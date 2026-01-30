@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "QRRange" ALTER COLUMN "updatedAt" DROP DEFAULT;

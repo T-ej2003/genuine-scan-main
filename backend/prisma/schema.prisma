@@ -1,0 +1,186 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  LICENSEE_ADMIN
+  MANUFACTURER
+}
+
+enum QRStatus {
+  DORMANT
+  ACTIVE
+  ALLOCATED
+  PRINTED
+  SCANNED
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         UserRole
+
+  licenseeId String?
+  licensee   Licensee? @relation(fields: [licenseeId], references: [id])
+
+  isActive  Boolean   @default(true)
+  deletedAt DateTime?
+
+  assignedBatches        Batch[]        @relation("ManufacturerBatches")
+  assignedProductBatches ProductBatch[] @relation("ManufacturerProductBatches")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([licenseeId])
+  @@index([role])
+  @@index([isActive])
+}
+
+model Licensee {
+  id          String  @id @default(uuid())
+  name        String
+  prefix      String  @unique
+  description String?
+  isActive    Boolean @default(true)
+
+  users          User[]
+  qrRanges       QRRange[]
+  batches        Batch[]
+  productBatches ProductBatch[]
+  qrCodes        QRCode[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+model QRRange {
+  id         String   @id @default(uuid())
+  licenseeId String
+  licensee   Licensee @relation(fields: [licenseeId], references: [id])
+
+  startCode  String
+  endCode    String
+  totalCodes Int
+  usedCodes  Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([licenseeId])
+}
+
+model Batch {
+  id         String   @id @default(uuid())
+  name       String
+  licenseeId String
+  licensee   Licensee @relation(fields: [licenseeId], references: [id])
+
+  // legacy optional direct assignment
+  manufacturerId String?
+  manufacturer   User?   @relation("ManufacturerBatches", fields: [manufacturerId], references: [id])
+
+  startCode  String
+  endCode    String
+  totalCodes Int
+  printedAt  DateTime?
+
+  qrCodes        QRCode[]
+  productBatches ProductBatch[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([licenseeId])
+  @@index([manufacturerId])
+  @@index([printedAt])
+}
+
+model ProductBatch {
+  id         String   @id @default(uuid())
+  licenseeId String
+  licensee   Licensee @relation(fields: [licenseeId], references: [id])
+
+  parentBatchId String
+  parentBatch   Batch  @relation(fields: [parentBatchId], references: [id])
+
+  productName String
+  productCode String
+  description String?
+
+  serialStart  Int
+  serialEnd    Int
+  serialFormat String
+
+  startCode  String
+  endCode    String
+  totalCodes Int
+
+  manufacturerId String?
+  manufacturer   User?   @relation("ManufacturerProductBatches", fields: [manufacturerId], references: [id])
+
+  printedAt DateTime?
+
+  qrCodes QRCode[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([parentBatchId, productCode])
+  @@index([licenseeId])
+  @@index([parentBatchId])
+  @@index([manufacturerId])
+  @@index([printedAt])
+}
+
+model QRCode {
+  id         String   @id @default(uuid())
+  code       String   @unique
+  licenseeId String
+  licensee   Licensee @relation(fields: [licenseeId], references: [id])
+
+  batchId String?
+  batch   Batch?  @relation(fields: [batchId], references: [id])
+
+  productBatchId String?
+  productBatch   ProductBatch? @relation(fields: [productBatchId], references: [id])
+
+  status    QRStatus  @default(DORMANT)
+  scannedAt DateTime?
+  scanCount Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([licenseeId])
+  @@index([batchId])
+  @@index([productBatchId])
+  @@index([status])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  licenseeId String?
+  action     String
+  entityType String
+  entityId   String?
+  details    Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([licenseeId])
+  @@index([entityType])
+  @@index([createdAt])
+}
