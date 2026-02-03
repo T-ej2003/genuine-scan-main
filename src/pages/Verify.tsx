@@ -1,134 +1,343 @@
-import React, { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { mockLicensees, mockManufacturers } from '@/lib/mock-data';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Shield, CheckCircle, XCircle, ExternalLink, MapPin, Building2, Loader2 } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from "react";
+import { useParams, Link } from "react-router-dom";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Shield,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  ExternalLink,
+  MapPin,
+  Building2,
+  Factory,
+  ScanEye,
+  CalendarClock,
+  Mail,
+  Phone,
+  Globe2,
+  Loader2,
+} from "lucide-react";
+import apiClient from "@/lib/api-client";
 
-interface VerificationResult {
-  isValid: boolean;
+type VerifyPayload = {
+  isAuthentic: boolean;
+  message?: string;
+  code?: string;
+  status?: string;
   licensee?: {
+    id: string;
     name: string;
-    location: string;
-    website?: string;
-  };
-  manufacturer?: {
+    prefix: string;
+    brandName?: string | null;
+    location?: string | null;
+    website?: string | null;
+    supportEmail?: string | null;
+    supportPhone?: string | null;
+  } | null;
+  productBatch?: {
+    id: string;
+    productName: string;
+    productCode: string;
+    description?: string | null;
+    printedAt?: string | null;
+    manufacturer?: {
+      id: string;
+      name: string;
+      email?: string | null;
+      location?: string | null;
+      website?: string | null;
+    } | null;
+  } | null;
+  batch?: {
+    id: string;
     name: string;
-    location: string;
-  };
-  qrCode?: string;
-}
+    printedAt?: string | null;
+    manufacturer?: {
+      id: string;
+      name: string;
+      email?: string | null;
+      location?: string | null;
+      website?: string | null;
+    } | null;
+  } | null;
+  batchName?: string | null;
+  printedAt?: string | null;
+  firstScanned?: string | null;
+  scanCount?: number;
+  isFirstScan?: boolean;
+  warningMessage?: string | null;
+};
 
 export default function Verify() {
   const { code } = useParams<{ code: string }>();
   const [isLoading, setIsLoading] = useState(true);
-  const [result, setResult] = useState<VerificationResult | null>(null);
+  const [result, setResult] = useState<VerifyPayload | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Simulate verification API call
-    const timer = setTimeout(() => {
-      if (!code) {
-        setResult({ isValid: false });
-        setIsLoading(false);
-        return;
-      }
+    let active = true;
+    (async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        if (!code) {
+          setResult({ isAuthentic: false, message: "Missing code" });
+          return;
+        }
+        const device = typeof navigator !== "undefined" ? navigator.userAgent : undefined;
 
-      // Extract prefix from QR code (e.g., "A" from "A0000000001")
-      const prefix = code.replace(/[0-9]/g, '');
-      const licensee = mockLicensees.find(l => l.prefix === prefix);
+        const getGeo = () =>
+          new Promise<{ lat?: number; lon?: number; acc?: number }>((resolve) => {
+            if (!navigator?.geolocation) return resolve({});
+            navigator.geolocation.getCurrentPosition(
+              (pos) =>
+                resolve({
+                  lat: pos.coords.latitude,
+                  lon: pos.coords.longitude,
+                  acc: pos.coords.accuracy,
+                }),
+              () => resolve({}),
+              { enableHighAccuracy: false, timeout: 1500 }
+            );
+          });
 
-      if (licensee) {
-        // Pick a random manufacturer for demo
-        const manufacturer = mockManufacturers.find(m => m.licenseeId === licensee.id);
-        
-        setResult({
-          isValid: true,
-          licensee: {
-            name: licensee.name,
-            location: licensee.location,
-            website: licensee.website,
-          },
-          manufacturer: manufacturer ? {
-            name: manufacturer.name,
-            location: manufacturer.location,
-          } : undefined,
-          qrCode: code,
+        const geo = await getGeo();
+
+        const res = await apiClient.verifyQRCode(code, {
+          device,
+          lat: geo.lat,
+          lon: geo.lon,
+          acc: geo.acc,
         });
-      } else {
-        setResult({ isValid: false, qrCode: code });
+        if (!res.success) {
+          setError(res.error || "Verification failed");
+          setResult(null);
+          return;
+        }
+        setResult(res.data as VerifyPayload);
+      } finally {
+        if (active) setIsLoading(false);
       }
-      
-      setIsLoading(false);
-    }, 1500);
-
-    return () => clearTimeout(timer);
+    })();
+    return () => {
+      active = false;
+    };
   }, [code]);
 
+  const statusKind = useMemo(() => {
+    if (result?.isAuthentic) return "genuine";
+    if (result?.status === "ALLOCATED") return "unprinted";
+    if (result?.status === "DORMANT" || result?.status === "ACTIVE") return "unassigned";
+    return "invalid";
+  }, [result?.isAuthentic, result?.status]);
+
+  const manufacturer =
+    result?.productBatch?.manufacturer || result?.batch?.manufacturer || null;
+
+  const productName = result?.productBatch?.productName || result?.batch?.name || "—";
+  const productCode = result?.productBatch?.productCode || result?.batch?.id || "—";
+  const productLabel = result?.productBatch ? "Product" : "Batch";
+  const codeLabel = result?.productBatch ? "Code" : "Batch ID";
+
+  const headline =
+    statusKind === "genuine"
+      ? "Genuine Product"
+      : statusKind === "unprinted"
+      ? "Not Yet Printed"
+      : statusKind === "unassigned"
+      ? "Not Assigned"
+      : "Verification Failed";
+
+  const subtitle =
+    statusKind === "genuine"
+      ? "This item matches our official records"
+      : statusKind === "unprinted"
+      ? "This code exists but was not printed"
+      : statusKind === "unassigned"
+      ? "This code exists but is not assigned to a product"
+      : "This code could not be verified";
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-secondary via-slate-800 to-slate-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        {/* Header */}
+    <div className="min-h-screen bg-[radial-gradient(circle_at_20%_20%,#134e4a_0%,transparent_40%),radial-gradient(circle_at_80%_10%,#1e3a8a_0%,transparent_40%),linear-gradient(135deg,#0f172a_0%,#0b1220_60%,#0a0f1d_100%)] flex items-center justify-center p-4">
+      <div className="w-full max-w-2xl">
         <div className="text-center mb-8">
-          <Link to="/" className="inline-flex items-center gap-2 text-white mb-4">
-            <Shield className="h-10 w-10 text-primary" />
-            <span className="text-2xl font-bold">AuthenticQR</span>
+          <Link to="/" className="inline-flex items-center gap-2 text-white mb-3">
+            <Shield className="h-10 w-10 text-emerald-400" />
+            <span className="text-2xl font-bold tracking-wide">AuthenticQR</span>
           </Link>
-          <p className="text-slate-400">Product Verification</p>
+          <p className="text-slate-300">Product Verification</p>
         </div>
 
         <Card className="border-0 shadow-2xl overflow-hidden animate-fade-in">
           {isLoading ? (
             <CardContent className="py-16 text-center">
-              <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
+              <Loader2 className="h-12 w-12 animate-spin text-emerald-400 mx-auto mb-4" />
               <p className="text-lg font-medium">Verifying authenticity...</p>
               <p className="text-sm text-muted-foreground mt-1">Please wait</p>
             </CardContent>
-          ) : result?.isValid ? (
+          ) : error ? (
+            <CardContent className="py-12 text-center space-y-3">
+              <XCircle className="h-10 w-10 text-destructive mx-auto" />
+              <p className="text-lg font-semibold">{error}</p>
+              <Button variant="outline" asChild className="w-full">
+                <Link to="/">Return to Home</Link>
+              </Button>
+            </CardContent>
+          ) : (
             <>
-              {/* Success header */}
-              <div className="bg-primary p-6 text-center">
-                <div className="inline-flex items-center justify-center h-16 w-16 rounded-full bg-white/20 mb-4">
-                  <CheckCircle className="h-10 w-10 text-white" />
+              <div
+                className={
+                  statusKind === "genuine"
+                    ? "bg-emerald-500"
+                    : statusKind === "unprinted"
+                    ? "bg-amber-500"
+                    : statusKind === "unassigned"
+                    ? "bg-slate-600"
+                    : "bg-destructive"
+                }
+              >
+                <div className="p-6 text-center text-white">
+                  <div className="inline-flex items-center justify-center h-16 w-16 rounded-full bg-white/20 mb-4">
+                    {statusKind === "genuine" ? (
+                      <CheckCircle2 className="h-10 w-10 text-white" />
+                    ) : statusKind === "invalid" ? (
+                      <XCircle className="h-10 w-10 text-white" />
+                    ) : (
+                      <AlertTriangle className="h-10 w-10 text-white" />
+                    )}
+                  </div>
+                  <h1 className="text-2xl font-bold">{headline}</h1>
+                  <p className="text-white/80 mt-1">{subtitle}</p>
                 </div>
-                <h1 className="text-2xl font-bold text-white">Genuine Product</h1>
-                <p className="text-primary-foreground/80 mt-1">This is an authentic item</p>
               </div>
-              
+
               <CardContent className="p-6 space-y-6">
-                {/* QR Code */}
                 <div className="text-center p-4 bg-muted rounded-lg">
                   <p className="text-sm text-muted-foreground mb-1">Verified Code</p>
-                  <p className="font-mono text-lg font-bold">{result.qrCode}</p>
+                  <p className="font-mono text-lg font-bold">{result?.code || code}</p>
                 </div>
 
-                {/* Licensee Info */}
-                <div className="space-y-4">
-                  <div className="flex items-start gap-4">
-                    <div className="p-2 bg-primary/10 rounded-lg">
-                      <Building2 className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Licensed By</p>
-                      <p className="font-semibold">{result.licensee?.name}</p>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="rounded-lg border p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="p-2 bg-emerald-500/10 rounded-lg">
+                        <Building2 className="h-5 w-5 text-emerald-500" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">Licensed By</p>
+                        <p className="font-semibold">
+                          {result?.licensee?.brandName || result?.licensee?.name || "—"}
+                        </p>
+                        {result?.licensee?.location && (
+                          <div className="text-xs text-muted-foreground flex items-center gap-1">
+                            <MapPin className="h-3 w-3" />
+                            {result.licensee.location}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
 
-                  <div className="flex items-start gap-4">
-                    <div className="p-2 bg-primary/10 rounded-lg">
-                      <MapPin className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Manufactured In</p>
-                      <p className="font-semibold">
-                        {result.manufacturer?.location || result.licensee?.location}
-                      </p>
+                  <div className="rounded-lg border p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="p-2 bg-blue-500/10 rounded-lg">
+                        <Factory className="h-5 w-5 text-blue-500" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">Manufacturer</p>
+                        <p className="font-semibold">
+                          {manufacturer?.name || "—"}
+                        </p>
+                        {manufacturer?.location && (
+                          <div className="text-xs text-muted-foreground flex items-center gap-1">
+                            <MapPin className="h-3 w-3" />
+                            {manufacturer.location}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                {/* CTA */}
-                {result.licensee?.website && (
+                <div className="rounded-lg border p-4 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline">{productLabel}</Badge>
+                    <span className="text-sm font-medium">
+                      {productName}
+                    </span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {codeLabel}: <span className="font-mono">{productCode}</span>
+                  </div>
+                  {result?.productBatch?.description && (
+                    <p className="text-sm text-muted-foreground">{result.productBatch.description}</p>
+                  )}
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="rounded-lg border p-3">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <ScanEye className="h-4 w-4" />
+                      Scan Count
+                    </div>
+                    <p className="text-lg font-semibold">{result?.scanCount ?? 0}</p>
+                  </div>
+                  <div className="rounded-lg border p-3">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <CalendarClock className="h-4 w-4" />
+                      First Scan
+                    </div>
+                    <p className="text-sm font-medium">
+                      {result?.firstScanned ? new Date(result.firstScanned).toLocaleString() : "—"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border p-3">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <CalendarClock className="h-4 w-4" />
+                      Printed
+                    </div>
+                    <p className="text-sm font-medium">
+                      {result?.printedAt ? new Date(result.printedAt).toLocaleDateString() : "—"}
+                    </p>
+                  </div>
+                </div>
+
+                {result?.warningMessage && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    {result.warningMessage}
+                  </div>
+                )}
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  {result?.licensee?.supportEmail && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <Mail className="h-4 w-4 text-muted-foreground" />
+                      <span>{result.licensee.supportEmail}</span>
+                    </div>
+                  )}
+                  {result?.licensee?.supportPhone && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <Phone className="h-4 w-4 text-muted-foreground" />
+                      <span>{result.licensee.supportPhone}</span>
+                    </div>
+                  )}
+                  {result?.licensee?.website && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <Globe2 className="h-4 w-4 text-muted-foreground" />
+                      <span>{result.licensee.website}</span>
+                    </div>
+                  )}
+                  {manufacturer?.website && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <Globe2 className="h-4 w-4 text-muted-foreground" />
+                      <span>{manufacturer.website}</span>
+                    </div>
+                  )}
+                </div>
+
+                {result?.licensee?.website && (
                   <Button asChild className="w-full" size="lg">
                     <a href={result.licensee.website} target="_blank" rel="noopener noreferrer">
                       Visit Official Website
@@ -138,43 +347,11 @@ export default function Verify() {
                 )}
               </CardContent>
             </>
-          ) : (
-            <>
-              {/* Error header */}
-              <div className="bg-destructive p-6 text-center">
-                <div className="inline-flex items-center justify-center h-16 w-16 rounded-full bg-white/20 mb-4">
-                  <XCircle className="h-10 w-10 text-white" />
-                </div>
-                <h1 className="text-2xl font-bold text-white">Verification Failed</h1>
-                <p className="text-destructive-foreground/80 mt-1">This code could not be verified</p>
-              </div>
-              
-              <CardContent className="p-6 space-y-6 text-center">
-                {result?.qrCode && (
-                  <div className="p-4 bg-muted rounded-lg">
-                    <p className="text-sm text-muted-foreground mb-1">Scanned Code</p>
-                    <p className="font-mono text-lg font-bold">{result.qrCode}</p>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <p className="font-medium">This product may be counterfeit</p>
-                  <p className="text-sm text-muted-foreground">
-                    The QR code you scanned is not registered in our system. 
-                    Please verify that you purchased this product from an authorized retailer.
-                  </p>
-                </div>
-
-                <Button variant="outline" asChild className="w-full">
-                  <Link to="/">Return to Home</Link>
-                </Button>
-              </CardContent>
-            </>
           )}
         </Card>
 
-        <p className="text-center text-slate-500 text-sm mt-6">
-          Powered by AuthenticQR Platform
+        <p className="text-center text-slate-400 text-sm mt-6">
+          Secure verification powered by AuthenticQR
         </p>
       </div>
     </div>

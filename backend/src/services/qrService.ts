@@ -26,7 +26,7 @@ export const buildVerifyUrl = (code: string): string => {
   const base = String(process.env.PUBLIC_VERIFY_WEB_BASE_URL || "").trim();
   if (!base) return code;
   const normalized = base.replace(/\/+$/, "");
-  return `${normalized}/v/${encodeURIComponent(code)}`;
+  return `${normalized}/verify/${encodeURIComponent(code)}`;
 };
 
 export const generateQRCodesForRange = async (
@@ -114,14 +114,24 @@ export const markProductBatchAsPrinted = async (
   await prisma.productBatch.update({ where: { id: productBatchId }, data: { printedAt: new Date() } });
 
   const result = await prisma.qRCode.updateMany({
-    where: { productBatchId, status: QRStatus.ALLOCATED },
+    where: { productBatchId, status: { in: [QRStatus.ALLOCATED, QRStatus.ACTIVE] } },
     data: { status: QRStatus.PRINTED },
   });
 
   return result.count;
 };
 
-export const recordScan = async (code: string) => {
+export const recordScan = async (
+  code: string,
+  meta?: {
+    ipAddress?: string | null;
+    userAgent?: string | null;
+    device?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
+    accuracy?: number | null;
+  }
+) => {
   const existing = await prisma.qRCode.findUnique({
     where: { code },
     include: {
@@ -144,23 +154,46 @@ export const recordScan = async (code: string) => {
 
   const isFirstScan = existing.status === QRStatus.PRINTED;
 
-  const updated = await prisma.qRCode.update({
-    where: { code },
-    data: {
-      status: QRStatus.SCANNED,
-      scannedAt: isFirstScan ? new Date() : existing.scannedAt,
-      scanCount: { increment: 1 },
-    },
-    include: {
-      licensee: true,
-      batch: { include: { manufacturer: { select: { id: true, name: true, email: true } } } },
-      productBatch: {
-        include: {
-          manufacturer: { select: { id: true, name: true, email: true } },
-          parentBatch: { select: { id: true, name: true } },
+  const updated = await prisma.$transaction(async (tx) => {
+    const qr = await tx.qRCode.update({
+      where: { code },
+      data: {
+        status: QRStatus.SCANNED,
+        scannedAt: isFirstScan ? new Date() : existing.scannedAt,
+        scanCount: { increment: 1 },
+      },
+      include: {
+        licensee: true,
+        batch: { include: { manufacturer: { select: { id: true, name: true, email: true } } } },
+        productBatch: {
+          include: {
+            manufacturer: { select: { id: true, name: true, email: true, location: true, website: true } },
+            parentBatch: { select: { id: true, name: true } },
+          },
         },
       },
-    },
+    });
+
+    await tx.qrScanLog.create({
+      data: {
+        code: qr.code,
+        qrCodeId: qr.id,
+        licenseeId: qr.licenseeId,
+        batchId: qr.batchId ?? null,
+        productBatchId: qr.productBatchId ?? null,
+        status: qr.status,
+        isFirstScan,
+        scanCount: qr.scanCount ?? 0,
+        ipAddress: meta?.ipAddress ?? null,
+        userAgent: meta?.userAgent ?? null,
+        device: meta?.device ?? null,
+        latitude: meta?.latitude ?? null,
+        longitude: meta?.longitude ?? null,
+        accuracy: meta?.accuracy ?? null,
+      },
+    });
+
+    return qr;
   });
 
   return { qrCode: updated, isFirstScan };
@@ -185,4 +218,3 @@ export const getQRStats = async (licenseeId?: string) => {
     }, {} as Record<string, number>),
   };
 };
-

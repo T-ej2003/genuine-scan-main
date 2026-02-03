@@ -19,10 +19,15 @@ export const verifyQRCode = async (req: Request, res: Response) => {
       where: { code: code.toUpperCase() },
       include: {
         licensee: {
-          select: { id: true, name: true, prefix: true },
+          select: { id: true, name: true, prefix: true, brandName: true, location: true, website: true, supportEmail: true, supportPhone: true },
         },
         batch: {
-          select: { id: true, name: true, printedAt: true },
+          select: {
+            id: true,
+            name: true,
+            printedAt: true,
+            manufacturer: { select: { id: true, name: true, email: true, location: true, website: true } },
+          },
         },
         productBatch: {
           select: {
@@ -34,7 +39,7 @@ export const verifyQRCode = async (req: Request, res: Response) => {
             serialEnd: true,
             serialFormat: true,
             printedAt: true,
-            manufacturer: { select: { id: true, name: true, email: true } },
+            manufacturer: { select: { id: true, name: true, email: true, location: true, website: true } },
             parentBatch: { select: { id: true, name: true } },
           },
         },
@@ -69,6 +74,26 @@ export const verifyQRCode = async (req: Request, res: Response) => {
           message: "This QR code has not been assigned to a product yet.",
           code,
           status: qrCode.status,
+          licensee: qrCode.licensee
+            ? {
+                id: qrCode.licensee.id,
+                name: qrCode.licensee.name,
+                prefix: qrCode.licensee.prefix,
+                brandName: qrCode.licensee.brandName,
+                location: qrCode.licensee.location,
+                website: qrCode.licensee.website,
+                supportEmail: qrCode.licensee.supportEmail,
+                supportPhone: qrCode.licensee.supportPhone,
+              }
+            : null,
+          batch: qrCode.batch
+            ? {
+                id: qrCode.batch.id,
+                name: qrCode.batch.name,
+                printedAt: qrCode.batch.printedAt,
+                manufacturer: qrCode.batch.manufacturer || null,
+              }
+            : null,
         },
       });
     }
@@ -82,6 +107,18 @@ export const verifyQRCode = async (req: Request, res: Response) => {
           message: "This QR code is allocated but not yet printed.",
           code,
           status: qrCode.status,
+          licensee: qrCode.licensee
+            ? {
+                id: qrCode.licensee.id,
+                name: qrCode.licensee.name,
+                prefix: qrCode.licensee.prefix,
+                brandName: qrCode.licensee.brandName,
+                location: qrCode.licensee.location,
+                website: qrCode.licensee.website,
+                supportEmail: qrCode.licensee.supportEmail,
+                supportPhone: qrCode.licensee.supportPhone,
+              }
+            : null,
           productBatch: qrCode.productBatch
             ? {
                 id: qrCode.productBatch.id,
@@ -90,13 +127,33 @@ export const verifyQRCode = async (req: Request, res: Response) => {
                 manufacturer: qrCode.productBatch.manufacturer || null,
               }
             : null,
+          batch: qrCode.batch
+            ? {
+                id: qrCode.batch.id,
+                name: qrCode.batch.name,
+                printedAt: qrCode.batch.printedAt,
+                manufacturer: qrCode.batch.manufacturer || null,
+              }
+            : null,
           batchName: qrCode.batch?.name || null,
         },
       });
     }
 
     // Valid printed/scanned QR - record scan
-    const { isFirstScan, qrCode: updated } = await recordScan(code.toUpperCase());
+    const toNum = (v: any) => {
+      const n = parseFloat(String(v));
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const { isFirstScan, qrCode: updated } = await recordScan(code.toUpperCase(), {
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || null,
+      device: (req.query.device as string | undefined) || null,
+      latitude: toNum(req.query.lat),
+      longitude: toNum(req.query.lon),
+      accuracy: toNum(req.query.acc),
+    });
 
     await createAuditLog({
       action: "VERIFY_SUCCESS",
@@ -118,8 +175,18 @@ export const verifyQRCode = async (req: Request, res: Response) => {
         message: "This is a genuine product.",
         code: updated.code,
 
-        licensee: updated.licensee?.name,
-        licenseePrefix: updated.licensee?.prefix,
+        licensee: updated.licensee
+          ? {
+              id: updated.licensee.id,
+              name: updated.licensee.name,
+              prefix: updated.licensee.prefix,
+              brandName: updated.licensee.brandName,
+              location: updated.licensee.location,
+              website: updated.licensee.website,
+              supportEmail: updated.licensee.supportEmail,
+              supportPhone: updated.licensee.supportPhone,
+            }
+          : null,
 
         productBatch: updated.productBatch
           ? {
@@ -133,6 +200,14 @@ export const verifyQRCode = async (req: Request, res: Response) => {
               printedAt: updated.productBatch.printedAt,
               manufacturer: updated.productBatch.manufacturer || null,
               parentBatch: updated.productBatch.parentBatch || null,
+            }
+          : null,
+        batch: updated.batch
+          ? {
+              id: updated.batch.id,
+              name: updated.batch.name,
+              printedAt: updated.batch.printedAt,
+              manufacturer: updated.batch.manufacturer || null,
             }
           : null,
 
@@ -157,4 +232,3 @@ export const verifyQRCode = async (req: Request, res: Response) => {
     });
   }
 };
-

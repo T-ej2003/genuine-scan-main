@@ -31,7 +31,25 @@ export default function AuditLogs() {
 
   const load = async () => {
     const res = await apiClient.getAuditLogs({ limit: 100 });
-    if (res.success) setLogs(res.data.logs);
+    if (!res.success) {
+      setLogs([]);
+      return;
+    }
+
+    // Support multiple backend shapes:
+    // - array
+    // - { logs: [...] }
+    // - { data: [...] }
+    const payload: any = res.data;
+    const list = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.logs)
+      ? payload.logs
+      : Array.isArray(payload?.data)
+      ? payload.data
+      : [];
+
+    setLogs(list);
   };
 
   useEffect(() => {

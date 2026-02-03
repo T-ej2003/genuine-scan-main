@@ -21,12 +21,20 @@ enum QRStatus {
   SCANNED
 }
 
+enum QrAllocationRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
   passwordHash String
   name         String
   role         UserRole
+  location     String?
+  website      String?
 
   licenseeId String?
   licensee   Licensee? @relation(fields: [licenseeId], references: [id])
@@ -36,6 +44,16 @@ model User {
 
   assignedBatches        Batch[]        @relation("ManufacturerBatches")
   assignedProductBatches ProductBatch[] @relation("ManufacturerProductBatches")
+
+  qrAllocationRequestsRequested QrAllocationRequest[] @relation("QrAllocationRequestedBy")
+  qrAllocationRequestsApproved  QrAllocationRequest[] @relation("QrAllocationApprovedBy")
+  qrAllocationRequestsRejected  QrAllocationRequest[] @relation("QrAllocationRejectedBy")
+
+  allocationEventsCreated AllocationEvent[] @relation("AllocationEventCreatedBy")
+  printPackTokensCreated   PrintPackToken[]  @relation("PrintPackTokenCreatedBy")
+  productBatchesPrintDownloads ProductBatch[] @relation("PrintPackDownloadedBy")
+  batchPrintPackTokensCreated BatchPrintPackToken[] @relation("BatchPrintPackTokenCreatedBy")
+  batchPrintDownloads Batch[] @relation("BatchPrintPackDownloadedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -50,6 +68,11 @@ model Licensee {
   name        String
   prefix      String  @unique
   description String?
+  brandName   String?
+  location    String?
+  website     String?
+  supportEmail String?
+  supportPhone String?
   isActive    Boolean @default(true)
 
   users          User[]
@@ -57,6 +80,9 @@ model Licensee {
   batches        Batch[]
   productBatches ProductBatch[]
   qrCodes        QRCode[]
+  qrAllocationRequests QrAllocationRequest[]
+  allocationEvents     AllocationEvent[]
+  qrScanLogs           QrScanLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -94,9 +120,14 @@ model Batch {
   endCode    String
   totalCodes Int
   printedAt  DateTime?
+  printPackDownloadedAt DateTime?
+  printPackDownloadedByUserId String?
+  printPackDownloadedByUser   User? @relation("BatchPrintPackDownloadedBy", fields: [printPackDownloadedByUserId], references: [id])
 
   qrCodes        QRCode[]
   productBatches ProductBatch[]
+  batchPrintPackTokens BatchPrintPackToken[]
+  scanLogs            QrScanLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -104,6 +135,7 @@ model Batch {
   @@index([licenseeId])
   @@index([manufacturerId])
   @@index([printedAt])
+  @@index([printPackDownloadedAt])
 }
 
 model ProductBatch {
@@ -130,8 +162,13 @@ model ProductBatch {
   manufacturer   User?   @relation("ManufacturerProductBatches", fields: [manufacturerId], references: [id])
 
   printedAt DateTime?
+  printPackDownloadedAt DateTime?
+  printPackDownloadedByUserId String?
+  printPackDownloadedByUser   User? @relation("PrintPackDownloadedBy", fields: [printPackDownloadedByUserId], references: [id])
 
   qrCodes QRCode[]
+  printPackTokens PrintPackToken[]
+  scanLogs QrScanLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -141,6 +178,7 @@ model ProductBatch {
   @@index([parentBatchId])
   @@index([manufacturerId])
   @@index([printedAt])
+  @@index([printPackDownloadedAt])
 }
 
 model QRCode {
@@ -154,6 +192,7 @@ model QRCode {
 
   productBatchId String?
   productBatch   ProductBatch? @relation(fields: [productBatchId], references: [id])
+  scanLogs       QrScanLog[]
 
   status    QRStatus  @default(DORMANT)
   scannedAt DateTime?
@@ -166,6 +205,56 @@ model QRCode {
   @@index([batchId])
   @@index([productBatchId])
   @@index([status])
+}
+
+model QrScanLog {
+  id         String   @id @default(uuid())
+  code       String
+  qrCodeId   String
+  qrCode     QRCode   @relation(fields: [qrCodeId], references: [id])
+
+  licenseeId String
+  licensee   Licensee @relation(fields: [licenseeId], references: [id])
+
+  batchId String?
+  batch   Batch? @relation(fields: [batchId], references: [id])
+  productBatchId String?
+  productBatch ProductBatch? @relation(fields: [productBatchId], references: [id])
+
+  status     QRStatus
+  scannedAt  DateTime @default(now())
+  isFirstScan Boolean @default(false)
+  scanCount  Int?
+
+  ipAddress String?
+  userAgent String?
+  device    String?
+  latitude  Float?
+  longitude Float?
+  accuracy  Float?
+
+  @@index([licenseeId])
+  @@index([batchId])
+  @@index([productBatchId])
+  @@index([code])
+  @@index([scannedAt])
+}
+
+model BatchPrintPackToken {
+  id         String   @id @default(uuid())
+  tokenHash  String   @unique
+  batchId    String
+  batch      Batch    @relation(fields: [batchId], references: [id])
+
+  createdByUserId String
+  createdByUser   User @relation("BatchPrintPackTokenCreatedBy", fields: [createdByUserId], references: [id])
+
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([batchId])
+  @@index([expiresAt])
 }
 
 model AuditLog {
@@ -183,4 +272,77 @@ model AuditLog {
   @@index([licenseeId])
   @@index([entityType])
   @@index([createdAt])
+}
+
+model QrAllocationRequest {
+  id         String   @id @default(uuid())
+  licenseeId String
+  licensee   Licensee @relation(fields: [licenseeId], references: [id])
+
+  requestedByUserId String
+  requestedByUser   User @relation("QrAllocationRequestedBy", fields: [requestedByUserId], references: [id])
+
+  quantity    Int?
+  startNumber Int?
+  endNumber   Int?
+
+  status QrAllocationRequestStatus @default(PENDING)
+  note   String?
+
+  approvedByUserId String?
+  approvedByUser   User? @relation("QrAllocationApprovedBy", fields: [approvedByUserId], references: [id])
+  approvedAt       DateTime?
+
+  rejectedByUserId String?
+  rejectedByUser   User? @relation("QrAllocationRejectedBy", fields: [rejectedByUserId], references: [id])
+  rejectedAt       DateTime?
+
+  decisionNote String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  allocationEvents AllocationEvent[]
+
+  @@index([licenseeId])
+  @@index([status])
+}
+
+model AllocationEvent {
+  id         String   @id @default(uuid())
+  licenseeId String
+  licensee   Licensee @relation(fields: [licenseeId], references: [id])
+
+  createdByUserId String?
+  createdByUser   User? @relation("AllocationEventCreatedBy", fields: [createdByUserId], references: [id])
+
+  requestId String?
+  request   QrAllocationRequest? @relation(fields: [requestId], references: [id])
+
+  source     String?
+  startCode  String
+  endCode    String
+  totalCodes Int
+
+  createdAt DateTime @default(now())
+
+  @@index([licenseeId])
+  @@index([requestId])
+}
+
+model PrintPackToken {
+  id         String   @id @default(uuid())
+  tokenHash  String   @unique
+  productBatchId String
+  productBatch  ProductBatch @relation(fields: [productBatchId], references: [id])
+
+  createdByUserId String
+  createdByUser   User @relation("PrintPackTokenCreatedBy", fields: [createdByUserId], references: [id])
+
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([productBatchId])
+  @@index([expiresAt])
 }

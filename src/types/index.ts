@@ -10,6 +10,8 @@ export interface User {
   createdAt: string;
   isActive: boolean;
   deletedAt?: string | null;
+  location?: string | null;
+  website?: string | null;
 }
 
 export interface Licensee {
@@ -17,6 +19,11 @@ export interface Licensee {
   name: string;
   prefix: string;
   description?: string | null;
+  brandName?: string | null;
+  location?: string | null;
+  website?: string | null;
+  supportEmail?: string | null;
+  supportPhone?: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt?: string;
@@ -104,4 +111,3 @@ export interface AuditLog {
   ipAddress?: string | null;
   createdAt: string;
 }
-

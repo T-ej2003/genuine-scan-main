@@ -26,6 +26,11 @@ const createLicenseeLegacy = z.object({
   name: z.string().trim().min(2, "Name must be at least 2 characters"),
   prefix: prefixSchema,
   description: z.string().trim().max(300).optional().or(z.literal("")),
+  brandName: z.string().trim().max(120).optional().or(z.literal("")),
+  location: z.string().trim().max(200).optional().or(z.literal("")),
+  website: z.string().trim().max(200).optional().or(z.literal("")),
+  supportEmail: z.string().trim().email().optional().or(z.literal("")),
+  supportPhone: z.string().trim().max(40).optional().or(z.literal("")),
   isActive: z.boolean().optional(),
   admin: adminSchema.optional(),
 });
@@ -36,6 +41,11 @@ const createLicenseeWithAdmin = z.object({
     name: z.string().trim().min(2),
     prefix: prefixSchema,
     description: z.string().trim().max(300).optional().or(z.literal("")),
+    brandName: z.string().trim().max(120).optional().or(z.literal("")),
+    location: z.string().trim().max(200).optional().or(z.literal("")),
+    website: z.string().trim().max(200).optional().or(z.literal("")),
+    supportEmail: z.string().trim().email().optional().or(z.literal("")),
+    supportPhone: z.string().trim().max(40).optional().or(z.literal("")),
     isActive: z.boolean().optional(),
   }),
   admin: adminSchema,
@@ -46,6 +56,11 @@ const createLicenseeSchema = z.union([createLicenseeLegacy, createLicenseeWithAd
 const updateLicenseeSchema = z.object({
   name: z.string().trim().min(2).optional(),
   description: z.string().trim().max(300).optional().or(z.literal("")),
+  brandName: z.string().trim().max(120).optional().or(z.literal("")),
+  location: z.string().trim().max(200).optional().or(z.literal("")),
+  website: z.string().trim().max(200).optional().or(z.literal("")),
+  supportEmail: z.string().trim().email().optional().or(z.literal("")),
+  supportPhone: z.string().trim().max(40).optional().or(z.literal("")),
   isActive: z.boolean().optional(),
 });
 
@@ -103,6 +118,13 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
           name: licenseePayload.name,
           prefix,
           description: licenseePayload.description?.trim() ? licenseePayload.description.trim() : null,
+          brandName: licenseePayload.brandName?.trim() ? licenseePayload.brandName.trim() : null,
+          location: licenseePayload.location?.trim() ? licenseePayload.location.trim() : null,
+          website: licenseePayload.website?.trim() ? licenseePayload.website.trim() : null,
+          supportEmail: licenseePayload.supportEmail?.trim()
+            ? licenseePayload.supportEmail.trim().toLowerCase()
+            : null,
+          supportPhone: licenseePayload.supportPhone?.trim() ? licenseePayload.supportPhone.trim() : null,
           isActive: licenseePayload.isActive ?? true,
         },
       });
@@ -214,6 +236,23 @@ export const updateLicensee = async (req: AuthRequest, res: Response) => {
     if (parsed.data.name !== undefined) data.name = parsed.data.name;
     if (parsed.data.description !== undefined) {
       data.description = parsed.data.description?.trim() ? parsed.data.description.trim() : null;
+    }
+    if (parsed.data.brandName !== undefined) {
+      data.brandName = parsed.data.brandName?.trim() ? parsed.data.brandName.trim() : null;
+    }
+    if (parsed.data.location !== undefined) {
+      data.location = parsed.data.location?.trim() ? parsed.data.location.trim() : null;
+    }
+    if (parsed.data.website !== undefined) {
+      data.website = parsed.data.website?.trim() ? parsed.data.website.trim() : null;
+    }
+    if (parsed.data.supportEmail !== undefined) {
+      data.supportEmail = parsed.data.supportEmail?.trim()
+        ? parsed.data.supportEmail.trim().toLowerCase()
+        : null;
+    }
+    if (parsed.data.supportPhone !== undefined) {
+      data.supportPhone = parsed.data.supportPhone?.trim() ? parsed.data.supportPhone.trim() : null;
     }
     if (parsed.data.isActive !== undefined) data.isActive = parsed.data.isActive;
 
@@ -330,4 +369,3 @@ export const exportLicenseesCsv = async (_req: AuthRequest, res: Response) => {
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 };
-

@@ -1,0 +1,19 @@
+import { Response } from "express";
+import { AuthRequest } from "../middleware/auth";
+export declare const allocateQRRange: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const allocateQRRangeForLicensee: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const bulkDeleteQRCodes: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const createBatch: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const adminAllocateBatch: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const deleteBatch: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const bulkDeleteBatches: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const assignManufacturer: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const markPrinted: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const confirmBatchPrint: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const createBatchPrintToken: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const downloadBatchPrintPack: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const getBatches: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const getQRCodes: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const getStats: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const exportQRCodesCsv: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+//# sourceMappingURL=qrController.d.ts.map

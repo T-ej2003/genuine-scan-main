@@ -46,7 +46,7 @@ const statusColors: Record<UIStatus, string> = {
 
 const toUIStatus = (s: string): UIStatus => {
   const v = String(s || "").toUpperCase();
-  if (v === "ALLOCATED") return "allocated";
+  if (v === "ALLOCATED" || v === "ACTIVE") return "allocated";
   if (v === "PRINTED") return "printed";
   if (v === "SCANNED") return "scanned";
   return "dormant";
@@ -108,27 +108,17 @@ export default function QRCodes() {
     }
   });
 
-  const [brandSlug, setBrandSlug] = useState<string>(() => {
-    try {
-      return localStorage.getItem("qr_brand_slug") || "nemesis";
-    } catch {
-      return "nemesis";
-    }
-  });
-
   useEffect(() => {
     try {
       localStorage.setItem("qr_public_base_url", publicBaseUrl);
-      localStorage.setItem("qr_brand_slug", brandSlug);
     } catch {
       // ignore
     }
-  }, [publicBaseUrl, brandSlug]);
+  }, [publicBaseUrl]);
 
   const buildPublicQrUrl = (code: string) => {
     const base = String(publicBaseUrl || "").trim().replace(/\/+$/, "");
-    const slug = String(brandSlug || "").trim().replace(/^\/+|\/+$/g, "");
-    return `${base}/brand/${encodeURIComponent(slug)}/verify/${encodeURIComponent(code)}`;
+    return `${base}/verify/${encodeURIComponent(code)}`;
   };
 
   const filteredLicenseeId =
@@ -141,7 +131,7 @@ export default function QRCodes() {
   const uiStats = useMemo(() => {
     const by = stats?.byStatus || {};
     const dormant = by.DORMANT || 0;
-    const allocated = by.ALLOCATED || 0;
+    const allocated = (by.ALLOCATED || 0) + (by.ACTIVE || 0);
     const printed = by.PRINTED || 0;
     const scanned = by.SCANNED || 0;
     const total = stats?.total ?? dormant + allocated + printed + scanned;
@@ -290,7 +280,7 @@ export default function QRCodes() {
     }
 
     const out = await zip.generateAsync({ type: "blob" });
-    saveAs(out, `qr-png-${brandSlug}.zip`);
+    saveAs(out, `qr-png.zip`);
   };
 
   const deleteSelectedQRCodes = async () => {
@@ -377,20 +367,12 @@ export default function QRCodes() {
             <div className="text-sm text-muted-foreground">Stored locally in your browser.</div>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-3 md:grid-cols-1">
               <div className="space-y-2">
                 <div className="text-sm font-medium">Public base URL</div>
                 <Input value={publicBaseUrl} onChange={(e) => setPublicBaseUrl(e.target.value)} />
                 <div className="text-xs text-muted-foreground font-mono">
                   Example: {buildPublicQrUrl("A0000000001")}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Brand slug</div>
-                <Input value={brandSlug} onChange={(e) => setBrandSlug(e.target.value)} />
-                <div className="text-xs text-muted-foreground">
-                  Used in URL: <span className="font-mono">{brandSlug}</span>
                 </div>
               </div>
             </div>
@@ -611,4 +593,3 @@ export default function QRCodes() {
     </DashboardLayout>
   );
 }
-

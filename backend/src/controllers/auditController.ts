@@ -32,6 +32,69 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
+
+    const limit = Math.min(Number(req.query.limit) || 5000, 20000);
+    const entityType = req.query.entityType as string | undefined;
+
+    const licenseeId =
+      req.user.role === UserRole.SUPER_ADMIN
+        ? (req.query.licenseeId as string | undefined)
+        : req.user.licenseeId ?? undefined;
+
+    const result = await getAuditLogs({
+      entityType,
+      licenseeId,
+      limit,
+      offset: 0,
+    });
+
+    const esc = (val: any) => {
+      const s = val == null ? "" : String(val);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    const lines = [
+      [
+        "createdAt",
+        "action",
+        "entityType",
+        "entityId",
+        "userId",
+        "licenseeId",
+        "ipAddress",
+        "details",
+      ].join(","),
+    ];
+
+    for (const log of result.logs) {
+      lines.push(
+        [
+          esc(log.createdAt?.toISOString?.() || log.createdAt),
+          esc(log.action),
+          esc(log.entityType),
+          esc(log.entityId),
+          esc(log.userId),
+          esc(log.licenseeId),
+          esc(log.ipAddress),
+          esc(log.details ? JSON.stringify(log.details) : ""),
+        ].join(",")
+      );
+    }
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", "attachment; filename=\"audit-logs.csv\"");
+    return res.status(200).send(lines.join("\n"));
+  } catch (err) {
+    console.error("Audit logs export error:", err);
+    return res.status(500).json({ success: false, error: "Internal server error" });
+  }
+};
+
 /* =======================
    SSE STREAM
 ======================= */
@@ -61,4 +124,3 @@ export const streamLogs = async (req: AuthRequest, res: Response) => {
     res.end();
   });
 };
-

@@ -119,13 +119,35 @@ class ApiClient {
   }
 
   async createLicenseeWithAdmin(payload: {
-    licensee: { name: string; prefix: string; description?: string; isActive?: boolean };
+    licensee: {
+      name: string;
+      prefix: string;
+      description?: string;
+      brandName?: string;
+      location?: string;
+      website?: string;
+      supportEmail?: string;
+      supportPhone?: string;
+      isActive?: boolean;
+    };
     admin: { name: string; email: string; password: string };
   }) {
     return this.request("/licensees", { method: "POST", body: JSON.stringify(payload) });
   }
 
-  async updateLicensee(id: string, payload: Partial<{ name: string; description: string; isActive: boolean }>) {
+  async updateLicensee(
+    id: string,
+    payload: Partial<{
+      name: string;
+      description: string;
+      brandName: string;
+      location: string;
+      website: string;
+      supportEmail: string;
+      supportPhone: string;
+      isActive: boolean;
+    }>
+  ) {
     return this.request(`/licensees/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
   }
 
@@ -147,6 +169,13 @@ class ApiClient {
     return this.request("/qr/ranges/allocate", { method: "POST", body: JSON.stringify(payload) });
   }
 
+  async allocateLicenseeQrRange(licenseeId: string, payload: { startNumber: number; endNumber: number }) {
+    return this.request(`/admin/licensees/${licenseeId}/qr-allocate-range`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
   // ==================== QR CODES ====================
   async getQRCodes(options?: { licenseeId?: string; status?: string; limit?: number; offset?: number; q?: string }) {
     const params = new URLSearchParams();
@@ -163,6 +192,11 @@ class ApiClient {
   async getQRStats(licenseeId?: string) {
     const query = licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : "";
     return this.request(`/qr/stats${query}`);
+  }
+
+  async getDashboardStats(licenseeId?: string) {
+    const query = licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : "";
+    return this.request(`/dashboard/stats${query}`);
   }
 
   async deleteQRCodes(payload: { ids?: string[]; codes?: string[] }) {
@@ -201,10 +235,10 @@ class ApiClient {
     return this.request("/qr/batches/admin-allocate", { method: "POST", body: JSON.stringify(payload) });
   }
 
-  async assignBatchManufacturer(payload: { batchId: string; manufacturerId: string }) {
+  async assignBatchManufacturer(payload: { batchId: string; manufacturerId: string; quantity: number }) {
     return this.request(`/qr/batches/${payload.batchId}/assign-manufacturer`, {
       method: "POST",
-      body: JSON.stringify({ manufacturerId: payload.manufacturerId }),
+      body: JSON.stringify({ manufacturerId: payload.manufacturerId, quantity: payload.quantity }),
     });
   }
 
@@ -214,6 +248,26 @@ class ApiClient {
 
   async markQRCodePrinted(code: string) {
     return this.request(`/qr/${encodeURIComponent(code)}/mark-printed`, { method: "POST" });
+  }
+
+  async createBatchPrintToken(batchId: string) {
+    return this.request(`/manufacturer/batches/${batchId}/print-pack-token`, { method: "POST" });
+  }
+
+  async downloadBatchPrintPack(token: string, opts?: { publicBaseUrl?: string }) {
+    const params = new URLSearchParams();
+    if (opts?.publicBaseUrl) params.append("publicBaseUrl", opts.publicBaseUrl);
+    const query = params.toString() ? `?${params.toString()}` : "";
+
+    const headers: Record<string, string> = {};
+    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+
+    const resp = await fetch(
+      `${BASE_URL}/manufacturer/batch-print-pack/${encodeURIComponent(token)}.zip${query}`,
+      { headers, credentials: "include" }
+    );
+    if (!resp.ok) throw new Error(`Download failed: HTTP ${resp.status}`);
+    return resp.blob();
   }
 
   // ==================== MANUFACTURERS ====================
@@ -254,6 +308,8 @@ class ApiClient {
     name: string;
     role: "LICENSEE_ADMIN" | "MANUFACTURER";
     licenseeId: string;
+    location?: string;
+    website?: string;
   }) {
     return this.request("/users", { method: "POST", body: JSON.stringify(payload) });
   }
@@ -267,7 +323,18 @@ class ApiClient {
     return this.request<any[]>(`/users${query}`);
   }
 
-  async updateUser(id: string, payload: Partial<{ email: string; name: string; password: string; isActive: boolean; licenseeId: string }>) {
+  async updateUser(
+    id: string,
+    payload: Partial<{
+      email: string;
+      name: string;
+      password: string;
+      isActive: boolean;
+      licenseeId: string;
+      location: string;
+      website: string;
+    }>
+  ) {
     return this.request(`/users/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
   }
 
@@ -330,6 +397,59 @@ class ApiClient {
     return this.request(`/qr/product-batches/${productBatchId}/confirm-print`, { method: "POST" });
   }
 
+  async createProductBatchPrintToken(productBatchId: string) {
+    return this.request(`/manufacturer/product-batches/${productBatchId}/print-pack-token`, { method: "POST" });
+  }
+
+  async downloadProductBatchPrintPack(
+    token: string,
+    opts?: { publicBaseUrl?: string }
+  ) {
+    const params = new URLSearchParams();
+    if (opts?.publicBaseUrl) params.append("publicBaseUrl", opts.publicBaseUrl);
+    const query = params.toString() ? `?${params.toString()}` : "";
+
+    const headers: Record<string, string> = {};
+    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+
+    const resp = await fetch(
+      `${BASE_URL}/manufacturer/print-pack/${encodeURIComponent(token)}.zip${query}`,
+      { headers, credentials: "include" }
+    );
+    if (!resp.ok) throw new Error(`Download failed: HTTP ${resp.status}`);
+    return resp.blob();
+  }
+
+  // ==================== QR REQUESTS ====================
+  async createQrAllocationRequest(payload: {
+    quantity?: number;
+    startNumber?: number;
+    endNumber?: number;
+    note?: string;
+    licenseeId?: string;
+  }) {
+    return this.request("/qr/requests", { method: "POST", body: JSON.stringify(payload) });
+  }
+
+  async getQrAllocationRequests(options?: { licenseeId?: string; status?: string }) {
+    const params = new URLSearchParams();
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.status) params.append("status", options.status);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request<any[]>(`/qr/requests${query}`);
+  }
+
+  async approveQrAllocationRequest(
+    id: string,
+    payload?: { startNumber?: number; endNumber?: number; decisionNote?: string }
+  ) {
+    return this.request(`/qr/requests/${id}/approve`, { method: "POST", body: JSON.stringify(payload || {}) });
+  }
+
+  async rejectQrAllocationRequest(id: string, payload?: { decisionNote?: string }) {
+    return this.request(`/qr/requests/${id}/reject`, { method: "POST", body: JSON.stringify(payload || {}) });
+  }
+
   // ==================== ACCOUNT ====================
   async updateMyProfile(payload: { name?: string; email?: string }) {
     return this.request("/account/profile", { method: "PATCH", body: JSON.stringify(payload) });
@@ -347,9 +467,45 @@ class ApiClient {
     if (!resp.ok) throw new Error("Export failed");
     return resp.blob();
   }
+
+  // ==================== PUBLIC VERIFY ====================
+  // Public endpoint, no auth required. Still works if token exists.
+  async verifyQRCode(code: string, opts?: { device?: string; lat?: number; lon?: number; acc?: number }) {
+    const c = String(code || "").trim();
+    const params = new URLSearchParams();
+    if (opts?.device) params.append("device", opts.device);
+    if (opts?.lat != null) params.append("lat", String(opts.lat));
+    if (opts?.lon != null) params.append("lon", String(opts.lon));
+    if (opts?.acc != null) params.append("acc", String(opts.acc));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/verify/${encodeURIComponent(c)}${query}`, { method: "GET" });
+  }
+
+  async getScanLogs(options?: {
+    licenseeId?: string;
+    batchId?: string;
+    productBatchId?: string;
+    code?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const params = new URLSearchParams();
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.batchId) params.append("batchId", options.batchId);
+    if (options?.productBatchId) params.append("productBatchId", options.productBatchId);
+    if (options?.code) params.append("code", options.code);
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/admin/qr/scan-logs${query}`);
+  }
+
+  async getBatchSummary(licenseeId?: string) {
+    const query = licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : "";
+    return this.request(`/admin/qr/batch-summary${query}`);
+  }
 }
 
 const apiClient = new ApiClient();
 export default apiClient;
 export { apiClient };
-

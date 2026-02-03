@@ -46,10 +46,8 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 
 import { format } from "date-fns";
-import { Search, Trash2, RefreshCw, MoreHorizontal, Download, CheckCircle2, UserCog } from "lucide-react";
+import { Search, Trash2, RefreshCw, MoreHorizontal, Download, UserCog } from "lucide-react";
 
-import QRCode from "qrcode";
-import JSZip from "jszip";
 import { saveAs } from "file-saver";
 
 type BatchRow = {
@@ -64,6 +62,9 @@ type BatchRow = {
   licensee?: { id: string; name: string; prefix: string };
   manufacturer?: { id: string; name: string; email: string };
   _count?: { qrCodes: number };
+  availableCodes?: number;
+  remainingStartCode?: string | null;
+  remainingEndCode?: string | null;
 };
 
 type ManufacturerRow = { id: string; name: string; email: string; isActive: boolean };
@@ -115,6 +116,7 @@ export default function Batches() {
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignBatch, setAssignBatch] = useState<BatchRow | null>(null);
   const [assignManufacturerId, setAssignManufacturerId] = useState<string>("");
+  const [assignQuantity, setAssignQuantity] = useState<string>("");
 
   // print pack dialog
   const [printOpen, setPrintOpen] = useState(false);
@@ -126,12 +128,9 @@ export default function Batches() {
     "qr_public_base_url",
     "https://auth.mcs.example"
   );
-  const [brandSlug, setBrandSlug] = useLocalStorageState<string>("qr_brand_slug", "nemesis");
-
   const buildPublicQrUrl = (code: string) => {
     const base = String(publicBaseUrl || "").trim().replace(/\/+$/, "");
-    const slug = String(brandSlug || "").trim().replace(/^\/+|\/+$/g, "");
-    return `${base}/brand/${encodeURIComponent(slug)}/verify/${encodeURIComponent(code)}`;
+    return `${base}/verify/${encodeURIComponent(code)}`;
   };
 
   const fetchBatches = async () => {
@@ -156,9 +155,10 @@ export default function Batches() {
   const fetchManufacturersForAssign = async () => {
     if (!canAssignManufacturer) return;
     const licenseeId = user?.licenseeId;
-    if (!licenseeId) return;
-
-    const res = await apiClient.getManufacturers({ licenseeId, includeInactive: false });
+    const res = await apiClient.getManufacturers({
+      licenseeId: licenseeId || undefined,
+      includeInactive: false,
+    });
     if (res.success) {
       setManufacturers(((res.data as any) || []) as ManufacturerRow[]);
     } else {
@@ -228,6 +228,7 @@ export default function Batches() {
   const openAssign = (b: BatchRow) => {
     setAssignBatch(b);
     setAssignManufacturerId(b.manufacturer?.id || "");
+    setAssignQuantity("");
     setAssignOpen(true);
   };
 
@@ -237,12 +238,26 @@ export default function Batches() {
       toast({ title: "Select a manufacturer", variant: "destructive" });
       return;
     }
+    const qty = parseInt(assignQuantity, 10);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast({ title: "Enter a valid quantity", variant: "destructive" });
+      return;
+    }
+    if (assignBatch.availableCodes != null && qty > assignBatch.availableCodes) {
+      toast({
+        title: "Quantity too large",
+        description: `Available: ${assignBatch.availableCodes}.`,
+        variant: "destructive",
+      });
+      return;
+    }
 
     setLoading(true);
     try {
       const res = await apiClient.assignBatchManufacturer({
         batchId: assignBatch.id,
         manufacturerId: assignManufacturerId,
+        quantity: qty,
       });
 
       if (!res.success) {
@@ -254,120 +269,57 @@ export default function Batches() {
       setAssignOpen(false);
       setAssignBatch(null);
       setAssignManufacturerId("");
+      setAssignQuantity("");
       await fetchBatches();
     } finally {
       setLoading(false);
     }
   };
 
-  // -------- PRINT PACK (PNG ZIP) --------
+  // -------- PRINT PACK (SERVER ZIP, ONE-TIME) --------
   const openPrintPack = (b: BatchRow) => {
     setPrintBatch(b);
     setPrintOpen(true);
   };
 
-  const fetchAllCodesForBatch = async (batchId: string): Promise<string[]> => {
-    // No backend batch filter exists yet, so we safely paginate and filter client-side.
-    // This will still respect tenant isolation + manufacturer restrictions server-side.
-    const licenseeId = user?.licenseeId; // manufacturer + licensee_admin have it
-    const pageSize = 1000;
-    const maxTotal = 20000; // safety limit
-
-    let offset = 0;
-    const out: string[] = [];
-
-    while (offset < maxTotal) {
-      const res = await apiClient.getQRCodes({
-        licenseeId: licenseeId || undefined,
-        limit: pageSize,
-        offset,
-      });
-
-      if (!res.success) break;
-
-      const payload: any = res.data;
-      const list: QrRow[] = Array.isArray(payload?.qrCodes)
-        ? payload.qrCodes
-        : Array.isArray(payload)
-        ? payload
-        : [];
-
-      if (list.length === 0) break;
-
-      for (const r of list) {
-        const rid = r.batch?.id || r.batchId;
-        if (rid === batchId) out.push(String(r.code));
-      }
-
-      if (list.length < pageSize) break;
-      offset += pageSize;
-    }
-
-    return out;
-  };
-
-  const qrPngDataUrl = async (code: string) => {
-    const urlInsideQr = buildPublicQrUrl(code);
-    return QRCode.toDataURL(urlInsideQr, {
-      width: 768,
-      margin: 2,
-      errorCorrectionLevel: "M",
-    });
-  };
-
   const downloadBatchZip = async () => {
     if (!printBatch) return;
+    const base = String(publicBaseUrl || "").trim();
+
+    if (!base) {
+      toast({
+        title: "Missing URL settings",
+        description: "Please set Public base URL first.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setPrinting(true);
     try {
-      const codes = await fetchAllCodesForBatch(printBatch.id);
-
-      if (codes.length === 0) {
-        toast({
-          title: "No codes found",
-          description: "No QR codes were found for this batch (or batch is empty).",
-          variant: "destructive",
-        });
+      const tokenRes = await apiClient.createBatchPrintToken(printBatch.id);
+      if (!tokenRes.success) {
+        toast({ title: "Download blocked", description: tokenRes.error || "Error", variant: "destructive" });
         return;
       }
 
-      const zip = new JSZip();
-      for (const code of codes) {
-        const dataUrl = await qrPngDataUrl(code);
-        const blob = await (await fetch(dataUrl)).blob();
-        zip.file(`${code}.png`, blob);
-      }
+      const token = (tokenRes.data as any)?.token;
+      if (!token) throw new Error("Download token missing");
 
-      const out = await zip.generateAsync({ type: "blob" });
-      saveAs(out, `batch-${printBatch.name || printBatch.id}-png.zip`);
+      const blob = await apiClient.downloadBatchPrintPack(token, { publicBaseUrl: base });
+      saveAs(blob, `batch-${printBatch.name || printBatch.id}-print-pack.zip`);
 
-      toast({ title: "Downloaded", description: `Generated ${codes.length} PNG(s).` });
+      toast({
+        title: "Downloaded",
+        description: "Print pack downloaded. This batch is now marked as printed.",
+      });
+
+      setPrintOpen(false);
+      await fetchBatches();
     } catch (e: any) {
       toast({ title: "Download failed", description: e?.message || "Error", variant: "destructive" });
     } finally {
       setPrinting(false);
-    }
-  };
-
-  const confirmPrinted = async (b: BatchRow) => {
-    if (!isManufacturer) return;
-
-    const ok = window.confirm(
-      `Confirm print for "${b.name}"?\n\nThis will mark the batch as PRINTED in the system.`
-    );
-    if (!ok) return;
-
-    setLoading(true);
-    try {
-      const res = await apiClient.confirmBatchPrint(b.id);
-      if (!res.success) {
-        toast({ title: "Confirm failed", description: res.error || "Error", variant: "destructive" });
-        return;
-      }
-      toast({ title: "Confirmed", description: "Batch marked as printed." });
-      await fetchBatches();
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -380,8 +332,8 @@ export default function Batches() {
             <h1 className="text-3xl font-bold">Batches</h1>
             <p className="text-muted-foreground">
               {isManufacturer
-                ? "Your assigned QR batches (download print pack and confirm printing)"
-                : "Manage QR batches (assign / delete / review printing)"}
+                ? "Your assigned QR batches (one-time print pack download auto-confirms printing)"
+                : "Manage received QR batches (assign by quantity / delete / review printing)"}
             </p>
           </div>
 
@@ -499,25 +451,17 @@ export default function Batches() {
                           </TableCell>
 
                           <TableCell className="text-right">
-                            {/* Manufacturer: print pack + confirm */}
+                            {/* Manufacturer: print pack download (one-time) */}
                             {isManufacturer ? (
                               <div className="flex justify-end gap-2">
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  disabled={loading}
+                                  disabled={loading || printed}
                                   onClick={() => openPrintPack(b)}
                                 >
                                   <Download className="mr-2 h-4 w-4" />
-                                  Print pack
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  disabled={loading || printed === true}
-                                  onClick={() => confirmPrinted(b)}
-                                >
-                                  <CheckCircle2 className="mr-2 h-4 w-4" />
-                                  Confirm
+                                  {printed ? "Printed" : "Download pack"}
                                 </Button>
                               </div>
                             ) : (
@@ -530,7 +474,7 @@ export default function Batches() {
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
                                   {canAssignManufacturer && (
-                                    <DropdownMenuItem onClick={() => openAssign(b)}>
+                                    <DropdownMenuItem onClick={() => openAssign(b)} disabled={!!b.manufacturer || !!b.printedAt}>
                                       <UserCog className="mr-2 h-4 w-4" />
                                       Assign manufacturer
                                     </DropdownMenuItem>
@@ -561,12 +505,12 @@ export default function Batches() {
         </Card>
 
         {/* Assign Manufacturer Dialog */}
-        <Dialog open={assignOpen} onOpenChange={(v) => { setAssignOpen(v); if (!v) { setAssignBatch(null); setAssignManufacturerId(""); } }}>
+        <Dialog open={assignOpen} onOpenChange={(v) => { setAssignOpen(v); if (!v) { setAssignBatch(null); setAssignManufacturerId(""); setAssignQuantity(""); } }}>
           <DialogContent className="sm:max-w-[520px]">
             <DialogHeader>
               <DialogTitle>Assign Manufacturer</DialogTitle>
               <DialogDescription>
-                Assigns a manufacturer to this batch. (Licensee Admin only)
+                Split this received batch by quantity and assign the new batch to a manufacturer.
               </DialogDescription>
             </DialogHeader>
 
@@ -603,6 +547,20 @@ export default function Batches() {
                   </Select>
                 </div>
 
+                <div className="space-y-2">
+                  <Label>Quantity to allocate</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={assignQuantity}
+                    onChange={(e) => setAssignQuantity(e.target.value)}
+                    placeholder="Enter quantity"
+                  />
+                  <div className="text-xs text-muted-foreground">
+                    Available in this batch: {assignBatch.availableCodes ?? assignBatch.totalCodes}
+                  </div>
+                </div>
+
                 <div className="flex justify-end gap-3 pt-2">
                   <Button variant="outline" onClick={() => setAssignOpen(false)} disabled={loading}>
                     Cancel
@@ -622,7 +580,7 @@ export default function Batches() {
             <DialogHeader>
               <DialogTitle>Download Print Pack (PNG ZIP)</DialogTitle>
               <DialogDescription>
-                Generates PNG QR images for this batch using the public URL settings. Saved locally for future use.
+                One-time download. Downloading marks the batch as printed automatically.
               </DialogDescription>
             </DialogHeader>
 
@@ -630,6 +588,11 @@ export default function Batches() {
               <div className="text-sm text-muted-foreground">No batch selected.</div>
             ) : (
               <div className="space-y-4 mt-2">
+                {printBatch.printedAt && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    This batch is already marked as printed. Downloads are restricted to one-time use.
+                  </div>
+                )}
                 <div className="rounded-md border p-3 text-sm">
                   <div className="font-medium">{printBatch.name}</div>
                   <div className="text-muted-foreground font-mono text-xs">
@@ -637,20 +600,12 @@ export default function Batches() {
                   </div>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-1">
                   <div className="space-y-2">
                     <Label>Public base URL</Label>
                     <Input value={publicBaseUrl} onChange={(e) => setPublicBaseUrl(e.target.value)} />
                     <div className="text-xs text-muted-foreground font-mono">
                       Example: {buildPublicQrUrl("A0000000001")}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Brand slug</Label>
-                    <Input value={brandSlug} onChange={(e) => setBrandSlug(e.target.value)} />
-                    <div className="text-xs text-muted-foreground">
-                      Used in URL: <span className="font-mono">{brandSlug}</span>
                     </div>
                   </div>
                 </div>
@@ -659,7 +614,7 @@ export default function Batches() {
                   <Button variant="outline" onClick={() => setPrintOpen(false)} disabled={printing}>
                     Close
                   </Button>
-                  <Button onClick={downloadBatchZip} disabled={printing}>
+                  <Button onClick={downloadBatchZip} disabled={printing || !!printBatch.printedAt}>
                     {printing ? "Generating..." : "Download ZIP"}
                   </Button>
                 </div>
@@ -671,4 +626,3 @@ export default function Batches() {
     </DashboardLayout>
   );
 }
-

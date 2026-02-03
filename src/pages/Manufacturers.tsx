@@ -67,6 +67,8 @@ type ManufacturerRow = {
   isActive: boolean;
   createdAt?: string;
   licenseeId?: string;
+  location?: string | null;
+  website?: string | null;
 };
 
 type CreateManufacturerForm = {
@@ -74,6 +76,8 @@ type CreateManufacturerForm = {
   name: string;
   email: string;
   password: string;
+  location: string;
+  website: string;
 };
 
 export default function Manufacturers() {
@@ -99,6 +103,8 @@ export default function Manufacturers() {
     name: "",
     email: "",
     password: "",
+    location: "",
+    website: "",
   });
 
   const effectiveLicenseeId = isSuperAdmin ? licenseeFilter : fixedLicenseeId;
@@ -207,6 +213,8 @@ export default function Manufacturers() {
       name: "",
       email: "",
       password: "",
+      location: "",
+      website: "",
     });
     setCreateOpen(true);
   };
@@ -219,6 +227,8 @@ export default function Manufacturers() {
     const name = createForm.name.trim();
     const email = createForm.email.trim().toLowerCase();
     const password = createForm.password.trim();
+    const location = createForm.location.trim();
+    const website = createForm.website.trim();
 
     if (!licId) {
       toast({
@@ -245,6 +255,8 @@ export default function Manufacturers() {
         email,
         password,
         role: "MANUFACTURER",
+        location: location || undefined,
+        website: website || undefined,
       });
 
       if (!res.success) throw new Error(res.error || "Create manufacturer failed");
@@ -255,7 +267,7 @@ export default function Manufacturers() {
       });
 
       setCreateOpen(false);
-      setCreateForm({ licenseeId: "", name: "", email: "", password: "" });
+      setCreateForm({ licenseeId: "", name: "", email: "", password: "", location: "", website: "" });
       await loadManufacturers();
     } catch (e: any) {
       toast({
@@ -397,6 +409,27 @@ export default function Manufacturers() {
                       placeholder="factory@example.com"
                       disabled={creating}
                     />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Location</Label>
+                      <Input
+                        value={createForm.location}
+                        onChange={(e) => setCreateForm((p) => ({ ...p, location: e.target.value }))}
+                        placeholder="City, Country"
+                        disabled={creating}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Website</Label>
+                      <Input
+                        value={createForm.website}
+                        onChange={(e) => setCreateForm((p) => ({ ...p, website: e.target.value }))}
+                        placeholder="https://factory.example"
+                        disabled={creating}
+                      />
+                    </div>
                   </div>
 
                   <div className="space-y-2">
@@ -556,4 +589,3 @@ export default function Manufacturers() {
     </DashboardLayout>
   );
 }
-

@@ -25,12 +25,13 @@ const normalizeRole = (role: any): User["role"] => {
 };
 
 function normalizeUser(u: any): User {
+  const licenseeId = u.licenseeId ?? u.licensee?.id ?? undefined;
   return {
     id: String(u.id),
     email: String(u.email),
     name: String(u.name ?? ""),
     role: normalizeRole(u.role),
-    licenseeId: u.licenseeId ?? undefined,
+    licenseeId,
     createdAt: u.createdAt ?? new Date().toISOString(),
     isActive: typeof u.isActive === "boolean" ? u.isActive : true,
     deletedAt: u.deletedAt ?? null,
@@ -138,4 +139,3 @@ export function useAuth() {
   if (!ctx) throw new Error("useAuth must be used within an AuthProvider");
   return ctx;
 }
-

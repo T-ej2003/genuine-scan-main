@@ -27,6 +27,8 @@ const createUserSchema = z.object({
   name: z.string().min(2),
   role: z.enum(["LICENSEE_ADMIN", "MANUFACTURER"]),
   licenseeId: z.string().uuid().optional(),
+  location: z.string().trim().max(200).optional(),
+  website: z.string().trim().max(200).optional(),
 });
 
 const updateUserSchema = z.object({
@@ -35,6 +37,8 @@ const updateUserSchema = z.object({
   password: z.string().min(6).optional(),
   isActive: z.boolean().optional(),
   licenseeId: z.string().uuid().optional(), // SUPER_ADMIN only
+  location: z.string().trim().max(200).optional(),
+  website: z.string().trim().max(200).optional(),
 });
 
 /* ===================== HELPERS ===================== */
@@ -134,20 +138,26 @@ export const createUser = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    if (!effectiveLicenseeId) {
+      return res.status(400).json({ success: false, error: "licenseeId is required" });
+    }
     const lic = await prisma.licensee.findUnique({ where: { id: effectiveLicenseeId } });
     if (!lic) return res.status(404).json({ success: false, error: "Licensee not found" });
 
     const passwordHash = await bcrypt.hash(password, 10);
 
+    const licenseeId = effectiveLicenseeId || undefined;
     const created = await prisma.user.create({
       data: {
         email,
         passwordHash,
         name,
         role,
-        licenseeId: effectiveLicenseeId,
+        licenseeId,
         isActive: true,
         deletedAt: null,
+        location: parsed.data.location?.trim() ? parsed.data.location.trim() : null,
+        website: parsed.data.website?.trim() ? parsed.data.website.trim() : null,
       },
       select: {
         id: true,
@@ -158,6 +168,8 @@ export const createUser = async (req: AuthRequest, res: Response) => {
         isActive: true,
         deletedAt: true,
         createdAt: true,
+        location: true,
+        website: true,
       },
     });
 
@@ -166,7 +178,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
       action: "CREATE_USER",
       entityType: "User",
       entityId: created.id,
-      details: { email, name, role, licenseeId: effectiveLicenseeId },
+      details: { email, name, role, licenseeId },
       ipAddress: req.ip,
     });
 
@@ -210,6 +222,8 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
         isActive: true,
         deletedAt: true,
         createdAt: true,
+        location: true,
+        website: true,
         licensee: { select: { name: true, prefix: true } },
       },
       orderBy: { createdAt: "desc" },
@@ -250,6 +264,8 @@ export const getManufacturers = async (req: AuthRequest, res: Response) => {
         isActive: true,
         deletedAt: true,
         createdAt: true,
+        location: true,
+        website: true,
         licensee: { select: { name: true, prefix: true } },
         assignedBatches: {
           select: { id: true, name: true, totalCodes: true, printedAt: true },
@@ -315,6 +331,8 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
         isActive: true,
         deletedAt: true,
         createdAt: true,
+        location: true,
+        website: true,
       },
     });
 
@@ -448,4 +466,3 @@ export const hardDeleteManufacturer = async (req: AuthRequest, res: Response) =>
   req.query.hard = "true";
   return deleteUser(req, res);
 };
-

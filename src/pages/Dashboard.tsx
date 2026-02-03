@@ -8,16 +8,19 @@ import { QrCode, Building2, Factory, FileText } from "lucide-react";
 import apiClient from "@/lib/api-client";
 
 const STATS_POLL_MS = 5000;
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
 
 export default function Dashboard() {
   const { user } = useAuth();
 
-  const [stats, setStats] = useState<any>(null);
+  const [summary, setSummary] = useState<any>(null);
+  const [qrStats, setQrStats] = useState<any>(null);
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const pollRef = useRef<number | null>(null);
+  const sseRef = useRef<EventSource | null>(null);
 
   const load = async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) {
@@ -26,23 +29,33 @@ export default function Dashboard() {
     }
 
     try {
-      // Stats: use your existing endpoint (qr/stats). This is what drives the chart.
-      const statsRes = await apiClient.getQRStats(user?.licenseeId);
+      const [summaryRes, qrRes] = await Promise.all([
+        apiClient.getDashboardStats(user?.licenseeId),
+        apiClient.getQRStats(user?.licenseeId),
+      ]);
 
-      if (!statsRes.success) throw new Error(statsRes.error || "Failed to load stats");
-      setStats(statsRes.data || {});
+      if (!summaryRes.success) throw new Error(summaryRes.error || "Failed to load dashboard stats");
+      if (!qrRes.success) throw new Error(qrRes.error || "Failed to load QR stats");
 
-      // Logs: only super_admin (route is protected in your backend)
-      if (user?.role === "super_admin") {
+      setSummary(summaryRes.data || {});
+      setQrStats(qrRes.data || {});
+
+      if (user?.role === "super_admin" || user?.role === "licensee_admin") {
         const logsRes = await apiClient.getAuditLogs({ limit: 5 });
-        if (logsRes.success) setLogs(Array.isArray(logsRes.data) ? logsRes.data : []);
-        else setLogs([]);
+        if (logsRes.success) {
+          const payload: any = logsRes.data;
+          const list = Array.isArray(payload) ? payload : Array.isArray(payload?.logs) ? payload.logs : [];
+          setLogs(list);
+        } else {
+          setLogs([]);
+        }
       } else {
         setLogs([]);
       }
     } catch (e: any) {
       setError(e?.message || "Failed to load dashboard");
-      setStats(null);
+      setSummary(null);
+      setQrStats(null);
       setLogs([]);
     } finally {
       if (!opts?.silent) setLoading(false);
@@ -53,40 +66,82 @@ export default function Dashboard() {
     // initial load
     load();
 
-    // start polling stats
+    // start polling stats (fallback)
     if (pollRef.current) window.clearInterval(pollRef.current);
-
     pollRef.current = window.setInterval(() => {
-      // avoid polling when tab is hidden
       if (document.visibilityState !== "visible") return;
-
-      // "silent" refresh = don't show loading screen, just update numbers/chart
+      if (sseRef.current) return;
       load({ silent: true });
     }, STATS_POLL_MS);
+
+    // setup SSE for realtime
+    if (sseRef.current) {
+      sseRef.current.close();
+      sseRef.current = null;
+    }
+    const token = apiClient.getToken();
+    if (token) {
+      const es = new EventSource(`${API_BASE}/events/dashboard?token=${encodeURIComponent(token)}`);
+      sseRef.current = es;
+
+      es.addEventListener("stats", (e: MessageEvent) => {
+        try {
+          const payload = JSON.parse(e.data);
+          setSummary({
+            totalQRCodes: payload?.totalQRCodes ?? 0,
+            activeLicensees: payload?.activeLicensees ?? 0,
+            manufacturers: payload?.manufacturers ?? 0,
+            totalBatches: payload?.totalBatches ?? 0,
+            totalProductBatches: payload?.totalProductBatches ?? 0,
+          });
+          setQrStats(payload?.qr || {});
+        } catch {
+          // ignore parse errors
+        }
+      });
+
+      es.addEventListener("audit", (e: MessageEvent) => {
+        try {
+          const log = JSON.parse(e.data);
+          setLogs((prev) => [log, ...(prev || [])].slice(0, 10));
+        } catch {
+          // ignore
+        }
+      });
+
+      es.onerror = () => {
+        es.close();
+        sseRef.current = null;
+      };
+    }
 
     return () => {
       if (pollRef.current) window.clearInterval(pollRef.current);
       pollRef.current = null;
+      if (sseRef.current) {
+        sseRef.current.close();
+        sseRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.licenseeId, user?.role]);
 
   // totals (support multiple backend shapes)
-  const totalQRCodes = stats?.totalQRCodes ?? stats?.total ?? 0;
-  const activeLicenseesCount = stats?.activeLicensees ?? stats?.licenseesActive ?? 0;
-  const manufacturersCount = stats?.manufacturers ?? stats?.manufacturersCount ?? 0;
-  const batchesCount = stats?.batches ?? stats?.batchesCount ?? 0;
+  const totalQRCodes = summary?.totalQRCodes ?? 0;
+  const activeLicenseesCount = summary?.activeLicensees ?? 0;
+  const manufacturersCount = summary?.manufacturers ?? 0;
+  const batchesCount = summary?.totalBatches ?? 0;
 
   // chart: support both { dormant: n } OR { byStatus: { DORMANT: n } }
   const qrStatusData = useMemo(() => {
-    const by = stats?.byStatus || stats?.statusCounts || {};
+    const by = qrStats?.byStatus || qrStats?.statusCounts || {};
     return {
-      dormant: stats?.dormant ?? by.DORMANT ?? 0,
-      allocated: stats?.allocated ?? by.ALLOCATED ?? 0,
-      printed: stats?.printed ?? by.PRINTED ?? 0,
-      scanned: stats?.scanned ?? by.SCANNED ?? 0,
+      dormant: qrStats?.dormant ?? by.DORMANT ?? 0,
+      allocated: (qrStats?.allocated ?? by.ALLOCATED ?? 0) + (by.ACTIVE ?? 0),
+      printed: qrStats?.printed ?? by.PRINTED ?? 0,
+      scanned: qrStats?.scanned ?? by.SCANNED ?? 0,
     };
-  }, [stats]);
+  }, [qrStats]);
 
   if (loading) return <div className="p-6">Loading…</div>;
   if (error) return <div className="p-6 text-red-500">{error}</div>;
@@ -104,11 +159,10 @@ export default function Dashboard() {
             title="Total QR Codes"
             value={totalQRCodes}
             icon={QrCode}
-            trend={{ value: 12, label: "vs last month" }}
           />
           <StatsCard title="Active Licensees" value={activeLicenseesCount} icon={Building2} variant="info" />
           <StatsCard title="Manufacturers" value={manufacturersCount} icon={Factory} variant="warning" />
-          <StatsCard title="Total Batches" value={batchesCount} icon={FileText} variant="success" />
+          <StatsCard title="QR Batches" value={batchesCount} icon={FileText} variant="success" />
         </div>
 
         <div className="grid gap-6 md:grid-cols-2 mt-6">
@@ -119,4 +173,3 @@ export default function Dashboard() {
     </DashboardLayout>
   );
 }
-

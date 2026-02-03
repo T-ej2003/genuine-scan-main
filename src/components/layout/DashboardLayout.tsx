@@ -14,6 +14,7 @@ import {
   Menu,
   ChevronDown,
   Shield,
+  ScanEye,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -33,10 +34,11 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["super_admin", "licensee_admin", "manufacturer"] },
   { label: "Licensees", href: "/licensees", icon: Building2, roles: ["super_admin"] },
-  { label: "QR Codes", href: "/qr-codes", icon: QrCode, roles: ["super_admin", "licensee_admin"] },
+  { label: "QR Codes", href: "/qr-codes", icon: QrCode, roles: ["super_admin"] },
+  { label: "QR Requests", href: "/qr-requests", icon: FileText, roles: ["super_admin", "licensee_admin"] },
   { label: "Batches", href: "/batches", icon: FileText, roles: ["super_admin", "licensee_admin", "manufacturer"] },
-  { label: "Product Batches", href: "/product-batches", icon: FileText, roles: ["super_admin", "licensee_admin", "manufacturer"] },
   { label: "Manufacturers", href: "/manufacturers", icon: Factory, roles: ["super_admin", "licensee_admin"] },
+  { label: "QR Tracking", href: "/qr-tracking", icon: ScanEye, roles: ["super_admin"] },
   { label: "Audit Logs", href: "/audit-logs", icon: FileText, roles: ["super_admin", "licensee_admin"] },
 ];
 
@@ -179,4 +181,3 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-

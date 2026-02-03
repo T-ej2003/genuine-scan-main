@@ -49,13 +49,11 @@ import {
   RefreshCw,
   MoreHorizontal,
   Download,
-  CheckCircle2,
   UserCog,
   Plus,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
-import QRCode from "qrcode";
-import JSZip from "jszip";
 import { saveAs } from "file-saver";
 
 type ManufacturerRow = { id: string; name: string; email: string; isActive: boolean };
@@ -69,6 +67,9 @@ type BatchRow = {
   totalCodes: number;
   printedAt: string | null;
   manufacturer?: { id: string; name: string; email: string } | null;
+  availableCodes?: number;
+  remainingStartCode?: string | null;
+  remainingEndCode?: string | null;
 };
 
 type ProductBatchRow = {
@@ -96,13 +97,6 @@ type ProductBatchRow = {
 
   parentBatch?: { id: string; name: string; startCode: string; endCode: string } | null;
   _count?: { qrCodes: number };
-};
-
-type QrRow = {
-  code: string;
-  batchId?: string | null;
-  productBatchId?: string | null;
-  productBatch?: { id: string } | null;
 };
 
 function useLocalStorageState<T>(key: string, initial: T) {
@@ -135,66 +129,18 @@ function safeFilePart(s: string) {
     .slice(0, 80) || "file";
 }
 
-function detectLicFromCode(code: string) {
-  const m = String(code).match(/^[A-Za-z]+/);
-  return m?.[0] || "LIC";
+function parseCodeNumber(code: string): number | null {
+  const m = String(code || "").match(/(\d{10})$/);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) ? n : null;
 }
 
-function padNumber(n: number, width: number) {
-  const s = String(Math.max(0, Math.trunc(n)));
-  return s.length >= width ? s : "0".repeat(width - s.length) + s;
-}
-
-/**
- * Serial format supports:
- * {LIC} = licensee prefix (detected from code like A000... => A)
- * {PROD} = product code
- * {NNN...} = N repeated indicates padding length, uses serial number value
- *
- * Example: "{LIC}-{PROD}-{NNNNNN}" => "A-TSHIRT-000123"
- */
-function renderSerial(formatStr: string, vars: { lic: string; prod: string; serial: number }) {
-  let out = formatStr || "{LIC}-{PROD}-{NNNNNN}";
-  out = out.replaceAll("{LIC}", vars.lic);
-  out = out.replaceAll("{PROD}", vars.prod);
-
-  // Replace any {NNN...} token with padded serial
-  out = out.replace(/\{N+\}/g, (token) => {
-    const nCount = token.length - 2; // remove braces
-    return padNumber(vars.serial, nCount);
-  });
-
-  return out;
-}
-
-async function promisePool<T, R>(
-  items: T[],
-  concurrency: number,
-  worker: (item: T, index: number) => Promise<R>,
-  onProgress?: (done: number, total: number) => void
-) {
-  const total = items.length;
-  const results: R[] = new Array(total);
-  let nextIndex = 0;
-  let done = 0;
-
-  const runners = new Array(Math.max(1, concurrency)).fill(0).map(async () => {
-    while (true) {
-      const i = nextIndex++;
-      if (i >= total) return;
-      results[i] = await worker(items[i], i);
-      done++;
-      onProgress?.(done, total);
-    }
-  });
-
-  await Promise.all(runners);
-  return results;
-}
 
 export default function ProductBatches() {
   const { toast } = useToast();
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const role = user?.role;
 
@@ -229,26 +175,24 @@ export default function ProductBatches() {
   const [serialEnd, setSerialEnd] = useState<number>(1);
   const [serialFormat, setSerialFormat] = useState<string>("{LIC}-{PROD}-{NNNNNN}");
 
+  const selectedParent = useMemo(
+    () => parentBatches.find((b) => b.id === parentBatchId) || null,
+    [parentBatches, parentBatchId]
+  );
+
   // print pack dialog
   const [printOpen, setPrintOpen] = useState(false);
   const [printPB, setPrintPB] = useState<ProductBatchRow | null>(null);
   const [printing, setPrinting] = useState(false);
-  const [printProgress, setPrintProgress] = useState<{ done: number; total: number }>({
-    done: 0,
-    total: 0,
-  });
 
   // Saved settings for QR URL inside QR codes (same keys as Batches page)
   const [publicBaseUrl, setPublicBaseUrl] = useLocalStorageState<string>(
     "qr_public_base_url",
     "https://auth.mcs.example"
   );
-  const [brandSlug, setBrandSlug] = useLocalStorageState<string>("qr_brand_slug", "nemesis");
-
   const buildPublicQrUrl = (code: string) => {
     const base = String(publicBaseUrl || "").trim().replace(/\/+$/, "");
-    const slug = String(brandSlug || "").trim().replace(/^\/+|\/+$/g, "");
-    return `${base}/brand/${encodeURIComponent(slug)}/verify/${encodeURIComponent(code)}`;
+    return `${base}/verify/${encodeURIComponent(code)}`;
   };
 
   const fetchProductBatches = async () => {
@@ -277,9 +221,7 @@ export default function ProductBatches() {
   const fetchManufacturersForAssign = async () => {
     if (!canAssignManufacturer) return;
     const licenseeId = user?.licenseeId;
-    if (!licenseeId) return;
-
-    const res = await apiClient.getManufacturers({ licenseeId, includeInactive: false });
+    const res = await apiClient.getManufacturers({ licenseeId: licenseeId || undefined, includeInactive: false });
     if (res.success) setManufacturers(((res.data as any) || []) as ManufacturerRow[]);
     else setManufacturers([]);
   };
@@ -293,8 +235,13 @@ export default function ProductBatches() {
 
       const list = (Array.isArray(res.data) ? res.data : []) as BatchRow[];
 
-      // Only “received pool” batches: unprinted + unassigned
-      const filtered = list.filter((b) => !b.printedAt && !b.manufacturer?.id);
+      // Only “received pool” batches: unprinted + unassigned + has remaining codes
+      const filtered = list.filter((b) => {
+        if (b.printedAt) return false;
+        if (b.manufacturer?.id) return false;
+        if (typeof b.availableCodes === "number") return b.availableCodes > 0;
+        return true;
+      });
 
       setParentBatches(filtered);
     } catch {
@@ -311,6 +258,21 @@ export default function ProductBatches() {
     fetchManufacturersForAssign();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.licenseeId, role]);
+
+  useEffect(() => {
+    if (!selectedParent) return;
+    const startCode = selectedParent.remainingStartCode || selectedParent.startCode;
+    const endCode = selectedParent.remainingEndCode || selectedParent.endCode;
+    const startNum = parseCodeNumber(startCode);
+    const endNum = parseCodeNumber(endCode);
+    if (startNum != null && endNum != null) {
+      setStartNumber(startNum);
+      setEndNumber(endNum);
+      setSerialStart(1);
+      const remaining = selectedParent.availableCodes ?? selectedParent.totalCodes ?? endNum - startNum + 1;
+      setSerialEnd(remaining);
+    }
+  }, [selectedParent?.id]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -430,179 +392,51 @@ export default function ProductBatches() {
     }
   };
 
-  // -------- PRINT PACK (PNG ZIP) --------
+  // -------- PRINT PACK (SERVER ZIP, ONE-TIME) --------
   const openPrintPack = (pb: ProductBatchRow) => {
     setPrintPB(pb);
-    setPrintProgress({ done: 0, total: 0 });
     setPrintOpen(true);
-  };
-
-  /**
-   * ✅ Recommended: create backend endpoint to fetch only codes for a given productBatchId.
-   * If apiClient.getProductBatchQRCodes exists, we use it.
-   * Otherwise we fallback to your licensee-wide scan (but still faster/safer than before).
-   */
-  const fetchAllCodesForProductBatch = async (pb: ProductBatchRow): Promise<string[]> => {
-    // If you add this method to apiClient, it will automatically be used:
-    const maybeFn = (apiClient as any).getProductBatchQRCodes as
-      | ((args: { productBatchId: string; limit?: number; offset?: number }) => Promise<any>)
-      | undefined;
-
-    if (typeof maybeFn === "function") {
-      const pageSize = 5000;
-      let offset = 0;
-      const out: string[] = [];
-      while (true) {
-        const res = await maybeFn({ productBatchId: pb.id, limit: pageSize, offset });
-        if (!res?.success) break;
-
-        const payload = res.data;
-        const list: string[] = Array.isArray(payload?.codes)
-          ? payload.codes
-          : Array.isArray(payload)
-          ? payload
-          : [];
-
-        if (list.length === 0) break;
-        out.push(...list.map(String));
-
-        if (pb.totalCodes && out.length >= pb.totalCodes) break;
-        if (list.length < pageSize) break;
-        offset += pageSize;
-      }
-      return out;
-    }
-
-    // ---- fallback (your existing approach, but with safety + lower cap risk) ----
-    const licenseeId = user?.licenseeId;
-    const pageSize = 2000;
-    const hardCap = 200000; // allow bigger licensees; still safe
-    let offset = 0;
-    const out: string[] = [];
-
-    while (offset < hardCap) {
-      const res = await apiClient.getQRCodes({
-        licenseeId: licenseeId || undefined,
-        limit: pageSize,
-        offset,
-      });
-
-      if (!res.success) break;
-
-      const payload: any = res.data;
-      const list: QrRow[] = Array.isArray(payload?.qrCodes)
-        ? payload.qrCodes
-        : Array.isArray(payload)
-        ? payload
-        : [];
-
-      if (list.length === 0) break;
-
-      for (const r of list) {
-        const pid = r.productBatch?.id || r.productBatchId;
-        if (pid === pb.id) out.push(String(r.code));
-      }
-
-      if (pb.totalCodes && out.length >= pb.totalCodes) break;
-      if (list.length < pageSize) break;
-
-      offset += pageSize;
-    }
-
-    return out;
-  };
-
-  const qrPngBlob = async (code: string) => {
-    const urlInsideQr = buildPublicQrUrl(code);
-    const dataUrl = await QRCode.toDataURL(urlInsideQr, {
-      width: 768,
-      margin: 2,
-      errorCorrectionLevel: "M",
-    });
-    return await (await fetch(dataUrl)).blob();
   };
 
   const downloadProductBatchZip = async () => {
     if (!printPB) return;
 
     const base = String(publicBaseUrl || "").trim();
-    const slug = String(brandSlug || "").trim();
 
-    if (!base || !slug) {
+    if (!base) {
       toast({
         title: "Missing URL settings",
-        description: "Please set Public base URL and Brand slug first.",
+        description: "Please set Public base URL first.",
         variant: "destructive",
       });
       return;
     }
 
     setPrinting(true);
-    setPrintProgress({ done: 0, total: 0 });
-
     try {
-      const codes = await fetchAllCodesForProductBatch(printPB);
-
-      if (codes.length === 0) {
-        toast({
-          title: "No codes found",
-          description: "No QR codes were found for this product batch.",
-          variant: "destructive",
-        });
+      const tokenRes = await apiClient.createProductBatchPrintToken(printPB.id);
+      if (!tokenRes.success) {
+        toast({ title: "Download blocked", description: tokenRes.error || "Error", variant: "destructive" });
         return;
       }
 
-      // Ensure stable ordering
-      const ordered = [...codes].sort((a, b) => a.localeCompare(b));
+      const token = (tokenRes.data as any)?.token;
+      if (!token) throw new Error("Download token missing");
 
-      const zip = new JSZip();
-      const folder = zip.folder("png")!;
-      const lic = detectLicFromCode(ordered[0] || printPB.startCode);
-      const prod = String(printPB.productCode || "PROD").trim() || "PROD";
+      const blob = await apiClient.downloadProductBatchPrintPack(token, {
+        publicBaseUrl: base,
+      });
 
-      // Prebuild CSV header
-      const csvLines: string[] = ["code,url,serial"];
+      const fileName = `product-batch-${safeFilePart(printPB.productCode || printPB.id)}-print-pack.zip`;
+      saveAs(blob, fileName);
 
-      setPrintProgress({ done: 0, total: ordered.length });
+      toast({
+        title: "Downloaded",
+        description: "Print pack downloaded. This batch is now marked as printed.",
+      });
 
-      const concurrency = 8; // tune if needed
-
-      await promisePool(
-        ordered,
-        concurrency,
-        async (code, idx) => {
-          const blob = await qrPngBlob(code);
-          folder.file(`${code}.png`, blob);
-
-          const serialValue = printPB.serialStart + idx;
-          const serial = renderSerial(printPB.serialFormat || "{LIC}-{PROD}-{NNNNNN}", {
-            lic,
-            prod,
-            serial: serialValue,
-          });
-
-          const url = buildPublicQrUrl(code);
-
-          // Basic CSV escaping (wrap in quotes if needed)
-          const esc = (v: string) => {
-            const s = String(v ?? "");
-            return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-          };
-
-          csvLines[idx + 1] = `${esc(code)},${esc(url)},${esc(serial)}`;
-          return true;
-        },
-        (done, total) => setPrintProgress({ done, total })
-      );
-
-      zip.file("manifest.csv", csvLines.join("\n"));
-
-      const out = await zip.generateAsync({ type: "blob" });
-
-      const fileName = `product-batch-${safeFilePart(printPB.productCode || printPB.id)}-png.zip`;
-      saveAs(out, fileName);
-
-      toast({ title: "Downloaded", description: `Generated ${ordered.length} PNG(s).` });
+      setPrintOpen(false);
+      await fetchProductBatches();
     } catch (e: any) {
       toast({
         title: "Download failed",
@@ -611,28 +445,6 @@ export default function ProductBatches() {
       });
     } finally {
       setPrinting(false);
-    }
-  };
-
-  const confirmPrinted = async (pb: ProductBatchRow) => {
-    if (!isManufacturer) return;
-
-    const ok = window.confirm(
-      `Confirm print for "${pb.productName}" (${pb.productCode})?\n\nThis will mark the product batch as PRINTED in the system.`
-    );
-    if (!ok) return;
-
-    setLoading(true);
-    try {
-      const res = await apiClient.confirmProductBatchPrint(pb.id);
-      if (!res.success) {
-        toast({ title: "Confirm failed", description: res.error || "Error", variant: "destructive" });
-        return;
-      }
-      toast({ title: "Confirmed", description: "Product batch marked as printed." });
-      await fetchProductBatches();
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -645,7 +457,7 @@ export default function ProductBatches() {
             <h1 className="text-3xl font-bold">Product Batches</h1>
             <p className="text-muted-foreground">
               {isManufacturer
-                ? "Your assigned product batches (download print pack and confirm printing)"
+                ? "Your assigned product batches (one-time download; auto-confirmed on download)"
                 : "Split received batches into product batches and assign manufacturers"}
             </p>
           </div>
@@ -782,19 +594,11 @@ export default function ProductBatches() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  disabled={loading}
+                                  disabled={loading || printed}
                                   onClick={() => openPrintPack(pb)}
                                 >
                                   <Download className="mr-2 h-4 w-4" />
                                   Print pack
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  disabled={loading || printed}
-                                  onClick={() => confirmPrinted(pb)}
-                                >
-                                  <CheckCircle2 className="mr-2 h-4 w-4" />
-                                  Confirm
                                 </Button>
                               </div>
                             ) : (
@@ -921,11 +725,45 @@ export default function ProductBatches() {
                       parentBatches.map((b) => (
                         <SelectItem key={b.id} value={b.id}>
                           {b.name} • {b.startCode} → {b.endCode}
+                          {typeof b.availableCodes === "number" ? ` • remaining ${b.availableCodes}` : ""}
                         </SelectItem>
                       ))
                     )}
                   </SelectContent>
                 </Select>
+                {parentBatches.length === 0 && (
+                  <div className="text-xs text-muted-foreground">
+                    No received pool yet. Ask Super Admin to allocate a QR range or submit a request in QR Requests.
+                  </div>
+                )}
+                {selectedParent && (
+                  <div className="text-xs text-muted-foreground">
+                    Remaining codes:{" "}
+                    <span className="font-medium">
+                      {typeof selectedParent.availableCodes === "number"
+                        ? selectedParent.availableCodes
+                        : "—"}
+                    </span>
+                    {selectedParent.remainingStartCode && selectedParent.remainingEndCode && (
+                      <>
+                        {" "}
+                        • Range {selectedParent.remainingStartCode} → {selectedParent.remainingEndCode}
+                        {" "}
+                        <span className="text-muted-foreground">(min/max; gaps possible)</span>
+                      </>
+                    )}
+                  </div>
+                )}
+                <div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate("/qr-requests")}
+                  >
+                    Request QR codes
+                  </Button>
+                </div>
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
@@ -955,6 +793,16 @@ export default function ProductBatches() {
                     type="number"
                     value={startNumber}
                     onChange={(e) => setStartNumber(parseInt(e.target.value || "0", 10))}
+                    min={
+                      selectedParent
+                        ? parseCodeNumber(selectedParent.remainingStartCode || selectedParent.startCode) || undefined
+                        : undefined
+                    }
+                    max={
+                      selectedParent
+                        ? parseCodeNumber(selectedParent.remainingEndCode || selectedParent.endCode) || undefined
+                        : undefined
+                    }
                   />
                 </div>
                 <div className="space-y-2">
@@ -963,6 +811,16 @@ export default function ProductBatches() {
                     type="number"
                     value={endNumber}
                     onChange={(e) => setEndNumber(parseInt(e.target.value || "0", 10))}
+                    min={
+                      selectedParent
+                        ? parseCodeNumber(selectedParent.remainingStartCode || selectedParent.startCode) || undefined
+                        : undefined
+                    }
+                    max={
+                      selectedParent
+                        ? parseCodeNumber(selectedParent.remainingEndCode || selectedParent.endCode) || undefined
+                        : undefined
+                    }
                   />
                 </div>
               </div>
@@ -1013,7 +871,6 @@ export default function ProductBatches() {
             setPrintOpen(v);
             if (!v) {
               setPrintPB(null);
-              setPrintProgress({ done: 0, total: 0 });
             }
           }}
         >
@@ -1021,7 +878,7 @@ export default function ProductBatches() {
             <DialogHeader>
               <DialogTitle>Download Print Pack (PNG ZIP)</DialogTitle>
               <DialogDescription>
-                Generates PNG QR images for this product batch using the public URL settings (and includes manifest.csv).
+                One-time download (PNG ZIP + manifest.csv). Downloading marks the batch as printed automatically.
               </DialogDescription>
             </DialogHeader>
 
@@ -1036,7 +893,7 @@ export default function ProductBatches() {
                   </div>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-1">
                   <div className="space-y-2">
                     <Label>Public base URL</Label>
                     <Input value={publicBaseUrl} onChange={(e) => setPublicBaseUrl(e.target.value)} />
@@ -1044,21 +901,9 @@ export default function ProductBatches() {
                       Example: {buildPublicQrUrl("A0000000001")}
                     </div>
                   </div>
-
-                  <div className="space-y-2">
-                    <Label>Brand slug</Label>
-                    <Input value={brandSlug} onChange={(e) => setBrandSlug(e.target.value)} />
-                    <div className="text-xs text-muted-foreground">
-                      Used in URL: <span className="font-mono">{brandSlug}</span>
-                    </div>
-                  </div>
                 </div>
 
-                {printing && (
-                  <div className="text-sm text-muted-foreground">
-                    Generating… {printProgress.done}/{printProgress.total}
-                  </div>
-                )}
+                {printing && <div className="text-sm text-muted-foreground">Preparing download…</div>}
 
                 <div className="flex justify-end gap-3 pt-2">
                   <Button variant="outline" onClick={() => setPrintOpen(false)} disabled={printing}>
@@ -1076,4 +921,3 @@ export default function ProductBatches() {
     </DashboardLayout>
   );
 }
-

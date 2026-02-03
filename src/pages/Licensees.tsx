@@ -40,6 +40,7 @@ import {
   Download,
   UserPlus,
   PackagePlus,
+  QrCode,
 } from "lucide-react";
 
 import {
@@ -67,6 +68,11 @@ type LicenseeRow = {
   name: string;
   prefix: string;
   description?: string | null;
+  brandName?: string | null;
+  location?: string | null;
+  website?: string | null;
+  supportEmail?: string | null;
+  supportPhone?: string | null;
   isActive: boolean;
   createdAt: string;
 
@@ -86,6 +92,11 @@ type CreateLicenseeForm = {
   prefix: string;
   description: string;
   isActive: boolean;
+  brandName: string;
+  location: string;
+  website: string;
+  supportEmail: string;
+  supportPhone: string;
 
   // Required: create licensee admin (backend expects this)
   adminName: string;
@@ -114,6 +125,11 @@ type EditLicenseeForm = {
   name: string;
   description: string;
   isActive: boolean;
+  brandName: string;
+  location: string;
+  website: string;
+  supportEmail: string;
+  supportPhone: string;
 };
 
 type CreateUserForm = {
@@ -137,6 +153,12 @@ type AllocateBatchForm = {
   quantity: string;
   name: string;
   requestNote: string;
+};
+
+type AllocateRangeForm = {
+  licenseeId: string;
+  startNumber: string;
+  endNumber: string;
 };
 
 /* ===================== HELPERS ===================== */
@@ -166,6 +188,11 @@ export default function Licensees() {
     prefix: "A",
     description: "",
     isActive: true,
+    brandName: "",
+    location: "",
+    website: "",
+    supportEmail: "",
+    supportPhone: "",
 
     adminName: "",
     adminEmail: "",
@@ -201,6 +228,11 @@ export default function Licensees() {
   const [allocManufacturers, setAllocManufacturers] = useState<ManufacturerRow[]>([]);
   const [allocStats, setAllocStats] = useState<any>(null);
   const [allocForm, setAllocForm] = useState<AllocateBatchForm | null>(null);
+
+  // Allocate QR range dialog (existing licensee)
+  const [rangeOpen, setRangeOpen] = useState(false);
+  const [rangeLoading, setRangeLoading] = useState(false);
+  const [rangeForm, setRangeForm] = useState<AllocateRangeForm | null>(null);
 
   /* ===================== LOAD ===================== */
 
@@ -268,6 +300,11 @@ export default function Licensees() {
       prefix: "A",
       description: "",
       isActive: true,
+      brandName: "",
+      location: "",
+      website: "",
+      supportEmail: "",
+      supportPhone: "",
 
       adminName: "",
       adminEmail: "",
@@ -383,6 +420,11 @@ export default function Licensees() {
           name,
           prefix,
           description: description ? description : undefined,
+          brandName: createForm.brandName.trim() || undefined,
+          location: createForm.location.trim() || undefined,
+          website: createForm.website.trim() || undefined,
+          supportEmail: createForm.supportEmail.trim() || undefined,
+          supportPhone: createForm.supportPhone.trim() || undefined,
           isActive: true,
         },
         admin: {
@@ -462,6 +504,11 @@ export default function Licensees() {
       name: l.name || "",
       description: (l.description || "") as string,
       isActive: !!l.isActive,
+      brandName: (l as any).brandName || "",
+      location: (l as any).location || "",
+      website: (l as any).website || "",
+      supportEmail: (l as any).supportEmail || "",
+      supportPhone: (l as any).supportPhone || "",
     });
     setIsEditOpen(true);
   };
@@ -484,6 +531,11 @@ export default function Licensees() {
       name,
       description,
       isActive: editForm.isActive,
+      brandName: editForm.brandName.trim() || undefined,
+      location: editForm.location.trim() || undefined,
+      website: editForm.website.trim() || undefined,
+      supportEmail: editForm.supportEmail.trim() || undefined,
+      supportPhone: editForm.supportPhone.trim() || undefined,
     });
 
     if (!res.success) {
@@ -703,6 +755,63 @@ export default function Licensees() {
     }
   };
 
+  /* ===================== ALLOCATE QR RANGE (TOP-UP) ===================== */
+
+  const openAllocateRange = (l: LicenseeRow) => {
+    setRangeForm({
+      licenseeId: l.id,
+      startNumber: "",
+      endNumber: "",
+    });
+    setRangeOpen(true);
+  };
+
+  const submitAllocateRange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rangeForm) return;
+
+    const startNumber = toInt(rangeForm.startNumber);
+    const endNumber = toInt(rangeForm.endNumber);
+
+    if (!Number.isFinite(startNumber) || !Number.isFinite(endNumber) || endNumber < startNumber) {
+      toast({
+        title: "Invalid range",
+        description: "Start/End numbers are required, and End must be >= Start.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setRangeLoading(true);
+    try {
+      const res = await apiClient.allocateLicenseeQrRange(rangeForm.licenseeId, {
+        startNumber,
+        endNumber,
+      });
+
+      if (!res.success) {
+        throw new Error(res.error || "Allocation failed");
+      }
+
+      toast({
+        title: "Range allocated",
+        description: `Allocated ${endNumber - startNumber + 1} QR codes to licensee.`,
+      });
+
+      setRangeOpen(false);
+      setRangeForm(null);
+      await load();
+    } catch (e: any) {
+      toast({
+        title: "Allocation failed",
+        description: e?.message || "Error",
+        variant: "destructive",
+      });
+    } finally {
+      setRangeLoading(false);
+    }
+  };
+
   /* ===================== RENDER ===================== */
 
   return (
@@ -773,6 +882,58 @@ export default function Licensees() {
                       value={createForm.description}
                       onChange={(e) => setCreateForm((p) => ({ ...p, description: e.target.value }))}
                       placeholder="Short note about this licensee"
+                      disabled={creating}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Brand Name</Label>
+                      <Input
+                        value={createForm.brandName}
+                        onChange={(e) => setCreateForm((p) => ({ ...p, brandName: e.target.value }))}
+                        placeholder="Brand / Label name"
+                        disabled={creating}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Location</Label>
+                      <Input
+                        value={createForm.location}
+                        onChange={(e) => setCreateForm((p) => ({ ...p, location: e.target.value }))}
+                        placeholder="City, Country"
+                        disabled={creating}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Official Website</Label>
+                      <Input
+                        value={createForm.website}
+                        onChange={(e) => setCreateForm((p) => ({ ...p, website: e.target.value }))}
+                        placeholder="https://brand.example"
+                        disabled={creating}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Support Email</Label>
+                      <Input
+                        value={createForm.supportEmail}
+                        onChange={(e) => setCreateForm((p) => ({ ...p, supportEmail: e.target.value }))}
+                        placeholder="support@brand.example"
+                        disabled={creating}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Support Phone</Label>
+                    <Input
+                      value={createForm.supportPhone}
+                      onChange={(e) => setCreateForm((p) => ({ ...p, supportPhone: e.target.value }))}
+                      placeholder="+1 555 123 4567"
                       disabled={creating}
                     />
                   </div>
@@ -1063,6 +1224,11 @@ export default function Licensees() {
                               </DropdownMenuTrigger>
 
                               <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => openAllocateRange(l)}>
+                                  <QrCode className="mr-2 h-4 w-4" />
+                                  Allocate QR Range
+                                </DropdownMenuItem>
+
                                 <DropdownMenuItem onClick={() => openAllocateBatch(l)}>
                                   <PackagePlus className="mr-2 h-4 w-4" />
                                   Allocate Batch
@@ -1128,6 +1294,48 @@ export default function Licensees() {
                   <Input
                     value={editForm.description}
                     onChange={(e) => setEditForm((p) => (p ? { ...p, description: e.target.value } : p))}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Brand Name</Label>
+                    <Input
+                      value={editForm.brandName}
+                      onChange={(e) => setEditForm((p) => (p ? { ...p, brandName: e.target.value } : p))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Location</Label>
+                    <Input
+                      value={editForm.location}
+                      onChange={(e) => setEditForm((p) => (p ? { ...p, location: e.target.value } : p))}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Official Website</Label>
+                    <Input
+                      value={editForm.website}
+                      onChange={(e) => setEditForm((p) => (p ? { ...p, website: e.target.value } : p))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Support Email</Label>
+                    <Input
+                      value={editForm.supportEmail}
+                      onChange={(e) => setEditForm((p) => (p ? { ...p, supportEmail: e.target.value } : p))}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Support Phone</Label>
+                  <Input
+                    value={editForm.supportPhone}
+                    onChange={(e) => setEditForm((p) => (p ? { ...p, supportPhone: e.target.value } : p))}
                   />
                 </div>
 
@@ -1219,6 +1427,58 @@ export default function Licensees() {
                   </Button>
                   <Button type="submit" disabled={creatingUser}>
                     {creatingUser ? "Creating..." : "Create User"}
+                  </Button>
+                </div>
+              </form>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* ALLOCATE QR RANGE DIALOG */}
+        <Dialog
+          open={rangeOpen}
+          onOpenChange={(v) => {
+            setRangeOpen(v);
+            if (!v) setRangeForm(null);
+          }}
+        >
+          <DialogContent className="sm:max-w-[520px] max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Allocate QR Range</DialogTitle>
+              <DialogDescription>
+                Adds a new QR range to the licensee's dormant pool.
+              </DialogDescription>
+            </DialogHeader>
+
+            {!rangeForm ? (
+              <div className="text-sm text-muted-foreground">No licensee selected.</div>
+            ) : (
+              <form className="space-y-4 mt-2" onSubmit={submitAllocateRange}>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Start Number</Label>
+                    <Input
+                      type="number"
+                      value={rangeForm.startNumber}
+                      onChange={(e) => setRangeForm((p) => (p ? { ...p, startNumber: e.target.value } : p))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>End Number</Label>
+                    <Input
+                      type="number"
+                      value={rangeForm.endNumber}
+                      onChange={(e) => setRangeForm((p) => (p ? { ...p, endNumber: e.target.value } : p))}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2">
+                  <Button type="button" variant="outline" onClick={() => setRangeOpen(false)} disabled={rangeLoading}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={rangeLoading}>
+                    {rangeLoading ? "Allocating..." : "Allocate QR"}
                   </Button>
                 </div>
               </form>
@@ -1327,4 +1587,3 @@ export default function Licensees() {
     </DashboardLayout>
   );
 }
-

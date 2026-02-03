@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authenticate, authenticateSSE } from "../middleware/auth";
 import { requireAnyAdmin } from "../middleware/rbac";
 import { enforceTenantIsolation } from "../middleware/tenantIsolation";
-import { getLogs, streamLogs } from "../controllers/auditController";
+import { getLogs, streamLogs, exportLogsCsv } from "../controllers/auditController";
 
 const router = Router();
 
@@ -15,6 +15,14 @@ router.get(
 );
 
 router.get(
+  "/logs/export",
+  authenticate,
+  requireAnyAdmin,
+  enforceTenantIsolation,
+  exportLogsCsv
+);
+
+router.get(
   "/stream",
   authenticateSSE,
   requireAnyAdmin,
@@ -23,4 +31,3 @@ router.get(
 );
 
 export default router;
-

@@ -13,8 +13,9 @@ import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Licensees from "@/pages/Licensees";
 import QRCodes from "@/pages/QRCodes";
+import QRRequests from "@/pages/QRRequests";
 import Batches from "@/pages/Batches";
-import ProductBatches from "@/pages/ProductBatches";
+import QRTracking from "@/pages/QRTracking";
 import Manufacturers from "@/pages/Manufacturers";
 import AuditLogs from "@/pages/AuditLogs";
 import Verify from "@/pages/Verify";
@@ -117,7 +118,7 @@ function AppRoutes() {
       <Route
         path="/qr-codes"
         element={
-          <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
+          <ProtectedRoute allowedRoles={["super_admin"]}>
             <QRCodes />
           </ProtectedRoute>
         }
@@ -133,10 +134,21 @@ function AppRoutes() {
       />
 
       <Route
-        path="/product-batches"
+        path="/qr-requests"
         element={
-          <ProtectedRoute allowedRoles={["super_admin", "licensee_admin", "manufacturer"]}>
-            <ProductBatches />
+          <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
+            <QRRequests />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route path="/product-batches" element={<Navigate to="/batches" replace />} />
+
+      <Route
+        path="/qr-tracking"
+        element={
+          <ProtectedRoute allowedRoles={["super_admin"]}>
+            <QRTracking />
           </ProtectedRoute>
         }
       />
@@ -189,4 +201,3 @@ export default function App() {
     </QueryClientProvider>
   );
 }
-

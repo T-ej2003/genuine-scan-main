@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 
 export default function AccountSettings() {
-  const { user } = useAuth();
+  const { user, refresh } = useAuth();
   const { toast } = useToast();
 
   const [profileLoading, setProfileLoading] = useState(false);
@@ -50,9 +50,8 @@ export default function AccountSettings() {
 
       toast({ title: "Saved", description: "Your profile has been updated." });
 
-      // Refresh auth user (so sidebar/header updates)
-      await apiClient.getCurrentUser();
-      window.location.reload(); // simplest safe refresh to sync AuthContext in your current setup
+      // Refresh the AuthContext user so UI updates immediately
+      await refresh();
     } catch (e: any) {
       toast({ title: "Save failed", description: e?.message || "Error", variant: "destructive" });
     } finally {

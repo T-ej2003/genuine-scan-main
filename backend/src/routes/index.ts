@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate } from "../middleware/auth";
+import { authenticate, authenticateSSE } from "../middleware/auth";
 import { enforceTenantIsolation } from "../middleware/tenantIsolation";
 import {
   requireSuperAdmin,
@@ -22,24 +22,30 @@ import {
   allocateQRRange,
   createBatch,
   assignManufacturer,
-  markPrinted,
   confirmBatchPrint,
   getBatches,
-  getQRCodes,
   getStats,
-  exportQRCodesCsv,
   deleteBatch,
   bulkDeleteBatches,
   bulkDeleteQRCodes,
   adminAllocateBatch,
+  // ⚠️ keep controller functions but we will restrict routes for licensee admin:
+  getQRCodes,
+  exportQRCodesCsv,
+  allocateQRRangeForLicensee,
+  createBatchPrintToken,
+  downloadBatchPrintPack,
+  markPrinted,
 } from "../controllers/qrController";
 
+
 import {
-  createProductBatch,
-  getProductBatches,
-  assignProductBatchManufacturer,
-  confirmProductBatchPrint,
-} from "../controllers/productBatchController";
+  createQrAllocationRequest,
+  getQrAllocationRequests,
+  approveQrAllocationRequest,
+  rejectQrAllocationRequest,
+} from "../controllers/qrRequestController";
+import { getScanLogs, getBatchSummary } from "../controllers/qrLogController";
 
 import {
   createUser,
@@ -56,6 +62,9 @@ import { verifyQRCode } from "../controllers/verifyController";
 import auditRoutes from "./auditRoutes";
 import { updateMyProfile, changeMyPassword } from "../controllers/accountController";
 
+import { getDashboardStats } from "../controllers/dashboardController";
+import { dashboardEvents } from "../controllers/eventsController";
+
 const router = Router();
 
 // ==================== PUBLIC ====================
@@ -65,8 +74,12 @@ router.get("/verify/:code", verifyQRCode);
 // ==================== AUTH ====================
 router.get("/auth/me", authenticate, me);
 
-// Dashboard stats
-router.get("/dashboard/stats", authenticate, enforceTenantIsolation, getStats);
+// ==================== DASHBOARD ====================
+// ✅ Correct stats endpoint used by UI cards + chart + activity
+router.get("/dashboard/stats", authenticate, enforceTenantIsolation, getDashboardStats);
+
+// ✅ Real-time events (SSE). Use EventSource with ?token=
+router.get("/events/dashboard", authenticateSSE, enforceTenantIsolation, dashboardEvents);
 
 // ==================== LICENSEES (SUPER ADMIN) ====================
 router.get("/licensees/export", authenticate, requireSuperAdmin, exportLicenseesCsv);
@@ -78,12 +91,14 @@ router.patch("/licensees/:id", authenticate, requireSuperAdmin, updateLicensee);
 router.delete("/licensees/:id", authenticate, requireSuperAdmin, deleteLicensee);
 
 // ==================== USERS ====================
-router.post("/users", authenticate, requireSuperAdmin, createUser);
+// ✅ recommended: allow LICENSEE_ADMIN to create MANUFACTURER (controller already enforces)
+router.post("/users", authenticate, requireAnyAdmin, enforceTenantIsolation, createUser);
+
 router.get("/users", authenticate, requireAnyAdmin, enforceTenantIsolation, getUsers);
 router.patch("/users/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, updateUser);
 router.delete("/users/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, deleteUser);
 
-// ==================== MANUFACTURERS (Admins) ====================
+// ==================== MANUFACTURERS ====================
 router.get("/manufacturers", authenticate, requireAnyAdmin, enforceTenantIsolation, getManufacturers);
 
 router.patch(
@@ -110,9 +125,18 @@ router.delete(
   hardDeleteManufacturer
 );
 
-// ==================== QR ====================
+// ==================== QR (SUPER ADMIN for ranges) ====================
 router.post("/qr/ranges/allocate", authenticate, requireSuperAdmin, allocateQRRange);
 
+// Super admin allocate range to existing licensee
+router.post(
+  "/admin/licensees/:licenseeId/qr-allocate-range",
+  authenticate,
+  requireSuperAdmin,
+  allocateQRRangeForLicensee
+);
+
+// ==================== BATCHES ====================
 router.post("/qr/batches", authenticate, requireLicenseeAdmin, enforceTenantIsolation, createBatch);
 router.get("/qr/batches", authenticate, enforceTenantIsolation, getBatches);
 
@@ -124,50 +148,25 @@ router.post(
   assignManufacturer
 );
 
+// Super admin bulk allocation helper
 router.post("/qr/batches/admin-allocate", authenticate, requireSuperAdmin, adminAllocateBatch);
 
-router.get("/qr/codes/export", authenticate, enforceTenantIsolation, exportQRCodesCsv);
-router.get("/qr/codes", authenticate, enforceTenantIsolation, getQRCodes);
+// ✅ IMPORTANT: remove QR Codes page for LICENSEE_ADMIN
+// raw QR list/export should be SUPER_ADMIN only
+router.get("/qr/codes/export", authenticate, requireSuperAdmin, exportQRCodesCsv);
+router.get("/qr/codes", authenticate, requireSuperAdmin, getQRCodes);
+
+// Stats is still allowed (needed for dashboard chart)
 router.get("/qr/stats", authenticate, enforceTenantIsolation, getStats);
 
+// delete endpoints (admins)
 router.delete("/qr/batches/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, deleteBatch);
 router.post("/qr/batches/bulk-delete", authenticate, requireAnyAdmin, enforceTenantIsolation, bulkDeleteBatches);
 router.delete("/qr/codes", authenticate, requireAnyAdmin, enforceTenantIsolation, bulkDeleteQRCodes);
+router.post("/qr/:code/mark-printed", authenticate, requireManufacturer, enforceTenantIsolation, markPrinted);
 
-// ==================== PRODUCT BATCHES ====================
-router.post(
-  "/qr/product-batches",
-  authenticate,
-  requireLicenseeAdmin,
-  enforceTenantIsolation,
-  createProductBatch
-);
 
-router.get(
-  "/qr/product-batches",
-  authenticate,
-  enforceTenantIsolation,
-  getProductBatches
-);
-
-router.post(
-  "/qr/product-batches/:id/assign-manufacturer",
-  authenticate,
-  requireLicenseeAdmin,
-  enforceTenantIsolation,
-  assignProductBatchManufacturer
-);
-
-router.post(
-  "/qr/product-batches/:id/confirm-print",
-  authenticate,
-  requireManufacturer,
-  enforceTenantIsolation,
-  confirmProductBatchPrint
-);
-
-// ==================== MANUFACTURER (legacy) ====================
-router.post("/qr/:code/mark-printed", authenticate, requireManufacturer, markPrinted);
+// ==================== MANUFACTURER PRINT CONFIRM (legacy batch print) ====================
 router.post(
   "/qr/batches/:id/confirm-print",
   authenticate,
@@ -176,12 +175,43 @@ router.post(
   confirmBatchPrint
 );
 
+// Manufacturer one-time print pack download for legacy batches
+router.post(
+  "/manufacturer/batches/:id/print-pack-token",
+  authenticate,
+  requireManufacturer,
+  enforceTenantIsolation,
+  createBatchPrintToken
+);
+router.get(
+  "/manufacturer/batch-print-pack/:token",
+  authenticate,
+  requireManufacturer,
+  enforceTenantIsolation,
+  downloadBatchPrintPack
+);
+
+// ==================== QR REQUESTS ====================
+router.post(
+  "/qr/requests",
+  authenticate,
+  requireAnyAdmin,
+  enforceTenantIsolation,
+  createQrAllocationRequest
+);
+router.get("/qr/requests", authenticate, requireAnyAdmin, enforceTenantIsolation, getQrAllocationRequests);
+router.post("/qr/requests/:id/approve", authenticate, requireSuperAdmin, approveQrAllocationRequest);
+router.post("/qr/requests/:id/reject", authenticate, requireSuperAdmin, rejectQrAllocationRequest);
+
 // ==================== AUDIT ====================
 router.use("/audit", auditRoutes);
+
+// ==================== QR LOGS (SUPER ADMIN) ====================
+router.get("/admin/qr/scan-logs", authenticate, requireSuperAdmin, getScanLogs);
+router.get("/admin/qr/batch-summary", authenticate, requireSuperAdmin, getBatchSummary);
 
 // ==================== ACCOUNT ====================
 router.patch("/account/profile", authenticate, updateMyProfile);
 router.patch("/account/password", authenticate, changeMyPassword);
 
 export default router;
-

@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
+import jwt, { type SignOptions } from "jsonwebtoken";
 import { z } from "zod";
 import prisma from "../config/database";
 import { createAuditLog } from "../services/auditService";
@@ -44,6 +44,14 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      return res.status(500).json({ success: false, error: "JWT secret not configured" });
+    }
+
+    const expiresIn = process.env.JWT_EXPIRES_IN || "7d";
+    const signOptions: SignOptions = { expiresIn: expiresIn as SignOptions["expiresIn"] };
+
     const token = jwt.sign(
       {
         userId: user.id,
@@ -51,8 +59,8 @@ export const login = async (req: Request, res: Response) => {
         role: user.role,
         licenseeId: user.licenseeId,
       },
-      process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
+      jwtSecret,
+      signOptions
     );
 
     await createAuditLog({
@@ -73,6 +81,7 @@ export const login = async (req: Request, res: Response) => {
           email: user.email,
           name: user.name,
           role: user.role,
+          licenseeId: user.licenseeId,
           licensee: user.licensee
             ? { id: user.licensee.id, name: user.licensee.name, prefix: user.licensee.prefix }
             : null,
@@ -110,6 +119,7 @@ export const me = async (req: Request, res: Response) => {
         email: user.email,
         name: user.name,
         role: user.role,
+        licenseeId: user.licenseeId,
         licensee: user.licensee
           ? { id: user.licensee.id, name: user.licensee.name, prefix: user.licensee.prefix }
           : null,
@@ -120,4 +130,3 @@ export const me = async (req: Request, res: Response) => {
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 };
-
