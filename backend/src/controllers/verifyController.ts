@@ -29,20 +29,7 @@ export const verifyQRCode = async (req: Request, res: Response) => {
             manufacturer: { select: { id: true, name: true, email: true, location: true, website: true } },
           },
         },
-        productBatch: {
-          select: {
-            id: true,
-            productName: true,
-            productCode: true,
-            description: true,
-            serialStart: true,
-            serialEnd: true,
-            serialFormat: true,
-            printedAt: true,
-            manufacturer: { select: { id: true, name: true, email: true, location: true, website: true } },
-            parentBatch: { select: { id: true, name: true } },
-          },
-        },
+        // product batch removed
       },
     });
 
@@ -65,7 +52,7 @@ export const verifyQRCode = async (req: Request, res: Response) => {
       });
     }
 
-    // If not yet assigned into any batch/productBatch
+    // If not yet assigned into any batch
     if (qrCode.status === QRStatus.DORMANT || qrCode.status === QRStatus.ACTIVE) {
       return res.json({
         success: true,
@@ -117,14 +104,6 @@ export const verifyQRCode = async (req: Request, res: Response) => {
                 website: qrCode.licensee.website,
                 supportEmail: qrCode.licensee.supportEmail,
                 supportPhone: qrCode.licensee.supportPhone,
-              }
-            : null,
-          productBatch: qrCode.productBatch
-            ? {
-                id: qrCode.productBatch.id,
-                productName: qrCode.productBatch.productName,
-                productCode: qrCode.productBatch.productCode,
-                manufacturer: qrCode.productBatch.manufacturer || null,
               }
             : null,
           batch: qrCode.batch
@@ -188,20 +167,6 @@ export const verifyQRCode = async (req: Request, res: Response) => {
             }
           : null,
 
-        productBatch: updated.productBatch
-          ? {
-              id: updated.productBatch.id,
-              productName: updated.productBatch.productName,
-              productCode: updated.productBatch.productCode,
-              description: updated.productBatch.description,
-              serialStart: updated.productBatch.serialStart,
-              serialEnd: updated.productBatch.serialEnd,
-              serialFormat: updated.productBatch.serialFormat,
-              printedAt: updated.productBatch.printedAt,
-              manufacturer: updated.productBatch.manufacturer || null,
-              parentBatch: updated.productBatch.parentBatch || null,
-            }
-          : null,
         batch: updated.batch
           ? {
               id: updated.batch.id,
@@ -213,7 +178,7 @@ export const verifyQRCode = async (req: Request, res: Response) => {
 
         // legacy batch info (if you still use it sometimes)
         batchName: updated.batch?.name || null,
-        printedAt: updated.batch?.printedAt || updated.productBatch?.printedAt || null,
+        printedAt: updated.batch?.printedAt || null,
 
         firstScanned: firstScanTime ? firstScanTime.toISOString() : null,
         scanCount: updated.scanCount ?? 0,

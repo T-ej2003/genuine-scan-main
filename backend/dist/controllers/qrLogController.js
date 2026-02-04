@@ -13,19 +13,20 @@ const getScanLogs = async (req, res) => {
         if (req.user.role !== client_1.UserRole.SUPER_ADMIN) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
+        const prismaAny = database_1.default;
+        if (!prismaAny.qrScanLog) {
+            return res.json({ success: true, data: { logs: [], total: 0, limit: 0, offset: 0 } });
+        }
         const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 1000);
         const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
         const licenseeId = req.query.licenseeId || undefined;
         const batchId = req.query.batchId || undefined;
-        const productBatchId = req.query.productBatchId || undefined;
         const code = req.query.code?.trim() || undefined;
         const where = {};
         if (licenseeId)
             where.licenseeId = licenseeId;
         if (batchId)
             where.batchId = batchId;
-        if (productBatchId)
-            where.productBatchId = productBatchId;
         if (code)
             where.code = { contains: code, mode: "insensitive" };
         const [logs, total] = await Promise.all([
@@ -45,6 +46,9 @@ const getScanLogs = async (req, res) => {
     }
     catch (e) {
         console.error("getScanLogs error:", e);
+        if (e instanceof client_1.Prisma.PrismaClientKnownRequestError && e.code === "P2021") {
+            return res.json({ success: true, data: { logs: [], total: 0, limit: 0, offset: 0 } });
+        }
         return res.status(500).json({ success: false, error: "Internal server error" });
     }
 };

@@ -56,41 +56,11 @@ export interface Batch {
   _count?: { qrCodes: number };
 }
 
-export interface ProductBatch {
-  id: string;
-  licenseeId: string;
-  parentBatchId: string;
-
-  productName: string;
-  productCode: string;
-  description?: string | null;
-
-  serialStart: number;
-  serialEnd: number;
-  serialFormat: string;
-
-  startCode: string;
-  endCode: string;
-  totalCodes: number;
-
-  manufacturerId?: string | null;
-  printedAt?: string | null;
-
-  createdAt: string;
-  updatedAt: string;
-
-  licensee?: { id: string; name: string; prefix: string } | null;
-  parentBatch?: { id: string; name: string; startCode: string; endCode: string } | null;
-  manufacturer?: { id: string; name: string; email: string } | null;
-  _count?: { qrCodes: number };
-}
-
 export interface QRCode {
   id: string;
   code: string;
   licenseeId: string;
   batchId?: string | null;
-  productBatchId?: string | null;
   status: QRStatus;
   scannedAt?: string | null;
   scanCount: number;
@@ -98,7 +68,6 @@ export interface QRCode {
   updatedAt: string;
 
   batch?: { id: string; name: string; printedAt?: string | null } | null;
-  productBatch?: { id: string; productName: string; productCode: string; printedAt?: string | null } | null;
 }
 
 export interface AuditLog {

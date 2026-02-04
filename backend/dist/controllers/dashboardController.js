@@ -32,21 +32,15 @@ const getDashboardStats = async (req, res) => {
             batchWhere.licenseeId = scopeLicenseeId;
         if (role === client_1.UserRole.MANUFACTURER)
             batchWhere.manufacturerId = userId;
-        const productBatchWhere = {};
-        if (scopeLicenseeId)
-            productBatchWhere.licenseeId = scopeLicenseeId;
-        if (role === client_1.UserRole.MANUFACTURER)
-            productBatchWhere.manufacturerId = userId;
-        const [totalQRCodes, activeLicensees, manufacturers, totalBatches, totalProductBatches,] = await Promise.all([
+        const [totalQRCodes, activeLicensees, manufacturers, totalBatches,] = await Promise.all([
             database_1.default.qRCode.count({ where: qrWhere }),
             database_1.default.licensee.count({ where: { ...licenseeWhere, isActive: true } }),
             database_1.default.user.count({ where: mfgWhere }),
             database_1.default.batch.count({ where: batchWhere }),
-            database_1.default.productBatch.count({ where: productBatchWhere }),
         ]);
         return res.json({
             success: true,
-            data: { totalQRCodes, activeLicensees, manufacturers, totalBatches, totalProductBatches },
+            data: { totalQRCodes, activeLicensees, manufacturers, totalBatches },
         });
     }
     catch (err) {

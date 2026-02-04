@@ -18,7 +18,6 @@ async function computeDashboard(req: AuthRequest) {
 
   const qrWhere = scopedLicenseeId ? { licenseeId: scopedLicenseeId } : {};
   const batchWhere = scopedLicenseeId ? { licenseeId: scopedLicenseeId } : {};
-  const productBatchWhere = scopedLicenseeId ? { licenseeId: scopedLicenseeId } : {};
 
   const manufacturersWhere = {
     role: UserRole.MANUFACTURER,
@@ -26,11 +25,10 @@ async function computeDashboard(req: AuthRequest) {
     isActive: true,
   };
 
-  const [totalQRCodes, totalBatches, totalProductBatches, manufacturers, activeLicensees, qrGrouped, qrTotal] =
+  const [totalQRCodes, totalBatches, manufacturers, activeLicensees, qrGrouped, qrTotal] =
     await Promise.all([
       prisma.qRCode.count({ where: qrWhere }),
       prisma.batch.count({ where: batchWhere }),
-      prisma.productBatch.count({ where: productBatchWhere }),
       prisma.user.count({ where: manufacturersWhere }),
 
       role === UserRole.SUPER_ADMIN
@@ -57,7 +55,6 @@ async function computeDashboard(req: AuthRequest) {
     activeLicensees,
     manufacturers,
     totalBatches,
-    totalProductBatches,
     qr: { total: qrTotal, byStatus },
   };
 }
@@ -123,4 +120,3 @@ export const dashboardEvents = async (req: AuthRequest, res: Response) => {
     return res.status(500).end();
   }
 };
-

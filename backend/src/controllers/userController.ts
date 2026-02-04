@@ -239,13 +239,15 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
 /* ===================== GET MANUFACTURERS ===================== */
 
 export const getManufacturers = async (req: AuthRequest, res: Response) => {
+  let includeInactive = false;
+  let licenseeId: string | undefined;
   try {
     const auth = ensureAuth(req);
     if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    const includeInactive = String(req.query.includeInactive || "false").toLowerCase() === "true";
+    includeInactive = String(req.query.includeInactive || "false").toLowerCase() === "true";
 
-    const licenseeId = isSuper(auth.role)
+    licenseeId = isSuper(auth.role)
       ? ((req.query.licenseeId as string | undefined) || undefined)
       : (getTenantLicenseeId(req) || undefined);
 
@@ -277,7 +279,31 @@ export const getManufacturers = async (req: AuthRequest, res: Response) => {
     return res.json({ success: true, data: manufacturers });
   } catch (e) {
     console.error("getManufacturers error:", e);
-    return res.status(500).json({ success: false, error: "Internal server error" });
+    try {
+      // Fallback for schema mismatch or older DB: return minimal fields
+      const fallbackWhere: any = { role: UserRole.MANUFACTURER };
+      if (licenseeId) fallbackWhere.licenseeId = licenseeId;
+      if (!includeInactive) fallbackWhere.isActive = true;
+      const fallback = await prisma.user.findMany({
+        where: fallbackWhere,
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          licenseeId: true,
+          isActive: true,
+          deletedAt: true,
+          createdAt: true,
+          licensee: { select: { name: true, prefix: true } },
+        },
+        orderBy: { name: "asc" },
+      });
+      return res.json({ success: true, data: fallback });
+    } catch (fallbackErr) {
+      console.error("getManufacturers fallback error:", fallbackErr);
+      return res.status(500).json({ success: false, error: "Internal server error" });
+    }
   }
 };
 

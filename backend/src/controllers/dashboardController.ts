@@ -33,31 +33,24 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     if (scopeLicenseeId) batchWhere.licenseeId = scopeLicenseeId;
     if (role === UserRole.MANUFACTURER) batchWhere.manufacturerId = userId;
 
-    const productBatchWhere: any = {};
-    if (scopeLicenseeId) productBatchWhere.licenseeId = scopeLicenseeId;
-    if (role === UserRole.MANUFACTURER) productBatchWhere.manufacturerId = userId;
-
     const [
       totalQRCodes,
       activeLicensees,
       manufacturers,
       totalBatches,
-      totalProductBatches,
     ] = await Promise.all([
       prisma.qRCode.count({ where: qrWhere }),
       prisma.licensee.count({ where: { ...licenseeWhere, isActive: true } }),
       prisma.user.count({ where: mfgWhere }),
       prisma.batch.count({ where: batchWhere }),
-      prisma.productBatch.count({ where: productBatchWhere }),
     ]);
 
     return res.json({
       success: true,
-      data: { totalQRCodes, activeLicensees, manufacturers, totalBatches, totalProductBatches },
+      data: { totalQRCodes, activeLicensees, manufacturers, totalBatches },
     });
   } catch (err) {
     console.error("getDashboardStats error", err);
     return res.status(500).json({ success: false, error: "Failed to load dashboard stats" });
   }
 };
-

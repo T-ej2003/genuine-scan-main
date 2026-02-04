@@ -126,8 +126,15 @@ export default function Batches() {
   // Saved settings for QR URL inside QR codes
   const [publicBaseUrl, setPublicBaseUrl] = useLocalStorageState<string>(
     "qr_public_base_url",
-    "https://auth.mcs.example"
+    typeof window !== "undefined" ? window.location.origin : "http://localhost:8080"
   );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (publicBaseUrl.includes("auth.mcs.example")) {
+      setPublicBaseUrl(window.location.origin);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const buildPublicQrUrl = (code: string) => {
     const base = String(publicBaseUrl || "").trim().replace(/\/+$/, "");
     return `${base}/verify/${encodeURIComponent(code)}`;

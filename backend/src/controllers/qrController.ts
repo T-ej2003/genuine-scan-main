@@ -347,7 +347,6 @@ export const adminAllocateBatch = async (req: AuthRequest, res: Response) => {
     const poolWhere = {
       licenseeId,
       status: QRStatus.DORMANT,
-      productBatchId: null,
       OR: [
         { batchId: null },
         { batch: { manufacturerId: null, printedAt: null } },
@@ -606,7 +605,6 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
       const eligible = await tx.qRCode.findMany({
         where: {
           batchId: batch.id,
-          productBatchId: null,
           status: { in: [QRStatus.DORMANT, QRStatus.ACTIVE, QRStatus.ALLOCATED] },
         },
         orderBy: { code: "asc" },
@@ -645,7 +643,7 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
       });
 
       const remaining = await tx.qRCode.findMany({
-        where: { batchId: batch.id, productBatchId: null },
+        where: { batchId: batch.id },
         orderBy: { code: "asc" },
         select: { code: true },
       });
@@ -908,7 +906,6 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
       by: ["batchId"],
       where: {
         batchId: { in: batchIds },
-        productBatchId: null,
       },
       _count: { _all: true },
       _min: { code: true },
@@ -976,7 +973,6 @@ export const getQRCodes = async (req: AuthRequest, res: Response) => {
         skip: offset,
         include: {
           batch: { select: { id: true, name: true, printedAt: true } },
-          productBatch: { select: { id: true, productName: true, productCode: true, printedAt: true } },
         },
       }),
     ]);
@@ -1034,7 +1030,6 @@ export const exportQRCodesCsv = async (req: AuthRequest, res: Response) => {
       include: {
         licensee: { select: { name: true, prefix: true } },
         batch: { select: { id: true, name: true, printedAt: true } },
-        productBatch: { select: { id: true, productName: true, productCode: true, printedAt: true } },
       },
     });
 
@@ -1046,7 +1041,7 @@ export const exportQRCodesCsv = async (req: AuthRequest, res: Response) => {
       "licenseePrefix",
       "batchId",
       "batchName",
-      "productBatchId",
+      // "productBatchId",
       "productName",
       "productCode",
       "printedAt",
@@ -1068,10 +1063,10 @@ export const exportQRCodesCsv = async (req: AuthRequest, res: Response) => {
             r.licensee?.prefix ?? "",
             r.batchId ?? "",
             r.batch?.name ?? "",
-            r.productBatchId ?? "",
-            r.productBatch?.productName ?? "",
-            r.productBatch?.productCode ?? "",
-            r.batch?.printedAt ?? r.productBatch?.printedAt ?? "",
+            "",
+            "",
+            "",
+            r.batch?.printedAt ?? "",
             r.scanCount ?? 0,
             r.createdAt,
             r.scannedAt ?? "",

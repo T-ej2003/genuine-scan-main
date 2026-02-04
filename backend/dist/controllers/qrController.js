@@ -309,7 +309,6 @@ const adminAllocateBatch = async (req, res) => {
         const poolWhere = {
             licenseeId,
             status: client_1.QRStatus.DORMANT,
-            productBatchId: null,
             OR: [
                 { batchId: null },
                 { batch: { manufacturerId: null, printedAt: null } },
@@ -533,7 +532,6 @@ const assignManufacturer = async (req, res) => {
             const eligible = await tx.qRCode.findMany({
                 where: {
                     batchId: batch.id,
-                    productBatchId: null,
                     status: { in: [client_1.QRStatus.DORMANT, client_1.QRStatus.ACTIVE, client_1.QRStatus.ALLOCATED] },
                 },
                 orderBy: { code: "asc" },
@@ -564,7 +562,7 @@ const assignManufacturer = async (req, res) => {
                 data: { batchId: newBatch.id, status: client_1.QRStatus.ALLOCATED },
             });
             const remaining = await tx.qRCode.findMany({
-                where: { batchId: batch.id, productBatchId: null },
+                where: { batchId: batch.id },
                 orderBy: { code: "asc" },
                 select: { code: true },
             });
@@ -806,7 +804,6 @@ const getBatches = async (req, res) => {
             by: ["batchId"],
             where: {
                 batchId: { in: batchIds },
-                productBatchId: null,
             },
             _count: { _all: true },
             _min: { code: true },
@@ -866,7 +863,6 @@ const getQRCodes = async (req, res) => {
                 skip: offset,
                 include: {
                     batch: { select: { id: true, name: true, printedAt: true } },
-                    productBatch: { select: { id: true, productName: true, productCode: true, printedAt: true } },
                 },
             }),
         ]);
@@ -920,7 +916,6 @@ const exportQRCodesCsv = async (req, res) => {
             include: {
                 licensee: { select: { name: true, prefix: true } },
                 batch: { select: { id: true, name: true, printedAt: true } },
-                productBatch: { select: { id: true, productName: true, productCode: true, printedAt: true } },
             },
         });
         const header = [
@@ -931,7 +926,7 @@ const exportQRCodesCsv = async (req, res) => {
             "licenseePrefix",
             "batchId",
             "batchName",
-            "productBatchId",
+            // "productBatchId",
             "productName",
             "productCode",
             "printedAt",
@@ -950,10 +945,10 @@ const exportQRCodesCsv = async (req, res) => {
                 r.licensee?.prefix ?? "",
                 r.batchId ?? "",
                 r.batch?.name ?? "",
-                r.productBatchId ?? "",
-                r.productBatch?.productName ?? "",
-                r.productBatch?.productCode ?? "",
-                r.batch?.printedAt ?? r.productBatch?.printedAt ?? "",
+                "",
+                "",
+                "",
+                r.batch?.printedAt ?? "",
                 r.scanCount ?? 0,
                 r.createdAt,
                 r.scannedAt ?? "",

@@ -18,10 +18,12 @@ const auditRoutes_1 = __importDefault(require("./auditRoutes"));
 const accountController_1 = require("../controllers/accountController");
 const dashboardController_1 = require("../controllers/dashboardController");
 const eventsController_1 = require("../controllers/eventsController");
+const healthController_1 = require("../controllers/healthController");
 const router = (0, express_1.Router)();
 // ==================== PUBLIC ====================
 router.post("/auth/login", authController_1.login);
 router.get("/verify/:code", verifyController_1.verifyQRCode);
+router.get("/health", healthController_1.healthCheck);
 // ==================== AUTH ====================
 router.get("/auth/me", auth_1.authenticate, authController_1.me);
 // ==================== DASHBOARD ====================

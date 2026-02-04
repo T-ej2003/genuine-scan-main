@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getQRStats = exports.recordScan = exports.markProductBatchAsPrinted = exports.markBatchAsPrinted = exports.allocateQRCodesToBatch = exports.activateQRCodes = exports.generateQRCodesForRange = exports.buildVerifyUrl = exports.makeProductCode = exports.parseQRCode = exports.generateQRCode = void 0;
+exports.getQRStats = exports.recordScan = exports.markBatchAsPrinted = exports.allocateQRCodesToBatch = exports.activateQRCodes = exports.generateQRCodesForRange = exports.buildVerifyUrl = exports.makeProductCode = exports.parseQRCode = exports.generateQRCode = void 0;
 const client_1 = require("@prisma/client");
 const database_1 = __importDefault(require("../config/database"));
 const generateQRCode = (prefix, number) => {
@@ -27,9 +27,9 @@ const makeProductCode = (input) => {
 };
 exports.makeProductCode = makeProductCode;
 const buildVerifyUrl = (code) => {
-    const base = String(process.env.PUBLIC_VERIFY_WEB_BASE_URL || "").trim();
-    if (!base)
-        return code;
+    const base = String(process.env.PUBLIC_VERIFY_WEB_BASE_URL || "").trim() ||
+        String(process.env.CORS_ORIGIN || "").trim() ||
+        "http://localhost:8080";
     const normalized = base.replace(/\/+$/, "");
     return `${normalized}/verify/${encodeURIComponent(code)}`;
 };
@@ -92,32 +92,13 @@ const markBatchAsPrinted = async (batchId, manufacturerId) => {
     return result.count;
 };
 exports.markBatchAsPrinted = markBatchAsPrinted;
-const markProductBatchAsPrinted = async (productBatchId, manufacturerId) => {
-    const pb = await database_1.default.productBatch.findFirst({ where: { id: productBatchId, manufacturerId } });
-    if (!pb)
-        throw new Error("Product batch not found or not assigned to this manufacturer");
-    if (pb.printedAt)
-        throw new Error("Product batch already printed");
-    await database_1.default.productBatch.update({ where: { id: productBatchId }, data: { printedAt: new Date() } });
-    const result = await database_1.default.qRCode.updateMany({
-        where: { productBatchId, status: { in: [client_1.QRStatus.ALLOCATED, client_1.QRStatus.ACTIVE] } },
-        data: { status: client_1.QRStatus.PRINTED },
-    });
-    return result.count;
-};
-exports.markProductBatchAsPrinted = markProductBatchAsPrinted;
+// product batches removed
 const recordScan = async (code, meta) => {
     const existing = await database_1.default.qRCode.findUnique({
         where: { code },
         include: {
             licensee: true,
             batch: { include: { manufacturer: { select: { id: true, name: true, email: true } } } },
-            productBatch: {
-                include: {
-                    manufacturer: { select: { id: true, name: true, email: true } },
-                    parentBatch: { select: { id: true, name: true } },
-                },
-            },
         },
     });
     if (!existing)
@@ -136,13 +117,7 @@ const recordScan = async (code, meta) => {
             },
             include: {
                 licensee: true,
-                batch: { include: { manufacturer: { select: { id: true, name: true, email: true } } } },
-                productBatch: {
-                    include: {
-                        manufacturer: { select: { id: true, name: true, email: true, location: true, website: true } },
-                        parentBatch: { select: { id: true, name: true } },
-                    },
-                },
+                batch: { include: { manufacturer: { select: { id: true, name: true, email: true, location: true, website: true } } } },
             },
         });
         await tx.qrScanLog.create({
@@ -151,7 +126,6 @@ const recordScan = async (code, meta) => {
                 qrCodeId: qr.id,
                 licenseeId: qr.licenseeId,
                 batchId: qr.batchId ?? null,
-                productBatchId: qr.productBatchId ?? null,
                 status: qr.status,
                 isFirstScan,
                 scanCount: qr.scanCount ?? 0,

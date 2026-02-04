@@ -36,20 +36,6 @@ type VerifyPayload = {
     supportEmail?: string | null;
     supportPhone?: string | null;
   } | null;
-  productBatch?: {
-    id: string;
-    productName: string;
-    productCode: string;
-    description?: string | null;
-    printedAt?: string | null;
-    manufacturer?: {
-      id: string;
-      name: string;
-      email?: string | null;
-      location?: string | null;
-      website?: string | null;
-    } | null;
-  } | null;
   batch?: {
     id: string;
     name: string;
@@ -133,13 +119,11 @@ export default function Verify() {
     return "invalid";
   }, [result?.isAuthentic, result?.status]);
 
-  const manufacturer =
-    result?.productBatch?.manufacturer || result?.batch?.manufacturer || null;
+  const manufacturer = result?.batch?.manufacturer || null;
 
-  const productName = result?.productBatch?.productName || result?.batch?.name || "—";
-  const productCode = result?.productBatch?.productCode || result?.batch?.id || "—";
-  const productLabel = result?.productBatch ? "Product" : "Batch";
-  const codeLabel = result?.productBatch ? "Code" : "Batch ID";
+  const productName = result?.batch?.name || "—";
+  const productLabel = "Batch";
+  const serialNumber = result?.code || code || "—";
 
   const headline =
     statusKind === "genuine"
@@ -269,11 +253,8 @@ export default function Verify() {
                     </span>
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    {codeLabel}: <span className="font-mono">{productCode}</span>
+                    Serial Number: <span className="font-mono">{serialNumber}</span>
                   </div>
-                  {result?.productBatch?.description && (
-                    <p className="text-sm text-muted-foreground">{result.productBatch.description}</p>
-                  )}
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-3">

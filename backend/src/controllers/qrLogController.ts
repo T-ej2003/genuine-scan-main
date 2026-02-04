@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { AuthRequest } from "../middleware/auth";
 import prisma from "../config/database";
-import { UserRole } from "@prisma/client";
+import { Prisma, UserRole } from "@prisma/client";
 
 export const getScanLogs = async (req: AuthRequest, res: Response) => {
   try {
@@ -10,18 +10,21 @@ export const getScanLogs = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
+    const prismaAny = prisma as any;
+    if (!prismaAny.qrScanLog) {
+      return res.json({ success: true, data: { logs: [], total: 0, limit: 0, offset: 0 } });
+    }
+
     const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 1000);
     const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
 
     const licenseeId = (req.query.licenseeId as string | undefined) || undefined;
     const batchId = (req.query.batchId as string | undefined) || undefined;
-    const productBatchId = (req.query.productBatchId as string | undefined) || undefined;
     const code = (req.query.code as string | undefined)?.trim() || undefined;
 
     const where: any = {};
     if (licenseeId) where.licenseeId = licenseeId;
     if (batchId) where.batchId = batchId;
-    if (productBatchId) where.productBatchId = productBatchId;
     if (code) where.code = { contains: code, mode: "insensitive" };
 
     const [logs, total] = await Promise.all([
@@ -41,6 +44,9 @@ export const getScanLogs = async (req: AuthRequest, res: Response) => {
     return res.json({ success: true, data: { logs, total, limit, offset } });
   } catch (e) {
     console.error("getScanLogs error:", e);
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2021") {
+      return res.json({ success: true, data: { logs: [], total: 0, limit: 0, offset: 0 } });
+    }
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 };

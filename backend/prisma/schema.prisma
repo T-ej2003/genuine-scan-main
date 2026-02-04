@@ -43,15 +43,12 @@ model User {
   deletedAt DateTime?
 
   assignedBatches        Batch[]        @relation("ManufacturerBatches")
-  assignedProductBatches ProductBatch[] @relation("ManufacturerProductBatches")
 
   qrAllocationRequestsRequested QrAllocationRequest[] @relation("QrAllocationRequestedBy")
   qrAllocationRequestsApproved  QrAllocationRequest[] @relation("QrAllocationApprovedBy")
   qrAllocationRequestsRejected  QrAllocationRequest[] @relation("QrAllocationRejectedBy")
 
   allocationEventsCreated AllocationEvent[] @relation("AllocationEventCreatedBy")
-  printPackTokensCreated   PrintPackToken[]  @relation("PrintPackTokenCreatedBy")
-  productBatchesPrintDownloads ProductBatch[] @relation("PrintPackDownloadedBy")
   batchPrintPackTokensCreated BatchPrintPackToken[] @relation("BatchPrintPackTokenCreatedBy")
   batchPrintDownloads Batch[] @relation("BatchPrintPackDownloadedBy")
 
@@ -78,7 +75,6 @@ model Licensee {
   users          User[]
   qrRanges       QRRange[]
   batches        Batch[]
-  productBatches ProductBatch[]
   qrCodes        QRCode[]
   qrAllocationRequests QrAllocationRequest[]
   allocationEvents     AllocationEvent[]
@@ -125,7 +121,6 @@ model Batch {
   printPackDownloadedByUser   User? @relation("BatchPrintPackDownloadedBy", fields: [printPackDownloadedByUserId], references: [id])
 
   qrCodes        QRCode[]
-  productBatches ProductBatch[]
   batchPrintPackTokens BatchPrintPackToken[]
   scanLogs            QrScanLog[]
 
@@ -138,48 +133,6 @@ model Batch {
   @@index([printPackDownloadedAt])
 }
 
-model ProductBatch {
-  id         String   @id @default(uuid())
-  licenseeId String
-  licensee   Licensee @relation(fields: [licenseeId], references: [id])
-
-  parentBatchId String
-  parentBatch   Batch  @relation(fields: [parentBatchId], references: [id])
-
-  productName String
-  productCode String
-  description String?
-
-  serialStart  Int
-  serialEnd    Int
-  serialFormat String
-
-  startCode  String
-  endCode    String
-  totalCodes Int
-
-  manufacturerId String?
-  manufacturer   User?   @relation("ManufacturerProductBatches", fields: [manufacturerId], references: [id])
-
-  printedAt DateTime?
-  printPackDownloadedAt DateTime?
-  printPackDownloadedByUserId String?
-  printPackDownloadedByUser   User? @relation("PrintPackDownloadedBy", fields: [printPackDownloadedByUserId], references: [id])
-
-  qrCodes QRCode[]
-  printPackTokens PrintPackToken[]
-  scanLogs QrScanLog[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([parentBatchId, productCode])
-  @@index([licenseeId])
-  @@index([parentBatchId])
-  @@index([manufacturerId])
-  @@index([printedAt])
-  @@index([printPackDownloadedAt])
-}
 
 model QRCode {
   id         String   @id @default(uuid())
@@ -190,8 +143,7 @@ model QRCode {
   batchId String?
   batch   Batch?  @relation(fields: [batchId], references: [id])
 
-  productBatchId String?
-  productBatch   ProductBatch? @relation(fields: [productBatchId], references: [id])
+  // product batch removed
   scanLogs       QrScanLog[]
 
   status    QRStatus  @default(DORMANT)
@@ -203,7 +155,6 @@ model QRCode {
 
   @@index([licenseeId])
   @@index([batchId])
-  @@index([productBatchId])
   @@index([status])
 }
 
@@ -218,8 +169,7 @@ model QrScanLog {
 
   batchId String?
   batch   Batch? @relation(fields: [batchId], references: [id])
-  productBatchId String?
-  productBatch ProductBatch? @relation(fields: [productBatchId], references: [id])
+  // product batch removed
 
   status     QRStatus
   scannedAt  DateTime @default(now())
@@ -235,7 +185,6 @@ model QrScanLog {
 
   @@index([licenseeId])
   @@index([batchId])
-  @@index([productBatchId])
   @@index([code])
   @@index([scannedAt])
 }
@@ -328,21 +277,4 @@ model AllocationEvent {
 
   @@index([licenseeId])
   @@index([requestId])
-}
-
-model PrintPackToken {
-  id         String   @id @default(uuid())
-  tokenHash  String   @unique
-  productBatchId String
-  productBatch  ProductBatch @relation(fields: [productBatchId], references: [id])
-
-  createdByUserId String
-  createdByUser   User @relation("PrintPackTokenCreatedBy", fields: [createdByUserId], references: [id])
-
-  expiresAt DateTime
-  usedAt    DateTime?
-  createdAt DateTime @default(now())
-
-  @@index([productBatchId])
-  @@index([expiresAt])
 }

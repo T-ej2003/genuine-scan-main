@@ -92,7 +92,6 @@ export default function Dashboard() {
             activeLicensees: payload?.activeLicensees ?? 0,
             manufacturers: payload?.manufacturers ?? 0,
             totalBatches: payload?.totalBatches ?? 0,
-            totalProductBatches: payload?.totalProductBatches ?? 0,
           });
           setQrStats(payload?.qr || {});
         } catch {

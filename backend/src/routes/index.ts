@@ -64,12 +64,14 @@ import { updateMyProfile, changeMyPassword } from "../controllers/accountControl
 
 import { getDashboardStats } from "../controllers/dashboardController";
 import { dashboardEvents } from "../controllers/eventsController";
+import { healthCheck } from "../controllers/healthController";
 
 const router = Router();
 
 // ==================== PUBLIC ====================
 router.post("/auth/login", login);
 router.get("/verify/:code", verifyQRCode);
+router.get("/health", healthCheck);
 
 // ==================== AUTH ====================
 router.get("/auth/me", authenticate, me);

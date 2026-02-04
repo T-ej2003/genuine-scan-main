@@ -364,61 +364,7 @@ class ApiClient {
     return () => es.close();
   }
 
-  // ==================== PRODUCT BATCHES ====================
-  async getProductBatches(options?: { licenseeId?: string }) {
-    const params = new URLSearchParams();
-    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
-    const q = params.toString() ? `?${params.toString()}` : "";
-    return this.request<any[]>(`/qr/product-batches${q}`);
-  }
-
-  async createProductBatch(payload: {
-    parentBatchId: string;
-    productName: string;
-    productCode?: string;
-    description?: string;
-    startNumber: number;
-    endNumber: number;
-    serialStart: number;
-    serialEnd: number;
-    serialFormat?: string;
-  }) {
-    return this.request("/qr/product-batches", { method: "POST", body: JSON.stringify(payload) });
-  }
-
-  async assignProductBatchManufacturer(payload: { productBatchId: string; manufacturerId: string }) {
-    return this.request(`/qr/product-batches/${payload.productBatchId}/assign-manufacturer`, {
-      method: "POST",
-      body: JSON.stringify({ manufacturerId: payload.manufacturerId }),
-    });
-  }
-
-  async confirmProductBatchPrint(productBatchId: string) {
-    return this.request(`/qr/product-batches/${productBatchId}/confirm-print`, { method: "POST" });
-  }
-
-  async createProductBatchPrintToken(productBatchId: string) {
-    return this.request(`/manufacturer/product-batches/${productBatchId}/print-pack-token`, { method: "POST" });
-  }
-
-  async downloadProductBatchPrintPack(
-    token: string,
-    opts?: { publicBaseUrl?: string }
-  ) {
-    const params = new URLSearchParams();
-    if (opts?.publicBaseUrl) params.append("publicBaseUrl", opts.publicBaseUrl);
-    const query = params.toString() ? `?${params.toString()}` : "";
-
-    const headers: Record<string, string> = {};
-    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
-
-    const resp = await fetch(
-      `${BASE_URL}/manufacturer/print-pack/${encodeURIComponent(token)}.zip${query}`,
-      { headers, credentials: "include" }
-    );
-    if (!resp.ok) throw new Error(`Download failed: HTTP ${resp.status}`);
-    return resp.blob();
-  }
+  // product batches removed
 
   // ==================== QR REQUESTS ====================
   async createQrAllocationRequest(payload: {
@@ -484,7 +430,6 @@ class ApiClient {
   async getScanLogs(options?: {
     licenseeId?: string;
     batchId?: string;
-    productBatchId?: string;
     code?: string;
     limit?: number;
     offset?: number;
@@ -492,7 +437,6 @@ class ApiClient {
     const params = new URLSearchParams();
     if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
     if (options?.batchId) params.append("batchId", options.batchId);
-    if (options?.productBatchId) params.append("productBatchId", options.productBatchId);
     if (options?.code) params.append("code", options.code);
     if (options?.limit != null) params.append("limit", String(options.limit));
     if (options?.offset != null) params.append("offset", String(options.offset));

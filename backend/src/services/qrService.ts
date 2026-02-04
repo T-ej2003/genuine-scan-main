@@ -23,8 +23,10 @@ export const makeProductCode = (input: string): string => {
 };
 
 export const buildVerifyUrl = (code: string): string => {
-  const base = String(process.env.PUBLIC_VERIFY_WEB_BASE_URL || "").trim();
-  if (!base) return code;
+  const base =
+    String(process.env.PUBLIC_VERIFY_WEB_BASE_URL || "").trim() ||
+    String(process.env.CORS_ORIGIN || "").trim() ||
+    "http://localhost:8080";
   const normalized = base.replace(/\/+$/, "");
   return `${normalized}/verify/${encodeURIComponent(code)}`;
 };
@@ -103,23 +105,7 @@ export const markBatchAsPrinted = async (batchId: string, manufacturerId: string
   return result.count;
 };
 
-export const markProductBatchAsPrinted = async (
-  productBatchId: string,
-  manufacturerId: string
-): Promise<number> => {
-  const pb = await prisma.productBatch.findFirst({ where: { id: productBatchId, manufacturerId } });
-  if (!pb) throw new Error("Product batch not found or not assigned to this manufacturer");
-  if (pb.printedAt) throw new Error("Product batch already printed");
-
-  await prisma.productBatch.update({ where: { id: productBatchId }, data: { printedAt: new Date() } });
-
-  const result = await prisma.qRCode.updateMany({
-    where: { productBatchId, status: { in: [QRStatus.ALLOCATED, QRStatus.ACTIVE] } },
-    data: { status: QRStatus.PRINTED },
-  });
-
-  return result.count;
-};
+// product batches removed
 
 export const recordScan = async (
   code: string,
@@ -137,12 +123,6 @@ export const recordScan = async (
     include: {
       licensee: true,
       batch: { include: { manufacturer: { select: { id: true, name: true, email: true } } } },
-      productBatch: {
-        include: {
-          manufacturer: { select: { id: true, name: true, email: true } },
-          parentBatch: { select: { id: true, name: true } },
-        },
-      },
     },
   });
 
@@ -164,13 +144,7 @@ export const recordScan = async (
       },
       include: {
         licensee: true,
-        batch: { include: { manufacturer: { select: { id: true, name: true, email: true } } } },
-        productBatch: {
-          include: {
-            manufacturer: { select: { id: true, name: true, email: true, location: true, website: true } },
-            parentBatch: { select: { id: true, name: true } },
-          },
-        },
+        batch: { include: { manufacturer: { select: { id: true, name: true, email: true, location: true, website: true } } } },
       },
     });
 
@@ -180,7 +154,6 @@ export const recordScan = async (
         qrCodeId: qr.id,
         licenseeId: qr.licenseeId,
         batchId: qr.batchId ?? null,
-        productBatchId: qr.productBatchId ?? null,
         status: qr.status,
         isFirstScan,
         scanCount: qr.scanCount ?? 0,

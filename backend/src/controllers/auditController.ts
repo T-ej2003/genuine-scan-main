@@ -1,6 +1,7 @@
 import { Response } from "express";
 import { AuthRequest } from "../middleware/auth";
 import { getAuditLogs, onAuditLog } from "../services/auditService";
+import prisma from "../config/database";
 import { UserRole } from "@prisma/client";
 
 export const getLogs = async (req: AuthRequest, res: Response) => {
@@ -25,7 +26,22 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
       offset,
     });
 
-    return res.json({ success: true, data: result });
+    const userIds = Array.from(new Set(result.logs.map((l) => l.userId).filter(Boolean))) as string[];
+    let userMap = new Map<string, { id: string; name: string; email: string }>();
+    if (userIds.length > 0) {
+      const users = await prisma.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, name: true, email: true },
+      });
+      userMap = new Map(users.map((u) => [u.id, u]));
+    }
+
+    const enriched = result.logs.map((l) => ({
+      ...l,
+      user: l.userId ? userMap.get(l.userId) || null : null,
+    }));
+
+    return res.json({ success: true, data: { ...result, logs: enriched } });
   } catch (err) {
     console.error("Audit logs error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
@@ -53,6 +69,16 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
       offset: 0,
     });
 
+    const userIds = Array.from(new Set(result.logs.map((l) => l.userId).filter(Boolean))) as string[];
+    let userMap = new Map<string, { id: string; name: string; email: string }>();
+    if (userIds.length > 0) {
+      const users = await prisma.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, name: true, email: true },
+      });
+      userMap = new Map(users.map((u) => [u.id, u]));
+    }
+
     const esc = (val: any) => {
       const s = val == null ? "" : String(val);
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -65,6 +91,8 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
         "entityType",
         "entityId",
         "userId",
+        "userName",
+        "userEmail",
         "licenseeId",
         "ipAddress",
         "details",
@@ -72,6 +100,7 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
     ];
 
     for (const log of result.logs) {
+      const user = log.userId ? userMap.get(log.userId) : null;
       lines.push(
         [
           esc(log.createdAt?.toISOString?.() || log.createdAt),
@@ -79,6 +108,8 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
           esc(log.entityType),
           esc(log.entityId),
           esc(log.userId),
+          esc(user?.name || ""),
+          esc(user?.email || ""),
           esc(log.licenseeId),
           esc(log.ipAddress),
           esc(log.details ? JSON.stringify(log.details) : ""),

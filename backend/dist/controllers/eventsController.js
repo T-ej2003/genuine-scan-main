@@ -19,16 +19,14 @@ async function computeDashboard(req) {
     const scopedLicenseeId = (0, tenantIsolation_1.getEffectiveLicenseeId)(req);
     const qrWhere = scopedLicenseeId ? { licenseeId: scopedLicenseeId } : {};
     const batchWhere = scopedLicenseeId ? { licenseeId: scopedLicenseeId } : {};
-    const productBatchWhere = scopedLicenseeId ? { licenseeId: scopedLicenseeId } : {};
     const manufacturersWhere = {
         role: client_1.UserRole.MANUFACTURER,
         ...(scopedLicenseeId ? { licenseeId: scopedLicenseeId } : {}),
         isActive: true,
     };
-    const [totalQRCodes, totalBatches, totalProductBatches, manufacturers, activeLicensees, qrGrouped, qrTotal] = await Promise.all([
+    const [totalQRCodes, totalBatches, manufacturers, activeLicensees, qrGrouped, qrTotal] = await Promise.all([
         database_1.default.qRCode.count({ where: qrWhere }),
         database_1.default.batch.count({ where: batchWhere }),
-        database_1.default.productBatch.count({ where: productBatchWhere }),
         database_1.default.user.count({ where: manufacturersWhere }),
         role === client_1.UserRole.SUPER_ADMIN
             ? database_1.default.licensee.count({ where: { isActive: true } })
@@ -51,7 +49,6 @@ async function computeDashboard(req) {
         activeLicensees,
         manufacturers,
         totalBatches,
-        totalProductBatches,
         qr: { total: qrTotal, byStatus },
     };
 }

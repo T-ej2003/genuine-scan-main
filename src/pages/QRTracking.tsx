@@ -34,7 +34,6 @@ type ScanLogRow = {
   scanCount?: number | null;
   scannedAt: string;
   batchId?: string | null;
-  productBatchId?: string | null;
   device?: string | null;
   userAgent?: string | null;
   ipAddress?: string | null;
@@ -56,9 +55,8 @@ export default function QRTracking() {
 
   const [codeQuery, setCodeQuery] = useState("");
   const [batchId, setBatchId] = useState("");
-  const [productBatchId, setProductBatchId] = useState("");
 
-  const load = async (opts?: { silent?: boolean; override?: { code?: string; batchId?: string; productBatchId?: string } }) => {
+  const load = async (opts?: { silent?: boolean; override?: { code?: string; batchId?: string } }) => {
     if (!opts?.silent) {
       setLoading(true);
       setError(null);
@@ -67,14 +65,11 @@ export default function QRTracking() {
     try {
       const codeFilter = opts?.override?.code ?? codeQuery;
       const batchFilter = opts?.override?.batchId ?? batchId;
-      const productFilter = opts?.override?.productBatchId ?? productBatchId;
-
       const [summaryRes, logsRes] = await Promise.all([
         apiClient.getBatchSummary(),
         apiClient.getScanLogs({
           code: codeFilter.trim() || undefined,
           batchId: batchFilter.trim() || undefined,
-          productBatchId: productFilter.trim() || undefined,
           limit: 200,
         }),
       ]);
@@ -221,11 +216,6 @@ export default function QRTracking() {
                 value={batchId}
                 onChange={(e) => setBatchId(e.target.value)}
               />
-              <Input
-                placeholder="Product Batch ID (optional)"
-                value={productBatchId}
-                onChange={(e) => setProductBatchId(e.target.value)}
-              />
               <div className="flex gap-2">
                 <Button onClick={() => load()} disabled={loading}>
                   Apply
@@ -235,8 +225,7 @@ export default function QRTracking() {
                   onClick={() => {
                     setCodeQuery("");
                     setBatchId("");
-                    setProductBatchId("");
-                    load({ override: { code: "", batchId: "", productBatchId: "" } });
+                    load({ override: { code: "", batchId: "" } });
                   }}
                   disabled={loading}
                 >
@@ -253,7 +242,6 @@ export default function QRTracking() {
                   <TableRow>
                     <TableHead>Code</TableHead>
                     <TableHead>Batch</TableHead>
-                    <TableHead>Product Batch</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Scan #</TableHead>
                     <TableHead>Location</TableHead>
@@ -265,7 +253,7 @@ export default function QRTracking() {
                 <TableBody>
                   {logs.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-muted-foreground">
+                      <TableCell colSpan={8} className="text-muted-foreground">
                         No scan logs found.
                       </TableCell>
                     </TableRow>
@@ -281,7 +269,6 @@ export default function QRTracking() {
                         <TableCell className="text-sm">
                           {log.batchId ? batchNameById.get(log.batchId) || log.batchId : "—"}
                         </TableCell>
-                        <TableCell className="text-sm">{log.productBatchId || "—"}</TableCell>
                         <TableCell>
                           <Badge variant="secondary">{log.qrCode?.status || log.status || "—"}</Badge>
                         </TableCell>

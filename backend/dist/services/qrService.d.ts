@@ -9,7 +9,6 @@ export declare const generateQRCodesForRange: (licenseeId: string, prefix: strin
 export declare const activateQRCodes: (licenseeId: string, codes: string[]) => Promise<number>;
 export declare const allocateQRCodesToBatch: (batchId: string, licenseeId: string, startCode: string, endCode: string) => Promise<number>;
 export declare const markBatchAsPrinted: (batchId: string, manufacturerId: string) => Promise<number>;
-export declare const markProductBatchAsPrinted: (productBatchId: string, manufacturerId: string) => Promise<number>;
 export declare const recordScan: (code: string, meta?: {
     ipAddress?: string | null;
     userAgent?: string | null;
@@ -38,6 +37,8 @@ export declare const recordScan: (code: string, meta?: {
                 id: string;
                 email: string;
                 name: string;
+                location: string | null;
+                website: string | null;
             } | null;
         } & {
             id: string;
@@ -53,38 +54,6 @@ export declare const recordScan: (code: string, meta?: {
             printPackDownloadedAt: Date | null;
             printPackDownloadedByUserId: string | null;
         }) | null;
-        productBatch: ({
-            manufacturer: {
-                id: string;
-                email: string;
-                name: string;
-                location: string | null;
-                website: string | null;
-            } | null;
-            parentBatch: {
-                id: string;
-                name: string;
-            };
-        } & {
-            id: string;
-            licenseeId: string;
-            createdAt: Date;
-            updatedAt: Date;
-            description: string | null;
-            startCode: string;
-            endCode: string;
-            totalCodes: number;
-            manufacturerId: string | null;
-            printedAt: Date | null;
-            printPackDownloadedAt: Date | null;
-            printPackDownloadedByUserId: string | null;
-            parentBatchId: string;
-            productName: string;
-            productCode: string;
-            serialStart: number;
-            serialEnd: number;
-            serialFormat: string;
-        }) | null;
     } & {
         id: string;
         licenseeId: string;
@@ -95,7 +64,6 @@ export declare const recordScan: (code: string, meta?: {
         scannedAt: Date | null;
         scanCount: number;
         batchId: string | null;
-        productBatchId: string | null;
     };
     isFirstScan: boolean;
 }>;

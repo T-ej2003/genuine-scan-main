@@ -1,7 +1,11 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.streamLogs = exports.exportLogsCsv = exports.getLogs = void 0;
 const auditService_1 = require("../services/auditService");
+const database_1 = __importDefault(require("../config/database"));
 const client_1 = require("@prisma/client");
 const getLogs = async (req, res) => {
     try {
@@ -20,7 +24,20 @@ const getLogs = async (req, res) => {
             limit,
             offset,
         });
-        return res.json({ success: true, data: result });
+        const userIds = Array.from(new Set(result.logs.map((l) => l.userId).filter(Boolean)));
+        let userMap = new Map();
+        if (userIds.length > 0) {
+            const users = await database_1.default.user.findMany({
+                where: { id: { in: userIds } },
+                select: { id: true, name: true, email: true },
+            });
+            userMap = new Map(users.map((u) => [u.id, u]));
+        }
+        const enriched = result.logs.map((l) => ({
+            ...l,
+            user: l.userId ? userMap.get(l.userId) || null : null,
+        }));
+        return res.json({ success: true, data: { ...result, logs: enriched } });
     }
     catch (err) {
         console.error("Audit logs error:", err);
@@ -44,6 +61,15 @@ const exportLogsCsv = async (req, res) => {
             limit,
             offset: 0,
         });
+        const userIds = Array.from(new Set(result.logs.map((l) => l.userId).filter(Boolean)));
+        let userMap = new Map();
+        if (userIds.length > 0) {
+            const users = await database_1.default.user.findMany({
+                where: { id: { in: userIds } },
+                select: { id: true, name: true, email: true },
+            });
+            userMap = new Map(users.map((u) => [u.id, u]));
+        }
         const esc = (val) => {
             const s = val == null ? "" : String(val);
             return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -55,18 +81,23 @@ const exportLogsCsv = async (req, res) => {
                 "entityType",
                 "entityId",
                 "userId",
+                "userName",
+                "userEmail",
                 "licenseeId",
                 "ipAddress",
                 "details",
             ].join(","),
         ];
         for (const log of result.logs) {
+            const user = log.userId ? userMap.get(log.userId) : null;
             lines.push([
                 esc(log.createdAt?.toISOString?.() || log.createdAt),
                 esc(log.action),
                 esc(log.entityType),
                 esc(log.entityId),
                 esc(log.userId),
+                esc(user?.name || ""),
+                esc(user?.email || ""),
                 esc(log.licenseeId),
                 esc(log.ipAddress),
                 esc(log.details ? JSON.stringify(log.details) : ""),

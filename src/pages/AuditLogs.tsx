@@ -69,6 +69,32 @@ export default function AuditLogs() {
     [logs]
   );
 
+  const summarizeDetails = (log: any) => {
+    const d = log?.details || {};
+    if (typeof d === "string") return d;
+    if (!d || typeof d !== "object") return "—";
+
+    const parts: string[] = [];
+    if (d.name) parts.push(`Name: ${d.name}`);
+    if (d.batchName) parts.push(`Batch: ${d.batchName}`);
+    if (d.quantity) parts.push(`Qty: ${d.quantity}`);
+    if (d.startCode || d.endCode) parts.push(`Range: ${d.startCode || "?"} → ${d.endCode || "?"}`);
+    if (d.manufacturerId) parts.push(`Manufacturer: ${d.manufacturerId}`);
+    if (d.licenseeId) parts.push(`Licensee: ${d.licenseeId}`);
+    if (d.codes) parts.push(`Codes: ${d.codes}`);
+    if (d.unassignedCount != null) parts.push(`Unassigned: ${d.unassignedCount}`);
+
+    if (parts.length) return parts.join(" • ");
+    return Object.keys(d).length ? "Additional details available" : "—";
+  };
+
+  const userLabel = (log: any) => {
+    if (log?.user?.name) return `${log.user.name} (${log.user.email || log.user.id})`;
+    if (log?.user?.email) return log.user.email;
+    if (log?.userId) return log.userId;
+    return "System";
+  };
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return logs.filter((l) => {
@@ -121,11 +147,12 @@ export default function AuditLogs() {
             </Select>
           </CardHeader>
 
-          <CardContent>
+        <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Action</TableHead>
+                  <TableHead>User</TableHead>
                   <TableHead>Entity</TableHead>
                   <TableHead>Details</TableHead>
                   <TableHead>Time</TableHead>
@@ -140,11 +167,14 @@ export default function AuditLogs() {
                         {l.action}
                       </Badge>
                     </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {userLabel(l)}
+                    </TableCell>
                     <TableCell>{l.entityType}</TableCell>
                     <TableCell>
-                      <pre className="text-xs whitespace-pre-wrap">
-                        {JSON.stringify(l.details, null, 2)}
-                      </pre>
+                      <div className="text-xs text-muted-foreground">
+                        {summarizeDetails(l)}
+                      </div>
                     </TableCell>
                     <TableCell>
                       {format(new Date(l.createdAt), "PPp")}
@@ -159,4 +189,3 @@ export default function AuditLogs() {
     </DashboardLayout>
   );
 }
-
