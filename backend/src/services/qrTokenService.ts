@@ -1,4 +1,13 @@
-import { createHash, createPrivateKey, createPublicKey, randomBytes, sign as cryptoSign, verify as cryptoVerify } from "crypto";
+import {
+  createHash,
+  createHmac,
+  createPrivateKey,
+  createPublicKey,
+  randomBytes,
+  sign as cryptoSign,
+  timingSafeEqual,
+  verify as cryptoVerify,
+} from "crypto";
 
 export type QrTokenPayload = {
   qr_id: string;
@@ -24,6 +33,18 @@ const fromBase64Url = (input: string) => {
   const pad = padded.length % 4;
   const withPad = pad ? padded + "=".repeat(4 - pad) : padded;
   return Buffer.from(withPad, "base64");
+};
+
+const decodeBase64UrlStrict = (input: string) => {
+  if (!/^[A-Za-z0-9_-]+$/.test(input)) {
+    throw new Error("Invalid token encoding");
+  }
+  const buf = fromBase64Url(input);
+  // Reject non-canonical variants so mutated tokens cannot decode to the same bytes.
+  if (toBase64Url(buf) !== input) {
+    throw new Error("Invalid token encoding");
+  }
+  return buf;
 };
 
 const normalizePem = (value: string) => value.replace(/\\n/g, "\n").trim();
@@ -82,17 +103,20 @@ export const signQrPayload = (payload: QrTokenPayload): string => {
     sig = cryptoSign(null, payloadHash, privateKey);
   } else {
     const secret = String(process.env.QR_SIGN_HMAC_SECRET || "");
-    sig = createHash("sha256").update(payloadHash).update(secret).digest();
+    sig = createHmac("sha256", secret).update(payloadHash).digest();
   }
 
   return `${toBase64Url(payloadBuf)}.${toBase64Url(sig)}`;
 };
 
 export const verifyQrToken = (token: string): { payload: QrTokenPayload } => {
-  const [payloadPart, sigPart] = String(token || "").split(".");
+  const tokenStr = String(token || "").trim();
+  const parts = tokenStr.split(".");
+  if (parts.length !== 2) throw new Error("Invalid token format");
+  const [payloadPart, sigPart] = parts;
   if (!payloadPart || !sigPart) throw new Error("Invalid token format");
 
-  const payloadBuf = fromBase64Url(payloadPart);
+  const payloadBuf = decodeBase64UrlStrict(payloadPart);
   const payloadJson = payloadBuf.toString("utf8");
   const payload = JSON.parse(payloadJson) as QrTokenPayload;
 
@@ -101,13 +125,15 @@ export const verifyQrToken = (token: string): { payload: QrTokenPayload } => {
   const { mode } = getSignMode();
   if (mode === "ed25519") {
     const { publicKey } = getEd25519Keys();
-    const ok = cryptoVerify(null, payloadHash, publicKey, fromBase64Url(sigPart));
+    const ok = cryptoVerify(null, payloadHash, publicKey, decodeBase64UrlStrict(sigPart));
     if (!ok) throw new Error("Signature verification failed");
   } else {
     const secret = String(process.env.QR_SIGN_HMAC_SECRET || "");
-    const expected = createHash("sha256").update(payloadHash).update(secret).digest("hex");
-    const got = fromBase64Url(sigPart).toString("hex");
-    if (expected !== got) throw new Error("Signature verification failed");
+    const expected = createHmac("sha256", secret).update(payloadHash).digest();
+    const got = decodeBase64UrlStrict(sigPart);
+    if (expected.length !== got.length || !timingSafeEqual(expected, got)) {
+      throw new Error("Signature verification failed");
+    }
   }
 
   return { payload };

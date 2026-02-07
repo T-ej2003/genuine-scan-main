@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -8,20 +8,20 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 
-import Index from "@/pages/Index";
-import Login from "@/pages/Login";
-import Dashboard from "@/pages/Dashboard";
-import Licensees from "@/pages/Licensees";
-import QRCodes from "@/pages/QRCodes";
-import QRRequests from "@/pages/QRRequests";
-import Batches from "@/pages/Batches";
-import QRTracking from "@/pages/QRTracking";
-import Manufacturers from "@/pages/Manufacturers";
-import AuditLogs from "@/pages/AuditLogs";
-import Verify from "@/pages/Verify";
-import VerifyLanding from "@/pages/VerifyLanding";
-import NotFound from "@/pages/NotFound";
-import AccountSettings from "@/pages/AccountSettings";
+const Index = lazy(() => import("@/pages/Index"));
+const Login = lazy(() => import("@/pages/Login"));
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const Licensees = lazy(() => import("@/pages/Licensees"));
+const QRCodes = lazy(() => import("@/pages/QRCodes"));
+const QRRequests = lazy(() => import("@/pages/QRRequests"));
+const Batches = lazy(() => import("@/pages/Batches"));
+const QRTracking = lazy(() => import("@/pages/QRTracking"));
+const Manufacturers = lazy(() => import("@/pages/Manufacturers"));
+const AuditLogs = lazy(() => import("@/pages/AuditLogs"));
+const Verify = lazy(() => import("@/pages/Verify"));
+const VerifyLanding = lazy(() => import("@/pages/VerifyLanding"));
+const NotFound = lazy(() => import("@/pages/NotFound"));
+const AccountSettings = lazy(() => import("@/pages/AccountSettings"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -80,110 +80,112 @@ function AuthRoute({ children }: { children: React.ReactNode }) {
 ========================= */
 function AppRoutes() {
   return (
-    <Routes>
-      {/* Public */}
-      <Route path="/" element={<Index />} />
-      <Route path="/verify" element={<VerifyLanding />} />
-      <Route path="/verify/:code" element={<Verify />} />
-      <Route path="/scan" element={<Verify />} />
+    <Suspense fallback={<LoadingScreen />}>
+      <Routes>
+        {/* Public */}
+        <Route path="/" element={<Index />} />
+        <Route path="/verify" element={<VerifyLanding />} />
+        <Route path="/verify/:code" element={<Verify />} />
+        <Route path="/scan" element={<Verify />} />
 
-      {/* Auth */}
-      <Route
-        path="/login"
-        element={
-          <AuthRoute>
-            <Login />
-          </AuthRoute>
-        }
-      />
+        {/* Auth */}
+        <Route
+          path="/login"
+          element={
+            <AuthRoute>
+              <Login />
+            </AuthRoute>
+          }
+        />
 
-      {/* Protected */}
-      <Route
-        path="/dashboard"
-        element={
-          <ProtectedRoute>
-            <Dashboard />
-          </ProtectedRoute>
-        }
-      />
+        {/* Protected */}
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+          }
+        />
 
-      <Route
-        path="/licensees"
-        element={
-          <ProtectedRoute allowedRoles={["super_admin"]}>
-            <Licensees />
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="/licensees"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin"]}>
+              <Licensees />
+            </ProtectedRoute>
+          }
+        />
 
-      <Route
-        path="/qr-codes"
-        element={
-          <ProtectedRoute allowedRoles={["super_admin"]}>
-            <QRCodes />
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="/qr-codes"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin"]}>
+              <QRCodes />
+            </ProtectedRoute>
+          }
+        />
 
-      <Route
-        path="/batches"
-        element={
-          <ProtectedRoute allowedRoles={["super_admin", "licensee_admin", "manufacturer"]}>
-            <Batches />
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="/batches"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin", "manufacturer"]}>
+              <Batches />
+            </ProtectedRoute>
+          }
+        />
 
-      <Route
-        path="/qr-requests"
-        element={
-          <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
-            <QRRequests />
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="/qr-requests"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
+              <QRRequests />
+            </ProtectedRoute>
+          }
+        />
 
-      <Route path="/product-batches" element={<Navigate to="/batches" replace />} />
+        <Route path="/product-batches" element={<Navigate to="/batches" replace />} />
 
-      <Route
-        path="/qr-tracking"
-        element={
-          <ProtectedRoute allowedRoles={["super_admin"]}>
-            <QRTracking />
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="/qr-tracking"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin"]}>
+              <QRTracking />
+            </ProtectedRoute>
+          }
+        />
 
-      <Route
-        path="/manufacturers"
-        element={
-          <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
-            <Manufacturers />
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="/manufacturers"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
+              <Manufacturers />
+            </ProtectedRoute>
+          }
+        />
 
-      <Route
-        path="/audit-logs"
-        element={
-          <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
-            <AuditLogs />
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="/audit-logs"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
+              <AuditLogs />
+            </ProtectedRoute>
+          }
+        />
 
-      <Route
-        path="/account"
-        element={
-          <ProtectedRoute>
-            <AccountSettings />
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="/account"
+          element={
+            <ProtectedRoute>
+              <AccountSettings />
+            </ProtectedRoute>
+          }
+        />
 
-      {/* Catch-all */}
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+        {/* Catch-all */}
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </Suspense>
   );
 }
 
@@ -194,7 +196,12 @@ export default function App() {
         <TooltipProvider>
           <Toaster />
           <Sonner />
-          <BrowserRouter>
+          <BrowserRouter
+            future={{
+              v7_startTransition: true,
+              v7_relativeSplatPath: true,
+            }}
+          >
             <AppRoutes />
           </BrowserRouter>
         </TooltipProvider>
