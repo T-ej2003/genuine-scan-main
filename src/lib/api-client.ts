@@ -63,6 +63,7 @@ class ApiClient {
       const res = await fetch(`${BASE_URL}${endpoint}`, {
         ...options,
         headers,
+        cache: "no-store",
         credentials: "include",
         signal: controller.signal,
       });
@@ -379,9 +380,7 @@ class ApiClient {
 
   // ==================== QR REQUESTS ====================
   async createQrAllocationRequest(payload: {
-    quantity?: number;
-    startNumber?: number;
-    endNumber?: number;
+    quantity: number;
     note?: string;
     licenseeId?: string;
   }) {
@@ -396,10 +395,7 @@ class ApiClient {
     return this.request<any[]>(`/qr/requests${query}`);
   }
 
-  async approveQrAllocationRequest(
-    id: string,
-    payload?: { startNumber?: number; endNumber?: number; decisionNote?: string }
-  ) {
+  async approveQrAllocationRequest(id: string, payload?: { decisionNote?: string }) {
     return this.request(`/qr/requests/${id}/approve`, { method: "POST", body: JSON.stringify(payload || {}) });
   }
 

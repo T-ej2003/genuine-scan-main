@@ -95,7 +95,7 @@ export default function Manufacturers() {
 
   const [manufacturers, setManufacturers] = useState<ManufacturerRow[]>([]);
   const [search, setSearch] = useState("");
-  const [showInactive, setShowInactive] = useState(false);
+  const [showInactive, setShowInactive] = useState(true);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -191,7 +191,7 @@ export default function Manufacturers() {
   useEffect(() => {
     loadManufacturers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveLicenseeId, showInactive]);
+  }, [effectiveLicenseeId]);
 
   useEffect(() => {
     const off = onMutationEvent(() => {

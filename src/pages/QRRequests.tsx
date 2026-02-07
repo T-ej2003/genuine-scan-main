@@ -62,10 +62,7 @@ export default function QRRequests() {
   const [licenseeFilter, setLicenseeFilter] = useState<string>("");
 
   // create request form (licensee admin)
-  const [mode, setMode] = useState<"quantity" | "range">("quantity");
   const [quantity, setQuantity] = useState<number>(1000);
-  const [startNumber, setStartNumber] = useState<number>(1);
-  const [endNumber, setEndNumber] = useState<number>(1);
   const [note, setNote] = useState("");
 
   // approve/reject dialog
@@ -73,8 +70,6 @@ export default function QRRequests() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [activeReq, setActiveReq] = useState<RequestRow | null>(null);
   const [decisionNote, setDecisionNote] = useState("");
-  const [approveStart, setApproveStart] = useState<number>(1);
-  const [approveEnd, setApproveEnd] = useState<number>(1);
 
   const loadLicensees = async () => {
     if (!isSuper) return;
@@ -124,26 +119,17 @@ export default function QRRequests() {
   const submitRequest = async () => {
     if (!isLicensee) return;
 
-    if (mode === "quantity") {
-      if (!quantity || quantity <= 0) {
-        toast({ title: "Invalid quantity", variant: "destructive" });
-        return;
-      }
-    } else {
-      if (!startNumber || !endNumber || endNumber < startNumber) {
-        toast({ title: "Invalid range", variant: "destructive" });
-        return;
-      }
+    if (!quantity || quantity <= 0) {
+      toast({ title: "Invalid quantity", variant: "destructive" });
+      return;
     }
 
     setLoading(true);
     try {
-      const payload =
-        mode === "quantity"
-          ? { quantity, note: note.trim() || undefined }
-          : { startNumber, endNumber, note: note.trim() || undefined };
-
-      const res = await apiClient.createQrAllocationRequest(payload);
+      const res = await apiClient.createQrAllocationRequest({
+        quantity,
+        note: note.trim() || undefined,
+      });
       if (!res.success) {
         toast({ title: "Request failed", description: res.error || "Error", variant: "destructive" });
         return;
@@ -160,13 +146,6 @@ export default function QRRequests() {
   const openApprove = (r: RequestRow) => {
     setActiveReq(r);
     setDecisionNote("");
-    if (r.startNumber && r.endNumber) {
-      setApproveStart(r.startNumber);
-      setApproveEnd(r.endNumber);
-    } else {
-      setApproveStart(1);
-      setApproveEnd(1);
-    }
     setApproveOpen(true);
   };
 
@@ -178,22 +157,12 @@ export default function QRRequests() {
 
   const submitApprove = async () => {
     if (!activeReq) return;
-    const needsRange = !(activeReq.startNumber && activeReq.endNumber);
-
-    if (needsRange && (approveEnd < approveStart || approveStart <= 0)) {
-      toast({ title: "Invalid range", variant: "destructive" });
-      return;
-    }
 
     setLoading(true);
     try {
-      const payload: any = { decisionNote: decisionNote.trim() || undefined };
-      if (needsRange) {
-        payload.startNumber = approveStart;
-        payload.endNumber = approveEnd;
-      }
-
-      const res = await apiClient.approveQrAllocationRequest(activeReq.id, payload);
+      const res = await apiClient.approveQrAllocationRequest(activeReq.id, {
+        decisionNote: decisionNote.trim() || undefined,
+      });
       if (!res.success) {
         const raw = (res.error || "Error").toLowerCase();
         const isBusy = raw.includes("busy") || raw.includes("retry") || raw.includes("conflict");
@@ -235,6 +204,12 @@ export default function QRRequests() {
   };
 
   const filtered = useMemo(() => rows, [rows]);
+  const requestQuantity = (r: RequestRow) =>
+    r.quantity && r.quantity > 0
+      ? r.quantity
+      : r.startNumber && r.endNumber
+        ? r.endNumber - r.startNumber + 1
+        : 0;
 
   return (
     <DashboardLayout>
@@ -261,54 +236,19 @@ export default function QRRequests() {
               <div className="text-sm text-muted-foreground">Request new QR codes</div>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center gap-2 mb-4">
-                <Button
-                  size="sm"
-                  variant={mode === "quantity" ? "default" : "outline"}
-                  onClick={() => setMode("quantity")}
-                >
-                  By quantity
-                </Button>
-                <Button
-                  size="sm"
-                  variant={mode === "range" ? "default" : "outline"}
-                  onClick={() => setMode("range")}
-                >
-                  By range
-                </Button>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Quantity</Label>
+                  <Input
+                    type="number"
+                    value={quantity}
+                    onChange={(e) => setQuantity(parseInt(e.target.value || "0", 10))}
+                  />
+                </div>
+                <div className="text-xs text-muted-foreground self-end pb-2">
+                  Allocation range is auto-picked from the next available codes after approval.
+                </div>
               </div>
-
-              {mode === "quantity" ? (
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>Quantity</Label>
-                    <Input
-                      type="number"
-                      value={quantity}
-                      onChange={(e) => setQuantity(parseInt(e.target.value || "0", 10))}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>Start Number</Label>
-                    <Input
-                      type="number"
-                      value={startNumber}
-                      onChange={(e) => setStartNumber(parseInt(e.target.value || "0", 10))}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>End Number</Label>
-                    <Input
-                      type="number"
-                      value={endNumber}
-                      onChange={(e) => setEndNumber(parseInt(e.target.value || "0", 10))}
-                    />
-                  </div>
-                </div>
-              )}
 
               <div className="space-y-2 mt-3">
                 <Label>Note (optional)</Label>
@@ -394,9 +334,8 @@ export default function QRRequests() {
                         <TableCell>
                           <div className="space-y-1">
                             <div className="font-medium">
-                              {r.startNumber && r.endNumber
-                                ? `${r.startNumber} → ${r.endNumber}`
-                                : `${r.quantity || 0} codes`}
+                              {`${requestQuantity(r)} codes`}
+                              {r.startNumber && r.endNumber ? ` (${r.startNumber} -> ${r.endNumber})` : ""}
                             </div>
                             {r.note && <div className="text-xs text-muted-foreground">{r.note}</div>}
                           </div>
@@ -492,33 +431,18 @@ export default function QRRequests() {
           <DialogContent className="sm:max-w-[520px]">
             <DialogHeader>
               <DialogTitle>Approve Request</DialogTitle>
-              <DialogDescription>Allocate QR range for this request.</DialogDescription>
+              <DialogDescription>
+                Approve this quantity request. Range allocation is automatic from next available codes.
+              </DialogDescription>
             </DialogHeader>
 
             {!activeReq ? (
               <div className="text-sm text-muted-foreground">No request selected.</div>
             ) : (
               <div className="space-y-4 mt-2">
-                {!(activeReq.startNumber && activeReq.endNumber) && (
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label>Start Number</Label>
-                      <Input
-                        type="number"
-                        value={approveStart}
-                        onChange={(e) => setApproveStart(parseInt(e.target.value || "0", 10))}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>End Number</Label>
-                      <Input
-                        type="number"
-                        value={approveEnd}
-                        onChange={(e) => setApproveEnd(parseInt(e.target.value || "0", 10))}
-                      />
-                    </div>
-                  </div>
-                )}
+                <div className="text-sm text-muted-foreground">
+                  Request quantity: <span className="font-medium text-foreground">{requestQuantity(activeReq)}</span>
+                </div>
 
                 <div className="space-y-2">
                   <Label>Decision note (optional)</Label>

@@ -9,27 +9,13 @@ import { parseQRCode } from "../services/qrService";
 
 const createRequestSchema = z
   .object({
-    quantity: z.number().int().positive().max(5_000_000).optional(),
-    startNumber: z.number().int().positive().optional(),
-    endNumber: z.number().int().positive().optional(),
+    quantity: z.number().int().positive().max(5_000_000),
     note: z.string().trim().max(500).optional(),
-  })
-  .refine((d) => d.quantity || (d.startNumber && d.endNumber), {
-    message: "Provide quantity or a start/end range",
-  })
-  .refine((d) => (d.startNumber && d.endNumber ? d.endNumber >= d.startNumber : true), {
-    message: "End number must be >= start number",
   });
 
-const approveSchema = z
-  .object({
-    startNumber: z.number().int().positive().optional(),
-    endNumber: z.number().int().positive().optional(),
-    decisionNote: z.string().trim().max(500).optional(),
-  })
-  .refine((d) => (d.startNumber && d.endNumber ? d.endNumber >= d.startNumber : true), {
-    message: "End number must be >= start number",
-  });
+const approveSchema = z.object({
+  decisionNote: z.string().trim().max(500).optional(),
+});
 
 const rejectSchema = z.object({
   decisionNote: z.string().trim().max(500).optional(),
@@ -65,19 +51,13 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
       return res.status(403).json({ success: false, error: "No licensee association" });
     }
 
-    const quantity =
-      parsed.data.quantity ??
-      (parsed.data.startNumber && parsed.data.endNumber
-        ? parsed.data.endNumber - parsed.data.startNumber + 1
-        : null);
-
     const created = await prisma.qrAllocationRequest.create({
       data: {
         licenseeId,
         requestedByUserId: auth.userId,
-        quantity: quantity || null,
-        startNumber: parsed.data.startNumber ?? null,
-        endNumber: parsed.data.endNumber ?? null,
+        quantity: parsed.data.quantity,
+        startNumber: null,
+        endNumber: null,
         note: parsed.data.note?.trim() || null,
         status: QrAllocationRequestStatus.PENDING,
       },
@@ -91,8 +71,6 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
       entityId: created.id,
       details: {
         quantity: created.quantity,
-        startNumber: created.startNumber,
-        endNumber: created.endNumber,
       },
       ipAddress: req.ip,
     });
@@ -169,50 +147,31 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
       return res.status(409).json({ success: false, error: "Request already processed" });
     }
 
-    let startNumber: number | null = requestRow.startNumber ?? null;
-    let endNumber: number | null = requestRow.endNumber ?? null;
-
-    if (startNumber && endNumber) {
-      if (parsed.data.startNumber || parsed.data.endNumber) {
-        if (parsed.data.startNumber !== startNumber || parsed.data.endNumber !== endNumber) {
-          return res.status(400).json({
-            success: false,
-            error: "Request already has a range; approve using the same range or leave empty.",
-          });
-        }
-      }
-    } else if (parsed.data.startNumber && parsed.data.endNumber) {
-      startNumber = parsed.data.startNumber;
-      endNumber = parsed.data.endNumber;
+    // Backward compatibility: derive quantity for old range-based rows.
+    const quantityRequested =
+      requestRow.quantity && requestRow.quantity > 0
+        ? requestRow.quantity
+        : requestRow.startNumber && requestRow.endNumber
+          ? requestRow.endNumber - requestRow.startNumber + 1
+          : null;
+    if (!quantityRequested || quantityRequested <= 0) {
+      return res.status(400).json({ success: false, error: "Request quantity is missing or invalid." });
     }
 
-    if (!startNumber || !endNumber) {
-      const quantity = requestRow.quantity;
-      if (!quantity || quantity <= 0) {
-        return res.status(400).json({ success: false, error: "Quantity missing; provide a range to approve." });
-      }
+    const last = await prisma.qRCode.findFirst({
+      where: { licenseeId: requestRow.licenseeId },
+      orderBy: { code: "desc" },
+      select: { code: true },
+    });
 
-      const last = await prisma.qRCode.findFirst({
-        where: { licenseeId: requestRow.licenseeId },
-        orderBy: { code: "desc" },
-        select: { code: true },
-      });
-
-      let nextNumber = 1;
-      if (last?.code) {
-        const parsedCode = parseQRCode(last.code);
-        if (parsedCode) nextNumber = parsedCode.number + 1;
-      }
-
-      startNumber = nextNumber;
-      endNumber = nextNumber + quantity - 1;
+    let nextNumber = 1;
+    if (last?.code) {
+      const parsedCode = parseQRCode(last.code);
+      if (parsedCode) nextNumber = parsedCode.number + 1;
     }
 
-    if (!startNumber || !endNumber) {
-      return res.status(400).json({ success: false, error: "Failed to determine allocation range" });
-    }
-
-    const quantityFinal = endNumber - startNumber + 1;
+    const startNumber = nextNumber;
+    const endNumber = nextNumber + quantityRequested - 1;
 
     const result = await prisma.$transaction(async (tx) => {
       const alloc = await allocateQrRange({
@@ -235,7 +194,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
           decisionNote: parsed.data.decisionNote?.trim() || null,
           startNumber,
           endNumber,
-          quantity: quantityFinal,
+          quantity: quantityRequested,
         },
       });
 
@@ -251,7 +210,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
       details: {
         startNumber,
         endNumber,
-        quantity: quantityFinal,
+        quantity: quantityRequested,
         rangeId: result.alloc.range.id,
         receivedBatchId: result.alloc.receivedBatch?.id || null,
       },
