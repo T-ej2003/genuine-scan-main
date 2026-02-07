@@ -6,6 +6,7 @@ import { QRStatusChart } from "@/components/dashboard/QRStatusChart";
 import { RecentActivityCard } from "@/components/dashboard/RecentActivityCard";
 import { QrCode, Building2, Factory, FileText } from "lucide-react";
 import apiClient from "@/lib/api-client";
+import { onMutationEvent } from "@/lib/mutation-events";
 
 const STATS_POLL_MS = 5000;
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
@@ -125,6 +126,14 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.licenseeId, user?.role]);
 
+  useEffect(() => {
+    const off = onMutationEvent(() => {
+      load({ silent: true });
+    });
+    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // totals (support multiple backend shapes)
   const totalQRCodes = summary?.totalQRCodes ?? 0;
   const activeLicenseesCount = summary?.activeLicensees ?? 0;
@@ -136,9 +145,9 @@ export default function Dashboard() {
     const by = qrStats?.byStatus || qrStats?.statusCounts || {};
     return {
       dormant: qrStats?.dormant ?? by.DORMANT ?? 0,
-      allocated: (qrStats?.allocated ?? by.ALLOCATED ?? 0) + (by.ACTIVE ?? 0),
+      allocated: (qrStats?.allocated ?? by.ALLOCATED ?? 0) + (by.ACTIVE ?? 0) + (by.ACTIVATED ?? 0),
       printed: qrStats?.printed ?? by.PRINTED ?? 0,
-      scanned: qrStats?.scanned ?? by.SCANNED ?? 0,
+      scanned: (qrStats?.scanned ?? by.SCANNED ?? 0) + (by.REDEEMED ?? 0),
     };
   }, [qrStats]);
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useSearchParams } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -53,11 +53,14 @@ type VerifyPayload = {
   firstScanned?: string | null;
   scanCount?: number;
   isFirstScan?: boolean;
+  scanOutcome?: string;
+  redeemedAt?: string | null;
   warningMessage?: string | null;
 };
 
 export default function Verify() {
   const { code } = useParams<{ code: string }>();
+  const [searchParams] = useSearchParams();
   const [isLoading, setIsLoading] = useState(true);
   const [result, setResult] = useState<VerifyPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -68,7 +71,8 @@ export default function Verify() {
       setIsLoading(true);
       setError(null);
       try {
-        if (!code) {
+        const token = searchParams.get("t");
+        if (!code && !token) {
           setResult({ isAuthentic: false, message: "Missing code" });
           return;
         }
@@ -91,12 +95,19 @@ export default function Verify() {
 
         const geo = await getGeo();
 
-        const res = await apiClient.verifyQRCode(code, {
-          device,
-          lat: geo.lat,
-          lon: geo.lon,
-          acc: geo.acc,
-        });
+        const res = token
+          ? await apiClient.scanToken(token, {
+              device,
+              lat: geo.lat,
+              lon: geo.lon,
+              acc: geo.acc,
+            })
+          : await apiClient.verifyQRCode(code as string, {
+              device,
+              lat: geo.lat,
+              lon: geo.lon,
+              acc: geo.acc,
+            });
         if (!res.success) {
           setError(res.error || "Verification failed");
           setResult(null);
@@ -110,14 +121,17 @@ export default function Verify() {
     return () => {
       active = false;
     };
-  }, [code]);
+  }, [code, searchParams]);
 
   const statusKind = useMemo(() => {
-    if (result?.isAuthentic) return "genuine";
+    if (result?.scanOutcome === "VALID") return "genuine";
+    if (result?.scanOutcome === "ALREADY_REDEEMED") return "fraud";
+    if (result?.scanOutcome === "SUSPICIOUS" || result?.status === "ACTIVATED") return "unprinted";
     if (result?.status === "ALLOCATED") return "unprinted";
     if (result?.status === "DORMANT" || result?.status === "ACTIVE") return "unassigned";
-    return "invalid";
-  }, [result?.isAuthentic, result?.status]);
+    if (result?.status === "BLOCKED") return "invalid";
+    return result?.isAuthentic ? "genuine" : "invalid";
+  }, [result?.isAuthentic, result?.status, result?.scanOutcome]);
 
   const manufacturer = result?.batch?.manufacturer || null;
 
@@ -128,6 +142,8 @@ export default function Verify() {
   const headline =
     statusKind === "genuine"
       ? "Genuine Product"
+      : statusKind === "fraud"
+      ? "Already Redeemed"
       : statusKind === "unprinted"
       ? "Not Yet Printed"
       : statusKind === "unassigned"
@@ -137,8 +153,10 @@ export default function Verify() {
   const subtitle =
     statusKind === "genuine"
       ? "This item matches our official records"
+      : statusKind === "fraud"
+      ? "This code was already redeemed. Possible counterfeit."
       : statusKind === "unprinted"
-      ? "This code exists but was not printed"
+      ? "This code exists but was not confirmed as printed"
       : statusKind === "unassigned"
       ? "This code exists but is not assigned to a product"
       : "This code could not be verified";
@@ -175,6 +193,8 @@ export default function Verify() {
                 className={
                   statusKind === "genuine"
                     ? "bg-emerald-500"
+                    : statusKind === "fraud"
+                    ? "bg-rose-600"
                     : statusKind === "unprinted"
                     ? "bg-amber-500"
                     : statusKind === "unassigned"

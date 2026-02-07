@@ -29,6 +29,7 @@ import {
 
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { onMutationEvent } from "@/lib/mutation-events";
 
 import {
   Plus,
@@ -180,6 +181,11 @@ export default function Licensees() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
 
+  const isBusyError = (msg?: string) => {
+    const m = (msg || "").toLowerCase();
+    return m.includes("batch busy") || m.includes("retry") || m.includes("conflict");
+  };
+
   // Create Licensee dialog
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -255,6 +261,14 @@ export default function Licensees() {
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const off = onMutationEvent(() => {
+      load();
+    });
+    return off;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -485,9 +499,11 @@ export default function Licensees() {
       resetCreateForm();
       await load();
     } catch (e: any) {
+      const msg = e?.message || "Error";
+      const busy = isBusyError(msg);
       toast({
-        title: "Create failed",
-        description: e?.message || "Error",
+        title: busy ? "Batch busy" : "Create failed",
+        description: busy ? "Please retry — batch busy." : msg,
         variant: "destructive",
       });
       await load();
@@ -747,9 +763,11 @@ export default function Licensees() {
       setAllocForm(null);
       await load();
     } catch (e: any) {
+      const msg = e?.message || "Error";
+      const busy = isBusyError(msg);
       toast({
-        title: "Allocation failed",
-        description: e?.message || "Error",
+        title: busy ? "Batch busy" : "Allocation failed",
+        description: busy ? "Please retry — batch busy." : msg,
         variant: "destructive",
       });
     }
@@ -802,9 +820,11 @@ export default function Licensees() {
       setRangeForm(null);
       await load();
     } catch (e: any) {
+      const msg = e?.message || "Error";
+      const busy = isBusyError(msg);
       toast({
-        title: "Allocation failed",
-        description: e?.message || "Error",
+        title: busy ? "Batch busy" : "Allocation failed",
+        description: busy ? "Please retry — batch busy." : msg,
         variant: "destructive",
       });
     } finally {

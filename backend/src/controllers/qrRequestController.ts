@@ -261,7 +261,11 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
     return res.json({ success: true, data: result.updated });
   } catch (e: any) {
     console.error("approveQrAllocationRequest error:", e);
-    return res.status(400).json({ success: false, error: e?.message || "Bad request" });
+    const msg = e?.message || "Bad request";
+    if (String(msg).includes("BATCH_BUSY") || String(msg).toLowerCase().includes("concurrency issue")) {
+      return res.status(409).json({ success: false, error: "Please retry — batch busy." });
+    }
+    return res.status(400).json({ success: false, error: msg });
   }
 };
 

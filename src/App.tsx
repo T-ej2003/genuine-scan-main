@@ -85,6 +85,7 @@ function AppRoutes() {
       <Route path="/" element={<Index />} />
       <Route path="/verify" element={<VerifyLanding />} />
       <Route path="/verify/:code" element={<Verify />} />
+      <Route path="/scan" element={<Verify />} />
 
       {/* Auth */}
       <Route

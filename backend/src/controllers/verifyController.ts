@@ -52,6 +52,39 @@ export const verifyQRCode = async (req: Request, res: Response) => {
       });
     }
 
+    // Blocked code
+    if (qrCode.status === QRStatus.BLOCKED) {
+      return res.json({
+        success: true,
+        data: {
+          isAuthentic: false,
+          message: "This QR code has been blocked due to fraud or recall.",
+          code,
+          status: qrCode.status,
+          licensee: qrCode.licensee
+            ? {
+                id: qrCode.licensee.id,
+                name: qrCode.licensee.name,
+                prefix: qrCode.licensee.prefix,
+                brandName: qrCode.licensee.brandName,
+                location: qrCode.licensee.location,
+                website: qrCode.licensee.website,
+                supportEmail: qrCode.licensee.supportEmail,
+                supportPhone: qrCode.licensee.supportPhone,
+              }
+            : null,
+          batch: qrCode.batch
+            ? {
+                id: qrCode.batch.id,
+                name: qrCode.batch.name,
+                printedAt: qrCode.batch.printedAt,
+                manufacturer: qrCode.batch.manufacturer || null,
+              }
+            : null,
+        },
+      });
+    }
+
     // If not yet assigned into any batch
     if (qrCode.status === QRStatus.DORMANT || qrCode.status === QRStatus.ACTIVE) {
       return res.json({
@@ -119,7 +152,41 @@ export const verifyQRCode = async (req: Request, res: Response) => {
       });
     }
 
-    // Valid printed/scanned QR - record scan
+    // Print job created but not confirmed
+    if (qrCode.status === QRStatus.ACTIVATED) {
+      return res.json({
+        success: true,
+        data: {
+          isAuthentic: false,
+          message: "This QR code has not been activated (print not confirmed).",
+          code,
+          status: qrCode.status,
+          licensee: qrCode.licensee
+            ? {
+                id: qrCode.licensee.id,
+                name: qrCode.licensee.name,
+                prefix: qrCode.licensee.prefix,
+                brandName: qrCode.licensee.brandName,
+                location: qrCode.licensee.location,
+                website: qrCode.licensee.website,
+                supportEmail: qrCode.licensee.supportEmail,
+                supportPhone: qrCode.licensee.supportPhone,
+              }
+            : null,
+          batch: qrCode.batch
+            ? {
+                id: qrCode.batch.id,
+                name: qrCode.batch.name,
+                printedAt: qrCode.batch.printedAt,
+                manufacturer: qrCode.batch.manufacturer || null,
+              }
+            : null,
+          batchName: qrCode.batch?.name || null,
+        },
+      });
+    }
+
+    // Valid printed/redeemed QR - record scan
     const toNum = (v: any) => {
       const n = parseFloat(String(v));
       return Number.isFinite(n) ? n : null;
@@ -147,11 +214,17 @@ export const verifyQRCode = async (req: Request, res: Response) => {
 
     const firstScanTime = updated.scannedAt ? new Date(updated.scannedAt) : null;
 
+    const warningMessage = !isFirstScan && firstScanTime
+      ? `Already redeemed. First scan was on ${firstScanTime.toISOString()}.`
+      : null;
+
     return res.json({
       success: true,
       data: {
-        isAuthentic: true,
-        message: "This is a genuine product.",
+        isAuthentic: isFirstScan,
+        message: isFirstScan
+          ? "This is a genuine product."
+          : "Already redeemed. Possible counterfeit or reuse.",
         code: updated.code,
 
         licensee: updated.licensee
@@ -184,9 +257,7 @@ export const verifyQRCode = async (req: Request, res: Response) => {
         scanCount: updated.scanCount ?? 0,
         isFirstScan,
 
-        warningMessage: !isFirstScan && firstScanTime
-          ? `This product has been scanned ${(updated.scanCount ?? 0)} times. First scan was on ${firstScanTime.toISOString()}.`
-          : null,
+        warningMessage,
       },
     });
   } catch (error) {

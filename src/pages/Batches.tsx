@@ -44,9 +44,10 @@ import {
 
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { onMutationEvent } from "@/lib/mutation-events";
 
 import { format } from "date-fns";
-import { Search, Trash2, RefreshCw, MoreHorizontal, Download, UserCog } from "lucide-react";
+import { Search, Trash2, RefreshCw, MoreHorizontal, Download, UserCog, Activity } from "lucide-react";
 
 import { saveAs } from "file-saver";
 
@@ -75,27 +76,6 @@ type QrRow = {
   batch?: { id: string } | null;
 };
 
-function useLocalStorageState<T>(key: string, initial: T) {
-  const [value, setValue] = useState<T>(() => {
-    try {
-      const raw = localStorage.getItem(key);
-      return raw ? (JSON.parse(raw) as T) : initial;
-    } catch {
-      return initial;
-    }
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch {
-      // ignore
-    }
-  }, [key, value]);
-
-  return [value, setValue] as const;
-}
-
 export default function Batches() {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -110,6 +90,8 @@ export default function Batches() {
   const [rows, setRows] = useState<BatchRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  const [assignmentFilter, setAssignmentFilter] = useState<"all" | "assigned" | "unassigned">("all");
+  const [printFilter, setPrintFilter] = useState<"all" | "printed" | "unprinted">("all");
 
   // manufacturers for assign dropdown (licensee_admin)
   const [manufacturers, setManufacturers] = useState<ManufacturerRow[]>([]);
@@ -123,22 +105,16 @@ export default function Batches() {
   const [printBatch, setPrintBatch] = useState<BatchRow | null>(null);
   const [printing, setPrinting] = useState(false);
 
-  // Saved settings for QR URL inside QR codes
-  const [publicBaseUrl, setPublicBaseUrl] = useLocalStorageState<string>(
-    "qr_public_base_url",
-    typeof window !== "undefined" ? window.location.origin : "http://localhost:8080"
-  );
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (publicBaseUrl.includes("auth.mcs.example")) {
-      setPublicBaseUrl(window.location.origin);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const buildPublicQrUrl = (code: string) => {
-    const base = String(publicBaseUrl || "").trim().replace(/\/+$/, "");
-    return `${base}/verify/${encodeURIComponent(code)}`;
-  };
+  const [printQuantity, setPrintQuantity] = useState<string>("");
+  const [printJobId, setPrintJobId] = useState<string>("");
+  const [printLockToken, setPrintLockToken] = useState<string>("");
+  const [printJobTokensCount, setPrintJobTokensCount] = useState<number>(0);
+
+  // allocation history
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyBatch, setHistoryBatch] = useState<BatchRow | null>(null);
+  const [historyLogs, setHistoryLogs] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const fetchBatches = async () => {
     setLoading(true);
@@ -179,15 +155,30 @@ export default function Batches() {
   }, []);
 
   useEffect(() => {
+    const off = onMutationEvent(() => {
+      fetchBatches();
+      fetchManufacturersForAssign();
+    });
+    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     fetchManufacturersForAssign();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.licenseeId, role]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    if (!s) return rows;
-
     return rows.filter((b) => {
+      if (isManufacturer) {
+        if (printFilter === "printed" && !b.printedAt) return false;
+        if (printFilter === "unprinted" && b.printedAt) return false;
+      } else {
+        if (assignmentFilter === "assigned" && !b.manufacturer) return false;
+        if (assignmentFilter === "unassigned" && b.manufacturer) return false;
+      }
+      if (!s) return true;
       const hay = [
         b.name,
         b.startCode,
@@ -203,7 +194,7 @@ export default function Batches() {
 
       return hay.includes(s);
     });
-  }, [rows, q]);
+  }, [rows, q, assignmentFilter, isManufacturer, printFilter]);
 
   // -------- DELETE (admins) --------
   const handleDelete = async (batch: BatchRow) => {
@@ -268,7 +259,15 @@ export default function Batches() {
       });
 
       if (!res.success) {
-        toast({ title: "Assign failed", description: res.error || "Error", variant: "destructive" });
+        const raw = (res.error || "Error").toLowerCase();
+        const isBusy = raw.includes("busy") || raw.includes("retry") || raw.includes("conflict");
+        toast({
+          title: isBusy ? "Batch busy" : "Assign failed",
+          description: isBusy
+            ? "These codes were just allocated by another action. Please retry."
+            : res.error || "Error",
+          variant: "destructive",
+        });
         return;
       }
 
@@ -283,20 +282,27 @@ export default function Batches() {
     }
   };
 
-  // -------- PRINT PACK (SERVER ZIP, ONE-TIME) --------
+  // -------- PRINT JOB (MANUFACTURER) --------
   const openPrintPack = (b: BatchRow) => {
     setPrintBatch(b);
+    setPrintQuantity("");
+    setPrintJobId("");
+    setPrintLockToken("");
+    setPrintJobTokensCount(0);
     setPrintOpen(true);
   };
 
-  const downloadBatchZip = async () => {
+  const createPrintJob = async () => {
     if (!printBatch) return;
-    const base = String(publicBaseUrl || "").trim();
-
-    if (!base) {
+    const qty = parseInt(printQuantity, 10);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast({ title: "Enter a valid quantity", variant: "destructive" });
+      return;
+    }
+    if (printBatch.availableCodes != null && qty > printBatch.availableCodes) {
       toast({
-        title: "Missing URL settings",
-        description: "Please set Public base URL first.",
+        title: "Quantity too large",
+        description: `Available: ${printBatch.availableCodes}.`,
         variant: "destructive",
       });
       return;
@@ -304,30 +310,99 @@ export default function Batches() {
 
     setPrinting(true);
     try {
-      const tokenRes = await apiClient.createBatchPrintToken(printBatch.id);
-      if (!tokenRes.success) {
-        toast({ title: "Download blocked", description: tokenRes.error || "Error", variant: "destructive" });
+      const res = await apiClient.createPrintJob({ batchId: printBatch.id, quantity: qty });
+      if (!res.success) {
+        const raw = (res.error || "Error").toLowerCase();
+        const isBusy = raw.includes("conflict") || raw.includes("busy") || raw.includes("retry");
+        toast({
+          title: isBusy ? "Batch busy" : "Print job failed",
+          description: isBusy
+            ? "These codes were just allocated by another job. Please retry."
+            : res.error || "Error",
+          variant: "destructive",
+        });
         return;
       }
+      const data: any = res.data || {};
+      setPrintJobId(data.printJobId || "");
+      setPrintLockToken(data.printLockToken || "");
+      setPrintJobTokensCount(Array.isArray(data.tokens) ? data.tokens.length : 0);
+      toast({ title: "Print job created", description: "Download your QR pack. Printing will auto-confirm on download." });
+    } finally {
+      setPrinting(false);
+    }
+  };
 
-      const token = (tokenRes.data as any)?.token;
-      if (!token) throw new Error("Download token missing");
-
-      const blob = await apiClient.downloadBatchPrintPack(token, { publicBaseUrl: base });
-      saveAs(blob, `batch-${printBatch.name || printBatch.id}-print-pack.zip`);
-
-      toast({
-        title: "Downloaded",
-        description: "Print pack downloaded. This batch is now marked as printed.",
-      });
-
+  const downloadPrintPack = async () => {
+    if (!printJobId || !printLockToken) return;
+    setPrinting(true);
+    try {
+      const blob = await apiClient.downloadPrintJobPack(printJobId, printLockToken);
+      saveAs(blob, `print-job-${printJobId}.zip`);
+      toast({ title: "Downloaded", description: "Print pack downloaded and confirmed." });
       setPrintOpen(false);
+      setPrintBatch(null);
+      setPrintJobId("");
+      setPrintLockToken("");
+      setPrintJobTokensCount(0);
       await fetchBatches();
     } catch (e: any) {
       toast({ title: "Download failed", description: e?.message || "Error", variant: "destructive" });
     } finally {
       setPrinting(false);
     }
+  };
+
+  const openHistory = async (b: BatchRow) => {
+    setHistoryBatch(b);
+    setHistoryOpen(true);
+    setHistoryLoading(true);
+    try {
+      const res = await apiClient.getAuditLogs({ entityType: "Batch", entityId: b.id, limit: 50 });
+      if (res.success) {
+        const payload: any = res.data;
+        const list = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.logs)
+          ? payload.logs
+          : Array.isArray(payload?.data)
+          ? payload.data
+          : [];
+        setHistoryLogs(list);
+      } else {
+        setHistoryLogs([]);
+      }
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const historySummary = (log: any) => {
+    const d = log?.details || {};
+    const ctx = d.context || "";
+    if (ctx === "ASSIGN_MANUFACTURER_QUANTITY_CHILD") {
+      return `Allocated ${d.quantity ?? "—"} to manufacturer ${d.manufacturerId || "—"} (${d.startCode || "?"} → ${d.endCode || "?"})`;
+    }
+    if (ctx === "ASSIGN_MANUFACTURER_QUANTITY_PARENT") {
+      return `Split ${d.quantity ?? "—"} to manufacturer ${d.manufacturerId || "—"} (child batch ${d.childBatchId || "—"})`;
+    }
+    if (ctx === "ADMIN_ALLOCATE_BATCH") {
+      return `Super admin allocated ${d.quantity ?? "—"} to manufacturer ${d.manufacturerId || "—"}`;
+    }
+    if (ctx === "CREATE_BATCH") {
+      return `Created batch with ${d.quantity ?? "—"} codes`;
+    }
+    if (log?.action === "PRINTED") {
+      return `Print confirmed (${d.printedCodes ?? "—"} codes)`;
+    }
+    return log?.action ? String(log.action) : "Activity";
+  };
+
+  const historyUser = (log: any) => {
+    if (log?.user?.name) return `${log.user.name} (${log.user.email || log.user.id || "id"})`;
+    if (log?.user?.email) return log.user.email;
+    if (log?.userId) return log.userId;
+    return "System";
   };
 
   return (
@@ -339,7 +414,7 @@ export default function Batches() {
             <h1 className="text-3xl font-bold">Batches</h1>
             <p className="text-muted-foreground">
               {isManufacturer
-                ? "Your assigned QR batches (one-time print pack download auto-confirms printing)"
+                ? "Your assigned QR batches (create print jobs, download pack, then confirm printing)"
                 : "Manage received QR batches (assign by quantity / delete / review printing)"}
             </p>
           </div>
@@ -358,14 +433,39 @@ export default function Batches() {
 
         <Card>
           <CardHeader className="pb-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search batches..."
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                className="pl-9"
-              />
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search batches..."
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              {role !== "manufacturer" ? (
+                <Select value={assignmentFilter} onValueChange={(v) => setAssignmentFilter(v as any)}>
+                  <SelectTrigger className="w-[220px]">
+                    <SelectValue placeholder="Assignment filter" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All batches</SelectItem>
+                    <SelectItem value="assigned">Assigned batches</SelectItem>
+                    <SelectItem value="unassigned">Unassigned batches</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Select value={printFilter} onValueChange={(v) => setPrintFilter(v as any)}>
+                  <SelectTrigger className="w-[220px]">
+                    <SelectValue placeholder="Printed filter" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All batches</SelectItem>
+                    <SelectItem value="printed">Printed</SelectItem>
+                    <SelectItem value="unprinted">Not printed</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
             </div>
           </CardHeader>
 
@@ -376,12 +476,13 @@ export default function Batches() {
                   <TableRow>
                     <TableHead>Batch</TableHead>
                     <TableHead>Licensee</TableHead>
-                    <TableHead>Range</TableHead>
-                    <TableHead>Total</TableHead>
-                    <TableHead>Assigned QR</TableHead>
-                    <TableHead>Manufacturer</TableHead>
-                    <TableHead>Printed</TableHead>
-                    <TableHead>Created</TableHead>
+                  <TableHead>Range</TableHead>
+                  <TableHead>Total</TableHead>
+                  <TableHead>Remaining</TableHead>
+                  <TableHead>Assigned QR</TableHead>
+                  <TableHead>Manufacturer</TableHead>
+                  <TableHead>Printed</TableHead>
+                  <TableHead>Created</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -389,13 +490,13 @@ export default function Batches() {
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-muted-foreground">
+                      <TableCell colSpan={10} className="text-muted-foreground">
                         Loading...
                       </TableCell>
                     </TableRow>
                   ) : filtered.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-muted-foreground">
+                      <TableCell colSpan={10} className="text-muted-foreground">
                         No batches found.
                       </TableCell>
                     </TableRow>
@@ -427,6 +528,19 @@ export default function Batches() {
                           </TableCell>
 
                           <TableCell>{b.totalCodes}</TableCell>
+
+                          <TableCell>
+                            <div className="space-y-1">
+                              <Badge variant={b.availableCodes ? "default" : "secondary"}>
+                                {b.availableCodes ?? 0}
+                              </Badge>
+                              <div className="text-[11px] text-muted-foreground font-mono">
+                                {b.remainingStartCode && b.remainingEndCode
+                                  ? `${b.remainingStartCode} → ${b.remainingEndCode}`
+                                  : "—"}
+                              </div>
+                            </div>
+                          </TableCell>
 
                           <TableCell>
                             <Badge variant={assignedCount > 0 ? "default" : "secondary"}>{assignedCount}</Badge>
@@ -464,11 +578,11 @@ export default function Batches() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  disabled={loading || printed}
+                                  disabled={loading || (b.availableCodes ?? 0) <= 0}
                                   onClick={() => openPrintPack(b)}
                                 >
                                   <Download className="mr-2 h-4 w-4" />
-                                  {printed ? "Printed" : "Download pack"}
+                                  {"Create Print Job"}
                                 </Button>
                               </div>
                             ) : (
@@ -480,6 +594,10 @@ export default function Batches() {
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => openHistory(b)}>
+                                    <Activity className="mr-2 h-4 w-4" />
+                                    View history
+                                  </DropdownMenuItem>
                                   {canAssignManufacturer && (
                                     <DropdownMenuItem onClick={() => openAssign(b)} disabled={!!b.manufacturer || !!b.printedAt}>
                                       <UserCog className="mr-2 h-4 w-4" />
@@ -566,6 +684,12 @@ export default function Batches() {
                   <div className="text-xs text-muted-foreground">
                     Available in this batch: {assignBatch.availableCodes ?? assignBatch.totalCodes}
                   </div>
+                  {assignBatch.availableCodes != null && Number(assignQuantity) > 0 && (
+                    <div className="text-xs text-muted-foreground">
+                      Remaining after split:{" "}
+                      {Math.max(assignBatch.availableCodes - Number(assignQuantity), 0)}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-end gap-3 pt-2">
@@ -581,13 +705,13 @@ export default function Batches() {
           </DialogContent>
         </Dialog>
 
-        {/* Print Pack Dialog */}
+        {/* Print Job Dialog */}
         <Dialog open={printOpen} onOpenChange={(v) => { setPrintOpen(v); if (!v) setPrintBatch(null); }}>
-          <DialogContent className="sm:max-w-[620px] max-h-[85vh] overflow-y-auto">
+          <DialogContent className="sm:max-w-[640px] max-h-[85vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Download Print Pack (PNG ZIP)</DialogTitle>
+              <DialogTitle>Create Print Job</DialogTitle>
               <DialogDescription>
-                One-time download. Downloading marks the batch as printed automatically.
+                Select quantity, generate signed QR tokens, download the pack. Printing is auto-confirmed after download.
               </DialogDescription>
             </DialogHeader>
 
@@ -595,11 +719,6 @@ export default function Batches() {
               <div className="text-sm text-muted-foreground">No batch selected.</div>
             ) : (
               <div className="space-y-4 mt-2">
-                {printBatch.printedAt && (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                    This batch is already marked as printed. Downloads are restricted to one-time use.
-                  </div>
-                )}
                 <div className="rounded-md border p-3 text-sm">
                   <div className="font-medium">{printBatch.name}</div>
                   <div className="text-muted-foreground font-mono text-xs">
@@ -607,24 +726,81 @@ export default function Batches() {
                   </div>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-1">
-                  <div className="space-y-2">
-                    <Label>Public base URL</Label>
-                    <Input value={publicBaseUrl} onChange={(e) => setPublicBaseUrl(e.target.value)} />
-                    <div className="text-xs text-muted-foreground font-mono">
-                      Example: {buildPublicQrUrl("A0000000001")}
-                    </div>
+                <div className="space-y-2">
+                  <Label>Quantity to print</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={printQuantity}
+                    onChange={(e) => setPrintQuantity(e.target.value)}
+                    placeholder="Enter quantity"
+                  />
+                  <div className="text-xs text-muted-foreground">
+                    Available: {printBatch.availableCodes ?? printBatch.totalCodes}
                   </div>
                 </div>
+
+                <div className="flex gap-2">
+                  <Button onClick={createPrintJob} disabled={printing}>
+                    {printing ? "Creating..." : "Create Print Job"}
+                  </Button>
+                  {printJobId && (
+                    <Badge variant="secondary">Job: {printJobId.slice(0, 8)}…</Badge>
+                  )}
+                </div>
+
+                {printJobId && printLockToken && (
+                  <div className="rounded-md border p-3 text-sm space-y-2">
+                    <div className="text-xs text-muted-foreground">Print Lock Token</div>
+                    <div className="font-mono text-xs break-all">{printLockToken}</div>
+                    <div className="text-xs text-muted-foreground">
+                      Tokens generated: {printJobTokensCount}
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex justify-end gap-3 pt-2">
                   <Button variant="outline" onClick={() => setPrintOpen(false)} disabled={printing}>
                     Close
                   </Button>
-                  <Button onClick={downloadBatchZip} disabled={printing || !!printBatch.printedAt}>
+                  <Button onClick={downloadPrintPack} disabled={printing || !printJobId}>
                     {printing ? "Generating..." : "Download ZIP"}
                   </Button>
                 </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Allocation History Dialog */}
+        <Dialog open={historyOpen} onOpenChange={(v) => { setHistoryOpen(v); if (!v) { setHistoryBatch(null); setHistoryLogs([]); } }}>
+          <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Batch History</DialogTitle>
+              <DialogDescription>
+                {historyBatch ? historyBatch.name : "Selected batch"} — allocation and print events
+              </DialogDescription>
+            </DialogHeader>
+
+            {historyLoading ? (
+              <div className="text-sm text-muted-foreground">Loading history…</div>
+            ) : historyLogs.length === 0 ? (
+              <div className="text-sm text-muted-foreground">No history found.</div>
+            ) : (
+              <div className="space-y-2">
+                {historyLogs.map((log) => (
+                  <div key={log.id} className="rounded-md border p-3 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-medium">{historySummary(log)}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {log.createdAt ? format(new Date(log.createdAt), "PPp") : "—"}
+                      </div>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      By {historyUser(log)}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </DialogContent>

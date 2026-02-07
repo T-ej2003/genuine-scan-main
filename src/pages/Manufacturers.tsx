@@ -30,6 +30,7 @@ import {
 
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { onMutationEvent } from "@/lib/mutation-events";
 
 import {
   Plus,
@@ -191,6 +192,14 @@ export default function Manufacturers() {
     loadManufacturers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveLicenseeId, showInactive]);
+
+  useEffect(() => {
+    const off = onMutationEvent(() => {
+      loadManufacturers();
+    });
+    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();

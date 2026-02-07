@@ -1,6 +1,7 @@
 import { Prisma, QRStatus } from "@prisma/client";
 import prisma from "../config/database";
 import { generateQRCode } from "./qrService";
+import { randomNonce } from "./qrTokenService";
 
 type DbClient = Prisma.TransactionClient;
 
@@ -62,6 +63,7 @@ export const allocateQrRange = async (params: AllocateQrRangeParams) => {
       code: generateQRCode(licensee.prefix, i),
       licenseeId,
       status: QRStatus.DORMANT,
+      tokenNonce: randomNonce(),
     });
   }
 
@@ -93,7 +95,7 @@ export const allocateQrRange = async (params: AllocateQrRangeParams) => {
     });
 
     if (updated.count !== totalCodes) {
-      throw new Error(`Concurrency issue: assigned ${updated.count}/${totalCodes}. Please retry.`);
+      throw new Error("BATCH_BUSY");
     }
 
     receivedBatch = batch;

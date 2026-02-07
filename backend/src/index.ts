@@ -36,7 +36,7 @@ app.use(
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Device-Fp"],
   })
 );
 
@@ -65,4 +65,3 @@ app.listen(PORT, () => {
   console.log(`📚 API available at http://localhost:${PORT}/api`);
   console.log(`🔍 Health check at http://localhost:${PORT}/health`);
 });
-

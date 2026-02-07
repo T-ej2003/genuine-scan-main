@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { onMutationEvent } from "@/lib/mutation-events";
 import { format } from "date-fns";
 import { RefreshCw, Check, X } from "lucide-react";
 
@@ -112,6 +113,14 @@ export default function QRRequests() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, licenseeFilter]);
 
+  useEffect(() => {
+    const off = onMutationEvent(() => {
+      loadRequests();
+    });
+    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const submitRequest = async () => {
     if (!isLicensee) return;
 
@@ -186,7 +195,13 @@ export default function QRRequests() {
 
       const res = await apiClient.approveQrAllocationRequest(activeReq.id, payload);
       if (!res.success) {
-        toast({ title: "Approve failed", description: res.error || "Error", variant: "destructive" });
+        const raw = (res.error || "Error").toLowerCase();
+        const isBusy = raw.includes("busy") || raw.includes("retry") || raw.includes("conflict");
+        toast({
+          title: isBusy ? "Batch busy" : "Approve failed",
+          description: isBusy ? "Please retry — batch busy." : res.error || "Error",
+          variant: "destructive",
+        });
         return;
       }
 

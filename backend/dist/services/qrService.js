@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getQRStats = exports.recordScan = exports.markBatchAsPrinted = exports.allocateQRCodesToBatch = exports.activateQRCodes = exports.generateQRCodesForRange = exports.buildVerifyUrl = exports.makeProductCode = exports.parseQRCode = exports.generateQRCode = void 0;
 const client_1 = require("@prisma/client");
 const database_1 = __importDefault(require("../config/database"));
+const qrTokenService_1 = require("./qrTokenService");
 const generateQRCode = (prefix, number) => {
     return `${prefix}${number.toString().padStart(10, "0")}`;
 };
@@ -41,6 +42,7 @@ const generateQRCodesForRange = async (licenseeId, prefix, startNumber, endNumbe
             code: (0, exports.generateQRCode)(prefix, i),
             licenseeId,
             status: client_1.QRStatus.DORMANT,
+            tokenNonce: (0, qrTokenService_1.randomNonce)(),
         });
     }
     const batchSize = 1000;
@@ -84,10 +86,11 @@ const markBatchAsPrinted = async (batchId, manufacturerId) => {
         throw new Error("Batch not found or not assigned to this manufacturer");
     if (batch.printedAt)
         throw new Error("Batch has already been marked as printed");
-    await database_1.default.batch.update({ where: { id: batchId }, data: { printedAt: new Date() } });
+    const now = new Date();
+    await database_1.default.batch.update({ where: { id: batchId }, data: { printedAt: now } });
     const result = await database_1.default.qRCode.updateMany({
         where: { batchId, status: client_1.QRStatus.ALLOCATED },
-        data: { status: client_1.QRStatus.PRINTED },
+        data: { status: client_1.QRStatus.PRINTED, printedAt: now, printedByUserId: manufacturerId },
     });
     return result.count;
 };
@@ -103,7 +106,9 @@ const recordScan = async (code, meta) => {
     });
     if (!existing)
         throw new Error("QR code not found");
-    if (existing.status !== client_1.QRStatus.PRINTED && existing.status !== client_1.QRStatus.SCANNED) {
+    if (existing.status !== client_1.QRStatus.PRINTED &&
+        existing.status !== client_1.QRStatus.REDEEMED &&
+        existing.status !== client_1.QRStatus.SCANNED) {
         throw new Error("QR code has not been printed yet");
     }
     const isFirstScan = existing.status === client_1.QRStatus.PRINTED;
@@ -111,8 +116,12 @@ const recordScan = async (code, meta) => {
         const qr = await tx.qRCode.update({
             where: { code },
             data: {
-                status: client_1.QRStatus.SCANNED,
+                status: isFirstScan ? client_1.QRStatus.REDEEMED : existing.status,
                 scannedAt: isFirstScan ? new Date() : existing.scannedAt,
+                redeemedAt: isFirstScan ? new Date() : existing.redeemedAt,
+                lastScanIp: meta?.ipAddress ?? null,
+                lastScanUserAgent: meta?.userAgent ?? null,
+                lastScanDevice: meta?.device ?? null,
                 scanCount: { increment: 1 },
             },
             include: {

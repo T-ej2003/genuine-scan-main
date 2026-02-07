@@ -16,7 +16,7 @@ export function QRStatusChart({ data }: QRStatusChartProps) {
     { name: 'Dormant', value: data.dormant, color: 'hsl(215, 16%, 47%)' },
     { name: 'Allocated', value: data.allocated, color: 'hsl(199, 89%, 48%)' },
     { name: 'Printed', value: data.printed, color: 'hsl(38, 92%, 50%)' },
-    { name: 'Scanned', value: data.scanned, color: 'hsl(160, 84%, 39%)' },
+    { name: 'Redeemed', value: data.scanned, color: 'hsl(160, 84%, 39%)' },
   ];
 
   return (

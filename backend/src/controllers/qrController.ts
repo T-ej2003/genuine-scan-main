@@ -5,11 +5,12 @@ import { QRStatus, UserRole } from "@prisma/client";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { createAuditLog } from "../services/auditService";
-import { generateQRCode, markBatchAsPrinted, buildVerifyUrl, getQRStats } from "../services/qrService";
+import { generateQRCode, markBatchAsPrinted, buildVerifyUrl, getQRStats, parseQRCode } from "../services/qrService";
 import { allocateQrRange } from "../services/qrAllocationService";
 import { createHash, randomBytes } from "crypto";
 import JSZip from "jszip";
 import QRCode from "qrcode";
+import { hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
 
 /* ===================== SCHEMAS ===================== */
 
@@ -56,6 +57,15 @@ const adminAllocateBatchSchema = z.object({
   requestNote: z.string().trim().max(500).optional(),
 });
 
+const generateQRCodesSchema = z.object({
+  licenseeId: z.string().uuid(),
+  quantity: z.number().int().positive().max(200000),
+});
+
+const blockQRSschema = z.object({
+  reason: z.string().trim().max(500).optional(),
+});
+
 /* ===================== HELPERS ===================== */
 
 const ensureAuth = (req: AuthRequest) => {
@@ -87,6 +97,9 @@ const escapeCsv = (v: any) => {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
+const isBatchBusyError = (msg: string) =>
+  msg.includes("BATCH_BUSY") || msg.toLowerCase().includes("concurrency issue");
+
 /* ===================== QR RANGE (SUPER ADMIN route) ===================== */
 
 export const allocateQRRange = async (req: AuthRequest, res: Response) => {
@@ -115,10 +128,11 @@ export const allocateQRRange = async (req: AuthRequest, res: Response) => {
 
     await createAuditLog({
       userId: auth.userId,
-      action: "ALLOCATE_QR_RANGE",
+      action: "ALLOCATED",
       entityType: "QRRange",
       entityId: result.range.id,
       details: {
+        context: "ALLOCATE_QR_RANGE",
         startCode: result.startCode,
         endCode: result.endCode,
         created: result.createdCount,
@@ -131,6 +145,9 @@ export const allocateQRRange = async (req: AuthRequest, res: Response) => {
   } catch (e) {
     console.error("allocateQRRange error:", e);
     const msg = (e as any)?.message || "Internal server error";
+    if (isBatchBusyError(msg)) {
+      return res.status(409).json({ success: false, error: "Please retry — batch busy." });
+    }
     return res.status(400).json({ success: false, error: msg });
   }
 };
@@ -166,10 +183,11 @@ export const allocateQRRangeForLicensee = async (req: AuthRequest, res: Response
 
     await createAuditLog({
       userId: auth.userId,
-      action: "ALLOCATE_QR_RANGE_LICENSEE",
+      action: "ALLOCATED",
       entityType: "QRRange",
       entityId: result.range.id,
       details: {
+        context: "ALLOCATE_QR_RANGE_LICENSEE",
         licenseeId,
         startCode: result.startCode,
         endCode: result.endCode,
@@ -182,7 +200,11 @@ export const allocateQRRangeForLicensee = async (req: AuthRequest, res: Response
     return res.status(201).json({ success: true, data: result.range });
   } catch (e: any) {
     console.error("allocateQRRangeForLicensee error:", e);
-    return res.status(400).json({ success: false, error: e?.message || "Bad request" });
+    const msg = e?.message || "Bad request";
+    if (isBatchBusyError(msg)) {
+      return res.status(409).json({ success: false, error: "Please retry — batch busy." });
+    }
+    return res.status(400).json({ success: false, error: msg });
   }
 };
 
@@ -288,11 +310,23 @@ export const createBatch = async (req: AuthRequest, res: Response) => {
 
       const updated = await tx.qRCode.updateMany({
         where: { id: { in: pool.map((p) => p.id) } },
-        data: { batchId: createdBatch.id, status: QRStatus.ALLOCATED },
+        data: {
+          batchId: createdBatch.id,
+          status: QRStatus.ALLOCATED,
+          printJobId: null,
+          tokenNonce: null,
+          tokenIssuedAt: null,
+          tokenExpiresAt: null,
+          tokenHash: null,
+          printedAt: null,
+          printedByUserId: null,
+          redeemedAt: null,
+          redeemedDeviceFingerprint: null,
+        },
       });
 
       if (updated.count !== pool.length) {
-        throw new Error(`Concurrency issue: assigned ${updated.count}/${pool.length}. Please retry.`);
+        throw new Error("BATCH_BUSY");
       }
 
       return createdBatch;
@@ -300,10 +334,10 @@ export const createBatch = async (req: AuthRequest, res: Response) => {
 
     await createAuditLog({
       userId: auth.userId,
-      action: "CREATE_BATCH",
+      action: "ALLOCATED",
       entityType: "Batch",
       entityId: batch.id,
-      details: { name, quantity, manufacturerId: mfgId },
+      details: { context: "CREATE_BATCH", name, quantity, manufacturerId: mfgId },
       ipAddress: req.ip,
     });
 
@@ -311,6 +345,9 @@ export const createBatch = async (req: AuthRequest, res: Response) => {
   } catch (e: any) {
     const msg = e?.message || "Internal server error";
     console.error("createBatch error:", e);
+    if (isBatchBusyError(msg)) {
+      return res.status(409).json({ success: false, error: "Please retry — batch busy." });
+    }
     return res.status(400).json({ success: false, error: msg });
   }
 };
@@ -391,11 +428,23 @@ export const adminAllocateBatch = async (req: AuthRequest, res: Response) => {
 
       const updated = await tx.qRCode.updateMany({
         where: { id: { in: pool.map((p) => p.id) } },
-        data: { batchId: batch.id, status: QRStatus.ALLOCATED },
+        data: {
+          batchId: batch.id,
+          status: QRStatus.ALLOCATED,
+          printJobId: null,
+          tokenNonce: null,
+          tokenIssuedAt: null,
+          tokenExpiresAt: null,
+          tokenHash: null,
+          printedAt: null,
+          printedByUserId: null,
+          redeemedAt: null,
+          redeemedDeviceFingerprint: null,
+        },
       });
 
       if (updated.count !== pool.length) {
-        throw new Error(`Concurrency issue: assigned ${updated.count}/${pool.length}. Please retry.`);
+        throw new Error("BATCH_BUSY");
       }
 
       return batch;
@@ -403,10 +452,11 @@ export const adminAllocateBatch = async (req: AuthRequest, res: Response) => {
 
     await createAuditLog({
       userId: req.user.userId,
-      action: "ADMIN_ALLOCATE_BATCH",
+      action: "ALLOCATED",
       entityType: "Batch",
       entityId: createdBatch.id,
       details: {
+        context: "ADMIN_ALLOCATE_BATCH",
         licenseeId,
         manufacturerId,
         quantity: pool.length,
@@ -426,6 +476,9 @@ export const adminAllocateBatch = async (req: AuthRequest, res: Response) => {
   } catch (e: any) {
     const msg = e?.message || "Internal server error";
     console.error("adminAllocateBatch error:", e);
+    if (isBatchBusyError(msg)) {
+      return res.status(409).json({ success: false, error: "Please retry — batch busy." });
+    }
     return res.status(400).json({ success: false, error: msg });
   }
 };
@@ -462,7 +515,19 @@ export const deleteBatch = async (req: AuthRequest, res: Response) => {
     const result = await prisma.$transaction(async (tx) => {
       const unassigned = await tx.qRCode.updateMany({
         where: { batchId: batch.id },
-        data: { batchId: null, status: QRStatus.DORMANT },
+        data: {
+          batchId: null,
+          status: QRStatus.DORMANT,
+          printJobId: null,
+          tokenNonce: null,
+          tokenIssuedAt: null,
+          tokenExpiresAt: null,
+          tokenHash: null,
+          printedAt: null,
+          printedByUserId: null,
+          redeemedAt: null,
+          redeemedDeviceFingerprint: null,
+        },
       });
 
       await tx.batch.delete({ where: { id: batch.id } });
@@ -528,7 +593,19 @@ export const bulkDeleteBatches = async (req: AuthRequest, res: Response) => {
     const txResult = await prisma.$transaction(async (tx) => {
       const unassigned = await tx.qRCode.updateMany({
         where: { batchId: { in: batchIds } },
-        data: { batchId: null, status: QRStatus.DORMANT },
+        data: {
+          batchId: null,
+          status: QRStatus.DORMANT,
+          printJobId: null,
+          tokenNonce: null,
+          tokenIssuedAt: null,
+          tokenExpiresAt: null,
+          tokenHash: null,
+          printedAt: null,
+          printedByUserId: null,
+          redeemedAt: null,
+          redeemedDeviceFingerprint: null,
+        },
       });
 
       const deleted = await tx.batch.deleteMany({
@@ -606,6 +683,7 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
         where: {
           batchId: batch.id,
           status: { in: [QRStatus.DORMANT, QRStatus.ACTIVE, QRStatus.ALLOCATED] },
+          printJobId: null,
         },
         orderBy: { code: "asc" },
         take: quantity,
@@ -637,10 +715,25 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
         },
       });
 
-      await tx.qRCode.updateMany({
+      const updated = await tx.qRCode.updateMany({
         where: { id: { in: eligible.map((e) => e.id) } },
-        data: { batchId: newBatch.id, status: QRStatus.ALLOCATED },
+        data: {
+          batchId: newBatch.id,
+          status: QRStatus.ALLOCATED,
+          printJobId: null,
+          tokenNonce: null,
+          tokenIssuedAt: null,
+          tokenExpiresAt: null,
+          tokenHash: null,
+          printedAt: null,
+          printedByUserId: null,
+          redeemedAt: null,
+          redeemedDeviceFingerprint: null,
+        },
       });
+      if (updated.count !== eligible.length) {
+        throw new Error("BATCH_BUSY");
+      }
 
       const remaining = await tx.qRCode.findMany({
         where: { batchId: batch.id },
@@ -661,22 +754,47 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
         });
       }
 
-      return { newBatchId: newBatch.id, allocated: totalCodes };
+      return { newBatchId: newBatch.id, allocated: totalCodes, startCode, endCode };
     });
 
     await createAuditLog({
       userId: auth.userId,
-      action: "ASSIGN_MANUFACTURER_QUANTITY",
+      action: "ALLOCATED",
       entityType: "Batch",
       entityId: batch.id,
-      details: { manufacturerId: manufacturer.id, quantity: result.allocated },
+      details: {
+        context: "ASSIGN_MANUFACTURER_QUANTITY_PARENT",
+        manufacturerId: manufacturer.id,
+        quantity: result.allocated,
+        childBatchId: result.newBatchId,
+      },
+      ipAddress: req.ip,
+    });
+
+    await createAuditLog({
+      userId: auth.userId,
+      action: "ALLOCATED",
+      entityType: "Batch",
+      entityId: result.newBatchId,
+      details: {
+        context: "ASSIGN_MANUFACTURER_QUANTITY_CHILD",
+        manufacturerId: manufacturer.id,
+        quantity: result.allocated,
+        parentBatchId: batch.id,
+        startCode: result.startCode,
+        endCode: result.endCode,
+      },
       ipAddress: req.ip,
     });
 
     return res.json({ success: true, data: result });
   } catch (e) {
     console.error("assignManufacturer error:", e);
-    return res.status(400).json({ success: false, error: (e as any)?.message || "Internal server error" });
+    const msg = (e as any)?.message || "Internal server error";
+    if (isBatchBusyError(msg)) {
+      return res.status(409).json({ success: false, error: "Please retry — batch busy." });
+    }
+    return res.status(400).json({ success: false, error: msg });
   }
 };
 
@@ -845,7 +963,7 @@ export const downloadBatchPrintPack = async (req: AuthRequest, res: Response) =>
 
       await tx.qRCode.updateMany({
         where: { batchId: batch.id, status: { in: [QRStatus.ALLOCATED, QRStatus.ACTIVE, QRStatus.DORMANT] } },
-        data: { status: QRStatus.PRINTED },
+        data: { status: QRStatus.PRINTED, printedAt: now, printedByUserId: userId },
       });
     });
 
@@ -865,6 +983,191 @@ export const downloadBatchPrintPack = async (req: AuthRequest, res: Response) =>
     return res.status(200).send(out);
   } catch (e: any) {
     console.error("downloadBatchPrintPack error:", e);
+    return res.status(400).json({ success: false, error: e?.message || "Bad request" });
+  }
+};
+
+/* ===================== ADMIN GENERATE SIGNED QRS ===================== */
+
+export const generateQRCodes = async (req: AuthRequest, res: Response) => {
+  try {
+    if (req.user?.role !== UserRole.SUPER_ADMIN) {
+      return res.status(403).json({ success: false, error: "Access denied" });
+    }
+
+    const parsed = generateQRCodesSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+    }
+
+    const { licenseeId, quantity } = parsed.data;
+
+    const last = await prisma.qRCode.findFirst({
+      where: { licenseeId },
+      orderBy: { code: "desc" },
+      select: { code: true },
+    });
+
+    let nextNumber = 1;
+    if (last?.code) {
+      const parsedCode = parseQRCode(last.code);
+      if (parsedCode) nextNumber = parsedCode.number + 1;
+    }
+
+    const startNumber = nextNumber;
+    const endNumber = nextNumber + quantity - 1;
+
+    const result = await prisma.$transaction((tx) =>
+      allocateQrRange({
+        licenseeId,
+        startNumber,
+        endNumber,
+        createdByUserId: req.user?.userId,
+        source: "ADMIN_GENERATE",
+        createReceivedBatch: true,
+        tx,
+      })
+    );
+
+    const rows = await prisma.qRCode.findMany({
+      where: { licenseeId, code: { gte: result.startCode, lte: result.endCode } },
+      select: { id: true, licenseeId: true, batchId: true, tokenNonce: true, tokenIssuedAt: true, tokenExpiresAt: true },
+      orderBy: { code: "asc" },
+    });
+
+    const now = new Date();
+    const expAt = new Date(now.getTime() + 3650 * 24 * 60 * 60 * 1000);
+
+    const tokens: { qrId: string; token: string }[] = [];
+    for (const qr of rows) {
+      const nonce = qr.tokenNonce || randomNonce();
+      const payload = {
+        qr_id: qr.id,
+        batch_id: qr.batchId ?? null,
+        licensee_id: qr.licenseeId,
+        manufacturer_id: null,
+        iat: Math.floor(now.getTime() / 1000),
+        exp: Math.floor(expAt.getTime() / 1000),
+        nonce,
+      };
+      const token = signQrPayload(payload);
+      const tokenHash = hashToken(token);
+      tokens.push({ qrId: qr.id, token });
+
+      await prisma.qRCode.update({
+        where: { id: qr.id },
+        data: {
+          tokenNonce: nonce,
+          tokenIssuedAt: now,
+          tokenExpiresAt: expAt,
+          tokenHash,
+        },
+      });
+    }
+
+    await createAuditLog({
+      userId: req.user.userId,
+      licenseeId,
+      action: "CREATED",
+      entityType: "QRCode",
+      details: { startNumber, endNumber, quantity },
+      ipAddress: req.ip,
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        range: result.range,
+        receivedBatch: result.receivedBatch,
+        tokens,
+      },
+    });
+  } catch (e: any) {
+    console.error("generateQRCodes error:", e);
+    const msg = e?.message || "Bad request";
+    if (isBatchBusyError(msg)) {
+      return res.status(409).json({ success: false, error: "Please retry — batch busy." });
+    }
+    return res.status(400).json({ success: false, error: msg });
+  }
+};
+
+/* ===================== ADMIN BLOCK ===================== */
+
+export const blockQRCode = async (req: AuthRequest, res: Response) => {
+  try {
+    if (req.user?.role !== UserRole.SUPER_ADMIN) {
+      return res.status(403).json({ success: false, error: "Access denied" });
+    }
+
+    const parsed = blockQRSschema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+    }
+
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ success: false, error: "Missing QR id" });
+
+    const updated = await prisma.qRCode.update({
+      where: { id },
+      data: { status: QRStatus.BLOCKED, blockedAt: new Date() },
+    });
+
+    await createAuditLog({
+      userId: req.user.userId,
+      licenseeId: updated.licenseeId,
+      action: "BLOCKED",
+      entityType: "QRCode",
+      entityId: updated.id,
+      details: { reason: parsed.data.reason || null },
+      ipAddress: req.ip,
+    });
+
+    return res.json({ success: true, data: { id: updated.id } });
+  } catch (e: any) {
+    console.error("blockQRCode error:", e);
+    return res.status(400).json({ success: false, error: e?.message || "Bad request" });
+  }
+};
+
+export const blockBatch = async (req: AuthRequest, res: Response) => {
+  try {
+    if (req.user?.role !== UserRole.SUPER_ADMIN) {
+      return res.status(403).json({ success: false, error: "Access denied" });
+    }
+
+    const parsed = blockQRSschema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+    }
+
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ success: false, error: "Missing batch id" });
+
+    const batch = await prisma.batch.findUnique({
+      where: { id },
+      select: { id: true, licenseeId: true },
+    });
+    if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
+
+    const updated = await prisma.qRCode.updateMany({
+      where: { batchId: batch.id },
+      data: { status: QRStatus.BLOCKED, blockedAt: new Date() },
+    });
+
+    await createAuditLog({
+      userId: req.user.userId,
+      licenseeId: batch.licenseeId,
+      action: "BLOCKED",
+      entityType: "Batch",
+      entityId: batch.id,
+      details: { blockedCodes: updated.count, reason: parsed.data.reason || null },
+      ipAddress: req.ip,
+    });
+
+    return res.json({ success: true, data: { batchId: batch.id, blocked: updated.count } });
+  } catch (e: any) {
+    console.error("blockBatch error:", e);
     return res.status(400).json({ success: false, error: e?.message || "Bad request" });
   }
 };
@@ -902,14 +1205,26 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
 
     const batchIds = batches.map((b) => b.id);
 
+    const allocatableStatuses = [QRStatus.DORMANT, QRStatus.ACTIVE, QRStatus.ALLOCATED];
+
     const remainingGroups = await prisma.qRCode.groupBy({
       by: ["batchId"],
       where: {
         batchId: { in: batchIds },
+        status: { in: allocatableStatuses },
       },
       _count: { _all: true },
       _min: { code: true },
       _max: { code: true },
+    });
+
+    const allocatedGroups = await prisma.qRCode.groupBy({
+      by: ["batchId"],
+      where: {
+        batchId: { in: batchIds },
+        status: { in: allocatableStatuses },
+      },
+      _count: { _all: true },
     });
 
     const remainingMap = new Map<
@@ -923,6 +1238,12 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
         remainingStartCode: g._min?.code || null,
         remainingEndCode: g._max?.code || null,
       });
+    }
+
+    const allocatedMap = new Map<string, number>();
+    for (const g of allocatedGroups) {
+      if (!g.batchId) continue;
+      allocatedMap.set(g.batchId, g._count?._all || 0);
     }
 
     const enriched = batches.map((b) => ({

@@ -17,7 +17,10 @@ enum QRStatus {
   DORMANT
   ACTIVE
   ALLOCATED
+  ACTIVATED
   PRINTED
+  REDEEMED
+  BLOCKED
   SCANNED
 }
 
@@ -25,6 +28,12 @@ enum QrAllocationRequestStatus {
   PENDING
   APPROVED
   REJECTED
+}
+
+enum PrintJobStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
 }
 
 model User {
@@ -51,6 +60,8 @@ model User {
   allocationEventsCreated AllocationEvent[] @relation("AllocationEventCreatedBy")
   batchPrintPackTokensCreated BatchPrintPackToken[] @relation("BatchPrintPackTokenCreatedBy")
   batchPrintDownloads Batch[] @relation("BatchPrintPackDownloadedBy")
+  printedQRCodes QRCode[] @relation("QRCodePrintedBy")
+  printJobs PrintJob[] @relation("ManufacturerPrintJobs")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -122,6 +133,7 @@ model Batch {
 
   qrCodes        QRCode[]
   batchPrintPackTokens BatchPrintPackToken[]
+  printJobs          PrintJob[]
   scanLogs            QrScanLog[]
 
   createdAt DateTime @default(now())
@@ -133,6 +145,29 @@ model Batch {
   @@index([printPackDownloadedAt])
 }
 
+model PrintJob {
+  id         String   @id @default(uuid())
+  batchId    String
+  batch      Batch    @relation(fields: [batchId], references: [id])
+
+  manufacturerId String
+  manufacturer   User   @relation("ManufacturerPrintJobs", fields: [manufacturerId], references: [id])
+
+  status     PrintJobStatus @default(PENDING)
+  quantity   Int
+  rangeStart String?
+  rangeEnd   String?
+
+  printLockTokenHash String @unique
+  confirmedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  qrCodes QRCode[]
+
+  @@index([batchId])
+  @@index([manufacturerId])
+  @@index([status])
+}
 
 model QRCode {
   id         String   @id @default(uuid())
@@ -149,6 +184,22 @@ model QRCode {
   status    QRStatus  @default(DORMANT)
   scannedAt DateTime?
   scanCount Int       @default(0)
+  printedAt DateTime?
+  printedByUserId String?
+  printedByUser   User? @relation("QRCodePrintedBy", fields: [printedByUserId], references: [id])
+  redeemedAt DateTime?
+  redeemedDeviceFingerprint String?
+  lastScanIp String?
+  lastScanUserAgent String?
+  lastScanDevice String?
+  blockedAt DateTime?
+  tokenNonce String?
+  tokenIssuedAt DateTime?
+  tokenExpiresAt DateTime?
+  tokenHash String?
+
+  printJobId String?
+  printJob   PrintJob? @relation(fields: [printJobId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -156,6 +207,8 @@ model QRCode {
   @@index([licenseeId])
   @@index([batchId])
   @@index([status])
+  @@index([printJobId])
+  @@index([tokenHash])
 }
 
 model QrScanLog {

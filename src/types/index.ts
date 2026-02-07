@@ -1,5 +1,13 @@
 export type UserRole = "super_admin" | "licensee_admin" | "manufacturer";
-export type QRStatus = "DORMANT" | "ACTIVE" | "ALLOCATED" | "PRINTED" | "SCANNED";
+export type QRStatus =
+  | "DORMANT"
+  | "ACTIVE"
+  | "ALLOCATED"
+  | "ACTIVATED"
+  | "PRINTED"
+  | "REDEEMED"
+  | "BLOCKED"
+  | "SCANNED";
 
 export interface User {
   id: string;

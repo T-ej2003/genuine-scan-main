@@ -13,24 +13,36 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
     const limit = Number(req.query.limit) || 50;
     const offset = Number(req.query.offset) || 0;
     const entityType = req.query.entityType as string | undefined;
+    const entityId = req.query.entityId as string | undefined;
 
     const licenseeId =
       req.user.role === UserRole.SUPER_ADMIN
         ? (req.query.licenseeId as string | undefined)
         : req.user.licenseeId ?? undefined;
 
+    let userIds: string[] | undefined;
+    if (req.user.role !== UserRole.SUPER_ADMIN && licenseeId) {
+      const users = await prisma.user.findMany({
+        where: { licenseeId },
+        select: { id: true },
+      });
+      userIds = users.map((u) => u.id);
+    }
+
     const result = await getAuditLogs({
       entityType,
+      entityId,
       licenseeId,
+      userIds,
       limit,
       offset,
     });
 
-    const userIds = Array.from(new Set(result.logs.map((l) => l.userId).filter(Boolean))) as string[];
+    const userIdsForMap = Array.from(new Set(result.logs.map((l) => l.userId).filter(Boolean))) as string[];
     let userMap = new Map<string, { id: string; name: string; email: string }>();
-    if (userIds.length > 0) {
+    if (userIdsForMap.length > 0) {
       const users = await prisma.user.findMany({
-        where: { id: { in: userIds } },
+        where: { id: { in: userIdsForMap } },
         select: { id: true, name: true, email: true },
       });
       userMap = new Map(users.map((u) => [u.id, u]));
@@ -56,24 +68,36 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
 
     const limit = Math.min(Number(req.query.limit) || 5000, 20000);
     const entityType = req.query.entityType as string | undefined;
+    const entityId = req.query.entityId as string | undefined;
 
     const licenseeId =
       req.user.role === UserRole.SUPER_ADMIN
         ? (req.query.licenseeId as string | undefined)
         : req.user.licenseeId ?? undefined;
 
+    let userIds: string[] | undefined;
+    if (req.user.role !== UserRole.SUPER_ADMIN && licenseeId) {
+      const users = await prisma.user.findMany({
+        where: { licenseeId },
+        select: { id: true },
+      });
+      userIds = users.map((u) => u.id);
+    }
+
     const result = await getAuditLogs({
       entityType,
+      entityId,
       licenseeId,
+      userIds,
       limit,
       offset: 0,
     });
 
-    const userIds = Array.from(new Set(result.logs.map((l) => l.userId).filter(Boolean))) as string[];
+    const userIdsForMap = Array.from(new Set(result.logs.map((l) => l.userId).filter(Boolean))) as string[];
     let userMap = new Map<string, { id: string; name: string; email: string }>();
-    if (userIds.length > 0) {
+    if (userIdsForMap.length > 0) {
       const users = await prisma.user.findMany({
-        where: { id: { in: userIds } },
+        where: { id: { in: userIdsForMap } },
         select: { id: true, name: true, email: true },
       });
       userMap = new Map(users.map((u) => [u.id, u]));

@@ -32,14 +32,23 @@ export const createAuditLog = async (data: AuditLogInput) => {
 export const getAuditLogs = async (opts: {
   userId?: string;
   entityType?: string;
+  entityId?: string;
   licenseeId?: string;
+  userIds?: string[];
   limit: number;
   offset: number;
 }) => {
   const where: any = {};
   if (opts.userId) where.userId = opts.userId;
   if (opts.entityType) where.entityType = opts.entityType;
-  if (opts.licenseeId) where.licenseeId = opts.licenseeId;
+  if (opts.entityId) where.entityId = opts.entityId;
+  if (opts.userIds && opts.userIds.length) {
+    const or: any[] = [{ userId: { in: opts.userIds } }];
+    if (opts.licenseeId) or.push({ licenseeId: opts.licenseeId });
+    where.OR = or;
+  } else if (opts.licenseeId) {
+    where.licenseeId = opts.licenseeId;
+  }
 
   const [logs, total] = await Promise.all([
     prisma.auditLog.findMany({
@@ -53,4 +62,3 @@ export const getAuditLogs = async (opts: {
 
   return { logs, total };
 };
-

@@ -1,5 +1,6 @@
 import { QRStatus, Prisma } from "@prisma/client";
 import prisma from "../config/database";
+import { randomNonce } from "./qrTokenService";
 
 export const generateQRCode = (prefix: string, number: number): string => {
   return `${prefix}${number.toString().padStart(10, "0")}`;
@@ -44,6 +45,7 @@ export const generateQRCodesForRange = async (
       code: generateQRCode(prefix, i),
       licenseeId,
       status: QRStatus.DORMANT,
+      tokenNonce: randomNonce(),
     });
   }
 
@@ -95,11 +97,12 @@ export const markBatchAsPrinted = async (batchId: string, manufacturerId: string
   if (!batch) throw new Error("Batch not found or not assigned to this manufacturer");
   if (batch.printedAt) throw new Error("Batch has already been marked as printed");
 
-  await prisma.batch.update({ where: { id: batchId }, data: { printedAt: new Date() } });
+  const now = new Date();
+  await prisma.batch.update({ where: { id: batchId }, data: { printedAt: now } });
 
   const result = await prisma.qRCode.updateMany({
     where: { batchId, status: QRStatus.ALLOCATED },
-    data: { status: QRStatus.PRINTED },
+    data: { status: QRStatus.PRINTED, printedAt: now, printedByUserId: manufacturerId },
   });
 
   return result.count;
@@ -128,7 +131,11 @@ export const recordScan = async (
 
   if (!existing) throw new Error("QR code not found");
 
-  if (existing.status !== QRStatus.PRINTED && existing.status !== QRStatus.SCANNED) {
+  if (
+    existing.status !== QRStatus.PRINTED &&
+    existing.status !== QRStatus.REDEEMED &&
+    existing.status !== QRStatus.SCANNED
+  ) {
     throw new Error("QR code has not been printed yet");
   }
 
@@ -138,8 +145,12 @@ export const recordScan = async (
     const qr = await tx.qRCode.update({
       where: { code },
       data: {
-        status: QRStatus.SCANNED,
+        status: isFirstScan ? QRStatus.REDEEMED : existing.status,
         scannedAt: isFirstScan ? new Date() : existing.scannedAt,
+        redeemedAt: isFirstScan ? new Date() : existing.redeemedAt,
+        lastScanIp: meta?.ipAddress ?? null,
+        lastScanUserAgent: meta?.userAgent ?? null,
+        lastScanDevice: meta?.device ?? null,
         scanCount: { increment: 1 },
       },
       include: {

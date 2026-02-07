@@ -33,22 +33,33 @@ import apiClient from "@/lib/api-client";
 import QRCode from "qrcode";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
+import { onMutationEvent } from "@/lib/mutation-events";
 
-type UIStatus = "dormant" | "allocated" | "printed" | "scanned";
-type ApiStatus = "DORMANT" | "ALLOCATED" | "PRINTED" | "SCANNED";
+type UIStatus = "dormant" | "allocated" | "printed" | "scanned" | "blocked";
+type ApiStatus =
+  | "DORMANT"
+  | "ACTIVE"
+  | "ALLOCATED"
+  | "ACTIVATED"
+  | "PRINTED"
+  | "REDEEMED"
+  | "SCANNED"
+  | "BLOCKED";
 
 const statusColors: Record<UIStatus, string> = {
   dormant: "bg-muted text-muted-foreground",
   allocated: "bg-info/10 text-info",
   printed: "bg-warning/10 text-warning",
   scanned: "bg-success/10 text-success",
+  blocked: "bg-rose-100 text-rose-700",
 };
 
 const toUIStatus = (s: string): UIStatus => {
   const v = String(s || "").toUpperCase();
-  if (v === "ALLOCATED" || v === "ACTIVE") return "allocated";
+  if (v === "BLOCKED") return "blocked";
+  if (v === "ALLOCATED" || v === "ACTIVE" || v === "ACTIVATED") return "allocated";
   if (v === "PRINTED") return "printed";
-  if (v === "SCANNED") return "scanned";
+  if (v === "SCANNED" || v === "REDEEMED") return "scanned";
   return "dormant";
 };
 
@@ -131,10 +142,11 @@ export default function QRCodes() {
   const uiStats = useMemo(() => {
     const by = stats?.byStatus || {};
     const dormant = by.DORMANT || 0;
-    const allocated = (by.ALLOCATED || 0) + (by.ACTIVE || 0);
+    const allocated = (by.ALLOCATED || 0) + (by.ACTIVE || 0) + (by.ACTIVATED || 0);
     const printed = by.PRINTED || 0;
-    const scanned = by.SCANNED || 0;
-    const total = stats?.total ?? dormant + allocated + printed + scanned;
+    const scanned = (by.SCANNED || 0) + (by.REDEEMED || 0);
+    const blocked = by.BLOCKED || 0;
+    const total = stats?.total ?? dormant + allocated + printed + scanned + blocked;
     return { total, dormant, allocated, printed, scanned };
   }, [stats]);
 
@@ -236,6 +248,14 @@ export default function QRCodes() {
     refreshAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLicensee, statusFilter, selectedBatchId]);
+
+  useEffect(() => {
+    const off = onMutationEvent(() => {
+      refreshAll();
+    });
+    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // export CSV (uses api-client)
   const handleExportCsv = async () => {

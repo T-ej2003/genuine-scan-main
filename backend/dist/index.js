@@ -35,7 +35,7 @@ app.use((0, cors_1.default)({
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Device-Fp"],
 }));
 app.use(express_1.default.json({ limit: "1mb" }));
 app.get("/health", (_req, res) => {

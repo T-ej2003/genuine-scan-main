@@ -22,7 +22,6 @@ import {
   allocateQRRange,
   createBatch,
   assignManufacturer,
-  confirmBatchPrint,
   getBatches,
   getStats,
   deleteBatch,
@@ -33,9 +32,9 @@ import {
   getQRCodes,
   exportQRCodesCsv,
   allocateQRRangeForLicensee,
-  createBatchPrintToken,
-  downloadBatchPrintPack,
-  markPrinted,
+  generateQRCodes,
+  blockQRCode,
+  blockBatch,
 } from "../controllers/qrController";
 
 
@@ -59,6 +58,8 @@ import {
 } from "../controllers/userController";
 
 import { verifyQRCode } from "../controllers/verifyController";
+import { scanToken } from "../controllers/scanController";
+import { createPrintJob, downloadPrintJobPack, confirmPrintJob } from "../controllers/printJobController";
 import auditRoutes from "./auditRoutes";
 import { updateMyProfile, changeMyPassword } from "../controllers/accountController";
 
@@ -71,6 +72,7 @@ const router = Router();
 // ==================== PUBLIC ====================
 router.post("/auth/login", login);
 router.get("/verify/:code", verifyQRCode);
+router.get("/scan", scanToken);
 router.get("/health", healthCheck);
 
 // ==================== AUTH ====================
@@ -129,6 +131,7 @@ router.delete(
 
 // ==================== QR (SUPER ADMIN for ranges) ====================
 router.post("/qr/ranges/allocate", authenticate, requireSuperAdmin, allocateQRRange);
+router.post("/qr/generate", authenticate, requireSuperAdmin, generateQRCodes);
 
 // Super admin allocate range to existing licensee
 router.post(
@@ -165,32 +168,28 @@ router.get("/qr/stats", authenticate, enforceTenantIsolation, getStats);
 router.delete("/qr/batches/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, deleteBatch);
 router.post("/qr/batches/bulk-delete", authenticate, requireAnyAdmin, enforceTenantIsolation, bulkDeleteBatches);
 router.delete("/qr/codes", authenticate, requireAnyAdmin, enforceTenantIsolation, bulkDeleteQRCodes);
-router.post("/qr/:code/mark-printed", authenticate, requireManufacturer, enforceTenantIsolation, markPrinted);
 
-
-// ==================== MANUFACTURER PRINT CONFIRM (legacy batch print) ====================
+// ==================== MANUFACTURER PRINT JOBS ====================
 router.post(
-  "/qr/batches/:id/confirm-print",
+  "/manufacturer/print-jobs",
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
-  confirmBatchPrint
-);
-
-// Manufacturer one-time print pack download for legacy batches
-router.post(
-  "/manufacturer/batches/:id/print-pack-token",
-  authenticate,
-  requireManufacturer,
-  enforceTenantIsolation,
-  createBatchPrintToken
+  createPrintJob
 );
 router.get(
-  "/manufacturer/batch-print-pack/:token",
+  "/manufacturer/print-jobs/:id/pack",
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
-  downloadBatchPrintPack
+  downloadPrintJobPack
+);
+router.post(
+  "/manufacturer/print-jobs/:id/confirm",
+  authenticate,
+  requireManufacturer,
+  enforceTenantIsolation,
+  confirmPrintJob
 );
 
 // ==================== QR REQUESTS ====================
@@ -211,6 +210,10 @@ router.use("/audit", auditRoutes);
 // ==================== QR LOGS (SUPER ADMIN) ====================
 router.get("/admin/qr/scan-logs", authenticate, requireSuperAdmin, getScanLogs);
 router.get("/admin/qr/batch-summary", authenticate, requireSuperAdmin, getBatchSummary);
+
+// ==================== ADMIN BLOCK ====================
+router.post("/admin/qrs/:id/block", authenticate, requireSuperAdmin, blockQRCode);
+router.post("/admin/batches/:id/block", authenticate, requireSuperAdmin, blockBatch);
 
 // ==================== ACCOUNT ====================
 router.patch("/account/profile", authenticate, updateMyProfile);

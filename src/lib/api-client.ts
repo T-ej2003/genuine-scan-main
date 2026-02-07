@@ -1,3 +1,5 @@
+import { emitMutationEvent } from "@/lib/mutation-events";
+
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
 
 export interface ApiResponse<T = any> {
@@ -42,6 +44,8 @@ class ApiClient {
       ...(options.headers as Record<string, string>),
     };
 
+    const method = String(options.method || "GET").toUpperCase();
+
     const hasBody = options.body !== undefined && options.body !== null;
     const isForm = typeof FormData !== "undefined" && options.body instanceof FormData;
 
@@ -82,9 +86,15 @@ class ApiClient {
       }
 
       if (payload && typeof payload === "object" && "success" in payload) {
+        if (method !== "GET" && method !== "HEAD" && payload.success) {
+          emitMutationEvent({ endpoint, method });
+        }
         return payload as ApiResponse<T>;
       }
 
+      if (method !== "GET" && method !== "HEAD") {
+        emitMutationEvent({ endpoint, method });
+      }
       return { success: true, data: payload as T };
     } catch (err: any) {
       const isAbort = err?.name === "AbortError";
@@ -169,6 +179,10 @@ class ApiClient {
     return this.request("/qr/ranges/allocate", { method: "POST", body: JSON.stringify(payload) });
   }
 
+  async generateQRCodes(payload: { licenseeId: string; quantity: number }) {
+    return this.request("/qr/generate", { method: "POST", body: JSON.stringify(payload) });
+  }
+
   async allocateLicenseeQrRange(licenseeId: string, payload: { startNumber: number; endNumber: number }) {
     return this.request(`/admin/licensees/${licenseeId}/qr-allocate-range`, {
       method: "POST",
@@ -242,32 +256,28 @@ class ApiClient {
     });
   }
 
-  async confirmBatchPrint(batchId: string) {
-    return this.request(`/qr/batches/${batchId}/confirm-print`, { method: "POST" });
+  // ==================== PRINT JOBS (MANUFACTURER) ====================
+  async createPrintJob(payload: { batchId: string; quantity: number; rangeStart?: string; rangeEnd?: string }) {
+    return this.request("/manufacturer/print-jobs", { method: "POST", body: JSON.stringify(payload) });
   }
 
-  async markQRCodePrinted(code: string) {
-    return this.request(`/qr/${encodeURIComponent(code)}/mark-printed`, { method: "POST" });
-  }
-
-  async createBatchPrintToken(batchId: string) {
-    return this.request(`/manufacturer/batches/${batchId}/print-pack-token`, { method: "POST" });
-  }
-
-  async downloadBatchPrintPack(token: string, opts?: { publicBaseUrl?: string }) {
-    const params = new URLSearchParams();
-    if (opts?.publicBaseUrl) params.append("publicBaseUrl", opts.publicBaseUrl);
-    const query = params.toString() ? `?${params.toString()}` : "";
-
+  async downloadPrintJobPack(jobId: string, printLockToken: string) {
     const headers: Record<string, string> = {};
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
-
-    const resp = await fetch(
-      `${BASE_URL}/manufacturer/batch-print-pack/${encodeURIComponent(token)}.zip${query}`,
-      { headers, credentials: "include" }
-    );
+    const query = `?token=${encodeURIComponent(printLockToken)}`;
+    const resp = await fetch(`${BASE_URL}/manufacturer/print-jobs/${encodeURIComponent(jobId)}/pack${query}`, {
+      headers,
+      credentials: "include",
+    });
     if (!resp.ok) throw new Error(`Download failed: HTTP ${resp.status}`);
     return resp.blob();
+  }
+
+  async confirmPrintJob(jobId: string, printLockToken: string) {
+    return this.request(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/confirm`, {
+      method: "POST",
+      body: JSON.stringify({ printLockToken }),
+    });
   }
 
   // ==================== MANUFACTURERS ====================
@@ -344,9 +354,10 @@ class ApiClient {
   }
 
   // ==================== AUDIT ====================
-  async getAuditLogs(opts?: { entityType?: string; licenseeId?: string; limit?: number; offset?: number }) {
+  async getAuditLogs(opts?: { entityType?: string; entityId?: string; licenseeId?: string; limit?: number; offset?: number }) {
     const params = new URLSearchParams();
     if (opts?.entityType) params.append("entityType", opts.entityType);
+    if (opts?.entityId) params.append("entityId", opts.entityId);
     if (opts?.licenseeId) params.append("licenseeId", opts.licenseeId);
     if (opts?.limit) params.append("limit", String(opts.limit));
     if (opts?.offset) params.append("offset", String(opts.offset));
@@ -425,6 +436,17 @@ class ApiClient {
     if (opts?.acc != null) params.append("acc", String(opts.acc));
     const query = params.toString() ? `?${params.toString()}` : "";
     return this.request(`/verify/${encodeURIComponent(c)}${query}`, { method: "GET" });
+  }
+
+  async scanToken(token: string, opts?: { device?: string; lat?: number; lon?: number; acc?: number }) {
+    const params = new URLSearchParams();
+    params.append("t", token);
+    if (opts?.device) params.append("device", opts.device);
+    if (opts?.lat != null) params.append("lat", String(opts.lat));
+    if (opts?.lon != null) params.append("lon", String(opts.lon));
+    if (opts?.acc != null) params.append("acc", String(opts.acc));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/scan${query}`, { method: "GET" });
   }
 
   async getScanLogs(options?: {

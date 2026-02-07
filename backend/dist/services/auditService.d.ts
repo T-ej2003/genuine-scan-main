@@ -23,7 +23,9 @@ export declare const createAuditLog: (data: AuditLogInput) => Promise<{
 export declare const getAuditLogs: (opts: {
     userId?: string;
     entityType?: string;
+    entityId?: string;
     licenseeId?: string;
+    userIds?: string[];
     limit: number;
     offset: number;
 }) => Promise<{

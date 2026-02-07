@@ -7,6 +7,7 @@ exports.allocateQrRange = void 0;
 const client_1 = require("@prisma/client");
 const database_1 = __importDefault(require("../config/database"));
 const qrService_1 = require("./qrService");
+const qrTokenService_1 = require("./qrTokenService");
 const allocateQrRange = async (params) => {
     const { licenseeId, startNumber, endNumber, createdByUserId, source, requestId, createReceivedBatch, tx, } = params;
     const db = tx ?? database_1.default;
@@ -40,6 +41,7 @@ const allocateQrRange = async (params) => {
             code: (0, qrService_1.generateQRCode)(licensee.prefix, i),
             licenseeId,
             status: client_1.QRStatus.DORMANT,
+            tokenNonce: (0, qrTokenService_1.randomNonce)(),
         });
     }
     const batchSize = 1000;

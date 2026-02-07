@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/table";
 import { RefreshCw, Search, ScanEye, Layers } from "lucide-react";
 import { format } from "date-fns";
+import { onMutationEvent } from "@/lib/mutation-events";
 
 type BatchSummaryRow = {
   id: string;
@@ -99,6 +100,14 @@ export default function QRTracking() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const off = onMutationEvent(() => {
+      load({ silent: true });
+    });
+    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const batchNameById = useMemo(() => {
     const map = new Map<string, string>();
     summary.forEach((b) => map.set(b.id, b.name || b.id));
@@ -155,7 +164,7 @@ export default function QRTracking() {
                     <TableHead>Dormant</TableHead>
                     <TableHead>Allocated</TableHead>
                     <TableHead>Printed</TableHead>
-                    <TableHead>Scanned</TableHead>
+                    <TableHead>Redeemed</TableHead>
                     <TableHead>Created</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -169,7 +178,9 @@ export default function QRTracking() {
                   ) : (
                     summary.map((b) => {
                       const counts = b.counts || {};
-                      const allocated = toCount(counts, "ALLOCATED") + toCount(counts, "ACTIVE");
+                      const allocated =
+                        toCount(counts, "ALLOCATED") + toCount(counts, "ACTIVE") + toCount(counts, "ACTIVATED");
+                      const redeemed = toCount(counts, "REDEEMED") + toCount(counts, "SCANNED");
                       return (
                         <TableRow key={b.id}>
                           <TableCell className="font-medium">{b.name}</TableCell>
@@ -181,7 +192,7 @@ export default function QRTracking() {
                           <TableCell>{toCount(counts, "DORMANT")}</TableCell>
                           <TableCell>{allocated}</TableCell>
                           <TableCell>{toCount(counts, "PRINTED")}</TableCell>
-                          <TableCell>{toCount(counts, "SCANNED")}</TableCell>
+                          <TableCell>{redeemed}</TableCell>
                           <TableCell className="text-muted-foreground">
                             {b.createdAt ? format(new Date(b.createdAt), "MMM d, yyyy") : "—"}
                           </TableCell>

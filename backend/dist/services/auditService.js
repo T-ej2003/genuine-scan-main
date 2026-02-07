@@ -27,8 +27,17 @@ const getAuditLogs = async (opts) => {
         where.userId = opts.userId;
     if (opts.entityType)
         where.entityType = opts.entityType;
-    if (opts.licenseeId)
+    if (opts.entityId)
+        where.entityId = opts.entityId;
+    if (opts.userIds && opts.userIds.length) {
+        const or = [{ userId: { in: opts.userIds } }];
+        if (opts.licenseeId)
+            or.push({ licenseeId: opts.licenseeId });
+        where.OR = or;
+    }
+    else if (opts.licenseeId) {
         where.licenseeId = opts.licenseeId;
+    }
     const [logs, total] = await Promise.all([
         database_1.default.auditLog.findMany({
             where,

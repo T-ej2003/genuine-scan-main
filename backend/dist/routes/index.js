@@ -14,6 +14,8 @@ const qrRequestController_1 = require("../controllers/qrRequestController");
 const qrLogController_1 = require("../controllers/qrLogController");
 const userController_1 = require("../controllers/userController");
 const verifyController_1 = require("../controllers/verifyController");
+const scanController_1 = require("../controllers/scanController");
+const printJobController_1 = require("../controllers/printJobController");
 const auditRoutes_1 = __importDefault(require("./auditRoutes"));
 const accountController_1 = require("../controllers/accountController");
 const dashboardController_1 = require("../controllers/dashboardController");
@@ -23,6 +25,7 @@ const router = (0, express_1.Router)();
 // ==================== PUBLIC ====================
 router.post("/auth/login", authController_1.login);
 router.get("/verify/:code", verifyController_1.verifyQRCode);
+router.get("/scan", scanController_1.scanToken);
 router.get("/health", healthController_1.healthCheck);
 // ==================== AUTH ====================
 router.get("/auth/me", auth_1.authenticate, authController_1.me);
@@ -51,6 +54,7 @@ router.patch("/manufacturers/:id/restore", auth_1.authenticate, rbac_1.requireAn
 router.delete("/manufacturers/:id", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, userController_1.hardDeleteManufacturer);
 // ==================== QR (SUPER ADMIN for ranges) ====================
 router.post("/qr/ranges/allocate", auth_1.authenticate, rbac_1.requireSuperAdmin, qrController_1.allocateQRRange);
+router.post("/qr/generate", auth_1.authenticate, rbac_1.requireSuperAdmin, qrController_1.generateQRCodes);
 // Super admin allocate range to existing licensee
 router.post("/admin/licensees/:licenseeId/qr-allocate-range", auth_1.authenticate, rbac_1.requireSuperAdmin, qrController_1.allocateQRRangeForLicensee);
 // ==================== BATCHES ====================
@@ -69,12 +73,10 @@ router.get("/qr/stats", auth_1.authenticate, tenantIsolation_1.enforceTenantIsol
 router.delete("/qr/batches/:id", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, qrController_1.deleteBatch);
 router.post("/qr/batches/bulk-delete", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, qrController_1.bulkDeleteBatches);
 router.delete("/qr/codes", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, qrController_1.bulkDeleteQRCodes);
-router.post("/qr/:code/mark-printed", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, qrController_1.markPrinted);
-// ==================== MANUFACTURER PRINT CONFIRM (legacy batch print) ====================
-router.post("/qr/batches/:id/confirm-print", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, qrController_1.confirmBatchPrint);
-// Manufacturer one-time print pack download for legacy batches
-router.post("/manufacturer/batches/:id/print-pack-token", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, qrController_1.createBatchPrintToken);
-router.get("/manufacturer/batch-print-pack/:token", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, qrController_1.downloadBatchPrintPack);
+// ==================== MANUFACTURER PRINT JOBS ====================
+router.post("/manufacturer/print-jobs", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, printJobController_1.createPrintJob);
+router.get("/manufacturer/print-jobs/:id/pack", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, printJobController_1.downloadPrintJobPack);
+router.post("/manufacturer/print-jobs/:id/confirm", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, printJobController_1.confirmPrintJob);
 // ==================== QR REQUESTS ====================
 router.post("/qr/requests", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, qrRequestController_1.createQrAllocationRequest);
 router.get("/qr/requests", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, qrRequestController_1.getQrAllocationRequests);
@@ -85,6 +87,9 @@ router.use("/audit", auditRoutes_1.default);
 // ==================== QR LOGS (SUPER ADMIN) ====================
 router.get("/admin/qr/scan-logs", auth_1.authenticate, rbac_1.requireSuperAdmin, qrLogController_1.getScanLogs);
 router.get("/admin/qr/batch-summary", auth_1.authenticate, rbac_1.requireSuperAdmin, qrLogController_1.getBatchSummary);
+// ==================== ADMIN BLOCK ====================
+router.post("/admin/qrs/:id/block", auth_1.authenticate, rbac_1.requireSuperAdmin, qrController_1.blockQRCode);
+router.post("/admin/batches/:id/block", auth_1.authenticate, rbac_1.requireSuperAdmin, qrController_1.blockBatch);
 // ==================== ACCOUNT ====================
 router.patch("/account/profile", auth_1.authenticate, accountController_1.updateMyProfile);
 router.patch("/account/password", auth_1.authenticate, accountController_1.changeMyPassword);
