@@ -13,6 +13,14 @@ Set these environment variables in `backend/.env`:
 - `SCAN_RATE_LIMIT_PER_MIN` (optional, default `60`)
 - `QR_TOKEN_EXP_DAYS` (optional, default `3650`)
 
+## Database (AWS RDS)
+This project is configured to run on **AWS RDS PostgreSQL**. Ensure `DATABASE_URL` in `backend/.env` points to your RDS instance with SSL enabled.
+
+Quick health check:
+```
+backend/scripts/check-db.sh
+```
+
 ## Security Model (Threat Notes)
 Prevented / detected:
 - Forged QR payloads (signed tokens verified server-side).
@@ -47,6 +55,8 @@ How it works:
 4. Consumer scans `/scan?t=...` and receives authenticity results.
 
 ## User Manual (Admins & Manufacturers)
+Full manual: `docs/USER_MANUAL.md`
+
 ### Super Admin (Platform Owner)
 1. Create Licensee: add brand name, location, support details, and licensee admin credentials.
 2. Allocate QR batch: generate a new batch for a licensee (these appear as “Received” batches).

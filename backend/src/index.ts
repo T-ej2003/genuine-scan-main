@@ -6,6 +6,7 @@ import routes from "./routes";
 dotenv.config();
 
 const app = express();
+app.disable("etag");
 const PORT = process.env.PORT || 4000;
 
 // ✅ Allow multiple dev frontends (WEB APP 1 on 8081, landing on 8080, default Vite on 5173)
@@ -44,6 +45,12 @@ app.use(express.json({ limit: "1mb" }));
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+app.use("/api", (_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Pragma", "no-cache");
+  next();
 });
 
 app.use("/api", routes);

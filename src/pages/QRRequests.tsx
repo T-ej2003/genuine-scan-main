@@ -35,8 +35,6 @@ type RequestRow = {
   licenseeId: string;
   status: "PENDING" | "APPROVED" | "REJECTED";
   quantity?: number | null;
-  startNumber?: number | null;
-  endNumber?: number | null;
   note?: string | null;
   decisionNote?: string | null;
   createdAt: string;
@@ -174,7 +172,7 @@ export default function QRRequests() {
         return;
       }
 
-      toast({ title: "Approved", description: "QR range allocated to licensee." });
+      toast({ title: "Approved", description: "QR codes allocated to licensee pool." });
       setApproveOpen(false);
       setActiveReq(null);
       await loadRequests();
@@ -204,12 +202,7 @@ export default function QRRequests() {
   };
 
   const filtered = useMemo(() => rows, [rows]);
-  const requestQuantity = (r: RequestRow) =>
-    r.quantity && r.quantity > 0
-      ? r.quantity
-      : r.startNumber && r.endNumber
-        ? r.endNumber - r.startNumber + 1
-        : 0;
+  const requestQuantity = (r: RequestRow) => (r.quantity && r.quantity > 0 ? r.quantity : 0);
 
   return (
     <DashboardLayout>
@@ -335,7 +328,6 @@ export default function QRRequests() {
                           <div className="space-y-1">
                             <div className="font-medium">
                               {`${requestQuantity(r)} codes`}
-                              {r.startNumber && r.endNumber ? ` (${r.startNumber} -> ${r.endNumber})` : ""}
                             </div>
                             {r.note && <div className="text-xs text-muted-foreground">{r.note}</div>}
                           </div>
@@ -432,7 +424,7 @@ export default function QRRequests() {
             <DialogHeader>
               <DialogTitle>Approve Request</DialogTitle>
               <DialogDescription>
-                Approve this quantity request. Range allocation is automatic from next available codes.
+                Approve this quantity request. Allocation uses the next available index sequence automatically.
               </DialogDescription>
             </DialogHeader>
 

@@ -110,6 +110,18 @@ export default function Manufacturers() {
 
   const effectiveLicenseeId = isSuperAdmin ? licenseeFilter : fixedLicenseeId;
 
+  const normalizeManufacturerRows = (list: any[]): ManufacturerRow[] =>
+    list.map((row) => ({
+      id: row.id,
+      name: row.name || "",
+      email: row.email || "",
+      isActive: typeof row.isActive === "boolean" ? row.isActive : true,
+      createdAt: row.createdAt,
+      licenseeId: row.licenseeId,
+      location: row.location ?? null,
+      website: row.website ?? null,
+    }));
+
   const loadLicenseesIfNeeded = async () => {
     if (!isSuperAdmin) return;
 
@@ -137,44 +149,52 @@ export default function Manufacturers() {
 
   const loadManufacturers = async () => {
     setLoading(true);
+    try {
+      // licensee_admin MUST have licenseeId
+      if (!isSuperAdmin && !fixedLicenseeId) {
+        setManufacturers([]);
+        toast({
+          title: "Missing licensee scope",
+          description: "Your account is not linked to a licensee. Contact Super Admin.",
+          variant: "destructive",
+        });
+        return;
+      }
 
-    // licensee_admin MUST have licenseeId
-    if (!isSuperAdmin && !fixedLicenseeId) {
-      setManufacturers([]);
-      setLoading(false);
-      toast({
-        title: "Missing licensee scope",
-        description: "Your account is not linked to a licensee. Contact Super Admin.",
-        variant: "destructive",
+      // super_admin must pick a licensee
+      if (isSuperAdmin && !effectiveLicenseeId) {
+        setManufacturers([]);
+        return;
+      }
+
+      const scope = effectiveLicenseeId || undefined;
+      const primary = await apiClient.getManufacturers({
+        licenseeId: scope,
+        includeInactive: true,
       });
-      return;
-    }
 
-    // super_admin must pick a licensee
-    if (isSuperAdmin && !effectiveLicenseeId) {
-      setManufacturers([]);
+      let rows: ManufacturerRow[] = primary.success
+        ? normalizeManufacturerRows((primary.data as any[]) || [])
+        : [];
+
+      // Fallback path if /manufacturers is unavailable or returns empty unexpectedly.
+      if (rows.length === 0) {
+        const fallback = await apiClient.getUsers({ licenseeId: scope, role: "MANUFACTURER" });
+        if (fallback.success) {
+          rows = normalizeManufacturerRows((fallback.data as any[]) || []);
+        } else if (!primary.success) {
+          toast({
+            title: "Failed to load manufacturers",
+            description: primary.error || fallback.error || "Could not load manufacturers",
+            variant: "destructive",
+          });
+        }
+      }
+
+      setManufacturers(rows);
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const res = await apiClient.getManufacturers({
-      licenseeId: effectiveLicenseeId,
-      includeInactive: true,
-    });
-
-    if (!res.success) {
-      toast({
-        title: "Failed to load manufacturers",
-        description: res.error || "Could not load manufacturers",
-        variant: "destructive",
-      });
-      setManufacturers([]);
-      setLoading(false);
-      return;
-    }
-
-    setManufacturers(((res.data as any) || []) as ManufacturerRow[]);
-    setLoading(false);
   };
 
   useEffect(() => {

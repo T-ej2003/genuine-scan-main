@@ -1,9 +1,26 @@
 import { Prisma, QRStatus } from "@prisma/client";
 import prisma from "../config/database";
-import { generateQRCode } from "./qrService";
+import { generateQRCode, parseQRCode } from "./qrService";
 import { randomNonce } from "./qrTokenService";
 
 type DbClient = Prisma.TransactionClient;
+
+export const lockLicenseeAllocation = async (tx: DbClient, licenseeId: string) => {
+  // Transaction-scoped advisory lock prevents concurrent next-range collisions per licensee.
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`qr_alloc_${licenseeId}`}))`;
+};
+
+export const getNextLicenseeQrNumber = async (tx: DbClient, licenseeId: string) => {
+  const last = await tx.qRCode.findFirst({
+    where: { licenseeId },
+    orderBy: { code: "desc" },
+    select: { code: true },
+  });
+  if (!last?.code) return 1;
+
+  const parsed = parseQRCode(last.code);
+  return (parsed?.number ?? 0) + 1;
+};
 
 export type AllocateQrRangeParams = {
   licenseeId: string;
@@ -82,6 +99,7 @@ export const allocateQrRange = async (params: AllocateQrRangeParams) => {
       data: {
         name,
         licenseeId,
+        manufacturerId: null,
         startCode,
         endCode,
         totalCodes,
@@ -91,7 +109,10 @@ export const allocateQrRange = async (params: AllocateQrRangeParams) => {
 
     const updated = await db.qRCode.updateMany({
       where: { licenseeId, code: { gte: startCode, lte: endCode } },
-      data: { batchId: batch.id },
+      data: {
+        batchId: batch.id,
+        status: QRStatus.DORMANT,
+      },
     });
 
     if (updated.count !== totalCodes) {

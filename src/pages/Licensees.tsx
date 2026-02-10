@@ -158,8 +158,14 @@ type AllocateBatchForm = {
 
 type AllocateRangeForm = {
   licenseeId: string;
+  mode: "quantity" | "range";
   startNumber: string;
   endNumber: string;
+  quantity: string;
+  lastStartCode: string | null;
+  lastEndCode: string | null;
+  lastEndNumber: number | null;
+  suggestedNextStart: number;
 };
 
 /* ===================== HELPERS ===================== */
@@ -169,6 +175,15 @@ const isValidPrefix = (prefix: string) => /^[A-Z0-9]{1,5}$/.test(prefix);
 const toInt = (v: string) => {
   const n = parseInt(String(v || "").trim(), 10);
   return Number.isFinite(n) ? n : NaN;
+};
+
+const extractCodeIndex = (code?: string | null) => {
+  const s = String(code || "").trim();
+  if (!s) return null;
+  const m = s.match(/(\d{10})$/);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) ? n : null;
 };
 
 /* ===================== COMPONENT ===================== */
@@ -776,10 +791,21 @@ export default function Licensees() {
   /* ===================== ALLOCATE QR RANGE (TOP-UP) ===================== */
 
   const openAllocateRange = (l: LicenseeRow) => {
+    const lastStartCode = l.latestRange?.startCode || null;
+    const lastEndCode = l.latestRange?.endCode || null;
+    const lastEndNumber = extractCodeIndex(lastEndCode);
+    const suggestedNextStart = (lastEndNumber ?? 0) + 1;
+
     setRangeForm({
       licenseeId: l.id,
-      startNumber: "",
+      mode: "quantity",
+      startNumber: String(suggestedNextStart),
       endNumber: "",
+      quantity: "1000",
+      lastStartCode,
+      lastEndCode,
+      lastEndNumber,
+      suggestedNextStart,
     });
     setRangeOpen(true);
   };
@@ -788,32 +814,55 @@ export default function Licensees() {
     e.preventDefault();
     if (!rangeForm) return;
 
-    const startNumber = toInt(rangeForm.startNumber);
-    const endNumber = toInt(rangeForm.endNumber);
-
-    if (!Number.isFinite(startNumber) || !Number.isFinite(endNumber) || endNumber < startNumber) {
-      toast({
-        title: "Invalid range",
-        description: "Start/End numbers are required, and End must be >= Start.",
-        variant: "destructive",
-      });
-      return;
-    }
-
     setRangeLoading(true);
     try {
-      const res = await apiClient.allocateLicenseeQrRange(rangeForm.licenseeId, {
-        startNumber,
-        endNumber,
-      });
+      let res;
+      if (rangeForm.mode === "quantity") {
+        const quantity = toInt(rangeForm.quantity);
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+          toast({
+            title: "Invalid quantity",
+            description: "Quantity must be a positive number.",
+            variant: "destructive",
+          });
+          setRangeLoading(false);
+          return;
+        }
+        res = await apiClient.allocateLicenseeQrRange(rangeForm.licenseeId, { quantity });
+      } else {
+        const startNumber = toInt(rangeForm.startNumber);
+        const endNumber = toInt(rangeForm.endNumber);
+        if (!Number.isFinite(startNumber) || !Number.isFinite(endNumber) || endNumber < startNumber) {
+          toast({
+            title: "Invalid range",
+            description: "Start/End numbers are required, and End must be >= Start.",
+            variant: "destructive",
+          });
+          setRangeLoading(false);
+          return;
+        }
+        res = await apiClient.allocateLicenseeQrRange(rangeForm.licenseeId, {
+          startNumber,
+          endNumber,
+        });
+      }
 
       if (!res.success) {
         throw new Error(res.error || "Allocation failed");
       }
 
+      const data: any = res.data || {};
+      const allocatedCount =
+        Number(data.totalCodes) ||
+        (Number(data.endNumber) && Number(data.startNumber)
+          ? Number(data.endNumber) - Number(data.startNumber) + 1
+          : null);
+
       toast({
         title: "Range allocated",
-        description: `Allocated ${endNumber - startNumber + 1} QR codes to licensee.`,
+        description: allocatedCount
+          ? `Allocated ${allocatedCount} QR codes to licensee (stored as DORMANT).`
+          : "Allocated QR codes to licensee (stored as DORMANT).",
       });
 
       setRangeOpen(false);
@@ -1462,11 +1511,11 @@ export default function Licensees() {
             if (!v) setRangeForm(null);
           }}
         >
-          <DialogContent className="sm:max-w-[520px] max-h-[85vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Allocate QR Range</DialogTitle>
-              <DialogDescription>
-                Adds a new QR range to the licensee's dormant pool.
+        <DialogContent className="sm:max-w-[520px] max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Allocate QR Range</DialogTitle>
+            <DialogDescription>
+                Adds new QR codes to the licensee pool in DORMANT state only.
               </DialogDescription>
             </DialogHeader>
 
@@ -1474,6 +1523,67 @@ export default function Licensees() {
               <div className="text-sm text-muted-foreground">No licensee selected.</div>
             ) : (
               <form className="space-y-4 mt-2" onSubmit={submitAllocateRange}>
+                <div className="rounded-md border p-3 text-sm space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Last allocated range</span>
+                    <span className="font-mono">
+                      {rangeForm.lastStartCode && rangeForm.lastEndCode
+                        ? `${rangeForm.lastStartCode} -> ${rangeForm.lastEndCode}`
+                        : "No previous range"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Last index</span>
+                    <span className="font-medium">{rangeForm.lastEndNumber ?? 0}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Suggested next start</span>
+                    <span className="font-medium">{rangeForm.suggestedNextStart}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={rangeForm.mode === "quantity" ? "default" : "outline"}
+                    onClick={() => setRangeForm((p) => (p ? { ...p, mode: "quantity" } : p))}
+                  >
+                    By quantity
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={rangeForm.mode === "range" ? "default" : "outline"}
+                    onClick={() =>
+                      setRangeForm((p) =>
+                        p
+                          ? {
+                              ...p,
+                              mode: "range",
+                              startNumber: p.startNumber || String(p.suggestedNextStart),
+                            }
+                          : p
+                      )
+                    }
+                  >
+                    By range
+                  </Button>
+                </div>
+
+                {rangeForm.mode === "quantity" ? (
+                  <div className="space-y-2">
+                    <Label>Quantity</Label>
+                    <Input
+                      type="number"
+                      value={rangeForm.quantity}
+                      onChange={(e) => setRangeForm((p) => (p ? { ...p, quantity: e.target.value } : p))}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Backend will allocate from next available index automatically (no overlap).
+                    </p>
+                  </div>
+                ) : (
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Start Number</Label>
@@ -1492,6 +1602,7 @@ export default function Licensees() {
                     />
                   </div>
                 </div>
+                )}
 
                 <div className="flex justify-end gap-3 pt-2">
                   <Button type="button" variant="outline" onClick={() => setRangeOpen(false)} disabled={rangeLoading}>

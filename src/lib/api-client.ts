@@ -16,6 +16,7 @@ type RequestOptions = RequestInit & {
 
 class ApiClient {
   private token: string | null = null;
+  private readonly getCache = new Map<string, unknown>();
 
   constructor() {
     this.token = localStorage.getItem("auth_token");
@@ -33,6 +34,7 @@ class ApiClient {
 
   logout() {
     this.setToken(null);
+    this.getCache.clear();
   }
 
   private emitLogout() {
@@ -45,12 +47,17 @@ class ApiClient {
     };
 
     const method = String(options.method || "GET").toUpperCase();
+    const cacheKey = `${this.token || "anon"}:${endpoint}`;
 
     const hasBody = options.body !== undefined && options.body !== null;
     const isForm = typeof FormData !== "undefined" && options.body instanceof FormData;
 
     if (!options.skipJson && hasBody && !isForm) {
       headers["Content-Type"] = "application/json";
+    }
+    if (method === "GET") {
+      headers["Cache-Control"] = "no-cache";
+      headers.Pragma = "no-cache";
     }
 
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
@@ -67,6 +74,12 @@ class ApiClient {
         credentials: "include",
         signal: controller.signal,
       });
+
+      if (res.status === 304 && method === "GET") {
+        const cached = this.getCache.get(cacheKey);
+        if (cached !== undefined) return { success: true, data: cached as T };
+        return { success: false, error: "Stale cache miss (HTTP 304)" };
+      }
 
       if (res.status === 401) {
         this.logout();
@@ -87,10 +100,17 @@ class ApiClient {
       }
 
       if (payload && typeof payload === "object" && "success" in payload) {
+        if (method === "GET" && payload.success) {
+          this.getCache.set(cacheKey, (payload as ApiResponse<T>).data as T);
+        }
         if (method !== "GET" && method !== "HEAD" && payload.success) {
           emitMutationEvent({ endpoint, method });
         }
         return payload as ApiResponse<T>;
+      }
+
+      if (method === "GET") {
+        this.getCache.set(cacheKey, payload as T);
       }
 
       if (method !== "GET" && method !== "HEAD") {
@@ -184,7 +204,10 @@ class ApiClient {
     return this.request("/qr/generate", { method: "POST", body: JSON.stringify(payload) });
   }
 
-  async allocateLicenseeQrRange(licenseeId: string, payload: { startNumber: number; endNumber: number }) {
+  async allocateLicenseeQrRange(
+    licenseeId: string,
+    payload: { startNumber: number; endNumber: number } | { quantity: number }
+  ) {
     return this.request(`/admin/licensees/${licenseeId}/qr-allocate-range`, {
       method: "POST",
       body: JSON.stringify(payload),

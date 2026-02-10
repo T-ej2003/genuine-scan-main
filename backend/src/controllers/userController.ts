@@ -269,9 +269,6 @@ export const getManufacturers = async (req: AuthRequest, res: Response) => {
         location: true,
         website: true,
         licensee: { select: { name: true, prefix: true } },
-        assignedBatches: {
-          select: { id: true, name: true, totalCodes: true, printedAt: true },
-        },
       },
       orderBy: { name: "asc" },
     });

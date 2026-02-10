@@ -4,8 +4,7 @@ import { QrAllocationRequestStatus, UserRole } from "@prisma/client";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { createAuditLog } from "../services/auditService";
-import { allocateQrRange } from "../services/qrAllocationService";
-import { parseQRCode } from "../services/qrService";
+import { allocateQrRange, getNextLicenseeQrNumber, lockLicenseeAllocation } from "../services/qrAllocationService";
 
 const createRequestSchema = z
   .object({
@@ -158,22 +157,11 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
       return res.status(400).json({ success: false, error: "Request quantity is missing or invalid." });
     }
 
-    const last = await prisma.qRCode.findFirst({
-      where: { licenseeId: requestRow.licenseeId },
-      orderBy: { code: "desc" },
-      select: { code: true },
-    });
-
-    let nextNumber = 1;
-    if (last?.code) {
-      const parsedCode = parseQRCode(last.code);
-      if (parsedCode) nextNumber = parsedCode.number + 1;
-    }
-
-    const startNumber = nextNumber;
-    const endNumber = nextNumber + quantityRequested - 1;
-
     const result = await prisma.$transaction(async (tx) => {
+      await lockLicenseeAllocation(tx, requestRow.licenseeId);
+      const startNumber = await getNextLicenseeQrNumber(tx, requestRow.licenseeId);
+      const endNumber = startNumber + quantityRequested - 1;
+
       const alloc = await allocateQrRange({
         licenseeId: requestRow.licenseeId,
         startNumber,
@@ -198,7 +186,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
         },
       });
 
-      return { alloc, updated };
+      return { alloc, updated, startNumber, endNumber };
     });
 
     await createAuditLog({
@@ -208,8 +196,8 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
       entityType: "QrAllocationRequest",
       entityId: requestRow.id,
       details: {
-        startNumber,
-        endNumber,
+        startNumber: result.startNumber,
+        endNumber: result.endNumber,
         quantity: quantityRequested,
         rangeId: result.alloc.range.id,
         receivedBatchId: result.alloc.receivedBatch?.id || null,
