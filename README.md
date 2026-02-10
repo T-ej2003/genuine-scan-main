@@ -13,6 +13,101 @@ Set these environment variables in `backend/.env`:
 - `SCAN_RATE_LIMIT_PER_MIN` (optional, default `60`)
 - `QR_TOKEN_EXP_DAYS` (optional, default `3650`)
 
+## Docker (Production Style)
+This repo is dockerized for:
+- Frontend: Vite build artifacts served by Nginx.
+- Backend: Node + TypeScript + Prisma API.
+- Reverse proxy: Nginx proxies `/api/*` to backend service.
+- Database: external AWS RDS PostgreSQL via `DATABASE_URL`.
+
+Files added:
+- `Dockerfile` (frontend build + Nginx runtime)
+- `nginx.conf` (SPA routing + API reverse proxy)
+- `backend/Dockerfile` (backend build + runtime)
+- `docker-compose.yml` (frontend + backend stack)
+- `.dockerignore` (smaller/cleaner build context)
+
+### Required Environment Variables (Compose)
+Set these in a root `.env` file (same folder as `docker-compose.yml`):
+- `DATABASE_URL` (RDS connection string)
+- `JWT_SECRET`
+- `QR_SIGN_PRIVATE_KEY` + `QR_SIGN_PUBLIC_KEY` (preferred), or `QR_SIGN_HMAC_SECRET`
+
+Optional:
+- `FRONTEND_PORT` (default `80`)
+- `CORS_ORIGIN`
+- `PUBLIC_SCAN_WEB_BASE_URL`
+- `PUBLIC_VERIFY_WEB_BASE_URL`
+- `SCAN_RATE_LIMIT_PER_MIN`
+- `QR_TOKEN_EXP_DAYS`
+- `JWT_EXPIRES_IN`
+
+### Local Docker Run
+1. Build images:
+   - `docker compose build --no-cache`
+2. Start stack:
+   - `docker compose up -d`
+3. Run DB migrations (one-off):
+   - `docker compose run --rm backend npx prisma migrate deploy`
+4. Verify services:
+   - `docker compose ps`
+   - `curl http://localhost/`
+   - `curl http://localhost/api/health`
+5. View logs:
+   - `docker compose logs -f backend`
+   - `docker compose logs -f frontend`
+
+### AWS Lightsail Deploy Guide (Ubuntu)
+1. Provision instance:
+   - Ubuntu LTS, open ports `80` and `443` (if TLS later), and optionally `22` for SSH.
+2. Install Docker Engine + Compose plugin:
+   - `sudo apt-get update`
+   - `sudo apt-get install -y ca-certificates curl gnupg`
+   - `sudo install -m 0755 -d /etc/apt/keyrings`
+   - `curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg`
+   - `sudo chmod a+r /etc/apt/keyrings/docker.gpg`
+   - `echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null`
+   - `sudo apt-get update`
+   - `sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin`
+   - `sudo usermod -aG docker $USER`
+   - Re-login SSH session, then verify: `docker --version && docker compose version`
+3. Deploy code:
+   - `git clone <your-repo-url>`
+   - `cd genuine-scan-main`
+4. Create `.env` in repo root with production values (`DATABASE_URL`, `JWT_SECRET`, signing keys, etc.).
+5. Build and start:
+   - `docker compose build`
+   - `docker compose up -d`
+6. Run production migrations:
+   - `docker compose run --rm backend npx prisma migrate deploy`
+7. Verify:
+   - `docker compose ps`
+   - `curl http://127.0.0.1/api/health`
+   - Open `http://<lightsail-public-ip>/` in browser.
+8. Update deployment on new release:
+   - `git pull`
+   - `docker compose build`
+   - `docker compose run --rm backend npx prisma migrate deploy`
+   - `docker compose up -d`
+
+### Troubleshooting (Docker/Lightsail)
+1. CORS errors:
+   - Ensure frontend calls `/api` (already default in app).
+   - Set `CORS_ORIGIN` to your public URL if browser still reports origin rejection.
+2. Wrong API base URL:
+   - Frontend defaults to `/api`.
+   - If overridden, check `VITE_API_URL` is not forcing old `http://localhost:4000/api`.
+3. Prisma connection failures:
+   - Validate `DATABASE_URL` points to RDS and credentials are correct.
+   - Confirm Lightsail instance can reach RDS (VPC/security group/NACL rules).
+   - For SSL RDS URLs, ensure connection params (`sslmode=require` or equivalent) are correct.
+4. Migration errors:
+   - Run: `docker compose run --rm backend npx prisma migrate status`
+   - Then: `docker compose run --rm backend npx prisma migrate deploy`
+5. Backend appears down behind frontend:
+   - Check backend logs: `docker compose logs -f backend`
+   - Check Nginx logs: `docker compose logs -f frontend`
+
 ## Database (AWS RDS)
 This project is configured to run on **AWS RDS PostgreSQL**. Ensure `DATABASE_URL` in `backend/.env` points to your RDS instance with SSL enabled.
 
