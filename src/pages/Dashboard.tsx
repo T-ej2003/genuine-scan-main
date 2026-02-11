@@ -9,7 +9,7 @@ import apiClient from "@/lib/api-client";
 import { onMutationEvent } from "@/lib/mutation-events";
 
 const STATS_POLL_MS = 5000;
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
+const API_BASE = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
 
 export default function Dashboard() {
   const { user } = useAuth();

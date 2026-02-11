@@ -1,9 +1,17 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import path from "path";
 import routes from "./routes";
 
 dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
+
+const missingRequiredEnv = ["DATABASE_URL", "JWT_SECRET"].filter((k) => !process.env[k]);
+if (missingRequiredEnv.length > 0) {
+  console.error(`Missing required environment variables: ${missingRequiredEnv.join(", ")}`);
+  process.exit(1);
+}
 
 const app = express();
 app.disable("etag");
@@ -37,7 +45,7 @@ app.use(
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Device-Fp"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Device-Fp", "Cache-Control", "Pragma"],
   })
 );
 

@@ -10,6 +10,29 @@ const loginSchema = z.object({
   password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
+const normalizeAuthError = (error: unknown): { status: number; error: string } => {
+  const raw = error instanceof Error ? error.message : String(error || "Unknown error");
+  const lower = raw.toLowerCase();
+
+  if (
+    lower.includes("environment variable not found: database_url") ||
+    lower.includes("can't reach database server") ||
+    lower.includes("p1001") ||
+    lower.includes("server has closed the connection")
+  ) {
+    return { status: 503, error: "Database unavailable. Check DATABASE_URL / RDS connectivity." };
+  }
+
+  if (lower.includes("invalid `prisma.") || lower.includes("p20")) {
+    return { status: 500, error: "Database query failed. Check Prisma schema/migrations." };
+  }
+
+  return {
+    status: 500,
+    error: process.env.NODE_ENV === "development" ? raw : "Internal server error",
+  };
+};
+
 export const login = async (req: Request, res: Response) => {
   try {
     const validation = loginSchema.safeParse(req.body);
@@ -29,6 +52,10 @@ export const login = async (req: Request, res: Response) => {
     });
 
     if (!user) {
+      return res.status(401).json({ success: false, error: "Invalid email or password" });
+    }
+
+    if (!user.passwordHash || typeof user.passwordHash !== "string") {
       return res.status(401).json({ success: false, error: "Invalid email or password" });
     }
 
@@ -63,14 +90,19 @@ export const login = async (req: Request, res: Response) => {
       signOptions
     );
 
-    await createAuditLog({
-      userId: user.id,
-      licenseeId: user.licenseeId ?? undefined,
-      action: "LOGIN",
-      entityType: "User",
-      entityId: user.id,
-      ipAddress: req.ip,
-    });
+    try {
+      await createAuditLog({
+        userId: user.id,
+        licenseeId: user.licenseeId ?? undefined,
+        action: "LOGIN",
+        entityType: "User",
+        entityId: user.id,
+        ipAddress: req.ip,
+      });
+    } catch (auditErr) {
+      // Login should not fail because of audit write failure.
+      console.error("Login audit log failed:", auditErr);
+    }
 
     return res.json({
       success: true,
@@ -90,7 +122,8 @@ export const login = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("Login error:", error);
-    return res.status(500).json({ success: false, error: "Internal server error" });
+    const out = normalizeAuthError(error);
+    return res.status(out.status).json({ success: false, error: out.error });
   }
 };
 

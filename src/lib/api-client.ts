@@ -55,11 +55,6 @@ class ApiClient {
     if (!options.skipJson && hasBody && !isForm) {
       headers["Content-Type"] = "application/json";
     }
-    if (method === "GET") {
-      headers["Cache-Control"] = "no-cache";
-      headers.Pragma = "no-cache";
-    }
-
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
 
     const controller = new AbortController();
