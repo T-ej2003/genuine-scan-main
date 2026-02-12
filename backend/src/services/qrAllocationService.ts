@@ -30,6 +30,7 @@ export type AllocateQrRangeParams = {
   source?: string | null;
   requestId?: string | null;
   createReceivedBatch?: boolean;
+  receivedBatchName?: string | null;
   tx?: DbClient;
 };
 
@@ -42,6 +43,7 @@ export const allocateQrRange = async (params: AllocateQrRangeParams) => {
     source,
     requestId,
     createReceivedBatch,
+    receivedBatchName,
     tx,
   } = params;
 
@@ -94,7 +96,9 @@ export const allocateQrRange = async (params: AllocateQrRangeParams) => {
 
   let receivedBatch = null as null | { id: string; name: string };
   if (createReceivedBatch) {
-    const name = `Received ${startCode} → ${endCode}`.slice(0, 120);
+    const preferredName = String(receivedBatchName || "").trim();
+    const name =
+      (preferredName.length >= 2 ? preferredName : `Received ${startCode} -> ${endCode}`).slice(0, 120);
     const batch = await db.batch.create({
       data: {
         name,

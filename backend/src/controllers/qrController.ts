@@ -19,6 +19,7 @@ const allocateRangeSchema = z
     licenseeId: z.string().uuid(),
     startNumber: z.number().int().positive(),
     endNumber: z.number().int().positive(),
+    receivedBatchName: z.string().trim().min(2).max(120).optional(),
   })
   .refine((d) => d.endNumber >= d.startNumber, {
     message: "End number must be >= start number",
@@ -29,6 +30,7 @@ const allocateLicenseeTopupSchema = z
     startNumber: z.number().int().positive().optional(),
     endNumber: z.number().int().positive().optional(),
     quantity: z.number().int().positive().max(500000).optional(),
+    receivedBatchName: z.string().trim().min(2).max(120).optional(),
   })
   .refine(
     (d) => {
@@ -55,6 +57,7 @@ const createBatchSchema = z
 const assignManufacturerSchema = z.object({
   manufacturerId: z.string().uuid(),
   quantity: z.number().int().positive().max(500000),
+  name: z.string().trim().min(2).max(120).optional(),
 });
 
 const bulkDeleteQRCodesSchema = z
@@ -125,7 +128,7 @@ export const allocateQRRange = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const { licenseeId, startNumber, endNumber } = parsed.data;
+    const { licenseeId, startNumber, endNumber, receivedBatchName } = parsed.data;
 
     const result = await prisma.$transaction(async (tx) => {
       await lockLicenseeAllocation(tx, licenseeId);
@@ -136,6 +139,7 @@ export const allocateQRRange = async (req: AuthRequest, res: Response) => {
         createdByUserId: auth.userId,
         source: "ADMIN_TOPUP",
         createReceivedBatch: true,
+        receivedBatchName: receivedBatchName || null,
         tx,
       });
     });
@@ -151,11 +155,22 @@ export const allocateQRRange = async (req: AuthRequest, res: Response) => {
         endCode: result.endCode,
         created: result.createdCount,
         receivedBatchId: result.receivedBatch?.id || null,
+        receivedBatchName: result.receivedBatch?.name || null,
       },
       ipAddress: req.ip,
     });
 
-    return res.status(201).json({ success: true, data: result.range });
+    return res.status(201).json({
+      success: true,
+      data: {
+        range: result.range,
+        startCode: result.startCode,
+        endCode: result.endCode,
+        totalCodes: result.totalCodes,
+        receivedBatchId: result.receivedBatch?.id || null,
+        receivedBatchName: result.receivedBatch?.name || null,
+      },
+    });
   } catch (e) {
     console.error("allocateQRRange error:", e);
     const msg = (e as any)?.message || "Internal server error";
@@ -203,6 +218,7 @@ export const allocateQRRangeForLicensee = async (req: AuthRequest, res: Response
         createdByUserId: auth.userId,
         source: "ADMIN_TOPUP",
         createReceivedBatch: true,
+        receivedBatchName: parsed.data.receivedBatchName || null,
         tx,
       });
 
@@ -221,6 +237,7 @@ export const allocateQRRangeForLicensee = async (req: AuthRequest, res: Response
         endCode: result.allocation.endCode,
         created: result.allocation.createdCount,
         receivedBatchId: result.allocation.receivedBatch?.id || null,
+        receivedBatchName: result.allocation.receivedBatch?.name || null,
       },
       ipAddress: req.ip,
     });
@@ -234,6 +251,8 @@ export const allocateQRRangeForLicensee = async (req: AuthRequest, res: Response
         startNumber: result.startNumber,
         endNumber: result.endNumber,
         totalCodes: result.allocation.totalCodes,
+        receivedBatchId: result.allocation.receivedBatch?.id || null,
+        receivedBatchName: result.allocation.receivedBatch?.name || null,
       },
     });
   } catch (e: any) {
@@ -598,6 +617,7 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
     if (!manufacturer) return res.status(404).json({ success: false, error: "Manufacturer invalid" });
 
     const quantity = parsed.data.quantity;
+    const requestedChildBatchName = String(parsed.data.name || "").trim();
 
     const result = await prisma.$transaction(async (tx) => {
       const eligible = await tx.qRCode.findMany({
@@ -621,7 +641,10 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
       const endCode = eligible[eligible.length - 1].code;
       const totalCodes = eligible.length;
 
-      const newName = `${batch.name} → ${manufacturer.name} (${totalCodes})`
+      const newName = (
+        requestedChildBatchName ||
+        `${batch.name} -> ${manufacturer.name} (${totalCodes})`
+      )
         .replace(/\s+/g, " ")
         .slice(0, 120);
 
@@ -675,7 +698,7 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
         });
       }
 
-      return { newBatchId: newBatch.id, allocated: totalCodes, startCode, endCode };
+      return { newBatchId: newBatch.id, newBatchName: newBatch.name, allocated: totalCodes, startCode, endCode };
     });
 
     await createAuditLog({
@@ -688,6 +711,7 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
         manufacturerId: manufacturer.id,
         quantity: result.allocated,
         childBatchId: result.newBatchId,
+        childBatchName: result.newBatchName,
       },
       ipAddress: req.ip,
     });
@@ -702,6 +726,7 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
         manufacturerId: manufacturer.id,
         quantity: result.allocated,
         parentBatchId: batch.id,
+        childBatchName: result.newBatchName,
         startCode: result.startCode,
         endCode: result.endCode,
       },

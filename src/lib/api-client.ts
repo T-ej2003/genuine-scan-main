@@ -201,7 +201,9 @@ class ApiClient {
 
   async allocateLicenseeQrRange(
     licenseeId: string,
-    payload: { startNumber: number; endNumber: number } | { quantity: number }
+    payload:
+      | { startNumber: number; endNumber: number; receivedBatchName?: string }
+      | { quantity: number; receivedBatchName?: string }
   ) {
     return this.request(`/admin/licensees/${licenseeId}/qr-allocate-range`, {
       method: "POST",
@@ -267,10 +269,14 @@ class ApiClient {
     return this.request<{ deleted: number }>("/qr/batches/bulk-delete", { method: "POST", body: JSON.stringify(payload) });
   }
 
-  async assignBatchManufacturer(payload: { batchId: string; manufacturerId: string; quantity: number }) {
+  async assignBatchManufacturer(payload: { batchId: string; manufacturerId: string; quantity: number; name?: string }) {
     return this.request(`/qr/batches/${payload.batchId}/assign-manufacturer`, {
       method: "POST",
-      body: JSON.stringify({ manufacturerId: payload.manufacturerId, quantity: payload.quantity }),
+      body: JSON.stringify({
+        manufacturerId: payload.manufacturerId,
+        quantity: payload.quantity,
+        name: payload.name,
+      }),
     });
   }
 

@@ -99,6 +99,7 @@ export default function Batches() {
   const [assignBatch, setAssignBatch] = useState<BatchRow | null>(null);
   const [assignManufacturerId, setAssignManufacturerId] = useState<string>("");
   const [assignQuantity, setAssignQuantity] = useState<string>("");
+  const [assignBatchName, setAssignBatchName] = useState<string>("");
 
   // print pack dialog
   const [printOpen, setPrintOpen] = useState(false);
@@ -227,6 +228,7 @@ export default function Batches() {
     setAssignBatch(b);
     setAssignManufacturerId(b.manufacturer?.id || "");
     setAssignQuantity("");
+    setAssignBatchName("");
     setAssignOpen(true);
   };
 
@@ -256,6 +258,7 @@ export default function Batches() {
         batchId: assignBatch.id,
         manufacturerId: assignManufacturerId,
         quantity: qty,
+        name: assignBatchName.trim() || undefined,
       });
 
       if (!res.success) {
@@ -271,11 +274,17 @@ export default function Batches() {
         return;
       }
 
-      toast({ title: "Assigned", description: "Manufacturer assigned to batch." });
+      const data: any = res.data || {};
+      const createdName = data.newBatchName || assignBatchName.trim() || "Auto";
+      toast({
+        title: "Assigned",
+        description: `Created child batch ${data.newBatchId || "(id pending)"}: ${createdName}`,
+      });
       setAssignOpen(false);
       setAssignBatch(null);
       setAssignManufacturerId("");
       setAssignQuantity("");
+      setAssignBatchName("");
       await fetchBatches();
     } finally {
       setLoading(false);
@@ -507,7 +516,12 @@ export default function Batches() {
 
                       return (
                         <TableRow key={b.id}>
-                          <TableCell className="font-medium">{b.name}</TableCell>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <div className="font-medium">{b.name}</div>
+                              <div className="text-[11px] text-muted-foreground font-mono">{b.id}</div>
+                            </div>
+                          </TableCell>
 
                           <TableCell>
                             {b.licensee?.name ? (
@@ -630,7 +644,18 @@ export default function Batches() {
         </Card>
 
         {/* Assign Manufacturer Dialog */}
-        <Dialog open={assignOpen} onOpenChange={(v) => { setAssignOpen(v); if (!v) { setAssignBatch(null); setAssignManufacturerId(""); setAssignQuantity(""); } }}>
+        <Dialog
+          open={assignOpen}
+          onOpenChange={(v) => {
+            setAssignOpen(v);
+            if (!v) {
+              setAssignBatch(null);
+              setAssignManufacturerId("");
+              setAssignQuantity("");
+              setAssignBatchName("");
+            }
+          }}
+        >
           <DialogContent className="sm:max-w-[520px]">
             <DialogHeader>
               <DialogTitle>Assign Manufacturer</DialogTitle>
@@ -645,6 +670,7 @@ export default function Batches() {
               <div className="space-y-4 mt-2">
                 <div className="rounded-md border p-3 text-sm">
                   <div className="font-medium">{assignBatch.name}</div>
+                  <div className="text-muted-foreground font-mono text-xs">{assignBatch.id}</div>
                   <div className="text-muted-foreground font-mono text-xs">
                     {assignBatch.startCode} → {assignBatch.endCode}
                   </div>
@@ -690,6 +716,18 @@ export default function Batches() {
                       {Math.max(assignBatch.availableCodes - Number(assignQuantity), 0)}
                     </div>
                   )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label>New Child Batch Name (optional)</Label>
+                  <Input
+                    value={assignBatchName}
+                    onChange={(e) => setAssignBatchName(e.target.value)}
+                    placeholder="e.g. Factory-A PO-1234"
+                  />
+                  <div className="text-xs text-muted-foreground">
+                    If empty, a default name is generated automatically.
+                  </div>
                 </div>
 
                 <div className="flex justify-end gap-3 pt-2">
