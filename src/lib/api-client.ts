@@ -267,10 +267,6 @@ class ApiClient {
     return this.request<{ deleted: number }>("/qr/batches/bulk-delete", { method: "POST", body: JSON.stringify(payload) });
   }
 
-  async adminAllocateBatch(payload: { licenseeId: string; manufacturerId: string; quantity: number; name?: string; requestNote?: string }) {
-    return this.request("/qr/batches/admin-allocate", { method: "POST", body: JSON.stringify(payload) });
-  }
-
   async assignBatchManufacturer(payload: { batchId: string; manufacturerId: string; quantity: number }) {
     return this.request(`/qr/batches/${payload.batchId}/assign-manufacturer`, {
       method: "POST",
