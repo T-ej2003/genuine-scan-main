@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useAuth } from "@/contexts/AuthContext";
 import apiClient from "@/lib/api-client";
+import { useNavigate } from "react-router-dom";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,10 @@ import {
   RefreshCw,
   Trash2,
   Power,
+  Copy,
+  Eye,
+  PackageCheck,
+  Activity,
 } from "lucide-react";
 
 import {
@@ -81,9 +86,32 @@ type CreateManufacturerForm = {
   website: string;
 };
 
+type BatchRow = {
+  id: string;
+  name: string;
+  licenseeId?: string;
+  manufacturerId?: string | null;
+  totalCodes?: number;
+  availableCodes?: number;
+  printedAt?: string | null;
+  createdAt?: string;
+  startCode?: string;
+  endCode?: string;
+};
+
+type ManufacturerStats = {
+  assignedBatches: number;
+  assignedCodes: number;
+  printedBatches: number;
+  pendingPrintBatches: number;
+  lastBatchAt: string | null;
+  recentBatches: BatchRow[];
+};
+
 export default function Manufacturers() {
   const { toast } = useToast();
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const isSuperAdmin = user?.role === "super_admin";
   const fixedLicenseeId = user?.licenseeId || "";
@@ -94,11 +122,14 @@ export default function Manufacturers() {
   const [licenseeFilter, setLicenseeFilter] = useState<string>(""); // super_admin only
 
   const [manufacturers, setManufacturers] = useState<ManufacturerRow[]>([]);
+  const [manufacturerStats, setManufacturerStats] = useState<Record<string, ManufacturerStats>>({});
   const [search, setSearch] = useState("");
   const [showInactive, setShowInactive] = useState(true);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsManufacturer, setDetailsManufacturer] = useState<ManufacturerRow | null>(null);
   const [createForm, setCreateForm] = useState<CreateManufacturerForm>({
     licenseeId: "",
     name: "",
@@ -121,6 +152,29 @@ export default function Manufacturers() {
       location: row.location ?? null,
       website: row.website ?? null,
     }));
+
+  const normalizeBatchRows = (list: any[]): BatchRow[] =>
+    list.map((row) => ({
+      id: row.id,
+      name: row.name || "",
+      licenseeId: row.licenseeId,
+      manufacturerId: row.manufacturerId ?? row.manufacturer?.id ?? null,
+      totalCodes: Number(row.totalCodes || 0),
+      availableCodes: Number(row.availableCodes || 0),
+      printedAt: row.printedAt || null,
+      createdAt: row.createdAt,
+      startCode: row.startCode,
+      endCode: row.endCode,
+    }));
+
+  const emptyStats = (): ManufacturerStats => ({
+    assignedBatches: 0,
+    assignedCodes: 0,
+    printedBatches: 0,
+    pendingPrintBatches: 0,
+    lastBatchAt: null,
+    recentBatches: [],
+  });
 
   const loadLicenseesIfNeeded = async () => {
     if (!isSuperAdmin) return;
@@ -153,6 +207,7 @@ export default function Manufacturers() {
       // licensee_admin MUST have licenseeId
       if (!isSuperAdmin && !fixedLicenseeId) {
         setManufacturers([]);
+        setManufacturerStats({});
         toast({
           title: "Missing licensee scope",
           description: "Your account is not linked to a licensee. Contact Super Admin.",
@@ -164,14 +219,18 @@ export default function Manufacturers() {
       // super_admin must pick a licensee
       if (isSuperAdmin && !effectiveLicenseeId) {
         setManufacturers([]);
+        setManufacturerStats({});
         return;
       }
 
       const scope = effectiveLicenseeId || undefined;
-      const primary = await apiClient.getManufacturers({
-        licenseeId: scope,
-        includeInactive: true,
-      });
+      const [primary, batchRes] = await Promise.all([
+        apiClient.getManufacturers({
+          licenseeId: scope,
+          includeInactive: true,
+        }),
+        apiClient.getBatches(scope ? { licenseeId: scope } : undefined),
+      ]);
 
       let rows: ManufacturerRow[] = primary.success
         ? normalizeManufacturerRows((primary.data as any[]) || [])
@@ -192,6 +251,37 @@ export default function Manufacturers() {
       }
 
       setManufacturers(rows);
+
+      const statsMap: Record<string, ManufacturerStats> = {};
+      for (const m of rows) statsMap[m.id] = emptyStats();
+
+      const batches = batchRes.success ? normalizeBatchRows((batchRes.data as any[]) || []) : [];
+      for (const b of batches) {
+        const manufacturerId = b.manufacturerId || "";
+        if (!manufacturerId || !statsMap[manufacturerId]) continue;
+        const s = statsMap[manufacturerId];
+        s.assignedBatches += 1;
+        s.assignedCodes += Number(b.totalCodes || 0);
+        if (b.printedAt) s.printedBatches += 1;
+        else s.pendingPrintBatches += 1;
+
+        if (!s.lastBatchAt || (b.createdAt && new Date(b.createdAt) > new Date(s.lastBatchAt))) {
+          s.lastBatchAt = b.createdAt || s.lastBatchAt;
+        }
+
+        s.recentBatches.push(b);
+      }
+
+      for (const key of Object.keys(statsMap)) {
+        statsMap[key].recentBatches.sort((a, b) => {
+          const aTs = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const bTs = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return bTs - aTs;
+        });
+        statsMap[key].recentBatches = statsMap[key].recentBatches.slice(0, 5);
+      }
+
+      setManufacturerStats(statsMap);
     } finally {
       setLoading(false);
     }
@@ -234,6 +324,43 @@ export default function Manufacturers() {
         );
       });
   }, [manufacturers, search, showInactive]);
+
+  const summary = useMemo(() => {
+    const rows = filtered || [];
+    let active = 0;
+    let inactive = 0;
+    let assignedBatches = 0;
+    let pendingPrintBatches = 0;
+    for (const m of rows) {
+      if (m.isActive) active += 1;
+      else inactive += 1;
+      const s = manufacturerStats[m.id];
+      if (!s) continue;
+      assignedBatches += s.assignedBatches;
+      pendingPrintBatches += s.pendingPrintBatches;
+    }
+    return {
+      total: rows.length,
+      active,
+      inactive,
+      assignedBatches,
+      pendingPrintBatches,
+    };
+  }, [filtered, manufacturerStats]);
+
+  const openDetails = (m: ManufacturerRow) => {
+    setDetailsManufacturer(m);
+    setDetailsOpen(true);
+  };
+
+  const copyId = async (id: string) => {
+    try {
+      await navigator.clipboard.writeText(id);
+      toast({ title: "Copied", description: "Manufacturer ID copied to clipboard." });
+    } catch {
+      toast({ title: "Copy failed", description: "Could not copy ID.", variant: "destructive" });
+    }
+  };
 
   const openCreate = () => {
     const licId = effectiveLicenseeId || fixedLicenseeId || "";
@@ -486,6 +613,39 @@ export default function Manufacturers() {
           </div>
         </div>
 
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-sm text-muted-foreground">Visible Manufacturers</div>
+              <div className="mt-2 text-2xl font-semibold">{summary.total}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-sm text-muted-foreground">Active</div>
+              <div className="mt-2 text-2xl font-semibold">{summary.active}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-sm text-muted-foreground">Inactive</div>
+              <div className="mt-2 text-2xl font-semibold">{summary.inactive}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-sm text-muted-foreground">Assigned Batches</div>
+              <div className="mt-2 text-2xl font-semibold">{summary.assignedBatches}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-sm text-muted-foreground">Pending Print</div>
+              <div className="mt-2 text-2xl font-semibold">{summary.pendingPrintBatches}</div>
+            </CardContent>
+          </Card>
+        </div>
+
         {/* Filters */}
         <Card>
           <CardHeader className="pb-4">
@@ -536,9 +696,12 @@ export default function Manufacturers() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Manufacturer</TableHead>
-                      <TableHead>Email</TableHead>
+                      <TableHead>Contact</TableHead>
+                      <TableHead>Location</TableHead>
+                      <TableHead>Batch Ops</TableHead>
+                      <TableHead>Print Status</TableHead>
+                      <TableHead>Last Assignment</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead>Created</TableHead>
                       <TableHead className="w-[50px]" />
                     </TableRow>
                   </TableHeader>
@@ -552,22 +715,66 @@ export default function Manufacturers() {
                               <Factory className="h-5 w-5 text-primary" />
                             </div>
                             <div>
-                              <p className="font-medium">{m.name}</p>
+                              <button
+                                type="button"
+                                className="font-medium text-left hover:underline"
+                                onClick={() => openDetails(m)}
+                              >
+                                {m.name}
+                              </button>
                               <p className="text-xs text-muted-foreground">{m.id}</p>
                             </div>
                           </div>
                         </TableCell>
 
-                        <TableCell className="text-muted-foreground">{m.email}</TableCell>
+                        <TableCell className="text-muted-foreground">
+                          <div>{m.email}</div>
+                          {m.website ? (
+                            <a
+                              className="text-xs text-primary hover:underline"
+                              href={m.website}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {m.website}
+                            </a>
+                          ) : (
+                            <span className="text-xs">—</span>
+                          )}
+                        </TableCell>
+
+                        <TableCell className="text-muted-foreground">{m.location || "—"}</TableCell>
+
+                        <TableCell>
+                          <div className="flex items-center gap-1 text-sm">
+                            <PackageCheck className="h-4 w-4 text-muted-foreground" />
+                            <span>{manufacturerStats[m.id]?.assignedBatches || 0} batches</span>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {manufacturerStats[m.id]?.assignedCodes || 0} codes
+                          </div>
+                        </TableCell>
+
+                        <TableCell>
+                          <div className="flex items-center gap-1 text-sm">
+                            <Activity className="h-4 w-4 text-muted-foreground" />
+                            <span>{manufacturerStats[m.id]?.printedBatches || 0} printed</span>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {manufacturerStats[m.id]?.pendingPrintBatches || 0} pending
+                          </div>
+                        </TableCell>
+
+                        <TableCell className="text-muted-foreground">
+                          {manufacturerStats[m.id]?.lastBatchAt
+                            ? format(new Date(manufacturerStats[m.id]!.lastBatchAt!), "MMM d, yyyy HH:mm")
+                            : "—"}
+                        </TableCell>
 
                         <TableCell>
                           <Badge variant={m.isActive ? "default" : "secondary"}>
                             {m.isActive ? "Active" : "Inactive"}
                           </Badge>
-                        </TableCell>
-
-                        <TableCell className="text-muted-foreground">
-                          {m.createdAt ? format(new Date(m.createdAt), "MMM d, yyyy") : "—"}
                         </TableCell>
 
                         <TableCell>
@@ -579,6 +786,21 @@ export default function Manufacturers() {
                             </DropdownMenuTrigger>
 
                             <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => openDetails(m)}>
+                                <Eye className="mr-2 h-4 w-4" />
+                                View Details
+                              </DropdownMenuItem>
+
+                              <DropdownMenuItem onClick={() => copyId(m.id)}>
+                                <Copy className="mr-2 h-4 w-4" />
+                                Copy ID
+                              </DropdownMenuItem>
+
+                              <DropdownMenuItem onClick={() => navigate("/batches")}>
+                                <PackageCheck className="mr-2 h-4 w-4" />
+                                Open Batches
+                              </DropdownMenuItem>
+
                               {m.isActive ? (
                                 <DropdownMenuItem onClick={() => deactivate(m)}>
                                   <Power className="mr-2 h-4 w-4" />
@@ -603,7 +825,7 @@ export default function Manufacturers() {
 
                     {filtered.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
+                        <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
                           No manufacturers found.
                         </TableCell>
                       </TableRow>
@@ -614,6 +836,114 @@ export default function Manufacturers() {
             )}
           </CardContent>
         </Card>
+
+        <Dialog
+          open={detailsOpen}
+          onOpenChange={(v) => {
+            setDetailsOpen(v);
+            if (!v) setDetailsManufacturer(null);
+          }}
+        >
+          <DialogContent className="sm:max-w-[760px] max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Manufacturer Details</DialogTitle>
+              <DialogDescription>
+                Operational snapshot, print status, and recent assigned batches.
+              </DialogDescription>
+            </DialogHeader>
+
+            {!detailsManufacturer ? (
+              <div className="text-sm text-muted-foreground">No manufacturer selected.</div>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Name</div>
+                    <div className="font-medium">{detailsManufacturer.name}</div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Email</div>
+                    <div className="font-medium">{detailsManufacturer.email}</div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Location</div>
+                    <div className="font-medium">{detailsManufacturer.location || "—"}</div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Status</div>
+                    <div className="font-medium">{detailsManufacturer.isActive ? "Active" : "Inactive"}</div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Assigned Batches</div>
+                    <div className="text-xl font-semibold">
+                      {manufacturerStats[detailsManufacturer.id]?.assignedBatches || 0}
+                    </div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Assigned Codes</div>
+                    <div className="text-xl font-semibold">
+                      {manufacturerStats[detailsManufacturer.id]?.assignedCodes || 0}
+                    </div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Printed Batches</div>
+                    <div className="text-xl font-semibold">
+                      {manufacturerStats[detailsManufacturer.id]?.printedBatches || 0}
+                    </div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Pending Print</div>
+                    <div className="text-xl font-semibold">
+                      {manufacturerStats[detailsManufacturer.id]?.pendingPrintBatches || 0}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-md border">
+                  <div className="border-b px-4 py-3 text-sm font-medium">Recent Assigned Batches</div>
+                  <div className="p-4">
+                    {(manufacturerStats[detailsManufacturer.id]?.recentBatches || []).length === 0 ? (
+                      <div className="text-sm text-muted-foreground">No assigned batches yet.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {(manufacturerStats[detailsManufacturer.id]?.recentBatches || []).map((b) => (
+                          <div key={b.id} className="flex items-center justify-between rounded border p-2 text-sm">
+                            <div>
+                              <div className="font-medium">{b.name || "Unnamed Batch"}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {b.startCode || "?"} {"->"} {b.endCode || "?"}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-medium">{b.totalCodes || 0} codes</div>
+                              <div className="text-xs text-muted-foreground">
+                                {b.printedAt ? "Printed" : "Pending print"}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => copyId(detailsManufacturer.id)}>
+                    <Copy className="mr-2 h-4 w-4" />
+                    Copy ID
+                  </Button>
+                  <Button onClick={() => navigate("/batches")}>
+                    <PackageCheck className="mr-2 h-4 w-4" />
+                    Open Batches
+                  </Button>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );

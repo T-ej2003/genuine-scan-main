@@ -70,14 +70,6 @@ const bulkDeleteBatchesSchema = z.object({
   ids: z.array(z.string().uuid()).min(1, "Provide batch ids"),
 });
 
-const adminAllocateBatchSchema = z.object({
-  licenseeId: z.string().uuid(),
-  manufacturerId: z.string().uuid(),
-  quantity: z.number().int().positive().max(500000),
-  name: z.string().trim().min(2).max(120).optional(),
-  requestNote: z.string().trim().max(500).optional(),
-});
-
 const generateQRCodesSchema = z.object({
   licenseeId: z.string().uuid(),
   quantity: z.number().int().positive().max(200000),
@@ -401,132 +393,15 @@ export const createBatch = async (req: AuthRequest, res: Response) => {
 /* ===================== BATCH (SUPER ADMIN) ===================== */
 
 export const adminAllocateBatch = async (req: AuthRequest, res: Response) => {
-  try {
-    if (req.user?.role !== UserRole.SUPER_ADMIN) {
-      return res.status(403).json({ success: false, error: "Access denied" });
-    }
-
-    const parsed = adminAllocateBatchSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
-    }
-
-    const { licenseeId, manufacturerId, quantity, name, requestNote } = parsed.data;
-
-    const licensee = await prisma.licensee.findUnique({
-      where: { id: licenseeId },
-      select: { id: true, prefix: true },
-    });
-    if (!licensee) return res.status(404).json({ success: false, error: "Licensee not found" });
-
-    const manufacturer = await prisma.user.findFirst({
-      where: { id: manufacturerId, role: UserRole.MANUFACTURER, licenseeId, isActive: true },
-      select: { id: true },
-    });
-    if (!manufacturer) {
-      return res.status(404).json({ success: false, error: "Manufacturer not found / inactive / wrong licensee" });
-    }
-
-    const poolWhere = {
-      licenseeId,
-      status: QRStatus.DORMANT,
-      OR: [
-        { batchId: null },
-        { batch: { manufacturerId: null, printedAt: null } },
-      ],
-    } as const;
-
-    const unassignedBefore = await prisma.qRCode.count({ where: poolWhere as any });
-
-    if (unassignedBefore < quantity) {
-      return res.status(400).json({
-        success: false,
-        error: `Not enough unassigned codes. Available: ${unassignedBefore}, requested: ${quantity}`,
-      });
-    }
-
-    // deterministic: smallest codes first
-    const pool = await prisma.qRCode.findMany({
-      where: poolWhere as any,
-      select: { id: true, code: true },
-      orderBy: { code: "asc" },
-      take: quantity,
-    });
-
-    if (!pool.length) {
-      return res.status(400).json({ success: false, error: "No unassigned pool available" });
-    }
-
-    const startCode = pool[0].code;
-    const endCode = pool[pool.length - 1].code;
-
-    const createdBatch = await prisma.$transaction(async (tx) => {
-      const batch = await tx.batch.create({
-        data: {
-          name: (name?.trim() || `Batch ${startCode} → ${endCode}`).slice(0, 120),
-          licenseeId,
-          manufacturerId,
-          startCode,
-          endCode,
-          totalCodes: pool.length,
-        },
-      });
-
-      const updated = await tx.qRCode.updateMany({
-        where: { id: { in: pool.map((p) => p.id) } },
-        data: {
-          batchId: batch.id,
-          status: QRStatus.ALLOCATED,
-          printJobId: null,
-          tokenNonce: null,
-          tokenIssuedAt: null,
-          tokenExpiresAt: null,
-          tokenHash: null,
-          printedAt: null,
-          printedByUserId: null,
-          redeemedAt: null,
-          redeemedDeviceFingerprint: null,
-        },
-      });
-
-      if (updated.count !== pool.length) {
-        throw new Error("BATCH_BUSY");
-      }
-
-      return batch;
-    });
-
-    await createAuditLog({
-      userId: req.user.userId,
-      action: "ALLOCATED",
-      entityType: "Batch",
-      entityId: createdBatch.id,
-      details: {
-        context: "ADMIN_ALLOCATE_BATCH",
-        licenseeId,
-        manufacturerId,
-        quantity: pool.length,
-        startCode,
-        endCode,
-        requestNote: requestNote?.trim() || null,
-      },
-      ipAddress: req.ip,
-    });
-
-    const unassignedAfter = await prisma.qRCode.count({ where: poolWhere as any });
-
-    return res.status(201).json({
-      success: true,
-      data: { batch: createdBatch, unassignedBefore, unassignedAfter },
-    });
-  } catch (e: any) {
-    const msg = e?.message || "Internal server error";
-    console.error("adminAllocateBatch error:", e);
-    if (isBatchBusyError(msg)) {
-      return res.status(409).json({ success: false, error: "Please retry — batch busy." });
-    }
-    return res.status(400).json({ success: false, error: msg });
+  if (req.user?.role !== UserRole.SUPER_ADMIN) {
+    return res.status(403).json({ success: false, error: "Access denied" });
   }
+
+  return res.status(403).json({
+    success: false,
+    error:
+      "Direct super admin allocation to manufacturer is disabled. Allocate dormant pool to licensee only; licensee admin must assign batches to manufacturers.",
+  });
 };
 
 /* ===================== DELETE ONE BATCH ===================== */

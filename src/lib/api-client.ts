@@ -252,8 +252,11 @@ class ApiClient {
   }
 
   // ==================== BATCHES ====================
-  async getBatches() {
-    return this.request<any[]>("/qr/batches");
+  async getBatches(options?: { licenseeId?: string }) {
+    const params = new URLSearchParams();
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request<any[]>(`/qr/batches${query}`);
   }
 
   async deleteBatch(batchId: string) {

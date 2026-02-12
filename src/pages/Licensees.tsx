@@ -40,7 +40,6 @@ import {
   Trash2,
   Download,
   UserPlus,
-  PackagePlus,
   QrCode,
 } from "lucide-react";
 
@@ -113,12 +112,6 @@ type CreateLicenseeForm = {
   manufacturerName: string;
   manufacturerEmail: string;
   manufacturerPassword: string;
-
-  // Optional: allocate initial batch now
-  allocateInitialBatch: boolean;
-  initialBatchQty: string;
-  initialBatchName: string;
-  initialRequestNote: string;
 };
 
 type EditLicenseeForm = {
@@ -139,21 +132,6 @@ type CreateUserForm = {
   email: string;
   password: string;
   role: "LICENSEE_ADMIN" | "MANUFACTURER";
-};
-
-type ManufacturerRow = {
-  id: string;
-  name: string;
-  email: string;
-  isActive: boolean;
-};
-
-type AllocateBatchForm = {
-  licenseeId: string;
-  manufacturerId: string;
-  quantity: string;
-  name: string;
-  requestNote: string;
 };
 
 type AllocateRangeForm = {
@@ -226,11 +204,6 @@ export default function Licensees() {
     manufacturerName: "",
     manufacturerEmail: "",
     manufacturerPassword: "",
-
-    allocateInitialBatch: true,
-    initialBatchQty: "1000",
-    initialBatchName: "",
-    initialRequestNote: "",
   });
 
   // Edit Licensee dialog
@@ -242,13 +215,6 @@ export default function Licensees() {
   const [isUserOpen, setIsUserOpen] = useState(false);
   const [creatingUser, setCreatingUser] = useState(false);
   const [userForm, setUserForm] = useState<CreateUserForm | null>(null);
-
-  // Allocate batch dialog (existing licensee)
-  const [allocOpen, setAllocOpen] = useState(false);
-  const [allocLoading, setAllocLoading] = useState(false);
-  const [allocManufacturers, setAllocManufacturers] = useState<ManufacturerRow[]>([]);
-  const [allocStats, setAllocStats] = useState<any>(null);
-  const [allocForm, setAllocForm] = useState<AllocateBatchForm | null>(null);
 
   // Allocate QR range dialog (existing licensee)
   const [rangeOpen, setRangeOpen] = useState(false);
@@ -346,11 +312,6 @@ export default function Licensees() {
       manufacturerName: "",
       manufacturerEmail: "",
       manufacturerPassword: "",
-
-      allocateInitialBatch: true,
-      initialBatchQty: "1000",
-      initialBatchName: "",
-      initialRequestNote: "",
     });
   };
 
@@ -403,7 +364,6 @@ export default function Licensees() {
     }
 
     const wantMfg = !!createForm.createManufacturerNow;
-    const wantInitialBatch = !!createForm.allocateInitialBatch;
 
     const mfgName = createForm.manufacturerName.trim();
     const mfgEmail = createForm.manufacturerEmail.trim().toLowerCase();
@@ -414,26 +374,6 @@ export default function Licensees() {
         toast({
           title: "Manufacturer details missing",
           description: "Provide Manufacturer Name, Email, and Password (min 6 chars).",
-          variant: "destructive",
-        });
-        return;
-      }
-    }
-
-    const qty = toInt(createForm.initialBatchQty);
-    if (wantInitialBatch) {
-      if (!Number.isFinite(qty) || qty <= 0) {
-        toast({
-          title: "Invalid quantity",
-          description: "Initial batch quantity must be a positive number.",
-          variant: "destructive",
-        });
-        return;
-      }
-      if (!wantMfg) {
-        toast({
-          title: "Manufacturer required",
-          description: "To allocate an initial batch, you must create a manufacturer now.",
           variant: "destructive",
         });
         return;
@@ -469,7 +409,6 @@ export default function Licensees() {
       if (!licenseeId) throw new Error("Licensee created, but licenseeId was not returned.");
 
       // 2) Optional: create manufacturer user
-      let manufacturerId: string | null = null;
       if (wantMfg) {
         const uRes = await apiClient.createUser({
           name: mfgName,
@@ -479,7 +418,6 @@ export default function Licensees() {
           licenseeId,
         });
         if (!uRes.success) throw new Error(uRes.error || "Manufacturer create failed");
-        manufacturerId = (uRes.data as any)?.id || null;
       }
 
       // 3) Allocate QR range (creates QRCode rows as DORMANT)
@@ -489,21 +427,6 @@ export default function Licensees() {
         endNumber: rangeEnd,
       });
       if (!allocRes.success) throw new Error(allocRes.error || "QR range allocation failed");
-
-      // 4) Optional: allocate initial batch by quantity (SUPER_ADMIN)
-      if (wantInitialBatch) {
-        if (!manufacturerId) throw new Error("Initial batch requires a manufacturer (creation failed).");
-
-        const bRes = await apiClient.adminAllocateBatch({
-          licenseeId,
-          manufacturerId,
-          quantity: qty,
-          name: createForm.initialBatchName.trim() || undefined,
-          requestNote: createForm.initialRequestNote.trim() || undefined,
-        });
-
-        if (!bRes.success) throw new Error(bRes.error || "Initial batch allocation failed");
-      }
 
       toast({
         title: "Created",
@@ -699,95 +622,6 @@ export default function Licensees() {
     await load();
   };
 
-  /* ===================== ALLOCATE BATCH (EXISTING LICENSEE) ===================== */
-
-  const openAllocateBatch = async (l: LicenseeRow) => {
-    setAllocOpen(true);
-    setAllocLoading(true);
-    setAllocManufacturers([]);
-    setAllocStats(null);
-
-    setAllocForm({
-      licenseeId: l.id,
-      manufacturerId: "",
-      quantity: "1000",
-      name: "",
-      requestNote: "",
-    });
-
-    try {
-      const [mRes, sRes] = await Promise.all([
-        apiClient.getManufacturers({ licenseeId: l.id, includeInactive: false }),
-        apiClient.getQRStats(l.id),
-      ]);
-
-      if (mRes.success) setAllocManufacturers(((mRes.data as any) || []) as ManufacturerRow[]);
-      if (sRes.success) setAllocStats(sRes.data || null);
-    } finally {
-      setAllocLoading(false);
-    }
-  };
-
-  const submitAllocateBatch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!allocForm) return;
-
-    const qty = toInt(allocForm.quantity);
-
-    if (!allocForm.manufacturerId) {
-      toast({
-        title: "Select manufacturer",
-        description: "Choose which manufacturer gets this batch.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!Number.isFinite(qty) || qty <= 0) {
-      toast({
-        title: "Invalid quantity",
-        description: "Quantity must be a positive number.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const dormant = (allocStats?.dormant ?? allocStats?.byStatus?.DORMANT ?? 0) as number;
-    if (dormant && qty > dormant) {
-      toast({
-        title: "Not enough unassigned codes",
-        description: `Requested ${qty} but only ${dormant} unassigned (DORMANT) available.`,
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      const res = await apiClient.adminAllocateBatch({
-        licenseeId: allocForm.licenseeId,
-        manufacturerId: allocForm.manufacturerId,
-        quantity: qty,
-        name: allocForm.name.trim() || undefined,
-        requestNote: allocForm.requestNote.trim() || undefined,
-      });
-
-      if (!res.success) throw new Error(res.error || "Allocation failed");
-
-      toast({ title: "Batch allocated", description: `Allocated ${qty} codes to manufacturer.` });
-      setAllocOpen(false);
-      setAllocForm(null);
-      await load();
-    } catch (e: any) {
-      const msg = e?.message || "Error";
-      const busy = isBusyError(msg);
-      toast({
-        title: busy ? "Batch busy" : "Allocation failed",
-        description: busy ? "Please retry — batch busy." : msg,
-        variant: "destructive",
-      });
-    }
-  };
-
   /* ===================== ALLOCATE QR RANGE (TOP-UP) ===================== */
 
   const openAllocateRange = (l: LicenseeRow) => {
@@ -915,7 +749,7 @@ export default function Licensees() {
                 <DialogHeader>
                   <DialogTitle>Create New Licensee</DialogTitle>
                   <DialogDescription>
-                    Creates the licensee + admin, allocates a QR range, and (optionally) creates a manufacturer + initial batch.
+                    Creates the licensee + admin, allocates a dormant QR range, and optionally creates the first manufacturer user.
                   </DialogDescription>
                 </DialogHeader>
 
@@ -1118,61 +952,6 @@ export default function Licensees() {
                     )}
                   </div>
 
-                  {/* Optional initial batch */}
-                  <div className="rounded-md border p-3 space-y-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <Label>Allocate initial batch to manufacturer</Label>
-                      <Button
-                        type="button"
-                        variant={createForm.allocateInitialBatch ? "default" : "secondary"}
-                        onClick={() => setCreateForm((p) => ({ ...p, allocateInitialBatch: !p.allocateInitialBatch }))}
-                        disabled={creating}
-                      >
-                        {createForm.allocateInitialBatch ? "Yes" : "No"}
-                      </Button>
-                    </div>
-
-                    {createForm.allocateInitialBatch && (
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>Quantity</Label>
-                          <Input
-                            type="number"
-                            value={createForm.initialBatchQty}
-                            onChange={(e) => setCreateForm((p) => ({ ...p, initialBatchQty: e.target.value }))}
-                            disabled={creating}
-                          />
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Batch Name (optional)</Label>
-                          <Input
-                            value={createForm.initialBatchName}
-                            onChange={(e) => setCreateForm((p) => ({ ...p, initialBatchName: e.target.value }))}
-                            placeholder="Launch Batch"
-                            disabled={creating}
-                          />
-                        </div>
-
-                        <div className="space-y-2 col-span-2">
-                          <Label>Request note (optional)</Label>
-                          <Input
-                            value={createForm.initialRequestNote}
-                            onChange={(e) => setCreateForm((p) => ({ ...p, initialRequestNote: e.target.value }))}
-                            placeholder='e.g. "Manufacturer requested 1000 labels for PO#1234"'
-                            disabled={creating}
-                          />
-                        </div>
-
-                        {!createForm.createManufacturerNow && (
-                          <p className="text-xs text-muted-foreground col-span-2">
-                            Initial batch requires a manufacturer. Turn on “Create Manufacturer now”.
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
                   <div className="flex justify-end gap-3 pt-2">
                     <Button
                       type="button"
@@ -1296,11 +1075,6 @@ export default function Licensees() {
                                 <DropdownMenuItem onClick={() => openAllocateRange(l)}>
                                   <QrCode className="mr-2 h-4 w-4" />
                                   Allocate QR Range
-                                </DropdownMenuItem>
-
-                                <DropdownMenuItem onClick={() => openAllocateBatch(l)}>
-                                  <PackagePlus className="mr-2 h-4 w-4" />
-                                  Allocate Batch
                                 </DropdownMenuItem>
 
                                 <DropdownMenuItem onClick={() => openCreateUser(l.id)}>
@@ -1617,103 +1391,6 @@ export default function Licensees() {
           </DialogContent>
         </Dialog>
 
-        {/* ALLOCATE BATCH DIALOG */}
-        <Dialog
-          open={allocOpen}
-          onOpenChange={(v) => {
-            setAllocOpen(v);
-            if (!v) {
-              setAllocForm(null);
-              setAllocManufacturers([]);
-              setAllocStats(null);
-            }
-          }}
-        >
-          <DialogContent className="sm:max-w-[520px] max-h-[85vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Allocate Batch to Manufacturer</DialogTitle>
-              <DialogDescription>
-                Allocates a new batch by quantity from the unassigned pool (DORMANT codes).
-              </DialogDescription>
-            </DialogHeader>
-
-            {allocLoading || !allocForm ? (
-              <div className="text-sm text-muted-foreground">Loading…</div>
-            ) : (
-              <form className="space-y-4 mt-2" onSubmit={submitAllocateBatch}>
-                <div className="rounded-md border p-3 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Unassigned available (DORMANT):</span>
-                    <span className="font-medium">
-                      {allocStats?.dormant ?? allocStats?.byStatus?.DORMANT ?? 0}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Manufacturer</Label>
-                  <Select
-                    value={allocForm.manufacturerId}
-                    onValueChange={(v) => setAllocForm((p) => (p ? { ...p, manufacturerId: v } : p))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select manufacturer" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {allocManufacturers.length === 0 ? (
-                        <SelectItem value="__none__" disabled>
-                          No manufacturers found (create one from “Create User”)
-                        </SelectItem>
-                      ) : (
-                        allocManufacturers.map((m) => (
-                          <SelectItem key={m.id} value={m.id}>
-                            {m.name} ({m.email})
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Quantity</Label>
-                    <Input
-                      type="number"
-                      value={allocForm.quantity}
-                      onChange={(e) => setAllocForm((p) => (p ? { ...p, quantity: e.target.value } : p))}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Batch Name (optional)</Label>
-                    <Input
-                      value={allocForm.name}
-                      onChange={(e) => setAllocForm((p) => (p ? { ...p, name: e.target.value } : p))}
-                      placeholder="PO-1234 Batch"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Request note (optional)</Label>
-                  <Input
-                    value={allocForm.requestNote}
-                    onChange={(e) => setAllocForm((p) => (p ? { ...p, requestNote: e.target.value } : p))}
-                    placeholder='e.g. "Allocated upon manufacturer request (PO #1234)"'
-                  />
-                </div>
-
-                <div className="flex justify-end gap-3 pt-2">
-                  <Button type="button" variant="outline" onClick={() => setAllocOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button type="submit">Allocate</Button>
-                </div>
-              </form>
-            )}
-          </DialogContent>
-        </Dialog>
       </div>
     </DashboardLayout>
   );
