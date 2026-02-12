@@ -1056,7 +1056,7 @@ export const blockQRCode = async (req: AuthRequest, res: Response) => {
       action: "BLOCKED",
       entityType: "QRCode",
       entityId: updated.id,
-      details: { reason: parsed.data.reason || null },
+      details: { reason: parsed.data.reason || null, batchId: updated.batchId || null },
       ipAddress: req.ip,
     });
 
@@ -1245,11 +1245,37 @@ export const getQRCodes = async (req: AuthRequest, res: Response) => {
 export const getStats = async (req: AuthRequest, res: Response) => {
   try {
     const role = req.user?.role;
+    const userId = req.user?.userId;
 
     const licenseeId: string | undefined =
       role === UserRole.SUPER_ADMIN
         ? ((req.query.licenseeId as string | undefined) || undefined)
         : (req.user?.licenseeId ?? undefined) || undefined;
+
+    if (role === UserRole.MANUFACTURER && userId) {
+      const where: any = {
+        batch: { manufacturerId: userId },
+      };
+      if (licenseeId) where.licenseeId = licenseeId;
+
+      const grouped = await prisma.qRCode.groupBy({
+        by: ["status"],
+        where,
+        _count: true,
+      });
+      const total = await prisma.qRCode.count({ where });
+
+      return res.json({
+        success: true,
+        data: {
+          total,
+          byStatus: grouped.reduce((acc, s) => {
+            acc[s.status] = s._count;
+            return acc;
+          }, {} as Record<string, number>),
+        },
+      });
+    }
 
     const stats = await getQRStats(licenseeId);
     return res.json({ success: true, data: stats });

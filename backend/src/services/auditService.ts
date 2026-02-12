@@ -1,4 +1,5 @@
 import prisma from "../config/database";
+import { createTraceEventFromAuditLog } from "./traceEventService";
 
 export interface AuditLogInput {
   userId?: string;
@@ -25,6 +26,21 @@ const emitAuditLog = (log: any) => {
 
 export const createAuditLog = async (data: AuditLogInput) => {
   const log = await prisma.auditLog.create({ data });
+  try {
+    await createTraceEventFromAuditLog({
+      id: log.id,
+      action: log.action,
+      entityType: log.entityType,
+      entityId: log.entityId,
+      userId: log.userId,
+      licenseeId: log.licenseeId,
+      details: log.details,
+      createdAt: log.createdAt,
+    });
+  } catch (e) {
+    // audit log creation should not fail if trace projection fails
+    console.error("createTraceEventFromAuditLog failed:", e);
+  }
   emitAuditLog(log);
   return log;
 };
@@ -33,6 +49,8 @@ export const getAuditLogs = async (opts: {
   userId?: string;
   entityType?: string;
   entityId?: string;
+  action?: string;
+  excludeActions?: string[];
   licenseeId?: string;
   userIds?: string[];
   limit: number;
@@ -42,6 +60,14 @@ export const getAuditLogs = async (opts: {
   if (opts.userId) where.userId = opts.userId;
   if (opts.entityType) where.entityType = opts.entityType;
   if (opts.entityId) where.entityId = opts.entityId;
+  if (opts.action) where.action = opts.action;
+  if (opts.excludeActions?.length) {
+    where.action = opts.action
+      ? opts.action
+      : {
+          notIn: opts.excludeActions,
+        };
+  }
   if (opts.userIds && opts.userIds.length) {
     const or: any[] = [{ userId: { in: opts.userIds } }];
     if (opts.licenseeId) or.push({ licenseeId: opts.licenseeId });

@@ -14,16 +14,26 @@ async function computeDashboard(req: AuthRequest) {
   if (!req.user) throw new Error("Not authenticated");
 
   const role = req.user.role;
+  const userId = req.user.userId;
   const scopedLicenseeId = getEffectiveLicenseeId(req);
 
-  const qrWhere = scopedLicenseeId ? { licenseeId: scopedLicenseeId } : {};
-  const batchWhere = scopedLicenseeId ? { licenseeId: scopedLicenseeId } : {};
+  const qrWhere: any = {};
+  const batchWhere: any = {};
 
-  const manufacturersWhere = {
+  const manufacturersWhere: any = {
     role: UserRole.MANUFACTURER,
-    ...(scopedLicenseeId ? { licenseeId: scopedLicenseeId } : {}),
     isActive: true,
   };
+
+  if (role === UserRole.MANUFACTURER) {
+    batchWhere.manufacturerId = userId;
+    qrWhere.batch = { manufacturerId: userId };
+    manufacturersWhere.id = userId;
+  } else if (scopedLicenseeId) {
+    qrWhere.licenseeId = scopedLicenseeId;
+    batchWhere.licenseeId = scopedLicenseeId;
+    manufacturersWhere.licenseeId = scopedLicenseeId;
+  }
 
   const [totalQRCodes, totalBatches, manufacturers, activeLicensees, qrGrouped, qrTotal] =
     await Promise.all([

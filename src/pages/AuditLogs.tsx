@@ -203,6 +203,10 @@ export default function AuditLogs() {
         return `Verification succeeded${
           d.isFirstScan ? " (first scan)" : ""
         }${d.scanCount != null ? `; scan count ${d.scanCount}` : ""}.`;
+      case "CUSTOMER_FRAUD_REPORT":
+        return `Customer fraud report submitted for code ${d.code || "—"}${
+          d.reason ? ` (${d.reason})` : ""
+        }.`;
       default: {
         const parts: string[] = [];
         if (name) parts.push(`name ${name}`);

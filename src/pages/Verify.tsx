@@ -1,25 +1,31 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { useParams, Link, useSearchParams } from "react-router-dom";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Shield,
   CheckCircle2,
-  XCircle,
   AlertTriangle,
-  ExternalLink,
-  MapPin,
+  Ban,
+  SearchX,
   Building2,
   Factory,
-  ScanEye,
   CalendarClock,
   Mail,
   Phone,
   Globe2,
   Loader2,
+  Flag,
+  ArrowRight,
 } from "lucide-react";
 import apiClient from "@/lib/api-client";
+import { useToast } from "@/hooks/use-toast";
 
 type VerifyPayload = {
   isAuthentic: boolean;
@@ -48,313 +54,490 @@ type VerifyPayload = {
       website?: string | null;
     } | null;
   } | null;
-  batchName?: string | null;
   printedAt?: string | null;
   firstScanned?: string | null;
   scanCount?: number;
-  isFirstScan?: boolean;
   scanOutcome?: string;
-  redeemedAt?: string | null;
   warningMessage?: string | null;
+};
+
+type StatusKind = "genuine" | "reused" | "suspicious" | "blocked" | "unassigned" | "invalid";
+
+const REPORT_REASONS = [
+  { value: "already-used", label: "Code already used" },
+  { value: "mismatch-packaging", label: "Packaging mismatch" },
+  { value: "unexpected-warning", label: "Unexpected warning" },
+  { value: "seller-concern", label: "Seller/source concern" },
+  { value: "other", label: "Other" },
+] as const;
+
+const STATUS_META: Record<
+  StatusKind,
+  {
+    title: string;
+    subtitle: string;
+    chip: string;
+    panelClass: string;
+    icon: React.ReactNode;
+  }
+> = {
+  genuine: {
+    title: "Verified Authentic",
+    subtitle: "This code matches official records and is safe to trust.",
+    chip: "Authentic",
+    panelClass: "from-emerald-600 to-teal-600",
+    icon: <CheckCircle2 className="h-10 w-10 text-white" />,
+  },
+  reused: {
+    title: "Previously Redeemed",
+    subtitle: "This code has already been verified before. Review product source.",
+    chip: "Possible Duplicate",
+    panelClass: "from-orange-500 to-amber-600",
+    icon: <AlertTriangle className="h-10 w-10 text-white" />,
+  },
+  suspicious: {
+    title: "Verification Warning",
+    subtitle: "Code exists, but lifecycle checks indicate abnormal state.",
+    chip: "Suspicious",
+    panelClass: "from-amber-500 to-orange-600",
+    icon: <AlertTriangle className="h-10 w-10 text-white" />,
+  },
+  blocked: {
+    title: "Blocked by Security",
+    subtitle: "This code is blocked due to policy or fraud controls.",
+    chip: "Blocked",
+    panelClass: "from-red-600 to-rose-700",
+    icon: <Ban className="h-10 w-10 text-white" />,
+  },
+  unassigned: {
+    title: "Not Ready for Customer Use",
+    subtitle: "Code exists but has not been finalized for product verification.",
+    chip: "Not Active",
+    panelClass: "from-slate-600 to-slate-700",
+    icon: <SearchX className="h-10 w-10 text-white" />,
+  },
+  invalid: {
+    title: "Verification Unavailable",
+    subtitle: "This code could not be verified in the platform.",
+    chip: "Unavailable",
+    panelClass: "from-red-600 to-rose-700",
+    icon: <SearchX className="h-10 w-10 text-white" />,
+  },
 };
 
 export default function Verify() {
   const { code } = useParams<{ code: string }>();
   const [searchParams] = useSearchParams();
+  const { toast } = useToast();
+
   const [isLoading, setIsLoading] = useState(true);
   const [result, setResult] = useState<VerifyPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState<string>(REPORT_REASONS[0].value);
+  const [reportNotes, setReportNotes] = useState("");
+  const [reportEmail, setReportEmail] = useState("");
+  const [reporting, setReporting] = useState(false);
+
+  const token = useMemo(() => searchParams.get("t")?.trim() || "", [searchParams.toString()]);
+  const codeParam = useMemo(() => {
+    const raw = String(code || "");
+    try {
+      return decodeURIComponent(raw).trim();
+    } catch {
+      return raw.trim();
+    }
+  }, [code]);
+  const requestKey = token ? `token:${token}` : codeParam ? `code:${codeParam.toUpperCase()}` : "";
+  const inFlightByKeyRef = useRef(new Map<string, Promise<any>>());
+
   useEffect(() => {
     let active = true;
+
+    if (!requestKey) {
+      setIsLoading(false);
+      setResult({ isAuthentic: false, message: "Missing verification code" });
+      return () => {
+        active = false;
+      };
+    }
+
     (async () => {
       setIsLoading(true);
       setError(null);
+
       try {
-        const token = searchParams.get("t");
-        if (!code && !token) {
-          setResult({ isAuthentic: false, message: "Missing code" });
-          return;
+        let requestPromise = inFlightByKeyRef.current.get(requestKey);
+        if (!requestPromise) {
+          requestPromise = (async () => {
+            const device = typeof navigator !== "undefined" ? navigator.userAgent : undefined;
+
+            const getGeo = () =>
+              new Promise<{ lat?: number; lon?: number; acc?: number }>((resolve) => {
+                if (!navigator?.geolocation) return resolve({});
+                navigator.geolocation.getCurrentPosition(
+                  (pos) =>
+                    resolve({
+                      lat: pos.coords.latitude,
+                      lon: pos.coords.longitude,
+                      acc: pos.coords.accuracy,
+                    }),
+                  () => resolve({}),
+                  { enableHighAccuracy: false, timeout: 1500 }
+                );
+              });
+
+            const geo = await getGeo();
+            return token
+              ? apiClient.scanToken(token, {
+                  device,
+                  lat: geo.lat,
+                  lon: geo.lon,
+                  acc: geo.acc,
+                })
+              : apiClient.verifyQRCode(codeParam, {
+                  device,
+                  lat: geo.lat,
+                  lon: geo.lon,
+                  acc: geo.acc,
+                });
+          })();
+          inFlightByKeyRef.current.set(requestKey, requestPromise);
         }
-        const device = typeof navigator !== "undefined" ? navigator.userAgent : undefined;
 
-        const getGeo = () =>
-          new Promise<{ lat?: number; lon?: number; acc?: number }>((resolve) => {
-            if (!navigator?.geolocation) return resolve({});
-            navigator.geolocation.getCurrentPosition(
-              (pos) =>
-                resolve({
-                  lat: pos.coords.latitude,
-                  lon: pos.coords.longitude,
-                  acc: pos.coords.accuracy,
-                }),
-              () => resolve({}),
-              { enableHighAccuracy: false, timeout: 1500 }
-            );
-          });
+        const res = await requestPromise;
+        inFlightByKeyRef.current.delete(requestKey);
 
-        const geo = await getGeo();
+        if (!active) return;
 
-        const res = token
-          ? await apiClient.scanToken(token, {
-              device,
-              lat: geo.lat,
-              lon: geo.lon,
-              acc: geo.acc,
-            })
-          : await apiClient.verifyQRCode(code as string, {
-              device,
-              lat: geo.lat,
-              lon: geo.lon,
-              acc: geo.acc,
-            });
         if (!res.success) {
           setError(res.error || "Verification failed");
           setResult(null);
           return;
         }
-        setResult(res.data as VerifyPayload);
+
+        setResult((res.data as VerifyPayload) || null);
+      } catch (e: any) {
+        inFlightByKeyRef.current.delete(requestKey);
+        if (!active) return;
+        setError(e?.message || "Verification failed");
+        setResult(null);
       } finally {
         if (active) setIsLoading(false);
       }
     })();
+
     return () => {
       active = false;
     };
-  }, [code, searchParams]);
+  }, [codeParam, requestKey, token]);
 
-  const statusKind = useMemo(() => {
-    if (result?.scanOutcome === "VALID") return "genuine";
-    if (result?.scanOutcome === "ALREADY_REDEEMED") return "fraud";
-    if (result?.scanOutcome === "SUSPICIOUS" || result?.status === "ACTIVATED") return "unprinted";
-    if (result?.status === "ALLOCATED") return "unprinted";
-    if (result?.status === "DORMANT" || result?.status === "ACTIVE") return "unassigned";
-    if (result?.status === "BLOCKED") return "invalid";
-    return result?.isAuthentic ? "genuine" : "invalid";
-  }, [result?.isAuthentic, result?.status, result?.scanOutcome]);
+  const statusKind: StatusKind = useMemo(() => {
+    if (result?.scanOutcome === "VALID" || result?.isAuthentic) return "genuine";
+    if (
+      result?.scanOutcome === "ALREADY_REDEEMED" ||
+      result?.status === "REDEEMED" ||
+      result?.status === "SCANNED"
+    ) {
+      return "reused";
+    }
+    if (result?.scanOutcome === "BLOCKED" || result?.status === "BLOCKED") return "blocked";
+    if (
+      result?.scanOutcome === "SUSPICIOUS" ||
+      result?.status === "ALLOCATED" ||
+      result?.status === "ACTIVATED"
+    ) {
+      return "suspicious";
+    }
+    if (result?.status === "DORMANT" || result?.status === "ACTIVE" || result?.scanOutcome === "NOT_PRINTED") {
+      return "unassigned";
+    }
+    const lowerMessage = String(result?.message || "").toLowerCase();
+    if (lowerMessage.includes("blocked")) return "blocked";
+    if (lowerMessage.includes("already redeemed")) return "reused";
+    if (lowerMessage.includes("allocated but not yet printed")) return "suspicious";
+    if (lowerMessage.includes("not been assigned")) return "unassigned";
+    return "invalid";
+  }, [result?.isAuthentic, result?.message, result?.scanOutcome, result?.status]);
 
+  const meta = STATUS_META[statusKind];
   const manufacturer = result?.batch?.manufacturer || null;
+  const displayedCode = result?.code || codeParam || "—";
+  const printedAt = result?.printedAt || result?.batch?.printedAt || null;
+  const isReportable = statusKind !== "genuine";
 
-  const productName = result?.batch?.name || "—";
-  const productLabel = "Batch";
-  const serialNumber = result?.code || code || "—";
+  const submitReport = async () => {
+    const normalizedCode = String(displayedCode || "").trim();
+    if (!normalizedCode || normalizedCode === "—") {
+      toast({
+        title: "Report failed",
+        description: "No valid code found to report.",
+        variant: "destructive",
+      });
+      return;
+    }
 
-  const headline =
-    statusKind === "genuine"
-      ? "Genuine Product"
-      : statusKind === "fraud"
-      ? "Already Redeemed"
-      : statusKind === "unprinted"
-      ? "Not Yet Printed"
-      : statusKind === "unassigned"
-      ? "Not Assigned"
-      : "Verification Failed";
+    setReporting(true);
+    try {
+      const res = await apiClient.reportFraud({
+        code: normalizedCode,
+        reason: reportReason,
+        notes: reportNotes.trim() || undefined,
+        contactEmail: reportEmail.trim() || undefined,
+        observedStatus: result?.status,
+        observedOutcome: result?.scanOutcome,
+        pageUrl: typeof window !== "undefined" ? window.location.href : undefined,
+      });
 
-  const subtitle =
-    statusKind === "genuine"
-      ? "This item matches our official records"
-      : statusKind === "fraud"
-      ? "This code was already redeemed. Possible counterfeit."
-      : statusKind === "unprinted"
-      ? "This code exists but was not confirmed as printed"
-      : statusKind === "unassigned"
-      ? "This code exists but is not assigned to a product"
-      : "This code could not be verified";
+      if (!res.success) {
+        toast({
+          title: "Report failed",
+          description: res.error || "Could not submit report.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      toast({
+        title: "Report submitted",
+        description: "Our security team has received your fraud report.",
+      });
+      setReportOpen(false);
+      setReportReason(REPORT_REASONS[0].value);
+      setReportNotes("");
+      setReportEmail("");
+    } finally {
+      setReporting(false);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_20%_20%,#134e4a_0%,transparent_40%),radial-gradient(circle_at_80%_10%,#1e3a8a_0%,transparent_40%),linear-gradient(135deg,#0f172a_0%,#0b1220_60%,#0a0f1d_100%)] flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl">
-        <div className="text-center mb-8">
-          <Link to="/" className="inline-flex items-center gap-2 text-white mb-3">
-            <Shield className="h-10 w-10 text-emerald-400" />
-            <span className="text-2xl font-bold tracking-wide">AuthenticQR</span>
+    <div className="relative min-h-screen overflow-hidden bg-[linear-gradient(145deg,#052f2f_0%,#0b3a53_45%,#0f2740_100%)] px-4 py-10">
+      <div className="pointer-events-none absolute -left-24 top-8 h-72 w-72 rounded-full bg-cyan-300/15 blur-3xl" />
+      <div className="pointer-events-none absolute right-0 top-0 h-96 w-96 rounded-full bg-emerald-300/10 blur-3xl" />
+      <div className="pointer-events-none absolute bottom-0 left-1/3 h-80 w-80 rounded-full bg-sky-300/10 blur-3xl" />
+
+      <div className="relative mx-auto w-full max-w-3xl">
+        <div className="mb-8 text-center">
+          <Link to="/" className="inline-flex items-center gap-3 text-white">
+            <span className="rounded-2xl border border-cyan-100/20 bg-white/10 p-2.5 backdrop-blur">
+              <Shield className="h-8 w-8 text-cyan-200" />
+            </span>
+            <span className="text-3xl font-semibold tracking-tight">AuthenticQR</span>
           </Link>
-          <p className="text-slate-300">Product Verification</p>
+          <p className="mt-3 text-sm uppercase tracking-[0.18em] text-cyan-100/80">Product Verification</p>
         </div>
 
-        <Card className="border-0 shadow-2xl overflow-hidden animate-fade-in">
+        <Card className="overflow-hidden border-white/20 bg-white/95 shadow-[0_30px_80px_rgba(3,18,30,0.35)] backdrop-blur-sm">
           {isLoading ? (
-            <CardContent className="py-16 text-center">
-              <Loader2 className="h-12 w-12 animate-spin text-emerald-400 mx-auto mb-4" />
-              <p className="text-lg font-medium">Verifying authenticity...</p>
-              <p className="text-sm text-muted-foreground mt-1">Please wait</p>
+            <CardContent className="space-y-3 py-16 text-center">
+              <Loader2 className="mx-auto h-12 w-12 animate-spin text-teal-600" />
+              <p className="text-lg font-semibold text-slate-900">Verifying authenticity...</p>
+              <p className="text-sm text-slate-500">This usually takes a moment</p>
             </CardContent>
           ) : error ? (
-            <CardContent className="py-12 text-center space-y-3">
-              <XCircle className="h-10 w-10 text-destructive mx-auto" />
-              <p className="text-lg font-semibold">{error}</p>
-              <Button variant="outline" asChild className="w-full">
-                <Link to="/">Return to Home</Link>
-              </Button>
+            <CardContent className="space-y-4 py-12 text-center">
+              <SearchX className="mx-auto h-10 w-10 text-red-600" />
+              <p className="text-xl font-semibold text-slate-900">Verification service unavailable</p>
+              <p className="text-sm text-slate-600">{error}</p>
+              <div className="mx-auto flex max-w-sm gap-2">
+                <Button variant="outline" asChild className="flex-1">
+                  <Link to="/verify">Try another code</Link>
+                </Button>
+                <Button asChild className="flex-1 bg-slate-900 text-white hover:bg-slate-800">
+                  <Link to="/">Return home</Link>
+                </Button>
+              </div>
             </CardContent>
           ) : (
             <>
-              <div
-                className={
-                  statusKind === "genuine"
-                    ? "bg-emerald-500"
-                    : statusKind === "fraud"
-                    ? "bg-rose-600"
-                    : statusKind === "unprinted"
-                    ? "bg-amber-500"
-                    : statusKind === "unassigned"
-                    ? "bg-slate-600"
-                    : "bg-destructive"
-                }
-              >
-                <div className="p-6 text-center text-white">
-                  <div className="inline-flex items-center justify-center h-16 w-16 rounded-full bg-white/20 mb-4">
-                    {statusKind === "genuine" ? (
-                      <CheckCircle2 className="h-10 w-10 text-white" />
-                    ) : statusKind === "invalid" ? (
-                      <XCircle className="h-10 w-10 text-white" />
-                    ) : (
-                      <AlertTriangle className="h-10 w-10 text-white" />
-                    )}
+              <div className={`bg-gradient-to-r ${meta.panelClass} px-6 py-7 text-white`}>
+                <div className="mx-auto flex max-w-xl items-center gap-4">
+                  <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border border-white/30 bg-white/15">
+                    {meta.icon}
                   </div>
-                  <h1 className="text-2xl font-bold">{headline}</h1>
-                  <p className="text-white/80 mt-1">{subtitle}</p>
+                  <div>
+                    <h1 className="text-3xl font-semibold leading-tight">{meta.title}</h1>
+                    <p className="mt-1 text-white/85">{meta.subtitle}</p>
+                  </div>
                 </div>
               </div>
 
-              <CardContent className="p-6 space-y-6">
-                <div className="text-center p-4 bg-muted rounded-lg">
-                  <p className="text-sm text-muted-foreground mb-1">Verified Code</p>
-                  <p className="font-mono text-lg font-bold">{result?.code || code}</p>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="rounded-lg border p-4">
-                    <div className="flex items-start gap-3">
-                      <div className="p-2 bg-emerald-500/10 rounded-lg">
-                        <Building2 className="h-5 w-5 text-emerald-500" />
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground">Licensed By</p>
-                        <p className="font-semibold">
-                          {result?.licensee?.brandName || result?.licensee?.name || "—"}
-                        </p>
-                        {result?.licensee?.location && (
-                          <div className="text-xs text-muted-foreground flex items-center gap-1">
-                            <MapPin className="h-3 w-3" />
-                            {result.licensee.location}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+              <CardContent className="space-y-6 p-6 md:p-8">
+                <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Verified code</p>
+                    <p className="mt-1 font-mono text-2xl font-semibold tracking-tight text-slate-900">{displayedCode}</p>
                   </div>
-
-                  <div className="rounded-lg border p-4">
-                    <div className="flex items-start gap-3">
-                      <div className="p-2 bg-blue-500/10 rounded-lg">
-                        <Factory className="h-5 w-5 text-blue-500" />
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground">Manufacturer</p>
-                        <p className="font-semibold">
-                          {manufacturer?.name || "—"}
-                        </p>
-                        {manufacturer?.location && (
-                          <div className="text-xs text-muted-foreground flex items-center gap-1">
-                            <MapPin className="h-3 w-3" />
-                            {manufacturer.location}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-lg border p-4 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline">{productLabel}</Badge>
-                    <span className="text-sm font-medium">
-                      {productName}
-                    </span>
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    Serial Number: <span className="font-mono">{serialNumber}</span>
-                  </div>
+                  <Badge className="w-fit border-transparent bg-slate-900 text-white">{meta.chip}</Badge>
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-3">
-                  <div className="rounded-lg border p-3">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <ScanEye className="h-4 w-4" />
-                      Scan Count
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500">
+                      <Building2 className="h-4 w-4 text-teal-600" />
+                      Licensed by
                     </div>
-                    <p className="text-lg font-semibold">{result?.scanCount ?? 0}</p>
-                  </div>
-                  <div className="rounded-lg border p-3">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <CalendarClock className="h-4 w-4" />
-                      First Scan
-                    </div>
-                    <p className="text-sm font-medium">
-                      {result?.firstScanned ? new Date(result.firstScanned).toLocaleString() : "—"}
+                    <p className="text-base font-semibold text-slate-900">
+                      {result?.licensee?.brandName || result?.licensee?.name || "—"}
                     </p>
                   </div>
-                  <div className="rounded-lg border p-3">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <CalendarClock className="h-4 w-4" />
-                      Printed
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500">
+                      <Factory className="h-4 w-4 text-cyan-700" />
+                      Manufacturer
                     </div>
-                    <p className="text-sm font-medium">
-                      {result?.printedAt ? new Date(result.printedAt).toLocaleDateString() : "—"}
+                    <p className="text-base font-semibold text-slate-900">{manufacturer?.name || "—"}</p>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500">
+                      <CalendarClock className="h-4 w-4 text-sky-700" />
+                      Printed on
+                    </div>
+                    <p className="text-base font-semibold text-slate-900">
+                      {printedAt ? new Date(printedAt).toLocaleDateString() : "Not available"}
                     </p>
                   </div>
                 </div>
 
-                {result?.warningMessage && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                    {result.warningMessage}
+                {(result?.message || result?.warningMessage) && (
+                  <div
+                    className={
+                      statusKind === "genuine"
+                        ? "rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"
+                        : "rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+                    }
+                  >
+                    <p className="font-medium">{result?.message || "Verification details"}</p>
+                    {result?.warningMessage ? <p className="mt-1 text-amber-900/90">{result.warningMessage}</p> : null}
                   </div>
                 )}
 
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-3">
                   {result?.licensee?.supportEmail && (
-                    <div className="flex items-center gap-2 text-sm">
-                      <Mail className="h-4 w-4 text-muted-foreground" />
-                      <span>{result.licensee.supportEmail}</span>
+                    <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                      <Mail className="h-4 w-4 text-slate-500" />
+                      <span className="truncate">{result.licensee.supportEmail}</span>
                     </div>
                   )}
                   {result?.licensee?.supportPhone && (
-                    <div className="flex items-center gap-2 text-sm">
-                      <Phone className="h-4 w-4 text-muted-foreground" />
+                    <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                      <Phone className="h-4 w-4 text-slate-500" />
                       <span>{result.licensee.supportPhone}</span>
                     </div>
                   )}
                   {result?.licensee?.website && (
-                    <div className="flex items-center gap-2 text-sm">
-                      <Globe2 className="h-4 w-4 text-muted-foreground" />
-                      <span>{result.licensee.website}</span>
-                    </div>
-                  )}
-                  {manufacturer?.website && (
-                    <div className="flex items-center gap-2 text-sm">
-                      <Globe2 className="h-4 w-4 text-muted-foreground" />
-                      <span>{manufacturer.website}</span>
-                    </div>
+                    <a
+                      href={result.licensee.website}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                    >
+                      <Globe2 className="h-4 w-4 text-slate-500" />
+                      <span className="truncate">Official website</span>
+                    </a>
                   )}
                 </div>
 
-                {result?.licensee?.website && (
-                  <Button asChild className="w-full" size="lg">
-                    <a href={result.licensee.website} target="_blank" rel="noopener noreferrer">
-                      Visit Official Website
-                      <ExternalLink className="ml-2 h-4 w-4" />
-                    </a>
+                <div className="flex flex-col-reverse gap-3 pt-1 md:flex-row md:justify-between">
+                  <Button asChild variant="outline" className="md:w-auto">
+                    <Link to="/verify">Verify another code</Link>
                   </Button>
-                )}
+
+                  <div className="flex flex-col gap-3 md:flex-row">
+                    {isReportable && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setReportOpen(true)}
+                        className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                      >
+                        <Flag className="mr-2 h-4 w-4" />
+                        Report Fraud
+                      </Button>
+                    )}
+                    <Button asChild className="bg-slate-900 text-white hover:bg-slate-800">
+                      <Link to="/">
+                        Back to home
+                        <ArrowRight className="ml-2 h-4 w-4" />
+                      </Link>
+                    </Button>
+                  </div>
+                </div>
               </CardContent>
             </>
           )}
         </Card>
 
-        <p className="text-center text-slate-400 text-sm mt-6">
-          Secure verification powered by AuthenticQR
-        </p>
+        <p className="mt-6 text-center text-sm text-cyan-100/90">Secure verification powered by AuthenticQR</p>
       </div>
+
+      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        <DialogContent className="sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle>Report suspected fraud</DialogTitle>
+            <DialogDescription>
+              This report goes directly to platform security review.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="rounded-lg border bg-slate-50 p-3 text-sm">
+              <span className="text-slate-500">Code:</span>
+              <span className="ml-2 font-mono font-semibold text-slate-900">{displayedCode}</span>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Reason</Label>
+              <Select value={reportReason} onValueChange={setReportReason}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select reason" />
+                </SelectTrigger>
+                <SelectContent>
+                  {REPORT_REASONS.map((reason) => (
+                    <SelectItem key={reason.value} value={reason.value}>
+                      {reason.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Additional details (optional)</Label>
+              <Textarea
+                value={reportNotes}
+                onChange={(e) => setReportNotes(e.target.value)}
+                placeholder="Share anything suspicious you noticed about the product, seller, or packaging."
+                rows={4}
+                maxLength={1500}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Contact email (optional)</Label>
+              <Input
+                type="email"
+                value={reportEmail}
+                onChange={(e) => setReportEmail(e.target.value)}
+                placeholder="you@example.com"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setReportOpen(false)} disabled={reporting}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={submitReport} disabled={reporting} className="bg-red-600 text-white hover:bg-red-700">
+              {reporting ? "Submitting..." : "Submit report"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

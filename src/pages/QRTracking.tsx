@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import apiClient from "@/lib/api-client";
+import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,6 +50,7 @@ type ScanLogRow = {
 const toCount = (counts: Record<string, number> | undefined, key: string) => counts?.[key] ?? 0;
 
 export default function QRTracking() {
+  const { user } = useAuth();
   const [summary, setSummary] = useState<BatchSummaryRow[]>([]);
   const [logs, setLogs] = useState<ScanLogRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -130,7 +132,11 @@ export default function QRTracking() {
             </div>
             <div>
               <h1 className="text-3xl font-bold">QR Tracking</h1>
-              <p className="text-muted-foreground">Batch status + scan activity across all QR codes</p>
+              <p className="text-muted-foreground">
+                {user?.role === "manufacturer"
+                  ? "Batch status + scan activity for your assigned production batches"
+                  : "Batch status + scan activity across your scoped QR operations"}
+              </p>
             </div>
           </div>
           <Button variant="outline" onClick={() => load()} disabled={loading}>

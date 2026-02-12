@@ -3,9 +3,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDistanceToNow } from "date-fns";
 import { Activity, Building2, FileText, Printer, UserPlus } from "lucide-react";
 import { AuditLog } from "@/types";
+import { Button } from "@/components/ui/button";
 
 interface RecentActivityCardProps {
   logs: AuditLog[];
+  title?: string;
+  emptyMessage?: string;
+  onViewAll?: () => void;
 }
 
 const actionIcons: Record<string, React.ElementType> = {
@@ -41,19 +45,29 @@ const formatDetails = (details: any) => {
   }
 };
 
-export function RecentActivityCard({ logs }: RecentActivityCardProps) {
+export function RecentActivityCard({
+  logs,
+  title = "Recent Activity",
+  emptyMessage = "No recent activity.",
+  onViewAll,
+}: RecentActivityCardProps) {
   const safeLogs = Array.isArray(logs) ? logs : [];
   const recent = safeLogs.slice(0, 5);
 
   return (
     <Card className="animate-fade-in">
-      <CardHeader>
-        <CardTitle className="text-lg font-semibold">Recent Activity</CardTitle>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="text-lg font-semibold">{title}</CardTitle>
+        {onViewAll && recent.length > 0 && (
+          <Button variant="ghost" size="sm" onClick={onViewAll}>
+            View all
+          </Button>
+        )}
       </CardHeader>
 
       <CardContent>
         {recent.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No recent activity.</p>
+          <p className="text-sm text-muted-foreground">{emptyMessage}</p>
         ) : (
           <div className="space-y-4">
             {recent.map((log) => {

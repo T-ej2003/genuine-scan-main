@@ -14,6 +14,9 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
     const offset = Number(req.query.offset) || 0;
     const entityType = req.query.entityType as string | undefined;
     const entityId = req.query.entityId as string | undefined;
+    const action = req.query.action as string | undefined;
+
+    const hiddenActionsForNonSuper = ["CUSTOMER_FRAUD_REPORT"];
 
     const licenseeId =
       req.user.role === UserRole.SUPER_ADMIN
@@ -29,9 +32,15 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
       userIds = users.map((u) => u.id);
     }
 
+    if (req.user.role !== UserRole.SUPER_ADMIN && action && hiddenActionsForNonSuper.includes(action)) {
+      return res.json({ success: true, data: { logs: [], total: 0, limit, offset } });
+    }
+
     const result = await getAuditLogs({
       entityType,
       entityId,
+      action,
+      excludeActions: req.user.role === UserRole.SUPER_ADMIN ? undefined : hiddenActionsForNonSuper,
       licenseeId,
       userIds,
       limit,
@@ -69,6 +78,9 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
     const limit = Math.min(Number(req.query.limit) || 5000, 20000);
     const entityType = req.query.entityType as string | undefined;
     const entityId = req.query.entityId as string | undefined;
+    const action = req.query.action as string | undefined;
+
+    const hiddenActionsForNonSuper = ["CUSTOMER_FRAUD_REPORT"];
 
     const licenseeId =
       req.user.role === UserRole.SUPER_ADMIN
@@ -84,9 +96,17 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
       userIds = users.map((u) => u.id);
     }
 
+    if (req.user.role !== UserRole.SUPER_ADMIN && action && hiddenActionsForNonSuper.includes(action)) {
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", "attachment; filename=\"audit-logs.csv\"");
+      return res.status(200).send("createdAt,action,entityType,entityId,userId,userName,userEmail,licenseeId,ipAddress,details\n");
+    }
+
     const result = await getAuditLogs({
       entityType,
       entityId,
+      action,
+      excludeActions: req.user.role === UserRole.SUPER_ADMIN ? undefined : hiddenActionsForNonSuper,
       licenseeId,
       userIds,
       limit,
@@ -169,6 +189,7 @@ export const streamLogs = async (req: AuthRequest, res: Response) => {
   const tenantId = req.user.licenseeId;
 
   const unsubscribe = onAuditLog((log) => {
+    if (!isSuper && log.action === "CUSTOMER_FRAUD_REPORT") return;
     if (!isSuper && log.licenseeId !== tenantId) return;
     res.write(`event: audit\ndata: ${JSON.stringify(log)}\n\n`);
   });

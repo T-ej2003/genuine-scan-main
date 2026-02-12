@@ -76,6 +76,21 @@ type QrRow = {
   batch?: { id: string } | null;
 };
 
+type TraceEventType = "COMMISSIONED" | "ASSIGNED" | "PRINTED" | "REDEEMED" | "BLOCKED";
+
+type TraceEventRow = {
+  id: string;
+  eventType?: TraceEventType;
+  action?: string;
+  sourceAction?: string | null;
+  createdAt: string;
+  details?: any;
+  user?: { id: string; name?: string | null; email?: string | null } | null;
+  manufacturer?: { id: string; name?: string | null; email?: string | null } | null;
+  qrCode?: { id: string; code?: string | null } | null;
+  userId?: string | null;
+};
+
 export default function Batches() {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -110,11 +125,12 @@ export default function Batches() {
   const [printJobId, setPrintJobId] = useState<string>("");
   const [printLockToken, setPrintLockToken] = useState<string>("");
   const [printJobTokensCount, setPrintJobTokensCount] = useState<number>(0);
+  const [exportingBatchId, setExportingBatchId] = useState<string | null>(null);
 
   // allocation history
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyBatch, setHistoryBatch] = useState<BatchRow | null>(null);
-  const [historyLogs, setHistoryLogs] = useState<any[]>([]);
+  const [historyLogs, setHistoryLogs] = useState<TraceEventRow[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
   const fetchBatches = async () => {
@@ -367,17 +383,17 @@ export default function Batches() {
     setHistoryOpen(true);
     setHistoryLoading(true);
     try {
-      const res = await apiClient.getAuditLogs({ entityType: "Batch", entityId: b.id, limit: 50 });
-      if (res.success) {
-        const payload: any = res.data;
+      const traceRes = await apiClient.getTraceTimeline({ batchId: b.id, limit: 100 });
+      if (traceRes.success) {
+        const payload: any = traceRes.data;
         const list = Array.isArray(payload)
           ? payload
+          : Array.isArray(payload?.events)
+          ? payload.events
           : Array.isArray(payload?.logs)
           ? payload.logs
-          : Array.isArray(payload?.data)
-          ? payload.data
           : [];
-        setHistoryLogs(list);
+        setHistoryLogs((list as TraceEventRow[]) || []);
       } else {
         setHistoryLogs([]);
       }
@@ -386,32 +402,72 @@ export default function Batches() {
     }
   };
 
-  const historySummary = (log: any) => {
+  const eventBadgeClass = (eventType?: string) => {
+    if (eventType === "COMMISSIONED") return "bg-sky-500/10 text-sky-700";
+    if (eventType === "ASSIGNED") return "bg-indigo-500/10 text-indigo-700";
+    if (eventType === "PRINTED") return "bg-amber-500/10 text-amber-700";
+    if (eventType === "REDEEMED") return "bg-emerald-500/10 text-emerald-700";
+    if (eventType === "BLOCKED") return "bg-red-500/10 text-red-700";
+    return "bg-muted text-muted-foreground";
+  };
+
+  const historySummary = (log: TraceEventRow) => {
     const d = log?.details || {};
+    const eventType = log?.eventType || "";
+    if (eventType === "COMMISSIONED") {
+      const qty = d.quantity ?? d.created ?? d.totalCodes;
+      const range = d.startCode && d.endCode ? ` (${d.startCode} → ${d.endCode})` : "";
+      return `Commissioned ${qty ?? "—"} codes${range}.`;
+    }
+    if (eventType === "ASSIGNED") {
+      return `Assigned ${d.quantity ?? "—"} codes to manufacturer ${d.manufacturerId || "—"}.`;
+    }
+    if (eventType === "PRINTED") {
+      return `Printed ${d.printedCodes ?? d.codes ?? "—"} codes.`;
+    }
+    if (eventType === "REDEEMED") {
+      return `Redeemed on scan${d.scanCount != null ? ` (scan #${d.scanCount})` : ""}.`;
+    }
+    if (eventType === "BLOCKED") {
+      return `Blocked${d.reason ? `: ${d.reason}` : ""}${d.blockedCodes ? ` (${d.blockedCodes} codes)` : ""}.`;
+    }
+
     const ctx = d.context || "";
     if (ctx === "ASSIGN_MANUFACTURER_QUANTITY_CHILD") {
       return `Allocated ${d.quantity ?? "—"} to manufacturer ${d.manufacturerId || "—"} (${d.startCode || "?"} → ${d.endCode || "?"})`;
     }
-    if (ctx === "ASSIGN_MANUFACTURER_QUANTITY_PARENT") {
-      return `Split ${d.quantity ?? "—"} to manufacturer ${d.manufacturerId || "—"} (child batch ${d.childBatchId || "—"})`;
-    }
-    if (ctx === "ADMIN_ALLOCATE_BATCH") {
-      return `Super admin allocated ${d.quantity ?? "—"} to manufacturer ${d.manufacturerId || "—"}`;
-    }
-    if (ctx === "CREATE_BATCH") {
-      return `Created batch with ${d.quantity ?? "—"} codes`;
-    }
-    if (log?.action === "PRINTED") {
-      return `Print confirmed (${d.printedCodes ?? "—"} codes)`;
-    }
-    return log?.action ? String(log.action) : "Activity";
+    return log?.sourceAction || log?.action || "Activity";
   };
 
-  const historyUser = (log: any) => {
+  const historyUser = (log: TraceEventRow) => {
     if (log?.user?.name) return `${log.user.name} (${log.user.email || log.user.id || "id"})`;
+    if (log?.manufacturer?.name) {
+      return `${log.manufacturer.name} (${log.manufacturer.email || log.manufacturer.id || "id"})`;
+    }
     if (log?.user?.email) return log.user.email;
     if (log?.userId) return log.userId;
     return "System";
+  };
+
+  const downloadAuditPackage = async (batch: BatchRow) => {
+    if (exportingBatchId) return;
+    setExportingBatchId(batch.id);
+    try {
+      const blob = await apiClient.exportBatchAuditPackage(batch.id);
+      saveAs(blob, `batch-${batch.id}-audit-package.zip`);
+      toast({
+        title: "Audit package downloaded",
+        description: "Immutable package contains manifest, event chain, and signatures.",
+      });
+    } catch (e: any) {
+      toast({
+        title: "Audit package failed",
+        description: e?.message || "Could not download package.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingBatchId(null);
+    }
   };
 
   return (
@@ -611,6 +667,13 @@ export default function Batches() {
                                   <DropdownMenuItem onClick={() => openHistory(b)}>
                                     <Activity className="mr-2 h-4 w-4" />
                                     View history
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => downloadAuditPackage(b)}
+                                    disabled={exportingBatchId === b.id}
+                                  >
+                                    <Download className="mr-2 h-4 w-4" />
+                                    {exportingBatchId === b.id ? "Preparing package..." : "Download audit package"}
                                   </DropdownMenuItem>
                                   {canAssignManufacturer && (
                                     <DropdownMenuItem onClick={() => openAssign(b)} disabled={!!b.manufacturer || !!b.printedAt}>
@@ -816,7 +879,7 @@ export default function Batches() {
             <DialogHeader>
               <DialogTitle>Batch History</DialogTitle>
               <DialogDescription>
-                {historyBatch ? historyBatch.name : "Selected batch"} — allocation and print events
+                {historyBatch ? historyBatch.name : "Selected batch"} — lifecycle timeline (COMMISSIONED → ASSIGNED → PRINTED → REDEEMED/BLOCKED)
               </DialogDescription>
             </DialogHeader>
 
@@ -826,10 +889,15 @@ export default function Batches() {
               <div className="text-sm text-muted-foreground">No history found.</div>
             ) : (
               <div className="space-y-2">
-                {historyLogs.map((log) => (
-                  <div key={log.id} className="rounded-md border p-3 text-sm">
+                {historyLogs.map((log, idx) => (
+                  <div key={log.id || `${log.createdAt}-${idx}`} className="rounded-md border p-3 text-sm">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{historySummary(log)}</div>
+                      <div className="space-y-1">
+                        {log.eventType && (
+                          <Badge className={eventBadgeClass(log.eventType)}>{log.eventType}</Badge>
+                        )}
+                        <div className="font-medium">{historySummary(log)}</div>
+                      </div>
                       <div className="text-xs text-muted-foreground">
                         {log.createdAt ? format(new Date(log.createdAt), "PPp") : "—"}
                       </div>

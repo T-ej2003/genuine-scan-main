@@ -6,6 +6,7 @@ import {
   requireLicenseeAdmin,
   requireManufacturer,
   requireAnyAdmin,
+  requireOpsUser,
 } from "../middleware/rbac";
 
 import { login, me } from "../controllers/authController";
@@ -45,6 +46,16 @@ import {
   rejectQrAllocationRequest,
 } from "../controllers/qrRequestController";
 import { getScanLogs, getBatchSummary } from "../controllers/qrLogController";
+import {
+  getTraceTimelineController,
+  getBatchSlaAnalyticsController,
+  getRiskAnalyticsController,
+  getPolicyConfigController,
+  updatePolicyConfigController,
+  getPolicyAlertsController,
+  acknowledgePolicyAlertController,
+  exportBatchAuditPackageController,
+} from "../controllers/tracePolicyController";
 
 import {
   createUser,
@@ -57,7 +68,7 @@ import {
   hardDeleteManufacturer,
 } from "../controllers/userController";
 
-import { verifyQRCode } from "../controllers/verifyController";
+import { verifyQRCode, reportFraud } from "../controllers/verifyController";
 import { scanToken } from "../controllers/scanController";
 import { createPrintJob, downloadPrintJobPack, confirmPrintJob } from "../controllers/printJobController";
 import auditRoutes from "./auditRoutes";
@@ -72,6 +83,7 @@ const router = Router();
 // ==================== PUBLIC ====================
 router.post("/auth/login", login);
 router.get("/verify/:code", verifyQRCode);
+router.post("/verify/report-fraud", reportFraud);
 router.get("/scan", scanToken);
 router.get("/health", healthCheck);
 
@@ -207,9 +219,31 @@ router.post("/qr/requests/:id/reject", authenticate, requireSuperAdmin, rejectQr
 // ==================== AUDIT ====================
 router.use("/audit", auditRoutes);
 
-// ==================== QR LOGS (SUPER ADMIN) ====================
-router.get("/admin/qr/scan-logs", authenticate, requireSuperAdmin, getScanLogs);
-router.get("/admin/qr/batch-summary", authenticate, requireSuperAdmin, getBatchSummary);
+// ==================== TRACE / ANALYTICS / POLICY ====================
+router.get("/trace/timeline", authenticate, enforceTenantIsolation, getTraceTimelineController);
+router.get("/analytics/batch-sla", authenticate, requireAnyAdmin, enforceTenantIsolation, getBatchSlaAnalyticsController);
+router.get("/analytics/risk-scores", authenticate, requireAnyAdmin, enforceTenantIsolation, getRiskAnalyticsController);
+router.get("/policy/config", authenticate, requireAnyAdmin, enforceTenantIsolation, getPolicyConfigController);
+router.patch("/policy/config", authenticate, requireAnyAdmin, enforceTenantIsolation, updatePolicyConfigController);
+router.get("/policy/alerts", authenticate, requireAnyAdmin, enforceTenantIsolation, getPolicyAlertsController);
+router.post(
+  "/policy/alerts/:id/ack",
+  authenticate,
+  requireAnyAdmin,
+  enforceTenantIsolation,
+  acknowledgePolicyAlertController
+);
+router.get(
+  "/audit/export/batches/:id/package",
+  authenticate,
+  requireAnyAdmin,
+  enforceTenantIsolation,
+  exportBatchAuditPackageController
+);
+
+// ==================== QR LOGS (ADMINS) ====================
+router.get("/admin/qr/scan-logs", authenticate, requireOpsUser, enforceTenantIsolation, getScanLogs);
+router.get("/admin/qr/batch-summary", authenticate, requireOpsUser, enforceTenantIsolation, getBatchSummary);
 
 // ==================== ADMIN BLOCK ====================
 router.post("/admin/qrs/:id/block", authenticate, requireSuperAdmin, blockQRCode);

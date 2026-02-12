@@ -149,7 +149,7 @@ function AppRoutes() {
         <Route
           path="/qr-tracking"
           element={
-            <ProtectedRoute allowedRoles={["super_admin"]}>
+            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin", "manufacturer"]}>
               <QRTracking />
             </ProtectedRoute>
           }

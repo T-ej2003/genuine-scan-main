@@ -23,6 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { PageTutorial } from "@/components/onboarding/PageTutorial";
 
 interface NavItem {
   label: string;
@@ -38,7 +39,7 @@ const navItems: NavItem[] = [
   { label: "QR Requests", href: "/qr-requests", icon: FileText, roles: ["super_admin", "licensee_admin"] },
   { label: "Batches", href: "/batches", icon: FileText, roles: ["super_admin", "licensee_admin", "manufacturer"] },
   { label: "Manufacturers", href: "/manufacturers", icon: Factory, roles: ["super_admin", "licensee_admin"] },
-  { label: "QR Tracking", href: "/qr-tracking", icon: ScanEye, roles: ["super_admin"] },
+  { label: "QR Tracking", href: "/qr-tracking", icon: ScanEye, roles: ["super_admin", "licensee_admin", "manufacturer"] },
   { label: "Audit Logs", href: "/audit-logs", icon: FileText, roles: ["super_admin", "licensee_admin"] },
 ];
 
@@ -176,6 +177,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           </DropdownMenu>
         </header>
 
+        <PageTutorial />
         <main className="p-4 lg:p-6">{children}</main>
       </div>
     </div>

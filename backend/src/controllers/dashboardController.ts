@@ -17,21 +17,24 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     const scopeLicenseeId =
       role === UserRole.SUPER_ADMIN ? ((req.query.licenseeId as string | undefined) || null) : licenseeId;
 
-    const qrWhere = scopeLicenseeId ? { licenseeId: scopeLicenseeId } : {};
-    const licenseeWhere = scopeLicenseeId ? { id: scopeLicenseeId } : {};
+    const qrWhere: any = {};
+    const batchWhere: any = {};
 
     // Manufacturers count:
     // - SUPER_ADMIN (no scope): all manufacturers
     // - SUPER_ADMIN (scoped): manufacturers inside that licensee
     // - LICENSEE_ADMIN: manufacturers in own licensee
-    // - MANUFACTURER: manufacturers in own licensee (so dashboard is consistent)
+    // - MANUFACTURER: only self (personal scope)
     const mfgWhere: any = { role: UserRole.MANUFACTURER, isActive: true };
-    if (scopeLicenseeId) mfgWhere.licenseeId = scopeLicenseeId;
-
-    // Batches:
-    const batchWhere: any = {};
-    if (scopeLicenseeId) batchWhere.licenseeId = scopeLicenseeId;
-    if (role === UserRole.MANUFACTURER) batchWhere.manufacturerId = userId;
+    if (role === UserRole.MANUFACTURER) {
+      batchWhere.manufacturerId = userId;
+      qrWhere.batch = { manufacturerId: userId };
+      mfgWhere.id = userId;
+    } else if (scopeLicenseeId) {
+      qrWhere.licenseeId = scopeLicenseeId;
+      batchWhere.licenseeId = scopeLicenseeId;
+      mfgWhere.licenseeId = scopeLicenseeId;
+    }
 
     const [
       totalQRCodes,
@@ -40,7 +43,11 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       totalBatches,
     ] = await Promise.all([
       prisma.qRCode.count({ where: qrWhere }),
-      prisma.licensee.count({ where: { ...licenseeWhere, isActive: true } }),
+      role === UserRole.SUPER_ADMIN
+        ? prisma.licensee.count({ where: { ...(scopeLicenseeId ? { id: scopeLicenseeId } : {}), isActive: true } })
+        : scopeLicenseeId
+          ? prisma.licensee.count({ where: { id: scopeLicenseeId, isActive: true } })
+          : 0,
       prisma.user.count({ where: mfgWhere }),
       prisma.batch.count({ where: batchWhere }),
     ]);

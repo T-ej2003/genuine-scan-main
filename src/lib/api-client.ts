@@ -457,6 +457,18 @@ class ApiClient {
     return this.request(`/verify/${encodeURIComponent(c)}${query}`, { method: "GET" });
   }
 
+  async reportFraud(payload: {
+    code: string;
+    reason: string;
+    notes?: string;
+    contactEmail?: string;
+    observedStatus?: string;
+    observedOutcome?: string;
+    pageUrl?: string;
+  }) {
+    return this.request(`/verify/report-fraud`, { method: "POST", body: JSON.stringify(payload) });
+  }
+
   async scanToken(token: string, opts?: { device?: string; lat?: number; lon?: number; acc?: number }) {
     const params = new URLSearchParams();
     params.append("t", token);
@@ -488,6 +500,99 @@ class ApiClient {
   async getBatchSummary(licenseeId?: string) {
     const query = licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : "";
     return this.request(`/admin/qr/batch-summary${query}`);
+  }
+
+  // ==================== TRACE / ANALYTICS / POLICY ====================
+  async getTraceTimeline(options?: {
+    licenseeId?: string;
+    eventType?: string;
+    batchId?: string;
+    manufacturerId?: string;
+    qrCodeId?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const params = new URLSearchParams();
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.eventType) params.append("eventType", options.eventType);
+    if (options?.batchId) params.append("batchId", options.batchId);
+    if (options?.manufacturerId) params.append("manufacturerId", options.manufacturerId);
+    if (options?.qrCodeId) params.append("qrCodeId", options.qrCodeId);
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/trace/timeline${query}`);
+  }
+
+  async getBatchSlaAnalytics(options?: { licenseeId?: string; limit?: number; stuckBatchHours?: number }) {
+    const params = new URLSearchParams();
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.stuckBatchHours != null) params.append("stuckBatchHours", String(options.stuckBatchHours));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/analytics/batch-sla${query}`);
+  }
+
+  async getRiskScores(options?: { licenseeId?: string; lookbackHours?: number; limit?: number }) {
+    const params = new URLSearchParams();
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.lookbackHours != null) params.append("lookbackHours", String(options.lookbackHours));
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/analytics/risk-scores${query}`);
+  }
+
+  async getPolicyConfig(licenseeId?: string) {
+    const query = licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : "";
+    return this.request(`/policy/config${query}`);
+  }
+
+  async updatePolicyConfig(
+    payload: Partial<{
+      licenseeId: string;
+      autoBlockEnabled: boolean;
+      autoBlockBatchOnVelocity: boolean;
+      multiScanThreshold: number;
+      geoDriftThresholdKm: number;
+      velocitySpikeThresholdPerMin: number;
+      stuckBatchHours: number;
+    }>
+  ) {
+    return this.request(`/policy/config`, { method: "PATCH", body: JSON.stringify(payload) });
+  }
+
+  async getPolicyAlerts(options?: {
+    licenseeId?: string;
+    alertType?: string;
+    severity?: string;
+    acknowledged?: boolean;
+    limit?: number;
+    offset?: number;
+  }) {
+    const params = new URLSearchParams();
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.alertType) params.append("alertType", options.alertType);
+    if (options?.severity) params.append("severity", options.severity);
+    if (options?.acknowledged != null) params.append("acknowledged", String(options.acknowledged));
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/policy/alerts${query}`);
+  }
+
+  async acknowledgePolicyAlert(id: string) {
+    return this.request(`/policy/alerts/${encodeURIComponent(id)}/ack`, { method: "POST" });
+  }
+
+  async exportBatchAuditPackage(batchId: string) {
+    const headers: Record<string, string> = {};
+    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+    const resp = await fetch(`${BASE_URL}/audit/export/batches/${encodeURIComponent(batchId)}/package`, {
+      headers,
+      credentials: "include",
+    });
+    if (!resp.ok) throw new Error(`Export failed: HTTP ${resp.status}`);
+    return resp.blob();
   }
 }
 

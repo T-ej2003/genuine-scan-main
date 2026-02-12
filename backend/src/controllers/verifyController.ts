@@ -3,6 +3,18 @@ import prisma from "../config/database";
 import { QRStatus } from "@prisma/client";
 import { recordScan } from "../services/qrService";
 import { createAuditLog } from "../services/auditService";
+import { evaluateScanAndEnforcePolicy } from "../services/policyEngineService";
+import { z } from "zod";
+
+const reportFraudSchema = z.object({
+  code: z.string().trim().min(2).max(128),
+  reason: z.string().trim().min(3).max(120),
+  notes: z.string().trim().max(1500).optional(),
+  contactEmail: z.string().trim().email().max(160).optional(),
+  observedStatus: z.string().trim().max(64).optional(),
+  observedOutcome: z.string().trim().max(64).optional(),
+  pageUrl: z.string().trim().max(1000).optional(),
+});
 
 export const verifyQRCode = async (req: Request, res: Response) => {
   try {
@@ -191,14 +203,17 @@ export const verifyQRCode = async (req: Request, res: Response) => {
       const n = parseFloat(String(v));
       return Number.isFinite(n) ? n : null;
     };
+    const latitude = toNum(req.query.lat);
+    const longitude = toNum(req.query.lon);
+    const accuracy = toNum(req.query.acc);
 
     const { isFirstScan, qrCode: updated } = await recordScan(code.toUpperCase(), {
       ipAddress: req.ip,
       userAgent: req.get("user-agent") || null,
       device: (req.query.device as string | undefined) || null,
-      latitude: toNum(req.query.lat),
-      longitude: toNum(req.query.lon),
-      accuracy: toNum(req.query.acc),
+      latitude,
+      longitude,
+      accuracy,
     });
 
     await createAuditLog({
@@ -212,20 +227,42 @@ export const verifyQRCode = async (req: Request, res: Response) => {
       ipAddress: req.ip,
     });
 
+    const policy = await evaluateScanAndEnforcePolicy({
+      qrCodeId: updated.id,
+      code: updated.code,
+      licenseeId: updated.licenseeId,
+      batchId: updated.batchId ?? null,
+      manufacturerId: updated.batch?.manufacturer?.id || null,
+      scanCount: updated.scanCount ?? 0,
+      scannedAt: new Date(),
+      latitude,
+      longitude,
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || null,
+    });
+
+    const blockedByPolicy = policy.autoBlockedQr || policy.autoBlockedBatch;
+    const finalStatus = blockedByPolicy ? QRStatus.BLOCKED : updated.status;
+
     const firstScanTime = updated.scannedAt ? new Date(updated.scannedAt) : null;
 
-    const warningMessage = !isFirstScan && firstScanTime
+    const warningMessage = blockedByPolicy
+      ? "This code has been auto-blocked by security policy due to anomaly detection."
+      : !isFirstScan && firstScanTime
       ? `Already redeemed. First scan was on ${firstScanTime.toISOString()}.`
       : null;
 
     return res.json({
       success: true,
       data: {
-        isAuthentic: isFirstScan,
-        message: isFirstScan
+        isAuthentic: isFirstScan && !blockedByPolicy,
+        message: blockedByPolicy
+          ? "Blocked code."
+          : isFirstScan
           ? "This is a genuine product."
           : "Already redeemed. Possible counterfeit or reuse.",
         code: updated.code,
+        status: finalStatus,
 
         licensee: updated.licensee
           ? {
@@ -258,6 +295,7 @@ export const verifyQRCode = async (req: Request, res: Response) => {
         isFirstScan,
 
         warningMessage,
+        policy,
       },
     });
   } catch (error) {
@@ -265,6 +303,72 @@ export const verifyQRCode = async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       error: "Verification service unavailable",
+    });
+  }
+};
+
+export const reportFraud = async (req: Request, res: Response) => {
+  try {
+    const parsed = reportFraudSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: parsed.error.errors[0]?.message || "Invalid report payload",
+      });
+    }
+
+    const payload = parsed.data;
+    const normalizedCode = payload.code.toUpperCase();
+
+    const qrCode = await prisma.qRCode.findUnique({
+      where: { code: normalizedCode },
+      select: {
+        id: true,
+        code: true,
+        licenseeId: true,
+        batchId: true,
+        batch: {
+          select: {
+            manufacturerId: true,
+          },
+        },
+      },
+    });
+
+    const log = await createAuditLog({
+      action: "CUSTOMER_FRAUD_REPORT",
+      entityType: "FraudReport",
+      entityId: qrCode?.id || normalizedCode,
+      licenseeId: qrCode?.licenseeId || undefined,
+      ipAddress: req.ip,
+      details: {
+        code: normalizedCode,
+        reason: payload.reason,
+        notes: payload.notes || null,
+        contactEmail: payload.contactEmail || null,
+        observedStatus: payload.observedStatus || null,
+        observedOutcome: payload.observedOutcome || null,
+        qrCodeId: qrCode?.id || null,
+        batchId: qrCode?.batchId || null,
+        manufacturerId: qrCode?.batch?.manufacturerId || null,
+        pageUrl: payload.pageUrl || null,
+        userAgent: req.get("user-agent") || null,
+        reportedAt: new Date().toISOString(),
+      },
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        reportId: log.id,
+        message: "Fraud report submitted successfully.",
+      },
+    });
+  } catch (error) {
+    console.error("reportFraud error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to submit fraud report",
     });
   }
 };

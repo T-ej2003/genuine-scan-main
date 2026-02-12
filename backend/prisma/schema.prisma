@@ -36,6 +36,30 @@ enum PrintJobStatus {
   CANCELLED
 }
 
+enum TraceEventType {
+  COMMISSIONED
+  ASSIGNED
+  PRINTED
+  REDEEMED
+  BLOCKED
+}
+
+enum PolicyAlertType {
+  MULTI_SCAN
+  GEO_DRIFT
+  VELOCITY_SPIKE
+  STUCK_BATCH
+  AUTO_BLOCK_QR
+  AUTO_BLOCK_BATCH
+}
+
+enum AlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
@@ -62,6 +86,10 @@ model User {
   batchPrintDownloads Batch[] @relation("BatchPrintPackDownloadedBy")
   printedQRCodes QRCode[] @relation("QRCodePrintedBy")
   printJobs PrintJob[] @relation("ManufacturerPrintJobs")
+  traceEventsAsActor TraceEvent[] @relation("TraceEventUser")
+  traceEventsAsManufacturer TraceEvent[] @relation("TraceEventManufacturer")
+  policyAlertsAsManufacturer PolicyAlert[] @relation("PolicyAlertManufacturer")
+  policyAlertsAcknowledged PolicyAlert[] @relation("PolicyAlertAcknowledgedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -90,6 +118,9 @@ model Licensee {
   qrAllocationRequests QrAllocationRequest[]
   allocationEvents     AllocationEvent[]
   qrScanLogs           QrScanLog[]
+  traceEvents          TraceEvent[]
+  securityPolicies     SecurityPolicy[]
+  policyAlerts         PolicyAlert[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -135,6 +166,8 @@ model Batch {
   batchPrintPackTokens BatchPrintPackToken[]
   printJobs          PrintJob[]
   scanLogs            QrScanLog[]
+  traceEvents         TraceEvent[]
+  policyAlerts        PolicyAlert[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -200,6 +233,8 @@ model QRCode {
 
   printJobId String?
   printJob   PrintJob? @relation(fields: [printJobId], references: [id])
+  traceEvents TraceEvent[]
+  policyAlerts PolicyAlert[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -330,4 +365,89 @@ model AllocationEvent {
 
   @@index([licenseeId])
   @@index([requestId])
+}
+
+model TraceEvent {
+  id         String       @id @default(uuid())
+  eventType  TraceEventType
+  licenseeId String
+  licensee   Licensee     @relation(fields: [licenseeId], references: [id])
+
+  batchId String?
+  batch   Batch?   @relation(fields: [batchId], references: [id])
+
+  qrCodeId String?
+  qrCode   QRCode? @relation(fields: [qrCodeId], references: [id])
+
+  manufacturerId String?
+  manufacturer   User? @relation("TraceEventManufacturer", fields: [manufacturerId], references: [id])
+
+  userId String?
+  user   User? @relation("TraceEventUser", fields: [userId], references: [id])
+
+  sourceAction String?
+  details      Json?
+  createdAt    DateTime @default(now())
+
+  @@index([licenseeId])
+  @@index([eventType])
+  @@index([batchId])
+  @@index([manufacturerId])
+  @@index([qrCodeId])
+  @@index([createdAt])
+}
+
+model SecurityPolicy {
+  id String @id @default(uuid())
+
+  licenseeId String?   @unique
+  licensee   Licensee? @relation(fields: [licenseeId], references: [id])
+
+  autoBlockEnabled         Boolean @default(true)
+  autoBlockBatchOnVelocity Boolean @default(false)
+  multiScanThreshold       Int     @default(2)
+  geoDriftThresholdKm      Float   @default(300)
+  velocitySpikeThresholdPerMin Int @default(80)
+  stuckBatchHours          Int     @default(24)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([licenseeId])
+}
+
+model PolicyAlert {
+  id         String         @id @default(uuid())
+  licenseeId String
+  licensee   Licensee       @relation(fields: [licenseeId], references: [id])
+
+  alertType  PolicyAlertType
+  severity   AlertSeverity @default(MEDIUM)
+  message    String
+  score      Int @default(0)
+
+  batchId String?
+  batch   Batch? @relation(fields: [batchId], references: [id])
+
+  qrCodeId String?
+  qrCode   QRCode? @relation(fields: [qrCodeId], references: [id])
+
+  manufacturerId String?
+  manufacturer   User? @relation("PolicyAlertManufacturer", fields: [manufacturerId], references: [id])
+
+  acknowledgedAt DateTime?
+  acknowledgedByUserId String?
+  acknowledgedByUser   User? @relation("PolicyAlertAcknowledgedBy", fields: [acknowledgedByUserId], references: [id])
+
+  details   Json?
+  createdAt DateTime @default(now())
+
+  @@index([licenseeId])
+  @@index([alertType])
+  @@index([severity])
+  @@index([batchId])
+  @@index([manufacturerId])
+  @@index([qrCodeId])
+  @@index([acknowledgedAt])
+  @@index([createdAt])
 }

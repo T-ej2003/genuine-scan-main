@@ -20,4 +20,4 @@ export const requireSuperAdmin = requireRole(UserRole.SUPER_ADMIN);
 export const requireLicenseeAdmin = requireRole(UserRole.LICENSEE_ADMIN, UserRole.SUPER_ADMIN);
 export const requireManufacturer = requireRole(UserRole.MANUFACTURER);
 export const requireAnyAdmin = requireRole(UserRole.SUPER_ADMIN, UserRole.LICENSEE_ADMIN);
-
+export const requireOpsUser = requireRole(UserRole.SUPER_ADMIN, UserRole.LICENSEE_ADMIN, UserRole.MANUFACTURER);

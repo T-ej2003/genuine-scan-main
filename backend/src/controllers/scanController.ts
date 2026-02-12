@@ -4,6 +4,7 @@ import { QRStatus } from "@prisma/client";
 import { createAuditLog } from "../services/auditService";
 import { evaluateScanPolicy } from "../services/scanPolicy";
 import { hashToken, verifyQrToken } from "../services/qrTokenService";
+import { evaluateScanAndEnforcePolicy } from "../services/policyEngineService";
 import { createHash } from "crypto";
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
@@ -253,35 +254,55 @@ export const scanToken = async (req: Request, res: Response) => {
       });
     }
 
+    const policy = await evaluateScanAndEnforcePolicy({
+      qrCodeId: updated.id,
+      code: updated.code,
+      licenseeId: updated.licenseeId,
+      batchId: updated.batchId ?? null,
+      manufacturerId: updated.batch?.manufacturer?.id || null,
+      scanCount: updated.scanCount ?? 0,
+      scannedAt: now,
+      latitude,
+      longitude,
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || null,
+    });
+
+    const finalStatus =
+      policy.autoBlockedQr || policy.autoBlockedBatch ? QRStatus.BLOCKED : updated.status;
+    const effectiveOutcome = finalStatus === QRStatus.BLOCKED ? "BLOCKED" : decision.outcome;
+
     const warningMessage =
-      decision.outcome === "ALREADY_REDEEMED"
+      effectiveOutcome === "ALREADY_REDEEMED"
         ? `Already redeemed. First redemption was at ${updated.redeemedAt?.toISOString?.() || "unknown time"}.`
-        : decision.outcome === "SUSPICIOUS"
+        : effectiveOutcome === "SUSPICIOUS"
         ? "This code was generated but not confirmed as printed. Treat with suspicion."
-        : decision.outcome === "BLOCKED"
-        ? "This code has been blocked due to fraud or recall."
+        : effectiveOutcome === "BLOCKED"
+        ? policy.autoBlockedQr || policy.autoBlockedBatch
+          ? "This code has been auto-blocked by security policy due to anomaly detection."
+          : "This code has been blocked due to fraud or recall."
         : null;
 
     const message =
-      decision.outcome === "VALID"
+      effectiveOutcome === "VALID"
         ? "Authentic item. First-time verification successful."
-        : decision.outcome === "ALREADY_REDEEMED"
+        : effectiveOutcome === "ALREADY_REDEEMED"
         ? "Already redeemed. Possible counterfeit or reuse."
-        : decision.outcome === "SUSPICIOUS"
+        : effectiveOutcome === "SUSPICIOUS"
         ? "Not activated for sale. Suspicious scan."
-        : decision.outcome === "BLOCKED"
+        : effectiveOutcome === "BLOCKED"
         ? "Blocked code."
         : "This code is not active.";
 
     return res.json({
       success: true,
       data: {
-        isAuthentic: decision.outcome === "VALID",
-        scanOutcome: decision.outcome,
+        isAuthentic: effectiveOutcome === "VALID",
+        scanOutcome: effectiveOutcome,
         message,
         warningMessage,
         code: updated.code,
-        status: updated.status,
+        status: finalStatus,
         licensee: updated.licensee
           ? {
               id: updated.licensee.id,
@@ -306,6 +327,7 @@ export const scanToken = async (req: Request, res: Response) => {
         scanCount: updated.scanCount ?? 0,
         isFirstScan: decision.allowRedeem,
         redeemedAt: updated.redeemedAt ? new Date(updated.redeemedAt).toISOString() : null,
+        policy,
       },
     });
   } catch (error) {

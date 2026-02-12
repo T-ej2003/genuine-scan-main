@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import routes from "./routes";
+import prisma from "./config/database";
 
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -53,6 +54,28 @@ app.use(express.json({ limit: "1mb" }));
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+app.get("/health/db", async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    return res.json({
+      status: "ok",
+      database: "reachable",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (e: any) {
+    const detail =
+      process.env.NODE_ENV === "development"
+        ? e?.message || "Database connectivity failed"
+        : "Database connectivity failed";
+    return res.status(503).json({
+      status: "degraded",
+      database: "unreachable",
+      error: detail,
+      timestamp: new Date().toISOString(),
+    });
+  }
 });
 
 app.use("/api", (_req, res, next) => {
