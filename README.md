@@ -28,19 +28,16 @@ Files added:
 - `.dockerignore` (smaller/cleaner build context)
 
 ### Required Environment Variables (Compose)
-Set these in a root `.env` file (same folder as `docker-compose.yml`):
+Set backend secrets/config in `backend/.env` (compose loads this file for the backend service):
 - `DATABASE_URL` (RDS connection string)
 - `JWT_SECRET`
 - `QR_SIGN_PRIVATE_KEY` + `QR_SIGN_PUBLIC_KEY` (preferred), or `QR_SIGN_HMAC_SECRET`
-
-Optional:
-- `FRONTEND_PORT` (default `80`)
 - `CORS_ORIGIN`
 - `PUBLIC_SCAN_WEB_BASE_URL`
-- `PUBLIC_VERIFY_WEB_BASE_URL`
-- `SCAN_RATE_LIMIT_PER_MIN`
-- `QR_TOKEN_EXP_DAYS`
-- `JWT_EXPIRES_IN`
+
+Optional compose vars in root `.env` (same folder as `docker-compose.yml`):
+- `FRONTEND_PORT` (default `80`)
+- `BACKEND_PORT` (default `4000`)
 
 ### Local Docker Run
 1. Build images:
@@ -74,17 +71,18 @@ Optional:
 3. Deploy code:
    - `git clone <your-repo-url>`
    - `cd genuine-scan-main`
-4. Create `.env` in repo root with production values (`DATABASE_URL`, `JWT_SECRET`, signing keys, etc.).
-5. Build and start:
+4. Create/update `backend/.env` with production values (`DATABASE_URL`, `JWT_SECRET`, signing keys, etc.).
+5. Optional: create root `.env` only for compose-level settings (`FRONTEND_PORT`, `BACKEND_PORT`).
+6. Build and start:
    - `docker compose build`
    - `docker compose up -d`
-6. Run production migrations:
+7. Run production migrations:
    - `docker compose run --rm backend npx prisma migrate deploy`
-7. Verify:
+8. Verify:
    - `docker compose ps`
    - `curl http://127.0.0.1/api/health`
    - Open `http://<lightsail-public-ip>/` in browser.
-8. Update deployment on new release:
+9. Update deployment on new release:
    - `git pull`
    - `docker compose build`
    - `docker compose run --rm backend npx prisma migrate deploy`
@@ -101,6 +99,7 @@ Optional:
    - Validate `DATABASE_URL` points to RDS and credentials are correct.
    - Confirm Lightsail instance can reach RDS (VPC/security group/NACL rules).
    - For SSL RDS URLs, ensure connection params (`sslmode=require` or equivalent) are correct.
+   - If using `sslmode=verify-full` with `sslrootcert`, use a container-accessible path (for example via a mounted volume), not a host-only path such as `/Users/...`.
 4. Migration errors:
    - Run: `docker compose run --rm backend npx prisma migrate status`
    - Then: `docker compose run --rm backend npx prisma migrate deploy`
