@@ -16,6 +16,16 @@ const reportFraudSchema = z.object({
   pageUrl: z.string().trim().max(1000).optional(),
 });
 
+const productFeedbackSchema = z.object({
+  code: z.string().trim().min(2).max(128),
+  rating: z.number().int().min(1).max(5),
+  satisfaction: z.enum(["very_satisfied", "satisfied", "neutral", "disappointed", "very_disappointed"]),
+  notes: z.string().trim().max(1000).optional(),
+  observedStatus: z.string().trim().max(64).optional(),
+  observedOutcome: z.string().trim().max(64).optional(),
+  pageUrl: z.string().trim().max(1000).optional(),
+});
+
 export const verifyQRCode = async (req: Request, res: Response) => {
   try {
     const { code } = req.params;
@@ -369,6 +379,72 @@ export const reportFraud = async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       error: "Failed to submit fraud report",
+    });
+  }
+};
+
+export const submitProductFeedback = async (req: Request, res: Response) => {
+  try {
+    const parsed = productFeedbackSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: parsed.error.errors[0]?.message || "Invalid feedback payload",
+      });
+    }
+
+    const payload = parsed.data;
+    const normalizedCode = payload.code.toUpperCase();
+
+    const qrCode = await prisma.qRCode.findUnique({
+      where: { code: normalizedCode },
+      select: {
+        id: true,
+        code: true,
+        licenseeId: true,
+        batchId: true,
+        batch: {
+          select: {
+            manufacturerId: true,
+          },
+        },
+      },
+    });
+
+    const feedbackLog = await createAuditLog({
+      action: "CUSTOMER_PRODUCT_FEEDBACK",
+      entityType: "CustomerFeedback",
+      entityId: qrCode?.id || normalizedCode,
+      licenseeId: qrCode?.licenseeId || undefined,
+      ipAddress: req.ip,
+      details: {
+        code: normalizedCode,
+        rating: payload.rating,
+        satisfaction: payload.satisfaction,
+        notes: payload.notes || null,
+        observedStatus: payload.observedStatus || null,
+        observedOutcome: payload.observedOutcome || null,
+        qrCodeId: qrCode?.id || null,
+        batchId: qrCode?.batchId || null,
+        manufacturerId: qrCode?.batch?.manufacturerId || null,
+        pageUrl: payload.pageUrl || null,
+        userAgent: req.get("user-agent") || null,
+        submittedAt: new Date().toISOString(),
+      },
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        feedbackId: feedbackLog.id,
+        message: "Feedback submitted successfully.",
+      },
+    });
+  } catch (error) {
+    console.error("submitProductFeedback error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to submit product feedback",
     });
   }
 };

@@ -8,7 +8,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 
-const Index = lazy(() => import("@/pages/Index"));
 const Login = lazy(() => import("@/pages/Login"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Licensees = lazy(() => import("@/pages/Licensees"));
@@ -75,6 +74,12 @@ function AuthRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function RootRoute() {
+  const { isAuthenticated, isLoading } = useAuth();
+  if (isLoading) return <LoadingScreen />;
+  return <Navigate to={isAuthenticated ? "/dashboard" : "/verify"} replace />;
+}
+
 /* =========================
    Routes
 ========================= */
@@ -83,7 +88,7 @@ function AppRoutes() {
     <Suspense fallback={<LoadingScreen />}>
       <Routes>
         {/* Public */}
-        <Route path="/" element={<Index />} />
+        <Route path="/" element={<RootRoute />} />
         <Route path="/verify" element={<VerifyLanding />} />
         <Route path="/verify/:code" element={<Verify />} />
         <Route path="/scan" element={<Verify />} />

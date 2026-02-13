@@ -369,8 +369,8 @@ export default function Dashboard() {
           ))}
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-2">
-          <Card className="animate-fade-in">
+        <div className="grid items-start gap-6 lg:grid-cols-2">
+          <Card className="animate-fade-in self-start">
             <CardHeader>
               <CardTitle className="text-lg font-semibold">Quick Actions</CardTitle>
             </CardHeader>

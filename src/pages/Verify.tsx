@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import {
   Shield,
   CheckCircle2,
@@ -23,6 +24,8 @@ import {
   Loader2,
   Flag,
   ArrowRight,
+  Sparkles,
+  Star,
 } from "lucide-react";
 import apiClient from "@/lib/api-client";
 import { useToast } from "@/hooks/use-toast";
@@ -69,6 +72,22 @@ const REPORT_REASONS = [
   { value: "unexpected-warning", label: "Unexpected warning" },
   { value: "seller-concern", label: "Seller/source concern" },
   { value: "other", label: "Other" },
+] as const;
+
+const SATISFACTION_OPTIONS = [
+  { value: "very_satisfied", label: "Loved it" },
+  { value: "satisfied", label: "Satisfied" },
+  { value: "neutral", label: "Neutral" },
+  { value: "disappointed", label: "Not great" },
+  { value: "very_disappointed", label: "Disappointed" },
+] as const;
+
+type SatisfactionValue = (typeof SATISFACTION_OPTIONS)[number]["value"];
+
+const VERIFY_LOADING_STEPS = [
+  "Reading secure QR signature",
+  "Checking print lifecycle",
+  "Validating authenticity records",
 ] as const;
 
 const STATUS_META: Record<
@@ -139,6 +158,13 @@ export default function Verify() {
   const [reportNotes, setReportNotes] = useState("");
   const [reportEmail, setReportEmail] = useState("");
   const [reporting, setReporting] = useState(false);
+
+  const [loadingStepIdx, setLoadingStepIdx] = useState(0);
+  const [feedbackRating, setFeedbackRating] = useState(0);
+  const [feedbackSatisfaction, setFeedbackSatisfaction] = useState<SatisfactionValue | "">("");
+  const [feedbackNote, setFeedbackNote] = useState("");
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
   const token = useMemo(() => searchParams.get("t")?.trim() || "", [searchParams.toString()]);
   const codeParam = useMemo(() => {
@@ -266,6 +292,37 @@ export default function Verify() {
   const displayedCode = result?.code || codeParam || "—";
   const printedAt = result?.printedAt || result?.batch?.printedAt || null;
   const isReportable = statusKind !== "genuine";
+  const canSubmitFeedback = displayedCode !== "—" && statusKind !== "invalid";
+  const feedbackStorageKey = useMemo(() => {
+    const normalized = String(displayedCode || "").trim().toUpperCase();
+    return normalized && normalized !== "—" ? `authenticqr_feedback_${normalized}` : "";
+  }, [displayedCode]);
+
+  useEffect(() => {
+    if (!isLoading) return;
+    const timer = window.setInterval(() => {
+      setLoadingStepIdx((prev) => (prev + 1) % VERIFY_LOADING_STEPS.length);
+    }, 1100);
+    return () => window.clearInterval(timer);
+  }, [isLoading]);
+
+  useEffect(() => {
+    if (!feedbackStorageKey) {
+      setFeedbackSubmitted(false);
+      return;
+    }
+    try {
+      setFeedbackSubmitted(window.localStorage.getItem(feedbackStorageKey) === "1");
+    } catch {
+      setFeedbackSubmitted(false);
+    }
+  }, [feedbackStorageKey]);
+
+  useEffect(() => {
+    setFeedbackRating(0);
+    setFeedbackSatisfaction("");
+    setFeedbackNote("");
+  }, [feedbackStorageKey]);
 
   const submitReport = async () => {
     const normalizedCode = String(displayedCode || "").trim();
@@ -312,15 +369,81 @@ export default function Verify() {
     }
   };
 
+  const submitFeedback = async () => {
+    if (!canSubmitFeedback) return;
+    if (feedbackRating < 1 || !feedbackSatisfaction) {
+      toast({
+        title: "Add your rating",
+        description: "Please select star rating and satisfaction level.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setFeedbackSubmitting(true);
+    try {
+      const res = await apiClient.submitProductFeedback({
+        code: displayedCode,
+        rating: feedbackRating,
+        satisfaction: feedbackSatisfaction as SatisfactionValue,
+        notes: feedbackNote.trim() || undefined,
+        observedStatus: result?.status,
+        observedOutcome: result?.scanOutcome,
+        pageUrl: typeof window !== "undefined" ? window.location.href : undefined,
+      });
+
+      if (!res.success) {
+        toast({
+          title: "Could not submit feedback",
+          description: res.error || "Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      try {
+        if (feedbackStorageKey) window.localStorage.setItem(feedbackStorageKey, "1");
+      } catch {}
+
+      setFeedbackSubmitted(true);
+      toast({
+        title: "Thanks for your feedback",
+        description: "Your response was shared with the product team.",
+      });
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  };
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-[linear-gradient(145deg,#052f2f_0%,#0b3a53_45%,#0f2740_100%)] px-4 py-10">
+      <style>{`
+        @keyframes verify-scanline {
+          0% { transform: translateY(-16%); opacity: 0; }
+          18% { opacity: 1; }
+          82% { opacity: 1; }
+          100% { transform: translateY(260%); opacity: 0; }
+        }
+        @keyframes verify-orbit {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        @keyframes verify-card-enter {
+          from { opacity: 0; transform: translateY(10px) scale(0.99); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes verify-icon-pulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.04); }
+        }
+      `}</style>
       <div className="pointer-events-none absolute -left-24 top-8 h-72 w-72 rounded-full bg-cyan-300/15 blur-3xl" />
       <div className="pointer-events-none absolute right-0 top-0 h-96 w-96 rounded-full bg-emerald-300/10 blur-3xl" />
       <div className="pointer-events-none absolute bottom-0 left-1/3 h-80 w-80 rounded-full bg-sky-300/10 blur-3xl" />
 
       <div className="relative mx-auto w-full max-w-3xl">
         <div className="mb-8 text-center">
-          <Link to="/" className="inline-flex items-center gap-3 text-white">
+          <Link to="/verify" className="inline-flex items-center gap-3 text-white">
             <span className="rounded-2xl border border-cyan-100/20 bg-white/10 p-2.5 backdrop-blur">
               <Shield className="h-8 w-8 text-cyan-200" />
             </span>
@@ -331,10 +454,26 @@ export default function Verify() {
 
         <Card className="overflow-hidden border-white/20 bg-white/95 shadow-[0_30px_80px_rgba(3,18,30,0.35)] backdrop-blur-sm">
           {isLoading ? (
-            <CardContent className="space-y-3 py-16 text-center">
-              <Loader2 className="mx-auto h-12 w-12 animate-spin text-teal-600" />
-              <p className="text-lg font-semibold text-slate-900">Verifying authenticity...</p>
-              <p className="text-sm text-slate-500">This usually takes a moment</p>
+            <CardContent className="py-14 sm:py-16">
+              <div className="mx-auto flex max-w-md flex-col items-center gap-6 text-center">
+                <div className="relative h-40 w-40">
+                  <div className="absolute -inset-3 rounded-[2.1rem] border border-cyan-300/30" style={{ animation: "verify-orbit 2.4s linear infinite" }} />
+                  <div className="absolute inset-0 rounded-[2rem] border border-cyan-200/70 bg-gradient-to-b from-cyan-100/60 to-white/80 shadow-inner" />
+                  <div className="absolute inset-4 overflow-hidden rounded-[1.4rem] border border-cyan-200/90 bg-white/70">
+                    <div
+                      className="absolute left-0 right-0 top-0 h-12 bg-gradient-to-b from-cyan-400/35 to-transparent"
+                      style={{ animation: "verify-scanline 1.8s ease-in-out infinite" }}
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <Shield className="h-12 w-12 text-slate-700 animate-pulse" />
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-lg font-semibold text-slate-900">{VERIFY_LOADING_STEPS[loadingStepIdx]}</p>
+                  <p className="text-sm text-slate-500">Please keep this screen open.</p>
+                </div>
+              </div>
             </CardContent>
           ) : error ? (
             <CardContent className="space-y-4 py-12 text-center">
@@ -345,16 +484,19 @@ export default function Verify() {
                 <Button variant="outline" asChild className="flex-1">
                   <Link to="/verify">Try another code</Link>
                 </Button>
-                <Button asChild className="flex-1 bg-slate-900 text-white hover:bg-slate-800">
-                  <Link to="/">Return home</Link>
+                <Button type="button" className="flex-1 bg-slate-900 text-white hover:bg-slate-800" onClick={() => window.location.reload()}>
+                  Retry
                 </Button>
               </div>
             </CardContent>
           ) : (
-            <>
+            <div style={{ animation: "verify-card-enter 360ms cubic-bezier(.22,1,.36,1) both" }}>
               <div className={`bg-gradient-to-r ${meta.panelClass} px-6 py-7 text-white`}>
                 <div className="mx-auto flex max-w-xl items-center gap-4">
-                  <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border border-white/30 bg-white/15">
+                  <div
+                    className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border border-white/30 bg-white/15"
+                    style={{ animation: "verify-icon-pulse 1.8s ease-in-out infinite" }}
+                  >
                     {meta.icon}
                   </div>
                   <div>
@@ -442,6 +584,94 @@ export default function Verify() {
                   )}
                 </div>
 
+                {canSubmitFeedback && (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 md:p-5">
+                    <div className="flex items-start gap-2">
+                      <Sparkles className="mt-0.5 h-4 w-4 text-cyan-700" />
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">How was this product?</p>
+                        <p className="text-xs text-slate-500">Share a quick rating for this verified item.</p>
+                      </div>
+                    </div>
+
+                    {feedbackSubmitted ? (
+                      <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                        Thanks, your feedback was shared with the brand team.
+                      </div>
+                    ) : (
+                      <div className="mt-4 space-y-4">
+                        <div className="space-y-2">
+                          <Label className="text-xs font-medium uppercase tracking-wide text-slate-500">Rating</Label>
+                          <div className="flex flex-wrap gap-2">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <button
+                                key={star}
+                                type="button"
+                                onClick={() => setFeedbackRating(star)}
+                                className={cn(
+                                  "flex h-10 w-10 items-center justify-center rounded-full border transition-colors",
+                                  feedbackRating >= star
+                                    ? "border-amber-300 bg-amber-50 text-amber-500"
+                                    : "border-slate-200 bg-white text-slate-300 hover:bg-slate-50"
+                                )}
+                                aria-label={`Rate ${star} star${star > 1 ? "s" : ""}`}
+                              >
+                                <Star className={cn("h-4 w-4", feedbackRating >= star ? "fill-current" : "")} />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-xs font-medium uppercase tracking-wide text-slate-500">Satisfaction</Label>
+                          <div className="flex flex-wrap gap-2">
+                            {SATISFACTION_OPTIONS.map((option) => (
+                              <button
+                                key={option.value}
+                                type="button"
+                                onClick={() => setFeedbackSatisfaction(option.value)}
+                                className={cn(
+                                  "rounded-full border px-3 py-1.5 text-sm transition-colors",
+                                  feedbackSatisfaction === option.value
+                                    ? "border-slate-900 bg-slate-900 text-white"
+                                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                )}
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-xs font-medium uppercase tracking-wide text-slate-500">Comment (optional)</Label>
+                          <Textarea
+                            value={feedbackNote}
+                            onChange={(e) => setFeedbackNote(e.target.value)}
+                            placeholder="Anything you liked or want improved."
+                            rows={3}
+                            maxLength={500}
+                            className="bg-white"
+                          />
+                        </div>
+
+                        <div className="flex justify-end">
+                          <Button type="button" onClick={submitFeedback} disabled={feedbackSubmitting} className="bg-slate-900 text-white hover:bg-slate-800">
+                            {feedbackSubmitting ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Sending...
+                              </>
+                            ) : (
+                              "Submit feedback"
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex flex-col-reverse gap-3 pt-1 md:flex-row md:justify-between">
                   <Button asChild variant="outline" className="md:w-auto">
                     <Link to="/verify">Verify another code</Link>
@@ -460,15 +690,15 @@ export default function Verify() {
                       </Button>
                     )}
                     <Button asChild className="bg-slate-900 text-white hover:bg-slate-800">
-                      <Link to="/">
-                        Back to home
+                      <Link to="/verify">
+                        Check another product
                         <ArrowRight className="ml-2 h-4 w-4" />
                       </Link>
                     </Button>
                   </div>
                 </div>
               </CardContent>
-            </>
+            </div>
           )}
         </Card>
 

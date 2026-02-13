@@ -23,7 +23,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { PageTutorial } from "@/components/onboarding/PageTutorial";
 
 interface NavItem {
   label: string;
@@ -177,7 +176,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           </DropdownMenu>
         </header>
 
-        <PageTutorial />
         <main className="p-4 lg:p-6">{children}</main>
       </div>
     </div>

@@ -68,7 +68,7 @@ import {
   hardDeleteManufacturer,
 } from "../controllers/userController";
 
-import { verifyQRCode, reportFraud } from "../controllers/verifyController";
+import { verifyQRCode, reportFraud, submitProductFeedback } from "../controllers/verifyController";
 import { scanToken } from "../controllers/scanController";
 import { createPrintJob, downloadPrintJobPack, confirmPrintJob } from "../controllers/printJobController";
 import auditRoutes from "./auditRoutes";
@@ -84,6 +84,7 @@ const router = Router();
 router.post("/auth/login", login);
 router.get("/verify/:code", verifyQRCode);
 router.post("/verify/report-fraud", reportFraud);
+router.post("/verify/feedback", submitProductFeedback);
 router.get("/scan", scanToken);
 router.get("/health", healthCheck);
 

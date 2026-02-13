@@ -207,6 +207,10 @@ export default function AuditLogs() {
         return `Customer fraud report submitted for code ${d.code || "—"}${
           d.reason ? ` (${d.reason})` : ""
         }.`;
+      case "CUSTOMER_PRODUCT_FEEDBACK":
+        return `Customer feedback for code ${d.code || "—"}: ${d.rating || "—"}★, ${
+          d.satisfaction || "no satisfaction tag"
+        }.`;
       default: {
         const parts: string[] = [];
         if (name) parts.push(`name ${name}`);

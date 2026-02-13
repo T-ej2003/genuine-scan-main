@@ -523,6 +523,18 @@ class ApiClient {
     return this.request(`/verify/report-fraud`, { method: "POST", body: JSON.stringify(payload) });
   }
 
+  async submitProductFeedback(payload: {
+    code: string;
+    rating: number;
+    satisfaction: "very_satisfied" | "satisfied" | "neutral" | "disappointed" | "very_disappointed";
+    notes?: string;
+    observedStatus?: string;
+    observedOutcome?: string;
+    pageUrl?: string;
+  }) {
+    return this.request(`/verify/feedback`, { method: "POST", body: JSON.stringify(payload) });
+  }
+
   async scanToken(token: string, opts?: { device?: string; lat?: number; lon?: number; acc?: number }) {
     const params = new URLSearchParams();
     params.append("t", token);
