@@ -6,11 +6,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getBatchSummary = exports.getScanLogs = void 0;
 const database_1 = __importDefault(require("../config/database"));
 const client_1 = require("@prisma/client");
+const locationService_1 = require("../services/locationService");
 const getScanLogs = async (req, res) => {
     try {
         if (!req.user)
             return res.status(401).json({ success: false, error: "Not authenticated" });
-        if (req.user.role !== client_1.UserRole.SUPER_ADMIN) {
+        if (req.user.role !== client_1.UserRole.SUPER_ADMIN &&
+            req.user.role !== client_1.UserRole.LICENSEE_ADMIN &&
+            req.user.role !== client_1.UserRole.MANUFACTURER) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
         const prismaAny = database_1.default;
@@ -19,9 +22,18 @@ const getScanLogs = async (req, res) => {
         }
         const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 1000);
         const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
-        const licenseeId = req.query.licenseeId || undefined;
+        const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN
+            ? req.query.licenseeId || undefined
+            : req.user.licenseeId || undefined;
         const batchId = req.query.batchId || undefined;
         const code = req.query.code?.trim() || undefined;
+        const statusRaw = String(req.query.status || "").trim().toUpperCase();
+        const validStatuses = new Set(["DORMANT", "ACTIVE", "ALLOCATED", "ACTIVATED", "PRINTED", "REDEEMED", "BLOCKED", "SCANNED"]);
+        const status = statusRaw && validStatuses.has(statusRaw) ? statusRaw : undefined;
+        const onlyFirstScanRaw = String(req.query.onlyFirstScan || "").trim().toLowerCase();
+        const onlyFirstScan = onlyFirstScanRaw === "true" ? true : onlyFirstScanRaw === "false" ? false : undefined;
+        const from = req.query.from || undefined;
+        const to = req.query.to || undefined;
         const where = {};
         if (licenseeId)
             where.licenseeId = licenseeId;
@@ -29,6 +41,20 @@ const getScanLogs = async (req, res) => {
             where.batchId = batchId;
         if (code)
             where.code = { contains: code, mode: "insensitive" };
+        if (status)
+            where.status = status;
+        if (onlyFirstScan != null)
+            where.isFirstScan = onlyFirstScan;
+        if (from || to) {
+            where.scannedAt = {};
+            if (from)
+                where.scannedAt.gte = new Date(from);
+            if (to)
+                where.scannedAt.lte = new Date(to);
+        }
+        if (req.user.role === client_1.UserRole.MANUFACTURER) {
+            where.batch = { manufacturerId: req.user.userId };
+        }
         const [logs, total] = await Promise.all([
             database_1.default.qrScanLog.findMany({
                 where,
@@ -42,7 +68,27 @@ const getScanLogs = async (req, res) => {
             }),
             database_1.default.qrScanLog.count({ where }),
         ]);
-        return res.json({ success: true, data: { logs, total, limit, offset } });
+        let geocodeBudget = 40;
+        const enrichedLogs = await Promise.all(logs.map(async (log) => {
+            let fallback = null;
+            const hasNamedLocation = Boolean(log.locationName) ||
+                Boolean(log.locationCity) ||
+                Boolean(log.locationRegion) ||
+                Boolean(log.locationCountry);
+            if (!hasNamedLocation && geocodeBudget > 0 && log.latitude != null && log.longitude != null) {
+                geocodeBudget -= 1;
+                fallback = await (0, locationService_1.reverseGeocode)(log.latitude ?? null, log.longitude ?? null);
+            }
+            return {
+                ...log,
+                locationName: log.locationName ||
+                    [log.locationCity, log.locationRegion, log.locationCountry].filter(Boolean).join(", ") ||
+                    fallback?.name ||
+                    null,
+                deviceLabel: (0, locationService_1.compactDeviceLabel)(log.userAgent || log.device || null),
+            };
+        }));
+        return res.json({ success: true, data: { logs: enrichedLogs, total, limit, offset } });
     }
     catch (e) {
         console.error("getScanLogs error:", e);
@@ -57,13 +103,25 @@ const getBatchSummary = async (req, res) => {
     try {
         if (!req.user)
             return res.status(401).json({ success: false, error: "Not authenticated" });
-        if (req.user.role !== client_1.UserRole.SUPER_ADMIN) {
+        if (req.user.role !== client_1.UserRole.SUPER_ADMIN &&
+            req.user.role !== client_1.UserRole.LICENSEE_ADMIN &&
+            req.user.role !== client_1.UserRole.MANUFACTURER) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
-        const licenseeId = req.query.licenseeId || undefined;
+        const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN
+            ? req.query.licenseeId || undefined
+            : req.user.licenseeId || undefined;
+        const manufacturerId = req.user.role === client_1.UserRole.SUPER_ADMIN
+            ? req.query.manufacturerId || undefined
+            : undefined;
         const whereBatch = {};
         if (licenseeId)
             whereBatch.licenseeId = licenseeId;
+        if (manufacturerId)
+            whereBatch.manufacturerId = manufacturerId;
+        if (req.user.role === client_1.UserRole.MANUFACTURER) {
+            whereBatch.manufacturerId = req.user.userId;
+        }
         const batches = await database_1.default.batch.findMany({
             where: whereBatch,
             orderBy: { createdAt: "desc" },

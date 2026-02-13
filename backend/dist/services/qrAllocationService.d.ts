@@ -1,5 +1,7 @@
 import { Prisma } from "@prisma/client";
 type DbClient = Prisma.TransactionClient;
+export declare const lockLicenseeAllocation: (tx: DbClient, licenseeId: string) => Promise<void>;
+export declare const getNextLicenseeQrNumber: (tx: DbClient, licenseeId: string) => Promise<number>;
 export type AllocateQrRangeParams = {
     licenseeId: string;
     startNumber: number;
@@ -8,6 +10,7 @@ export type AllocateQrRangeParams = {
     source?: string | null;
     requestId?: string | null;
     createReceivedBatch?: boolean;
+    receivedBatchName?: string | null;
     tx?: DbClient;
 };
 export declare const allocateQrRange: (params: AllocateQrRangeParams) => Promise<{

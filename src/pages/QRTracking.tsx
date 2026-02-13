@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -337,16 +338,22 @@ export default function QRTracking() {
               </SelectContent>
             </Select>
 
-            <Input
-              type="date"
-              value={filters.fromDate}
-              onChange={(e) => setFilters((prev) => ({ ...prev, fromDate: e.target.value }))}
-            />
-            <Input
-              type="date"
-              value={filters.toDate}
-              onChange={(e) => setFilters((prev) => ({ ...prev, toDate: e.target.value }))}
-            />
+            <div className="space-y-1">
+              <Label className="text-xs font-medium text-slate-600">From date</Label>
+              <Input
+                type="date"
+                value={filters.fromDate}
+                onChange={(e) => setFilters((prev) => ({ ...prev, fromDate: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs font-medium text-slate-600">To date</Label>
+              <Input
+                type="date"
+                value={filters.toDate}
+                onChange={(e) => setFilters((prev) => ({ ...prev, toDate: e.target.value }))}
+              />
+            </div>
           </CardContent>
         </Card>
 

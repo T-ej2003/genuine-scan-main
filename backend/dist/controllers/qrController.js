@@ -11,17 +11,38 @@ const auditService_1 = require("../services/auditService");
 const qrService_1 = require("../services/qrService");
 const qrAllocationService_1 = require("../services/qrAllocationService");
 const crypto_1 = require("crypto");
-const jszip_1 = __importDefault(require("jszip"));
-const qrcode_1 = __importDefault(require("qrcode"));
 const qrTokenService_1 = require("../services/qrTokenService");
+const qrZipStreamService_1 = require("../services/qrZipStreamService");
 /* ===================== SCHEMAS ===================== */
 const allocateRangeSchema = zod_1.z
     .object({
     licenseeId: zod_1.z.string().uuid(),
     startNumber: zod_1.z.number().int().positive(),
     endNumber: zod_1.z.number().int().positive(),
+    receivedBatchName: zod_1.z.string().trim().min(2).max(120).optional(),
 })
     .refine((d) => d.endNumber >= d.startNumber, {
+    message: "End number must be >= start number",
+});
+const allocateLicenseeTopupSchema = zod_1.z
+    .object({
+    startNumber: zod_1.z.number().int().positive().optional(),
+    endNumber: zod_1.z.number().int().positive().optional(),
+    quantity: zod_1.z.number().int().positive().max(500000).optional(),
+    receivedBatchName: zod_1.z.string().trim().min(2).max(120).optional(),
+})
+    .refine((d) => {
+    const hasRange = d.startNumber != null || d.endNumber != null;
+    const hasQuantity = d.quantity != null;
+    if (hasRange && hasQuantity)
+        return false;
+    if (!hasRange && !hasQuantity)
+        return false;
+    if (hasRange && (d.startNumber == null || d.endNumber == null))
+        return false;
+    return true;
+}, { message: "Provide either quantity or both startNumber and endNumber." })
+    .refine((d) => (d.startNumber != null && d.endNumber != null ? d.endNumber >= d.startNumber : true), {
     message: "End number must be >= start number",
 });
 const createBatchSchema = zod_1.z
@@ -33,6 +54,7 @@ const createBatchSchema = zod_1.z
 const assignManufacturerSchema = zod_1.z.object({
     manufacturerId: zod_1.z.string().uuid(),
     quantity: zod_1.z.number().int().positive().max(500000),
+    name: zod_1.z.string().trim().min(2).max(120).optional(),
 });
 const bulkDeleteQRCodesSchema = zod_1.z
     .object({
@@ -44,13 +66,6 @@ const bulkDeleteQRCodesSchema = zod_1.z
 });
 const bulkDeleteBatchesSchema = zod_1.z.object({
     ids: zod_1.z.array(zod_1.z.string().uuid()).min(1, "Provide batch ids"),
-});
-const adminAllocateBatchSchema = zod_1.z.object({
-    licenseeId: zod_1.z.string().uuid(),
-    manufacturerId: zod_1.z.string().uuid(),
-    quantity: zod_1.z.number().int().positive().max(500000),
-    name: zod_1.z.string().trim().min(2).max(120).optional(),
-    requestNote: zod_1.z.string().trim().max(500).optional(),
 });
 const generateQRCodesSchema = zod_1.z.object({
     licenseeId: zod_1.z.string().uuid(),
@@ -86,6 +101,7 @@ const escapeCsv = (v) => {
     const s = String(v);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
+const isBatchBusyError = (msg) => msg.includes("BATCH_BUSY") || msg.toLowerCase().includes("concurrency issue");
 /* ===================== QR RANGE (SUPER ADMIN route) ===================== */
 const allocateQRRange = async (req, res) => {
     try {
@@ -96,16 +112,20 @@ const allocateQRRange = async (req, res) => {
         if (!parsed.success) {
             return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
         }
-        const { licenseeId, startNumber, endNumber } = parsed.data;
-        const result = await database_1.default.$transaction((tx) => (0, qrAllocationService_1.allocateQrRange)({
-            licenseeId,
-            startNumber,
-            endNumber,
-            createdByUserId: auth.userId,
-            source: "ADMIN_TOPUP",
-            createReceivedBatch: true,
-            tx,
-        }));
+        const { licenseeId, startNumber, endNumber, receivedBatchName } = parsed.data;
+        const result = await database_1.default.$transaction(async (tx) => {
+            await (0, qrAllocationService_1.lockLicenseeAllocation)(tx, licenseeId);
+            return (0, qrAllocationService_1.allocateQrRange)({
+                licenseeId,
+                startNumber,
+                endNumber,
+                createdByUserId: auth.userId,
+                source: "ADMIN_TOPUP",
+                createReceivedBatch: true,
+                receivedBatchName: receivedBatchName || null,
+                tx,
+            });
+        });
         await (0, auditService_1.createAuditLog)({
             userId: auth.userId,
             action: "ALLOCATED",
@@ -117,14 +137,28 @@ const allocateQRRange = async (req, res) => {
                 endCode: result.endCode,
                 created: result.createdCount,
                 receivedBatchId: result.receivedBatch?.id || null,
+                receivedBatchName: result.receivedBatch?.name || null,
             },
             ipAddress: req.ip,
         });
-        return res.status(201).json({ success: true, data: result.range });
+        return res.status(201).json({
+            success: true,
+            data: {
+                range: result.range,
+                startCode: result.startCode,
+                endCode: result.endCode,
+                totalCodes: result.totalCodes,
+                receivedBatchId: result.receivedBatch?.id || null,
+                receivedBatchName: result.receivedBatch?.name || null,
+            },
+        });
     }
     catch (e) {
         console.error("allocateQRRange error:", e);
         const msg = e?.message || "Internal server error";
+        if (isBatchBusyError(msg)) {
+            return res.status(409).json({ success: false, error: "Please retry — batch busy." });
+        }
         return res.status(400).json({ success: false, error: msg });
     }
 };
@@ -135,43 +169,72 @@ const allocateQRRangeForLicensee = async (req, res) => {
         const auth = ensureAuth(req);
         if (!auth)
             return res.status(401).json({ success: false, error: "Not authenticated" });
-        const parsed = allocateRangeSchema.safeParse({
-            ...(req.body || {}),
-            licenseeId: req.params.licenseeId,
-        });
+        const licenseeIdParsed = zod_1.z.string().uuid().safeParse(req.params.licenseeId);
+        if (!licenseeIdParsed.success) {
+            return res.status(400).json({ success: false, error: "Invalid licenseeId" });
+        }
+        const licenseeId = licenseeIdParsed.data;
+        const parsed = allocateLicenseeTopupSchema.safeParse(req.body || {});
         if (!parsed.success) {
             return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
         }
-        const { licenseeId, startNumber, endNumber } = parsed.data;
-        const result = await database_1.default.$transaction((tx) => (0, qrAllocationService_1.allocateQrRange)({
-            licenseeId,
-            startNumber,
-            endNumber,
-            createdByUserId: auth.userId,
-            source: "ADMIN_TOPUP",
-            createReceivedBatch: true,
-            tx,
-        }));
+        const result = await database_1.default.$transaction(async (tx) => {
+            await (0, qrAllocationService_1.lockLicenseeAllocation)(tx, licenseeId);
+            const startNumber = parsed.data.quantity != null
+                ? await (0, qrAllocationService_1.getNextLicenseeQrNumber)(tx, licenseeId)
+                : parsed.data.startNumber;
+            const endNumber = parsed.data.quantity != null
+                ? startNumber + parsed.data.quantity - 1
+                : parsed.data.endNumber;
+            const allocation = await (0, qrAllocationService_1.allocateQrRange)({
+                licenseeId,
+                startNumber,
+                endNumber,
+                createdByUserId: auth.userId,
+                source: "ADMIN_TOPUP",
+                createReceivedBatch: true,
+                receivedBatchName: parsed.data.receivedBatchName || null,
+                tx,
+            });
+            return { allocation, startNumber, endNumber };
+        });
         await (0, auditService_1.createAuditLog)({
             userId: auth.userId,
             action: "ALLOCATED",
             entityType: "QRRange",
-            entityId: result.range.id,
+            entityId: result.allocation.range.id,
             details: {
                 context: "ALLOCATE_QR_RANGE_LICENSEE",
                 licenseeId,
-                startCode: result.startCode,
-                endCode: result.endCode,
-                created: result.createdCount,
-                receivedBatchId: result.receivedBatch?.id || null,
+                startCode: result.allocation.startCode,
+                endCode: result.allocation.endCode,
+                created: result.allocation.createdCount,
+                receivedBatchId: result.allocation.receivedBatch?.id || null,
+                receivedBatchName: result.allocation.receivedBatch?.name || null,
             },
             ipAddress: req.ip,
         });
-        return res.status(201).json({ success: true, data: result.range });
+        return res.status(201).json({
+            success: true,
+            data: {
+                range: result.allocation.range,
+                startCode: result.allocation.startCode,
+                endCode: result.allocation.endCode,
+                startNumber: result.startNumber,
+                endNumber: result.endNumber,
+                totalCodes: result.allocation.totalCodes,
+                receivedBatchId: result.allocation.receivedBatch?.id || null,
+                receivedBatchName: result.allocation.receivedBatch?.name || null,
+            },
+        });
     }
     catch (e) {
         console.error("allocateQRRangeForLicensee error:", e);
-        return res.status(400).json({ success: false, error: e?.message || "Bad request" });
+        const msg = e?.message || "Bad request";
+        if (isBatchBusyError(msg)) {
+            return res.status(409).json({ success: false, error: "Please retry — batch busy." });
+        }
+        return res.status(400).json({ success: false, error: msg });
     }
 };
 exports.allocateQRRangeForLicensee = allocateQRRangeForLicensee;
@@ -283,7 +346,7 @@ const createBatch = async (req, res) => {
                 },
             });
             if (updated.count !== pool.length) {
-                throw new Error(`Concurrency issue: assigned ${updated.count}/${pool.length}. Please retry.`);
+                throw new Error("BATCH_BUSY");
             }
             return createdBatch;
         });
@@ -300,120 +363,22 @@ const createBatch = async (req, res) => {
     catch (e) {
         const msg = e?.message || "Internal server error";
         console.error("createBatch error:", e);
+        if (isBatchBusyError(msg)) {
+            return res.status(409).json({ success: false, error: "Please retry — batch busy." });
+        }
         return res.status(400).json({ success: false, error: msg });
     }
 };
 exports.createBatch = createBatch;
 /* ===================== BATCH (SUPER ADMIN) ===================== */
 const adminAllocateBatch = async (req, res) => {
-    try {
-        if (req.user?.role !== client_1.UserRole.SUPER_ADMIN) {
-            return res.status(403).json({ success: false, error: "Access denied" });
-        }
-        const parsed = adminAllocateBatchSchema.safeParse(req.body);
-        if (!parsed.success) {
-            return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
-        }
-        const { licenseeId, manufacturerId, quantity, name, requestNote } = parsed.data;
-        const licensee = await database_1.default.licensee.findUnique({
-            where: { id: licenseeId },
-            select: { id: true, prefix: true },
-        });
-        if (!licensee)
-            return res.status(404).json({ success: false, error: "Licensee not found" });
-        const manufacturer = await database_1.default.user.findFirst({
-            where: { id: manufacturerId, role: client_1.UserRole.MANUFACTURER, licenseeId, isActive: true },
-            select: { id: true },
-        });
-        if (!manufacturer) {
-            return res.status(404).json({ success: false, error: "Manufacturer not found / inactive / wrong licensee" });
-        }
-        const poolWhere = {
-            licenseeId,
-            status: client_1.QRStatus.DORMANT,
-            OR: [
-                { batchId: null },
-                { batch: { manufacturerId: null, printedAt: null } },
-            ],
-        };
-        const unassignedBefore = await database_1.default.qRCode.count({ where: poolWhere });
-        if (unassignedBefore < quantity) {
-            return res.status(400).json({
-                success: false,
-                error: `Not enough unassigned codes. Available: ${unassignedBefore}, requested: ${quantity}`,
-            });
-        }
-        // deterministic: smallest codes first
-        const pool = await database_1.default.qRCode.findMany({
-            where: poolWhere,
-            select: { id: true, code: true },
-            orderBy: { code: "asc" },
-            take: quantity,
-        });
-        if (!pool.length) {
-            return res.status(400).json({ success: false, error: "No unassigned pool available" });
-        }
-        const startCode = pool[0].code;
-        const endCode = pool[pool.length - 1].code;
-        const createdBatch = await database_1.default.$transaction(async (tx) => {
-            const batch = await tx.batch.create({
-                data: {
-                    name: (name?.trim() || `Batch ${startCode} → ${endCode}`).slice(0, 120),
-                    licenseeId,
-                    manufacturerId,
-                    startCode,
-                    endCode,
-                    totalCodes: pool.length,
-                },
-            });
-            const updated = await tx.qRCode.updateMany({
-                where: { id: { in: pool.map((p) => p.id) } },
-                data: {
-                    batchId: batch.id,
-                    status: client_1.QRStatus.ALLOCATED,
-                    printJobId: null,
-                    tokenNonce: null,
-                    tokenIssuedAt: null,
-                    tokenExpiresAt: null,
-                    tokenHash: null,
-                    printedAt: null,
-                    printedByUserId: null,
-                    redeemedAt: null,
-                    redeemedDeviceFingerprint: null,
-                },
-            });
-            if (updated.count !== pool.length) {
-                throw new Error(`Concurrency issue: assigned ${updated.count}/${pool.length}. Please retry.`);
-            }
-            return batch;
-        });
-        await (0, auditService_1.createAuditLog)({
-            userId: req.user.userId,
-            action: "ALLOCATED",
-            entityType: "Batch",
-            entityId: createdBatch.id,
-            details: {
-                context: "ADMIN_ALLOCATE_BATCH",
-                licenseeId,
-                manufacturerId,
-                quantity: pool.length,
-                startCode,
-                endCode,
-                requestNote: requestNote?.trim() || null,
-            },
-            ipAddress: req.ip,
-        });
-        const unassignedAfter = await database_1.default.qRCode.count({ where: poolWhere });
-        return res.status(201).json({
-            success: true,
-            data: { batch: createdBatch, unassignedBefore, unassignedAfter },
-        });
+    if (req.user?.role !== client_1.UserRole.SUPER_ADMIN) {
+        return res.status(403).json({ success: false, error: "Access denied" });
     }
-    catch (e) {
-        const msg = e?.message || "Internal server error";
-        console.error("adminAllocateBatch error:", e);
-        return res.status(400).json({ success: false, error: msg });
-    }
+    return res.status(403).json({
+        success: false,
+        error: "Direct super admin allocation to manufacturer is disabled. Allocate dormant pool to licensee only; licensee admin must assign batches to manufacturers.",
+    });
 };
 exports.adminAllocateBatch = adminAllocateBatch;
 /* ===================== DELETE ONE BATCH ===================== */
@@ -587,6 +552,7 @@ const assignManufacturer = async (req, res) => {
         if (!manufacturer)
             return res.status(404).json({ success: false, error: "Manufacturer invalid" });
         const quantity = parsed.data.quantity;
+        const requestedChildBatchName = String(parsed.data.name || "").trim();
         const result = await database_1.default.$transaction(async (tx) => {
             const eligible = await tx.qRCode.findMany({
                 where: {
@@ -604,7 +570,8 @@ const assignManufacturer = async (req, res) => {
             const startCode = eligible[0].code;
             const endCode = eligible[eligible.length - 1].code;
             const totalCodes = eligible.length;
-            const newName = `${batch.name} → ${manufacturer.name} (${totalCodes})`
+            const newName = (requestedChildBatchName ||
+                `${batch.name} -> ${manufacturer.name} (${totalCodes})`)
                 .replace(/\s+/g, " ")
                 .slice(0, 120);
             const newBatch = await tx.batch.create({
@@ -617,7 +584,7 @@ const assignManufacturer = async (req, res) => {
                     totalCodes,
                 },
             });
-            await tx.qRCode.updateMany({
+            const updated = await tx.qRCode.updateMany({
                 where: { id: { in: eligible.map((e) => e.id) } },
                 data: {
                     batchId: newBatch.id,
@@ -633,6 +600,9 @@ const assignManufacturer = async (req, res) => {
                     redeemedDeviceFingerprint: null,
                 },
             });
+            if (updated.count !== eligible.length) {
+                throw new Error("BATCH_BUSY");
+            }
             const remaining = await tx.qRCode.findMany({
                 where: { batchId: batch.id },
                 orderBy: { code: "asc" },
@@ -651,7 +621,7 @@ const assignManufacturer = async (req, res) => {
                     },
                 });
             }
-            return { newBatchId: newBatch.id, allocated: totalCodes, startCode, endCode };
+            return { newBatchId: newBatch.id, newBatchName: newBatch.name, allocated: totalCodes, startCode, endCode };
         });
         await (0, auditService_1.createAuditLog)({
             userId: auth.userId,
@@ -663,6 +633,7 @@ const assignManufacturer = async (req, res) => {
                 manufacturerId: manufacturer.id,
                 quantity: result.allocated,
                 childBatchId: result.newBatchId,
+                childBatchName: result.newBatchName,
             },
             ipAddress: req.ip,
         });
@@ -676,6 +647,7 @@ const assignManufacturer = async (req, res) => {
                 manufacturerId: manufacturer.id,
                 quantity: result.allocated,
                 parentBatchId: batch.id,
+                childBatchName: result.newBatchName,
                 startCode: result.startCode,
                 endCode: result.endCode,
             },
@@ -685,7 +657,11 @@ const assignManufacturer = async (req, res) => {
     }
     catch (e) {
         console.error("assignManufacturer error:", e);
-        return res.status(400).json({ success: false, error: e?.message || "Internal server error" });
+        const msg = e?.message || "Internal server error";
+        if (isBatchBusyError(msg)) {
+            return res.status(409).json({ success: false, error: "Please retry — batch busy." });
+        }
+        return res.status(400).json({ success: false, error: msg });
     }
 };
 exports.assignManufacturer = assignManufacturer;
@@ -800,35 +776,14 @@ const downloadBatchPrintPack = async (req, res) => {
         if (markUsed.count === 0) {
             return res.status(409).json({ success: false, error: "Token already used" });
         }
-        const codes = await database_1.default.qRCode.findMany({
+        const totalCodes = await database_1.default.qRCode.count({
             where: { batchId: batch.id },
-            select: { code: true },
-            orderBy: { code: "asc" },
         });
-        if (codes.length === 0) {
+        if (totalCodes === 0) {
             return res.status(404).json({ success: false, error: "No QR codes found for this batch" });
         }
         const publicBaseUrl = String(req.query.publicBaseUrl || "").trim();
-        const zip = new jszip_1.default();
-        const folder = zip.folder("png");
-        const csvLines = ["code,url"];
-        for (let i = 0; i < codes.length; i += 1) {
-            const code = codes[i].code;
-            const urlInsideQr = buildPublicQrUrl(code, publicBaseUrl);
-            const pngBuffer = await qrcode_1.default.toBuffer(urlInsideQr, {
-                width: 768,
-                margin: 2,
-                errorCorrectionLevel: "M",
-            });
-            folder.file(`${code}.png`, pngBuffer);
-            const esc = (v) => {
-                const s = String(v ?? "");
-                return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-            };
-            csvLines[i + 1] = `${esc(code)},${esc(urlInsideQr)}`;
-        }
-        zip.file("manifest.csv", csvLines.join("\n"));
-        const out = await zip.generateAsync({ type: "nodebuffer" });
+        const profile = (0, qrZipStreamService_1.resolveQrZipProfile)(totalCodes);
         await database_1.default.$transaction(async (tx) => {
             await tx.batch.update({
                 where: { id: batch.id },
@@ -849,16 +804,49 @@ const downloadBatchPrintPack = async (req, res) => {
             action: "DOWNLOAD_BATCH_PRINT_PACK",
             entityType: "Batch",
             entityId: batch.id,
-            details: { codes: codes.length },
+            details: { codes: totalCodes },
             ipAddress: req.ip,
         });
         const fileName = `batch-${safeFilePart(batch.name || batch.id)}-print-pack.zip`;
-        res.setHeader("Content-Type", "application/zip");
-        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-        return res.status(200).send(out);
+        const entries = (async function* () {
+            let cursorCode;
+            while (true) {
+                const rows = await database_1.default.qRCode.findMany({
+                    where: { batchId: batch.id },
+                    orderBy: { code: "asc" },
+                    take: profile.dbChunkSize,
+                    ...(cursorCode ? { cursor: { code: cursorCode }, skip: 1 } : {}),
+                    select: { code: true },
+                });
+                if (rows.length === 0)
+                    break;
+                for (const row of rows) {
+                    const urlInsideQr = buildPublicQrUrl(row.code, publicBaseUrl);
+                    yield {
+                        code: row.code,
+                        url: urlInsideQr,
+                        manifestValues: [row.code, urlInsideQr],
+                    };
+                }
+                cursorCode = rows[rows.length - 1].code;
+            }
+        })();
+        await (0, qrZipStreamService_1.streamQrZipToResponse)({
+            res,
+            fileName,
+            totalCount: totalCodes,
+            profile,
+            manifestHeader: ["code", "url"],
+            entries,
+        });
+        return;
     }
     catch (e) {
         console.error("downloadBatchPrintPack error:", e);
+        if (res.headersSent) {
+            res.destroy(e instanceof Error ? e : new Error(String(e?.message || "Download failed")));
+            return;
+        }
         return res.status(400).json({ success: false, error: e?.message || "Bad request" });
     }
 };
@@ -874,30 +862,23 @@ const generateQRCodes = async (req, res) => {
             return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
         }
         const { licenseeId, quantity } = parsed.data;
-        const last = await database_1.default.qRCode.findFirst({
-            where: { licenseeId },
-            orderBy: { code: "desc" },
-            select: { code: true },
+        const result = await database_1.default.$transaction(async (tx) => {
+            await (0, qrAllocationService_1.lockLicenseeAllocation)(tx, licenseeId);
+            const startNumber = await (0, qrAllocationService_1.getNextLicenseeQrNumber)(tx, licenseeId);
+            const endNumber = startNumber + quantity - 1;
+            const allocation = await (0, qrAllocationService_1.allocateQrRange)({
+                licenseeId,
+                startNumber,
+                endNumber,
+                createdByUserId: req.user?.userId,
+                source: "ADMIN_GENERATE",
+                createReceivedBatch: true,
+                tx,
+            });
+            return { allocation, startNumber, endNumber };
         });
-        let nextNumber = 1;
-        if (last?.code) {
-            const parsedCode = (0, qrService_1.parseQRCode)(last.code);
-            if (parsedCode)
-                nextNumber = parsedCode.number + 1;
-        }
-        const startNumber = nextNumber;
-        const endNumber = nextNumber + quantity - 1;
-        const result = await database_1.default.$transaction((tx) => (0, qrAllocationService_1.allocateQrRange)({
-            licenseeId,
-            startNumber,
-            endNumber,
-            createdByUserId: req.user?.userId,
-            source: "ADMIN_GENERATE",
-            createReceivedBatch: true,
-            tx,
-        }));
         const rows = await database_1.default.qRCode.findMany({
-            where: { licenseeId, code: { gte: result.startCode, lte: result.endCode } },
+            where: { licenseeId, code: { gte: result.allocation.startCode, lte: result.allocation.endCode } },
             select: { id: true, licenseeId: true, batchId: true, tokenNonce: true, tokenIssuedAt: true, tokenExpiresAt: true },
             orderBy: { code: "asc" },
         });
@@ -933,21 +914,25 @@ const generateQRCodes = async (req, res) => {
             licenseeId,
             action: "CREATED",
             entityType: "QRCode",
-            details: { startNumber, endNumber, quantity },
+            details: { startNumber: result.startNumber, endNumber: result.endNumber, quantity },
             ipAddress: req.ip,
         });
         return res.status(201).json({
             success: true,
             data: {
-                range: result.range,
-                receivedBatch: result.receivedBatch,
+                range: result.allocation.range,
+                receivedBatch: result.allocation.receivedBatch,
                 tokens,
             },
         });
     }
     catch (e) {
         console.error("generateQRCodes error:", e);
-        return res.status(400).json({ success: false, error: e?.message || "Bad request" });
+        const msg = e?.message || "Bad request";
+        if (isBatchBusyError(msg)) {
+            return res.status(409).json({ success: false, error: "Please retry — batch busy." });
+        }
+        return res.status(400).json({ success: false, error: msg });
     }
 };
 exports.generateQRCodes = generateQRCodes;
@@ -974,7 +959,7 @@ const blockQRCode = async (req, res) => {
             action: "BLOCKED",
             entityType: "QRCode",
             entityId: updated.id,
-            details: { reason: parsed.data.reason || null },
+            details: { reason: parsed.data.reason || null, batchId: updated.batchId || null },
             ipAddress: req.ip,
         });
         return res.json({ success: true, data: { id: updated.id } });
@@ -1146,9 +1131,33 @@ exports.getQRCodes = getQRCodes;
 const getStats = async (req, res) => {
     try {
         const role = req.user?.role;
+        const userId = req.user?.userId;
         const licenseeId = role === client_1.UserRole.SUPER_ADMIN
             ? (req.query.licenseeId || undefined)
             : (req.user?.licenseeId ?? undefined) || undefined;
+        if (role === client_1.UserRole.MANUFACTURER && userId) {
+            const where = {
+                batch: { manufacturerId: userId },
+            };
+            if (licenseeId)
+                where.licenseeId = licenseeId;
+            const grouped = await database_1.default.qRCode.groupBy({
+                by: ["status"],
+                where,
+                _count: true,
+            });
+            const total = await database_1.default.qRCode.count({ where });
+            return res.json({
+                success: true,
+                data: {
+                    total,
+                    byStatus: grouped.reduce((acc, s) => {
+                        acc[s.status] = s._count;
+                        return acc;
+                    }, {}),
+                },
+            });
+        }
         const stats = await (0, qrService_1.getQRStats)(licenseeId);
         return res.json({ success: true, data: stats });
     }

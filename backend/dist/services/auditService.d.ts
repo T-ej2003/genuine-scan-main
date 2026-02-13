@@ -14,16 +14,18 @@ export declare const createAuditLog: (data: AuditLogInput) => Promise<{
     licenseeId: string | null;
     createdAt: Date;
     userId: string | null;
+    details: import("@prisma/client/runtime/library").JsonValue | null;
     action: string;
     entityType: string;
     entityId: string | null;
-    details: import("@prisma/client/runtime/library").JsonValue | null;
     ipAddress: string | null;
 }>;
 export declare const getAuditLogs: (opts: {
     userId?: string;
     entityType?: string;
     entityId?: string;
+    action?: string;
+    excludeActions?: string[];
     licenseeId?: string;
     userIds?: string[];
     limit: number;
@@ -34,10 +36,10 @@ export declare const getAuditLogs: (opts: {
         licenseeId: string | null;
         createdAt: Date;
         userId: string | null;
+        details: import("@prisma/client/runtime/library").JsonValue | null;
         action: string;
         entityType: string;
         entityId: string | null;
-        details: import("@prisma/client/runtime/library").JsonValue | null;
         ipAddress: string | null;
     }[];
     total: number;

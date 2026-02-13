@@ -3,10 +3,31 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.streamLogs = exports.exportLogsCsv = exports.getLogs = void 0;
+exports.respondToFraudReport = exports.getFraudReports = exports.streamLogs = exports.exportLogsCsv = exports.getLogs = void 0;
 const auditService_1 = require("../services/auditService");
 const database_1 = __importDefault(require("../config/database"));
 const client_1 = require("@prisma/client");
+const zod_1 = require("zod");
+const hiddenActionsForNonSuper = ["CUSTOMER_FRAUD_REPORT", "CUSTOMER_FRAUD_REPORT_RESPONSE"];
+const fraudResponseSchema = zod_1.z.object({
+    status: zod_1.z.enum(["REVIEWED", "RESOLVED", "DISMISSED"]).default("REVIEWED"),
+    message: zod_1.z.string().trim().max(1000).optional(),
+    notifyCustomer: zod_1.z.boolean().optional().default(true),
+});
+const coerceDetails = (details) => {
+    if (!details || typeof details !== "object" || Array.isArray(details))
+        return {};
+    return details;
+};
+const defaultFraudReply = (status, code) => {
+    if (status === "RESOLVED") {
+        return `Thanks for reporting code ${code}. Our security team reviewed it and completed corrective action.`;
+    }
+    if (status === "DISMISSED") {
+        return `Thanks for reporting code ${code}. We reviewed the case and found no actionable fraud signal from current evidence.`;
+    }
+    return `Thanks for reporting code ${code}. Our security team has started investigating your report.`;
+};
 const getLogs = async (req, res) => {
     try {
         if (!req.user) {
@@ -16,6 +37,7 @@ const getLogs = async (req, res) => {
         const offset = Number(req.query.offset) || 0;
         const entityType = req.query.entityType;
         const entityId = req.query.entityId;
+        const action = req.query.action;
         const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN
             ? req.query.licenseeId
             : req.user.licenseeId ?? undefined;
@@ -27,9 +49,14 @@ const getLogs = async (req, res) => {
             });
             userIds = users.map((u) => u.id);
         }
+        if (req.user.role !== client_1.UserRole.SUPER_ADMIN && action && hiddenActionsForNonSuper.includes(action)) {
+            return res.json({ success: true, data: { logs: [], total: 0, limit, offset } });
+        }
         const result = await (0, auditService_1.getAuditLogs)({
             entityType,
             entityId,
+            action,
+            excludeActions: req.user.role === client_1.UserRole.SUPER_ADMIN ? undefined : hiddenActionsForNonSuper,
             licenseeId,
             userIds,
             limit,
@@ -64,6 +91,7 @@ const exportLogsCsv = async (req, res) => {
         const limit = Math.min(Number(req.query.limit) || 5000, 20000);
         const entityType = req.query.entityType;
         const entityId = req.query.entityId;
+        const action = req.query.action;
         const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN
             ? req.query.licenseeId
             : req.user.licenseeId ?? undefined;
@@ -75,9 +103,16 @@ const exportLogsCsv = async (req, res) => {
             });
             userIds = users.map((u) => u.id);
         }
+        if (req.user.role !== client_1.UserRole.SUPER_ADMIN && action && hiddenActionsForNonSuper.includes(action)) {
+            res.setHeader("Content-Type", "text/csv");
+            res.setHeader("Content-Disposition", "attachment; filename=\"audit-logs.csv\"");
+            return res.status(200).send("createdAt,action,entityType,entityId,userId,userName,userEmail,licenseeId,ipAddress,details\n");
+        }
         const result = await (0, auditService_1.getAuditLogs)({
             entityType,
             entityId,
+            action,
+            excludeActions: req.user.role === client_1.UserRole.SUPER_ADMIN ? undefined : hiddenActionsForNonSuper,
             licenseeId,
             userIds,
             limit,
@@ -151,6 +186,8 @@ const streamLogs = async (req, res) => {
     const isSuper = req.user.role === client_1.UserRole.SUPER_ADMIN;
     const tenantId = req.user.licenseeId;
     const unsubscribe = (0, auditService_1.onAuditLog)((log) => {
+        if (!isSuper && hiddenActionsForNonSuper.includes(String(log.action || "")))
+            return;
         if (!isSuper && log.licenseeId !== tenantId)
             return;
         res.write(`event: audit\ndata: ${JSON.stringify(log)}\n\n`);
@@ -162,4 +199,183 @@ const streamLogs = async (req, res) => {
     });
 };
 exports.streamLogs = streamLogs;
+const getFraudReports = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ success: false, error: "Not authenticated" });
+        }
+        if (req.user.role !== client_1.UserRole.SUPER_ADMIN) {
+            return res.status(403).json({ success: false, error: "Access denied" });
+        }
+        const limit = Math.min(Number(req.query.limit) || 100, 500);
+        const offset = Number(req.query.offset) || 0;
+        const licenseeId = req.query.licenseeId || undefined;
+        const statusFilterRaw = String(req.query.status || "ALL").toUpperCase();
+        const statusFilter = ["ALL", "OPEN", "REVIEWED", "RESOLVED", "DISMISSED"].includes(statusFilterRaw)
+            ? statusFilterRaw
+            : "ALL";
+        const where = { action: "CUSTOMER_FRAUD_REPORT" };
+        if (licenseeId)
+            where.licenseeId = licenseeId;
+        const reportLogs = await database_1.default.auditLog.findMany({
+            where,
+            orderBy: { createdAt: "desc" },
+            take: limit,
+            skip: offset,
+        });
+        if (reportLogs.length === 0) {
+            return res.json({
+                success: true,
+                data: { reports: [], total: 0, limit, offset },
+            });
+        }
+        const reportIds = reportLogs.map((l) => l.id);
+        const responseLogs = await database_1.default.auditLog.findMany({
+            where: {
+                action: "CUSTOMER_FRAUD_REPORT_RESPONSE",
+                OR: reportIds.map((id) => ({ details: { path: ["reportId"], equals: id } })),
+            },
+            orderBy: { createdAt: "desc" },
+        });
+        const latestResponseByReportId = new Map();
+        for (const log of responseLogs) {
+            const details = coerceDetails(log.details);
+            const reportId = String(details.reportId || "");
+            if (!reportId || latestResponseByReportId.has(reportId))
+                continue;
+            latestResponseByReportId.set(reportId, log);
+        }
+        const reports = reportLogs
+            .map((reportLog) => {
+            const reportDetails = coerceDetails(reportLog.details);
+            const responseLog = latestResponseByReportId.get(reportLog.id);
+            const responseDetails = coerceDetails(responseLog?.details);
+            const status = String(responseDetails.status || "OPEN").toUpperCase();
+            return {
+                id: reportLog.id,
+                createdAt: reportLog.createdAt,
+                licenseeId: reportLog.licenseeId || null,
+                report: {
+                    code: reportDetails.code || null,
+                    reason: reportDetails.reason || null,
+                    notes: reportDetails.notes || null,
+                    contactEmail: reportDetails.contactEmail || null,
+                    observedStatus: reportDetails.observedStatus || null,
+                    observedOutcome: reportDetails.observedOutcome || null,
+                    pageUrl: reportDetails.pageUrl || null,
+                    userAgent: reportDetails.userAgent || null,
+                    ipAddress: reportLog.ipAddress || null,
+                },
+                status,
+                response: responseLog
+                    ? {
+                        id: responseLog.id,
+                        createdAt: responseLog.createdAt,
+                        message: responseDetails.message || null,
+                        notifyCustomer: Boolean(responseDetails.notifyCustomer),
+                        recipientEmail: responseDetails.recipientEmail || null,
+                        delivery: responseDetails.delivery || null,
+                        actorUserId: responseLog.userId || null,
+                    }
+                    : null,
+            };
+        })
+            .filter((r) => (statusFilter === "ALL" ? true : r.status === statusFilter));
+        return res.json({
+            success: true,
+            data: {
+                reports,
+                total: reports.length,
+                limit,
+                offset,
+            },
+        });
+    }
+    catch (err) {
+        console.error("getFraudReports error:", err);
+        return res.status(500).json({ success: false, error: "Internal server error" });
+    }
+};
+exports.getFraudReports = getFraudReports;
+const respondToFraudReport = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ success: false, error: "Not authenticated" });
+        }
+        if (req.user.role !== client_1.UserRole.SUPER_ADMIN) {
+            return res.status(403).json({ success: false, error: "Access denied" });
+        }
+        const reportId = String(req.params.id || "").trim();
+        if (!reportId) {
+            return res.status(400).json({ success: false, error: "Missing report id" });
+        }
+        const parsed = fraudResponseSchema.safeParse(req.body || {});
+        if (!parsed.success) {
+            return res.status(400).json({
+                success: false,
+                error: parsed.error.errors[0]?.message || "Invalid response payload",
+            });
+        }
+        const reportLog = await database_1.default.auditLog.findFirst({
+            where: { id: reportId, action: "CUSTOMER_FRAUD_REPORT" },
+        });
+        if (!reportLog) {
+            return res.status(404).json({ success: false, error: "Fraud report not found" });
+        }
+        const reportDetails = coerceDetails(reportLog.details);
+        const normalizedCode = String(reportDetails.code || reportLog.entityId || "UNKNOWN");
+        const recipientEmail = reportDetails.contactEmail && typeof reportDetails.contactEmail === "string"
+            ? String(reportDetails.contactEmail).trim()
+            : "";
+        const status = parsed.data.status;
+        const message = parsed.data.message?.trim() || defaultFraudReply(status, normalizedCode);
+        const notifyCustomer = parsed.data.notifyCustomer !== false;
+        // Automated reply dispatch is simulated by default for local/dev.
+        // This keeps the workflow operational even without SMTP credentials.
+        const delivery = {
+            attempted: notifyCustomer,
+            delivered: notifyCustomer && Boolean(recipientEmail),
+            transport: notifyCustomer ? "simulated" : "none",
+            recipientEmail: notifyCustomer ? recipientEmail || null : null,
+            reason: notifyCustomer && !recipientEmail
+                ? "Customer did not provide a contact email in the report."
+                : null,
+            deliveredAt: notifyCustomer && recipientEmail ? new Date().toISOString() : null,
+        };
+        const responseLog = await (0, auditService_1.createAuditLog)({
+            userId: req.user.userId,
+            licenseeId: reportLog.licenseeId || undefined,
+            action: "CUSTOMER_FRAUD_REPORT_RESPONSE",
+            entityType: "FraudReport",
+            entityId: reportLog.id,
+            ipAddress: req.ip,
+            details: {
+                reportId: reportLog.id,
+                status,
+                message,
+                notifyCustomer,
+                recipientEmail: recipientEmail || null,
+                delivery,
+                sourceCode: normalizedCode,
+                respondedAt: new Date().toISOString(),
+            },
+        });
+        return res.json({
+            success: true,
+            data: {
+                responseId: responseLog.id,
+                reportId: reportLog.id,
+                status,
+                message,
+                notifyCustomer,
+                delivery,
+            },
+        });
+    }
+    catch (err) {
+        console.error("respondToFraudReport error:", err);
+        return res.status(500).json({ success: false, error: "Internal server error" });
+    }
+};
+exports.respondToFraudReport = respondToFraudReport;
 //# sourceMappingURL=auditController.js.map

@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getAuditLogs = exports.createAuditLog = exports.onAuditLog = void 0;
 const database_1 = __importDefault(require("../config/database"));
+const traceEventService_1 = require("./traceEventService");
 const listeners = new Set();
 const onAuditLog = (cb) => {
     listeners.add(cb);
@@ -17,6 +18,22 @@ const emitAuditLog = (log) => {
 };
 const createAuditLog = async (data) => {
     const log = await database_1.default.auditLog.create({ data });
+    try {
+        await (0, traceEventService_1.createTraceEventFromAuditLog)({
+            id: log.id,
+            action: log.action,
+            entityType: log.entityType,
+            entityId: log.entityId,
+            userId: log.userId,
+            licenseeId: log.licenseeId,
+            details: log.details,
+            createdAt: log.createdAt,
+        });
+    }
+    catch (e) {
+        // audit log creation should not fail if trace projection fails
+        console.error("createTraceEventFromAuditLog failed:", e);
+    }
     emitAuditLog(log);
     return log;
 };
@@ -29,6 +46,15 @@ const getAuditLogs = async (opts) => {
         where.entityType = opts.entityType;
     if (opts.entityId)
         where.entityId = opts.entityId;
+    if (opts.action)
+        where.action = opts.action;
+    if (opts.excludeActions?.length) {
+        where.action = opts.action
+            ? opts.action
+            : {
+                notIn: opts.excludeActions,
+            };
+    }
     if (opts.userIds && opts.userIds.length) {
         const or = [{ userId: { in: opts.userIds } }];
         if (opts.licenseeId)

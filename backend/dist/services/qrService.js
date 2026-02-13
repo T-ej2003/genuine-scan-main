@@ -7,6 +7,7 @@ exports.getQRStats = exports.recordScan = exports.markBatchAsPrinted = exports.a
 const client_1 = require("@prisma/client");
 const database_1 = __importDefault(require("../config/database"));
 const qrTokenService_1 = require("./qrTokenService");
+const locationService_1 = require("./locationService");
 const generateQRCode = (prefix, number) => {
     return `${prefix}${number.toString().padStart(10, "0")}`;
 };
@@ -112,6 +113,7 @@ const recordScan = async (code, meta) => {
         throw new Error("QR code has not been printed yet");
     }
     const isFirstScan = existing.status === client_1.QRStatus.PRINTED;
+    const location = await (0, locationService_1.reverseGeocode)(meta?.latitude ?? null, meta?.longitude ?? null);
     const updated = await database_1.default.$transaction(async (tx) => {
         const qr = await tx.qRCode.update({
             where: { code },
@@ -144,6 +146,10 @@ const recordScan = async (code, meta) => {
                 latitude: meta?.latitude ?? null,
                 longitude: meta?.longitude ?? null,
                 accuracy: meta?.accuracy ?? null,
+                locationName: location?.name || null,
+                locationCountry: location?.country || null,
+                locationRegion: location?.region || null,
+                locationCity: location?.city || null,
             },
         });
         return qr;

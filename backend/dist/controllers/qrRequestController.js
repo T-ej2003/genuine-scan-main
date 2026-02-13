@@ -9,28 +9,13 @@ const client_1 = require("@prisma/client");
 const database_1 = __importDefault(require("../config/database"));
 const auditService_1 = require("../services/auditService");
 const qrAllocationService_1 = require("../services/qrAllocationService");
-const qrService_1 = require("../services/qrService");
 const createRequestSchema = zod_1.z
     .object({
-    quantity: zod_1.z.number().int().positive().max(5_000_000).optional(),
-    startNumber: zod_1.z.number().int().positive().optional(),
-    endNumber: zod_1.z.number().int().positive().optional(),
+    quantity: zod_1.z.number().int().positive().max(5_000_000),
     note: zod_1.z.string().trim().max(500).optional(),
-})
-    .refine((d) => d.quantity || (d.startNumber && d.endNumber), {
-    message: "Provide quantity or a start/end range",
-})
-    .refine((d) => (d.startNumber && d.endNumber ? d.endNumber >= d.startNumber : true), {
-    message: "End number must be >= start number",
 });
-const approveSchema = zod_1.z
-    .object({
-    startNumber: zod_1.z.number().int().positive().optional(),
-    endNumber: zod_1.z.number().int().positive().optional(),
+const approveSchema = zod_1.z.object({
     decisionNote: zod_1.z.string().trim().max(500).optional(),
-})
-    .refine((d) => (d.startNumber && d.endNumber ? d.endNumber >= d.startNumber : true), {
-    message: "End number must be >= start number",
 });
 const rejectSchema = zod_1.z.object({
     decisionNote: zod_1.z.string().trim().max(500).optional(),
@@ -60,17 +45,13 @@ const createQrAllocationRequest = async (req, res) => {
         if (!licenseeId) {
             return res.status(403).json({ success: false, error: "No licensee association" });
         }
-        const quantity = parsed.data.quantity ??
-            (parsed.data.startNumber && parsed.data.endNumber
-                ? parsed.data.endNumber - parsed.data.startNumber + 1
-                : null);
         const created = await database_1.default.qrAllocationRequest.create({
             data: {
                 licenseeId,
                 requestedByUserId: auth.userId,
-                quantity: quantity || null,
-                startNumber: parsed.data.startNumber ?? null,
-                endNumber: parsed.data.endNumber ?? null,
+                quantity: parsed.data.quantity,
+                startNumber: null,
+                endNumber: null,
                 note: parsed.data.note?.trim() || null,
                 status: client_1.QrAllocationRequestStatus.PENDING,
             },
@@ -83,8 +64,6 @@ const createQrAllocationRequest = async (req, res) => {
             entityId: created.id,
             details: {
                 quantity: created.quantity,
-                startNumber: created.startNumber,
-                endNumber: created.endNumber,
             },
             ipAddress: req.ip,
         });
@@ -159,46 +138,19 @@ const approveQrAllocationRequest = async (req, res) => {
         if (requestRow.status !== client_1.QrAllocationRequestStatus.PENDING) {
             return res.status(409).json({ success: false, error: "Request already processed" });
         }
-        let startNumber = requestRow.startNumber ?? null;
-        let endNumber = requestRow.endNumber ?? null;
-        if (startNumber && endNumber) {
-            if (parsed.data.startNumber || parsed.data.endNumber) {
-                if (parsed.data.startNumber !== startNumber || parsed.data.endNumber !== endNumber) {
-                    return res.status(400).json({
-                        success: false,
-                        error: "Request already has a range; approve using the same range or leave empty.",
-                    });
-                }
-            }
+        // Backward compatibility: derive quantity for old range-based rows.
+        const quantityRequested = requestRow.quantity && requestRow.quantity > 0
+            ? requestRow.quantity
+            : requestRow.startNumber && requestRow.endNumber
+                ? requestRow.endNumber - requestRow.startNumber + 1
+                : null;
+        if (!quantityRequested || quantityRequested <= 0) {
+            return res.status(400).json({ success: false, error: "Request quantity is missing or invalid." });
         }
-        else if (parsed.data.startNumber && parsed.data.endNumber) {
-            startNumber = parsed.data.startNumber;
-            endNumber = parsed.data.endNumber;
-        }
-        if (!startNumber || !endNumber) {
-            const quantity = requestRow.quantity;
-            if (!quantity || quantity <= 0) {
-                return res.status(400).json({ success: false, error: "Quantity missing; provide a range to approve." });
-            }
-            const last = await database_1.default.qRCode.findFirst({
-                where: { licenseeId: requestRow.licenseeId },
-                orderBy: { code: "desc" },
-                select: { code: true },
-            });
-            let nextNumber = 1;
-            if (last?.code) {
-                const parsedCode = (0, qrService_1.parseQRCode)(last.code);
-                if (parsedCode)
-                    nextNumber = parsedCode.number + 1;
-            }
-            startNumber = nextNumber;
-            endNumber = nextNumber + quantity - 1;
-        }
-        if (!startNumber || !endNumber) {
-            return res.status(400).json({ success: false, error: "Failed to determine allocation range" });
-        }
-        const quantityFinal = endNumber - startNumber + 1;
         const result = await database_1.default.$transaction(async (tx) => {
+            await (0, qrAllocationService_1.lockLicenseeAllocation)(tx, requestRow.licenseeId);
+            const startNumber = await (0, qrAllocationService_1.getNextLicenseeQrNumber)(tx, requestRow.licenseeId);
+            const endNumber = startNumber + quantityRequested - 1;
             const alloc = await (0, qrAllocationService_1.allocateQrRange)({
                 licenseeId: requestRow.licenseeId,
                 startNumber,
@@ -218,10 +170,10 @@ const approveQrAllocationRequest = async (req, res) => {
                     decisionNote: parsed.data.decisionNote?.trim() || null,
                     startNumber,
                     endNumber,
-                    quantity: quantityFinal,
+                    quantity: quantityRequested,
                 },
             });
-            return { alloc, updated };
+            return { alloc, updated, startNumber, endNumber };
         });
         await (0, auditService_1.createAuditLog)({
             userId: auth.userId,
@@ -230,9 +182,9 @@ const approveQrAllocationRequest = async (req, res) => {
             entityType: "QrAllocationRequest",
             entityId: requestRow.id,
             details: {
-                startNumber,
-                endNumber,
-                quantity: quantityFinal,
+                startNumber: result.startNumber,
+                endNumber: result.endNumber,
+                quantity: quantityRequested,
                 rangeId: result.alloc.range.id,
                 receivedBatchId: result.alloc.receivedBatch?.id || null,
             },
@@ -242,7 +194,11 @@ const approveQrAllocationRequest = async (req, res) => {
     }
     catch (e) {
         console.error("approveQrAllocationRequest error:", e);
-        return res.status(400).json({ success: false, error: e?.message || "Bad request" });
+        const msg = e?.message || "Bad request";
+        if (String(msg).includes("BATCH_BUSY") || String(msg).toLowerCase().includes("concurrency issue")) {
+            return res.status(409).json({ success: false, error: "Please retry — batch busy." });
+        }
+        return res.status(400).json({ success: false, error: msg });
     }
 };
 exports.approveQrAllocationRequest = approveQrAllocationRequest;

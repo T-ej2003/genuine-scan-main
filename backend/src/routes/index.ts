@@ -281,6 +281,13 @@ router.post(
   addIncidentEvidence
 );
 router.post(
+  "/incidents/:id/email",
+  authenticate,
+  requireAnyAdmin,
+  enforceTenantIsolation,
+  notifyIncidentCustomer
+);
+router.post(
   "/incidents/:id/notify-customer",
   authenticate,
   requireAnyAdmin,

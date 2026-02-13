@@ -5,13 +5,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.confirmPrintJob = exports.downloadPrintJobPack = exports.createPrintJob = void 0;
 const zod_1 = require("zod");
-const jszip_1 = __importDefault(require("jszip"));
-const qrcode_1 = __importDefault(require("qrcode"));
 const database_1 = __importDefault(require("../config/database"));
 const client_1 = require("@prisma/client");
 const crypto_1 = require("crypto");
 const qrTokenService_1 = require("../services/qrTokenService");
 const auditService_1 = require("../services/auditService");
+const qrZipStreamService_1 = require("../services/qrZipStreamService");
 const createPrintJobSchema = zod_1.z.object({
     batchId: zod_1.z.string().uuid(),
     quantity: zod_1.z.number().int().positive().max(200000),
@@ -26,6 +25,12 @@ const getTokenExp = () => {
     const days = Number(process.env.QR_TOKEN_EXP_DAYS || "3650");
     return Date.now() + Math.max(days, 30) * 24 * 60 * 60 * 1000;
 };
+const INLINE_PRINT_JOB_TOKENS_LIMIT = (() => {
+    const raw = Number(process.env.PRINT_JOB_INLINE_TOKENS_LIMIT || "2500");
+    if (!Number.isFinite(raw))
+        return 2500;
+    return Math.max(0, Math.min(20_000, Math.floor(raw)));
+})();
 const createPrintJob = async (req, res) => {
     try {
         if (!req.user || req.user.role !== client_1.UserRole.MANUFACTURER) {
@@ -67,6 +72,24 @@ const createPrintJob = async (req, res) => {
         const now = new Date();
         const expAt = new Date(getTokenExp());
         const tokens = [];
+        const prepared = candidates.map((qr) => {
+            const nonce = (0, qrTokenService_1.randomNonce)();
+            const payload = {
+                qr_id: qr.id,
+                batch_id: qr.batchId,
+                licensee_id: qr.licenseeId,
+                manufacturer_id: batch.manufacturerId || null,
+                iat: Math.floor(now.getTime() / 1000),
+                exp: Math.floor(expAt.getTime() / 1000),
+                nonce,
+            };
+            const token = (0, qrTokenService_1.signQrPayload)(payload);
+            const tokenHash = (0, qrTokenService_1.hashToken)(token);
+            if (tokens.length < INLINE_PRINT_JOB_TOKENS_LIMIT) {
+                tokens.push({ qrId: qr.id, token });
+            }
+            return { qr, nonce, tokenHash };
+        });
         const job = await database_1.default.$transaction(async (tx) => {
             const createdJob = await tx.printJob.create({
                 data: {
@@ -79,34 +102,28 @@ const createPrintJob = async (req, res) => {
                     status: "PENDING",
                 },
             });
-            for (const qr of candidates) {
-                const nonce = (0, qrTokenService_1.randomNonce)();
-                const payload = {
-                    qr_id: qr.id,
-                    batch_id: qr.batchId,
-                    licensee_id: qr.licenseeId,
-                    manufacturer_id: batch.manufacturerId || null,
-                    iat: Math.floor(now.getTime() / 1000),
-                    exp: Math.floor(expAt.getTime() / 1000),
-                    nonce,
-                };
-                const token = (0, qrTokenService_1.signQrPayload)(payload);
-                const tokenHash = (0, qrTokenService_1.hashToken)(token);
-                await tx.qRCode.update({
-                    where: { id: qr.id },
-                    data: {
-                        status: client_1.QRStatus.ACTIVATED,
-                        tokenNonce: nonce,
-                        tokenIssuedAt: now,
-                        tokenExpiresAt: expAt,
-                        tokenHash,
-                        printJobId: createdJob.id,
-                    },
-                });
-                tokens.push({ qrId: qr.id, token });
+            const values = prepared.map((item) => client_1.Prisma.sql `(${item.qr.id}, ${item.nonce}, ${item.tokenHash}, ${now}, ${expAt})`);
+            const updatedCount = await tx.$executeRaw(client_1.Prisma.sql `
+        UPDATE "QRCode" AS q
+        SET
+          "status" = CAST(${client_1.QRStatus.ACTIVATED} AS "QRStatus"),
+          "tokenNonce" = v."tokenNonce",
+          "tokenIssuedAt" = v."tokenIssuedAt",
+          "tokenExpiresAt" = v."tokenExpiresAt",
+          "tokenHash" = v."tokenHash",
+          "printJobId" = ${createdJob.id}
+        FROM (
+          VALUES ${client_1.Prisma.join(values)}
+        ) AS v("id", "tokenNonce", "tokenHash", "tokenIssuedAt", "tokenExpiresAt")
+        WHERE q."id" = v."id"
+          AND q."status" = CAST(${client_1.QRStatus.ALLOCATED} AS "QRStatus")
+          AND q."printJobId" IS NULL;
+      `);
+            if (Number(updatedCount) !== prepared.length) {
+                throw new Error("BATCH_BUSY");
             }
             return createdJob;
-        });
+        }, { timeout: 20000, maxWait: 10000 });
         await (0, auditService_1.createAuditLog)({
             userId: req.user.userId,
             licenseeId: batch.licenseeId,
@@ -127,12 +144,18 @@ const createPrintJob = async (req, res) => {
                 printJobId: job.id,
                 printLockToken,
                 quantity,
+                tokenCount: prepared.length,
+                tokensTruncated: prepared.length > tokens.length,
                 tokens,
             },
         });
     }
     catch (e) {
         console.error("createPrintJob error:", e);
+        const msg = String(e?.message || "");
+        if (msg.includes("BATCH_BUSY")) {
+            return res.status(409).json({ success: false, error: "Please retry — batch busy." });
+        }
         return res.status(400).json({ success: false, error: e?.message || "Bad request" });
     }
 };
@@ -149,7 +172,7 @@ const downloadPrintJobPack = async (req, res) => {
         }
         const job = await database_1.default.printJob.findFirst({
             where: { id: jobId, manufacturerId: req.user.userId },
-            include: { batch: { select: { id: true, name: true } } },
+            include: { batch: { select: { id: true, name: true, licenseeId: true } } },
         });
         if (!job)
             return res.status(404).json({ success: false, error: "Print job not found" });
@@ -160,59 +183,106 @@ const downloadPrintJobPack = async (req, res) => {
         if (tokenHash !== job.printLockTokenHash) {
             return res.status(403).json({ success: false, error: "Invalid print lock token" });
         }
-        const qrCodes = await database_1.default.qRCode.findMany({
+        const totalCodes = await database_1.default.qRCode.count({
             where: { printJobId: job.id },
-            orderBy: { code: "asc" },
-            select: {
-                id: true,
-                code: true,
-                licenseeId: true,
-                batchId: true,
-                tokenNonce: true,
-                tokenIssuedAt: true,
-                tokenExpiresAt: true,
-            },
         });
-        if (!qrCodes.length) {
+        if (!totalCodes) {
             return res.status(404).json({ success: false, error: "No QR codes assigned to this print job" });
         }
-        const zip = new jszip_1.default();
-        const folder = zip.folder("png");
-        const csvLines = ["qr_id,code,token,url"];
-        for (let i = 0; i < qrCodes.length; i += 1) {
-            const qr = qrCodes[i];
-            const payload = {
-                qr_id: qr.id,
-                batch_id: qr.batchId,
-                licensee_id: qr.licenseeId,
-                manufacturer_id: req.user.userId,
-                iat: Math.floor((qr.tokenIssuedAt?.getTime?.() || Date.now()) / 1000),
-                exp: qr.tokenExpiresAt ? Math.floor(qr.tokenExpiresAt.getTime() / 1000) : undefined,
-                nonce: qr.tokenNonce || "",
-            };
-            const token = (0, qrTokenService_1.signQrPayload)(payload);
-            const urlInsideQr = (0, qrTokenService_1.buildScanUrl)(token);
-            const pngBuffer = await qrcode_1.default.toBuffer(urlInsideQr, {
-                width: 768,
-                margin: 2,
-                errorCorrectionLevel: "M",
+        const profile = (0, qrZipStreamService_1.resolveQrZipProfile)(totalCodes);
+        const now = new Date();
+        const confirmed = await database_1.default.$transaction(async (tx) => {
+            const updatedJob = await tx.printJob.updateMany({
+                where: { id: job.id, status: "PENDING" },
+                data: { status: "CONFIRMED", confirmedAt: now },
             });
-            folder.file(`${qr.code}.png`, pngBuffer);
-            const esc = (v) => {
-                const s = String(v ?? "");
-                return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-            };
-            csvLines[i + 1] = `${esc(qr.id)},${esc(qr.code)},${esc(token)},${esc(urlInsideQr)}`;
+            if (updatedJob.count === 0) {
+                return { updated: false, printed: 0 };
+            }
+            const updatedCodes = await tx.qRCode.updateMany({
+                where: { printJobId: job.id, status: client_1.QRStatus.ACTIVATED },
+                data: {
+                    status: client_1.QRStatus.PRINTED,
+                    printedAt: now,
+                    printedByUserId: req.user.userId,
+                },
+            });
+            await tx.batch.update({
+                where: { id: job.batchId },
+                data: { printedAt: now },
+            });
+            return { updated: true, printed: updatedCodes.count };
+        });
+        if (!confirmed.updated) {
+            return res.status(409).json({ success: false, error: "Print job already confirmed" });
         }
-        zip.file("manifest.csv", csvLines.join("\n"));
-        const out = await zip.generateAsync({ type: "nodebuffer" });
+        await (0, auditService_1.createAuditLog)({
+            userId: req.user.userId,
+            licenseeId: job.batch.licenseeId,
+            action: "PRINTED",
+            entityType: "PrintJob",
+            entityId: job.id,
+            details: { printedCodes: confirmed.printed },
+            ipAddress: req.ip,
+        });
         const fileName = `print-job-${job.id}.zip`;
-        res.setHeader("Content-Type", "application/zip");
-        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-        return res.status(200).send(out);
+        const entries = (async function* () {
+            let cursorCode;
+            while (true) {
+                const rows = await database_1.default.qRCode.findMany({
+                    where: { printJobId: job.id },
+                    orderBy: { code: "asc" },
+                    take: profile.dbChunkSize,
+                    ...(cursorCode ? { cursor: { code: cursorCode }, skip: 1 } : {}),
+                    select: {
+                        id: true,
+                        code: true,
+                        licenseeId: true,
+                        batchId: true,
+                        tokenNonce: true,
+                        tokenIssuedAt: true,
+                        tokenExpiresAt: true,
+                    },
+                });
+                if (rows.length === 0)
+                    break;
+                for (const qr of rows) {
+                    const payload = {
+                        qr_id: qr.id,
+                        batch_id: qr.batchId,
+                        licensee_id: qr.licenseeId,
+                        manufacturer_id: req.user.userId,
+                        iat: Math.floor((qr.tokenIssuedAt?.getTime?.() || Date.now()) / 1000),
+                        exp: qr.tokenExpiresAt ? Math.floor(qr.tokenExpiresAt.getTime() / 1000) : undefined,
+                        nonce: qr.tokenNonce || "",
+                    };
+                    const token = (0, qrTokenService_1.signQrPayload)(payload);
+                    const urlInsideQr = (0, qrTokenService_1.buildScanUrl)(token);
+                    yield {
+                        code: qr.code,
+                        url: urlInsideQr,
+                        manifestValues: [qr.id, qr.code, token, urlInsideQr],
+                    };
+                }
+                cursorCode = rows[rows.length - 1].code;
+            }
+        })();
+        await (0, qrZipStreamService_1.streamQrZipToResponse)({
+            res,
+            fileName,
+            totalCount: totalCodes,
+            profile,
+            manifestHeader: ["qr_id", "code", "token", "url"],
+            entries,
+        });
+        return;
     }
     catch (e) {
         console.error("downloadPrintJobPack error:", e);
+        if (res.headersSent) {
+            res.destroy(e instanceof Error ? e : new Error(String(e?.message || "Download failed")));
+            return;
+        }
         return res.status(400).json({ success: false, error: e?.message || "Bad request" });
     }
 };
@@ -235,6 +305,19 @@ const confirmPrintJob = async (req, res) => {
         });
         if (!job)
             return res.status(404).json({ success: false, error: "Print job not found" });
+        if (job.status === "CONFIRMED") {
+            const printedCount = await database_1.default.qRCode.count({
+                where: { printJobId: job.id, status: client_1.QRStatus.PRINTED },
+            });
+            return res.json({
+                success: true,
+                data: {
+                    printJobId: job.id,
+                    confirmedAt: job.confirmedAt,
+                    printedCodes: printedCount,
+                },
+            });
+        }
         const tokenHash = hashLockToken(parsed.data.printLockToken);
         if (tokenHash !== job.printLockTokenHash) {
             return res.status(403).json({ success: false, error: "Invalid print lock token" });

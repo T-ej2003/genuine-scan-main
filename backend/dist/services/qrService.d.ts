@@ -46,11 +46,11 @@ export declare const recordScan: (code: string, meta?: {
             licenseeId: string;
             createdAt: Date;
             updatedAt: Date;
+            manufacturerId: string | null;
             startCode: string;
             endCode: string;
             totalCodes: number;
             printedAt: Date | null;
-            manufacturerId: string | null;
             printPackDownloadedAt: Date | null;
             printPackDownloadedByUserId: string | null;
         }) | null;
@@ -59,11 +59,13 @@ export declare const recordScan: (code: string, meta?: {
         licenseeId: string;
         createdAt: Date;
         updatedAt: Date;
+        batchId: string | null;
+        printedAt: Date | null;
         code: string;
         status: import(".prisma/client").$Enums.QRStatus;
         scannedAt: Date | null;
         scanCount: number;
-        printedAt: Date | null;
+        printedByUserId: string | null;
         redeemedAt: Date | null;
         redeemedDeviceFingerprint: string | null;
         lastScanIp: string | null;
@@ -74,8 +76,6 @@ export declare const recordScan: (code: string, meta?: {
         tokenIssuedAt: Date | null;
         tokenExpiresAt: Date | null;
         tokenHash: string | null;
-        batchId: string | null;
-        printedByUserId: string | null;
         printJobId: string | null;
     };
     isFirstScan: boolean;

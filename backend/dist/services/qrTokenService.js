@@ -13,6 +13,17 @@ const fromBase64Url = (input) => {
     const withPad = pad ? padded + "=".repeat(4 - pad) : padded;
     return Buffer.from(withPad, "base64");
 };
+const decodeBase64UrlStrict = (input) => {
+    if (!/^[A-Za-z0-9_-]+$/.test(input)) {
+        throw new Error("Invalid token encoding");
+    }
+    const buf = fromBase64Url(input);
+    // Reject non-canonical variants so mutated tokens cannot decode to the same bytes.
+    if (toBase64Url(buf) !== input) {
+        throw new Error("Invalid token encoding");
+    }
+    return buf;
+};
 const normalizePem = (value) => value.replace(/\\n/g, "\n").trim();
 const stableStringify = (obj) => {
     if (obj === null || typeof obj !== "object") {
@@ -65,32 +76,37 @@ const signQrPayload = (payload) => {
     }
     else {
         const secret = String(process.env.QR_SIGN_HMAC_SECRET || "");
-        sig = (0, crypto_1.createHash)("sha256").update(payloadHash).update(secret).digest();
+        sig = (0, crypto_1.createHmac)("sha256", secret).update(payloadHash).digest();
     }
     return `${toBase64Url(payloadBuf)}.${toBase64Url(sig)}`;
 };
 exports.signQrPayload = signQrPayload;
 const verifyQrToken = (token) => {
-    const [payloadPart, sigPart] = String(token || "").split(".");
+    const tokenStr = String(token || "").trim();
+    const parts = tokenStr.split(".");
+    if (parts.length !== 2)
+        throw new Error("Invalid token format");
+    const [payloadPart, sigPart] = parts;
     if (!payloadPart || !sigPart)
         throw new Error("Invalid token format");
-    const payloadBuf = fromBase64Url(payloadPart);
+    const payloadBuf = decodeBase64UrlStrict(payloadPart);
     const payloadJson = payloadBuf.toString("utf8");
     const payload = JSON.parse(payloadJson);
     const payloadHash = (0, crypto_1.createHash)("sha256").update(payloadBuf).digest();
     const { mode } = getSignMode();
     if (mode === "ed25519") {
         const { publicKey } = getEd25519Keys();
-        const ok = (0, crypto_1.verify)(null, payloadHash, publicKey, fromBase64Url(sigPart));
+        const ok = (0, crypto_1.verify)(null, payloadHash, publicKey, decodeBase64UrlStrict(sigPart));
         if (!ok)
             throw new Error("Signature verification failed");
     }
     else {
         const secret = String(process.env.QR_SIGN_HMAC_SECRET || "");
-        const expected = (0, crypto_1.createHash)("sha256").update(payloadHash).update(secret).digest("hex");
-        const got = fromBase64Url(sigPart).toString("hex");
-        if (expected !== got)
+        const expected = (0, crypto_1.createHmac)("sha256", secret).update(payloadHash).digest();
+        const got = decodeBase64UrlStrict(sigPart);
+        if (expected.length !== got.length || !(0, crypto_1.timingSafeEqual)(expected, got)) {
             throw new Error("Signature verification failed");
+        }
     }
     return { payload };
 };

@@ -12,6 +12,7 @@ import {
   buildIncidentAdminUrl,
   computeSlaDueAt,
   createIncidentFromReport,
+  isIncidentAdminRole,
   getIncidentByIdScoped,
   listIncidentsScoped,
   recordIncidentEvent,
@@ -209,25 +210,14 @@ export const reportIncident = async (req: Request, res: Response) => {
     const alertBody = incidentSummaryText(incident);
 
     for (const email of superadminEmails) {
-      const mail = await sendIncidentEmail({
+      await sendIncidentEmail({
         incidentId: incident.id,
         licenseeId: incident.licenseeId || null,
         toAddress: email,
         subject: alertSubject,
         text: alertBody,
-      });
-
-      await recordIncidentEvent({
-        incidentId: incident.id,
-        actorType: IncidentActorType.SYSTEM,
-        eventType: IncidentEventType.EMAIL_SENT,
-        eventPayload: {
-          template: "superadmin_alert",
-          toAddress: email,
-          delivered: mail.delivered,
-          providerMessageId: mail.providerMessageId || null,
-          error: mail.error || null,
-        },
+        senderMode: "system",
+        template: "superadmin_alert",
       });
     }
 
@@ -240,25 +230,14 @@ export const reportIncident = async (req: Request, res: Response) => {
         `What next: Our team will review your report and update you if needed.\n\n` +
         `For your privacy, we only use your contact details for this incident workflow.`;
 
-      const ack = await sendIncidentEmail({
+      await sendIncidentEmail({
         incidentId: incident.id,
         licenseeId: incident.licenseeId || null,
         toAddress: incident.customerEmail,
         subject,
         text: body,
-      });
-
-      await recordIncidentEvent({
-        incidentId: incident.id,
-        actorType: IncidentActorType.SYSTEM,
-        eventType: IncidentEventType.EMAIL_SENT,
-        eventPayload: {
-          template: "customer_acknowledgement",
-          toAddress: incident.customerEmail,
-          delivered: ack.delivered,
-          providerMessageId: ack.providerMessageId || null,
-          error: ack.error || null,
-        },
+        senderMode: "system",
+        template: "customer_acknowledgement",
       });
     }
 
@@ -570,6 +549,10 @@ export const addIncidentEvidence = async (req: AuthRequest, res: Response) => {
 export const notifyIncidentCustomer = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+    if (!isIncidentAdminRole(req.user.role)) {
+      return res.status(403).json({ success: false, error: "Only admin users can send incident emails" });
+    }
+
     const incidentId = String(req.params.id || "").trim();
     if (!incidentId) return res.status(400).json({ success: false, error: "Missing incident id" });
 
@@ -603,21 +586,13 @@ export const notifyIncidentCustomer = async (req: AuthRequest, res: Response) =>
         `${parsed.data.message}\n\n` +
         `Reference ID: ${incident.id}\n` +
         `Current status: ${toHumanIncidentStatus(incident.status)}\n`,
-      actorUserId: req.user.userId,
-    });
-
-    await recordIncidentEvent({
-      incidentId: incident.id,
-      actorType: IncidentActorType.ADMIN,
-      actorUserId: req.user.userId,
-      eventType: IncidentEventType.EMAIL_SENT,
-      eventPayload: {
-        template: "customer_update",
-        toAddress: incident.customerEmail,
-        delivered: mail.delivered,
-        providerMessageId: mail.providerMessageId || null,
-        error: mail.error || null,
+      actorUser: {
+        id: req.user.userId,
+        role: req.user.role,
+        email: req.user.email,
       },
+      senderMode: "actor",
+      template: "customer_update",
     });
 
     return res.json({
@@ -626,6 +601,9 @@ export const notifyIncidentCustomer = async (req: AuthRequest, res: Response) =>
         delivered: mail.delivered,
         providerMessageId: mail.providerMessageId || null,
         error: mail.error || null,
+        attemptedFrom: mail.attemptedFrom || null,
+        usedFrom: mail.usedFrom || null,
+        replyTo: mail.replyTo || null,
       },
     });
   } catch (error) {

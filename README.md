@@ -395,6 +395,16 @@ Blocking/admin controls:
 - `POST /admin/qrs/:id/block` (super admin)
 - `POST /admin/batches/:id/block` (super admin)
 
+Incident response:
+
+- `POST /incidents/report` (public)
+- `GET /incidents` (any admin)
+- `GET /incidents/:id` (any admin)
+- `PATCH /incidents/:id` (any admin)
+- `POST /incidents/:id/events` (any admin)
+- `POST /incidents/:id/evidence` (any admin)
+- `POST /incidents/:id/email` (any admin; `/incidents/:id/notify-customer` kept as backward-compatible alias)
+
 Account:
 
 - `PATCH /account/profile`
@@ -451,7 +461,7 @@ Optional:
 - `QR_ZIP_HIGH_DB_CHUNK_SIZE` (default `5000`)
 - `QR_ZIP_ULTRA_DB_CHUNK_SIZE` (default `10000`)
 - `PUBLIC_ADMIN_WEB_BASE_URL` (used in incident alert emails; default falls back to verify base URL)
-- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM` (incident email delivery)
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS` (incident email delivery transport)
 - `SUPERADMIN_ALERT_EMAILS` (optional comma-separated override for admin incident alerts)
 - `EMAIL_USE_JSON_TRANSPORT` (`true` for local JSON transport testing)
 - `INCIDENT_HASH_SALT` (salt for hashing IP / user-agent fingerprints)
@@ -468,6 +478,13 @@ Optional:
 - `GEO_REVERSE_TIMEOUT_MS` (default `1200`)
 - `POLICY_RAPID_REPEAT_MINUTES` (default `30`)
 - `POLICY_RAPID_REPEAT_DISTANCE_KM` (default `80`)
+
+Incident email sender behavior:
+
+- `EMAIL_FROM` is no longer used.
+- Admin-triggered incident emails use the logged-in admin profile email from DB as the attempted sender.
+- If SMTP provider rejects sender mismatch (common with Gmail SMTP), delivery retries once with `SMTP_USER` as `from` and the admin email as `reply-to`.
+- Communication + timeline logs include attempted sender, used sender, reply-to, delivery status, provider message id, and error details.
 
 Frontend/root:
 

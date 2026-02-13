@@ -638,7 +638,11 @@ model IncidentCommunication {
   toAddress String
   subject String
   bodyPreview String
+  attemptedFrom String?
+  usedFrom String?
+  replyTo String?
   providerMessageId String?
+  errorMessage String?
   status IncidentCommStatus @default(QUEUED)
   createdAt DateTime @default(now())
 

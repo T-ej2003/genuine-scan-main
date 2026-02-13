@@ -16,25 +16,31 @@ const getDashboardStats = async (req, res) => {
         }
         // SUPER_ADMIN can optionally scope by ?licenseeId=
         const scopeLicenseeId = role === client_1.UserRole.SUPER_ADMIN ? (req.query.licenseeId || null) : licenseeId;
-        const qrWhere = scopeLicenseeId ? { licenseeId: scopeLicenseeId } : {};
-        const licenseeWhere = scopeLicenseeId ? { id: scopeLicenseeId } : {};
+        const qrWhere = {};
+        const batchWhere = {};
         // Manufacturers count:
         // - SUPER_ADMIN (no scope): all manufacturers
         // - SUPER_ADMIN (scoped): manufacturers inside that licensee
         // - LICENSEE_ADMIN: manufacturers in own licensee
-        // - MANUFACTURER: manufacturers in own licensee (so dashboard is consistent)
+        // - MANUFACTURER: only self (personal scope)
         const mfgWhere = { role: client_1.UserRole.MANUFACTURER, isActive: true };
-        if (scopeLicenseeId)
-            mfgWhere.licenseeId = scopeLicenseeId;
-        // Batches:
-        const batchWhere = {};
-        if (scopeLicenseeId)
-            batchWhere.licenseeId = scopeLicenseeId;
-        if (role === client_1.UserRole.MANUFACTURER)
+        if (role === client_1.UserRole.MANUFACTURER) {
             batchWhere.manufacturerId = userId;
+            qrWhere.batch = { manufacturerId: userId };
+            mfgWhere.id = userId;
+        }
+        else if (scopeLicenseeId) {
+            qrWhere.licenseeId = scopeLicenseeId;
+            batchWhere.licenseeId = scopeLicenseeId;
+            mfgWhere.licenseeId = scopeLicenseeId;
+        }
         const [totalQRCodes, activeLicensees, manufacturers, totalBatches,] = await Promise.all([
             database_1.default.qRCode.count({ where: qrWhere }),
-            database_1.default.licensee.count({ where: { ...licenseeWhere, isActive: true } }),
+            role === client_1.UserRole.SUPER_ADMIN
+                ? database_1.default.licensee.count({ where: { ...(scopeLicenseeId ? { id: scopeLicenseeId } : {}), isActive: true } })
+                : scopeLicenseeId
+                    ? database_1.default.licensee.count({ where: { id: scopeLicenseeId, isActive: true } })
+                    : 0,
             database_1.default.user.count({ where: mfgWhere }),
             database_1.default.batch.count({ where: batchWhere }),
         ]);

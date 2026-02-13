@@ -12,12 +12,14 @@ const licenseeController_1 = require("../controllers/licenseeController");
 const qrController_1 = require("../controllers/qrController");
 const qrRequestController_1 = require("../controllers/qrRequestController");
 const qrLogController_1 = require("../controllers/qrLogController");
+const tracePolicyController_1 = require("../controllers/tracePolicyController");
 const userController_1 = require("../controllers/userController");
 const verifyController_1 = require("../controllers/verifyController");
 const scanController_1 = require("../controllers/scanController");
 const printJobController_1 = require("../controllers/printJobController");
 const auditRoutes_1 = __importDefault(require("./auditRoutes"));
 const accountController_1 = require("../controllers/accountController");
+const incidentController_1 = require("../controllers/incidentController");
 const dashboardController_1 = require("../controllers/dashboardController");
 const eventsController_1 = require("../controllers/eventsController");
 const healthController_1 = require("../controllers/healthController");
@@ -25,6 +27,9 @@ const router = (0, express_1.Router)();
 // ==================== PUBLIC ====================
 router.post("/auth/login", authController_1.login);
 router.get("/verify/:code", verifyController_1.verifyQRCode);
+router.post("/verify/report-fraud", verifyController_1.reportFraud);
+router.post("/verify/feedback", verifyController_1.submitProductFeedback);
+router.post("/incidents/report", incidentController_1.uploadIncidentReportPhotos, incidentController_1.reportIncident);
 router.get("/scan", scanController_1.scanToken);
 router.get("/health", healthController_1.healthCheck);
 // ==================== AUTH ====================
@@ -84,9 +89,28 @@ router.post("/qr/requests/:id/approve", auth_1.authenticate, rbac_1.requireSuper
 router.post("/qr/requests/:id/reject", auth_1.authenticate, rbac_1.requireSuperAdmin, qrRequestController_1.rejectQrAllocationRequest);
 // ==================== AUDIT ====================
 router.use("/audit", auditRoutes_1.default);
-// ==================== QR LOGS (SUPER ADMIN) ====================
-router.get("/admin/qr/scan-logs", auth_1.authenticate, rbac_1.requireSuperAdmin, qrLogController_1.getScanLogs);
-router.get("/admin/qr/batch-summary", auth_1.authenticate, rbac_1.requireSuperAdmin, qrLogController_1.getBatchSummary);
+// ==================== TRACE / ANALYTICS / POLICY ====================
+router.get("/trace/timeline", auth_1.authenticate, tenantIsolation_1.enforceTenantIsolation, tracePolicyController_1.getTraceTimelineController);
+router.get("/analytics/batch-sla", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, tracePolicyController_1.getBatchSlaAnalyticsController);
+router.get("/analytics/risk-scores", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, tracePolicyController_1.getRiskAnalyticsController);
+router.get("/policy/config", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, tracePolicyController_1.getPolicyConfigController);
+router.patch("/policy/config", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, tracePolicyController_1.updatePolicyConfigController);
+router.get("/policy/alerts", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, tracePolicyController_1.getPolicyAlertsController);
+router.post("/policy/alerts/:id/ack", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, tracePolicyController_1.acknowledgePolicyAlertController);
+router.get("/audit/export/batches/:id/package", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, tracePolicyController_1.exportBatchAuditPackageController);
+// ==================== QR LOGS (ADMINS) ====================
+router.get("/admin/qr/scan-logs", auth_1.authenticate, rbac_1.requireOpsUser, tenantIsolation_1.enforceTenantIsolation, qrLogController_1.getScanLogs);
+router.get("/admin/qr/batch-summary", auth_1.authenticate, rbac_1.requireOpsUser, tenantIsolation_1.enforceTenantIsolation, qrLogController_1.getBatchSummary);
+// ==================== INCIDENT RESPONSE ====================
+router.get("/incidents", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, incidentController_1.listIncidents);
+router.get("/incidents/evidence-files/:fileName", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, incidentController_1.serveIncidentEvidenceFile);
+router.get("/incidents/:id", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, incidentController_1.getIncident);
+router.patch("/incidents/:id", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, incidentController_1.patchIncident);
+router.post("/incidents/:id/events", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, incidentController_1.addIncidentEventNote);
+router.post("/incidents/:id/evidence", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, incidentController_1.uploadIncidentEvidence, incidentController_1.addIncidentEvidence);
+router.post("/incidents/:id/email", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, incidentController_1.notifyIncidentCustomer);
+router.post("/incidents/:id/notify-customer", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, incidentController_1.notifyIncidentCustomer);
+router.get("/incidents/:id/export-pdf", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, incidentController_1.exportIncidentPdfHook);
 // ==================== ADMIN BLOCK ====================
 router.post("/admin/qrs/:id/block", auth_1.authenticate, rbac_1.requireSuperAdmin, qrController_1.blockQRCode);
 router.post("/admin/batches/:id/block", auth_1.authenticate, rbac_1.requireSuperAdmin, qrController_1.blockBatch);

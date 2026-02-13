@@ -780,11 +780,15 @@ class ApiClient {
     });
   }
 
-  async notifyIncidentCustomer(id: string, payload: { subject: string; message: string }) {
-    return this.request(`/incidents/${encodeURIComponent(id)}/notify-customer`, {
+  async sendIncidentEmail(id: string, payload: { subject: string; message: string }) {
+    return this.request(`/incidents/${encodeURIComponent(id)}/email`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
+  }
+
+  async notifyIncidentCustomer(id: string, payload: { subject: string; message: string }) {
+    return this.sendIncidentEmail(id, payload);
   }
 
   async downloadIncidentEvidence(fileName: string) {

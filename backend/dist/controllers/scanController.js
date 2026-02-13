@@ -9,7 +9,10 @@ const client_1 = require("@prisma/client");
 const auditService_1 = require("../services/auditService");
 const scanPolicy_1 = require("../services/scanPolicy");
 const qrTokenService_1 = require("../services/qrTokenService");
+const policyEngineService_1 = require("../services/policyEngineService");
 const crypto_1 = require("crypto");
+const locationService_1 = require("../services/locationService");
+const scanInsightService_1 = require("../services/scanInsightService");
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = Number(process.env.SCAN_RATE_LIMIT_PER_MIN || "60");
 const rateLimitState = new Map();
@@ -186,6 +189,7 @@ const scanToken = async (req, res) => {
         const latitude = toNum(req.query.lat);
         const longitude = toNum(req.query.lon);
         const accuracy = toNum(req.query.acc);
+        const location = await (0, locationService_1.reverseGeocode)(latitude, longitude);
         const updated = await database_1.default.$transaction(async (tx) => {
             const updatedQr = await tx.qRCode.update({
                 where: { id: qr.id },
@@ -219,6 +223,10 @@ const scanToken = async (req, res) => {
                     latitude,
                     longitude,
                     accuracy,
+                    locationName: location?.name || null,
+                    locationCountry: location?.country || null,
+                    locationRegion: location?.region || null,
+                    locationCity: location?.city || null,
                 },
             });
             return updatedQr;
@@ -236,31 +244,49 @@ const scanToken = async (req, res) => {
                 ipAddress: req.ip,
             });
         }
-        const warningMessage = decision.outcome === "ALREADY_REDEEMED"
-            ? `Already redeemed. First redemption was at ${updated.redeemedAt?.toISOString?.() || "unknown time"}.`
-            : decision.outcome === "SUSPICIOUS"
+        const policy = await (0, policyEngineService_1.evaluateScanAndEnforcePolicy)({
+            qrCodeId: updated.id,
+            code: updated.code,
+            licenseeId: updated.licenseeId,
+            batchId: updated.batchId ?? null,
+            manufacturerId: updated.batch?.manufacturer?.id || null,
+            scanCount: updated.scanCount ?? 0,
+            scannedAt: now,
+            latitude,
+            longitude,
+            ipAddress: req.ip,
+            userAgent: req.get("user-agent") || null,
+        });
+        const finalStatus = policy.autoBlockedQr || policy.autoBlockedBatch ? client_1.QRStatus.BLOCKED : updated.status;
+        const effectiveOutcome = finalStatus === client_1.QRStatus.BLOCKED ? "BLOCKED" : decision.outcome;
+        const scanInsight = await (0, scanInsightService_1.getScanInsight)(updated.id);
+        const warningMessage = effectiveOutcome === "ALREADY_REDEEMED"
+            ? `Already verified before. First verification was at ${scanInsight.firstScanAt || updated.redeemedAt?.toISOString?.() || "unknown time"}.`
+            : effectiveOutcome === "SUSPICIOUS"
                 ? "This code was generated but not confirmed as printed. Treat with suspicion."
-                : decision.outcome === "BLOCKED"
-                    ? "This code has been blocked due to fraud or recall."
+                : effectiveOutcome === "BLOCKED"
+                    ? policy.autoBlockedQr || policy.autoBlockedBatch
+                        ? "This code has been auto-blocked by security policy due to anomaly detection."
+                        : "This code has been blocked due to fraud or recall."
                     : null;
-        const message = decision.outcome === "VALID"
+        const message = effectiveOutcome === "VALID"
             ? "Authentic item. First-time verification successful."
-            : decision.outcome === "ALREADY_REDEEMED"
-                ? "Already redeemed. Possible counterfeit or reuse."
-                : decision.outcome === "SUSPICIOUS"
+            : effectiveOutcome === "ALREADY_REDEEMED"
+                ? "Already verified. Please review scan details below."
+                : effectiveOutcome === "SUSPICIOUS"
                     ? "Not activated for sale. Suspicious scan."
-                    : decision.outcome === "BLOCKED"
+                    : effectiveOutcome === "BLOCKED"
                         ? "Blocked code."
                         : "This code is not active.";
         return res.json({
             success: true,
             data: {
-                isAuthentic: decision.outcome === "VALID",
-                scanOutcome: decision.outcome,
+                isAuthentic: effectiveOutcome === "VALID",
+                scanOutcome: effectiveOutcome,
                 message,
                 warningMessage,
                 code: updated.code,
-                status: updated.status,
+                status: finalStatus,
                 licensee: updated.licensee
                     ? {
                         id: updated.licensee.id,
@@ -285,6 +311,13 @@ const scanToken = async (req, res) => {
                 scanCount: updated.scanCount ?? 0,
                 isFirstScan: decision.allowRedeem,
                 redeemedAt: updated.redeemedAt ? new Date(updated.redeemedAt).toISOString() : null,
+                firstScanAt: scanInsight.firstScanAt,
+                firstScanLocation: scanInsight.firstScanLocation,
+                latestScanAt: scanInsight.latestScanAt,
+                latestScanLocation: scanInsight.latestScanLocation,
+                previousScanAt: scanInsight.previousScanAt,
+                previousScanLocation: scanInsight.previousScanLocation,
+                policy,
             },
         });
     }

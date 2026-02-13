@@ -3,13 +3,30 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.allocateQrRange = void 0;
+exports.allocateQrRange = exports.getNextLicenseeQrNumber = exports.lockLicenseeAllocation = void 0;
 const client_1 = require("@prisma/client");
 const database_1 = __importDefault(require("../config/database"));
 const qrService_1 = require("./qrService");
 const qrTokenService_1 = require("./qrTokenService");
+const lockLicenseeAllocation = async (tx, licenseeId) => {
+    // Transaction-scoped advisory lock prevents concurrent next-range collisions per licensee.
+    await tx.$executeRaw `SELECT pg_advisory_xact_lock(hashtext(${`qr_alloc_${licenseeId}`}))`;
+};
+exports.lockLicenseeAllocation = lockLicenseeAllocation;
+const getNextLicenseeQrNumber = async (tx, licenseeId) => {
+    const last = await tx.qRCode.findFirst({
+        where: { licenseeId },
+        orderBy: { code: "desc" },
+        select: { code: true },
+    });
+    if (!last?.code)
+        return 1;
+    const parsed = (0, qrService_1.parseQRCode)(last.code);
+    return (parsed?.number ?? 0) + 1;
+};
+exports.getNextLicenseeQrNumber = getNextLicenseeQrNumber;
 const allocateQrRange = async (params) => {
-    const { licenseeId, startNumber, endNumber, createdByUserId, source, requestId, createReceivedBatch, tx, } = params;
+    const { licenseeId, startNumber, endNumber, createdByUserId, source, requestId, createReceivedBatch, receivedBatchName, tx, } = params;
     const db = tx ?? database_1.default;
     const licensee = await db.licensee.findUnique({
         where: { id: licenseeId },
@@ -53,11 +70,13 @@ const allocateQrRange = async (params) => {
     }
     let receivedBatch = null;
     if (createReceivedBatch) {
-        const name = `Received ${startCode} → ${endCode}`.slice(0, 120);
+        const preferredName = String(receivedBatchName || "").trim();
+        const name = (preferredName.length >= 2 ? preferredName : `Received ${startCode} -> ${endCode}`).slice(0, 120);
         const batch = await db.batch.create({
             data: {
                 name,
                 licenseeId,
+                manufacturerId: null,
                 startCode,
                 endCode,
                 totalCodes,
@@ -66,10 +85,13 @@ const allocateQrRange = async (params) => {
         });
         const updated = await db.qRCode.updateMany({
             where: { licenseeId, code: { gte: startCode, lte: endCode } },
-            data: { batchId: batch.id },
+            data: {
+                batchId: batch.id,
+                status: client_1.QRStatus.DORMANT,
+            },
         });
         if (updated.count !== totalCodes) {
-            throw new Error(`Concurrency issue: assigned ${updated.count}/${totalCodes}. Please retry.`);
+            throw new Error("BATCH_BUSY");
         }
         receivedBatch = batch;
     }

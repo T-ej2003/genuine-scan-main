@@ -208,28 +208,34 @@ export default function Incidents() {
     }
   }, [user?.role]);
 
-  const saveUpdates = async () => {
+  const buildPatchPayload = (payload: typeof updatePayload) => ({
+    status: payload.status || undefined,
+    assignedToUserId:
+      payload.assignedToUserId && payload.assignedToUserId !== "unassigned"
+        ? payload.assignedToUserId
+        : null,
+    severity: payload.severity || undefined,
+    internalNotes: payload.internalNotes || undefined,
+    resolutionSummary: payload.resolutionSummary || undefined,
+    resolutionOutcome:
+      payload.resolutionOutcome && payload.resolutionOutcome !== "none"
+        ? (payload.resolutionOutcome as any)
+        : null,
+    tags: payload.tags
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  });
+
+  const applyIncidentUpdate = async (
+    overrides: Partial<typeof updatePayload>,
+    successToast: { title: string; description: string }
+  ) => {
     if (!detail) return;
     setSaving(true);
     try {
-      const res = await apiClient.patchIncident(detail.id, {
-        status: updatePayload.status || undefined,
-        assignedToUserId:
-          updatePayload.assignedToUserId && updatePayload.assignedToUserId !== "unassigned"
-            ? updatePayload.assignedToUserId
-            : null,
-        severity: updatePayload.severity || undefined,
-        internalNotes: updatePayload.internalNotes || undefined,
-        resolutionSummary: updatePayload.resolutionSummary || undefined,
-        resolutionOutcome:
-          updatePayload.resolutionOutcome && updatePayload.resolutionOutcome !== "none"
-            ? (updatePayload.resolutionOutcome as any)
-            : null,
-        tags: updatePayload.tags
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
-      });
+      const nextPayload = { ...updatePayload, ...overrides };
+      const res = await apiClient.patchIncident(detail.id, buildPatchPayload(nextPayload));
       if (!res.success) {
         toast({
           title: "Update failed",
@@ -238,12 +244,28 @@ export default function Incidents() {
         });
         return;
       }
-      toast({ title: "Incident updated", description: "Changes saved." });
+      setUpdatePayload(nextPayload);
+      toast(successToast);
       await loadIncidents();
       await loadDetail(detail.id);
     } finally {
       setSaving(false);
     }
+  };
+
+  const saveUpdates = async () => {
+    await applyIncidentUpdate({}, { title: "Incident updated", description: "Changes saved." });
+  };
+
+  const applyQuickStatus = async (status: "RESOLVED" | "REJECTED_SPAM") => {
+    const label = status === "RESOLVED" ? "marked as resolved" : "marked as spam";
+    await applyIncidentUpdate(
+      { status },
+      {
+        title: "Incident updated",
+        description: `Incident ${label}.`,
+      }
+    );
   };
 
   const addNote = async () => {
@@ -263,7 +285,17 @@ export default function Incidents() {
 
   const sendCustomerUpdate = async () => {
     if (!detail) return;
-    const res = await apiClient.notifyIncidentCustomer(detail.id, {
+    const senderEmail = String(user?.email || "").trim();
+    if (!senderEmail) {
+      toast({
+        title: "Missing sender email",
+        description: "Update your account email before sending incident emails.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const res = await apiClient.sendIncidentEmail(detail.id, {
       subject: customerSubject.trim(),
       message: customerMessage.trim(),
     });
@@ -391,8 +423,22 @@ export default function Incidents() {
               </SelectContent>
             </Select>
 
-            <Input type="date" value={filters.dateFrom} onChange={(e) => setFilters((prev) => ({ ...prev, dateFrom: e.target.value }))} />
-            <Input type="date" value={filters.dateTo} onChange={(e) => setFilters((prev) => ({ ...prev, dateTo: e.target.value }))} />
+            <div className="space-y-1">
+              <Label className="text-xs font-medium text-slate-600">From date</Label>
+              <Input
+                type="date"
+                value={filters.dateFrom}
+                onChange={(e) => setFilters((prev) => ({ ...prev, dateFrom: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs font-medium text-slate-600">To date</Label>
+              <Input
+                type="date"
+                value={filters.dateTo}
+                onChange={(e) => setFilters((prev) => ({ ...prev, dateTo: e.target.value }))}
+              />
+            </div>
             <Button onClick={loadIncidents} disabled={loading} className="bg-slate-900 text-white hover:bg-slate-800">
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Apply
@@ -604,16 +650,17 @@ export default function Incidents() {
                       {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
                       Save updates
                     </Button>
-                    <Button variant="outline" onClick={() => setUpdatePayload((prev) => ({ ...prev, status: "RESOLVED" }))}>
+                    <Button variant="outline" onClick={() => applyQuickStatus("RESOLVED")} disabled={saving}>
                       Mark resolved
                     </Button>
-                    <Button variant="outline" onClick={() => setUpdatePayload((prev) => ({ ...prev, status: "REJECTED_SPAM" }))}>
+                    <Button variant="outline" onClick={() => applyQuickStatus("REJECTED_SPAM")} disabled={saving}>
                       Reject as spam
                     </Button>
                   </div>
 
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <p className="mb-2 text-sm font-semibold">Customer update</p>
+                    <p className="mb-2 text-xs text-slate-500">From: {user?.email || "No sender email configured"}</p>
                     <div className="space-y-2">
                       <Input value={customerSubject} onChange={(e) => setCustomerSubject(e.target.value)} placeholder="Email subject" />
                       <Textarea rows={3} value={customerMessage} onChange={(e) => setCustomerMessage(e.target.value)} placeholder="Write update message..." />
