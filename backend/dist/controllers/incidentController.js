@@ -550,6 +550,19 @@ const notifyIncidentCustomer = async (req, res) => {
             senderMode: "actor",
             template: "customer_update",
         });
+        if (!mail.delivered) {
+            return res.status(502).json({
+                success: false,
+                error: mail.error || "Email delivery failed",
+                data: {
+                    delivered: false,
+                    providerMessageId: mail.providerMessageId || null,
+                    attemptedFrom: mail.attemptedFrom || null,
+                    usedFrom: mail.usedFrom || null,
+                    replyTo: mail.replyTo || null,
+                },
+            });
+        }
         return res.json({
             success: true,
             data: {

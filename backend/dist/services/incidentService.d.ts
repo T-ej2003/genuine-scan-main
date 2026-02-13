@@ -130,12 +130,16 @@ export declare const getIncidentByIdScoped: (incidentId: string, actor: {
         createdAt: Date;
         status: import(".prisma/client").$Enums.IncidentCommStatus;
         incidentId: string;
+        replyTo: string | null;
         subject: string;
         direction: import(".prisma/client").$Enums.IncidentCommDirection;
         channel: import(".prisma/client").$Enums.IncidentCommChannel;
         toAddress: string;
         bodyPreview: string;
+        attemptedFrom: string | null;
+        usedFrom: string | null;
         providerMessageId: string | null;
+        errorMessage: string | null;
     }[];
     evidence: {
         id: string;

@@ -781,10 +781,26 @@ class ApiClient {
   }
 
   async sendIncidentEmail(id: string, payload: { subject: string; message: string }) {
-    const primary = await this.request(`/incidents/${encodeURIComponent(id)}/email`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    const normalizeDelivery = <T extends ApiResponse<any>>(resp: T): T => {
+      if (!resp.success) return resp;
+      const delivered = (resp.data as any)?.delivered;
+      if (typeof delivered === "boolean" && !delivered) {
+        const reason = (resp.data as any)?.error || resp.error || "Email delivery failed";
+        return {
+          ...resp,
+          success: false,
+          error: String(reason),
+        } as T;
+      }
+      return resp;
+    };
+
+    const primary = normalizeDelivery(
+      await this.request(`/incidents/${encodeURIComponent(id)}/email`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      })
+    );
 
     if (primary.success) return primary;
 
@@ -797,17 +813,29 @@ class ApiClient {
 
     if (!isEndpointMissing) return primary;
 
-    return this.request(`/incidents/${encodeURIComponent(id)}/notify-customer`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    return normalizeDelivery(
+      await this.request(`/incidents/${encodeURIComponent(id)}/notify-customer`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      })
+    );
   }
 
   async notifyIncidentCustomer(id: string, payload: { subject: string; message: string }) {
-    return this.request(`/incidents/${encodeURIComponent(id)}/notify-customer`, {
+    const resp = await this.request(`/incidents/${encodeURIComponent(id)}/notify-customer`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
+    if (!resp.success) return resp;
+    const delivered = (resp.data as any)?.delivered;
+    if (typeof delivered === "boolean" && !delivered) {
+      return {
+        ...resp,
+        success: false,
+        error: String((resp.data as any)?.error || resp.error || "Email delivery failed"),
+      };
+    }
+    return resp;
   }
 
   async downloadIncidentEvidence(fileName: string) {
