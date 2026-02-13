@@ -442,6 +442,34 @@ class ApiClient {
     return this.request(`/audit/logs?${params.toString()}`);
   }
 
+  async getFraudReports(opts?: {
+    status?: "ALL" | "OPEN" | "REVIEWED" | "RESOLVED" | "DISMISSED";
+    licenseeId?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const params = new URLSearchParams();
+    if (opts?.status) params.append("status", opts.status);
+    if (opts?.licenseeId) params.append("licenseeId", opts.licenseeId);
+    if (opts?.limit != null) params.append("limit", String(opts.limit));
+    if (opts?.offset != null) params.append("offset", String(opts.offset));
+    return this.request(`/audit/fraud-reports${params.toString() ? `?${params.toString()}` : ""}`);
+  }
+
+  async respondToFraudReport(
+    reportId: string,
+    payload: {
+      status: "REVIEWED" | "RESOLVED" | "DISMISSED";
+      message?: string;
+      notifyCustomer?: boolean;
+    }
+  ) {
+    return this.request(`/audit/fraud-reports/${encodeURIComponent(reportId)}/respond`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
   streamAuditLogs(onMessage: (log: any) => void) {
     const token = this.getToken();
     if (!token) throw new Error("No auth token");
@@ -550,6 +578,10 @@ class ApiClient {
     licenseeId?: string;
     batchId?: string;
     code?: string;
+    status?: "DORMANT" | "ACTIVE" | "ALLOCATED" | "ACTIVATED" | "PRINTED" | "REDEEMED" | "BLOCKED" | "SCANNED";
+    onlyFirstScan?: boolean;
+    from?: string;
+    to?: string;
     limit?: number;
     offset?: number;
   }) {
@@ -557,14 +589,21 @@ class ApiClient {
     if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
     if (options?.batchId) params.append("batchId", options.batchId);
     if (options?.code) params.append("code", options.code);
+    if (options?.status) params.append("status", options.status);
+    if (options?.onlyFirstScan != null) params.append("onlyFirstScan", String(options.onlyFirstScan));
+    if (options?.from) params.append("from", options.from);
+    if (options?.to) params.append("to", options.to);
     if (options?.limit != null) params.append("limit", String(options.limit));
     if (options?.offset != null) params.append("offset", String(options.offset));
     const query = params.toString() ? `?${params.toString()}` : "";
     return this.request(`/admin/qr/scan-logs${query}`);
   }
 
-  async getBatchSummary(licenseeId?: string) {
-    const query = licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : "";
+  async getBatchSummary(options?: { licenseeId?: string; manufacturerId?: string }) {
+    const params = new URLSearchParams();
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.manufacturerId) params.append("manufacturerId", options.manufacturerId);
+    const query = params.toString() ? `?${params.toString()}` : "";
     return this.request(`/admin/qr/batch-summary${query}`);
   }
 

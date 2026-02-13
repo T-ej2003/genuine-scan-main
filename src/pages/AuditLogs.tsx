@@ -1,227 +1,134 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { format } from "date-fns";
+import { Activity, AlertTriangle, Ban, CheckCircle2, ChevronDown, ChevronUp, Mail, RefreshCw, Search, ShieldAlert } from "lucide-react";
+
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import apiClient from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { onMutationEvent } from "@/lib/mutation-events";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Search, RefreshCw, Activity } from "lucide-react";
-import { format } from "date-fns";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
+
+type FraudStatus = "OPEN" | "REVIEWED" | "RESOLVED" | "DISMISSED";
+
+type FraudReportQueueItem = {
+  id: string;
+  createdAt: string;
+  licenseeId?: string | null;
+  status: FraudStatus;
+  report: {
+    code?: string | null;
+    reason?: string | null;
+    notes?: string | null;
+    contactEmail?: string | null;
+    observedStatus?: string | null;
+    observedOutcome?: string | null;
+    pageUrl?: string | null;
+    ipAddress?: string | null;
+  };
+  response?: {
+    id: string;
+    createdAt: string;
+    message?: string | null;
+    notifyCustomer?: boolean;
+    recipientEmail?: string | null;
+    delivery?: { delivered?: boolean; reason?: string | null } | null;
+    actorUserId?: string | null;
+  } | null;
+};
+
+const ACTION_TONES: Array<{ test: RegExp; className: string; icon: React.ReactNode }> = [
+  { test: /BLOCK|FRAUD|VERIFY_FAILED|REJECT/i, className: "border-red-200 bg-red-50 text-red-700", icon: <Ban className="mr-1 h-3 w-3" /> },
+  { test: /WARNING|SUSPICIOUS|REDEEMED|ALLOCATE|DELETE/i, className: "border-amber-200 bg-amber-50 text-amber-700", icon: <AlertTriangle className="mr-1 h-3 w-3" /> },
+  { test: /CREATE|APPROVE|LOGIN|VERIFY_SUCCESS|PRINT|RESTORE|UPDATE/i, className: "border-emerald-200 bg-emerald-50 text-emerald-700", icon: <CheckCircle2 className="mr-1 h-3 w-3" /> },
+];
+
+const FRAUD_STATUS_TONE: Record<FraudStatus, string> = {
+  OPEN: "border-red-200 bg-red-50 text-red-700",
+  REVIEWED: "border-amber-200 bg-amber-50 text-amber-700",
+  RESOLVED: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  DISMISSED: "border-slate-300 bg-slate-100 text-slate-700",
+};
+
+const actionTone = (action: string) => {
+  const hit = ACTION_TONES.find((t) => t.test.test(action));
+  return hit || { className: "border-slate-300 bg-slate-100 text-slate-700", icon: <Activity className="mr-1 h-3 w-3" /> };
+};
+
+const asObject = (value: unknown): Record<string, any> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, any>;
+};
 
 export default function AuditLogs() {
   const { user } = useAuth();
+  const { toast } = useToast();
+
   const [logs, setLogs] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [action, setAction] = useState("all");
   const [live, setLive] = useState(true);
   const [licensees, setLicensees] = useState<any[]>([]);
   const [licenseeFilter, setLicenseeFilter] = useState<string>("all");
+  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
 
-  const load = async () => {
-    const res = await apiClient.getAuditLogs({
-      limit: 100,
-      licenseeId: user?.role === "super_admin" && licenseeFilter !== "all" ? licenseeFilter : undefined,
-    });
-    if (!res.success) {
-      setLogs([]);
-      return;
-    }
+  const [fraudStatusFilter, setFraudStatusFilter] = useState<"ALL" | FraudStatus>("OPEN");
+  const [fraudReports, setFraudReports] = useState<FraudReportQueueItem[]>([]);
+  const [fraudLoading, setFraudLoading] = useState(false);
 
-    // Support multiple backend shapes:
-    // - array
-    // - { logs: [...] }
-    // - { data: [...] }
-    const payload: any = res.data;
-    const list = Array.isArray(payload)
-      ? payload
-      : Array.isArray(payload?.logs)
-      ? payload.logs
-      : Array.isArray(payload?.data)
-      ? payload.data
-      : [];
+  const [respondDialogOpen, setRespondDialogOpen] = useState(false);
+  const [selectedFraudReport, setSelectedFraudReport] = useState<FraudReportQueueItem | null>(null);
+  const [responseStatus, setResponseStatus] = useState<FraudStatus>("REVIEWED");
+  const [responseMessage, setResponseMessage] = useState("");
+  const [notifyCustomer, setNotifyCustomer] = useState(true);
+  const [responding, setResponding] = useState(false);
 
-    setLogs(list);
-  };
-
-  useEffect(() => {
-    load();
-  }, [licenseeFilter]);
-
-  useEffect(() => {
-    const off = onMutationEvent(() => {
-      load();
-    });
-    return off;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (user?.role !== "super_admin") return;
-    apiClient.getLicensees().then((res) => {
-      if (res.success) setLicensees((res.data as any) || []);
-    });
-  }, [user?.role]);
-
-  useEffect(() => {
-    if (!live) return;
-    const stop = apiClient.streamAuditLogs((log) => {
-      if (user?.role === "super_admin" && licenseeFilter !== "all") {
-        if (log.licenseeId !== licenseeFilter) return;
-      }
-      setLogs((prev) => [log, ...prev].slice(0, 200));
-    });
-    return stop;
-  }, [live, licenseeFilter, user?.role]);
-
-  const actions = useMemo(
-    () => Array.from(new Set(logs.map((l) => l.action))),
-    [logs]
-  );
+  const isSuperAdmin = user?.role === "super_admin";
 
   const summarizeDetails = (log: any) => {
-    const d = log?.details || {};
-    if (typeof d === "string") return d;
-    if (!d || typeof d !== "object") return "—";
+    const d = asObject(log?.details);
+    if (typeof log?.details === "string") return log.details;
+    if (!d || Object.keys(d).length === 0) return "—";
 
-    const action = String(log?.action || "").toUpperCase();
+    const actionCode = String(log?.action || "").toUpperCase();
     const range =
       d.startCode || d.endCode
         ? `${d.startCode || "?"}–${d.endCode || "?"}`
         : d.startNumber || d.endNumber
         ? `${d.startNumber || "?"}–${d.endNumber || "?"}`
         : null;
-    const changed = Array.isArray(d.changed) ? d.changed.filter(Boolean).join(", ") : null;
-    const name = d.name || d.batchName || d.licenseeName || d.manufacturerName || null;
 
-    switch (action) {
-      case "CREATED":
-        if (log?.entityType === "PrintJob") {
-          return `Created print job${d.batchId ? ` for batch ${d.batchId}` : ""}${
-            d.quantity ? ` (${d.quantity} codes)` : ""
-          }.`;
-        }
-        return `Created QR codes${range ? ` (range ${range})` : d.quantity ? ` (${d.quantity})` : ""}.`;
-      case "ALLOCATED":
-        return `Allocated${d.quantity ? ` ${d.quantity} codes` : ""}${range ? ` (range ${range})` : ""}${
-          d.manufacturerId ? ` to manufacturer ${d.manufacturerId}` : ""
-        }.`;
-      case "PRINTED":
-        return `Print confirmed${d.printedCodes != null ? ` (${d.printedCodes} codes)` : ""}.`;
-      case "REDEEMED":
-        return `Redeemed on first scan${d.scanCount != null ? ` (scan count ${d.scanCount})` : ""}.`;
-      case "BLOCKED":
-        return `Blocked${d.blockedCodes ? ` (${d.blockedCodes} codes)` : ""}${d.reason ? `: ${d.reason}` : "."}`;
-      case "LOGIN":
-        return "Signed in.";
-      case "UPDATE_MY_PROFILE":
-        return changed ? `Updated profile (changed: ${changed}).` : "Updated profile.";
-      case "CHANGE_MY_PASSWORD":
-        return "Changed account password.";
-      case "CREATE_USER":
-        return `Created user ${name || d.email || "new user"}${
-          d.role ? ` (${d.role})` : ""
-        }${d.licenseeId ? ` for licensee ${d.licenseeId}` : ""}.`;
-      case "UPDATE_USER":
-        return changed ? `Updated user (changed: ${changed}).` : "Updated user.";
-      case "HARD_DELETE_MANUFACTURER":
-        return `Permanently deleted manufacturer ${name || d.email || "unknown"}.`;
-      case "SOFT_DELETE_MANUFACTURER":
-        return `Deactivated manufacturer ${name || d.email || "unknown"}.`;
-      case "RESTORE_MANUFACTURER":
-        return `Restored manufacturer ${name || d.email || "unknown"}.`;
-      case "CREATE_LICENSEE_WITH_ADMIN":
-        return `Created licensee ${d.licenseeName || "new licensee"}${
-          d.prefix ? ` (prefix ${d.prefix})` : ""
-        } with admin ${d.adminEmail || "—"}.`;
-      case "UPDATE_LICENSEE":
-        return changed ? `Updated licensee (changed: ${changed}).` : "Updated licensee.";
-      case "HARD_DELETE_LICENSEE":
-        return "Deleted licensee.";
-      case "CREATE_QR_ALLOCATION_REQUEST":
-        return d.quantity
-          ? `Requested ${d.quantity} QR codes.`
-          : range
-          ? `Requested QR range ${range}.`
-          : "Requested QR allocation.";
-      case "APPROVE_QR_ALLOCATION_REQUEST":
-        return `${d.quantity ? `Approved ${d.quantity} QR codes.` : "Approved QR allocation."}${
-          range ? ` Range ${range}.` : ""
-        }`;
-      case "REJECT_QR_ALLOCATION_REQUEST":
-        return `Rejected QR allocation request${
-          d.decisionNote ? `: ${d.decisionNote}` : "."
-        }`;
-      case "ALLOCATE_QR_RANGE":
-      case "ALLOCATE_QR_RANGE_LICENSEE":
-        return `Allocated QR range ${range || "—"}${
-          d.created || d.quantity ? ` (${d.created || d.quantity} codes)` : ""
-        }.`;
-      case "BULK_DELETE_QR_CODES":
-        return `Deleted ${d.deleted ?? d.count ?? "some"} QR codes${
-          range ? ` (range ${range})` : ""
-        }.`;
-      case "CREATE_BATCH":
-        return `Created batch ${name || "—"} with ${d.quantity ?? "—"} codes${
-          d.manufacturerId ? ` for manufacturer ${d.manufacturerId}` : ""
-        }.`;
-      case "ADMIN_ALLOCATE_BATCH":
-        return `Allocated ${d.quantity ?? "—"} codes to manufacturer ${
-          d.manufacturerId || "—"
-        } for licensee ${d.licenseeId || "—"}${range ? ` (range ${range})` : ""}.`;
-      case "DELETE_BATCH":
-        return `Deleted batch ${d.batchName || "—"}${
-          d.unassignedCount != null ? `; ${d.unassignedCount} codes returned to pool` : ""
-        }.`;
-      case "BULK_DELETE_BATCHES":
-        return `Deleted ${d.deletedCount ?? "—"} batches${
-          d.unassignedCount != null ? `; ${d.unassignedCount} codes returned to pool` : ""
-        }.`;
-      case "ASSIGN_MANUFACTURER_QUANTITY":
-        return `Assigned ${d.quantity ?? "—"} codes to manufacturer ${d.manufacturerId || "—"}.`;
-      case "DOWNLOAD_BATCH_PRINT_PACK":
-        return `Downloaded print pack${d.codes ? ` (${d.codes} codes)` : ""}.`;
+    switch (actionCode) {
       case "VERIFY_FAILED":
         return `Verification failed${d.reason ? `: ${d.reason}` : "."}`;
       case "VERIFY_SUCCESS":
-        return `Verification succeeded${
-          d.isFirstScan ? " (first scan)" : ""
-        }${d.scanCount != null ? `; scan count ${d.scanCount}` : ""}.`;
+        return `Verification succeeded${d.isFirstScan ? " (first scan)" : ""}${d.scanCount != null ? `; scan count ${d.scanCount}` : ""}.`;
       case "CUSTOMER_FRAUD_REPORT":
-        return `Customer fraud report submitted for code ${d.code || "—"}${
-          d.reason ? ` (${d.reason})` : ""
-        }.`;
+        return `Fraud report for ${d.code || "—"}${d.reason ? ` (${d.reason})` : ""}.`;
+      case "CUSTOMER_FRAUD_REPORT_RESPONSE":
+        return `Fraud report ${d.status || "REVIEWED"}${d.notifyCustomer ? "; customer notified" : "; customer not notified"}.`;
       case "CUSTOMER_PRODUCT_FEEDBACK":
-        return `Customer feedback for code ${d.code || "—"}: ${d.rating || "—"}★, ${
-          d.satisfaction || "no satisfaction tag"
-        }.`;
+        return `Customer feedback for ${d.code || "—"}: ${d.rating || "—"}★, ${d.satisfaction || "unlabeled"}.`;
+      case "ALLOCATE_QR_RANGE":
+      case "ALLOCATE_QR_RANGE_LICENSEE":
+        return `Allocated QR range ${range || "—"}${d.created || d.quantity ? ` (${d.created || d.quantity} codes)` : ""}.`;
       default: {
+        const name = d.name || d.batchName || d.licenseeName || d.manufacturerName || null;
         const parts: string[] = [];
         if (name) parts.push(`name ${name}`);
         if (d.quantity) parts.push(`qty ${d.quantity}`);
         if (range) parts.push(`range ${range}`);
         if (d.manufacturerId) parts.push(`manufacturer ${d.manufacturerId}`);
         if (d.licenseeId) parts.push(`licensee ${d.licenseeId}`);
-        if (d.codes) parts.push(`codes ${d.codes}`);
-        if (d.unassignedCount != null) parts.push(`unassigned ${d.unassignedCount}`);
-        const entity = log?.entityType ? ` on ${log.entityType}` : "";
-        return parts.length ? `Updated${entity}: ${parts.join(", ")}.` : `Activity recorded${entity}.`;
+        return parts.length ? parts.join(" • ") : "Activity recorded.";
       }
     }
   };
@@ -230,36 +137,159 @@ export default function AuditLogs() {
     const id = log?.user?.id || log?.userId;
     if (log?.user?.name) {
       const email = log.user.email ? ` • ${log.user.email}` : "";
-      const idPart = id ? ` • id: ${id}` : "";
-      return `${log.user.name}${email}${idPart}`;
+      return `${log.user.name}${email}${id ? ` • ${id}` : ""}`;
     }
-    if (log?.user?.email) return `${log.user.email}${id ? ` • id: ${id}` : ""}`;
+    if (log?.user?.email) return `${log.user.email}${id ? ` • ${id}` : ""}`;
     if (id) return id;
     return "System";
   };
+
+  const load = async () => {
+    const res = await apiClient.getAuditLogs({
+      limit: 150,
+      licenseeId: isSuperAdmin && licenseeFilter !== "all" ? licenseeFilter : undefined,
+    });
+
+    if (!res.success) {
+      setLogs([]);
+      return;
+    }
+
+    const payload: any = res.data;
+    const list = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.logs)
+      ? payload.logs
+      : Array.isArray(payload?.data)
+      ? payload.data
+      : [];
+    setLogs(list);
+  };
+
+  const loadFraudReports = async (opts?: { silent?: boolean }) => {
+    if (!isSuperAdmin) return;
+    if (!opts?.silent) setFraudLoading(true);
+
+    try {
+      const res = await apiClient.getFraudReports({
+        status: fraudStatusFilter,
+        licenseeId: licenseeFilter !== "all" ? licenseeFilter : undefined,
+        limit: 100,
+      });
+      if (!res.success) {
+        setFraudReports([]);
+        return;
+      }
+      const payload: any = res.data;
+      const list = Array.isArray(payload) ? payload : Array.isArray(payload?.reports) ? payload.reports : [];
+      setFraudReports(list);
+    } finally {
+      if (!opts?.silent) setFraudLoading(false);
+    }
+  };
+
+  const refreshAll = async () => {
+    await Promise.all([load(), loadFraudReports()]);
+  };
+
+  useEffect(() => {
+    refreshAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [licenseeFilter, fraudStatusFilter, isSuperAdmin]);
+
+  useEffect(() => {
+    const off = onMutationEvent(() => {
+      refreshAll();
+    });
+    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [licenseeFilter, fraudStatusFilter, isSuperAdmin]);
+
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    apiClient.getLicensees().then((res) => {
+      if (res.success) setLicensees((res.data as any[]) || []);
+    });
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    if (!live) return;
+    const stop = apiClient.streamAuditLogs((log) => {
+      if (isSuperAdmin && licenseeFilter !== "all" && log.licenseeId !== licenseeFilter) return;
+      setLogs((prev) => [log, ...prev].slice(0, 200));
+      if (isSuperAdmin && (log.action === "CUSTOMER_FRAUD_REPORT" || log.action === "CUSTOMER_FRAUD_REPORT_RESPONSE")) {
+        loadFraudReports({ silent: true });
+      }
+    });
+    return stop;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live, licenseeFilter, isSuperAdmin, fraudStatusFilter]);
+
+  const actions = useMemo(() => Array.from(new Set(logs.map((l) => l.action))), [logs]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return logs.filter((l) => {
       if (action !== "all" && l.action !== action) return false;
-      if (user?.role === "super_admin" && licenseeFilter !== "all") {
-        if (l.licenseeId !== licenseeFilter) return false;
-      }
+      if (isSuperAdmin && licenseeFilter !== "all" && l.licenseeId !== licenseeFilter) return false;
       return JSON.stringify(l).toLowerCase().includes(q);
     });
-  }, [logs, search, action, licenseeFilter, user?.role]);
+  }, [logs, search, action, licenseeFilter, isSuperAdmin]);
+
+  const openRespondDialog = (report: FraudReportQueueItem, status: FraudStatus) => {
+    setSelectedFraudReport(report);
+    setResponseStatus(status);
+    setNotifyCustomer(Boolean(report?.report?.contactEmail));
+    setResponseMessage("");
+    setRespondDialogOpen(true);
+  };
+
+  const submitFraudResponse = async () => {
+    if (!selectedFraudReport) return;
+    setResponding(true);
+    try {
+      const res = await apiClient.respondToFraudReport(selectedFraudReport.id, {
+        status: responseStatus,
+        message: responseMessage.trim() || undefined,
+        notifyCustomer,
+      });
+      if (!res.success) {
+        toast({
+          title: "Action failed",
+          description: res.error || "Could not update fraud report.",
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: "Fraud report updated",
+        description: notifyCustomer
+          ? "Status updated and automated reply prepared for the reported email."
+          : "Status updated without customer notification.",
+      });
+      setRespondDialogOpen(false);
+      setSelectedFraudReport(null);
+      await refreshAll();
+    } finally {
+      setResponding(false);
+    }
+  };
 
   return (
-    <DashboardLayout>
-      <div className="space-y-6">
-        <div className="flex justify-between items-center">
-          <h1 className="text-3xl font-bold flex gap-2">
+    <>
+      <DashboardLayout>
+        <div className="space-y-6">
+        <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 via-white to-cyan-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
             Audit Logs
-            <Badge variant="secondary">{live ? "LIVE" : "PAUSED"}</Badge>
+            <Badge className={live ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-600"}>
+              {live ? "LIVE" : "PAUSED"}
+            </Badge>
           </h1>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={load}>
-              <RefreshCw className="h-4 w-4 mr-1" /> Refresh
+            <Button variant="outline" onClick={refreshAll}>
+              <RefreshCw className="mr-1 h-4 w-4" />
+              Refresh
             </Button>
             <Button variant="outline" onClick={() => setLive((v) => !v)}>
               {live ? "Pause" : "Resume"}
@@ -267,20 +297,104 @@ export default function AuditLogs() {
           </div>
         </div>
 
-        <Card>
-          <CardHeader className="flex gap-4 sm:flex-row">
+        {isSuperAdmin && (
+          <Card className="border-red-200">
+            <CardHeader className="flex flex-col gap-3 border-b bg-red-50/70 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="h-4 w-4 text-red-600" />
+                <span className="font-semibold text-red-800">Fraud Report Queue</span>
+                <Badge className="border-red-200 bg-white text-red-700">{fraudReports.length} cases</Badge>
+              </div>
+              <div className="flex gap-2">
+                <Select value={fraudStatusFilter} onValueChange={(v) => setFraudStatusFilter(v as any)}>
+                  <SelectTrigger className="w-[170px] bg-white">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">All statuses</SelectItem>
+                    <SelectItem value="OPEN">Open</SelectItem>
+                    <SelectItem value="REVIEWED">Reviewed</SelectItem>
+                    <SelectItem value="RESOLVED">Resolved</SelectItem>
+                    <SelectItem value="DISMISSED">Dismissed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3 pt-4">
+              {fraudLoading ? (
+                <div className="text-sm text-slate-500">Loading fraud reports...</div>
+              ) : fraudReports.length === 0 ? (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+                  No fraud reports found for this filter.
+                </div>
+              ) : (
+                fraudReports.map((fr) => {
+                  const status = (fr.status || "OPEN") as FraudStatus;
+                  return (
+                    <div key={fr.id} className="rounded-xl border border-red-100 bg-white p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge className={FRAUD_STATUS_TONE[status]}>{status}</Badge>
+                            <span className="font-mono text-sm text-slate-900">{fr.report.code || "Unknown code"}</span>
+                            {fr.report.reason ? (
+                              <Badge className="border-amber-200 bg-amber-50 text-amber-700">{fr.report.reason}</Badge>
+                            ) : null}
+                          </div>
+                          <p className="text-sm text-slate-700">{fr.report.notes || "No customer notes provided."}</p>
+                          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                            <span>Reported: {format(new Date(fr.createdAt), "PPp")}</span>
+                            {fr.report.contactEmail ? (
+                              <span className="inline-flex items-center gap-1">
+                                <Mail className="h-3 w-3" />
+                                {fr.report.contactEmail}
+                              </span>
+                            ) : (
+                              <span>No reply email</span>
+                            )}
+                            {fr.report.observedStatus ? <span>Status: {fr.report.observedStatus}</span> : null}
+                            {fr.report.observedOutcome ? <span>Outcome: {fr.report.observedOutcome}</span> : null}
+                          </div>
+                          {fr.response?.message ? (
+                            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                              Last response: {fr.response.message}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button variant="outline" onClick={() => openRespondDialog(fr, "REVIEWED")}>
+                            Mark reviewed
+                          </Button>
+                          <Button className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => openRespondDialog(fr, "RESOLVED")}>
+                            Resolve
+                          </Button>
+                          <Button variant="outline" className="border-slate-300 text-slate-700" onClick={() => openRespondDialog(fr, "DISMISSED")}>
+                            Dismiss
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        <Card className="border-slate-200">
+          <CardHeader className="flex flex-col gap-4 border-b bg-slate-50/70 sm:flex-row">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+              <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
               <Input
                 placeholder="Search logs..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
+                className="border-slate-200 bg-white pl-9"
               />
             </div>
-            {user?.role === "super_admin" && (
+            {isSuperAdmin && (
               <Select value={licenseeFilter} onValueChange={setLicenseeFilter}>
-                <SelectTrigger className="w-[220px]">
+                <SelectTrigger className="w-[220px] bg-white">
                   <SelectValue placeholder="Licensee" />
                 </SelectTrigger>
                 <SelectContent>
@@ -294,7 +408,7 @@ export default function AuditLogs() {
               </Select>
             )}
             <Select value={action} onValueChange={setAction}>
-              <SelectTrigger className="w-[200px]">
+              <SelectTrigger className="w-[220px] bg-white">
                 <SelectValue placeholder="Action" />
               </SelectTrigger>
               <SelectContent>
@@ -308,45 +422,177 @@ export default function AuditLogs() {
             </Select>
           </CardHeader>
 
-        <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Action</TableHead>
-                  <TableHead>User</TableHead>
-                  <TableHead>Entity</TableHead>
-                  <TableHead>Details</TableHead>
-                  <TableHead>Time</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((l) => (
-                  <TableRow key={l.id}>
-                    <TableCell>
-                      <Badge>
-                        <Activity className="h-3 w-3 mr-1" />
-                        {l.action}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {userLabel(l)}
-                    </TableCell>
-                    <TableCell>{l.entityType}</TableCell>
-                    <TableCell>
-                      <div className="text-xs text-muted-foreground">
-                        {summarizeDetails(l)}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {format(new Date(l.createdAt), "PPp")}
-                    </TableCell>
+          <CardContent className="pt-4">
+            <div className="overflow-hidden rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-slate-50">
+                    <TableHead>Action</TableHead>
+                    <TableHead>User</TableHead>
+                    <TableHead>Entity</TableHead>
+                    <TableHead>Details</TableHead>
+                    <TableHead>Time</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {filtered.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-slate-500">
+                        No audit logs found for current filters.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filtered.map((l) => {
+                      const tone = actionTone(String(l.action || ""));
+                      const details = asObject(l.details);
+                      const expanded = Boolean(expandedRows[l.id]);
+                      return (
+                        <TableRow key={l.id} className={String(l.action || "").includes("FRAUD") ? "bg-red-50/30" : undefined}>
+                          <TableCell>
+                            <Badge className={tone.className}>
+                              {tone.icon}
+                              {l.action}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-xs text-slate-600">{userLabel(l)}</TableCell>
+                          <TableCell className="text-sm text-slate-700">{l.entityType}</TableCell>
+                          <TableCell className="max-w-[460px]">
+                            <div className="space-y-2">
+                              <div className="text-xs text-slate-600">{summarizeDetails(l)}</div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                className="h-auto p-0 text-xs text-slate-700 hover:bg-transparent hover:text-slate-900"
+                                onClick={() =>
+                                  setExpandedRows((prev) => ({
+                                    ...prev,
+                                    [l.id]: !prev[l.id],
+                                  }))
+                                }
+                              >
+                                {expanded ? (
+                                  <>
+                                    <ChevronUp className="mr-1 h-3 w-3" />
+                                    Hide details
+                                  </>
+                                ) : (
+                                  <>
+                                    <ChevronDown className="mr-1 h-3 w-3" />
+                                    Expand details
+                                  </>
+                                )}
+                              </Button>
+                              {expanded && (
+                                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                                  <div className="grid gap-1 text-xs text-slate-700 sm:grid-cols-2">
+                                    <div>
+                                      <span className="font-semibold text-slate-900">Entity ID:</span>{" "}
+                                      {l.entityId || "—"}
+                                    </div>
+                                    <div>
+                                      <span className="font-semibold text-slate-900">Licensee:</span>{" "}
+                                      {l.licenseeId || "—"}
+                                    </div>
+                                    <div>
+                                      <span className="font-semibold text-slate-900">IP:</span>{" "}
+                                      {l.ipAddress || "—"}
+                                    </div>
+                                    <div>
+                                      <span className="font-semibold text-slate-900">Keys:</span>{" "}
+                                      {Object.keys(details).join(", ") || "—"}
+                                    </div>
+                                  </div>
+                                  <pre className="mt-2 max-h-52 overflow-auto rounded bg-white p-2 text-[11px] leading-5 text-slate-700">
+                                    {JSON.stringify(details, null, 2)}
+                                  </pre>
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-xs text-slate-600">
+                            {l.createdAt ? format(new Date(l.createdAt), "PPp") : "—"}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
-      </div>
-    </DashboardLayout>
+        </div>
+      </DashboardLayout>
+
+      <Dialog open={respondDialogOpen} onOpenChange={setRespondDialogOpen}>
+        <DialogContent className="sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle>Resolve Fraud Report</DialogTitle>
+            <DialogDescription>
+              Update fraud status, add investigation notes, and optionally send an automated customer response.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedFraudReport && (
+            <div className="space-y-4">
+              <div className="rounded-lg border bg-slate-50 p-3 text-sm">
+                <div className="font-mono font-semibold text-slate-900">{selectedFraudReport.report.code || "Unknown code"}</div>
+                <div className="text-slate-600">{selectedFraudReport.report.reason || "No reason provided"}</div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Select value={responseStatus} onValueChange={(v) => setResponseStatus(v as FraudStatus)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="REVIEWED">Reviewed</SelectItem>
+                    <SelectItem value="RESOLVED">Resolved</SelectItem>
+                    <SelectItem value="DISMISSED">Dismissed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Investigation note (optional)</Label>
+                <Textarea
+                  rows={4}
+                  value={responseMessage}
+                  onChange={(e) => setResponseMessage(e.target.value)}
+                  placeholder="Add internal context or custom auto-reply text."
+                />
+              </div>
+
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
+                <label className="flex cursor-pointer items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={notifyCustomer}
+                    onChange={(e) => setNotifyCustomer(e.target.checked)}
+                    className="mt-1 h-4 w-4 rounded border-slate-300"
+                  />
+                  <span>
+                    Send automated customer reply{" "}
+                    <span className="text-slate-500">
+                      ({selectedFraudReport.report.contactEmail || "no email on report"})
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRespondDialogOpen(false)} disabled={responding}>
+              Cancel
+            </Button>
+            <Button className="bg-slate-900 text-white hover:bg-slate-800" onClick={submitFraudResponse} disabled={responding}>
+              {responding ? "Submitting..." : "Apply action"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

@@ -28,11 +28,25 @@ export const getScanLogs = async (req: AuthRequest, res: Response) => {
         : req.user.licenseeId || undefined;
     const batchId = (req.query.batchId as string | undefined) || undefined;
     const code = (req.query.code as string | undefined)?.trim() || undefined;
+    const statusRaw = String(req.query.status || "").trim().toUpperCase();
+    const validStatuses = new Set(["DORMANT", "ACTIVE", "ALLOCATED", "ACTIVATED", "PRINTED", "REDEEMED", "BLOCKED", "SCANNED"]);
+    const status = statusRaw && validStatuses.has(statusRaw) ? statusRaw : undefined;
+    const onlyFirstScanRaw = String(req.query.onlyFirstScan || "").trim().toLowerCase();
+    const onlyFirstScan = onlyFirstScanRaw === "true" ? true : onlyFirstScanRaw === "false" ? false : undefined;
+    const from = (req.query.from as string | undefined) || undefined;
+    const to = (req.query.to as string | undefined) || undefined;
 
     const where: any = {};
     if (licenseeId) where.licenseeId = licenseeId;
     if (batchId) where.batchId = batchId;
     if (code) where.code = { contains: code, mode: "insensitive" };
+    if (status) where.status = status;
+    if (onlyFirstScan != null) where.isFirstScan = onlyFirstScan;
+    if (from || to) {
+      where.scannedAt = {};
+      if (from) where.scannedAt.gte = new Date(from);
+      if (to) where.scannedAt.lte = new Date(to);
+    }
     if (req.user.role === UserRole.MANUFACTURER) {
       where.batch = { manufacturerId: req.user.userId };
     }
@@ -76,8 +90,13 @@ export const getBatchSummary = async (req: AuthRequest, res: Response) => {
       req.user.role === UserRole.SUPER_ADMIN
         ? (req.query.licenseeId as string | undefined) || undefined
         : req.user.licenseeId || undefined;
+    const manufacturerId =
+      req.user.role === UserRole.SUPER_ADMIN
+        ? (req.query.manufacturerId as string | undefined) || undefined
+        : undefined;
     const whereBatch: any = {};
     if (licenseeId) whereBatch.licenseeId = licenseeId;
+    if (manufacturerId) whereBatch.manufacturerId = manufacturerId;
     if (req.user.role === UserRole.MANUFACTURER) {
       whereBatch.manufacturerId = req.user.userId;
     }

@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { authenticate, authenticateSSE } from "../middleware/auth";
-import { requireAnyAdmin } from "../middleware/rbac";
+import { requireAnyAdmin, requireSuperAdmin } from "../middleware/rbac";
 import { enforceTenantIsolation } from "../middleware/tenantIsolation";
-import { getLogs, streamLogs, exportLogsCsv } from "../controllers/auditController";
+import { getLogs, streamLogs, exportLogsCsv, getFraudReports, respondToFraudReport } from "../controllers/auditController";
 
 const router = Router();
 
@@ -28,6 +28,22 @@ router.get(
   requireAnyAdmin,
   enforceTenantIsolation,
   streamLogs
+);
+
+router.get(
+  "/fraud-reports",
+  authenticate,
+  requireSuperAdmin,
+  enforceTenantIsolation,
+  getFraudReports
+);
+
+router.post(
+  "/fraud-reports/:id/respond",
+  authenticate,
+  requireSuperAdmin,
+  enforceTenantIsolation,
+  respondToFraudReport
 );
 
 export default router;
