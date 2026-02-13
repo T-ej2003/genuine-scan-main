@@ -1,13 +1,12 @@
 import { Response } from "express";
 import { z } from "zod";
-import JSZip from "jszip";
-import QRCode from "qrcode";
 import { AuthRequest } from "../middleware/auth";
 import prisma from "../config/database";
 import { Prisma, QRStatus, UserRole } from "@prisma/client";
 import { randomBytes, createHash } from "crypto";
 import { buildScanUrl, hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
 import { createAuditLog } from "../services/auditService";
+import { resolveQrZipProfile, streamQrZipToResponse } from "../services/qrZipStreamService";
 
 const createPrintJobSchema = z.object({
   batchId: z.string().uuid(),
@@ -27,6 +26,12 @@ const getTokenExp = () => {
   const days = Number(process.env.QR_TOKEN_EXP_DAYS || "3650");
   return Date.now() + Math.max(days, 30) * 24 * 60 * 60 * 1000;
 };
+
+const INLINE_PRINT_JOB_TOKENS_LIMIT = (() => {
+  const raw = Number(process.env.PRINT_JOB_INLINE_TOKENS_LIMIT || "2500");
+  if (!Number.isFinite(raw)) return 2500;
+  return Math.max(0, Math.min(20_000, Math.floor(raw)));
+})();
 
 export const createPrintJob = async (req: AuthRequest, res: Response) => {
   try {
@@ -77,6 +82,7 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
     const now = new Date();
     const expAt = new Date(getTokenExp());
 
+    const tokens: { qrId: string; token: string }[] = [];
     const prepared = candidates.map((qr) => {
       const nonce = randomNonce();
       const payload = {
@@ -90,10 +96,11 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
       };
       const token = signQrPayload(payload);
       const tokenHash = hashToken(token);
-      return { qr, nonce, token, tokenHash };
+      if (tokens.length < INLINE_PRINT_JOB_TOKENS_LIMIT) {
+        tokens.push({ qrId: qr.id, token });
+      }
+      return { qr, nonce, tokenHash };
     });
-
-    const tokens: { qrId: string; token: string }[] = prepared.map((p) => ({ qrId: p.qr.id, token: p.token }));
 
     const job = await prisma.$transaction(async (tx) => {
       const createdJob = await tx.printJob.create({
@@ -157,6 +164,8 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
         printJobId: job.id,
         printLockToken,
         quantity,
+        tokenCount: prepared.length,
+        tokensTruncated: prepared.length > tokens.length,
         tokens,
       },
     });
@@ -196,56 +205,13 @@ export const downloadPrintJobPack = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ success: false, error: "Invalid print lock token" });
     }
 
-    const qrCodes = await prisma.qRCode.findMany({
+    const totalCodes = await prisma.qRCode.count({
       where: { printJobId: job.id },
-      orderBy: { code: "asc" },
-      select: {
-        id: true,
-        code: true,
-        licenseeId: true,
-        batchId: true,
-        tokenNonce: true,
-        tokenIssuedAt: true,
-        tokenExpiresAt: true,
-      },
     });
-
-    if (!qrCodes.length) {
+    if (!totalCodes) {
       return res.status(404).json({ success: false, error: "No QR codes assigned to this print job" });
     }
-
-    const zip = new JSZip();
-    const folder = zip.folder("png")!;
-    const csvLines: string[] = ["qr_id,code,token,url"];
-
-    for (let i = 0; i < qrCodes.length; i += 1) {
-      const qr = qrCodes[i];
-      const payload = {
-        qr_id: qr.id,
-        batch_id: qr.batchId,
-        licensee_id: qr.licenseeId,
-        manufacturer_id: req.user.userId,
-        iat: Math.floor((qr.tokenIssuedAt?.getTime?.() || Date.now()) / 1000),
-        exp: qr.tokenExpiresAt ? Math.floor(qr.tokenExpiresAt.getTime() / 1000) : undefined,
-        nonce: qr.tokenNonce || "",
-      };
-      const token = signQrPayload(payload);
-      const urlInsideQr = buildScanUrl(token);
-      const pngBuffer = await QRCode.toBuffer(urlInsideQr, {
-        width: 768,
-        margin: 2,
-        errorCorrectionLevel: "M",
-      });
-      folder.file(`${qr.code}.png`, pngBuffer);
-      const esc = (v: string) => {
-        const s = String(v ?? "");
-        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-      };
-      csvLines[i + 1] = `${esc(qr.id)},${esc(qr.code)},${esc(token)},${esc(urlInsideQr)}`;
-    }
-
-    zip.file("manifest.csv", csvLines.join("\n"));
-    const out = await zip.generateAsync({ type: "nodebuffer" });
+    const profile = resolveQrZipProfile(totalCodes);
 
     const now = new Date();
     const confirmed = await prisma.$transaction(async (tx) => {
@@ -289,11 +255,65 @@ export const downloadPrintJobPack = async (req: AuthRequest, res: Response) => {
     });
 
     const fileName = `print-job-${job.id}.zip`;
-    res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-    return res.status(200).send(out);
+    const entries = (async function* () {
+      let cursorCode: string | undefined;
+      while (true) {
+        const rows = await prisma.qRCode.findMany({
+          where: { printJobId: job.id },
+          orderBy: { code: "asc" },
+          take: profile.dbChunkSize,
+          ...(cursorCode ? { cursor: { code: cursorCode }, skip: 1 } : {}),
+          select: {
+            id: true,
+            code: true,
+            licenseeId: true,
+            batchId: true,
+            tokenNonce: true,
+            tokenIssuedAt: true,
+            tokenExpiresAt: true,
+          },
+        });
+
+        if (rows.length === 0) break;
+
+        for (const qr of rows) {
+          const payload = {
+            qr_id: qr.id,
+            batch_id: qr.batchId,
+            licensee_id: qr.licenseeId,
+            manufacturer_id: req.user!.userId,
+            iat: Math.floor((qr.tokenIssuedAt?.getTime?.() || Date.now()) / 1000),
+            exp: qr.tokenExpiresAt ? Math.floor(qr.tokenExpiresAt.getTime() / 1000) : undefined,
+            nonce: qr.tokenNonce || "",
+          };
+          const token = signQrPayload(payload);
+          const urlInsideQr = buildScanUrl(token);
+          yield {
+            code: qr.code,
+            url: urlInsideQr,
+            manifestValues: [qr.id, qr.code, token, urlInsideQr],
+          };
+        }
+
+        cursorCode = rows[rows.length - 1].code;
+      }
+    })();
+
+    await streamQrZipToResponse({
+      res,
+      fileName,
+      totalCount: totalCodes,
+      profile,
+      manifestHeader: ["qr_id", "code", "token", "url"],
+      entries,
+    });
+    return;
   } catch (e: any) {
     console.error("downloadPrintJobPack error:", e);
+    if (res.headersSent) {
+      res.destroy(e instanceof Error ? e : new Error(String(e?.message || "Download failed")));
+      return;
+    }
     return res.status(400).json({ success: false, error: e?.message || "Bad request" });
   }
 };

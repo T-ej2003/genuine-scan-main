@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { OperationProgressDialog } from "@/components/feedback/OperationProgressDialog";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useAuth } from "@/contexts/AuthContext";
+import { useOperationProgress } from "@/hooks/useOperationProgress";
 import apiClient from "@/lib/api-client";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -28,6 +30,8 @@ import { onMutationEvent } from "@/lib/mutation-events";
 import { format } from "date-fns";
 import { RefreshCw, Check, X } from "lucide-react";
 
+const LARGE_REQUEST_APPROVAL_THRESHOLD = 25_000;
+
 type LicenseeOption = { id: string; name: string; prefix: string };
 
 type RequestRow = {
@@ -49,6 +53,7 @@ type RequestRow = {
 export default function QRRequests() {
   const { toast } = useToast();
   const { user } = useAuth();
+  const progress = useOperationProgress();
 
   const isSuper = user?.role === "super_admin";
   const isLicensee = user?.role === "licensee_admin";
@@ -155,6 +160,19 @@ export default function QRRequests() {
 
   const submitApprove = async () => {
     if (!activeReq) return;
+    const qty = requestQuantity(activeReq);
+    const showApprovalProgress = qty >= LARGE_REQUEST_APPROVAL_THRESHOLD;
+
+    if (showApprovalProgress) {
+      progress.start({
+        title: "Approving allocation request",
+        description: "Validating request and allocating QR inventory for this licensee.",
+        phaseLabel: "Approval",
+        detail: `Allocating ${qty.toLocaleString()} QR codes.`,
+        mode: "simulated",
+        initialValue: 14,
+      });
+    }
 
     setLoading(true);
     try {
@@ -162,6 +180,7 @@ export default function QRRequests() {
         decisionNote: decisionNote.trim() || undefined,
       });
       if (!res.success) {
+        if (showApprovalProgress) progress.close();
         const raw = (res.error || "Error").toLowerCase();
         const isBusy = raw.includes("busy") || raw.includes("retry") || raw.includes("conflict");
         toast({
@@ -172,10 +191,16 @@ export default function QRRequests() {
         return;
       }
 
+      if (showApprovalProgress) {
+        await progress.complete(`Approved request and allocated ${qty.toLocaleString()} QR codes.`);
+      }
       toast({ title: "Approved", description: "QR codes allocated to licensee pool." });
       setApproveOpen(false);
       setActiveReq(null);
       await loadRequests();
+    } catch (e: any) {
+      if (showApprovalProgress) progress.close();
+      toast({ title: "Approve failed", description: e?.message || "Error", variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -483,6 +508,17 @@ export default function QRRequests() {
             )}
           </DialogContent>
         </Dialog>
+
+        <OperationProgressDialog
+          open={progress.state.open}
+          title={progress.state.title}
+          description={progress.state.description}
+          phaseLabel={progress.state.phaseLabel}
+          detail={progress.state.detail}
+          speedLabel={progress.state.speedLabel}
+          value={progress.state.value}
+          indeterminate={progress.state.indeterminate}
+        />
       </div>
     </DashboardLayout>
   );

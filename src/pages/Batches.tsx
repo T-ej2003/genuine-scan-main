@@ -2,7 +2,9 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { OperationProgressDialog } from "@/components/feedback/OperationProgressDialog";
 import { useAuth } from "@/contexts/AuthContext";
+import { useOperationProgress } from "@/hooks/useOperationProgress";
 import apiClient from "@/lib/api-client";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -91,9 +93,14 @@ type TraceEventRow = {
   userId?: string | null;
 };
 
+const LARGE_ALLOCATION_THRESHOLD = 25_000;
+const LARGE_DOWNLOAD_THRESHOLD = 10_000;
+const bytesToMb = (value: number) => `${(value / (1024 * 1024)).toFixed(value >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+
 export default function Batches() {
   const { toast } = useToast();
   const { user } = useAuth();
+  const progress = useOperationProgress();
 
   const role = user?.role;
 
@@ -268,6 +275,18 @@ export default function Batches() {
       return;
     }
 
+    const showLargeAllocationProgress = qty >= LARGE_ALLOCATION_THRESHOLD;
+    if (showLargeAllocationProgress) {
+      progress.start({
+        title: "Allocating QR batch",
+        description: "Validating availability, assigning manufacturer, and creating child batch.",
+        phaseLabel: "Allocation",
+        detail: `Allocating ${qty.toLocaleString()} QR codes to selected manufacturer.`,
+        mode: "simulated",
+        initialValue: 12,
+      });
+    }
+
     setLoading(true);
     try {
       const res = await apiClient.assignBatchManufacturer({
@@ -278,6 +297,7 @@ export default function Batches() {
       });
 
       if (!res.success) {
+        if (showLargeAllocationProgress) progress.close();
         const raw = (res.error || "Error").toLowerCase();
         const isBusy = raw.includes("busy") || raw.includes("retry") || raw.includes("conflict");
         toast({
@@ -292,6 +312,11 @@ export default function Batches() {
 
       const data: any = res.data || {};
       const createdName = data.newBatchName || assignBatchName.trim() || "Auto";
+      if (showLargeAllocationProgress) {
+        await progress.complete(
+          `Allocated ${qty.toLocaleString()} codes. Child batch ${data.newBatchId || "(id pending)"} is ready for print.`
+        );
+      }
       toast({
         title: "Assigned",
         description: `Created child batch ${data.newBatchId || "(id pending)"}: ${createdName}`,
@@ -302,6 +327,9 @@ export default function Batches() {
       setAssignQuantity("");
       setAssignBatchName("");
       await fetchBatches();
+    } catch (e: any) {
+      if (showLargeAllocationProgress) progress.close();
+      toast({ title: "Assign failed", description: e?.message || "Error", variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -351,7 +379,9 @@ export default function Batches() {
       const data: any = res.data || {};
       setPrintJobId(data.printJobId || "");
       setPrintLockToken(data.printLockToken || "");
-      setPrintJobTokensCount(Array.isArray(data.tokens) ? data.tokens.length : 0);
+      setPrintJobTokensCount(
+        typeof data.tokenCount === "number" ? data.tokenCount : Array.isArray(data.tokens) ? data.tokens.length : 0
+      );
       toast({ title: "Print job created", description: "Download your QR pack. Printing will auto-confirm on download." });
     } finally {
       setPrinting(false);
@@ -360,9 +390,44 @@ export default function Batches() {
 
   const downloadPrintPack = async () => {
     if (!printJobId || !printLockToken) return;
+    const showLargeDownloadProgress = (printJobTokensCount || 0) >= LARGE_DOWNLOAD_THRESHOLD || printJobTokensCount === 0;
+    if (showLargeDownloadProgress) {
+      progress.start({
+        title: "Preparing secure download",
+        description: "Generating PNGs, compressing ZIP, and streaming to your browser.",
+        phaseLabel: "Download",
+        detail:
+          printJobTokensCount > 0
+            ? `Preparing approximately ${printJobTokensCount.toLocaleString()} QR files.`
+            : "Preparing QR package...",
+        mode: "simulated",
+        initialValue: 8,
+      });
+    }
+
     setPrinting(true);
     try {
-      const blob = await apiClient.downloadPrintJobPack(printJobId, printLockToken);
+      const blob = await apiClient.downloadPrintJobPack(printJobId, printLockToken, (snapshot) => {
+        if (!showLargeDownloadProgress) return;
+        const hasKnownTotal = snapshot.totalBytes != null && snapshot.totalBytes > 0;
+        const progressValue = hasKnownTotal
+          ? Math.max(8, Math.min(98, snapshot.percent || 0))
+          : Math.max(12, Math.min(94, 12 + Math.floor(snapshot.loadedBytes / (1024 * 1024 * 20))));
+        const speedMbps = snapshot.elapsedMs > 0 ? (snapshot.loadedBytes * 8) / (snapshot.elapsedMs / 1000) / 1_000_000 : 0;
+
+        progress.update({
+          value: progressValue,
+          indeterminate: !hasKnownTotal,
+          detail: hasKnownTotal
+            ? `Downloaded ${bytesToMb(snapshot.loadedBytes)} of ${bytesToMb(snapshot.totalBytes!)}`
+            : `Downloaded ${bytesToMb(snapshot.loadedBytes)} (estimating total size...)`,
+          speedLabel: speedMbps > 0 ? `${speedMbps.toFixed(1)} Mbps` : "",
+          phaseLabel: "Downloading",
+        });
+      });
+      if (showLargeDownloadProgress) {
+        await progress.complete("Download complete. Saving ZIP to your device.");
+      }
       saveAs(blob, `print-job-${printJobId}.zip`);
       toast({ title: "Downloaded", description: "Print pack downloaded and confirmed." });
       setPrintOpen(false);
@@ -372,6 +437,7 @@ export default function Batches() {
       setPrintJobTokensCount(0);
       await fetchBatches();
     } catch (e: any) {
+      if (showLargeDownloadProgress) progress.close();
       toast({ title: "Download failed", description: e?.message || "Error", variant: "destructive" });
     } finally {
       setPrinting(false);
@@ -911,6 +977,17 @@ export default function Batches() {
             )}
           </DialogContent>
         </Dialog>
+
+        <OperationProgressDialog
+          open={progress.state.open}
+          title={progress.state.title}
+          description={progress.state.description}
+          phaseLabel={progress.state.phaseLabel}
+          detail={progress.state.detail}
+          speedLabel={progress.state.speedLabel}
+          value={progress.state.value}
+          indeterminate={progress.state.indeterminate}
+        />
       </div>
     </DashboardLayout>
   );

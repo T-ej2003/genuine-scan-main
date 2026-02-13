@@ -8,9 +8,8 @@ import { createAuditLog } from "../services/auditService";
 import { generateQRCode, markBatchAsPrinted, buildVerifyUrl, getQRStats } from "../services/qrService";
 import { allocateQrRange, getNextLicenseeQrNumber, lockLicenseeAllocation } from "../services/qrAllocationService";
 import { createHash, randomBytes } from "crypto";
-import JSZip from "jszip";
-import QRCode from "qrcode";
 import { hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
+import { resolveQrZipProfile, streamQrZipToResponse } from "../services/qrZipStreamService";
 
 /* ===================== SCHEMAS ===================== */
 
@@ -863,39 +862,15 @@ export const downloadBatchPrintPack = async (req: AuthRequest, res: Response) =>
       return res.status(409).json({ success: false, error: "Token already used" });
     }
 
-    const codes = await prisma.qRCode.findMany({
+    const totalCodes = await prisma.qRCode.count({
       where: { batchId: batch.id },
-      select: { code: true },
-      orderBy: { code: "asc" },
     });
-    if (codes.length === 0) {
+    if (totalCodes === 0) {
       return res.status(404).json({ success: false, error: "No QR codes found for this batch" });
     }
 
     const publicBaseUrl = String(req.query.publicBaseUrl || "").trim();
-
-    const zip = new JSZip();
-    const folder = zip.folder("png")!;
-    const csvLines: string[] = ["code,url"];
-
-    for (let i = 0; i < codes.length; i += 1) {
-      const code = codes[i].code;
-      const urlInsideQr = buildPublicQrUrl(code, publicBaseUrl);
-      const pngBuffer = await QRCode.toBuffer(urlInsideQr, {
-        width: 768,
-        margin: 2,
-        errorCorrectionLevel: "M",
-      });
-      folder.file(`${code}.png`, pngBuffer);
-      const esc = (v: string) => {
-        const s = String(v ?? "");
-        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-      };
-      csvLines[i + 1] = `${esc(code)},${esc(urlInsideQr)}`;
-    }
-
-    zip.file("manifest.csv", csvLines.join("\n"));
-    const out = await zip.generateAsync({ type: "nodebuffer" });
+    const profile = resolveQrZipProfile(totalCodes);
 
     await prisma.$transaction(async (tx) => {
       await tx.batch.update({
@@ -919,16 +894,52 @@ export const downloadBatchPrintPack = async (req: AuthRequest, res: Response) =>
       action: "DOWNLOAD_BATCH_PRINT_PACK",
       entityType: "Batch",
       entityId: batch.id,
-      details: { codes: codes.length },
+      details: { codes: totalCodes },
       ipAddress: req.ip,
     });
 
     const fileName = `batch-${safeFilePart(batch.name || batch.id)}-print-pack.zip`;
-    res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-    return res.status(200).send(out);
+    const entries = (async function* () {
+      let cursorCode: string | undefined;
+      while (true) {
+        const rows = await prisma.qRCode.findMany({
+          where: { batchId: batch.id },
+          orderBy: { code: "asc" },
+          take: profile.dbChunkSize,
+          ...(cursorCode ? { cursor: { code: cursorCode }, skip: 1 } : {}),
+          select: { code: true },
+        });
+
+        if (rows.length === 0) break;
+
+        for (const row of rows) {
+          const urlInsideQr = buildPublicQrUrl(row.code, publicBaseUrl);
+          yield {
+            code: row.code,
+            url: urlInsideQr,
+            manifestValues: [row.code, urlInsideQr],
+          };
+        }
+
+        cursorCode = rows[rows.length - 1].code;
+      }
+    })();
+
+    await streamQrZipToResponse({
+      res,
+      fileName,
+      totalCount: totalCodes,
+      profile,
+      manifestHeader: ["code", "url"],
+      entries,
+    });
+    return;
   } catch (e: any) {
     console.error("downloadBatchPrintPack error:", e);
+    if (res.headersSent) {
+      res.destroy(e instanceof Error ? e : new Error(String(e?.message || "Download failed")));
+      return;
+    }
     return res.status(400).json({ success: false, error: e?.message || "Bad request" });
   }
 };

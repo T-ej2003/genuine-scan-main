@@ -435,6 +435,21 @@ Optional:
 - `PUBLIC_VERIFY_WEB_BASE_URL`
 - `SCAN_RATE_LIMIT_PER_MIN` (default `60`)
 - `QR_TOKEN_EXP_DAYS` (default `3650`)
+- `PRINT_JOB_INLINE_TOKENS_LIMIT` (default `2500`; max inline tokens returned from print-job creation response)
+- `QR_ZIP_HIGH_VOLUME_THRESHOLD` (default `100000`)
+- `QR_ZIP_ULTRA_VOLUME_THRESHOLD` (default `1000000`)
+- `QR_ZIP_STANDARD_LEVEL` (default `6`)
+- `QR_ZIP_HIGH_LEVEL` (default `8`)
+- `QR_ZIP_ULTRA_LEVEL` (default `9`)
+- `QR_ZIP_STANDARD_PNG_WIDTH` (default `768`)
+- `QR_ZIP_HIGH_PNG_WIDTH` (default `640`)
+- `QR_ZIP_ULTRA_PNG_WIDTH` (default `512`)
+- `QR_ZIP_STANDARD_PNG_CONCURRENCY` (default auto by CPU, capped at `16`)
+- `QR_ZIP_HIGH_PNG_CONCURRENCY` (default auto by CPU, capped at `20`)
+- `QR_ZIP_ULTRA_PNG_CONCURRENCY` (default auto by CPU, capped at `24`)
+- `QR_ZIP_STANDARD_DB_CHUNK_SIZE` (default `2000`)
+- `QR_ZIP_HIGH_DB_CHUNK_SIZE` (default `5000`)
+- `QR_ZIP_ULTRA_DB_CHUNK_SIZE` (default `10000`)
 
 Frontend/root:
 
@@ -649,6 +664,36 @@ If you are onboarding and want the fastest deep understanding, read these in ord
 8. `src/pages/QRTracking.tsx` (ops tracking UX)
 9. `src/lib/api-client.ts` (frontend API contract)
 10. `docs/USER_MANUAL.md` (operator SOP)
+
+## 19. Connectivity and QR ZIP Download Speed Guide
+
+The print-pack ZIP endpoints are optimized for high volumes using:
+
+- Streamed ZIP output (no giant in-memory ZIP buffer before sending).
+- Chunked DB reads (`code` cursor pagination).
+- Concurrent PNG rendering with adaptive profiles.
+- Adaptive compression/size profiles:
+  - `standard`: < `100000` QRs (default 768px PNG, zip level 6)
+  - `high`: >= `100000` QRs (default 640px PNG, zip level 8)
+  - `ultra`: >= `1000000` QRs (default 512px PNG, zip level 9)
+
+### Download speed expectations
+
+Approximate transfer formula:
+
+- `seconds ~= (zip_size_MB * 8) / link_Mbps`
+
+Example transfer times for a 1 GB ZIP:
+
+- 20 Mbps: ~6.8 minutes
+- 50 Mbps: ~2.7 minutes
+- 100 Mbps: ~1.4 minutes
+- 300 Mbps: ~27 seconds
+
+Local machine (`localhost`) note:
+
+- Network bandwidth is usually not the bottleneck.
+- Throughput is mostly limited by CPU (PNG generation/compression) and disk write speed in the browser download path.
 
 ---
 

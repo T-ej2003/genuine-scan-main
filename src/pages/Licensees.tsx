@@ -1,6 +1,7 @@
 // src/pages/Licensees.tsx
 
 import React, { useEffect, useMemo, useState } from "react";
+import { OperationProgressDialog } from "@/components/feedback/OperationProgressDialog";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import apiClient from "@/lib/api-client";
 
@@ -28,6 +29,7 @@ import {
 } from "@/components/ui/dialog";
 
 import { Label } from "@/components/ui/label";
+import { useOperationProgress } from "@/hooks/useOperationProgress";
 import { useToast } from "@/hooks/use-toast";
 import { onMutationEvent } from "@/lib/mutation-events";
 
@@ -165,10 +167,13 @@ const extractCodeIndex = (code?: string | null) => {
   return Number.isFinite(n) ? n : null;
 };
 
+const LARGE_QR_ALLOCATION_THRESHOLD = 25_000;
+
 /* ===================== COMPONENT ===================== */
 
 export default function Licensees() {
   const { toast } = useToast();
+  const progress = useOperationProgress();
 
   const [loading, setLoading] = useState(true);
   const [licensees, setLicensees] = useState<LicenseeRow[]>([]);
@@ -365,6 +370,7 @@ export default function Licensees() {
     }
 
     const wantMfg = !!createForm.createManufacturerNow;
+    const requestedRangeCount = rangeEnd - rangeStart + 1;
 
     const mfgName = createForm.manufacturerName.trim();
     const mfgEmail = createForm.manufacturerEmail.trim().toLowerCase();
@@ -381,10 +387,30 @@ export default function Licensees() {
       }
     }
 
+    const showProvisioningProgress = requestedRangeCount >= LARGE_QR_ALLOCATION_THRESHOLD;
+    if (showProvisioningProgress) {
+      progress.start({
+        title: "Provisioning licensee",
+        description: "Creating tenant records and allocating initial QR inventory.",
+        phaseLabel: "Provisioning",
+        detail: `Preparing ${requestedRangeCount.toLocaleString()} initial QR codes.`,
+        mode: "simulated",
+        initialValue: 10,
+      });
+    }
+
     setCreating(true);
 
     try {
       // 1) Create licensee WITH admin (exact backend format)
+      if (showProvisioningProgress) {
+        progress.update({
+          value: 18,
+          indeterminate: false,
+          phaseLabel: "Tenant setup",
+          detail: "Creating licensee and admin account...",
+        });
+      }
       const createRes = await apiClient.createLicenseeWithAdmin({
         licensee: {
           name,
@@ -411,6 +437,14 @@ export default function Licensees() {
 
       // 2) Optional: create manufacturer user
       if (wantMfg) {
+        if (showProvisioningProgress) {
+          progress.update({
+            value: 34,
+            indeterminate: false,
+            phaseLabel: "User setup",
+            detail: "Creating manufacturer access user...",
+          });
+        }
         const uRes = await apiClient.createUser({
           name: mfgName,
           email: mfgEmail,
@@ -422,12 +456,24 @@ export default function Licensees() {
       }
 
       // 3) Allocate QR range (creates QRCode rows as DORMANT)
+      if (showProvisioningProgress) {
+        progress.update({
+          value: 56,
+          indeterminate: true,
+          phaseLabel: "Allocation",
+          detail: `Allocating ${requestedRangeCount.toLocaleString()} QR codes...`,
+        });
+      }
       const allocRes = await apiClient.allocateQRRange({
         licenseeId,
         startNumber: rangeStart,
         endNumber: rangeEnd,
       });
       if (!allocRes.success) throw new Error(allocRes.error || "QR range allocation failed");
+
+      if (showProvisioningProgress) {
+        await progress.complete(`Provisioning complete. ${requestedRangeCount.toLocaleString()} QR codes are ready.`);
+      }
 
       toast({
         title: "Created",
@@ -438,6 +484,7 @@ export default function Licensees() {
       resetCreateForm();
       await load();
     } catch (e: any) {
+      if (showProvisioningProgress) progress.close();
       const msg = e?.message || "Error";
       const busy = isBusyError(msg);
       toast({
@@ -650,42 +697,60 @@ export default function Licensees() {
     e.preventDefault();
     if (!rangeForm) return;
 
+    let expectedQuantity = 0;
+    let requestPayload:
+      | { quantity: number; receivedBatchName?: string }
+      | { startNumber: number; endNumber: number; receivedBatchName?: string };
+
+    if (rangeForm.mode === "quantity") {
+      const quantity = toInt(rangeForm.quantity);
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        toast({
+          title: "Invalid quantity",
+          description: "Quantity must be a positive number.",
+          variant: "destructive",
+        });
+        return;
+      }
+      expectedQuantity = quantity;
+      requestPayload = {
+        quantity,
+        receivedBatchName: rangeForm.receivedBatchName.trim() || undefined,
+      };
+    } else {
+      const startNumber = toInt(rangeForm.startNumber);
+      const endNumber = toInt(rangeForm.endNumber);
+      if (!Number.isFinite(startNumber) || !Number.isFinite(endNumber) || endNumber < startNumber) {
+        toast({
+          title: "Invalid range",
+          description: "Start/End numbers are required, and End must be >= Start.",
+          variant: "destructive",
+        });
+        return;
+      }
+      expectedQuantity = endNumber - startNumber + 1;
+      requestPayload = {
+        startNumber,
+        endNumber,
+        receivedBatchName: rangeForm.receivedBatchName.trim() || undefined,
+      };
+    }
+
+    const showAllocationProgress = expectedQuantity >= LARGE_QR_ALLOCATION_THRESHOLD;
+    if (showAllocationProgress) {
+      progress.start({
+        title: "Allocating QR inventory",
+        description: "Creating new DORMANT QR range and batch records.",
+        phaseLabel: "Allocation",
+        detail: `Preparing ${expectedQuantity.toLocaleString()} QR codes for this licensee.`,
+        mode: "simulated",
+        initialValue: 12,
+      });
+    }
+
     setRangeLoading(true);
     try {
-      let res;
-      if (rangeForm.mode === "quantity") {
-        const quantity = toInt(rangeForm.quantity);
-        if (!Number.isFinite(quantity) || quantity <= 0) {
-          toast({
-            title: "Invalid quantity",
-            description: "Quantity must be a positive number.",
-            variant: "destructive",
-          });
-          setRangeLoading(false);
-          return;
-        }
-        res = await apiClient.allocateLicenseeQrRange(rangeForm.licenseeId, {
-          quantity,
-          receivedBatchName: rangeForm.receivedBatchName.trim() || undefined,
-        });
-      } else {
-        const startNumber = toInt(rangeForm.startNumber);
-        const endNumber = toInt(rangeForm.endNumber);
-        if (!Number.isFinite(startNumber) || !Number.isFinite(endNumber) || endNumber < startNumber) {
-          toast({
-            title: "Invalid range",
-            description: "Start/End numbers are required, and End must be >= Start.",
-            variant: "destructive",
-          });
-          setRangeLoading(false);
-          return;
-        }
-        res = await apiClient.allocateLicenseeQrRange(rangeForm.licenseeId, {
-          startNumber,
-          endNumber,
-          receivedBatchName: rangeForm.receivedBatchName.trim() || undefined,
-        });
-      }
+      const res = await apiClient.allocateLicenseeQrRange(rangeForm.licenseeId, requestPayload);
 
       if (!res.success) {
         throw new Error(res.error || "Allocation failed");
@@ -698,6 +763,14 @@ export default function Licensees() {
           ? Number(data.endNumber) - Number(data.startNumber) + 1
           : null);
 
+      if (showAllocationProgress) {
+        await progress.complete(
+          allocatedCount
+            ? `Allocated ${Number(allocatedCount).toLocaleString()} QR codes successfully.`
+            : "Allocation completed successfully."
+        );
+      }
+
       toast({
         title: "Range allocated",
         description: allocatedCount
@@ -709,6 +782,7 @@ export default function Licensees() {
       setRangeForm(null);
       await load();
     } catch (e: any) {
+      if (showAllocationProgress) progress.close();
       const msg = e?.message || "Error";
       const busy = isBusyError(msg);
       toast({
@@ -1408,6 +1482,17 @@ export default function Licensees() {
             )}
           </DialogContent>
         </Dialog>
+
+        <OperationProgressDialog
+          open={progress.state.open}
+          title={progress.state.title}
+          description={progress.state.description}
+          phaseLabel={progress.state.phaseLabel}
+          detail={progress.state.detail}
+          speedLabel={progress.state.speedLabel}
+          value={progress.state.value}
+          indeterminate={progress.state.indeterminate}
+        />
 
       </div>
     </DashboardLayout>

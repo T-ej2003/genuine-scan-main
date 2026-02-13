@@ -9,6 +9,13 @@ export interface ApiResponse<T = any> {
   message?: string;
 }
 
+export type DownloadProgress = {
+  loadedBytes: number;
+  totalBytes: number | null;
+  percent: number | null;
+  elapsedMs: number;
+};
+
 type RequestOptions = RequestInit & {
   skipJson?: boolean;
   timeoutMs?: number;
@@ -285,7 +292,7 @@ class ApiClient {
     return this.request("/manufacturer/print-jobs", { method: "POST", body: JSON.stringify(payload) });
   }
 
-  async downloadPrintJobPack(jobId: string, printLockToken: string) {
+  async downloadPrintJobPack(jobId: string, printLockToken: string, onProgress?: (progress: DownloadProgress) => void) {
     const headers: Record<string, string> = {};
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
     const query = `?token=${encodeURIComponent(printLockToken)}`;
@@ -294,7 +301,54 @@ class ApiClient {
       credentials: "include",
     });
     if (!resp.ok) throw new Error(`Download failed: HTTP ${resp.status}`);
-    return resp.blob();
+
+    const totalHeader = resp.headers.get("content-length");
+    const totalBytes = totalHeader ? Number(totalHeader) : NaN;
+    const resolvedTotal = Number.isFinite(totalBytes) && totalBytes > 0 ? totalBytes : null;
+
+    if (!resp.body || typeof resp.body.getReader !== "function") {
+      const blob = await resp.blob();
+      onProgress?.({
+        loadedBytes: blob.size,
+        totalBytes: resolvedTotal,
+        percent: resolvedTotal ? 100 : null,
+        elapsedMs: 0,
+      });
+      return blob;
+    }
+
+    const reader = resp.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let loadedBytes = 0;
+    const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      chunks.push(value);
+      loadedBytes += value.byteLength;
+
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      const elapsedMs = Math.max(1, now - startedAt);
+      onProgress?.({
+        loadedBytes,
+        totalBytes: resolvedTotal,
+        percent: resolvedTotal ? Math.min(100, (loadedBytes / resolvedTotal) * 100) : null,
+        elapsedMs,
+      });
+    }
+
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const elapsedMs = Math.max(1, now - startedAt);
+    onProgress?.({
+      loadedBytes,
+      totalBytes: resolvedTotal,
+      percent: resolvedTotal ? 100 : null,
+      elapsedMs,
+    });
+
+    return new Blob(chunks, { type: resp.headers.get("content-type") || "application/zip" });
   }
 
   async confirmPrintJob(jobId: string, printLockToken: string) {
