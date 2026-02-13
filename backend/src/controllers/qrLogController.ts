@@ -2,6 +2,7 @@ import { Response } from "express";
 import { AuthRequest } from "../middleware/auth";
 import prisma from "../config/database";
 import { Prisma, UserRole } from "@prisma/client";
+import { compactDeviceLabel, reverseGeocode } from "../services/locationService";
 
 export const getScanLogs = async (req: AuthRequest, res: Response) => {
   try {
@@ -65,7 +66,32 @@ export const getScanLogs = async (req: AuthRequest, res: Response) => {
       prisma.qrScanLog.count({ where }),
     ]);
 
-    return res.json({ success: true, data: { logs, total, limit, offset } });
+    let geocodeBudget = 40;
+    const enrichedLogs = await Promise.all(
+      logs.map(async (log) => {
+        let fallback: Awaited<ReturnType<typeof reverseGeocode>> | null = null;
+        const hasNamedLocation =
+          Boolean(log.locationName) ||
+          Boolean(log.locationCity) ||
+          Boolean(log.locationRegion) ||
+          Boolean(log.locationCountry);
+        if (!hasNamedLocation && geocodeBudget > 0 && log.latitude != null && log.longitude != null) {
+          geocodeBudget -= 1;
+          fallback = await reverseGeocode(log.latitude ?? null, log.longitude ?? null);
+        }
+        return {
+          ...log,
+          locationName:
+            log.locationName ||
+            [log.locationCity, log.locationRegion, log.locationCountry].filter(Boolean).join(", ") ||
+            fallback?.name ||
+            null,
+          deviceLabel: compactDeviceLabel(log.userAgent || log.device || null),
+        };
+      })
+    );
+
+    return res.json({ success: true, data: { logs: enrichedLogs, total, limit, offset } });
   } catch (e) {
     console.error("getScanLogs error:", e);
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2021") {

@@ -17,6 +17,7 @@ const Batches = lazy(() => import("@/pages/Batches"));
 const QRTracking = lazy(() => import("@/pages/QRTracking"));
 const Manufacturers = lazy(() => import("@/pages/Manufacturers"));
 const AuditLogs = lazy(() => import("@/pages/AuditLogs"));
+const Incidents = lazy(() => import("@/pages/Incidents"));
 const Verify = lazy(() => import("@/pages/Verify"));
 const VerifyLanding = lazy(() => import("@/pages/VerifyLanding"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
@@ -174,6 +175,15 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
               <AuditLogs />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/incidents"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
+              <Incidents />
             </ProtectedRoute>
           }
         />

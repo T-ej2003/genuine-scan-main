@@ -132,6 +132,8 @@ export const evaluateScanAndEnforcePolicy = async (input: PolicyScanInput): Prom
   let geoDrift = false;
   let velocitySpike = false;
   let geoDistance: number | null = null;
+  let repeatIntervalMinutes: number | null = null;
+  let rapidRepeatAcrossDistance = false;
   let velocityCount = 0;
 
   const multiThreshold = Math.max(2, policy.multiScanThreshold);
@@ -182,7 +184,23 @@ export const evaluateScanAndEnforcePolicy = async (input: PolicyScanInput): Prom
           previous.latitude,
           previous.longitude
         );
+        const currentTs = current.scannedAt ? new Date(current.scannedAt).getTime() : NaN;
+        const previousTs = previous.scannedAt ? new Date(previous.scannedAt).getTime() : NaN;
+        if (Number.isFinite(currentTs) && Number.isFinite(previousTs)) {
+          repeatIntervalMinutes = Math.abs(currentTs - previousTs) / 60_000;
+        }
       }
+    }
+
+    const rapidRepeatMinutesThreshold = Number(process.env.POLICY_RAPID_REPEAT_MINUTES || "30");
+    const rapidRepeatDistanceThresholdKm = Number(process.env.POLICY_RAPID_REPEAT_DISTANCE_KM || "80");
+    if (
+      repeatIntervalMinutes != null &&
+      geoDistance != null &&
+      repeatIntervalMinutes <= rapidRepeatMinutesThreshold &&
+      geoDistance >= rapidRepeatDistanceThresholdKm
+    ) {
+      rapidRepeatAcrossDistance = true;
     }
 
     if (geoDistance != null && geoDistance >= policy.geoDriftThresholdKm) {
@@ -248,7 +266,10 @@ export const evaluateScanAndEnforcePolicy = async (input: PolicyScanInput): Prom
   let autoBlockedQr = false;
   let autoBlockedBatch = false;
 
-  if (policy.autoBlockEnabled && (multiScan || geoDrift)) {
+  const shouldAutoBlockByMultiScan =
+    multiScan && input.scanCount >= multiThreshold + 1 && rapidRepeatAcrossDistance;
+
+  if (policy.autoBlockEnabled && (shouldAutoBlockByMultiScan || geoDrift)) {
     const blockQr = await prisma.qRCode.updateMany({
       where: {
         id: input.qrCodeId,
@@ -275,6 +296,9 @@ export const evaluateScanAndEnforcePolicy = async (input: PolicyScanInput): Prom
           reasons: {
             multiScan,
             geoDrift,
+            rapidRepeatAcrossDistance,
+            repeatIntervalMinutes,
+            geoDistance,
           },
         },
       });
@@ -294,6 +318,9 @@ export const evaluateScanAndEnforcePolicy = async (input: PolicyScanInput): Prom
           triggers: {
             multiScan,
             geoDrift,
+            rapidRepeatAcrossDistance,
+            repeatIntervalMinutes,
+            geoDistance,
           },
         },
         ipAddress: input.ipAddress || undefined,

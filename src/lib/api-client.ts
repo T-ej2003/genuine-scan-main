@@ -699,6 +699,108 @@ class ApiClient {
     if (!resp.ok) throw new Error(`Export failed: HTTP ${resp.status}`);
     return resp.blob();
   }
+
+  // ==================== INCIDENT RESPONSE ====================
+  async submitIncidentReport(formData: FormData, captchaToken?: string) {
+    const headers: Record<string, string> = {};
+    if (captchaToken) headers["x-captcha-token"] = captchaToken;
+    return this.request(`/incidents/report`, {
+      method: "POST",
+      body: formData,
+      headers,
+      skipJson: true,
+      timeoutMs: 45_000,
+    });
+  }
+
+  async getIncidents(options?: {
+    status?: string;
+    severity?: string;
+    qr?: string;
+    search?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    assignedTo?: string;
+    licenseeId?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const params = new URLSearchParams();
+    if (options?.status) params.append("status", options.status);
+    if (options?.severity) params.append("severity", options.severity);
+    if (options?.qr) params.append("qr", options.qr);
+    if (options?.search) params.append("search", options.search);
+    if (options?.dateFrom) params.append("date_from", options.dateFrom);
+    if (options?.dateTo) params.append("date_to", options.dateTo);
+    if (options?.assignedTo) params.append("assigned_to", options.assignedTo);
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/incidents${query}`);
+  }
+
+  async getIncidentById(id: string) {
+    return this.request(`/incidents/${encodeURIComponent(id)}`);
+  }
+
+  async patchIncident(
+    id: string,
+    payload: Partial<{
+      status: string;
+      assignedToUserId: string | null;
+      internalNotes: string;
+      tags: string[];
+      severity: string;
+      resolutionSummary: string;
+      resolutionOutcome: "CONFIRMED_FRAUD" | "NOT_FRAUD" | "INCONCLUSIVE" | null;
+    }>
+  ) {
+    return this.request(`/incidents/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async addIncidentNote(id: string, note: string) {
+    return this.request(`/incidents/${encodeURIComponent(id)}/events`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    });
+  }
+
+  async uploadIncidentEvidence(id: string, file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return this.request(`/incidents/${encodeURIComponent(id)}/evidence`, {
+      method: "POST",
+      body: form,
+      skipJson: true,
+      timeoutMs: 45_000,
+    });
+  }
+
+  async notifyIncidentCustomer(id: string, payload: { subject: string; message: string }) {
+    return this.request(`/incidents/${encodeURIComponent(id)}/notify-customer`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async downloadIncidentEvidence(fileName: string) {
+    const headers: Record<string, string> = {};
+    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+    const resp = await fetch(`${BASE_URL}/incidents/evidence-files/${encodeURIComponent(fileName)}`, {
+      headers,
+      credentials: "include",
+    });
+    if (!resp.ok) throw new Error(`Download failed: HTTP ${resp.status}`);
+    return resp.blob();
+  }
+
+  async requestIncidentPdfExport(id: string) {
+    return this.request(`/incidents/${encodeURIComponent(id)}/export-pdf`);
+  }
 }
 
 const apiClient = new ApiClient();

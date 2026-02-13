@@ -1,10 +1,12 @@
 import { Request, Response } from "express";
 import prisma from "../config/database";
-import { QRStatus } from "@prisma/client";
+import { IncidentActorType, QRStatus } from "@prisma/client";
 import { recordScan } from "../services/qrService";
 import { createAuditLog } from "../services/auditService";
 import { evaluateScanAndEnforcePolicy } from "../services/policyEngineService";
 import { z } from "zod";
+import { createIncidentFromReport } from "../services/incidentService";
+import { getScanInsight } from "../services/scanInsightService";
 
 const reportFraudSchema = z.object({
   code: z.string().trim().min(2).max(128),
@@ -255,11 +257,12 @@ export const verifyQRCode = async (req: Request, res: Response) => {
     const finalStatus = blockedByPolicy ? QRStatus.BLOCKED : updated.status;
 
     const firstScanTime = updated.scannedAt ? new Date(updated.scannedAt) : null;
+    const scanInsight = await getScanInsight(updated.id);
 
     const warningMessage = blockedByPolicy
       ? "This code has been auto-blocked by security policy due to anomaly detection."
       : !isFirstScan && firstScanTime
-      ? `Already redeemed. First scan was on ${firstScanTime.toISOString()}.`
+      ? `Already verified before. First verification was on ${scanInsight.firstScanAt || firstScanTime.toISOString()}.`
       : null;
 
     return res.json({
@@ -270,7 +273,7 @@ export const verifyQRCode = async (req: Request, res: Response) => {
           ? "Blocked code."
           : isFirstScan
           ? "This is a genuine product."
-          : "Already redeemed. Possible counterfeit or reuse.",
+          : "Already verified. Please review scan details below.",
         code: updated.code,
         status: finalStatus,
 
@@ -303,6 +306,12 @@ export const verifyQRCode = async (req: Request, res: Response) => {
         firstScanned: firstScanTime ? firstScanTime.toISOString() : null,
         scanCount: updated.scanCount ?? 0,
         isFirstScan,
+        firstScanAt: scanInsight.firstScanAt,
+        firstScanLocation: scanInsight.firstScanLocation,
+        latestScanAt: scanInsight.latestScanAt,
+        latestScanLocation: scanInsight.latestScanLocation,
+        previousScanAt: scanInsight.previousScanAt,
+        previousScanLocation: scanInsight.previousScanLocation,
 
         warningMessage,
         policy,
@@ -329,48 +338,37 @@ export const reportFraud = async (req: Request, res: Response) => {
 
     const payload = parsed.data;
     const normalizedCode = payload.code.toUpperCase();
+    const reason = String(payload.reason || "").toLowerCase();
+    const mappedType =
+      reason.includes("mismatch")
+        ? "wrong_product"
+        : reason.includes("used")
+        ? "duplicate_scan"
+        : reason.includes("seller")
+        ? "counterfeit_suspected"
+        : "other";
 
-    const qrCode = await prisma.qRCode.findUnique({
-      where: { code: normalizedCode },
-      select: {
-        id: true,
-        code: true,
-        licenseeId: true,
-        batchId: true,
-        batch: {
-          select: {
-            manufacturerId: true,
-          },
-        },
+    const incident = await createIncidentFromReport(
+      {
+        qrCodeValue: normalizedCode,
+        incidentType: mappedType,
+        description: payload.notes || payload.reason,
+        consentToContact: Boolean(payload.contactEmail),
+        customerEmail: payload.contactEmail || undefined,
+        preferredContactMethod: payload.contactEmail ? "email" : "none",
+        tags: ["legacy_verify_report_fraud"],
       },
-    });
-
-    const log = await createAuditLog({
-      action: "CUSTOMER_FRAUD_REPORT",
-      entityType: "FraudReport",
-      entityId: qrCode?.id || normalizedCode,
-      licenseeId: qrCode?.licenseeId || undefined,
-      ipAddress: req.ip,
-      details: {
-        code: normalizedCode,
-        reason: payload.reason,
-        notes: payload.notes || null,
-        contactEmail: payload.contactEmail || null,
-        observedStatus: payload.observedStatus || null,
-        observedOutcome: payload.observedOutcome || null,
-        qrCodeId: qrCode?.id || null,
-        batchId: qrCode?.batchId || null,
-        manufacturerId: qrCode?.batch?.manufacturerId || null,
-        pageUrl: payload.pageUrl || null,
-        userAgent: req.get("user-agent") || null,
-        reportedAt: new Date().toISOString(),
-      },
-    });
+      {
+        actorType: IncidentActorType.CUSTOMER,
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") || undefined,
+      }
+    );
 
     return res.status(201).json({
       success: true,
       data: {
-        reportId: log.id,
+        reportId: incident.id,
         message: "Fraud report submitted successfully.",
       },
     });

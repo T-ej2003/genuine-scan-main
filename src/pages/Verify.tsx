@@ -59,6 +59,12 @@ type VerifyPayload = {
   } | null;
   printedAt?: string | null;
   firstScanned?: string | null;
+  firstScanAt?: string | null;
+  firstScanLocation?: string | null;
+  latestScanAt?: string | null;
+  latestScanLocation?: string | null;
+  previousScanAt?: string | null;
+  previousScanLocation?: string | null;
   scanCount?: number;
   scanOutcome?: string;
   warningMessage?: string | null;
@@ -66,11 +72,11 @@ type VerifyPayload = {
 
 type StatusKind = "genuine" | "reused" | "suspicious" | "blocked" | "unassigned" | "invalid";
 
-const REPORT_REASONS = [
-  { value: "already-used", label: "Code already used" },
-  { value: "mismatch-packaging", label: "Packaging mismatch" },
-  { value: "unexpected-warning", label: "Unexpected warning" },
-  { value: "seller-concern", label: "Seller/source concern" },
+const INCIDENT_TYPE_OPTIONS = [
+  { value: "counterfeit_suspected", label: "Counterfeit suspected" },
+  { value: "duplicate_scan", label: "Duplicate scan" },
+  { value: "tampered_label", label: "Tampered label" },
+  { value: "wrong_product", label: "Wrong product" },
   { value: "other", label: "Other" },
 ] as const;
 
@@ -154,9 +160,18 @@ export default function Verify() {
   const [error, setError] = useState<string | null>(null);
 
   const [reportOpen, setReportOpen] = useState(false);
-  const [reportReason, setReportReason] = useState<string>(REPORT_REASONS[0].value);
-  const [reportNotes, setReportNotes] = useState("");
+  const [incidentType, setIncidentType] = useState<string>(INCIDENT_TYPE_OPTIONS[0].value);
+  const [reportDescription, setReportDescription] = useState("");
+  const [purchasePlace, setPurchasePlace] = useState("");
+  const [purchaseDate, setPurchaseDate] = useState("");
+  const [productBatchNo, setProductBatchNo] = useState("");
+  const [reportCustomerName, setReportCustomerName] = useState("");
   const [reportEmail, setReportEmail] = useState("");
+  const [reportPhone, setReportPhone] = useState("");
+  const [reportCountry, setReportCountry] = useState("");
+  const [reportConsent, setReportConsent] = useState(true);
+  const [reportPhotos, setReportPhotos] = useState<File[]>([]);
+  const [reportReference, setReportReference] = useState<string | null>(null);
   const [reporting, setReporting] = useState(false);
 
   const [loadingStepIdx, setLoadingStepIdx] = useState(0);
@@ -293,6 +308,12 @@ export default function Verify() {
   const printedAt = result?.printedAt || result?.batch?.printedAt || null;
   const isReportable = statusKind !== "genuine";
   const canSubmitFeedback = displayedCode !== "—" && statusKind !== "invalid";
+  const firstScanAt = result?.firstScanAt || result?.firstScanned || null;
+  const firstScanLocation = result?.firstScanLocation || null;
+  const latestScanAt = result?.latestScanAt || null;
+  const latestScanLocation = result?.latestScanLocation || null;
+  const previousScanAt = result?.previousScanAt || null;
+  const previousScanLocation = result?.previousScanLocation || null;
   const feedbackStorageKey = useMemo(() => {
     const normalized = String(displayedCode || "").trim().toUpperCase();
     return normalized && normalized !== "—" ? `authenticqr_feedback_${normalized}` : "";
@@ -334,18 +355,38 @@ export default function Verify() {
       });
       return;
     }
+    if (reportDescription.trim().length < 6) {
+      toast({
+        title: "More details needed",
+        description: "Please add a short description so the team can investigate.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setReporting(true);
     try {
-      const res = await apiClient.reportFraud({
-        code: normalizedCode,
-        reason: reportReason,
-        notes: reportNotes.trim() || undefined,
-        contactEmail: reportEmail.trim() || undefined,
-        observedStatus: result?.status,
-        observedOutcome: result?.scanOutcome,
-        pageUrl: typeof window !== "undefined" ? window.location.href : undefined,
-      });
+      const formData = new FormData();
+      formData.append("qrCodeValue", normalizedCode);
+      formData.append("incidentType", incidentType);
+      formData.append("description", reportDescription.trim());
+      if (purchasePlace.trim()) formData.append("purchasePlace", purchasePlace.trim());
+      if (purchaseDate.trim()) formData.append("purchaseDate", purchaseDate.trim());
+      if (productBatchNo.trim()) formData.append("productBatchNo", productBatchNo.trim());
+      if (reportCustomerName.trim()) formData.append("customerName", reportCustomerName.trim());
+      if (reportEmail.trim()) formData.append("customerEmail", reportEmail.trim());
+      if (reportPhone.trim()) formData.append("customerPhone", reportPhone.trim());
+      if (reportCountry.trim()) formData.append("customerCountry", reportCountry.trim());
+      formData.append("consentToContact", String(reportConsent));
+      formData.append("preferredContactMethod", reportConsent && reportEmail.trim() ? "email" : "none");
+      if (typeof window !== "undefined" && window.location.href) {
+        formData.append("tags", JSON.stringify(["verify_page_report", `status_${String(result?.status || "unknown").toLowerCase()}`]));
+      }
+      for (const photo of reportPhotos.slice(0, 4)) {
+        formData.append("photos", photo);
+      }
+
+      const res = await apiClient.submitIncidentReport(formData);
 
       if (!res.success) {
         toast({
@@ -358,12 +399,20 @@ export default function Verify() {
 
       toast({
         title: "Report submitted",
-        description: "Our security team has received your fraud report.",
+        description: "Our security team has received your report.",
       });
-      setReportOpen(false);
-      setReportReason(REPORT_REASONS[0].value);
-      setReportNotes("");
+      setReportReference((res.data as any)?.reference || (res.data as any)?.incidentId || null);
+      setIncidentType(INCIDENT_TYPE_OPTIONS[0].value);
+      setReportDescription("");
+      setPurchasePlace("");
+      setPurchaseDate("");
+      setProductBatchNo("");
+      setReportCustomerName("");
       setReportEmail("");
+      setReportPhone("");
+      setReportCountry("");
+      setReportConsent(true);
+      setReportPhotos([]);
     } finally {
       setReporting(false);
     }
@@ -558,6 +607,29 @@ export default function Verify() {
                   </div>
                 )}
 
+                {(statusKind === "reused" || statusKind === "blocked") && (
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Total scans</p>
+                      <p className="mt-1 text-2xl font-semibold text-slate-900">{result?.scanCount ?? 0}</p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <p className="text-xs uppercase tracking-wide text-slate-500">First verified</p>
+                      <p className="mt-1 text-sm font-medium text-slate-900">
+                        {firstScanAt ? new Date(firstScanAt).toLocaleString() : "Not available"}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">{firstScanLocation || "Location unavailable"}</p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Latest verification</p>
+                      <p className="mt-1 text-sm font-medium text-slate-900">
+                        {latestScanAt ? new Date(latestScanAt).toLocaleString() : "Not available"}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">{latestScanLocation || previousScanLocation || "Location unavailable"}</p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid gap-3 md:grid-cols-3">
                   {result?.licensee?.supportEmail && (
                     <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
@@ -682,7 +754,10 @@ export default function Verify() {
                       <Button
                         type="button"
                         variant="outline"
-                        onClick={() => setReportOpen(true)}
+                        onClick={() => {
+                          setReportReference(null);
+                          setReportOpen(true);
+                        }}
                         className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
                       >
                         <Flag className="mr-2 h-4 w-4" />
@@ -706,65 +781,134 @@ export default function Verify() {
       </div>
 
       <Dialog open={reportOpen} onOpenChange={setReportOpen}>
-        <DialogContent className="sm:max-w-[560px]">
+        <DialogContent className="sm:max-w-[680px]">
           <DialogHeader>
             <DialogTitle>Report suspected fraud</DialogTitle>
             <DialogDescription>
-              This report goes directly to platform security review.
+              Share what you noticed. This goes directly to incident response.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
-            <div className="rounded-lg border bg-slate-50 p-3 text-sm">
-              <span className="text-slate-500">Code:</span>
-              <span className="ml-2 font-mono font-semibold text-slate-900">{displayedCode}</span>
+          {reportReference ? (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-sm font-semibold text-emerald-800">Report submitted successfully</p>
+                <p className="mt-1 text-sm text-emerald-700">
+                  Reference ID: <span className="font-mono font-semibold">{reportReference}</span>
+                </p>
+              </div>
+              <p className="text-sm text-slate-600">
+                Our team will review this and update you if contact consent was provided.
+              </p>
             </div>
+          ) : (
+            <div className="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
+              <div className="rounded-lg border bg-slate-50 p-3 text-sm">
+                <span className="text-slate-500">Code:</span>
+                <span className="ml-2 font-mono font-semibold text-slate-900">{displayedCode}</span>
+              </div>
 
-            <div className="space-y-2">
-              <Label>Reason</Label>
-              <Select value={reportReason} onValueChange={setReportReason}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select reason" />
-                </SelectTrigger>
-                <SelectContent>
-                  {REPORT_REASONS.map((reason) => (
-                    <SelectItem key={reason.value} value={reason.value}>
-                      {reason.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+              <div className="space-y-2">
+                <Label>Incident type</Label>
+                <Select value={incidentType} onValueChange={setIncidentType}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select incident type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {INCIDENT_TYPE_OPTIONS.map((reason) => (
+                      <SelectItem key={reason.value} value={reason.value}>
+                        {reason.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <div className="space-y-2">
-              <Label>Additional details (optional)</Label>
-              <Textarea
-                value={reportNotes}
-                onChange={(e) => setReportNotes(e.target.value)}
-                placeholder="Share anything suspicious you noticed about the product, seller, or packaging."
-                rows={4}
-                maxLength={1500}
-              />
-            </div>
+              <div className="space-y-2">
+                <Label>What did you observe?</Label>
+                <Textarea
+                  value={reportDescription}
+                  onChange={(e) => setReportDescription(e.target.value)}
+                  placeholder="Describe what looked suspicious."
+                  rows={4}
+                  maxLength={2000}
+                />
+              </div>
 
-            <div className="space-y-2">
-              <Label>Contact email (optional)</Label>
-              <Input
-                type="email"
-                value={reportEmail}
-                onChange={(e) => setReportEmail(e.target.value)}
-                placeholder="you@example.com"
-              />
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Purchase place (optional)</Label>
+                  <Input value={purchasePlace} onChange={(e) => setPurchasePlace(e.target.value)} placeholder="Store / seller name" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Purchase date (optional)</Label>
+                  <Input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Product batch number (optional)</Label>
+                <Input value={productBatchNo} onChange={(e) => setProductBatchNo(e.target.value)} placeholder="Batch / lot code if available" />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Photos (optional)</Label>
+                <Input
+                  type="file"
+                  multiple
+                  accept="image/png,image/jpeg,image/jpg,image/webp"
+                  onChange={(e) => setReportPhotos(Array.from(e.target.files || []))}
+                />
+                <p className="text-xs text-slate-500">Up to 4 photos, 5MB each.</p>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <label className="flex cursor-pointer items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={reportConsent}
+                    onChange={(e) => setReportConsent(e.target.checked)}
+                    className="mt-1 h-4 w-4 rounded border-slate-300"
+                  />
+                  <span className="text-sm text-slate-700">
+                    I consent to be contacted for investigation updates.
+                  </span>
+                </label>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Name (optional)</Label>
+                  <Input value={reportCustomerName} onChange={(e) => setReportCustomerName(e.target.value)} placeholder="Your name" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Email (optional)</Label>
+                  <Input type="email" value={reportEmail} onChange={(e) => setReportEmail(e.target.value)} placeholder="you@example.com" />
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Phone (optional)</Label>
+                  <Input value={reportPhone} onChange={(e) => setReportPhone(e.target.value)} placeholder="+1 ..." />
+                </div>
+                <div className="space-y-2">
+                  <Label>Country (optional)</Label>
+                  <Input value={reportCountry} onChange={(e) => setReportCountry(e.target.value)} placeholder="Country" />
+                </div>
+              </div>
             </div>
-          </div>
+          )}
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setReportOpen(false)} disabled={reporting}>
-              Cancel
+              {reportReference ? "Close" : "Cancel"}
             </Button>
-            <Button type="button" onClick={submitReport} disabled={reporting} className="bg-red-600 text-white hover:bg-red-700">
-              {reporting ? "Submitting..." : "Submit report"}
-            </Button>
+            {!reportReference ? (
+              <Button type="button" onClick={submitReport} disabled={reporting} className="bg-red-600 text-white hover:bg-red-700">
+                {reporting ? "Submitting..." : "Submit report"}
+              </Button>
+            ) : null}
           </DialogFooter>
         </DialogContent>
       </Dialog>

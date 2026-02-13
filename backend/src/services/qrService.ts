@@ -1,6 +1,7 @@
 import { QRStatus, Prisma } from "@prisma/client";
 import prisma from "../config/database";
 import { randomNonce } from "./qrTokenService";
+import { reverseGeocode } from "./locationService";
 
 export const generateQRCode = (prefix: string, number: number): string => {
   return `${prefix}${number.toString().padStart(10, "0")}`;
@@ -140,6 +141,7 @@ export const recordScan = async (
   }
 
   const isFirstScan = existing.status === QRStatus.PRINTED;
+  const location = await reverseGeocode(meta?.latitude ?? null, meta?.longitude ?? null);
 
   const updated = await prisma.$transaction(async (tx) => {
     const qr = await tx.qRCode.update({
@@ -174,6 +176,10 @@ export const recordScan = async (
         latitude: meta?.latitude ?? null,
         longitude: meta?.longitude ?? null,
         accuracy: meta?.accuracy ?? null,
+        locationName: location?.name || null,
+        locationCountry: location?.country || null,
+        locationRegion: location?.region || null,
+        locationCity: location?.city || null,
       },
     });
 

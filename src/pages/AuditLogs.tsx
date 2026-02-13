@@ -68,6 +68,41 @@ const asObject = (value: unknown): Record<string, any> => {
   return value as Record<string, any>;
 };
 
+const humanKey = (key: string) =>
+  key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+
+const toLabel = (value: string) =>
+  String(value || "")
+    .toLowerCase()
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+
+const readableDetailEntries = (details: Record<string, any>) => {
+  const entries: Array<{ label: string; value: string }> = [];
+  for (const [key, rawValue] of Object.entries(details || {})) {
+    if (rawValue == null || rawValue === "") continue;
+    if (typeof rawValue === "object" && !Array.isArray(rawValue)) {
+      const nested = Object.entries(rawValue)
+        .filter(([, v]) => v != null && v !== "")
+        .map(([nestedKey, nestedValue]) => `${humanKey(nestedKey)}: ${String(nestedValue)}`);
+      if (nested.length > 0) entries.push({ label: humanKey(key), value: nested.join(" • ") });
+      continue;
+    }
+    if (Array.isArray(rawValue)) {
+      if (rawValue.length === 0) continue;
+      entries.push({ label: humanKey(key), value: rawValue.map((v) => String(v)).join(", ") });
+      continue;
+    }
+    entries.push({ label: humanKey(key), value: String(rawValue) });
+  }
+  return entries;
+};
+
 export default function AuditLogs() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -117,6 +152,16 @@ export default function AuditLogs() {
         return `Fraud report ${d.status || "REVIEWED"}${d.notifyCustomer ? "; customer notified" : "; customer not notified"}.`;
       case "CUSTOMER_PRODUCT_FEEDBACK":
         return `Customer feedback for ${d.code || "—"}: ${d.rating || "—"}★, ${d.satisfaction || "unlabeled"}.`;
+      case "INCIDENT_CREATED":
+        return `Incident created for ${d.qrCodeValue || "unknown code"} (${toLabel(String(d.incidentType || "other"))}).`;
+      case "INCIDENT_UPDATED":
+        return `Incident updated${Array.isArray(d.changedFields) ? ` (${d.changedFields.join(", ")})` : ""}.`;
+      case "INCIDENT_NOTE_ADDED":
+        return "Investigation note added.";
+      case "INCIDENT_EVIDENCE_ADDED":
+        return "Evidence attached to incident.";
+      case "INCIDENT_EMAIL_SENT":
+        return `Incident email ${String(d.status || "processed").toLowerCase()}${d.toAddress ? ` to ${d.toAddress}` : ""}.`;
       case "ALLOCATE_QR_RANGE":
       case "ALLOCATE_QR_RANGE_LICENSEE":
         return `Allocated QR range ${range || "—"}${d.created || d.quantity ? ` (${d.created || d.quantity} codes)` : ""}.`;
@@ -445,6 +490,7 @@ export default function AuditLogs() {
                     filtered.map((l) => {
                       const tone = actionTone(String(l.action || ""));
                       const details = asObject(l.details);
+                      const detailEntries = readableDetailEntries(details);
                       const expanded = Boolean(expandedRows[l.id]);
                       return (
                         <TableRow key={l.id} className={String(l.action || "").includes("FRAUD") ? "bg-red-50/30" : undefined}>
@@ -502,9 +548,17 @@ export default function AuditLogs() {
                                       {Object.keys(details).join(", ") || "—"}
                                     </div>
                                   </div>
-                                  <pre className="mt-2 max-h-52 overflow-auto rounded bg-white p-2 text-[11px] leading-5 text-slate-700">
-                                    {JSON.stringify(details, null, 2)}
-                                  </pre>
+                                  <div className="mt-2 max-h-52 space-y-1 overflow-auto rounded border bg-white p-2 text-[11px] leading-5 text-slate-700">
+                                    {detailEntries.length === 0 ? (
+                                      <p className="text-slate-500">No additional details.</p>
+                                    ) : (
+                                      detailEntries.map((entry) => (
+                                        <p key={`${l.id}-${entry.label}`}>
+                                          <span className="font-semibold text-slate-900">{entry.label}:</span> {entry.value}
+                                        </p>
+                                      ))
+                                    )}
+                                  </div>
                                 </div>
                               )}
                             </div>

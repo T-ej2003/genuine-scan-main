@@ -60,6 +60,84 @@ enum AlertSeverity {
   CRITICAL
 }
 
+enum IncidentReportedBy {
+  CUSTOMER
+  LICENSEE
+  ADMIN
+}
+
+enum IncidentContactMethod {
+  EMAIL
+  PHONE
+  WHATSAPP
+  NONE
+}
+
+enum IncidentType {
+  COUNTERFEIT_SUSPECTED
+  DUPLICATE_SCAN
+  TAMPERED_LABEL
+  WRONG_PRODUCT
+  OTHER
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentStatus {
+  NEW
+  TRIAGED
+  INVESTIGATING
+  AWAITING_CUSTOMER
+  AWAITING_LICENSEE
+  MITIGATED
+  RESOLVED
+  CLOSED
+  REJECTED_SPAM
+}
+
+enum IncidentResolutionOutcome {
+  CONFIRMED_FRAUD
+  NOT_FRAUD
+  INCONCLUSIVE
+}
+
+enum IncidentActorType {
+  CUSTOMER
+  ADMIN
+  SYSTEM
+}
+
+enum IncidentEventType {
+  CREATED
+  UPDATED_FIELDS
+  STATUS_CHANGED
+  ASSIGNED
+  EMAIL_SENT
+  NOTE_ADDED
+  EVIDENCE_ADDED
+  EXPORTED
+}
+
+enum IncidentCommDirection {
+  OUTBOUND
+  INBOUND
+}
+
+enum IncidentCommChannel {
+  EMAIL
+}
+
+enum IncidentCommStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
@@ -90,6 +168,9 @@ model User {
   traceEventsAsManufacturer TraceEvent[] @relation("TraceEventManufacturer")
   policyAlertsAsManufacturer PolicyAlert[] @relation("PolicyAlertManufacturer")
   policyAlertsAcknowledged PolicyAlert[] @relation("PolicyAlertAcknowledgedBy")
+  assignedIncidents Incident[] @relation("IncidentAssignedTo")
+  incidentEvents IncidentEvent[] @relation("IncidentActorUser")
+  incidentEvidence IncidentEvidence[] @relation("IncidentEvidenceUploadedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -121,6 +202,7 @@ model Licensee {
   traceEvents          TraceEvent[]
   securityPolicies     SecurityPolicy[]
   policyAlerts         PolicyAlert[]
+  incidents            Incident[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -235,6 +317,7 @@ model QRCode {
   printJob   PrintJob? @relation(fields: [printJobId], references: [id])
   traceEvents TraceEvent[]
   policyAlerts PolicyAlert[]
+  incidents Incident[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -270,6 +353,12 @@ model QrScanLog {
   latitude  Float?
   longitude Float?
   accuracy  Float?
+  locationName String?
+  locationCountry String?
+  locationRegion String?
+  locationCity String?
+
+  incidents Incident[]
 
   @@index([licenseeId])
   @@index([batchId])
@@ -449,5 +538,130 @@ model PolicyAlert {
   @@index([manufacturerId])
   @@index([qrCodeId])
   @@index([acknowledgedAt])
+  @@index([createdAt])
+}
+
+model Incident {
+  id String @id @default(uuid())
+
+  qrCodeId String?
+  qrCode   QRCode? @relation(fields: [qrCodeId], references: [id])
+
+  qrCodeValue String
+
+  scanEventId String?
+  scanEvent   QrScanLog? @relation(fields: [scanEventId], references: [id])
+
+  licenseeId String?
+  licensee   Licensee? @relation(fields: [licenseeId], references: [id])
+
+  reportedBy IncidentReportedBy @default(CUSTOMER)
+  customerName String?
+  customerEmail String?
+  customerPhone String?
+  customerCountry String?
+  preferredContactMethod IncidentContactMethod @default(NONE)
+  consentToContact Boolean @default(false)
+
+  incidentType IncidentType
+  severity IncidentSeverity @default(MEDIUM)
+  severityOverridden Boolean @default(false)
+  description String
+  photos String[]
+  purchasePlace String?
+  purchaseDate DateTime?
+  productBatchNo String?
+  locationLat Float?
+  locationLng Float?
+  locationName String?
+  locationCountry String?
+  locationRegion String?
+  locationCity String?
+  ipHash String?
+  userAgentHash String?
+  deviceFingerprintHash String?
+
+  status IncidentStatus @default(NEW)
+  assignedToUserId String?
+  assignedToUser User? @relation("IncidentAssignedTo", fields: [assignedToUserId], references: [id])
+  slaDueAt DateTime?
+  tags String[]
+  internalNotes String?
+  resolutionSummary String?
+  resolutionOutcome IncidentResolutionOutcome?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events IncidentEvent[]
+  communications IncidentCommunication[]
+  evidence IncidentEvidence[]
+
+  @@index([qrCodeId])
+  @@index([qrCodeValue])
+  @@index([scanEventId])
+  @@index([licenseeId])
+  @@index([status])
+  @@index([severity])
+  @@index([createdAt])
+  @@index([assignedToUserId])
+}
+
+model IncidentEvent {
+  id String @id @default(uuid())
+
+  incidentId String
+  incident Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  actorType IncidentActorType
+  actorUserId String?
+  actorUser User? @relation("IncidentActorUser", fields: [actorUserId], references: [id])
+  eventType IncidentEventType
+  eventPayload Json?
+  createdAt DateTime @default(now())
+
+  @@index([incidentId])
+  @@index([actorType])
+  @@index([eventType])
+  @@index([createdAt])
+  @@index([actorUserId])
+}
+
+model IncidentCommunication {
+  id String @id @default(uuid())
+
+  incidentId String
+  incident Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  direction IncidentCommDirection
+  channel IncidentCommChannel @default(EMAIL)
+  toAddress String
+  subject String
+  bodyPreview String
+  providerMessageId String?
+  status IncidentCommStatus @default(QUEUED)
+  createdAt DateTime @default(now())
+
+  @@index([incidentId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model IncidentEvidence {
+  id String @id @default(uuid())
+
+  incidentId String
+  incident Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  fileUrl String?
+  storageKey String?
+  fileType String?
+  uploadedByUserId String?
+  uploadedByUser User? @relation("IncidentEvidenceUploadedBy", fields: [uploadedByUserId], references: [id])
+  uploadedBy IncidentActorType @default(CUSTOMER)
+  createdAt DateTime @default(now())
+
+  @@index([incidentId])
+  @@index([uploadedByUserId])
   @@index([createdAt])
 }

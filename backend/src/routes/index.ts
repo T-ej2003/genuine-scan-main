@@ -73,6 +73,19 @@ import { scanToken } from "../controllers/scanController";
 import { createPrintJob, downloadPrintJobPack, confirmPrintJob } from "../controllers/printJobController";
 import auditRoutes from "./auditRoutes";
 import { updateMyProfile, changeMyPassword } from "../controllers/accountController";
+import {
+  addIncidentEventNote,
+  addIncidentEvidence,
+  exportIncidentPdfHook,
+  getIncident,
+  listIncidents,
+  notifyIncidentCustomer,
+  patchIncident,
+  reportIncident,
+  serveIncidentEvidenceFile,
+  uploadIncidentEvidence,
+  uploadIncidentReportPhotos,
+} from "../controllers/incidentController";
 
 import { getDashboardStats } from "../controllers/dashboardController";
 import { dashboardEvents } from "../controllers/eventsController";
@@ -85,6 +98,7 @@ router.post("/auth/login", login);
 router.get("/verify/:code", verifyQRCode);
 router.post("/verify/report-fraud", reportFraud);
 router.post("/verify/feedback", submitProductFeedback);
+router.post("/incidents/report", uploadIncidentReportPhotos, reportIncident);
 router.get("/scan", scanToken);
 router.get("/health", healthCheck);
 
@@ -245,6 +259,41 @@ router.get(
 // ==================== QR LOGS (ADMINS) ====================
 router.get("/admin/qr/scan-logs", authenticate, requireOpsUser, enforceTenantIsolation, getScanLogs);
 router.get("/admin/qr/batch-summary", authenticate, requireOpsUser, enforceTenantIsolation, getBatchSummary);
+
+// ==================== INCIDENT RESPONSE ====================
+router.get("/incidents", authenticate, requireAnyAdmin, enforceTenantIsolation, listIncidents);
+router.get(
+  "/incidents/evidence-files/:fileName",
+  authenticate,
+  requireAnyAdmin,
+  enforceTenantIsolation,
+  serveIncidentEvidenceFile
+);
+router.get("/incidents/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, getIncident);
+router.patch("/incidents/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, patchIncident);
+router.post("/incidents/:id/events", authenticate, requireAnyAdmin, enforceTenantIsolation, addIncidentEventNote);
+router.post(
+  "/incidents/:id/evidence",
+  authenticate,
+  requireAnyAdmin,
+  enforceTenantIsolation,
+  uploadIncidentEvidence,
+  addIncidentEvidence
+);
+router.post(
+  "/incidents/:id/notify-customer",
+  authenticate,
+  requireAnyAdmin,
+  enforceTenantIsolation,
+  notifyIncidentCustomer
+);
+router.get(
+  "/incidents/:id/export-pdf",
+  authenticate,
+  requireAnyAdmin,
+  enforceTenantIsolation,
+  exportIncidentPdfHook
+);
 
 // ==================== ADMIN BLOCK ====================
 router.post("/admin/qrs/:id/block", authenticate, requireSuperAdmin, blockQRCode);

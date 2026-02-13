@@ -6,6 +6,8 @@ import { evaluateScanPolicy } from "../services/scanPolicy";
 import { hashToken, verifyQrToken } from "../services/qrTokenService";
 import { evaluateScanAndEnforcePolicy } from "../services/policyEngineService";
 import { createHash } from "crypto";
+import { reverseGeocode } from "../services/locationService";
+import { getScanInsight } from "../services/scanInsightService";
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = Number(process.env.SCAN_RATE_LIMIT_PER_MIN || "60");
@@ -199,6 +201,7 @@ export const scanToken = async (req: Request, res: Response) => {
     const latitude = toNum(req.query.lat);
     const longitude = toNum(req.query.lon);
     const accuracy = toNum(req.query.acc);
+    const location = await reverseGeocode(latitude, longitude);
 
     const updated = await prisma.$transaction(async (tx) => {
       const updatedQr = await tx.qRCode.update({
@@ -234,6 +237,10 @@ export const scanToken = async (req: Request, res: Response) => {
           latitude,
           longitude,
           accuracy,
+          locationName: location?.name || null,
+          locationCountry: location?.country || null,
+          locationRegion: location?.region || null,
+          locationCity: location?.city || null,
         },
       });
 
@@ -271,10 +278,11 @@ export const scanToken = async (req: Request, res: Response) => {
     const finalStatus =
       policy.autoBlockedQr || policy.autoBlockedBatch ? QRStatus.BLOCKED : updated.status;
     const effectiveOutcome = finalStatus === QRStatus.BLOCKED ? "BLOCKED" : decision.outcome;
+    const scanInsight = await getScanInsight(updated.id);
 
     const warningMessage =
       effectiveOutcome === "ALREADY_REDEEMED"
-        ? `Already redeemed. First redemption was at ${updated.redeemedAt?.toISOString?.() || "unknown time"}.`
+        ? `Already verified before. First verification was at ${scanInsight.firstScanAt || updated.redeemedAt?.toISOString?.() || "unknown time"}.`
         : effectiveOutcome === "SUSPICIOUS"
         ? "This code was generated but not confirmed as printed. Treat with suspicion."
         : effectiveOutcome === "BLOCKED"
@@ -286,8 +294,8 @@ export const scanToken = async (req: Request, res: Response) => {
     const message =
       effectiveOutcome === "VALID"
         ? "Authentic item. First-time verification successful."
-        : effectiveOutcome === "ALREADY_REDEEMED"
-        ? "Already redeemed. Possible counterfeit or reuse."
+      : effectiveOutcome === "ALREADY_REDEEMED"
+        ? "Already verified. Please review scan details below."
         : effectiveOutcome === "SUSPICIOUS"
         ? "Not activated for sale. Suspicious scan."
         : effectiveOutcome === "BLOCKED"
@@ -327,6 +335,12 @@ export const scanToken = async (req: Request, res: Response) => {
         scanCount: updated.scanCount ?? 0,
         isFirstScan: decision.allowRedeem,
         redeemedAt: updated.redeemedAt ? new Date(updated.redeemedAt).toISOString() : null,
+        firstScanAt: scanInsight.firstScanAt,
+        firstScanLocation: scanInsight.firstScanLocation,
+        latestScanAt: scanInsight.latestScanAt,
+        latestScanLocation: scanInsight.latestScanLocation,
+        previousScanAt: scanInsight.previousScanAt,
+        previousScanLocation: scanInsight.previousScanLocation,
         policy,
       },
     });

@@ -10,6 +10,8 @@ vi.mock("@/lib/api-client", () => ({
     verifyQRCode: vi.fn(),
     scanToken: vi.fn(),
     reportFraud: vi.fn(),
+    submitIncidentReport: vi.fn(),
+    submitProductFeedback: vi.fn(),
   },
 }));
 

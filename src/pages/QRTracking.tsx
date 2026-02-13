@@ -37,6 +37,8 @@ type ScanLogRow = {
   latitude?: number | null;
   longitude?: number | null;
   accuracy?: number | null;
+  locationName?: string | null;
+  deviceLabel?: string | null;
   isFirstScan?: boolean | null;
   licensee?: { id: string; name: string; prefix: string };
   qrCode?: { id: string; code: string; status: string };
@@ -182,11 +184,7 @@ export default function QRTracking() {
     });
   }, [summary, filters.batchName]);
 
-  const formatLocation = (log: ScanLogRow) => {
-    if (log.latitude == null || log.longitude == null) return "—";
-    const acc = log.accuracy ? ` (±${Math.round(log.accuracy)}m)` : "";
-    return `${log.latitude.toFixed(4)}, ${log.longitude.toFixed(4)}${acc}`;
-  };
+  const formatLocation = (log: ScanLogRow) => log.locationName || "Location unavailable";
 
   const blockedLogCount = logs.filter((l) => String(l.qrCode?.status || l.status || "").toUpperCase() === "BLOCKED").length;
   const firstScanCount = logs.filter((l) => Boolean(l.isFirstScan)).length;
@@ -492,7 +490,7 @@ export default function QRTracking() {
                           </TableCell>
                           <TableCell className="text-xs text-slate-700">{formatLocation(log)}</TableCell>
                           <TableCell className="max-w-[220px] text-xs text-slate-600">
-                            {log.device || log.userAgent || "—"}
+                            {log.deviceLabel || "Browser device"}
                           </TableCell>
                           <TableCell className="text-xs text-slate-600">{log.ipAddress || "—"}</TableCell>
                           <TableCell className="text-xs text-slate-600">
