@@ -22,6 +22,14 @@ const normalizeEmail = (value) => {
     const email = String(value || "").trim().toLowerCase();
     return email || null;
 };
+const getFirstEnv = (...keys) => {
+    for (const key of keys) {
+        const value = String(process.env[key] || "").trim();
+        if (value)
+            return value;
+    }
+    return "";
+};
 const inferHostFromUserEmail = (userEmail) => {
     const domain = String(userEmail.split("@")[1] || "").toLowerCase().trim();
     if (!domain)
@@ -44,9 +52,9 @@ const inferHostFromUserEmail = (userEmail) => {
     return null;
 };
 const resolveSmtpConfig = () => {
-    const user = String(process.env.SMTP_USER || "").trim();
-    const pass = String(process.env.SMTP_PASS || "").trim();
-    const explicitHost = String(process.env.SMTP_HOST || "").trim();
+    const user = getFirstEnv("SMTP_USER", "SMTP_USERNAME", "EMAIL_USER", "MAIL_USER");
+    const pass = getFirstEnv("SMTP_PASS", "SMTP_PASSWORD", "EMAIL_PASS", "MAIL_PASS", "MAIL_PASSWORD");
+    const explicitHost = getFirstEnv("SMTP_HOST", "EMAIL_HOST", "MAIL_HOST");
     if (!user || !pass) {
         return {
             config: null,
@@ -62,9 +70,9 @@ const resolveSmtpConfig = () => {
         };
     }
     const defaultPort = inferred?.port || 587;
-    const parsedPort = Number(process.env.SMTP_PORT || defaultPort);
+    const parsedPort = Number(getFirstEnv("SMTP_PORT", "EMAIL_PORT", "MAIL_PORT") || defaultPort);
     const port = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : defaultPort;
-    const secure = parseBool(process.env.SMTP_SECURE, inferred ? inferred.secure : port === 465);
+    const secure = parseBool(getFirstEnv("SMTP_SECURE", "EMAIL_SECURE", "MAIL_SECURE"), inferred ? inferred.secure : port === 465);
     return {
         config: {
             host,
@@ -81,14 +89,29 @@ const getTransporter = () => {
     if (parseBool(process.env.EMAIL_USE_JSON_TRANSPORT, false)) {
         transporterKey = "jsonTransport";
         transporter = nodemailer_1.default.createTransport({ jsonTransport: true });
-        return { transporter, configError: null, configSource: "json" };
+        return {
+            transporter,
+            configError: null,
+            configSource: "json",
+            smtpUser: normalizeEmail(getFirstEnv("SMTP_USER", "SMTP_USERNAME", "EMAIL_USER", "MAIL_USER")),
+        };
     }
     if (!config) {
-        return { transporter: null, configError: error || "SMTP transport is not configured", configSource: null };
+        return {
+            transporter: null,
+            configError: error || "SMTP transport is not configured",
+            configSource: null,
+            smtpUser: null,
+        };
     }
     const nextKey = `${config.host}|${config.port}|${config.secure}|${config.user}`;
     if (transporter && transporterKey === nextKey) {
-        return { transporter, configError: null, configSource: config.source };
+        return {
+            transporter,
+            configError: null,
+            configSource: config.source,
+            smtpUser: normalizeEmail(config.user),
+        };
     }
     transporterKey = nextKey;
     transporter = nodemailer_1.default.createTransport({
@@ -100,7 +123,12 @@ const getTransporter = () => {
             pass: config.pass,
         },
     });
-    return { transporter, configError: null, configSource: config.source };
+    return {
+        transporter,
+        configError: null,
+        configSource: config.source,
+        smtpUser: normalizeEmail(config.user),
+    };
 };
 const preview = (body) => body.slice(0, 500);
 const formatFromAddress = (email) => `"AuthenticQR" <${email}>`;
@@ -218,7 +246,7 @@ const sendIncidentEmail = async (input) => {
     const trState = getTransporter();
     const tr = trState.transporter;
     const smtpConfigSource = trState.configSource;
-    const smtpUser = normalizeEmail(process.env.SMTP_USER);
+    const smtpUser = trState.smtpUser;
     const toAddress = normalizeEmail(input.toAddress);
     const actorUser = await resolveActorUser(input.actorUser);
     const senderMode = input.senderMode || (actorUser?.email ? "actor" : "system");

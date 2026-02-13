@@ -487,6 +487,7 @@ Incident email sender behavior:
 - Communication + timeline logs include attempted sender, used sender, reply-to, delivery status, provider message id, and error details.
 - If `SMTP_HOST` is omitted, host auto-inference is attempted from `SMTP_USER` for common providers (`gmail.com`, `outlook/hotmail/live`, `yahoo`, `icloud`, `zoho`).
 - Real delivery still requires valid SMTP credentials (`SMTP_USER` + `SMTP_PASS`). For Gmail, use an App Password and enable SMTP access on the account.
+- Backward-compatible env aliases are also supported: `EMAIL_HOST/EMAIL_PORT/EMAIL_SECURE/EMAIL_USER/EMAIL_PASS` and `MAIL_HOST/MAIL_PORT/MAIL_SECURE/MAIL_USER/MAIL_PASS`.
 
 Frontend/root:
 

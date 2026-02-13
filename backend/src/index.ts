@@ -14,6 +14,16 @@ if (missingRequiredEnv.length > 0) {
   process.exit(1);
 }
 
+const smtpConfigured = Boolean(
+  (process.env.SMTP_USER || process.env.SMTP_USERNAME || process.env.EMAIL_USER || process.env.MAIL_USER) &&
+    (process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.EMAIL_PASS || process.env.MAIL_PASS || process.env.MAIL_PASSWORD)
+);
+if (!smtpConfigured) {
+  console.warn(
+    "⚠️ SMTP is not configured. Incident/customer emails will fail until SMTP_USER/SMTP_PASS (or EMAIL_/MAIL_ aliases) are set."
+  );
+}
+
 const app = express();
 app.disable("etag");
 const PORT = process.env.PORT || 4000;

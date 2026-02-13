@@ -54,6 +54,14 @@ const normalizeEmail = (value: unknown) => {
   return email || null;
 };
 
+const getFirstEnv = (...keys: string[]) => {
+  for (const key of keys) {
+    const value = String(process.env[key] || "").trim();
+    if (value) return value;
+  }
+  return "";
+};
+
 type ResolvedSmtpConfig = {
   host: string;
   user: string;
@@ -87,9 +95,9 @@ const inferHostFromUserEmail = (userEmail: string) => {
 };
 
 const resolveSmtpConfig = (): { config: ResolvedSmtpConfig | null; error?: string } => {
-  const user = String(process.env.SMTP_USER || "").trim();
-  const pass = String(process.env.SMTP_PASS || "").trim();
-  const explicitHost = String(process.env.SMTP_HOST || "").trim();
+  const user = getFirstEnv("SMTP_USER", "SMTP_USERNAME", "EMAIL_USER", "MAIL_USER");
+  const pass = getFirstEnv("SMTP_PASS", "SMTP_PASSWORD", "EMAIL_PASS", "MAIL_PASS", "MAIL_PASSWORD");
+  const explicitHost = getFirstEnv("SMTP_HOST", "EMAIL_HOST", "MAIL_HOST");
 
   if (!user || !pass) {
     return {
@@ -109,9 +117,12 @@ const resolveSmtpConfig = (): { config: ResolvedSmtpConfig | null; error?: strin
   }
 
   const defaultPort = inferred?.port || 587;
-  const parsedPort = Number(process.env.SMTP_PORT || defaultPort);
+  const parsedPort = Number(getFirstEnv("SMTP_PORT", "EMAIL_PORT", "MAIL_PORT") || defaultPort);
   const port = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : defaultPort;
-  const secure = parseBool(process.env.SMTP_SECURE, inferred ? inferred.secure : port === 465);
+  const secure = parseBool(
+    getFirstEnv("SMTP_SECURE", "EMAIL_SECURE", "MAIL_SECURE"),
+    inferred ? inferred.secure : port === 465
+  );
 
   return {
     config: {
@@ -131,16 +142,31 @@ const getTransporter = () => {
   if (parseBool(process.env.EMAIL_USE_JSON_TRANSPORT, false)) {
     transporterKey = "jsonTransport";
     transporter = nodemailer.createTransport({ jsonTransport: true });
-    return { transporter, configError: null as string | null, configSource: "json" as const };
+    return {
+      transporter,
+      configError: null as string | null,
+      configSource: "json" as const,
+      smtpUser: normalizeEmail(getFirstEnv("SMTP_USER", "SMTP_USERNAME", "EMAIL_USER", "MAIL_USER")),
+    };
   }
 
   if (!config) {
-    return { transporter: null, configError: error || "SMTP transport is not configured", configSource: null as string | null };
+    return {
+      transporter: null,
+      configError: error || "SMTP transport is not configured",
+      configSource: null as string | null,
+      smtpUser: null as string | null,
+    };
   }
 
   const nextKey = `${config.host}|${config.port}|${config.secure}|${config.user}`;
   if (transporter && transporterKey === nextKey) {
-    return { transporter, configError: null as string | null, configSource: config.source };
+    return {
+      transporter,
+      configError: null as string | null,
+      configSource: config.source,
+      smtpUser: normalizeEmail(config.user),
+    };
   }
 
   transporterKey = nextKey;
@@ -154,7 +180,12 @@ const getTransporter = () => {
     },
   });
 
-  return { transporter, configError: null as string | null, configSource: config.source };
+  return {
+    transporter,
+    configError: null as string | null,
+    configSource: config.source,
+    smtpUser: normalizeEmail(config.user),
+  };
 };
 
 const preview = (body: string) => body.slice(0, 500);
@@ -298,7 +329,7 @@ export const sendIncidentEmail = async (input: SendIncidentEmailInput): Promise<
   const trState = getTransporter();
   const tr = trState.transporter;
   const smtpConfigSource = trState.configSource;
-  const smtpUser = normalizeEmail(process.env.SMTP_USER);
+  const smtpUser = trState.smtpUser;
   const toAddress = normalizeEmail(input.toAddress);
   const actorUser = await resolveActorUser(input.actorUser);
   const senderMode = input.senderMode || (actorUser?.email ? "actor" : "system");
