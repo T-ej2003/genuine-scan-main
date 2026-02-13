@@ -781,14 +781,33 @@ class ApiClient {
   }
 
   async sendIncidentEmail(id: string, payload: { subject: string; message: string }) {
-    return this.request(`/incidents/${encodeURIComponent(id)}/email`, {
+    const primary = await this.request(`/incidents/${encodeURIComponent(id)}/email`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+
+    if (primary.success) return primary;
+
+    const errorText = String(primary.error || "").toLowerCase();
+    const isEndpointMissing =
+      errorText.includes("endpoint not found") ||
+      errorText.includes("cannot post") ||
+      errorText.includes("not found") ||
+      errorText.includes("http 404");
+
+    if (!isEndpointMissing) return primary;
+
+    return this.request(`/incidents/${encodeURIComponent(id)}/notify-customer`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
   }
 
   async notifyIncidentCustomer(id: string, payload: { subject: string; message: string }) {
-    return this.sendIncidentEmail(id, payload);
+    return this.request(`/incidents/${encodeURIComponent(id)}/notify-customer`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   }
 
   async downloadIncidentEvidence(fileName: string) {
