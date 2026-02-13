@@ -137,19 +137,6 @@ const run = async () => {
   prisma.user.findFirst = async () => ({ email: "primary-superadmin@authenticqr.com" });
   auditService.createAuditLog = async () => ({ id: "audit-1" });
 
-  setNodemailerCreateTransport(() => ({
-    sendMail: async (mail) => {
-      sendMailCalls += 1;
-      if (sendMailCalls === 1) {
-        const err = new Error("Sender address rejected: not owned by authenticated user");
-        err.code = "EENVELOPE";
-        err.responseCode = 553;
-        throw err;
-      }
-      return { messageId: "msg-123" };
-    },
-  }));
-
   const oldEnv = {
     SMTP_HOST: process.env.SMTP_HOST,
     SMTP_USER: process.env.SMTP_USER,
@@ -159,14 +146,31 @@ const run = async () => {
     EMAIL_USE_JSON_TRANSPORT: process.env.EMAIL_USE_JSON_TRANSPORT,
   };
 
-  process.env.SMTP_HOST = "smtp.example.com";
-  process.env.SMTP_USER = "smtp-user@authenticqr.com";
+  delete process.env.SMTP_HOST;
+  process.env.SMTP_USER = "smtp-user@gmail.com";
   process.env.SMTP_PASS = "smtp-pass";
-  process.env.SMTP_PORT = "587";
-  process.env.SMTP_SECURE = "false";
+  delete process.env.SMTP_PORT;
+  delete process.env.SMTP_SECURE;
   delete process.env.EMAIL_USE_JSON_TRANSPORT;
 
   incidentEmailService.__resetIncidentEmailTransporterForTests();
+
+  let transportConfig = null;
+  setNodemailerCreateTransport((config) => {
+    transportConfig = config;
+    return {
+      sendMail: async () => {
+        sendMailCalls += 1;
+        if (sendMailCalls === 1) {
+          const err = new Error("Sender address rejected: not owned by authenticated user");
+          err.code = "EENVELOPE";
+          err.responseCode = 553;
+          throw err;
+        }
+        return { messageId: "msg-123" };
+      },
+    };
+  });
 
   const emailRes = await incidentEmailService.sendIncidentEmail({
     incidentId: "incident-1",
@@ -184,13 +188,17 @@ const run = async () => {
 
   assert(emailRes.delivered === true, "Email should succeed after SMTP-user fallback retry");
   assert(sendMailCalls === 2, "Email sender should retry once with SMTP_USER");
+  assert(
+    transportConfig && transportConfig.host === "smtp.gmail.com",
+    "SMTP host should be inferred from SMTP_USER domain when SMTP_HOST is missing"
+  );
   assert(communicationRow && communicationRow.status === "SENT", "Communication row should be persisted as SENT");
   assert(
     communicationRow.attemptedFrom === "superadmin.profile@authenticqr.com",
     "Communication row should store attempted sender"
   );
   assert(
-    communicationRow.usedFrom === "smtp-user@authenticqr.com",
+    communicationRow.usedFrom === "smtp-user@gmail.com",
     "Communication row should store fallback used sender"
   );
   assert(
@@ -202,7 +210,7 @@ const run = async () => {
     "Incident timeline should persist EMAIL_SENT event"
   );
   assert(
-    incidentEventRow.eventPayload && incidentEventRow.eventPayload.used_from === "smtp-user@authenticqr.com",
+    incidentEventRow.eventPayload && incidentEventRow.eventPayload.used_from === "smtp-user@gmail.com",
     "Incident event payload should include used_from"
   );
 

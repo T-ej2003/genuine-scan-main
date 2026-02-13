@@ -9,6 +9,7 @@ const client_1 = require("@prisma/client");
 const database_1 = __importDefault(require("../config/database"));
 const auditService_1 = require("./auditService");
 let transporter = null;
+let transporterKey = null;
 const parseBool = (value, fallback = false) => {
     const normalized = String(value ?? "").trim().toLowerCase();
     if (["1", "true", "yes", "on"].includes(normalized))
@@ -21,30 +22,85 @@ const normalizeEmail = (value) => {
     const email = String(value || "").trim().toLowerCase();
     return email || null;
 };
-const smtpPort = Number(process.env.SMTP_PORT || "587");
-const getTransporter = () => {
-    if (transporter)
-        return transporter;
-    if (parseBool(process.env.EMAIL_USE_JSON_TRANSPORT, false)) {
-        transporter = nodemailer_1.default.createTransport({ jsonTransport: true });
-        return transporter;
+const inferHostFromUserEmail = (userEmail) => {
+    const domain = String(userEmail.split("@")[1] || "").toLowerCase().trim();
+    if (!domain)
+        return null;
+    if (domain === "gmail.com" || domain === "googlemail.com") {
+        return { host: "smtp.gmail.com", port: 465, secure: true };
     }
-    const host = String(process.env.SMTP_HOST || "").trim();
+    if (["outlook.com", "hotmail.com", "live.com", "msn.com", "office365.com"].includes(domain)) {
+        return { host: "smtp.office365.com", port: 587, secure: false };
+    }
+    if (domain.includes("yahoo.")) {
+        return { host: "smtp.mail.yahoo.com", port: 465, secure: true };
+    }
+    if (["icloud.com", "me.com", "mac.com"].includes(domain)) {
+        return { host: "smtp.mail.me.com", port: 587, secure: false };
+    }
+    if (domain === "zoho.com" || domain.endsWith(".zoho.com")) {
+        return { host: "smtp.zoho.com", port: 465, secure: true };
+    }
+    return null;
+};
+const resolveSmtpConfig = () => {
     const user = String(process.env.SMTP_USER || "").trim();
     const pass = String(process.env.SMTP_PASS || "").trim();
-    const secure = parseBool(process.env.SMTP_SECURE, smtpPort === 465);
-    if (!host || !user || !pass)
-        return null;
-    transporter = nodemailer_1.default.createTransport({
-        host,
-        port: smtpPort,
-        secure,
-        auth: {
+    const explicitHost = String(process.env.SMTP_HOST || "").trim();
+    if (!user || !pass) {
+        return {
+            config: null,
+            error: "SMTP transport is not configured (missing SMTP_USER/SMTP_PASS)",
+        };
+    }
+    const inferred = explicitHost ? null : inferHostFromUserEmail(user);
+    const host = explicitHost || inferred?.host || "";
+    if (!host) {
+        return {
+            config: null,
+            error: "SMTP transport is not configured (missing SMTP_HOST and could not infer provider from SMTP_USER)",
+        };
+    }
+    const defaultPort = inferred?.port || 587;
+    const parsedPort = Number(process.env.SMTP_PORT || defaultPort);
+    const port = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : defaultPort;
+    const secure = parseBool(process.env.SMTP_SECURE, inferred ? inferred.secure : port === 465);
+    return {
+        config: {
+            host,
             user,
             pass,
+            port,
+            secure,
+            source: explicitHost ? "env" : "inferred",
+        },
+    };
+};
+const getTransporter = () => {
+    const { config, error } = resolveSmtpConfig();
+    if (parseBool(process.env.EMAIL_USE_JSON_TRANSPORT, false)) {
+        transporterKey = "jsonTransport";
+        transporter = nodemailer_1.default.createTransport({ jsonTransport: true });
+        return { transporter, configError: null, configSource: "json" };
+    }
+    if (!config) {
+        return { transporter: null, configError: error || "SMTP transport is not configured", configSource: null };
+    }
+    const nextKey = `${config.host}|${config.port}|${config.secure}|${config.user}`;
+    if (transporter && transporterKey === nextKey) {
+        return { transporter, configError: null, configSource: config.source };
+    }
+    transporterKey = nextKey;
+    transporter = nodemailer_1.default.createTransport({
+        host: config.host,
+        port: config.port,
+        secure: config.secure,
+        auth: {
+            user: config.user,
+            pass: config.pass,
         },
     });
-    return transporter;
+    return { transporter, configError: null, configSource: config.source };
 };
 const preview = (body) => body.slice(0, 500);
 const formatFromAddress = (email) => `"AuthenticQR" <${email}>`;
@@ -159,7 +215,9 @@ const buildMailOptions = (input) => {
     return options;
 };
 const sendIncidentEmail = async (input) => {
-    const tr = getTransporter();
+    const trState = getTransporter();
+    const tr = trState.transporter;
+    const smtpConfigSource = trState.configSource;
     const smtpUser = normalizeEmail(process.env.SMTP_USER);
     const toAddress = normalizeEmail(input.toAddress);
     const actorUser = await resolveActorUser(input.actorUser);
@@ -194,7 +252,7 @@ const sendIncidentEmail = async (input) => {
         if (!toAddress)
             throw new Error("Missing recipient address");
         if (!tr)
-            throw new Error("SMTP transport is not configured");
+            throw new Error(trState.configError || "SMTP transport is not configured");
         if (!usedFrom)
             throw new Error("SMTP sender account is not configured");
         if (senderMode === "actor" && !attemptedFrom) {
@@ -279,6 +337,7 @@ const sendIncidentEmail = async (input) => {
                 error: errMessage,
                 fallback_used: fallbackUsed,
                 sender_mode: senderMode,
+                smtp_config_source: smtpConfigSource,
             },
         },
     });
@@ -301,6 +360,7 @@ const sendIncidentEmail = async (input) => {
             error: errMessage,
             fallbackUsed,
             senderMode,
+            smtpConfigSource,
         },
     });
     return {
@@ -333,6 +393,7 @@ const getSuperadminAlertEmails = async () => {
 exports.getSuperadminAlertEmails = getSuperadminAlertEmails;
 const __resetIncidentEmailTransporterForTests = () => {
     transporter = null;
+    transporterKey = null;
 };
 exports.__resetIncidentEmailTransporterForTests = __resetIncidentEmailTransporterForTests;
 //# sourceMappingURL=incidentEmailService.js.map

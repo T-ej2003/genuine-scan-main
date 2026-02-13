@@ -485,6 +485,8 @@ Incident email sender behavior:
 - Admin-triggered incident emails use the logged-in admin profile email from DB as the attempted sender.
 - If SMTP provider rejects sender mismatch (common with Gmail SMTP), delivery retries once with `SMTP_USER` as `from` and the admin email as `reply-to`.
 - Communication + timeline logs include attempted sender, used sender, reply-to, delivery status, provider message id, and error details.
+- If `SMTP_HOST` is omitted, host auto-inference is attempted from `SMTP_USER` for common providers (`gmail.com`, `outlook/hotmail/live`, `yahoo`, `icloud`, `zoho`).
+- Real delivery still requires valid SMTP credentials (`SMTP_USER` + `SMTP_PASS`). For Gmail, use an App Password and enable SMTP access on the account.
 
 Frontend/root:
 
