@@ -95,10 +95,58 @@ Open app:
 │   └── tests/                        # Lightweight backend tests
 ├── docs/
 │   └── USER_MANUAL.md                # Role-based user SOPs
+├── scripts/
+│   └── docs-screenshots.spec.ts      # Best-effort screenshot capture for help docs
 ├── docker-compose.yml
 ├── Dockerfile                        # Frontend image
 ├── backend/Dockerfile                # Backend image
 └── nginx.conf                        # Frontend reverse proxy for /api
+```
+
+## User Documentation
+
+In-app help pages:
+
+- Open `http://localhost:8080/help` for the documentation home.
+- Open `http://localhost:8080/help/:role` for a specific page:
+  - `/help/getting-access`
+  - `/help/setting-password`
+  - `/help/super-admin`
+  - `/help/licensee-admin`
+  - `/help/manufacturer`
+  - `/help/customer`
+
+Screenshot workflow:
+
+- Add image files to `public/docs/`.
+- The help pages auto-load `/docs/<filename>` if it exists.
+- If a screenshot is missing, the page shows a placeholder card with the required filename.
+- Reference list: `public/docs/README.md` and `/help` screenshot inventory table.
+
+Automated capture (best effort):
+
+```bash
+npm run docs:screenshots
+```
+
+Script file: `scripts/docs-screenshots.spec.ts`
+
+- This script captures help pages and attempts role flows.
+- For role-specific captures, set test login env vars:
+  - `DOCS_BASE_URL` (default `http://localhost:8080`)
+  - `DOCS_SUPERADMIN_EMAIL`
+  - `DOCS_SUPERADMIN_PASSWORD`
+  - `DOCS_LICENSEE_EMAIL`
+  - `DOCS_LICENSEE_PASSWORD`
+  - `DOCS_MANUFACTURER_EMAIL`
+  - `DOCS_MANUFACTURER_PASSWORD`
+  - `DOCS_CUSTOMER_TEST_CODE` (sample QR code for verify page)
+
+If Playwright is not installed locally, install once:
+
+```bash
+npm i -D @playwright/test
+npx playwright install
 ```
 
 ## 4. Architecture

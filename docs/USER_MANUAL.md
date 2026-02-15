@@ -1,8 +1,8 @@
 # AuthenticQR User Manual
 
 Version: 1.0  
-Audience: Licensee Admin, Manufacturer  
-Last Updated: 2026-02-09
+Audience: Customer, Licensee Admin, Manufacturer  
+Last Updated: 2026-02-15
 
 ## 1. Purpose
 This manual defines the standard operating workflow for managing QR code allocations, manufacturer assignments, secure printing, and product verification in AuthenticQR.
@@ -11,7 +11,20 @@ The platform is designed for anti-counterfeit control:
 - Licensee receives dormant QR inventory.
 - Licensee assigns quantities to manufacturers.
 - Manufacturer prints under server-controlled lock.
-- Consumer scan validates authenticity and flags reuse.
+- Customer scan validates authenticity and classifies risk as first scan, legit repeat, or possible duplicate.
+
+## 1.1 In-app Help Pages
+
+Use the in-app documentation for screenshot-based guidance:
+- `/help`
+- `/help/getting-access`
+- `/help/setting-password`
+- `/help/super-admin`
+- `/help/licensee-admin`
+- `/help/manufacturer`
+- `/help/customer`
+
+Screenshot files are served from `/public/docs/`. Missing files show placeholders in the help pages.
 
 ## 2. Role Access
 
@@ -37,13 +50,29 @@ Cannot:
 - Request QR inventory directly.
 - Access licensee-wide admin functions.
 
+### Customer (Public Verify User)
+Can:
+- Scan a QR by opening verify URL or signed token URL.
+- Verify authenticity status with product and brand details.
+- Re-scan the same genuine product and get `Verified Again` (legit repeat), not automatic fraud messaging.
+- Optionally continue as guest or sign in (Google or email OTP).
+- Claim product ownership after sign-in to improve duplicate protection.
+- View scan history summary: total scans, first/last verification time, and coarse location hints.
+- Report suspected counterfeit/duplicate with optional photos or proof of purchase.
+- Contact support from the verify page using brand support details.
+
+Cannot:
+- Access admin dashboards, inventory tools, or tenant data.
+- View precise GPS traces (only coarse city/country style location context is shown).
+- Override fraud classification or unblock codes.
+
 ## 3. Core Data Rules
 
 1. QR inventory from Super Admin is stored as `DORMANT`.
 2. Assignment is quantity-based and always allocated from the next available codes.
 3. Overlapping ranges are prevented by server-side transaction locking.
 4. Manufacturer printing is one-time controlled by print job token flow.
-5. First valid consumer scan redeems; later scans show fraud/reuse warning.
+5. First valid customer scan is `FIRST_SCAN`; later scans are classified as `LEGIT_REPEAT` or `SUSPICIOUS_DUPLICATE`.
 
 ## 4. Licensee Admin Guide
 
@@ -153,13 +182,51 @@ If status does not update:
 2. Check network/API connectivity.
 3. Contact Licensee Admin with job ID and timestamp.
 
-## 6. Consumer Scan Outcome (Reference)
+## 6. Customer Guide (Verify Page)
 
-When a customer scans a QR:
-- First valid scan: authentic response with brand and manufacturer details.
-- Repeat scan: fraud/reuse warning with redemption context.
-- Invalid/tampered token: rejected as invalid.
-- Not printed/blocked states: warning or invalid outcome based on policy.
+### 6.1 Open Verification
+1. Scan QR code with phone camera or open `/verify/<code>` URL.
+2. Wait for authenticity and risk checks to complete.
+
+### 6.2 Understand Verification Result
+
+Possible states:
+- `Verified Authentic` (`FIRST_SCAN`): first recorded verification of this QR.
+- `Verified Again` (`LEGIT_REPEAT`): repeat scan by same customer/account/device pattern.
+- `Possible Duplicate` (`SUSPICIOUS_DUPLICATE`): unusual cross-identity/device/location pattern; review carefully.
+- `Blocked by Security`: code blocked by policy or fraud controls.
+- `Not Ready for Customer Use`: code not printed/activated for customer use.
+
+### 6.3 Optional Sign-In for Better Protection
+Customers may:
+1. Sign in with Google (if configured), or
+2. Continue with email OTP.
+
+Benefits:
+- Claim product ownership.
+- Increase confidence for future repeat scans from same customer.
+- Stronger warning when other identities scan an owned product.
+
+### 6.4 Claim Product Ownership
+1. Sign in on verify page.
+2. Click `Claim this product`.
+3. Ownership is linked to customer account and stored with claim timestamp.
+
+### 6.5 Report Suspected Counterfeit
+1. Click `Report suspected counterfeit`.
+2. Add what was observed.
+3. Optionally attach purchase proof/photos.
+4. Submit report.
+
+System behavior:
+- Scan metadata (classification, reasons, summary) is attached automatically.
+- Incident ticket is created for admin workflow.
+- Superadmin alert email is sent through configured email provider.
+
+### 6.6 Privacy Note
+- Sign-in is optional.
+- Platform stores scan events to detect duplicates.
+- Coarse location context may be stored; no precise tracking UI is shown to customers.
 
 ## 7. Operational SOP
 
@@ -168,6 +235,7 @@ Daily:
 2. Licensee Admin assigns only required quantity to each manufacturer.
 3. Manufacturer creates print jobs only for current production run.
 4. Licensee Admin checks audit logs for unexpected batch events.
+5. Incident team reviews `Possible Duplicate` customer reports and follows escalation workflow.
 
 Weekly:
 1. Review printed vs assigned delta by manufacturer.
@@ -197,17 +265,31 @@ Checks:
 
 ### Issue: Scan shows already redeemed
 Meaning:
-- This is expected for second and later scans of same QR.
-- Treat as potential duplicate label usage if attached to different physical item.
+- Legacy wording has been replaced in current verify UX.
+- Same customer/device repeat scans should show `Verified Again`.
+- `Possible Duplicate` should appear when identity/device/location patterns look inconsistent.
+
+### Issue: Customer cannot claim ownership
+Checks:
+1. Confirm customer is signed in (Google or OTP).
+2. Verify QR exists and is scannable.
+3. If already claimed by another account, escalate through fraud report flow.
+
+### Issue: Customer sees `Possible Duplicate` but owns product
+Checks:
+1. Ask customer to sign in and claim ownership.
+2. Re-scan from the same account/device.
+3. If warning persists unexpectedly, collect QR code, timestamp, and report reference for investigation.
 
 ## 9. Security Compliance Notes
 
 Implemented controls:
 - Signed QR token validation.
-- One-time redemption policy.
+- Identity-aware scan classification (`FIRST_SCAN`, `LEGIT_REPEAT`, `SUSPICIOUS_DUPLICATE`).
+- Optional customer ownership claim linking.
 - Server-side state transitions and audit logging.
 - Print job lock and one-time download behavior.
-- Rate limiting and scan metadata tracking.
+- Rate limiting and scan metadata tracking (including coarse location and hashed IP).
 
 Operational caveat:
 - Physical image copying cannot be prevented absolutely.
