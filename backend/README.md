@@ -50,6 +50,15 @@ npm start
 
 Server runs at `http://localhost:3001`
 
+### Customer Identity Env (Optional but Recommended)
+
+- `SESSION_SECRET`
+- `GOOGLE_CLIENT_ID`
+- `CUSTOMER_OTP_TTL_MINUTES`
+- `CUSTOMER_OTP_MAX_ATTEMPTS`
+- `CUSTOMER_OTP_RATE_WINDOW_MINUTES`
+- `CUSTOMER_OTP_RATE_MAX_PER_WINDOW`
+
 ## API Endpoints
 
 ### Public
@@ -57,7 +66,15 @@ Server runs at `http://localhost:3001`
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/auth/login` | User login |
+| POST | `/api/auth/google` | Customer Google sign-in (ID token) |
+| POST | `/api/auth/email/request-otp` | Customer email OTP request |
+| POST | `/api/auth/email/verify-otp` | Customer email OTP verify |
+| GET | `/api/me` | Get current customer session |
 | GET | `/api/verify/:code` | Public QR verification |
+| POST | `/api/scan/:code` | Record scan + classify risk by code |
+| GET | `/api/scan?t=...` | Record scan + classify risk by signed token |
+| POST | `/api/claim/:code` | Claim ownership for signed-in customer |
+| POST | `/api/fraud-report` | Create fraud report + incident ticket |
 
 ### Authenticated
 

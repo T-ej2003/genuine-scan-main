@@ -312,8 +312,16 @@ All routes below are mounted under `/api` unless noted.
 Public:
 
 - `POST /auth/login`
+- `POST /auth/google`
+- `POST /auth/email/request-otp`
+- `POST /auth/email/verify-otp`
+- `POST /auth/logout-customer`
+- `GET /me`
 - `GET /verify/:code`
+- `POST /scan/:code`
 - `GET /scan?t=...`
+- `POST /claim/:code`
+- `POST /fraud-report`
 - `GET /health`
 
 Authenticated:
@@ -440,10 +448,21 @@ Optional:
 - `PORT` (default `4000`)
 - `NODE_ENV` (`development`/`production`)
 - `JWT_EXPIRES_IN` (default `7d`)
+- `SESSION_SECRET` (recommended separate secret for customer cookie sessions)
 - `CORS_ORIGIN` (comma-separated origins)
 - `PUBLIC_SCAN_WEB_BASE_URL`
 - `PUBLIC_VERIFY_WEB_BASE_URL`
 - `SCAN_RATE_LIMIT_PER_MIN` (default `60`)
+- `GOOGLE_CLIENT_ID` (required for Google Sign-In ID token verification)
+- `GOOGLE_CLIENT_SECRET` (optional; only needed if you adopt OAuth code flow)
+- `AUTH_CALLBACK_URL` (optional; only needed for OAuth code flow)
+- `CUSTOMER_SESSION_TTL_DAYS` (default `30`)
+- `ANON_VISITOR_TTL_DAYS` (default `180`)
+- `CUSTOMER_OTP_TTL_MINUTES` (default `10`)
+- `CUSTOMER_OTP_MAX_ATTEMPTS` (default `5`)
+- `CUSTOMER_OTP_RATE_WINDOW_MINUTES` (default `10`)
+- `CUSTOMER_OTP_RATE_MAX_PER_WINDOW` (default `5`)
+- `CUSTOMER_OTP_SALT` (optional; defaults to `SESSION_SECRET` / `JWT_SECRET`)
 - `QR_TOKEN_EXP_DAYS` (default `3650`)
 - `PRINT_JOB_INLINE_TOKENS_LIMIT` (default `2500`; max inline tokens returned from print-job creation response)
 - `QR_ZIP_HIGH_VOLUME_THRESHOLD` (default `100000`)
@@ -481,7 +500,7 @@ Optional:
 
 Incident email sender behavior:
 
-- `EMAIL_FROM` is no longer used.
+- System-generated fraud alerts use the active superadmin profile email as the attempted sender (`from`) source.
 - Admin-triggered incident emails use the logged-in admin profile email from DB as the attempted sender.
 - If SMTP provider rejects sender mismatch (common with Gmail SMTP), delivery retries once with `SMTP_USER` as `from` and the admin email as `reply-to`.
 - Communication + timeline logs include attempted sender, used sender, reply-to, delivery status, provider message id, and error details.
@@ -492,6 +511,7 @@ Incident email sender behavior:
 Frontend/root:
 
 - `VITE_API_URL` (defaults to `/api`)
+- `VITE_GOOGLE_CLIENT_ID` (enables Google sign-in button on public verify page)
 
 Vite dev proxy (`vite.config.ts`):
 
@@ -544,7 +564,9 @@ Manufacturer:
 Consumer/public:
 
 1. Scan tokenized URL (`/scan?t=...`) or verify plain code (`/verify/:code`).
-2. Receive authenticity result + warning context where applicable.
+2. Platform classifies scan as `FIRST_SCAN`, `LEGIT_REPEAT`, or `SUSPICIOUS_DUPLICATE`.
+3. Legit repeats remain authentic (`Verified Again`), suspicious duplicates surface fraud CTAs.
+4. Optional sign-in + claim ownership strengthens future duplicate detection.
 
 ## 13. Scripts and Commands
 
@@ -662,6 +684,7 @@ Backend tests (`backend/package.json`):
 - Builds TS output.
 - Runs `backend/tests/qrService.test.js`.
 - Runs `backend/tests/scanSecurity.test.js`.
+- Runs `backend/tests/scanRiskService.test.js`.
 
 Frontend tests:
 
@@ -694,14 +717,14 @@ If you are onboarding and want the fastest deep understanding, read these in ord
 
 1. `backend/src/routes/index.ts` (full API surface + guards)
 2. `backend/prisma/schema.prisma` (data model, enums, relations)
-3. `backend/src/controllers/scanController.ts` (scan security path)
-4. `backend/src/services/policyEngineService.ts` (anomaly detection + auto-block)
-5. `backend/src/services/analyticsService.ts` (SLA and risk scoring)
-6. `backend/src/services/immutableAuditExportService.ts` (audit package)
-7. `src/pages/Dashboard.tsx` (main UX entry point)
-8. `src/pages/QRTracking.tsx` (ops tracking UX)
-9. `src/lib/api-client.ts` (frontend API contract)
-10. `docs/USER_MANUAL.md` (operator SOP)
+3. `backend/src/controllers/verifyController.ts` (public code verification path)
+4. `backend/src/controllers/scanController.ts` (signed token scan path)
+5. `backend/src/services/scanRiskService.ts` (repeat-vs-duplicate classifier)
+6. `backend/src/services/policyEngineService.ts` (anomaly detection + auto-block)
+7. `backend/src/services/analyticsService.ts` (SLA and risk scoring)
+8. `backend/src/services/immutableAuditExportService.ts` (audit package)
+9. `src/pages/Verify.tsx` (public verification UX with claim/report flows)
+10. `src/lib/api-client.ts` (frontend API contract)
 
 ## 19. Connectivity and QR ZIP Download Speed Guide
 
