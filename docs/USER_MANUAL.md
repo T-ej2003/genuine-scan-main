@@ -1,7 +1,7 @@
 # AuthenticQR User Manual
 
 Version: 1.0  
-Audience: Customer, Licensee Admin, Manufacturer  
+Audience: Super Admin, Licensee Admin, Manufacturer, Customer  
 Last Updated: 2026-02-15
 
 ## 1. Purpose
@@ -26,7 +26,77 @@ Use the in-app documentation for screenshot-based guidance:
 
 Screenshot files are served from `/public/docs/`. Missing files show placeholders in the help pages.
 
+## 1.2 Getting Access (by user type)
+
+If you are unsure which role you have, ask the person who created your account.
+
+### Super Admin
+- Created by: an existing Super Admin (or during initial platform setup).
+- Login: `/login` with the email/password provided.
+- If you are locked out: contact another Super Admin (there is no self-serve reset today).
+
+![Super Admin login screen](../public/docs/access-super-admin-login.png)
+
+### Licensee/Admin (brand/company)
+- Created by: Super Admin.
+- Credentials are provided out-of-band (there is no invite-acceptance flow today).
+- Login: `/login`.
+
+![Licensee creation form (includes first licensee admin user)](../public/docs/access-licensee-admin-created-user.png)
+
+### Manufacturer (factory user)
+- Created by: Super Admin or Licensee/Admin.
+- Login: `/login` with credentials provided by your admin.
+
+![Manufacturer creation form](../public/docs/access-manufacturer-create-form.png)
+
+### Customer (scanner / verification page)
+- No admin-created account is required to verify.
+- Open the QR link printed on the product (for example `/verify/<code>` or `/scan?t=...`).
+- Optional: sign in (Google or Email OTP) to claim ownership and improve protection.
+
+![Public verify page entry](../public/docs/access-customer-verify-entry.png)
+
+## 1.3 Setting Your Password / Signing In (by user type)
+
+### Super Admin, Licensee/Admin, Manufacturer (dashboard users)
+
+Change password:
+1. Sign in.
+2. Open `Account` (top-right user menu).
+3. Open `Security`.
+4. Set a new password.
+
+Reset password:
+- Current behavior: there is no “Forgot password” email flow in-app.
+- Contact your admin (or another Super Admin) to reset access.
+
+![Super Admin account security](../public/docs/password-superadmin-account-security.png)
+
+![Licensee/Admin account security](../public/docs/password-licensee-change-password.png)
+
+![Manufacturer account security](../public/docs/password-manufacturer-account-security.png)
+
+### Customer (verification page)
+Customers do not set a password.
+- Email OTP: request a one-time code and enter it to sign in.
+- Google: if enabled by the brand, use Google sign-in.
+
+![Request email OTP](../public/docs/password-customer-otp-request.png)
+
+![Verify email OTP](../public/docs/password-customer-otp-verify.png)
+
 ## 2. Role Access
+
+### Super Admin
+Can:
+- Create and manage licensees.
+- Allocate QR inventory ranges to licensee pools.
+- Approve or reject licensee QR requests.
+- View cross-tenant incidents, QR tracking, and audit logs.
+
+Cannot:
+- There is no self-service password reset flow today (reset is handled by an existing Super Admin).
 
 ### Licensee Admin
 Can:
@@ -74,14 +144,62 @@ Cannot:
 4. Manufacturer printing is one-time controlled by print job token flow.
 5. First valid customer scan is `FIRST_SCAN`; later scans are classified as `LEGIT_REPEAT` or `SUSPICIOUS_DUPLICATE`.
 
-## 4. Licensee Admin Guide
+## 4. Super Admin Guide
 
 ### 4.1 Login
+1. Open `/login`.
+2. Sign in with Super Admin credentials.
+3. After sign-in, you land on the dashboard.
+
+![Super Admin login screen](../public/docs/access-super-admin-login.png)
+
+### 4.2 Create Licensee + First Admin User
+Path: `Licensees`
+
+Steps:
+1. Click `Add Licensee`.
+2. Fill licensee details (name, prefix, brand/support fields).
+3. Fill the first Licensee Admin user (name, email, password).
+4. Create.
+
+![Create licensee form](../public/docs/superadmin-create-licensee-form.png)
+
+### 4.3 Allocate QR Range to a Licensee
+Path: `Licensees` → row `Actions` → `Allocate QR Range`
+
+Notes:
+- This adds new QR codes to the licensee pool in `DORMANT` state.
+- Ranges are unique; allocate carefully.
+
+![Allocate QR range dialog](../public/docs/superadmin-allocate-qr-range.png)
+
+### 4.4 Approve QR Requests
+Path: `QR Requests`
+
+Steps:
+1. Filter `Status` to `Pending`.
+2. Click `Approve` for a request.
+3. Confirm approval.
+
+![Approve QR request](../public/docs/superadmin-approve-qr-request.png)
+
+### 4.5 Monitor Incidents and Risk Signals
+Paths:
+- `Incidents` (customer fraud reports)
+- `QR Tracking` (scan activity and policy alerts)
+
+![Incidents list](../public/docs/superadmin-incident-list.png)
+
+![QR tracking and policy alerts](../public/docs/superadmin-policy-alerts.png)
+
+## 5. Licensee Admin Guide
+
+### 5.1 Login
 1. Open the web app URL.
 2. Sign in with licensee admin email and password.
 3. Confirm left navigation includes `QR Requests`, `Batches`, `Manufacturers`, `Audit Logs`.
 
-### 4.2 Manufacturers
+### 5.2 Manufacturers
 Path: `Manufacturers`
 
 Actions:
@@ -95,7 +213,9 @@ Expected behavior:
 - Only manufacturers linked to your licensee are listed.
 - If the primary manufacturer endpoint is unavailable, app falls back to user list endpoint automatically.
 
-### 4.3 Request New QR Inventory
+![Create manufacturer form](../public/docs/licensee-create-manufacturer.png)
+
+### 5.3 Request New QR Inventory
 Path: `QR Requests`
 
 Actions:
@@ -112,7 +232,9 @@ Notes:
 - Requesting by range is deprecated for licensee workflow.
 - Quantity is the only supported request mode.
 
-### 4.4 Assign Received Batches to Manufacturer
+![Submit QR request](../public/docs/licensee-qr-request-submit.png)
+
+### 5.4 Assign Received Batches to Manufacturer
 Path: `Batches`
 
 Actions:
@@ -127,7 +249,9 @@ Allocation behavior:
 - No overlap is allowed.
 - Remaining quantity stays available for later assignments.
 
-### 4.5 Audit Logs
+![Assign batch to manufacturer](../public/docs/licensee-assign-batch-manufacturer.png)
+
+### 5.5 Audit Logs
 Path: `Audit Logs`
 
 Scope:
@@ -139,21 +263,36 @@ Use audit logs for:
 - Assignment verification.
 - Print/download investigation.
 
-## 5. Manufacturer Guide
+### 5.6 Incidents and QR Tracking
+Paths:
+- `Incidents` (customer fraud reports)
+- `QR Tracking` (scan history and risk patterns)
 
-### 5.1 Login
+Use this for:
+- Reviewing customer reports tied to your licensee.
+- Investigating “Possible Duplicate” warnings using scan history and filters.
+
+![Licensee incidents overview](../public/docs/licensee-incidents-overview.png)
+
+![Licensee QR tracking filtered](../public/docs/licensee-qr-tracking-filtered.png)
+
+## 6. Manufacturer Guide
+
+### 6.1 Login
 1. Open app URL.
 2. Sign in with manufacturer credentials.
 3. Confirm access to assigned batch operations.
 
-### 5.2 View Assigned Batches
+### 6.2 View Assigned Batches
 Path: `Batches`
 
 You should see:
 - Batches assigned to your manufacturer account only.
 - Quantity and print status indicators.
 
-### 5.3 Create Print Job
+![Manufacturer batches list](../public/docs/manufacturer-batches-list.png)
+
+### 6.3 Create Print Job
 1. Open target batch.
 2. Click `Create Print Job`.
 3. Enter quantity to print.
@@ -163,7 +302,9 @@ System behavior:
 - Server generates signed tokens for selected QR records.
 - Batch reservation follows available unprinted QR count.
 
-### 5.4 Download Print Pack
+![Create print job dialog](../public/docs/manufacturer-create-print-job.png)
+
+### 6.4 Download Print Pack
 1. Click `Download ZIP` for created job.
 2. Save and print labels.
 
@@ -172,7 +313,9 @@ Security behavior:
 - Server auto-confirms print state after successful download.
 - Re-download attempt is blocked.
 
-### 5.5 Print Confirmation
+![Download print pack](../public/docs/manufacturer-download-print-pack.png)
+
+### 6.5 Print Confirmation
 Expected:
 - Batch/QR statuses update to printed automatically.
 - No manual duplicate confirmation required in normal flow.
@@ -182,13 +325,15 @@ If status does not update:
 2. Check network/API connectivity.
 3. Contact Licensee Admin with job ID and timestamp.
 
-## 6. Customer Guide (Verify Page)
+![Print confirmed status](../public/docs/manufacturer-print-confirmed-status.png)
 
-### 6.1 Open Verification
+## 7. Customer Guide (Verify Page)
+
+### 7.1 Open Verification
 1. Scan QR code with phone camera or open `/verify/<code>` URL.
 2. Wait for authenticity and risk checks to complete.
 
-### 6.2 Understand Verification Result
+### 7.2 Understand Verification Result
 
 Possible states:
 - `Verified Authentic` (`FIRST_SCAN`): first recorded verification of this QR.
@@ -197,7 +342,13 @@ Possible states:
 - `Blocked by Security`: code blocked by policy or fraud controls.
 - `Not Ready for Customer Use`: code not printed/activated for customer use.
 
-### 6.3 Optional Sign-In for Better Protection
+![First verification](../public/docs/customer-verify-first-scan.png)
+
+![Legit repeat verification](../public/docs/customer-verify-again-scan.png)
+
+![Possible duplicate warning](../public/docs/customer-possible-duplicate.png)
+
+### 7.3 Optional Sign-In for Better Protection
 Customers may:
 1. Sign in with Google (if configured), or
 2. Continue with email OTP.
@@ -207,12 +358,16 @@ Benefits:
 - Increase confidence for future repeat scans from same customer.
 - Stronger warning when other identities scan an owned product.
 
-### 6.4 Claim Product Ownership
+![OTP sign-in panel](../public/docs/customer-signin-otp.png)
+
+### 7.4 Claim Product Ownership
 1. Sign in on verify page.
 2. Click `Claim this product`.
 3. Ownership is linked to customer account and stored with claim timestamp.
 
-### 6.5 Report Suspected Counterfeit
+![Claim product ownership](../public/docs/customer-claim-product.png)
+
+### 7.5 Report Suspected Counterfeit
 1. Click `Report suspected counterfeit`.
 2. Add what was observed.
 3. Optionally attach purchase proof/photos.
@@ -223,12 +378,14 @@ System behavior:
 - Incident ticket is created for admin workflow.
 - Superadmin alert email is sent through configured email provider.
 
-### 6.6 Privacy Note
+![Report suspected counterfeit form](../public/docs/customer-report-counterfeit-form.png)
+
+### 7.6 Privacy Note
 - Sign-in is optional.
 - Platform stores scan events to detect duplicates.
 - Coarse location context may be stored; no precise tracking UI is shown to customers.
 
-## 7. Operational SOP
+## 8. Operational SOP
 
 Daily:
 1. Licensee Admin reviews pending received inventory.
@@ -242,7 +399,7 @@ Weekly:
 2. Investigate repeated scan warnings.
 3. Deactivate unused manufacturer accounts.
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 ### Issue: Manufacturers list is empty
 Checks:
@@ -281,7 +438,7 @@ Checks:
 2. Re-scan from the same account/device.
 3. If warning persists unexpectedly, collect QR code, timestamp, and report reference for investigation.
 
-## 9. Security Compliance Notes
+## 10. Security Compliance Notes
 
 Implemented controls:
 - Signed QR token validation.
@@ -295,7 +452,7 @@ Operational caveat:
 - Physical image copying cannot be prevented absolutely.
 - System detects and flags reuse so duplicates cannot be validated repeatedly.
 
-## 10. Escalation Matrix
+## 11. Escalation Matrix
 
 1. Manufacturer operation issue: contact Licensee Admin.
 2. Cross-tenant, account, or policy issue: escalate to Super Admin.
