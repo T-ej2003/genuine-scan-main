@@ -128,6 +128,7 @@ Can:
 - Optionally continue as guest or sign in (Google or email OTP).
 - Claim product ownership after sign-in to improve duplicate protection.
 - View scan history summary: total scans, first/last verification time, and coarse location hints.
+- Submit optional product feedback (rating + short comment) for the brand/licensee.
 - Report suspected counterfeit/duplicate with optional photos or proof of purchase.
 - Contact support from the verify page using brand support details.
 
@@ -361,11 +362,13 @@ Benefits:
 ![OTP sign-in panel](../public/docs/customer-signin-otp.png)
 
 ### 7.4 Claim Product Ownership
-1. Sign in on verify page.
-2. Click `Claim this product`.
-3. Ownership is linked to customer account and stored with claim timestamp.
+1. Sign in on verify page (Google or email OTP).
+2. Scroll to the `Ownership protection` section.
+3. If you see `Claim this product`, tap it to link the item to your account.
+4. If you see `Claimed by you`, you are already protected on this account.
+5. If you see “already claimed by another account”, use the fraud report flow so the team can investigate.
 
-![Claim product ownership](../public/docs/customer-claim-product.png)
+![Ownership protection and claiming](../public/docs/customer-claim-product.png)
 
 ### 7.5 Report Suspected Counterfeit
 1. Click `Report suspected counterfeit`.

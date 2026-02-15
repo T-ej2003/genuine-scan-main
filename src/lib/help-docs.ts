@@ -621,7 +621,7 @@ const docs: Record<HelpDocSlug, HelpDoc> = {
           },
           {
             file: "customer-claim-product.png",
-            capture: "Verify page ownership panel with claim button or claimed badge.",
+            capture: "Verify page ownership panel (sign in first, then claim button/claimed badge appears).",
             alt: "Customer claim ownership",
           },
         ],

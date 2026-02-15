@@ -351,6 +351,17 @@ const tryClick = async (page: Page, selector: string) => {
   return true;
 };
 
+const waitForListActionsReady = async (page: Page, timeoutMs = 20_000) => {
+  // Many list pages render a "Loading..." row first. Wait for it to disappear, then ensure row actions exist.
+  await page
+    .locator("text=Loading...")
+    .first()
+    .waitFor({ state: "detached", timeout: timeoutMs })
+    .catch(() => undefined);
+
+  await page.getByRole("button", { name: /actions/i }).first().waitFor({ state: "visible", timeout: timeoutMs });
+};
+
 const openFirstActionsAndPick = async (page: Page, itemName: RegExp) => {
   const buttons = page.getByRole("button", { name: /actions/i });
   const count = await buttons.count().catch(() => 0);
@@ -365,6 +376,7 @@ const openFirstActionsAndPick = async (page: Page, itemName: RegExp) => {
     await button.click();
 
     const menuItem = page.getByRole("menuitem", { name: itemName }).first();
+    await menuItem.waitFor({ state: "visible", timeout: 2_000 }).catch(() => undefined);
     const itemVisible = await menuItem.isVisible().catch(() => false);
     const itemEnabled = itemVisible ? await menuItem.isEnabled().catch(() => false) : false;
     if (!itemVisible || !itemEnabled) {
@@ -449,15 +461,25 @@ const getFreshCustomerCode = (settings: BackendSettings | null) => {
   return fallback || "TT0000000105";
 };
 
-const resolveOtpFromDb = (settings: BackendSettings | null, email: string) => {
+const resolveOtpFromDb = async (settings: BackendSettings | null, email: string, timeoutMs = 15_000) => {
   if (!settings) return null;
   const escapedEmail = email.replace(/'/g, "''");
-  const codeHash = runPsqlSingle(
-    settings.databaseUrl,
-    `select "codeHash" from "CustomerOtpCode" where email='${escapedEmail}' and "consumedAt" is null order by "createdAt" desc limit 1;`
-  );
-  if (!codeHash) return null;
-  return deriveOtpCode(email, codeHash, settings.otpSalt);
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const codeHash = runPsqlSingle(
+      settings.databaseUrl,
+      `select "codeHash" from "CustomerOtpCode" where email='${escapedEmail}' and "consumedAt" is null order by "createdAt" desc limit 1;`
+    );
+    if (!codeHash) {
+      await pause(250);
+      continue;
+    }
+
+    return deriveOtpCode(email, codeHash, settings.otpSalt);
+  }
+
+  return null;
 };
 
 test.beforeAll(async () => {
@@ -500,8 +522,12 @@ test("capture documentation screenshots with framed callouts", async ({ browser 
   });
   await superPage.keyboard.press("Escape");
 
-  await openFirstActionsAndPick(superPage, /allocate qr range/i);
-  await superPage.locator("text=Allocate QR Range").first().waitFor({ state: "visible", timeout: 12_000 }).catch(() => undefined);
+  await waitForListActionsReady(superPage);
+  const openedAllocate = await openFirstActionsAndPick(superPage, /allocate qr range/i);
+  expect(openedAllocate).toBeTruthy();
+  const allocateDialog = superPage.getByRole("dialog").first();
+  await expect(allocateDialog).toBeVisible({ timeout: 15_000 });
+  await expect(allocateDialog.getByText(/Allocate QR Range/i)).toBeVisible({ timeout: 15_000 });
   await capture(superPage, "superadmin-allocate-qr-range.png", {
     title: "Super Admin • Allocate QR Range",
     focusSelector: "[role='dialog']",
@@ -579,10 +605,13 @@ test("capture documentation screenshots with framed callouts", async ({ browser 
   });
 
   await licenseePage.goto(`${BASE_URL}/batches`, { waitUntil: "domcontentloaded" });
-  await openFirstActionsAndPick(licenseePage, /assign manufacturer/i);
-  await licenseePage.locator("text=Assign Manufacturer").first().waitFor({ state: "visible", timeout: 12_000 }).catch(() => undefined);
+  await waitForListActionsReady(licenseePage);
+  const openedAssign = await openFirstActionsAndPick(licenseePage, /assign manufacturer/i);
+  expect(openedAssign).toBeTruthy();
 
-  const assignDialog = licenseePage.locator("[role='dialog']").first();
+  const assignDialog = licenseePage.getByRole("dialog").first();
+  await expect(assignDialog).toBeVisible({ timeout: 15_000 });
+  await expect(assignDialog.getByText(/Assign Manufacturer/i)).toBeVisible({ timeout: 15_000 });
   // Best-effort: prefill fields so the docs look like a real workflow.
   const mfgTrigger = assignDialog.locator("text=Select manufacturer").first();
   if (await mfgTrigger.isVisible().catch(() => false)) {
@@ -778,7 +807,8 @@ test("capture documentation screenshots with framed callouts", async ({ browser 
     focusLabel: "Enter OTP and verify",
   });
 
-  const otpCode = resolveOtpFromDb(settings, customerEmail);
+  let customerSignedIn = false;
+  const otpCode = await resolveOtpFromDb(settings, customerEmail, 20_000);
   if (otpCode) {
     await customerPage.locator("input[placeholder='Enter OTP']").first().fill(otpCode);
     await customerPage.getByRole("button", { name: /^Verify$/i }).first().click();
@@ -788,23 +818,29 @@ test("capture documentation screenshots with framed callouts", async ({ browser 
   // Signing in triggers a background refresh of the verification state.
   await waitForVerifySettled(customerPage);
   await customerPage.locator("text=Ownership protection").first().scrollIntoViewIfNeeded().catch(() => undefined);
+  if (otpCode) {
+    await customerPage.locator("text=Signed in as").first().waitFor({ state: "visible", timeout: 20_000 }).catch(() => undefined);
+  }
+  customerSignedIn = await customerPage.locator("text=Signed in as").first().isVisible().catch(() => false);
   await pause(450);
 
   const claimBtn = customerPage.getByRole("button", { name: /claim this product/i }).first();
   const claimedByYou = customerPage.locator("text=Claimed by you").first();
   const claimedByOther = customerPage.locator("text=already claimed by another account").first();
-  const claimFocusSelector = (await claimBtn.isVisible().catch(() => false))
-    ? "button:has-text('Claim this product')"
-    : (await claimedByYou.isVisible().catch(() => false))
-    ? "text=Claimed by you"
-    : (await claimedByOther.isVisible().catch(() => false))
-    ? "text=already claimed by another account"
-    : "text=Ownership protection";
+  const claimFocusSelector = customerSignedIn
+    ? (await claimBtn.isVisible().catch(() => false))
+      ? "button:has-text('Claim this product')"
+      : (await claimedByYou.isVisible().catch(() => false))
+      ? "text=Claimed by you"
+      : (await claimedByOther.isVisible().catch(() => false))
+      ? "text=already claimed by another account"
+      : "text=Signed in as"
+    : "button:has-text('Continue with email OTP')";
 
   await capture(customerPage, "customer-claim-product.png", {
     title: "Customer • Claim Product",
     focusSelector: claimFocusSelector,
-    focusLabel: "Claim ownership for stronger protection",
+    focusLabel: customerSignedIn ? "Claim ownership for stronger protection" : "Sign in to claim ownership",
   });
 
   await customerCtx.close();
