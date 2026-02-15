@@ -21,11 +21,15 @@ async function computeDashboard(req: AuthRequest) {
   const batchWhere: any = {};
 
   const manufacturersWhere: any = {
-    role: UserRole.MANUFACTURER,
+    role: { in: [UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER] },
     isActive: true,
   };
 
-  if (role === UserRole.MANUFACTURER) {
+  if (
+    role === UserRole.MANUFACTURER ||
+    role === UserRole.MANUFACTURER_ADMIN ||
+    role === UserRole.MANUFACTURER_USER
+  ) {
     batchWhere.manufacturerId = userId;
     qrWhere.batch = { manufacturerId: userId };
     manufacturersWhere.id = userId;
@@ -41,7 +45,7 @@ async function computeDashboard(req: AuthRequest) {
       prisma.batch.count({ where: batchWhere }),
       prisma.user.count({ where: manufacturersWhere }),
 
-      role === UserRole.SUPER_ADMIN
+      role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN
         ? prisma.licensee.count({ where: { isActive: true } })
         : scopedLicenseeId
           ? prisma.licensee.count({ where: { id: scopedLicenseeId, isActive: true } })
@@ -102,7 +106,7 @@ export const dashboardEvents = async (req: AuthRequest, res: Response) => {
     const off = onAuditLog(async (log) => {
       try {
         // Tenant filter
-        if (role !== UserRole.SUPER_ADMIN) {
+        if (role !== UserRole.SUPER_ADMIN && role !== UserRole.PLATFORM_SUPER_ADMIN) {
           if (!scopedLicenseeId) return;
           if (log.licenseeId !== scopedLicenseeId) return;
         } else {

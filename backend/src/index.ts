@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
+import cookieParser from "cookie-parser";
 import routes from "./routes";
 import prisma from "./config/database";
 
@@ -26,6 +27,7 @@ if (!smtpConfigured) {
 
 const app = express();
 app.disable("etag");
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 4000;
 
 // ✅ Allow multiple dev frontends (WEB APP 1 on 8081, landing on 8080, default Vite on 5173)
@@ -56,11 +58,20 @@ app.use(
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Device-Fp", "Cache-Control", "Pragma"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Device-Fp",
+      "X-CSRF-Token",
+      "X-Captcha-Token",
+      "Cache-Control",
+      "Pragma",
+    ],
   })
 );
 
 app.use(express.json({ limit: "1mb" }));
+app.use(cookieParser());
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

@@ -128,7 +128,10 @@ export const normalizeCustomerContact = (input: {
 };
 
 export const isIncidentAdminRole = (role: UserRole) =>
-  role === UserRole.SUPER_ADMIN || role === UserRole.LICENSEE_ADMIN;
+  role === UserRole.SUPER_ADMIN ||
+  role === UserRole.PLATFORM_SUPER_ADMIN ||
+  role === UserRole.LICENSEE_ADMIN ||
+  role === UserRole.ORG_ADMIN;
 
 const computeSpamSignal = async (input: { email?: string | null; phone?: string | null }) => {
   const maxPerHour = Number(process.env.INCIDENT_SPAM_MAX_PER_HOUR || "5");
@@ -368,7 +371,7 @@ export const createIncidentFromReport = async (
 
 export const getIncidentByIdScoped = async (incidentId: string, actor: { role: UserRole; licenseeId?: string | null }) => {
   const where: any = { id: incidentId };
-  if (actor.role !== UserRole.SUPER_ADMIN) {
+  if (actor.role !== UserRole.SUPER_ADMIN && actor.role !== UserRole.PLATFORM_SUPER_ADMIN) {
     where.licenseeId = actor.licenseeId || "__none__";
   }
 
@@ -403,7 +406,7 @@ export const listIncidentsScoped = async (input: {
   };
 }) => {
   const where: any = {};
-  if (input.role !== UserRole.SUPER_ADMIN) {
+  if (input.role !== UserRole.SUPER_ADMIN && input.role !== UserRole.PLATFORM_SUPER_ADMIN) {
     where.licenseeId = input.actorLicenseeId || "__none__";
   } else if (input.filters.licenseeId) {
     where.licenseeId = input.filters.licenseeId;
@@ -464,12 +467,17 @@ export const sanitizeIncidentStatus = (value?: string | null): IncidentStatus | 
   if (!normalized) return null;
   if (normalized === "NEW") return IncidentStatus.NEW;
   if (normalized === "TRIAGED") return IncidentStatus.TRIAGED;
+  if (normalized === "TRIAGE") return IncidentStatus.TRIAGE;
   if (normalized === "INVESTIGATING") return IncidentStatus.INVESTIGATING;
+  if (normalized === "CONTAINMENT") return IncidentStatus.CONTAINMENT;
+  if (normalized === "ERADICATION") return IncidentStatus.ERADICATION;
+  if (normalized === "RECOVERY") return IncidentStatus.RECOVERY;
   if (normalized === "AWAITING_CUSTOMER") return IncidentStatus.AWAITING_CUSTOMER;
   if (normalized === "AWAITING_LICENSEE") return IncidentStatus.AWAITING_LICENSEE;
   if (normalized === "MITIGATED") return IncidentStatus.MITIGATED;
   if (normalized === "RESOLVED") return IncidentStatus.RESOLVED;
   if (normalized === "CLOSED") return IncidentStatus.CLOSED;
+  if (normalized === "REOPENED") return IncidentStatus.REOPENED;
   if (normalized === "REJECTED_SPAM") return IncidentStatus.REJECTED_SPAM;
   return null;
 };
@@ -509,12 +517,17 @@ export const toHumanIncidentStatus = (status: IncidentStatus) => {
   const map: Record<IncidentStatus, string> = {
     NEW: "New",
     TRIAGED: "Triaged",
+    TRIAGE: "Triage",
     INVESTIGATING: "Investigating",
+    CONTAINMENT: "Containment",
+    ERADICATION: "Eradication",
+    RECOVERY: "Recovery",
     AWAITING_CUSTOMER: "Awaiting customer",
     AWAITING_LICENSEE: "Awaiting licensee",
     MITIGATED: "Mitigated",
     RESOLVED: "Resolved",
     CLOSED: "Closed",
+    REOPENED: "Reopened",
     REJECTED_SPAM: "Rejected as spam",
   };
   return map[status] || status;

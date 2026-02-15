@@ -194,7 +194,12 @@ const formatFromAddress = (email: string) => `"AuthenticQR" <${email}>`;
 
 const isAdminRole = (role?: UserRole | string | null) => {
   const normalized = String(role || "").toUpperCase();
-  return normalized === UserRole.SUPER_ADMIN || normalized === UserRole.LICENSEE_ADMIN;
+  return (
+    normalized === UserRole.SUPER_ADMIN ||
+    normalized === UserRole.PLATFORM_SUPER_ADMIN ||
+    normalized === UserRole.LICENSEE_ADMIN ||
+    normalized === UserRole.ORG_ADMIN
+  );
 };
 
 const isFromRejectedError = (error: any) => {
@@ -286,7 +291,7 @@ const resolveActorUser = async (actorUser?: IncidentEmailActorUser | null) => {
 const getPrimarySuperadminEmail = async () => {
   const primary = await prisma.user.findFirst({
     where: {
-      role: UserRole.SUPER_ADMIN,
+      role: { in: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN] },
       isActive: true,
       deletedAt: null,
     },
@@ -508,7 +513,7 @@ export const getSuperadminAlertEmails = async (): Promise<string[]> => {
 
   const users = await prisma.user.findMany({
     where: {
-      role: UserRole.SUPER_ADMIN,
+      role: { in: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN] },
       isActive: true,
       deletedAt: null,
     },

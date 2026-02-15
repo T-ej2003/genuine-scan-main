@@ -1,11 +1,12 @@
 //backend/src/controllers/licenseeController.ts
 import { Response } from "express";
 import { z } from "zod";
-import bcrypt from "bcryptjs";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { UserRole } from "@prisma/client";
 import { createAuditLog } from "../services/auditService";
+import { randomUUID } from "crypto";
+import { hashPassword } from "../services/auth/passwordService";
 
 const prefixSchema = z
   .string()
@@ -78,7 +79,7 @@ const escapeCsv = (v: any) => {
 
 export const createLicensee = async (req: AuthRequest, res: Response) => {
   try {
-    if (req.user?.role !== UserRole.SUPER_ADMIN) {
+    if (req.user?.role !== UserRole.SUPER_ADMIN && req.user?.role !== UserRole.PLATFORM_SUPER_ADMIN) {
       return res.status(403).json({ success: false, error: "Insufficient permissions" });
     }
 
@@ -113,8 +114,20 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      const id = randomUUID();
+
+      await tx.organization.create({
+        data: {
+          id,
+          name: licenseePayload.name,
+          isActive: licenseePayload.isActive ?? true,
+        },
+      });
+
       const lic = await tx.licensee.create({
         data: {
+          id,
+          orgId: id,
           name: licenseePayload.name,
           prefix,
           description: licenseePayload.description?.trim() ? licenseePayload.description.trim() : null,
@@ -129,7 +142,7 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
         },
       });
 
-      const passwordHash = await bcrypt.hash(adminPayload.password, 12);
+      const passwordHash = await hashPassword(adminPayload.password);
 
       const adminUser = await tx.user.create({
         data: {
@@ -138,6 +151,7 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
           passwordHash,
           role: UserRole.LICENSEE_ADMIN,
           licenseeId: lic.id,
+          orgId: lic.orgId,
           isActive: true,
           deletedAt: null,
         },
@@ -155,11 +169,13 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
       await createAuditLog({
         userId: req.user!.userId,
         licenseeId: lic.id,
+        orgId: lic.orgId,
         action: "CREATE_LICENSEE_WITH_ADMIN",
         entityType: "Licensee",
         entityId: lic.id,
         details: { licenseeName: lic.name, prefix: lic.prefix, adminEmail: adminUser.email },
         ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
       });
 
       return { licensee: lic, adminUser };

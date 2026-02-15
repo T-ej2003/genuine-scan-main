@@ -1,9 +1,9 @@
 import { Response } from "express";
 import { z } from "zod";
-import bcrypt from "bcryptjs";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { createAuditLog } from "../services/auditService";
+import { hashPassword, verifyPassword } from "../services/auth/passwordService";
 
 const updateProfileSchema = z.object({
   name: z.string().trim().min(2).max(80).optional(),
@@ -80,12 +80,16 @@ export const changeMyPassword = async (req: AuthRequest, res: Response) => {
 
     if (!user) return res.status(404).json({ success: false, error: "User not found" });
 
-    const ok = await bcrypt.compare(parsed.data.currentPassword, user.passwordHash);
+    if (!user.passwordHash) {
+      return res.status(400).json({ success: false, error: "Account has no password set. Use password reset." });
+    }
+
+    const ok = await verifyPassword(user.passwordHash, parsed.data.currentPassword);
     if (!ok) {
       return res.status(400).json({ success: false, error: "Current password is incorrect" });
     }
 
-    const passwordHash = await bcrypt.hash(parsed.data.newPassword, 10);
+    const passwordHash = await hashPassword(parsed.data.newPassword);
 
     await prisma.user.update({
       where: { id: userId },
@@ -107,4 +111,3 @@ export const changeMyPassword = async (req: AuthRequest, res: Response) => {
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 };
-

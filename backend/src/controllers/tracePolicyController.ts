@@ -53,7 +53,7 @@ const asOptionalBool = (value: unknown): boolean | undefined => {
 
 const resolveScopedLicenseeId = (req: AuthRequest): string | undefined => {
   if (!req.user) return undefined;
-  if (req.user.role === UserRole.SUPER_ADMIN) {
+  if (req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN) {
     return asOptionalString(req.query.licenseeId) || undefined;
   }
   return req.user.licenseeId || undefined;
@@ -61,7 +61,7 @@ const resolveScopedLicenseeId = (req: AuthRequest): string | undefined => {
 
 const requirePolicyLicenseeId = (req: AuthRequest, bodyLicenseeId?: string) => {
   if (!req.user) return null;
-  if (req.user.role === UserRole.SUPER_ADMIN) {
+  if (req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN) {
     return bodyLicenseeId || asOptionalString(req.query.licenseeId) || undefined;
   }
   return req.user.licenseeId || undefined;
@@ -86,7 +86,11 @@ export const getTraceTimelineController = async (req: AuthRequest, res: Response
     }
 
     let manufacturerId = asOptionalString(req.query.manufacturerId);
-    if (req.user.role === UserRole.MANUFACTURER) {
+    if (
+      req.user.role === UserRole.MANUFACTURER ||
+      req.user.role === UserRole.MANUFACTURER_ADMIN ||
+      req.user.role === UserRole.MANUFACTURER_USER
+    ) {
       manufacturerId = req.user.userId;
     }
 
@@ -354,7 +358,11 @@ export const exportBatchAuditPackageController = async (req: AuthRequest, res: R
     });
     if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
 
-    if (req.user.role !== UserRole.SUPER_ADMIN && req.user.licenseeId !== batch.licenseeId) {
+    if (
+      req.user.role !== UserRole.SUPER_ADMIN &&
+      req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
+      req.user.licenseeId !== batch.licenseeId
+    ) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 

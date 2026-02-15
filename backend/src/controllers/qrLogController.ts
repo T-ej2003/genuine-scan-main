@@ -9,8 +9,12 @@ export const getScanLogs = async (req: AuthRequest, res: Response) => {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     if (
       req.user.role !== UserRole.SUPER_ADMIN &&
+      req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
       req.user.role !== UserRole.LICENSEE_ADMIN &&
-      req.user.role !== UserRole.MANUFACTURER
+      req.user.role !== UserRole.ORG_ADMIN &&
+      req.user.role !== UserRole.MANUFACTURER &&
+      req.user.role !== UserRole.MANUFACTURER_ADMIN &&
+      req.user.role !== UserRole.MANUFACTURER_USER
     ) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
@@ -24,7 +28,7 @@ export const getScanLogs = async (req: AuthRequest, res: Response) => {
     const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
 
     const licenseeId =
-      req.user.role === UserRole.SUPER_ADMIN
+      req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
         ? (req.query.licenseeId as string | undefined) || undefined
         : req.user.licenseeId || undefined;
     const batchId = (req.query.batchId as string | undefined) || undefined;
@@ -48,7 +52,11 @@ export const getScanLogs = async (req: AuthRequest, res: Response) => {
       if (from) where.scannedAt.gte = new Date(from);
       if (to) where.scannedAt.lte = new Date(to);
     }
-    if (req.user.role === UserRole.MANUFACTURER) {
+    if (
+      req.user.role === UserRole.MANUFACTURER ||
+      req.user.role === UserRole.MANUFACTURER_ADMIN ||
+      req.user.role === UserRole.MANUFACTURER_USER
+    ) {
       where.batch = { manufacturerId: req.user.userId };
     }
 
@@ -106,24 +114,32 @@ export const getBatchSummary = async (req: AuthRequest, res: Response) => {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     if (
       req.user.role !== UserRole.SUPER_ADMIN &&
+      req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
       req.user.role !== UserRole.LICENSEE_ADMIN &&
-      req.user.role !== UserRole.MANUFACTURER
+      req.user.role !== UserRole.ORG_ADMIN &&
+      req.user.role !== UserRole.MANUFACTURER &&
+      req.user.role !== UserRole.MANUFACTURER_ADMIN &&
+      req.user.role !== UserRole.MANUFACTURER_USER
     ) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
     const licenseeId =
-      req.user.role === UserRole.SUPER_ADMIN
+      req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
         ? (req.query.licenseeId as string | undefined) || undefined
         : req.user.licenseeId || undefined;
     const manufacturerId =
-      req.user.role === UserRole.SUPER_ADMIN
+      req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
         ? (req.query.manufacturerId as string | undefined) || undefined
         : undefined;
     const whereBatch: any = {};
     if (licenseeId) whereBatch.licenseeId = licenseeId;
     if (manufacturerId) whereBatch.manufacturerId = manufacturerId;
-    if (req.user.role === UserRole.MANUFACTURER) {
+    if (
+      req.user.role === UserRole.MANUFACTURER ||
+      req.user.role === UserRole.MANUFACTURER_ADMIN ||
+      req.user.role === UserRole.MANUFACTURER_USER
+    ) {
       whereBatch.manufacturerId = req.user.userId;
     }
 

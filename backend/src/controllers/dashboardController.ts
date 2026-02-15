@@ -15,7 +15,9 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
 
     // SUPER_ADMIN can optionally scope by ?licenseeId=
     const scopeLicenseeId =
-      role === UserRole.SUPER_ADMIN ? ((req.query.licenseeId as string | undefined) || null) : licenseeId;
+      role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN
+        ? ((req.query.licenseeId as string | undefined) || null)
+        : licenseeId;
 
     const qrWhere: any = {};
     const batchWhere: any = {};
@@ -25,8 +27,15 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     // - SUPER_ADMIN (scoped): manufacturers inside that licensee
     // - LICENSEE_ADMIN: manufacturers in own licensee
     // - MANUFACTURER: only self (personal scope)
-    const mfgWhere: any = { role: UserRole.MANUFACTURER, isActive: true };
-    if (role === UserRole.MANUFACTURER) {
+    const mfgWhere: any = {
+      role: { in: [UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER] },
+      isActive: true,
+    };
+    if (
+      role === UserRole.MANUFACTURER ||
+      role === UserRole.MANUFACTURER_ADMIN ||
+      role === UserRole.MANUFACTURER_USER
+    ) {
       batchWhere.manufacturerId = userId;
       qrWhere.batch = { manufacturerId: userId };
       mfgWhere.id = userId;
@@ -43,7 +52,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       totalBatches,
     ] = await Promise.all([
       prisma.qRCode.count({ where: qrWhere }),
-      role === UserRole.SUPER_ADMIN
+      role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN
         ? prisma.licensee.count({ where: { ...(scopeLicenseeId ? { id: scopeLicenseeId } : {}), isActive: true } })
         : scopeLicenseeId
           ? prisma.licensee.count({ where: { id: scopeLicenseeId, isActive: true } })

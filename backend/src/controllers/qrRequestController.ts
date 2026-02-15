@@ -32,7 +32,12 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
     const auth = ensureAuth(req);
     if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    if (auth.role !== UserRole.LICENSEE_ADMIN && auth.role !== UserRole.SUPER_ADMIN) {
+    if (
+      auth.role !== UserRole.LICENSEE_ADMIN &&
+      auth.role !== UserRole.ORG_ADMIN &&
+      auth.role !== UserRole.SUPER_ADMIN &&
+      auth.role !== UserRole.PLATFORM_SUPER_ADMIN
+    ) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
@@ -42,7 +47,7 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
     }
 
     const licenseeId =
-      auth.role === UserRole.SUPER_ADMIN
+      auth.role === UserRole.SUPER_ADMIN || auth.role === UserRole.PLATFORM_SUPER_ADMIN
         ? (req.body?.licenseeId as string | undefined)
         : req.user?.licenseeId;
 
@@ -86,7 +91,12 @@ export const getQrAllocationRequests = async (req: AuthRequest, res: Response) =
     const auth = ensureAuth(req);
     if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    if (auth.role !== UserRole.LICENSEE_ADMIN && auth.role !== UserRole.SUPER_ADMIN) {
+    if (
+      auth.role !== UserRole.LICENSEE_ADMIN &&
+      auth.role !== UserRole.ORG_ADMIN &&
+      auth.role !== UserRole.SUPER_ADMIN &&
+      auth.role !== UserRole.PLATFORM_SUPER_ADMIN
+    ) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
@@ -96,7 +106,7 @@ export const getQrAllocationRequests = async (req: AuthRequest, res: Response) =
     const where: any = {};
     if (status) where.status = status;
 
-    if (auth.role === UserRole.SUPER_ADMIN) {
+    if (auth.role === UserRole.SUPER_ADMIN || auth.role === UserRole.PLATFORM_SUPER_ADMIN) {
       if (qLicenseeId) where.licenseeId = qLicenseeId;
     } else {
       if (!req.user?.licenseeId) {
@@ -127,7 +137,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
   try {
     const auth = ensureAuth(req);
     if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
-    if (auth.role !== UserRole.SUPER_ADMIN) {
+    if (auth.role !== UserRole.SUPER_ADMIN && auth.role !== UserRole.PLATFORM_SUPER_ADMIN) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
@@ -220,7 +230,7 @@ export const rejectQrAllocationRequest = async (req: AuthRequest, res: Response)
   try {
     const auth = ensureAuth(req);
     if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
-    if (auth.role !== UserRole.SUPER_ADMIN) {
+    if (auth.role !== UserRole.SUPER_ADMIN && auth.role !== UserRole.PLATFORM_SUPER_ADMIN) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 

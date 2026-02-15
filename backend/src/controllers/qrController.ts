@@ -280,7 +280,7 @@ export const bulkDeleteQRCodes = async (req: AuthRequest, res: Response) => {
     if (parsed.data.ids?.length) where.id = { in: parsed.data.ids };
     if (parsed.data.codes?.length) where.code = { in: parsed.data.codes };
 
-    if (auth.role !== UserRole.SUPER_ADMIN) {
+    if (auth.role !== UserRole.SUPER_ADMIN && auth.role !== UserRole.PLATFORM_SUPER_ADMIN) {
       const licenseeId = req.user?.licenseeId;
       if (!licenseeId) return res.status(403).json({ success: false, error: "No licensee association" });
       where.licenseeId = licenseeId;
@@ -331,7 +331,12 @@ export const createBatch = async (req: AuthRequest, res: Response) => {
     let mfgId: string | null = null;
     if (manufacturerId) {
       const m = await prisma.user.findFirst({
-        where: { id: manufacturerId, role: UserRole.MANUFACTURER, licenseeId, isActive: true },
+        where: {
+          id: manufacturerId,
+          role: { in: [UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER] },
+          licenseeId,
+          isActive: true,
+        },
         select: { id: true },
       });
       if (!m) return res.status(404).json({ success: false, error: "Manufacturer invalid" });
@@ -411,7 +416,7 @@ export const createBatch = async (req: AuthRequest, res: Response) => {
 /* ===================== BATCH (SUPER ADMIN) ===================== */
 
 export const adminAllocateBatch = async (req: AuthRequest, res: Response) => {
-  if (req.user?.role !== UserRole.SUPER_ADMIN) {
+  if (req.user?.role !== UserRole.SUPER_ADMIN && req.user?.role !== UserRole.PLATFORM_SUPER_ADMIN) {
     return res.status(403).json({ success: false, error: "Access denied" });
   }
 
@@ -437,11 +442,15 @@ export const deleteBatch = async (req: AuthRequest, res: Response) => {
     });
     if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
 
-    if (auth.role === UserRole.MANUFACTURER) {
+    if (
+      auth.role === UserRole.MANUFACTURER ||
+      auth.role === UserRole.MANUFACTURER_ADMIN ||
+      auth.role === UserRole.MANUFACTURER_USER
+    ) {
       return res.status(403).json({ success: false, error: "Manufacturers cannot delete batches" });
     }
 
-    if (auth.role === UserRole.LICENSEE_ADMIN) {
+    if (auth.role === UserRole.LICENSEE_ADMIN || auth.role === UserRole.ORG_ADMIN) {
       if (!req.user?.licenseeId || req.user.licenseeId !== batch.licenseeId) {
         return res.status(403).json({ success: false, error: "Access denied" });
       }
@@ -497,7 +506,11 @@ export const bulkDeleteBatches = async (req: AuthRequest, res: Response) => {
     const auth = ensureAuth(req);
     if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    if (auth.role === UserRole.MANUFACTURER) {
+    if (
+      auth.role === UserRole.MANUFACTURER ||
+      auth.role === UserRole.MANUFACTURER_ADMIN ||
+      auth.role === UserRole.MANUFACTURER_USER
+    ) {
       return res.status(403).json({ success: false, error: "Manufacturers cannot delete batches" });
     }
 
@@ -508,7 +521,7 @@ export const bulkDeleteBatches = async (req: AuthRequest, res: Response) => {
 
     const batchIds = parsed.data.ids;
 
-    if (auth.role === UserRole.LICENSEE_ADMIN) {
+    if (auth.role === UserRole.LICENSEE_ADMIN || auth.role === UserRole.ORG_ADMIN) {
       const licId = req.user?.licenseeId;
       if (!licId) return res.status(403).json({ success: false, error: "No licensee association" });
 
@@ -598,7 +611,7 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: "Batch already assigned to a manufacturer" });
     }
 
-    if (auth.role === UserRole.LICENSEE_ADMIN) {
+    if (auth.role === UserRole.LICENSEE_ADMIN || auth.role === UserRole.ORG_ADMIN) {
       if (!req.user?.licenseeId || req.user.licenseeId !== batch.licenseeId) {
         return res.status(403).json({ success: false, error: "Access denied" });
       }
@@ -607,7 +620,7 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
     const manufacturer = await prisma.user.findFirst({
       where: {
         id: parsed.data.manufacturerId,
-        role: UserRole.MANUFACTURER,
+        role: { in: [UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER] },
         licenseeId: batch.licenseeId,
         isActive: true,
       },
@@ -948,7 +961,7 @@ export const downloadBatchPrintPack = async (req: AuthRequest, res: Response) =>
 
 export const generateQRCodes = async (req: AuthRequest, res: Response) => {
   try {
-    if (req.user?.role !== UserRole.SUPER_ADMIN) {
+    if (req.user?.role !== UserRole.SUPER_ADMIN && req.user?.role !== UserRole.PLATFORM_SUPER_ADMIN) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
@@ -1044,7 +1057,7 @@ export const generateQRCodes = async (req: AuthRequest, res: Response) => {
 
 export const blockQRCode = async (req: AuthRequest, res: Response) => {
   try {
-    if (req.user?.role !== UserRole.SUPER_ADMIN) {
+    if (req.user?.role !== UserRole.SUPER_ADMIN && req.user?.role !== UserRole.PLATFORM_SUPER_ADMIN) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
@@ -1080,7 +1093,7 @@ export const blockQRCode = async (req: AuthRequest, res: Response) => {
 
 export const blockBatch = async (req: AuthRequest, res: Response) => {
   try {
-    if (req.user?.role !== UserRole.SUPER_ADMIN) {
+    if (req.user?.role !== UserRole.SUPER_ADMIN && req.user?.role !== UserRole.PLATFORM_SUPER_ADMIN) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
@@ -1126,14 +1139,18 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
   try {
     const where: any = {};
 
-    if (req.user?.role !== UserRole.SUPER_ADMIN) {
+    if (req.user?.role !== UserRole.SUPER_ADMIN && req.user?.role !== UserRole.PLATFORM_SUPER_ADMIN) {
       if (req.user?.licenseeId) where.licenseeId = req.user.licenseeId;
     } else {
       const qLicenseeId = (req.query.licenseeId as string | undefined) || undefined;
       if (qLicenseeId) where.licenseeId = qLicenseeId;
     }
 
-    if (req.user?.role === UserRole.MANUFACTURER) {
+    if (
+      req.user?.role === UserRole.MANUFACTURER ||
+      req.user?.role === UserRole.MANUFACTURER_ADMIN ||
+      req.user?.role === UserRole.MANUFACTURER_USER
+    ) {
       where.manufacturerId = req.user.userId;
     }
 
@@ -1220,7 +1237,7 @@ export const getQRCodes = async (req: AuthRequest, res: Response) => {
     const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
 
     const licenseeId: string | undefined =
-      role === UserRole.SUPER_ADMIN
+      role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN
         ? ((req.query.licenseeId as string | undefined) || undefined)
         : (req.user?.licenseeId ?? undefined) || undefined;
 
@@ -1229,7 +1246,12 @@ export const getQRCodes = async (req: AuthRequest, res: Response) => {
     if (status) where.status = status;
     if (q) where.code = { contains: q, mode: "insensitive" };
 
-    if (role === UserRole.MANUFACTURER && userId) {
+    if (
+      (role === UserRole.MANUFACTURER ||
+        role === UserRole.MANUFACTURER_ADMIN ||
+        role === UserRole.MANUFACTURER_USER) &&
+      userId
+    ) {
       where.batch = { manufacturerId: userId };
     }
 
@@ -1259,11 +1281,16 @@ export const getStats = async (req: AuthRequest, res: Response) => {
     const userId = req.user?.userId;
 
     const licenseeId: string | undefined =
-      role === UserRole.SUPER_ADMIN
+      role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN
         ? ((req.query.licenseeId as string | undefined) || undefined)
         : (req.user?.licenseeId ?? undefined) || undefined;
 
-    if (role === UserRole.MANUFACTURER && userId) {
+    if (
+      (role === UserRole.MANUFACTURER ||
+        role === UserRole.MANUFACTURER_ADMIN ||
+        role === UserRole.MANUFACTURER_USER) &&
+      userId
+    ) {
       const where: any = {
         batch: { manufacturerId: userId },
       };
@@ -1306,7 +1333,7 @@ export const exportQRCodesCsv = async (req: AuthRequest, res: Response) => {
     const status = (req.query.status as QRStatus | undefined) || undefined;
 
     const licenseeId =
-      role === UserRole.SUPER_ADMIN
+      role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN
         ? ((req.query.licenseeId as string | undefined) || undefined)
         : req.user?.licenseeId;
 
@@ -1315,7 +1342,11 @@ export const exportQRCodesCsv = async (req: AuthRequest, res: Response) => {
     if (status) where.status = status;
     if (q) where.code = { contains: q, mode: "insensitive" };
 
-    if (role === UserRole.MANUFACTURER) {
+    if (
+      role === UserRole.MANUFACTURER ||
+      role === UserRole.MANUFACTURER_ADMIN ||
+      role === UserRole.MANUFACTURER_USER
+    ) {
       where.batch = { manufacturerId: userId };
     }
 

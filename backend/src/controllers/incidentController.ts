@@ -273,7 +273,7 @@ export const listIncidents = async (req: AuthRequest, res: Response) => {
     const dateToRaw = String(req.query.date_to || "").trim();
     const assignedTo = String(req.query.assigned_to || "").trim() || undefined;
     const licenseeId =
-      req.user.role === UserRole.SUPER_ADMIN
+      req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
         ? String(req.query.licenseeId || "").trim() || undefined
         : undefined;
 
@@ -675,7 +675,7 @@ export const serveIncidentEvidenceFile = async (req: AuthRequest, res: Response)
       where: {
         storageKey: fileName,
         incident:
-          req.user.role === UserRole.SUPER_ADMIN
+          req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
             ? undefined
             : { licenseeId: req.user.licenseeId || "__none__" },
       },

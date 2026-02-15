@@ -2,14 +2,25 @@ import { Router } from "express";
 import { authenticate, authenticateSSE } from "../middleware/auth";
 import { enforceTenantIsolation } from "../middleware/tenantIsolation";
 import {
-  requireSuperAdmin,
+  requirePlatformAdmin,
   requireLicenseeAdmin,
   requireManufacturer,
   requireAnyAdmin,
   requireOpsUser,
 } from "../middleware/rbac";
+import { requireCsrf } from "../middleware/csrf";
+import rateLimit from "express-rate-limit";
 
-import { login, me } from "../controllers/authController";
+import {
+  login,
+  me,
+  refresh,
+  logout,
+  forgotPassword,
+  resetPassword,
+  invite,
+  acceptInviteController,
+} from "../controllers/authController";
 import {
   createLicensee,
   getLicensees,
@@ -93,8 +104,25 @@ import { healthCheck } from "../controllers/healthController";
 
 const router = Router();
 
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 25,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ==================== PUBLIC ====================
-router.post("/auth/login", login);
+router.post("/auth/login", loginLimiter, login);
+router.post("/auth/accept-invite", loginLimiter, acceptInviteController);
+router.post("/auth/forgot-password", forgotPasswordLimiter, forgotPassword);
+router.post("/auth/reset-password", forgotPasswordLimiter, resetPassword);
 router.get("/verify/:code", verifyQRCode);
 router.post("/verify/report-fraud", reportFraud);
 router.post("/verify/feedback", submitProductFeedback);
@@ -104,6 +132,9 @@ router.get("/health", healthCheck);
 
 // ==================== AUTH ====================
 router.get("/auth/me", authenticate, me);
+router.post("/auth/refresh", requireCsrf, refresh);
+router.post("/auth/logout", authenticate, requireCsrf, logout);
+router.post("/auth/invite", authenticate, requireAnyAdmin, requireCsrf, invite);
 
 // ==================== DASHBOARD ====================
 // ✅ Correct stats endpoint used by UI cards + chart + activity
@@ -113,21 +144,21 @@ router.get("/dashboard/stats", authenticate, enforceTenantIsolation, getDashboar
 router.get("/events/dashboard", authenticateSSE, enforceTenantIsolation, dashboardEvents);
 
 // ==================== LICENSEES (SUPER ADMIN) ====================
-router.get("/licensees/export", authenticate, requireSuperAdmin, exportLicenseesCsv);
+router.get("/licensees/export", authenticate, requirePlatformAdmin, exportLicenseesCsv);
 
-router.post("/licensees", authenticate, requireSuperAdmin, createLicensee);
-router.get("/licensees", authenticate, requireSuperAdmin, getLicensees);
-router.get("/licensees/:id", authenticate, requireSuperAdmin, getLicensee);
-router.patch("/licensees/:id", authenticate, requireSuperAdmin, updateLicensee);
-router.delete("/licensees/:id", authenticate, requireSuperAdmin, deleteLicensee);
+router.post("/licensees", authenticate, requirePlatformAdmin, requireCsrf, createLicensee);
+router.get("/licensees", authenticate, requirePlatformAdmin, getLicensees);
+router.get("/licensees/:id", authenticate, requirePlatformAdmin, getLicensee);
+router.patch("/licensees/:id", authenticate, requirePlatformAdmin, requireCsrf, updateLicensee);
+router.delete("/licensees/:id", authenticate, requirePlatformAdmin, requireCsrf, deleteLicensee);
 
 // ==================== USERS ====================
 // ✅ recommended: allow LICENSEE_ADMIN to create MANUFACTURER (controller already enforces)
-router.post("/users", authenticate, requireAnyAdmin, enforceTenantIsolation, createUser);
+router.post("/users", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, createUser);
 
 router.get("/users", authenticate, requireAnyAdmin, enforceTenantIsolation, getUsers);
-router.patch("/users/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, updateUser);
-router.delete("/users/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, deleteUser);
+router.patch("/users/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, updateUser);
+router.delete("/users/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, deleteUser);
 
 // ==================== MANUFACTURERS ====================
 router.get("/manufacturers", authenticate, requireAnyAdmin, enforceTenantIsolation, getManufacturers);
@@ -137,6 +168,7 @@ router.patch(
   authenticate,
   requireAnyAdmin,
   enforceTenantIsolation,
+  requireCsrf,
   deactivateManufacturer
 );
 
@@ -145,6 +177,7 @@ router.patch(
   authenticate,
   requireAnyAdmin,
   enforceTenantIsolation,
+  requireCsrf,
   restoreManufacturer
 );
 
@@ -153,18 +186,20 @@ router.delete(
   authenticate,
   requireAnyAdmin,
   enforceTenantIsolation,
+  requireCsrf,
   hardDeleteManufacturer
 );
 
 // ==================== QR (SUPER ADMIN for ranges) ====================
-router.post("/qr/ranges/allocate", authenticate, requireSuperAdmin, allocateQRRange);
-router.post("/qr/generate", authenticate, requireSuperAdmin, generateQRCodes);
+router.post("/qr/ranges/allocate", authenticate, requirePlatformAdmin, requireCsrf, allocateQRRange);
+router.post("/qr/generate", authenticate, requirePlatformAdmin, requireCsrf, generateQRCodes);
 
 // Super admin allocate range to existing licensee
 router.post(
   "/admin/licensees/:licenseeId/qr-allocate-range",
   authenticate,
-  requireSuperAdmin,
+  requirePlatformAdmin,
+  requireCsrf,
   allocateQRRangeForLicensee
 );
 
@@ -177,24 +212,25 @@ router.post(
   authenticate,
   requireLicenseeAdmin,
   enforceTenantIsolation,
+  requireCsrf,
   assignManufacturer
 );
 
 // Super admin bulk allocation helper
-router.post("/qr/batches/admin-allocate", authenticate, requireSuperAdmin, adminAllocateBatch);
+router.post("/qr/batches/admin-allocate", authenticate, requirePlatformAdmin, requireCsrf, adminAllocateBatch);
 
 // ✅ IMPORTANT: remove QR Codes page for LICENSEE_ADMIN
 // raw QR list/export should be SUPER_ADMIN only
-router.get("/qr/codes/export", authenticate, requireSuperAdmin, exportQRCodesCsv);
-router.get("/qr/codes", authenticate, requireSuperAdmin, getQRCodes);
+router.get("/qr/codes/export", authenticate, requirePlatformAdmin, exportQRCodesCsv);
+router.get("/qr/codes", authenticate, requirePlatformAdmin, getQRCodes);
 
 // Stats is still allowed (needed for dashboard chart)
 router.get("/qr/stats", authenticate, enforceTenantIsolation, getStats);
 
 // delete endpoints (admins)
 router.delete("/qr/batches/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, deleteBatch);
-router.post("/qr/batches/bulk-delete", authenticate, requireAnyAdmin, enforceTenantIsolation, bulkDeleteBatches);
-router.delete("/qr/codes", authenticate, requireAnyAdmin, enforceTenantIsolation, bulkDeleteQRCodes);
+router.post("/qr/batches/bulk-delete", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, bulkDeleteBatches);
+router.delete("/qr/codes", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, bulkDeleteQRCodes);
 
 // ==================== MANUFACTURER PRINT JOBS ====================
 router.post(
@@ -202,6 +238,7 @@ router.post(
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
+  requireCsrf,
   createPrintJob
 );
 router.get(
@@ -216,6 +253,7 @@ router.post(
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
+  requireCsrf,
   confirmPrintJob
 );
 
@@ -225,11 +263,12 @@ router.post(
   authenticate,
   requireAnyAdmin,
   enforceTenantIsolation,
+  requireCsrf,
   createQrAllocationRequest
 );
 router.get("/qr/requests", authenticate, requireAnyAdmin, enforceTenantIsolation, getQrAllocationRequests);
-router.post("/qr/requests/:id/approve", authenticate, requireSuperAdmin, approveQrAllocationRequest);
-router.post("/qr/requests/:id/reject", authenticate, requireSuperAdmin, rejectQrAllocationRequest);
+router.post("/qr/requests/:id/approve", authenticate, requirePlatformAdmin, requireCsrf, approveQrAllocationRequest);
+router.post("/qr/requests/:id/reject", authenticate, requirePlatformAdmin, requireCsrf, rejectQrAllocationRequest);
 
 // ==================== AUDIT ====================
 router.use("/audit", auditRoutes);
@@ -246,6 +285,7 @@ router.post(
   authenticate,
   requireAnyAdmin,
   enforceTenantIsolation,
+  requireCsrf,
   acknowledgePolicyAlertController
 );
 router.get(
@@ -277,6 +317,7 @@ router.post(
   authenticate,
   requireAnyAdmin,
   enforceTenantIsolation,
+  requireCsrf,
   uploadIncidentEvidence,
   addIncidentEvidence
 );
@@ -285,6 +326,7 @@ router.post(
   authenticate,
   requireAnyAdmin,
   enforceTenantIsolation,
+  requireCsrf,
   notifyIncidentCustomer
 );
 router.post(
@@ -292,6 +334,7 @@ router.post(
   authenticate,
   requireAnyAdmin,
   enforceTenantIsolation,
+  requireCsrf,
   notifyIncidentCustomer
 );
 router.get(
@@ -303,11 +346,12 @@ router.get(
 );
 
 // ==================== ADMIN BLOCK ====================
-router.post("/admin/qrs/:id/block", authenticate, requireSuperAdmin, blockQRCode);
-router.post("/admin/batches/:id/block", authenticate, requireSuperAdmin, blockBatch);
+router.post("/admin/qrs/:id/block", authenticate, requirePlatformAdmin, requireCsrf, blockQRCode);
+router.post("/admin/batches/:id/block", authenticate, requirePlatformAdmin, requireCsrf, blockBatch);
 
 // ==================== ACCOUNT ====================
 router.patch("/account/profile", authenticate, updateMyProfile);
-router.patch("/account/password", authenticate, changeMyPassword);
+router.patch("/account/profile", authenticate, requireCsrf, updateMyProfile);
+router.patch("/account/password", authenticate, requireCsrf, changeMyPassword);
 
 export default router;

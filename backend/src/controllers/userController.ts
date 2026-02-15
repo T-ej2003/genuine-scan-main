@@ -2,11 +2,11 @@
 
 import { Response } from "express";
 import { z } from "zod";
-import bcrypt from "bcryptjs";
 import { Prisma, UserRole } from "@prisma/client";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { createAuditLog } from "../services/auditService";
+import { hashPassword } from "../services/auth/passwordService";
 
 /**
  * Notes:
@@ -25,7 +25,13 @@ const createUserSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
   name: z.string().min(2),
-  role: z.enum(["LICENSEE_ADMIN", "MANUFACTURER"]),
+  role: z.enum([
+    "LICENSEE_ADMIN",
+    "ORG_ADMIN",
+    "MANUFACTURER",
+    "MANUFACTURER_ADMIN",
+    "MANUFACTURER_USER",
+  ]),
   licenseeId: z.string().uuid().optional(),
   location: z.string().trim().max(200).optional(),
   website: z.string().trim().max(200).optional(),
@@ -43,6 +49,14 @@ const updateUserSchema = z.object({
 
 /* ===================== HELPERS ===================== */
 
+const MANUFACTURER_ROLES: UserRole[] = [
+  UserRole.MANUFACTURER,
+  UserRole.MANUFACTURER_ADMIN,
+  UserRole.MANUFACTURER_USER,
+];
+
+const isManufacturerRole = (role: UserRole) => MANUFACTURER_ROLES.includes(role);
+
 const ensureAuth = (req: AuthRequest) => {
   const role = req.user?.role;
   const userId = req.user?.userId;
@@ -50,7 +64,7 @@ const ensureAuth = (req: AuthRequest) => {
   return { role, userId };
 };
 
-const isSuper = (role: UserRole) => role === UserRole.SUPER_ADMIN;
+const isPlatform = (role: UserRole) => role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN;
 
 const getTenantLicenseeId = (req: AuthRequest) => {
   // if your middleware sets (req as any).licenseeId you can support it
@@ -62,7 +76,7 @@ const enforceTenantForTarget = (
   actorLicenseeId: string | null,
   targetLicenseeId: string | null
 ) => {
-  if (isSuper(actorRole)) return { ok: true as const };
+  if (isPlatform(actorRole)) return { ok: true as const };
 
   if (!actorLicenseeId) {
     return { ok: false as const, status: 403, error: "No licensee association found" };
@@ -89,8 +103,8 @@ const assertManufacturerTarget = async (id: string) => {
   });
 
   if (!target) return { ok: false as const, status: 404, error: "User not found" };
-  if (target.role !== UserRole.MANUFACTURER) {
-    return { ok: false as const, status: 400, error: "Target must be a MANUFACTURER user" };
+  if (!isManufacturerRole(target.role)) {
+    return { ok: false as const, status: 400, error: "Target must be a manufacturer user" };
   }
 
   return { ok: true as const, target };
@@ -120,7 +134,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
 
     let effectiveLicenseeId: string | null = null;
 
-    if (isSuper(auth.role)) {
+    if (isPlatform(auth.role)) {
       effectiveLicenseeId = parsed.data.licenseeId || null;
       if (!effectiveLicenseeId) {
         return res.status(400).json({ success: false, error: "licenseeId is required for super admin createUser" });
@@ -133,18 +147,19 @@ export const createUser = async (req: AuthRequest, res: Response) => {
       effectiveLicenseeId = actorLicenseeId;
 
       // non-super cannot create licensee admins
-      if (role !== UserRole.MANUFACTURER) {
-        return res.status(403).json({ success: false, error: "Only super admin can create LICENSEE_ADMIN users" });
+      if (!isManufacturerRole(role)) {
+        return res.status(403).json({ success: false, error: "Only platform admin can create org admin users" });
       }
     }
 
     if (!effectiveLicenseeId) {
       return res.status(400).json({ success: false, error: "licenseeId is required" });
     }
-    const lic = await prisma.licensee.findUnique({ where: { id: effectiveLicenseeId } });
+    const lic = await prisma.licensee.findUnique({ where: { id: effectiveLicenseeId }, select: { id: true, orgId: true } });
     if (!lic) return res.status(404).json({ success: false, error: "Licensee not found" });
+    if (!lic.orgId) return res.status(500).json({ success: false, error: "Licensee org not configured" });
 
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await hashPassword(password);
 
     const licenseeId = effectiveLicenseeId || undefined;
     const created = await prisma.user.create({
@@ -154,6 +169,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
         name,
         role,
         licenseeId,
+        orgId: lic.orgId,
         isActive: true,
         deletedAt: null,
         location: parsed.data.location?.trim() ? parsed.data.location.trim() : null,
@@ -203,8 +219,7 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
     const queryLicenseeId = (req.query.licenseeId as string | undefined) || undefined;
     const includeInactive = String(req.query.includeInactive || "false").toLowerCase() === "true";
     const roleFilter = (req.query.role as UserRole | undefined) || undefined;
-
-    const effectiveLicenseeId = isSuper(auth.role) ? queryLicenseeId : getTenantLicenseeId(req) || undefined;
+    const effectiveLicenseeId = isPlatform(auth.role) ? queryLicenseeId : getTenantLicenseeId(req) || undefined;
 
     const where: any = {};
     if (effectiveLicenseeId) where.licenseeId = effectiveLicenseeId;
@@ -247,11 +262,11 @@ export const getManufacturers = async (req: AuthRequest, res: Response) => {
 
     includeInactive = String(req.query.includeInactive || "false").toLowerCase() === "true";
 
-    licenseeId = isSuper(auth.role)
+    licenseeId = isPlatform(auth.role)
       ? ((req.query.licenseeId as string | undefined) || undefined)
       : (getTenantLicenseeId(req) || undefined);
 
-    const where: any = { role: UserRole.MANUFACTURER };
+    const where: any = { role: { in: [UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER] } };
     if (licenseeId) where.licenseeId = licenseeId;
     if (!includeInactive) where.isActive = true;
 
@@ -278,7 +293,7 @@ export const getManufacturers = async (req: AuthRequest, res: Response) => {
     console.error("getManufacturers error:", e);
     try {
       // Fallback for schema mismatch or older DB: return minimal fields
-      const fallbackWhere: any = { role: UserRole.MANUFACTURER };
+      const fallbackWhere: any = { role: { in: [UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER] } };
       if (licenseeId) fallbackWhere.licenseeId = licenseeId;
       if (!includeInactive) fallbackWhere.isActive = true;
       const fallback = await prisma.user.findMany({
@@ -326,11 +341,11 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
     const data: any = { ...parsed.data };
 
     // only super can change tenant
-    if (!isSuper(auth.role)) delete data.licenseeId;
+    if (!isPlatform(auth.role)) delete data.licenseeId;
 
     // password -> passwordHash
     if (data.password) {
-      data.passwordHash = await bcrypt.hash(String(data.password), 10);
+      data.passwordHash = await hashPassword(String(data.password));
       delete data.password;
     }
 
@@ -395,7 +410,7 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
     if (!tenantCheck.ok) return res.status(tenantCheck.status).json({ success: false, error: tenantCheck.error });
 
     if (hard) {
-      if (!isSuper(auth.role)) {
+      if (!isPlatform(auth.role)) {
         return res.status(403).json({ success: false, error: "Only super admin can hard delete" });
       }
 
