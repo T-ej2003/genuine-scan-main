@@ -50,3 +50,6 @@ If a file is missing, the UI shows a placeholder block with the expected filenam
 
 Use `npm run docs:screenshots` for best-effort capture.
 See `/scripts/docs-screenshots.spec.ts` for TODO selectors and env vars.
+
+Optional env vars for higher-fidelity customer captures:
+- `DOCS_DATABASE_URL` and `DOCS_OTP_SALT` enable OTP auto-verify (so the script can show the signed-in claim state).

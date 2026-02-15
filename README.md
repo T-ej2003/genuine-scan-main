@@ -141,6 +141,14 @@ Script file: `scripts/docs-screenshots.spec.ts`
   - `DOCS_MANUFACTURER_EMAIL`
   - `DOCS_MANUFACTURER_PASSWORD`
   - `DOCS_CUSTOMER_TEST_CODE` (sample QR code for verify page)
+  - `DOCS_CUSTOMER_EMAIL` (optional; default `docs-customer@example.com`)
+  - `DOCS_CUSTOMER_NAME` (optional; default `Docs Customer`)
+  - `DOCS_DATABASE_URL` (optional; used to read OTP hash for sign-in capture)
+  - `DOCS_OTP_SALT` (optional; must match backend `CUSTOMER_OTP_SALT` or `SESSION_SECRET`/`JWT_SECRET`)
+
+Notes:
+- If OTP cannot be resolved from DB (missing/mismatched salt), the script still captures the Ownership panel, but the
+  `customer-claim-product.png` callout will point to sign-in (not the claim button).
 
 If Playwright is not installed locally, install once:
 
