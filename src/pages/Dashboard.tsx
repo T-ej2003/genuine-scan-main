@@ -107,10 +107,9 @@ export default function Dashboard() {
       load({ silent: true });
     }, STATS_POLL_MS);
 
-    // setup SSE for realtime
-    const token = apiClient.getToken();
-    if (token) {
-      const es = new EventSource(`${API_BASE}/events/dashboard?token=${encodeURIComponent(token)}`);
+    // setup SSE for realtime (cookie-auth; do not put tokens in URLs)
+    {
+      const es = new EventSource(`${API_BASE}/events/dashboard`);
       sseRef.current = es;
       setSseConnected(true);
 

@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import {
   Shield,
   CheckCircle2,
+  UserCheck,
   AlertTriangle,
   Ban,
   SearchX,
@@ -35,6 +36,13 @@ type VerifyPayload = {
   message?: string;
   code?: string;
   status?: string;
+  isFirstScan?: boolean;
+  policy?: any;
+  containment?: {
+    qrUnderInvestigation?: { at: string; reason: string | null } | null;
+    batchSuspended?: { at: string; reason: string | null } | null;
+    orgSuspended?: { at: string; reason: string | null } | null;
+  } | null;
   licensee?: {
     id: string;
     name: string;
@@ -70,7 +78,7 @@ type VerifyPayload = {
   warningMessage?: string | null;
 };
 
-type StatusKind = "genuine" | "reused" | "suspicious" | "blocked" | "unassigned" | "invalid";
+type StatusKind = "first" | "verified_again" | "possible_duplicate" | "blocked" | "suspicious" | "unassigned" | "invalid";
 
 const INCIDENT_TYPE_OPTIONS = [
   { value: "counterfeit_suspected", label: "Counterfeit suspected" },
@@ -106,17 +114,24 @@ const STATUS_META: Record<
     icon: React.ReactNode;
   }
 > = {
-  genuine: {
+  first: {
     title: "Verified Authentic",
-    subtitle: "This code matches official records and is safe to trust.",
+    subtitle: "First-time verification completed successfully.",
     chip: "Authentic",
     panelClass: "from-emerald-600 to-teal-600",
     icon: <CheckCircle2 className="h-10 w-10 text-white" />,
   },
-  reused: {
-    title: "Previously Redeemed",
-    subtitle: "This code has already been verified before. Review product source.",
-    chip: "Possible Duplicate",
+  verified_again: {
+    title: "Verified Again",
+    subtitle: "Authentic product. You have verified this before.",
+    chip: "Authentic",
+    panelClass: "from-emerald-600 to-cyan-600",
+    icon: <UserCheck className="h-10 w-10 text-white" />,
+  },
+  possible_duplicate: {
+    title: "Possible Duplicate",
+    subtitle: "This QR shows unusual scan patterns that may indicate label copying.",
+    chip: "Fraud Risk",
     panelClass: "from-orange-500 to-amber-600",
     icon: <AlertTriangle className="h-10 w-10 text-white" />,
   },
@@ -275,38 +290,51 @@ export default function Verify() {
   }, [codeParam, requestKey, token]);
 
   const statusKind: StatusKind = useMemo(() => {
-    if (result?.scanOutcome === "VALID" || result?.isAuthentic) return "genuine";
-    if (
-      result?.scanOutcome === "ALREADY_REDEEMED" ||
-      result?.status === "REDEEMED" ||
-      result?.status === "SCANNED"
-    ) {
-      return "reused";
-    }
-    if (result?.scanOutcome === "BLOCKED" || result?.status === "BLOCKED") return "blocked";
-    if (
-      result?.scanOutcome === "SUSPICIOUS" ||
-      result?.status === "ALLOCATED" ||
-      result?.status === "ACTIVATED"
-    ) {
+    const scanOutcome = String(result?.scanOutcome || "").toUpperCase();
+    const status = String(result?.status || "").toUpperCase();
+
+    if (scanOutcome === "BLOCKED" || status === "BLOCKED") return "blocked";
+
+    if (scanOutcome === "SUSPICIOUS" || status === "ALLOCATED" || status === "ACTIVATED") {
       return "suspicious";
     }
-    if (result?.status === "DORMANT" || result?.status === "ACTIVE" || result?.scanOutcome === "NOT_PRINTED") {
+
+    if (status === "DORMANT" || status === "ACTIVE" || scanOutcome === "NOT_PRINTED") {
       return "unassigned";
     }
+
+    const isAuthentic = Boolean(result?.isAuthentic);
+    const isFirstScan = Boolean((result as any)?.isFirstScan);
+    const policy: any = (result as any)?.policy || null;
+    const triggered: any = policy?.triggered || {};
+    const alerts: any[] = Array.isArray(policy?.alerts) ? policy.alerts : [];
+
+    const hasDuplicateSignals =
+      Boolean(triggered.multiScan || triggered.geoDrift || triggered.velocitySpike) ||
+      alerts.some((a) => {
+        const t = String(a?.alertType || "").toUpperCase();
+        return ["POLICY_RULE", "MULTI_SCAN", "GEO_DRIFT", "VELOCITY_SPIKE", "AUTO_BLOCK_QR", "AUTO_BLOCK_BATCH"].includes(t);
+      });
+
+    const possibleDuplicate = isAuthentic && !isFirstScan && hasDuplicateSignals;
+
+    if (isAuthentic) {
+      if (possibleDuplicate) return "possible_duplicate";
+      return isFirstScan ? "first" : "verified_again";
+    }
+
     const lowerMessage = String(result?.message || "").toLowerCase();
     if (lowerMessage.includes("blocked")) return "blocked";
-    if (lowerMessage.includes("already redeemed")) return "reused";
     if (lowerMessage.includes("allocated but not yet printed")) return "suspicious";
     if (lowerMessage.includes("not been assigned")) return "unassigned";
     return "invalid";
-  }, [result?.isAuthentic, result?.message, result?.scanOutcome, result?.status]);
+  }, [result]);
 
   const meta = STATUS_META[statusKind];
   const manufacturer = result?.batch?.manufacturer || null;
   const displayedCode = result?.code || codeParam || "—";
   const printedAt = result?.printedAt || result?.batch?.printedAt || null;
-  const isReportable = statusKind !== "genuine";
+  const isReportable = statusKind === "possible_duplicate" || statusKind === "blocked" || statusKind === "suspicious" || statusKind === "invalid";
   const canSubmitFeedback = displayedCode !== "—" && statusKind !== "invalid";
   const firstScanAt = result?.firstScanAt || result?.firstScanned || null;
   const firstScanLocation = result?.firstScanLocation || null;
@@ -314,6 +342,51 @@ export default function Verify() {
   const latestScanLocation = result?.latestScanLocation || null;
   const previousScanAt = result?.previousScanAt || null;
   const previousScanLocation = result?.previousScanLocation || null;
+
+  const containment = result?.containment || null;
+  const hasContainment =
+    Boolean(containment?.qrUnderInvestigation) ||
+    Boolean(containment?.batchSuspended) ||
+    Boolean(containment?.orgSuspended);
+
+  const policyAlerts = useMemo(() => {
+    const alerts = (result as any)?.policy?.alerts;
+    return Array.isArray(alerts) ? alerts : [];
+  }, [result]);
+
+  const riskReasons = useMemo(() => {
+    if (statusKind !== "possible_duplicate") return [];
+    const policy: any = (result as any)?.policy || null;
+    const triggered: any = policy?.triggered || {};
+    const reasons: string[] = [];
+    if (triggered.multiScan) reasons.push("High repeat scan count for this QR.");
+    if (triggered.geoDrift) reasons.push("Recent scans show large location drift.");
+    if (triggered.velocitySpike) reasons.push("Unusually high scan frequency in this batch.");
+
+    for (const a of policyAlerts) {
+      const msg = String(a?.message || "").trim();
+      if (msg && !reasons.includes(msg)) reasons.push(msg);
+    }
+
+    return reasons.slice(0, 6);
+  }, [policyAlerts, result, statusKind]);
+
+  const primaryMessage = useMemo(() => {
+    if (statusKind === "first") return "This is a genuine product.";
+    if (statusKind === "verified_again") return "Authentic item verified again.";
+    if (statusKind === "possible_duplicate") return "Possible duplicate scan detected.";
+    return result?.message || "Verification details";
+  }, [result?.message, statusKind]);
+
+  const messageTone = useMemo(() => {
+    if (statusKind === "first" || statusKind === "verified_again") return "success";
+    if (statusKind === "blocked" || statusKind === "invalid") return "danger";
+    return "warning";
+  }, [statusKind]);
+
+  const showScanHistory =
+    statusKind !== "invalid" &&
+    (typeof result?.scanCount === "number" || Boolean(firstScanAt) || Boolean(latestScanAt));
   const feedbackStorageKey = useMemo(() => {
     const normalized = String(displayedCode || "").trim().toUpperCase();
     return normalized && normalized !== "—" ? `authenticqr_feedback_${normalized}` : "";
@@ -594,41 +667,95 @@ export default function Verify() {
                   </div>
                 </div>
 
-                {(result?.message || result?.warningMessage) && (
-                  <div
-                    className={
-                      statusKind === "genuine"
-                        ? "rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"
-                        : "rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
-                    }
-                  >
-                    <p className="font-medium">{result?.message || "Verification details"}</p>
-                    {result?.warningMessage ? <p className="mt-1 text-amber-900/90">{result.warningMessage}</p> : null}
+                {hasContainment ? (
+                  <div className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-900">
+                    <p className="font-semibold">Under investigation</p>
+                    <p className="mt-1 text-orange-900/90">
+                      This product is currently under investigation. If you need help, contact the brand support details below.
+                    </p>
+                    {containment?.qrUnderInvestigation?.reason ? (
+                      <p className="mt-1 text-xs text-orange-900/80">Reason: {containment.qrUnderInvestigation.reason}</p>
+                    ) : null}
                   </div>
-                )}
+                ) : null}
 
-                {(statusKind === "reused" || statusKind === "blocked") && (
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <div className="rounded-xl border border-slate-200 bg-white p-4">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Total scans</p>
-                      <p className="mt-1 text-2xl font-semibold text-slate-900">{result?.scanCount ?? 0}</p>
-                    </div>
-                    <div className="rounded-xl border border-slate-200 bg-white p-4">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">First verified</p>
-                      <p className="mt-1 text-sm font-medium text-slate-900">
-                        {firstScanAt ? new Date(firstScanAt).toLocaleString() : "Not available"}
+                {(primaryMessage || result?.warningMessage) ? (
+                  <div
+                    className={cn(
+                      "rounded-xl border px-4 py-3 text-sm",
+                      messageTone === "success" && "border-emerald-200 bg-emerald-50 text-emerald-900",
+                      messageTone === "warning" && "border-amber-300 bg-amber-50 text-amber-900",
+                      messageTone === "danger" && "border-red-200 bg-red-50 text-red-900"
+                    )}
+                  >
+                    <p className="font-medium">{primaryMessage}</p>
+                    {statusKind === "verified_again" ? (
+                      <div className="mt-1 space-y-1 text-emerald-900/90">
+                        <p>You have verified this product before.</p>
+                        <p>You can safely show this screen again if someone asks for proof.</p>
+                      </div>
+                    ) : null}
+                    {statusKind === "possible_duplicate" ? (
+                      <p className="mt-1 text-amber-900/90">
+                        Review details below before trusting this label. If anything looks wrong, report it.
                       </p>
-                      <p className="mt-1 text-xs text-slate-500">{firstScanLocation || "Location unavailable"}</p>
-                    </div>
-                    <div className="rounded-xl border border-slate-200 bg-white p-4">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Latest verification</p>
-                      <p className="mt-1 text-sm font-medium text-slate-900">
-                        {latestScanAt ? new Date(latestScanAt).toLocaleString() : "Not available"}
+                    ) : null}
+                    {result?.warningMessage ? (
+                      <p
+                        className={cn(
+                          "mt-2",
+                          messageTone === "success" && "text-emerald-900/80",
+                          messageTone === "warning" && "text-amber-900/80",
+                          messageTone === "danger" && "text-red-900/80"
+                        )}
+                      >
+                        {result.warningMessage}
                       </p>
-                      <p className="mt-1 text-xs text-slate-500">{latestScanLocation || previousScanLocation || "Location unavailable"}</p>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {statusKind === "possible_duplicate" ? (
+                  <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+                    <p className="font-semibold">Why this was flagged</p>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-red-900/90">
+                      {(riskReasons.length > 0 ? riskReasons : ["Unusual scan pattern detected by security policy."]).map((r) => (
+                        <li key={r}>{r}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {showScanHistory ? (
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Scan history summary</p>
+                      <Badge variant="outline" className="text-xs">Coarse city/country only</Badge>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-wide text-slate-500">Total scans</p>
+                        <p className="mt-1 text-2xl font-semibold text-slate-900">{result?.scanCount ?? 0}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-wide text-slate-500">First verified</p>
+                        <p className="mt-1 text-sm font-medium text-slate-900">
+                          {firstScanAt ? new Date(firstScanAt).toLocaleString() : "Not available"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">{firstScanLocation || "Location unavailable"}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-wide text-slate-500">Latest verified</p>
+                        <p className="mt-1 text-sm font-medium text-slate-900">
+                          {latestScanAt ? new Date(latestScanAt).toLocaleString() : "Not available"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {latestScanLocation || previousScanLocation || "Location unavailable"}
+                        </p>
+                      </div>
                     </div>
                   </div>
-                )}
+                ) : null}
 
                 <div className="grid gap-3 md:grid-cols-3">
                   {result?.licensee?.supportEmail && (
@@ -761,7 +888,7 @@ export default function Verify() {
                         className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
                       >
                         <Flag className="mr-2 h-4 w-4" />
-                        Report Fraud
+                        Report suspected counterfeit
                       </Button>
                     )}
                     <Button asChild className="bg-slate-900 text-white hover:bg-slate-800">
@@ -783,9 +910,9 @@ export default function Verify() {
       <Dialog open={reportOpen} onOpenChange={setReportOpen}>
         <DialogContent className="sm:max-w-[680px]">
           <DialogHeader>
-            <DialogTitle>Report suspected fraud</DialogTitle>
+            <DialogTitle>Report suspected counterfeit</DialogTitle>
             <DialogDescription>
-              Share what you noticed. This goes directly to incident response.
+              We will attach scan metadata automatically so investigators can act faster.
             </DialogDescription>
           </DialogHeader>
 

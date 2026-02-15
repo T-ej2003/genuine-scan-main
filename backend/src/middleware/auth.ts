@@ -73,17 +73,20 @@ export const optionalAuth = async (req: AuthRequest, _res: Response, next: NextF
  * SSE auth supports:
  * - ?token= (for EventSource)
  * - Authorization: Bearer (normal)
+ * - Cookie access token (preferred; avoids putting tokens in URLs)
  */
 export const authenticateSSE = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const queryToken = (req.query.token as string | undefined) || "";
   const headerToken = getBearerToken(req) || "";
-  const token = queryToken || headerToken;
+  const cookieToken = !queryToken && !headerToken ? getCookieAccessToken(req) || "" : "";
+  const token = queryToken || headerToken || cookieToken;
 
   if (!token) return res.status(401).json({ success: false, error: "No token provided" });
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
     req.user = await hydrateTenantIfNeeded(decoded);
+    req.authMode = queryToken ? "bearer" : headerToken ? "bearer" : "cookie";
     return next();
   } catch {
     return res.status(401).json({ success: false, error: "Invalid or expired token" });
