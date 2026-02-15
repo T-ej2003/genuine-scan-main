@@ -1,13 +1,13 @@
 import { Request, Response } from "express";
 import prisma from "../config/database";
-import { QRStatus } from "@prisma/client";
+import { QRStatus, ScanRiskClassification } from "@prisma/client";
 import { createAuditLog } from "../services/auditService";
 import { evaluateScanPolicy } from "../services/scanPolicy";
 import { hashToken, verifyQrToken } from "../services/qrTokenService";
 import { evaluateScanAndEnforcePolicy } from "../services/policyEngineService";
-import { createHash } from "crypto";
-import { reverseGeocode } from "../services/locationService";
-import { getScanInsight } from "../services/scanInsightService";
+import { getCustomerIdentityContext } from "../services/customerSessionService";
+import { recordClassifiedScan } from "../services/recordClassifiedScanService";
+import { buildScanHistorySummary } from "../services/scanHistorySummaryService";
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = Number(process.env.SCAN_RATE_LIMIT_PER_MIN || "60");
@@ -23,16 +23,6 @@ const hitRateLimit = (key: string) => {
   }
   entry.count += 1;
   return entry.count > RATE_LIMIT_MAX;
-};
-
-const deviceFingerprint = (req: Request) => {
-  const raw =
-    String(req.get("x-device-fp") || "") +
-    "|" +
-    String(req.get("user-agent") || "") +
-    "|" +
-    String(req.ip || "");
-  return createHash("sha256").update(raw).digest("hex");
 };
 
 export const scanToken = async (req: Request, res: Response) => {
@@ -193,7 +183,12 @@ export const scanToken = async (req: Request, res: Response) => {
 
     const decision = evaluateScanPolicy(qr.status);
     const now = new Date();
-    const fp = deviceFingerprint(req);
+    const identity = getCustomerIdentityContext(req, res);
+    const device =
+      String((req.query.device as string | undefined) || "").trim() ||
+      String(req.get("x-device-fp") || "").trim() ||
+      String(req.get("user-agent") || "").trim() ||
+      null;
     const toNum = (v: any) => {
       const n = parseFloat(String(v));
       return Number.isFinite(n) ? n : null;
@@ -201,50 +196,23 @@ export const scanToken = async (req: Request, res: Response) => {
     const latitude = toNum(req.query.lat);
     const longitude = toNum(req.query.lon);
     const accuracy = toNum(req.query.acc);
-    const location = await reverseGeocode(latitude, longitude);
-
-    const updated = await prisma.$transaction(async (tx) => {
-      const updatedQr = await tx.qRCode.update({
-        where: { id: qr.id },
-        data: {
-          scanCount: { increment: 1 },
-          scannedAt: qr.scannedAt ?? now,
-          lastScanIp: req.ip,
-          lastScanUserAgent: req.get("user-agent") || null,
-          lastScanDevice: fp,
-          status: decision.allowRedeem ? QRStatus.REDEEMED : qr.status,
-          redeemedAt: decision.allowRedeem ? now : qr.redeemedAt,
-          redeemedDeviceFingerprint: decision.allowRedeem ? fp : qr.redeemedDeviceFingerprint,
-        },
-        include: {
-          licensee: true,
-          batch: { include: { manufacturer: { select: { id: true, name: true, email: true, location: true, website: true } } } },
-        },
-      });
-
-      await tx.qrScanLog.create({
-        data: {
-          code: updatedQr.code,
-          qrCodeId: updatedQr.id,
-          licenseeId: updatedQr.licenseeId,
-          batchId: updatedQr.batchId ?? null,
-          status: updatedQr.status,
-          isFirstScan: decision.allowRedeem,
-          scanCount: updatedQr.scanCount ?? 0,
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent") || null,
-          device: fp,
-          latitude,
-          longitude,
-          accuracy,
-          locationName: location?.name || null,
-          locationCountry: location?.country || null,
-          locationRegion: location?.region || null,
-          locationCity: location?.city || null,
-        },
-      });
-
-      return updatedQr;
+    const { qrCode: updated, classification, ownership } = await recordClassifiedScan({
+      qrId: qr.id,
+      currentStatus: qr.status,
+      allowRedeem: decision.allowRedeem,
+      existingScannedAt: qr.scannedAt,
+      existingRedeemedAt: qr.redeemedAt,
+      ipAddress: req.ip,
+      ipHash: identity.ipHash,
+      userAgent: req.get("user-agent") || null,
+      device,
+      latitude,
+      longitude,
+      accuracy,
+      customerUserId: identity.customerUserId,
+      anonVisitorId: identity.anonVisitorId,
+      visitorFingerprint: identity.visitorFingerprint,
+      scannedAt: now,
     });
 
     if (decision.allowRedeem) {
@@ -277,14 +245,31 @@ export const scanToken = async (req: Request, res: Response) => {
 
     const finalStatus =
       policy.autoBlockedQr || policy.autoBlockedBatch ? QRStatus.BLOCKED : updated.status;
-    const effectiveOutcome = finalStatus === QRStatus.BLOCKED ? "BLOCKED" : decision.outcome;
-    const scanInsight = await getScanInsight(updated.id);
+    const summary = await buildScanHistorySummary({
+      qrCodeId: updated.id,
+      totalScans: updated.scanCount ?? 0,
+      customerUserId: identity.customerUserId,
+      anonVisitorId: identity.anonVisitorId,
+    });
+
+    const effectiveOutcome =
+      finalStatus === QRStatus.BLOCKED
+        ? "BLOCKED"
+        : decision.outcome === "SUSPICIOUS" || decision.outcome === "NOT_PRINTED"
+        ? decision.outcome
+        : classification.classification === ScanRiskClassification.FIRST_SCAN
+        ? "VALID"
+        : classification.classification === ScanRiskClassification.LEGIT_REPEAT
+        ? "VALID_REPEAT"
+        : "SUSPICIOUS_DUPLICATE";
 
     const warningMessage =
-      effectiveOutcome === "ALREADY_REDEEMED"
-        ? `Already verified before. First verification was at ${scanInsight.firstScanAt || updated.redeemedAt?.toISOString?.() || "unknown time"}.`
+      effectiveOutcome === "VALID_REPEAT"
+        ? "You have verified this product before."
+        : effectiveOutcome === "SUSPICIOUS_DUPLICATE"
+        ? "Possible duplicate: this code is being scanned by different identities/devices."
         : effectiveOutcome === "SUSPICIOUS"
-        ? "This code was generated but not confirmed as printed. Treat with suspicion."
+        ? "This code was generated but not confirmed as printed. Treat with caution."
         : effectiveOutcome === "BLOCKED"
         ? policy.autoBlockedQr || policy.autoBlockedBatch
           ? "This code has been auto-blocked by security policy due to anomaly detection."
@@ -294,19 +279,33 @@ export const scanToken = async (req: Request, res: Response) => {
     const message =
       effectiveOutcome === "VALID"
         ? "Authentic item. First-time verification successful."
-      : effectiveOutcome === "ALREADY_REDEEMED"
-        ? "Already verified. Please review scan details below."
+        : effectiveOutcome === "VALID_REPEAT"
+        ? "Authentic item verified again."
+        : effectiveOutcome === "SUSPICIOUS_DUPLICATE"
+        ? "Possible duplicate scan detected."
         : effectiveOutcome === "SUSPICIOUS"
         ? "Not activated for sale. Suspicious scan."
         : effectiveOutcome === "BLOCKED"
         ? "Blocked code."
         : "This code is not active.";
 
+    const isOwnedByYou = Boolean(
+      identity.customerUserId &&
+        ownership?.customerUserId &&
+        ownership.customerUserId === identity.customerUserId
+    );
+
     return res.json({
       success: true,
       data: {
-        isAuthentic: effectiveOutcome === "VALID",
+        isAuthentic: effectiveOutcome === "VALID" || effectiveOutcome === "VALID_REPEAT",
         scanOutcome: effectiveOutcome,
+        scanClassification:
+          finalStatus === QRStatus.BLOCKED ? "SUSPICIOUS_DUPLICATE" : classification.classification,
+        reasons:
+          finalStatus === QRStatus.BLOCKED
+            ? ["Security policy auto-blocked this QR code"]
+            : classification.reasons,
         message,
         warningMessage,
         code: updated.code,
@@ -331,16 +330,27 @@ export const scanToken = async (req: Request, res: Response) => {
               manufacturer: updated.batch.manufacturer || null,
             }
           : null,
-        firstScanned: updated.scannedAt ? new Date(updated.scannedAt).toISOString() : null,
+        firstScanned: summary.firstScanAt,
         scanCount: updated.scanCount ?? 0,
-        isFirstScan: decision.allowRedeem,
+        isFirstScan: classification.classification === ScanRiskClassification.FIRST_SCAN,
         redeemedAt: updated.redeemedAt ? new Date(updated.redeemedAt).toISOString() : null,
-        firstScanAt: scanInsight.firstScanAt,
-        firstScanLocation: scanInsight.firstScanLocation,
-        latestScanAt: scanInsight.latestScanAt,
-        latestScanLocation: scanInsight.latestScanLocation,
-        previousScanAt: scanInsight.previousScanAt,
-        previousScanLocation: scanInsight.previousScanLocation,
+        firstScanAt: summary.firstScanAt,
+        firstScanLocation: summary.firstScanLocation,
+        latestScanAt: summary.lastScanAt,
+        latestScanLocation: summary.lastScanLocation,
+        previousScanAt: summary.previousScanAt,
+        previousScanLocation: summary.previousScanLocation,
+        verifiedByYouCount: summary.verifiedByYouCount,
+        topLocations: summary.topLocations,
+        ownership: ownership
+          ? {
+              ownerCustomerId: ownership.customerUserId,
+              claimedAt: ownership.claimedAt,
+              isOwnedByYou,
+            }
+          : null,
+        claimRecommended: !ownership && !identity.customerUserId,
+        anonVisitorId: identity.anonVisitorId,
         policy,
       },
     });

@@ -1,12 +1,13 @@
 import { Request, Response } from "express";
 import prisma from "../config/database";
-import { IncidentActorType, QRStatus } from "@prisma/client";
-import { recordScan } from "../services/qrService";
+import { IncidentActorType, QRStatus, ScanRiskClassification } from "@prisma/client";
 import { createAuditLog } from "../services/auditService";
 import { evaluateScanAndEnforcePolicy } from "../services/policyEngineService";
 import { z } from "zod";
 import { createIncidentFromReport } from "../services/incidentService";
-import { getScanInsight } from "../services/scanInsightService";
+import { recordClassifiedScan } from "../services/recordClassifiedScanService";
+import { getCustomerIdentityContext } from "../services/customerSessionService";
+import { buildScanHistorySummary } from "../services/scanHistorySummaryService";
 
 const reportFraudSchema = z.object({
   code: z.string().trim().min(2).max(128),
@@ -210,23 +211,41 @@ export const verifyQRCode = async (req: Request, res: Response) => {
       });
     }
 
-    // Valid printed/redeemed QR - record scan
+    // Valid printed/redeemed QR - record scan with identity-aware classification
     const toNum = (v: any) => {
       const n = parseFloat(String(v));
       return Number.isFinite(n) ? n : null;
     };
-    const latitude = toNum(req.query.lat);
-    const longitude = toNum(req.query.lon);
-    const accuracy = toNum(req.query.acc);
+    const latitude = toNum(req.query.lat ?? req.body?.lat);
+    const longitude = toNum(req.query.lon ?? req.body?.lon);
+    const accuracy = toNum(req.query.acc ?? req.body?.acc);
 
-    const { isFirstScan, qrCode: updated } = await recordScan(code.toUpperCase(), {
+    const identity = getCustomerIdentityContext(req, res);
+    const scannedAt = new Date();
+
+    const { qrCode: updated, classification, ownership } = await recordClassifiedScan({
+      qrId: qrCode.id,
+      currentStatus: qrCode.status,
+      allowRedeem: qrCode.status === QRStatus.PRINTED,
+      existingScannedAt: qrCode.scannedAt,
+      existingRedeemedAt: qrCode.redeemedAt,
       ipAddress: req.ip,
+      ipHash: identity.ipHash,
       userAgent: req.get("user-agent") || null,
-      device: (req.query.device as string | undefined) || null,
+      device: ((req.query.device as string | undefined) || req.body?.device || null) as string | null,
       latitude,
       longitude,
       accuracy,
+      customerUserId: identity.customerUserId,
+      anonVisitorId: identity.anonVisitorId,
+      visitorFingerprint: identity.visitorFingerprint,
+      scannedAt,
     });
+
+    const isFirstScan = classification.classification === ScanRiskClassification.FIRST_SCAN;
+    const isLegitRepeat = classification.classification === ScanRiskClassification.LEGIT_REPEAT;
+    const isSuspiciousDuplicate =
+      classification.classification === ScanRiskClassification.SUSPICIOUS_DUPLICATE;
 
     await createAuditLog({
       action: "VERIFY_SUCCESS",
@@ -234,6 +253,8 @@ export const verifyQRCode = async (req: Request, res: Response) => {
       entityId: qrCode.id,
       details: {
         isFirstScan,
+        scanClassification: classification.classification,
+        scanReasons: classification.reasons,
         scanCount: (updated.scanCount ?? 0),
       },
       ipAddress: req.ip,
@@ -246,7 +267,7 @@ export const verifyQRCode = async (req: Request, res: Response) => {
       batchId: updated.batchId ?? null,
       manufacturerId: updated.batch?.manufacturer?.id || null,
       scanCount: updated.scanCount ?? 0,
-      scannedAt: new Date(),
+      scannedAt,
       latitude,
       longitude,
       ipAddress: req.ip,
@@ -255,27 +276,53 @@ export const verifyQRCode = async (req: Request, res: Response) => {
 
     const blockedByPolicy = policy.autoBlockedQr || policy.autoBlockedBatch;
     const finalStatus = blockedByPolicy ? QRStatus.BLOCKED : updated.status;
-
-    const firstScanTime = updated.scannedAt ? new Date(updated.scannedAt) : null;
-    const scanInsight = await getScanInsight(updated.id);
+    const summary = await buildScanHistorySummary({
+      qrCodeId: updated.id,
+      totalScans: updated.scanCount ?? 0,
+      customerUserId: identity.customerUserId,
+      anonVisitorId: identity.anonVisitorId,
+    });
 
     const warningMessage = blockedByPolicy
       ? "This code has been auto-blocked by security policy due to anomaly detection."
-      : !isFirstScan && firstScanTime
-      ? `Already verified before. First verification was on ${scanInsight.firstScanAt || firstScanTime.toISOString()}.`
+      : isLegitRepeat
+      ? "You have verified this product before."
+      : isSuspiciousDuplicate
+      ? "This QR was scanned by other identities or unusual locations. Review before trusting."
       : null;
+
+    const message = blockedByPolicy
+      ? "Blocked code."
+      : isFirstScan
+      ? "This is a genuine product."
+      : isLegitRepeat
+      ? "Authentic item verified again."
+      : "Possible duplicate scan detected.";
+
+    const isOwnedByYou = Boolean(
+      identity.customerUserId &&
+        ownership?.customerUserId &&
+        identity.customerUserId === ownership.customerUserId
+    );
 
     return res.json({
       success: true,
       data: {
-        isAuthentic: isFirstScan && !blockedByPolicy,
-        message: blockedByPolicy
-          ? "Blocked code."
-          : isFirstScan
-          ? "This is a genuine product."
-          : "Already verified. Please review scan details below.",
+        isAuthentic: !blockedByPolicy && (isFirstScan || isLegitRepeat),
+        message,
         code: updated.code,
         status: finalStatus,
+        scanClassification: blockedByPolicy ? "SUSPICIOUS_DUPLICATE" : classification.classification,
+        reasons: blockedByPolicy
+          ? ["Security policy auto-blocked this QR code"]
+          : classification.reasons,
+        scanOutcome: blockedByPolicy
+          ? "BLOCKED"
+          : isFirstScan
+          ? "VALID"
+          : isLegitRepeat
+          ? "VALID_REPEAT"
+          : "SUSPICIOUS_DUPLICATE",
 
         licensee: updated.licensee
           ? {
@@ -303,15 +350,26 @@ export const verifyQRCode = async (req: Request, res: Response) => {
         batchName: updated.batch?.name || null,
         printedAt: updated.batch?.printedAt || null,
 
-        firstScanned: firstScanTime ? firstScanTime.toISOString() : null,
+        firstScanned: summary.firstScanAt,
         scanCount: updated.scanCount ?? 0,
         isFirstScan,
-        firstScanAt: scanInsight.firstScanAt,
-        firstScanLocation: scanInsight.firstScanLocation,
-        latestScanAt: scanInsight.latestScanAt,
-        latestScanLocation: scanInsight.latestScanLocation,
-        previousScanAt: scanInsight.previousScanAt,
-        previousScanLocation: scanInsight.previousScanLocation,
+        firstScanAt: summary.firstScanAt,
+        firstScanLocation: summary.firstScanLocation,
+        latestScanAt: summary.lastScanAt,
+        latestScanLocation: summary.lastScanLocation,
+        previousScanAt: summary.previousScanAt,
+        previousScanLocation: summary.previousScanLocation,
+        verifiedByYouCount: summary.verifiedByYouCount,
+        topLocations: summary.topLocations,
+        ownership: ownership
+          ? {
+              ownerCustomerId: ownership.customerUserId,
+              claimedAt: ownership.claimedAt,
+              isOwnedByYou,
+            }
+          : null,
+        claimRecommended: !ownership && !identity.customerUserId,
+        anonVisitorId: identity.anonVisitorId,
 
         warningMessage,
         policy,

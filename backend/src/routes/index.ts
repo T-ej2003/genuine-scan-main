@@ -11,6 +11,13 @@ import {
 
 import { login, me } from "../controllers/authController";
 import {
+  getCurrentCustomer,
+  googleCustomerAuth,
+  requestCustomerOtp,
+  verifyCustomerOtp,
+  logoutCustomer,
+} from "../controllers/customerAuthController";
+import {
   createLicensee,
   getLicensees,
   getLicensee,
@@ -70,6 +77,7 @@ import {
 
 import { verifyQRCode, reportFraud, submitProductFeedback } from "../controllers/verifyController";
 import { scanToken } from "../controllers/scanController";
+import { claimOwnership, submitFraudReport } from "../controllers/customerSecurityController";
 import { createPrintJob, downloadPrintJobPack, confirmPrintJob } from "../controllers/printJobController";
 import auditRoutes from "./auditRoutes";
 import { updateMyProfile, changeMyPassword } from "../controllers/accountController";
@@ -90,14 +98,23 @@ import {
 import { getDashboardStats } from "../controllers/dashboardController";
 import { dashboardEvents } from "../controllers/eventsController";
 import { healthCheck } from "../controllers/healthController";
+import { incidentReportUpload } from "../middleware/incidentUpload";
 
 const router = Router();
 
 // ==================== PUBLIC ====================
 router.post("/auth/login", login);
+router.post("/auth/google", googleCustomerAuth);
+router.post("/auth/email/request-otp", requestCustomerOtp);
+router.post("/auth/email/verify-otp", verifyCustomerOtp);
+router.post("/auth/logout-customer", logoutCustomer);
+router.get("/me", getCurrentCustomer);
 router.get("/verify/:code", verifyQRCode);
+router.post("/scan/:code", verifyQRCode);
 router.post("/verify/report-fraud", reportFraud);
+router.post("/fraud-report", incidentReportUpload.array("photos", 4), submitFraudReport);
 router.post("/verify/feedback", submitProductFeedback);
+router.post("/claim/:code", claimOwnership);
 router.post("/incidents/report", uploadIncidentReportPhotos, reportIncident);
 router.get("/scan", scanToken);
 router.get("/health", healthCheck);
