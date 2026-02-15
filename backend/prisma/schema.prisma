@@ -138,6 +138,17 @@ enum IncidentCommStatus {
   FAILED
 }
 
+enum CustomerAuthProvider {
+  GOOGLE
+  EMAIL_OTP
+}
+
+enum ScanRiskClassification {
+  FIRST_SCAN
+  LEGIT_REPEAT
+  SUSPICIOUS_DUPLICATE
+}
+
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
@@ -178,6 +189,45 @@ model User {
   @@index([licenseeId])
   @@index([role])
   @@index([isActive])
+}
+
+model CustomerUser {
+  id         String               @id @default(uuid())
+  email      String               @unique
+  name       String?
+  provider   CustomerAuthProvider @default(EMAIL_OTP)
+  providerId String?
+
+  qrScanLogs   QrScanLog[]
+  ownerships   ProductOwnership[]
+  fraudReports FraudReport[]
+  otpCodes     CustomerOtpCode[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([provider, providerId])
+  @@index([createdAt])
+}
+
+model CustomerOtpCode {
+  id String @id @default(uuid())
+
+  email      String
+  codeHash   String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  attempts   Int      @default(0)
+
+  customerUserId String?
+  customerUser   CustomerUser? @relation(fields: [customerUserId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
+  @@index([customerUserId])
+  @@index([createdAt])
 }
 
 model Licensee {
@@ -318,6 +368,8 @@ model QRCode {
   traceEvents TraceEvent[]
   policyAlerts PolicyAlert[]
   incidents Incident[]
+  ownerships ProductOwnership[]
+  fraudReports FraudReport[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -357,6 +409,13 @@ model QrScanLog {
   locationCountry String?
   locationRegion String?
   locationCity String?
+  customerUserId String?
+  customerUser CustomerUser? @relation(fields: [customerUserId], references: [id])
+  anonVisitorId String?
+  visitorFingerprint String?
+  ipHash String?
+  riskClassification ScanRiskClassification?
+  riskReasons Json?
 
   incidents Incident[]
 
@@ -364,6 +423,54 @@ model QrScanLog {
   @@index([batchId])
   @@index([code])
   @@index([scannedAt])
+  @@index([customerUserId])
+  @@index([anonVisitorId])
+  @@index([riskClassification])
+}
+
+model ProductOwnership {
+  id String @id @default(uuid())
+
+  qrCodeId String @unique
+  qrCode   QRCode @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+
+  customerUserId String
+  customerUser   CustomerUser @relation(fields: [customerUserId], references: [id], onDelete: Cascade)
+
+  claimedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerUserId])
+  @@index([claimedAt])
+}
+
+model FraudReport {
+  id String @id @default(uuid())
+
+  qrCodeId String?
+  qrCode   QRCode? @relation(fields: [qrCodeId], references: [id], onDelete: SetNull)
+
+  qrCodeValue String
+
+  customerUserId String?
+  customerUser   CustomerUser? @relation(fields: [customerUserId], references: [id], onDelete: SetNull)
+
+  anonVisitorId String?
+  reason        String
+  details       Json?
+  status        String @default("NEW")
+  incidentId    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([qrCodeId])
+  @@index([qrCodeValue])
+  @@index([customerUserId])
+  @@index([anonVisitorId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model BatchPrintPackToken {
