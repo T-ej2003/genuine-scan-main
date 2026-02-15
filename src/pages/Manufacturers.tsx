@@ -778,12 +778,12 @@ export default function Manufacturers() {
                         </TableCell>
 
                         <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" aria-label="Actions" title="Actions">
                                 <MoreHorizontal className="h-4 w-4" />
                               </Button>
-                            </DropdownMenuTrigger>
+                              </DropdownMenuTrigger>
 
                             <DropdownMenuContent align="end">
                               <DropdownMenuItem onClick={() => openDetails(m)}>

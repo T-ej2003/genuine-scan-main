@@ -1144,9 +1144,9 @@ export default function Licensees() {
                           </TableCell>
 
                           <TableCell>
-                            <DropdownMenu>
+                              <DropdownMenu>
                               <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon">
+                                <Button variant="ghost" size="icon" aria-label="Actions" title="Actions">
                                   <MoreHorizontal className="h-4 w-4" />
                                 </Button>
                               </DropdownMenuTrigger>
