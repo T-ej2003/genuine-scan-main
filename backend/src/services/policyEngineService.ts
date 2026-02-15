@@ -1,6 +1,7 @@
 import { AlertSeverity, PolicyAlert, PolicyAlertType, QRStatus, SecurityPolicy } from "@prisma/client";
 import prisma from "../config/database";
 import { createAuditLog } from "./auditService";
+import { evaluatePolicyRulesForScan } from "./ir/policyRuleEngineService";
 
 const ALERT_DEDUPE_WINDOW_MS = 15 * 60_000;
 
@@ -374,6 +375,21 @@ export const evaluateScanAndEnforcePolicy = async (input: PolicyScanInput): Prom
         ipAddress: input.ipAddress || undefined,
       });
     }
+  }
+
+  // Additional IR policy rules (superadmin-configurable)
+  try {
+    const ruleEval = await evaluatePolicyRulesForScan({
+      licenseeId: input.licenseeId,
+      qrCodeId: input.qrCodeId,
+      code: input.code,
+      batchId: input.batchId || null,
+      manufacturerId: input.manufacturerId || null,
+    });
+    if (ruleEval.alerts.length > 0) createdAlerts.push(...ruleEval.alerts);
+  } catch (e) {
+    // Never fail scan verification because rule evaluation failed.
+    console.error("evaluatePolicyRulesForScan failed:", e);
   }
 
   return {

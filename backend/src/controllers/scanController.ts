@@ -99,6 +99,8 @@ export const scanToken = async (req: Request, res: Response) => {
             website: true,
             supportEmail: true,
             supportPhone: true,
+            suspendedAt: true,
+            suspendedReason: true,
           },
         },
         batch: {
@@ -106,6 +108,8 @@ export const scanToken = async (req: Request, res: Response) => {
             id: true,
             name: true,
             printedAt: true,
+            suspendedAt: true,
+            suspendedReason: true,
             manufacturer: { select: { id: true, name: true, email: true, location: true, website: true } },
           },
         },
@@ -280,16 +284,35 @@ export const scanToken = async (req: Request, res: Response) => {
     const effectiveOutcome = finalStatus === QRStatus.BLOCKED ? "BLOCKED" : decision.outcome;
     const scanInsight = await getScanInsight(updated.id);
 
+    const containment = {
+      qrUnderInvestigation: updated.underInvestigationAt
+        ? { at: new Date(updated.underInvestigationAt).toISOString(), reason: updated.underInvestigationReason || null }
+        : null,
+      batchSuspended: updated.batch?.suspendedAt
+        ? { at: new Date(updated.batch.suspendedAt).toISOString(), reason: updated.batch.suspendedReason || null }
+        : null,
+      orgSuspended: updated.licensee?.suspendedAt
+        ? { at: new Date(updated.licensee.suspendedAt).toISOString(), reason: updated.licensee.suspendedReason || null }
+        : null,
+    };
+
+    const hasContainment =
+      Boolean(containment.qrUnderInvestigation) ||
+      Boolean(containment.batchSuspended) ||
+      Boolean(containment.orgSuspended);
+
     const warningMessage =
       effectiveOutcome === "ALREADY_REDEEMED"
         ? `Already verified before. First verification was at ${scanInsight.firstScanAt || updated.redeemedAt?.toISOString?.() || "unknown time"}.`
-        : effectiveOutcome === "SUSPICIOUS"
+      : effectiveOutcome === "SUSPICIOUS"
         ? "This code was generated but not confirmed as printed. Treat with suspicion."
-        : effectiveOutcome === "BLOCKED"
+      : effectiveOutcome === "BLOCKED"
         ? policy.autoBlockedQr || policy.autoBlockedBatch
           ? "This code has been auto-blocked by security policy due to anomaly detection."
           : "This code has been blocked due to fraud or recall."
-        : null;
+      : hasContainment
+        ? "This product is currently under investigation. Please review details and contact support if needed."
+      : null;
 
     const message =
       effectiveOutcome === "VALID"
@@ -305,12 +328,14 @@ export const scanToken = async (req: Request, res: Response) => {
     return res.json({
       success: true,
       data: {
-        isAuthentic: effectiveOutcome === "VALID",
+        // Consumers may re-verify the same product; treat repeat scans as authentic unless blocked.
+        isAuthentic: effectiveOutcome === "VALID" || effectiveOutcome === "ALREADY_REDEEMED",
         scanOutcome: effectiveOutcome,
         message,
         warningMessage,
         code: updated.code,
         status: finalStatus,
+        containment,
         licensee: updated.licensee
           ? {
               id: updated.licensee.id,

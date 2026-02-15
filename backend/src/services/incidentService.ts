@@ -12,6 +12,7 @@ import prisma from "../config/database";
 import { createAuditLog } from "./auditService";
 import { deviceFingerprintFromRequest, sha256Hash } from "./securityHashService";
 import { reverseGeocode } from "./locationService";
+import { evaluatePolicyRulesForIncidentVolume } from "./ir/policyRuleEngineService";
 
 type IncidentReportInput = {
   qrCodeValue: string;
@@ -365,6 +366,16 @@ export const createIncidentFromReport = async (
       suspectedSpam,
     },
   });
+
+  // IR volume rules - best effort and never block incident creation.
+  try {
+    await evaluatePolicyRulesForIncidentVolume({
+      incidentId: incident.id,
+      licenseeId: incident.licenseeId || null,
+    });
+  } catch (e) {
+    console.error("evaluatePolicyRulesForIncidentVolume failed:", e);
+  }
 
   return incident;
 };

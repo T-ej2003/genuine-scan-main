@@ -98,6 +98,19 @@ import {
   uploadIncidentReportPhotos,
 } from "../controllers/incidentController";
 
+import {
+  listIrIncidents,
+  createIrIncident,
+  getIrIncident,
+  patchIrIncident,
+  addIrIncidentEvent,
+  applyIrIncidentAction,
+  sendIrIncidentCommunication,
+} from "../controllers/irIncidentController";
+
+import { listIrPolicies, createIrPolicy, patchIrPolicy } from "../controllers/irPolicyController";
+import { listIrAlerts, patchIrAlert } from "../controllers/irAlertController";
+
 import { getDashboardStats } from "../controllers/dashboardController";
 import { dashboardEvents } from "../controllers/eventsController";
 import { healthCheck } from "../controllers/healthController";
@@ -344,6 +357,36 @@ router.get(
   enforceTenantIsolation,
   exportIncidentPdfHook
 );
+
+// ==================== IR (PLATFORM SUPERADMIN) ====================
+router.get("/ir/incidents", authenticate, requirePlatformAdmin, listIrIncidents);
+router.post("/ir/incidents", authenticate, requirePlatformAdmin, requireCsrf, createIrIncident);
+router.get("/ir/incidents/:id", authenticate, requirePlatformAdmin, getIrIncident);
+router.patch("/ir/incidents/:id", authenticate, requirePlatformAdmin, requireCsrf, patchIrIncident);
+router.post("/ir/incidents/:id/events", authenticate, requirePlatformAdmin, requireCsrf, addIrIncidentEvent);
+router.post("/ir/incidents/:id/actions", authenticate, requirePlatformAdmin, requireCsrf, applyIrIncidentAction);
+router.post(
+  "/ir/incidents/:id/communications",
+  authenticate,
+  requirePlatformAdmin,
+  requireCsrf,
+  sendIrIncidentCommunication
+);
+router.post(
+  "/ir/incidents/:id/attachments",
+  authenticate,
+  requirePlatformAdmin,
+  requireCsrf,
+  uploadIncidentEvidence,
+  addIncidentEvidence
+);
+
+router.get("/ir/policies", authenticate, requirePlatformAdmin, listIrPolicies);
+router.post("/ir/policies", authenticate, requirePlatformAdmin, requireCsrf, createIrPolicy);
+router.patch("/ir/policies/:id", authenticate, requirePlatformAdmin, requireCsrf, patchIrPolicy);
+
+router.get("/ir/alerts", authenticate, requirePlatformAdmin, listIrAlerts);
+router.patch("/ir/alerts/:id", authenticate, requirePlatformAdmin, requireCsrf, patchIrAlert);
 
 // ==================== ADMIN BLOCK ====================
 router.post("/admin/qrs/:id/block", authenticate, requirePlatformAdmin, requireCsrf, blockQRCode);
