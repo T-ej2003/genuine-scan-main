@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -88,6 +89,12 @@ export default function Login() {
                   "Sign in"
                 )}
               </Button>
+
+              <div className="flex items-center justify-between text-sm">
+                <Link to="/forgot-password" className="text-muted-foreground hover:text-foreground underline-offset-4 hover:underline">
+                  Forgot password?
+                </Link>
+              </div>
             </form>
           </CardContent>
         </Card>
@@ -95,4 +102,3 @@ export default function Login() {
     </div>
   );
 }
-

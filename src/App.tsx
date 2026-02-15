@@ -9,6 +9,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 
 const Login = lazy(() => import("@/pages/Login"));
+const AcceptInvite = lazy(() => import("@/pages/AcceptInvite"));
+const ForgotPassword = lazy(() => import("@/pages/ForgotPassword"));
+const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Licensees = lazy(() => import("@/pages/Licensees"));
 const QRCodes = lazy(() => import("@/pages/QRCodes"));
@@ -100,6 +103,30 @@ function AppRoutes() {
           element={
             <AuthRoute>
               <Login />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/accept-invite"
+          element={
+            <AuthRoute>
+              <AcceptInvite />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/forgot-password"
+          element={
+            <AuthRoute>
+              <ForgotPassword />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/reset-password"
+          element={
+            <AuthRoute>
+              <ResetPassword />
             </AuthRoute>
           }
         />

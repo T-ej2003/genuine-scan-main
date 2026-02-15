@@ -111,6 +111,7 @@ type CreateLicenseeForm = {
 
   // Optional: create manufacturer now
   createManufacturerNow: boolean;
+  manufacturerAccessMode: "invite" | "password";
   manufacturerName: string;
   manufacturerEmail: string;
   manufacturerPassword: string;
@@ -207,6 +208,7 @@ export default function Licensees() {
     rangeEnd: "150000",
 
     createManufacturerNow: true,
+    manufacturerAccessMode: "invite",
     manufacturerName: "",
     manufacturerEmail: "",
     manufacturerPassword: "",
@@ -221,6 +223,7 @@ export default function Licensees() {
   const [isUserOpen, setIsUserOpen] = useState(false);
   const [creatingUser, setCreatingUser] = useState(false);
   const [userForm, setUserForm] = useState<CreateUserForm | null>(null);
+  const [userCreateMode, setUserCreateMode] = useState<"invite" | "password">("invite");
 
   // Allocate QR range dialog (existing licensee)
   const [rangeOpen, setRangeOpen] = useState(false);
@@ -315,6 +318,7 @@ export default function Licensees() {
       rangeEnd: "150000",
 
       createManufacturerNow: true,
+      manufacturerAccessMode: "invite",
       manufacturerName: "",
       manufacturerEmail: "",
       manufacturerPassword: "",
@@ -375,12 +379,16 @@ export default function Licensees() {
     const mfgName = createForm.manufacturerName.trim();
     const mfgEmail = createForm.manufacturerEmail.trim().toLowerCase();
     const mfgPass = createForm.manufacturerPassword.trim();
+    const mfgAccessMode = createForm.manufacturerAccessMode || "invite";
 
     if (wantMfg) {
-      if (!mfgName || !mfgEmail || mfgPass.length < 6) {
+      const needsPassword = mfgAccessMode === "password";
+      if (!mfgName || !mfgEmail || (needsPassword && mfgPass.length < 6)) {
         toast({
           title: "Manufacturer details missing",
-          description: "Provide Manufacturer Name, Email, and Password (min 6 chars).",
+          description: needsPassword
+            ? "Provide Manufacturer Name, Email, and Password (min 6 chars)."
+            : "Provide Manufacturer Name and Email.",
           variant: "destructive",
         });
         return;
@@ -445,13 +453,21 @@ export default function Licensees() {
             detail: "Creating manufacturer access user...",
           });
         }
-        const uRes = await apiClient.createUser({
-          name: mfgName,
-          email: mfgEmail,
-          password: mfgPass,
-          role: "MANUFACTURER",
-          licenseeId,
-        });
+        const uRes =
+          mfgAccessMode === "password"
+            ? await apiClient.createUser({
+                name: mfgName,
+                email: mfgEmail,
+                password: mfgPass,
+                role: "MANUFACTURER",
+                licenseeId,
+              })
+            : await apiClient.inviteUser({
+                name: mfgName,
+                email: mfgEmail,
+                role: "MANUFACTURER_USER",
+                licenseeId,
+              });
         if (!uRes.success) throw new Error(uRes.error || "Manufacturer create failed");
       }
 
@@ -616,6 +632,7 @@ export default function Licensees() {
   /* ===================== CREATE USER ===================== */
 
   const openCreateUser = (licenseeId: string) => {
+    setUserCreateMode("invite");
     setUserForm({
       licenseeId,
       name: "",
@@ -634,10 +651,13 @@ export default function Licensees() {
     const email = userForm.email.trim().toLowerCase();
     const password = userForm.password.trim();
 
-    if (!name || !email || password.length < 6 || !userForm.role || !userForm.licenseeId) {
+    const needsPassword = userCreateMode === "password";
+    if (!name || !email || (needsPassword && password.length < 6) || !userForm.role || !userForm.licenseeId) {
       toast({
         title: "Missing fields",
-        description: "Name, Email, Password (min 6), and Role are required.",
+        description: needsPassword
+          ? "Name, Email, Password (min 6), and Role are required."
+          : "Name, Email, and Role are required.",
         variant: "destructive",
       });
       return;
@@ -645,17 +665,25 @@ export default function Licensees() {
 
     setCreatingUser(true);
 
-    const res = await apiClient.createUser({
-      name,
-      email,
-      password,
-      role: userForm.role,
-      licenseeId: userForm.licenseeId,
-    });
+    const res =
+      userCreateMode === "password"
+        ? await apiClient.createUser({
+            name,
+            email,
+            password,
+            role: userForm.role,
+            licenseeId: userForm.licenseeId,
+          })
+        : await apiClient.inviteUser({
+            name,
+            email,
+            role: userForm.role === "LICENSEE_ADMIN" ? "ORG_ADMIN" : "MANUFACTURER_USER",
+            licenseeId: userForm.licenseeId,
+          });
 
     if (!res.success) {
       toast({
-        title: "Create user failed",
+        title: userCreateMode === "password" ? "Create user failed" : "Invite failed",
         description: res.error || "Could not create user",
         variant: "destructive",
       });
@@ -663,7 +691,13 @@ export default function Licensees() {
       return;
     }
 
-    toast({ title: "User created", description: `${userForm.role} created successfully.` });
+    toast({
+      title: userCreateMode === "password" ? "User created" : "Invite sent",
+      description:
+        userCreateMode === "password"
+          ? `${userForm.role} created successfully.`
+          : `Invite sent for ${userForm.role}.`,
+    });
     setCreatingUser(false);
     setIsUserOpen(false);
     setUserForm(null);
@@ -1019,15 +1053,37 @@ export default function Licensees() {
                         </div>
 
                         <div className="space-y-2 col-span-2">
-                          <Label>Manufacturer Password</Label>
-                          <Input
-                            type="password"
-                            value={createForm.manufacturerPassword}
-                            onChange={(e) => setCreateForm((p) => ({ ...p, manufacturerPassword: e.target.value }))}
-                            placeholder="Min 6 chars"
+                          <Label>Access</Label>
+                          <Select
+                            value={createForm.manufacturerAccessMode}
+                            onValueChange={(v) => setCreateForm((p) => ({ ...p, manufacturerAccessMode: v as any }))}
                             disabled={creating}
-                          />
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select access mode" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="invite">Send invite link (recommended)</SelectItem>
+                              <SelectItem value="password">Set password now (legacy)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-muted-foreground">
+                            Invite mode emails a one-time link to set the password (expires in 24 hours).
+                          </p>
                         </div>
+
+                        {createForm.manufacturerAccessMode === "password" ? (
+                          <div className="space-y-2 col-span-2">
+                            <Label>Manufacturer Password</Label>
+                            <Input
+                              type="password"
+                              value={createForm.manufacturerPassword}
+                              onChange={(e) => setCreateForm((p) => ({ ...p, manufacturerPassword: e.target.value }))}
+                              placeholder="Min 6 chars"
+                              disabled={creating}
+                            />
+                          </div>
+                        ) : null}
                       </div>
                     )}
                   </div>
@@ -1290,12 +1346,34 @@ export default function Licensees() {
         <Dialog open={isUserOpen} onOpenChange={setIsUserOpen}>
           <DialogContent className="sm:max-w-[520px] max-h-[85vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Create User</DialogTitle>
-              <DialogDescription>Create a LICENSEE_ADMIN or MANUFACTURER for this licensee.</DialogDescription>
+              <DialogTitle>Add user access</DialogTitle>
+              <DialogDescription>
+                Invite a user (recommended) or create with a password (legacy).
+              </DialogDescription>
             </DialogHeader>
 
             {userForm && (
               <form className="space-y-4 mt-4" onSubmit={submitCreateUser}>
+                <div className="space-y-2">
+                  <Label>Access</Label>
+                  <Select
+                    value={userCreateMode}
+                    onValueChange={(v) => setUserCreateMode(v as any)}
+                    disabled={creatingUser}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select access mode" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="invite">Send invite link (recommended)</SelectItem>
+                      <SelectItem value="password">Set password now (legacy)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Invite mode emails a one-time link to set the password (expires in 24 hours).
+                  </p>
+                </div>
+
                 <div className="space-y-2">
                   <Label>Name</Label>
                   <Input
@@ -1316,16 +1394,18 @@ export default function Licensees() {
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Password</Label>
-                  <Input
-                    type="password"
-                    value={userForm.password}
-                    onChange={(e) => setUserForm((p) => (p ? { ...p, password: e.target.value } : p))}
-                    placeholder="Min 6 chars"
-                    disabled={creatingUser}
-                  />
-                </div>
+                {userCreateMode === "password" ? (
+                  <div className="space-y-2">
+                    <Label>Password</Label>
+                    <Input
+                      type="password"
+                      value={userForm.password}
+                      onChange={(e) => setUserForm((p) => (p ? { ...p, password: e.target.value } : p))}
+                      placeholder="Min 6 chars"
+                      disabled={creatingUser}
+                    />
+                  </div>
+                ) : null}
 
                 <div className="space-y-2">
                   <Label>Role</Label>
@@ -1349,7 +1429,7 @@ export default function Licensees() {
                     Cancel
                   </Button>
                   <Button type="submit" disabled={creatingUser}>
-                    {creatingUser ? "Creating..." : "Create User"}
+                    {creatingUser ? "Working..." : userCreateMode === "password" ? "Create user" : "Send invite"}
                   </Button>
                 </div>
               </form>

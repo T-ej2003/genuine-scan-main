@@ -128,6 +128,7 @@ export default function Manufacturers() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [createMode, setCreateMode] = useState<"invite" | "create">("invite");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsManufacturer, setDetailsManufacturer] = useState<ManufacturerRow | null>(null);
   const [createForm, setCreateForm] = useState<CreateManufacturerForm>({
@@ -372,6 +373,7 @@ export default function Manufacturers() {
       location: "",
       website: "",
     });
+    setCreateMode("invite");
     setCreateOpen(true);
   };
 
@@ -394,10 +396,13 @@ export default function Manufacturers() {
       });
       return;
     }
-    if (!name || !email || password.length < 6) {
+    if (!name || !email || (createMode === "create" && password.length < 6)) {
       toast({
         title: "Missing fields",
-        description: "Name, Email, Password (min 6 chars) are required.",
+        description:
+          createMode === "invite"
+            ? "Name and Email are required."
+            : "Name, Email, Password (min 6 chars) are required.",
         variant: "destructive",
       });
       return;
@@ -405,21 +410,32 @@ export default function Manufacturers() {
 
     setCreating(true);
     try {
-      const res = await apiClient.createUser({
-        licenseeId: licId,
-        name,
-        email,
-        password,
-        role: "MANUFACTURER",
-        location: location || undefined,
-        website: website || undefined,
-      });
+      const res =
+        createMode === "invite"
+          ? await apiClient.inviteUser({
+              email,
+              name,
+              role: "MANUFACTURER_USER",
+              licenseeId: licId,
+            })
+          : await apiClient.createUser({
+              licenseeId: licId,
+              name,
+              email,
+              password,
+              role: "MANUFACTURER",
+              location: location || undefined,
+              website: website || undefined,
+            });
 
       if (!res.success) throw new Error(res.error || "Create manufacturer failed");
 
       toast({
-        title: "Manufacturer created",
-        description: `${name} added successfully.`,
+        title: createMode === "invite" ? "Invite sent" : "Manufacturer created",
+        description:
+          createMode === "invite"
+            ? `An invite link was emailed to ${email}. It expires in 24 hours.`
+            : `${name} added successfully.`,
       });
 
       setCreateOpen(false);
@@ -519,9 +535,9 @@ export default function Manufacturers() {
 
               <DialogContent className="sm:max-w-[560px] max-h-[85vh] overflow-y-auto">
                 <DialogHeader>
-                  <DialogTitle>Create Manufacturer</DialogTitle>
+                  <DialogTitle>Add Manufacturer</DialogTitle>
                   <DialogDescription>
-                    Creates a manufacturer user under the selected licensee.
+                    Invite a factory user (recommended) or create credentials directly (legacy).
                   </DialogDescription>
                 </DialogHeader>
 
@@ -567,6 +583,24 @@ export default function Manufacturers() {
                     />
                   </div>
 
+                  <div className="space-y-2">
+                    <Label>Access</Label>
+                    <Select value={createMode} onValueChange={(v) => setCreateMode(v as "invite" | "create")}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select access method" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="invite">Invite link (recommended)</SelectItem>
+                        <SelectItem value="create">Create password now (legacy)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <div className="text-xs text-muted-foreground">
+                      {createMode === "invite"
+                        ? "We’ll email a one-time activation link (expires in 24 hours)."
+                        : "Sets a password immediately (use only when email delivery is not available)."}
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>Location</Label>
@@ -588,23 +622,31 @@ export default function Manufacturers() {
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label>Password</Label>
-                    <Input
-                      type="password"
-                      value={createForm.password}
-                      onChange={(e) => setCreateForm((p) => ({ ...p, password: e.target.value }))}
-                      placeholder="Min 6 chars"
-                      disabled={creating}
-                    />
-                  </div>
+                  {createMode === "create" ? (
+                    <div className="space-y-2">
+                      <Label>Password</Label>
+                      <Input
+                        type="password"
+                        value={createForm.password}
+                        onChange={(e) => setCreateForm((p) => ({ ...p, password: e.target.value }))}
+                        placeholder="Min 6 chars"
+                        disabled={creating}
+                      />
+                    </div>
+                  ) : null}
 
                   <div className="flex justify-end gap-3 pt-2">
                     <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={creating}>
                       Cancel
                     </Button>
                     <Button type="submit" disabled={creating}>
-                      {creating ? "Creating..." : "Create"}
+                      {creating
+                        ? createMode === "invite"
+                          ? "Sending invite..."
+                          : "Creating..."
+                        : createMode === "invite"
+                          ? "Send invite"
+                          : "Create"}
                     </Button>
                   </div>
                 </form>

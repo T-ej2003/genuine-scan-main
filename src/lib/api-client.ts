@@ -19,20 +19,22 @@ export type DownloadProgress = {
 type RequestOptions = RequestInit & {
   skipJson?: boolean;
   timeoutMs?: number;
+  skipAuthRefresh?: boolean;
 };
 
 class ApiClient {
   private token: string | null = null;
   private readonly getCache = new Map<string, unknown>();
+  private refreshInFlight: Promise<ApiResponse<{ token: string; user: any }>> | null = null;
 
   constructor() {
-    this.token = localStorage.getItem("auth_token");
+    // Access tokens are stored in HttpOnly cookies (server-managed).
+    // We keep an in-memory access token only for legacy/SSE flows.
+    this.token = null;
   }
 
   setToken(token: string | null) {
     this.token = token;
-    if (token) localStorage.setItem("auth_token", token);
-    else localStorage.removeItem("auth_token");
   }
 
   getToken(): string | null {
@@ -48,13 +50,30 @@ class ApiClient {
     window.dispatchEvent(new Event("auth:logout"));
   }
 
+  private isAuthRefreshEndpoint(endpoint: string) {
+    return endpoint === "/auth/login" || endpoint === "/auth/refresh" || endpoint === "/auth/logout" || endpoint === "/auth/accept-invite";
+  }
+
+  private async refreshOnce() {
+    if (this.refreshInFlight) return this.refreshInFlight;
+    this.refreshInFlight = this.request<{ token: string; user: any }>("/auth/refresh", {
+      method: "POST",
+      skipAuthRefresh: true,
+    }).finally(() => {
+      this.refreshInFlight = null;
+    });
+    const res = await this.refreshInFlight;
+    if (res.success && res.data?.token) this.setToken(res.data.token);
+    return res;
+  }
+
   private async request<T>(endpoint: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
     const headers: Record<string, string> = {
       ...(options.headers as Record<string, string>),
     };
 
     const method = String(options.method || "GET").toUpperCase();
-    const cacheKey = `${this.token || "anon"}:${endpoint}`;
+    const cacheKey = `${this.token || "cookie"}:${endpoint}`;
 
     const hasBody = options.body !== undefined && options.body !== null;
     const isForm = typeof FormData !== "undefined" && options.body instanceof FormData;
@@ -63,6 +82,26 @@ class ApiClient {
       headers["Content-Type"] = "application/json";
     }
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+
+    // Double-submit CSRF: server sets `aq_csrf` cookie; client mirrors it in header.
+    const isStateChanging = !["GET", "HEAD", "OPTIONS"].includes(method);
+    if (isStateChanging) {
+      const csrf = (() => {
+        try {
+          const match = document.cookie
+            .split(";")
+            .map((c) => c.trim())
+            .find((c) => c.startsWith("aq_csrf="));
+          if (!match) return "";
+          return decodeURIComponent(match.split("=").slice(1).join("="));
+        } catch {
+          return "";
+        }
+      })();
+      if (csrf && !headers["x-csrf-token"] && !headers["X-CSRF-Token"]) {
+        headers["x-csrf-token"] = csrf;
+      }
+    }
 
     const controller = new AbortController();
     const timeoutMs = options.timeoutMs ?? 20_000;
@@ -83,15 +122,26 @@ class ApiClient {
         return { success: false, error: "Stale cache miss (HTTP 304)" };
       }
 
-      if (res.status === 401) {
-        this.logout();
-        this.emitLogout();
-      }
-
       const contentType = res.headers.get("content-type") || "";
       const isJson = contentType.includes("application/json");
 
       const payload: any = isJson ? await res.json().catch(() => null) : await res.text().catch(() => "");
+
+      if (res.status === 401 && !options.skipAuthRefresh && !this.isAuthRefreshEndpoint(endpoint)) {
+        // Attempt to rotate refresh token and retry once (cookie-based sessions).
+        const refreshed = await this.refreshOnce();
+        if (refreshed.success) {
+          return this.request<T>(endpoint, { ...options, skipAuthRefresh: true });
+        }
+
+        this.logout();
+        this.emitLogout();
+        const msg =
+          (payload && typeof payload === "object" && (payload.error || payload.message)) ||
+          (typeof payload === "string" && payload) ||
+          "Not authenticated";
+        return { success: false, error: msg };
+      }
 
       if (!res.ok) {
         const msg =
@@ -140,6 +190,39 @@ class ApiClient {
 
   async getCurrentUser() {
     return this.request("/auth/me");
+  }
+
+  async refreshSession() {
+    const res = await this.request<{ token: string; user: any }>("/auth/refresh", { method: "POST" });
+    if (res.success && res.data?.token) this.setToken(res.data.token);
+    return res;
+  }
+
+  async logoutSession() {
+    const res = await this.request("/auth/logout", { method: "POST" });
+    this.logout();
+    return res;
+  }
+
+  async forgotPassword(email: string) {
+    return this.request("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) });
+  }
+
+  async resetPassword(token: string, password: string) {
+    return this.request("/auth/reset-password", { method: "POST", body: JSON.stringify({ token, password }) });
+  }
+
+  async acceptInvite(payload: { token: string; password: string; name?: string }) {
+    const res = await this.request<{ token: string; user: any }>("/auth/accept-invite", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    if (res.success && res.data?.token) this.setToken(res.data.token);
+    return res;
+  }
+
+  async inviteUser(payload: { email: string; role: string; name?: string; licenseeId?: string; manufacturerId?: string }) {
+    return this.request("/auth/invite", { method: "POST", body: JSON.stringify(payload) });
   }
 
   // ==================== LICENSEES ====================
