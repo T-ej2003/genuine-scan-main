@@ -40,7 +40,8 @@ const navItems: NavItem[] = [
   { label: "Batches", href: "/batches", icon: FileText, roles: ["super_admin", "licensee_admin", "manufacturer"] },
   { label: "Manufacturers", href: "/manufacturers", icon: Factory, roles: ["super_admin", "licensee_admin"] },
   { label: "QR Tracking", href: "/qr-tracking", icon: ScanEye, roles: ["super_admin", "licensee_admin", "manufacturer"] },
-  { label: "Incidents", href: "/incidents", icon: ShieldAlert, roles: ["super_admin", "licensee_admin"] },
+  { label: "IR Center", href: "/ir", icon: Shield, roles: ["super_admin"] },
+  { label: "Incidents", href: "/incidents", icon: ShieldAlert, roles: ["licensee_admin"] },
   { label: "Audit Logs", href: "/audit-logs", icon: FileText, roles: ["super_admin", "licensee_admin"] },
 ];
 

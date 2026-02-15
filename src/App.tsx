@@ -21,6 +21,8 @@ const QRTracking = lazy(() => import("@/pages/QRTracking"));
 const Manufacturers = lazy(() => import("@/pages/Manufacturers"));
 const AuditLogs = lazy(() => import("@/pages/AuditLogs"));
 const Incidents = lazy(() => import("@/pages/Incidents"));
+const IR = lazy(() => import("@/pages/IR"));
+const IRIncidentDetail = lazy(() => import("@/pages/IRIncidentDetail"));
 const Verify = lazy(() => import("@/pages/Verify"));
 const VerifyLanding = lazy(() => import("@/pages/VerifyLanding"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
@@ -211,6 +213,24 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
               <Incidents />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/ir"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin"]}>
+              <IR />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/ir/incidents/:id"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin"]}>
+              <IRIncidentDetail />
             </ProtectedRoute>
           }
         />

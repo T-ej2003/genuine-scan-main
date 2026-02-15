@@ -935,6 +935,197 @@ class ApiClient {
   async requestIncidentPdfExport(id: string) {
     return this.request(`/incidents/${encodeURIComponent(id)}/export-pdf`);
   }
+
+  // ==================== IR (PLATFORM SUPERADMIN) ====================
+  async getIrIncidents(options?: {
+    status?: string;
+    severity?: string;
+    priority?: string;
+    licenseeId?: string;
+    manufacturerId?: string;
+    qr?: string;
+    search?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    assignedTo?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const params = new URLSearchParams();
+    if (options?.status) params.append("status", options.status);
+    if (options?.severity) params.append("severity", options.severity);
+    if (options?.priority) params.append("priority", options.priority);
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.manufacturerId) params.append("manufacturerId", options.manufacturerId);
+    if (options?.qr) params.append("qr", options.qr);
+    if (options?.search) params.append("search", options.search);
+    if (options?.dateFrom) params.append("date_from", options.dateFrom);
+    if (options?.dateTo) params.append("date_to", options.dateTo);
+    if (options?.assignedTo) params.append("assigned_to", options.assignedTo);
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/ir/incidents${query}`);
+  }
+
+  async createIrIncident(payload: {
+    qrCodeValue: string;
+    incidentType: "COUNTERFEIT_SUSPECTED" | "DUPLICATE_SCAN" | "TAMPERED_LABEL" | "WRONG_PRODUCT" | "OTHER";
+    description: string;
+    severity?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+    priority?: "P1" | "P2" | "P3" | "P4";
+    licenseeId?: string;
+    tags?: string[];
+  }) {
+    return this.request(`/ir/incidents`, { method: "POST", body: JSON.stringify(payload) });
+  }
+
+  async getIrIncidentById(id: string) {
+    return this.request(`/ir/incidents/${encodeURIComponent(id)}`);
+  }
+
+  async patchIrIncident(
+    id: string,
+    payload: Partial<{
+      status: string;
+      severity: string;
+      priority: string;
+      assignedToUserId: string | null;
+      internalNotes: string | null;
+      tags: string[];
+      resolutionSummary: string | null;
+      resolutionOutcome: "CONFIRMED_FRAUD" | "NOT_FRAUD" | "INCONCLUSIVE" | null;
+    }>
+  ) {
+    return this.request(`/ir/incidents/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async addIrIncidentNote(id: string, note: string) {
+    return this.request(`/ir/incidents/${encodeURIComponent(id)}/events`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    });
+  }
+
+  async applyIrIncidentAction(
+    id: string,
+    payload: {
+      action:
+        | "FLAG_QR_UNDER_INVESTIGATION"
+        | "UNFLAG_QR_UNDER_INVESTIGATION"
+        | "SUSPEND_BATCH"
+        | "REINSTATE_BATCH"
+        | "SUSPEND_ORG"
+        | "REINSTATE_ORG"
+        | "SUSPEND_MANUFACTURER_USERS"
+        | "REINSTATE_MANUFACTURER_USERS";
+      reason: string;
+      qrCodeId?: string;
+      batchId?: string;
+      licenseeId?: string;
+      manufacturerUserIds?: string[];
+    }
+  ) {
+    return this.request(`/ir/incidents/${encodeURIComponent(id)}/actions`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async sendIrIncidentCommunication(
+    id: string,
+    payload: {
+      recipient?: "reporter" | "org_admin";
+      toAddress?: string;
+      subject: string;
+      message: string;
+      template?: string;
+      senderMode?: "actor" | "system";
+    }
+  ) {
+    return this.request(`/ir/incidents/${encodeURIComponent(id)}/communications`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async uploadIrIncidentAttachment(id: string, file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return this.request(`/ir/incidents/${encodeURIComponent(id)}/attachments`, {
+      method: "POST",
+      body: form,
+      skipJson: true,
+      timeoutMs: 45_000,
+    });
+  }
+
+  async getIrPolicies(options?: { licenseeId?: string; ruleType?: string; isActive?: boolean; limit?: number; offset?: number }) {
+    const params = new URLSearchParams();
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.ruleType) params.append("ruleType", options.ruleType);
+    if (options?.isActive != null) params.append("isActive", String(options.isActive));
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/ir/policies${query}`);
+  }
+
+  async createIrPolicy(payload: {
+    name: string;
+    description?: string;
+    ruleType: "DISTINCT_DEVICES" | "MULTI_COUNTRY" | "BURST_SCANS" | "TOO_MANY_REPORTS";
+    isActive?: boolean;
+    threshold: number;
+    windowMinutes: number;
+    severity?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+    autoCreateIncident?: boolean;
+    incidentSeverity?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+    incidentPriority?: "P1" | "P2" | "P3" | "P4";
+    licenseeId?: string;
+    manufacturerId?: string;
+    actionConfig?: any;
+  }) {
+    return this.request(`/ir/policies`, { method: "POST", body: JSON.stringify(payload) });
+  }
+
+  async patchIrPolicy(id: string, payload: any) {
+    return this.request(`/ir/policies/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) });
+  }
+
+  async getIrAlerts(options?: {
+    licenseeId?: string;
+    alertType?: string;
+    severity?: string;
+    acknowledged?: boolean;
+    policyRuleId?: string;
+    qrCodeId?: string;
+    batchId?: string;
+    manufacturerId?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const params = new URLSearchParams();
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.alertType) params.append("alertType", options.alertType);
+    if (options?.severity) params.append("severity", options.severity);
+    if (options?.acknowledged != null) params.append("acknowledged", String(options.acknowledged));
+    if (options?.policyRuleId) params.append("policyRuleId", options.policyRuleId);
+    if (options?.qrCodeId) params.append("qrCodeId", options.qrCodeId);
+    if (options?.batchId) params.append("batchId", options.batchId);
+    if (options?.manufacturerId) params.append("manufacturerId", options.manufacturerId);
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/ir/alerts${query}`);
+  }
+
+  async patchIrAlert(id: string, payload: { acknowledged?: boolean; incidentId?: string | null }) {
+    return this.request(`/ir/alerts/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) });
+  }
 }
 
 const apiClient = new ApiClient();
