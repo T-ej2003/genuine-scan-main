@@ -20,6 +20,8 @@ const AuditLogs = lazy(() => import("@/pages/AuditLogs"));
 const Incidents = lazy(() => import("@/pages/Incidents"));
 const Verify = lazy(() => import("@/pages/Verify"));
 const VerifyLanding = lazy(() => import("@/pages/VerifyLanding"));
+const Help = lazy(() => import("@/pages/Help"));
+const HelpRole = lazy(() => import("@/pages/HelpRole"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 const AccountSettings = lazy(() => import("@/pages/AccountSettings"));
 
@@ -93,6 +95,8 @@ function AppRoutes() {
         <Route path="/verify" element={<VerifyLanding />} />
         <Route path="/verify/:code" element={<Verify />} />
         <Route path="/scan" element={<Verify />} />
+        <Route path="/help" element={<Help />} />
+        <Route path="/help/:role" element={<HelpRole />} />
 
         {/* Auth */}
         <Route

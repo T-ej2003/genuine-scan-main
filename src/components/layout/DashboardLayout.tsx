@@ -16,6 +16,7 @@ import {
   Shield,
   ScanEye,
   ShieldAlert,
+  CircleHelp,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -24,6 +25,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { getHelpSlugForAppRole } from "@/lib/help-docs";
 
 interface NavItem {
   label: string;
@@ -51,6 +53,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const filteredNavItems = navItems.filter((item) => user && item.roles.includes(user.role));
+  const helpSlug = getHelpSlugForAppRole(user?.role);
+  const helpHref = helpSlug ? `/help/${helpSlug}` : "/help";
 
   const handleLogout = () => {
     logout();
@@ -130,7 +134,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      <div className="lg:pl-64">
+      <div className="flex min-h-screen flex-col lg:pl-64">
         <header className="sticky top-0 z-30 h-16 bg-card border-b border-border flex items-center justify-between px-4 lg:px-6">
           <button
             onClick={() => setSidebarOpen(true)}
@@ -141,6 +145,13 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           </button>
 
           <div className="flex-1" />
+
+          <Button asChild variant="ghost" className="mr-2 hidden sm:inline-flex">
+            <Link to={helpHref}>
+              <CircleHelp className="mr-2 h-4 w-4" />
+              Help
+            </Link>
+          </Button>
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -178,7 +189,20 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           </DropdownMenu>
         </header>
 
-        <main className="p-4 lg:p-6">{children}</main>
+        <main className="flex-1 p-4 lg:p-6">{children}</main>
+
+        <footer className="border-t border-border bg-card/40 px-4 py-3 lg:px-6">
+          <div className="flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+            <p>Need guidance for your role? Open the help center.</p>
+            <Link
+              to={helpHref}
+              className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+            >
+              <CircleHelp className="h-4 w-4" />
+              Help
+            </Link>
+          </div>
+        </footer>
       </div>
     </div>
   );

@@ -15,6 +15,9 @@ export default function Index() {
             <span className="text-xl font-bold text-foreground">AuthenticQR</span>
           </div>
           <div className="flex items-center gap-4">
+            <Link to="/help">
+              <Button variant="ghost" size="sm">Help</Button>
+            </Link>
             <Link to="/verify">
               <Button variant="ghost" size="sm">Verify Product</Button>
             </Link>
@@ -134,9 +137,14 @@ export default function Index() {
             <span className="font-semibold text-foreground">AuthenticQR</span>
           </div>
           <p className="text-sm text-muted-foreground">© 2026 AuthenticQR. All rights reserved.</p>
-          <Link to="/login" className="text-sm text-primary hover:underline">
-            Licensee Login
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link to="/help" className="text-sm text-primary hover:underline">
+              Help
+            </Link>
+            <Link to="/login" className="text-sm text-primary hover:underline">
+              Licensee Login
+            </Link>
+          </div>
         </div>
       </footer>
     </div>
@@ -174,4 +182,3 @@ function StepCard({ number, title, description }: { number: number; title: strin
     </div>
   );
 }
-
