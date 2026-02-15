@@ -527,6 +527,70 @@ class ApiClient {
   }
 
   // ==================== PUBLIC VERIFY ====================
+  async getVerificationMe() {
+    return this.request("/me");
+  }
+
+  async authGoogle(idToken: string) {
+    return this.request("/auth/google", {
+      method: "POST",
+      body: JSON.stringify({ idToken }),
+    });
+  }
+
+  async requestVerificationOtp(payload: { email: string; name?: string }) {
+    return this.request("/auth/email/request-otp", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async verifyVerificationOtp(payload: { email: string; otp: string; name?: string }) {
+    return this.request("/auth/email/verify-otp", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async logoutVerificationUser() {
+    return this.request("/auth/logout-customer", { method: "POST" });
+  }
+
+  async scanCode(
+    code: string,
+    opts?: { device?: string; lat?: number; lon?: number; acc?: number; visitorFp?: string }
+  ) {
+    const c = String(code || "").trim();
+    return this.request(`/scan/${encodeURIComponent(c)}`, {
+      method: "POST",
+      body: JSON.stringify({
+        device: opts?.device,
+        lat: opts?.lat,
+        lon: opts?.lon,
+        acc: opts?.acc,
+      }),
+      headers: opts?.visitorFp ? { "X-Visitor-Fp": opts.visitorFp } : undefined,
+    });
+  }
+
+  async claimProduct(code: string) {
+    return this.request(`/claim/${encodeURIComponent(String(code || "").trim())}`, {
+      method: "POST",
+    });
+  }
+
+  async submitFraudReport(formData: FormData, visitorFp?: string) {
+    const headers: Record<string, string> = {};
+    if (visitorFp) headers["X-Visitor-Fp"] = visitorFp;
+    return this.request(`/fraud-report`, {
+      method: "POST",
+      body: formData,
+      headers,
+      skipJson: true,
+      timeoutMs: 45_000,
+    });
+  }
+
   // Public endpoint, no auth required. Still works if token exists.
   async verifyQRCode(code: string, opts?: { device?: string; lat?: number; lon?: number; acc?: number }) {
     const c = String(code || "").trim();
@@ -563,7 +627,7 @@ class ApiClient {
     return this.request(`/verify/feedback`, { method: "POST", body: JSON.stringify(payload) });
   }
 
-  async scanToken(token: string, opts?: { device?: string; lat?: number; lon?: number; acc?: number }) {
+  async scanToken(token: string, opts?: { device?: string; lat?: number; lon?: number; acc?: number; visitorFp?: string }) {
     const params = new URLSearchParams();
     params.append("t", token);
     if (opts?.device) params.append("device", opts.device);
@@ -571,7 +635,10 @@ class ApiClient {
     if (opts?.lon != null) params.append("lon", String(opts.lon));
     if (opts?.acc != null) params.append("acc", String(opts.acc));
     const query = params.toString() ? `?${params.toString()}` : "";
-    return this.request(`/scan${query}`, { method: "GET" });
+    return this.request(`/scan${query}`, {
+      method: "GET",
+      headers: opts?.visitorFp ? { "X-Visitor-Fp": opts.visitorFp } : undefined,
+    });
   }
 
   async getScanLogs(options?: {

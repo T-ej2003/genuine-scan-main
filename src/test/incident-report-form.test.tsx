@@ -8,9 +8,10 @@ import apiClient from "@/lib/api-client";
 
 vi.mock("@/lib/api-client", () => ({
   default: {
-    verifyQRCode: vi.fn(),
+    scanCode: vi.fn(),
     scanToken: vi.fn(),
-    submitIncidentReport: vi.fn(),
+    getVerificationMe: vi.fn().mockResolvedValue({ success: true, data: { user: null } }),
+    submitFraudReport: vi.fn(),
     submitProductFeedback: vi.fn(),
     reportFraud: vi.fn(),
   },
@@ -29,13 +30,14 @@ describe("Incident report form", () => {
   });
 
   it("prevents submit when description is too short", async () => {
-    vi.mocked(apiClient.verifyQRCode).mockResolvedValue({
+    vi.mocked(apiClient.scanCode).mockResolvedValue({
       success: true,
       data: {
         isAuthentic: false,
         code: "TT0000000068",
         status: "REDEEMED",
-        message: "Already verified.",
+        scanClassification: "SUSPICIOUS_DUPLICATE",
+        message: "Possible duplicate scan detected.",
       },
     } as any);
 
@@ -49,9 +51,9 @@ describe("Incident report form", () => {
       </React.StrictMode>
     );
 
-    expect(await screen.findByText("Previously Redeemed")).toBeTruthy();
-    fireEvent.click(screen.getByText("Report Fraud"));
+    expect(await screen.findByText("Possible Duplicate")).toBeTruthy();
+    fireEvent.click(screen.getByText("Report suspected counterfeit"));
     fireEvent.click(screen.getByText("Submit report"));
-    expect(vi.mocked(apiClient.submitIncidentReport)).toHaveBeenCalledTimes(0);
+    expect(vi.mocked(apiClient.submitFraudReport)).toHaveBeenCalledTimes(0);
   });
 });

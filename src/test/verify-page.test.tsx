@@ -7,9 +7,11 @@ import apiClient from "@/lib/api-client";
 
 vi.mock("@/lib/api-client", () => ({
   default: {
-    verifyQRCode: vi.fn(),
+    scanCode: vi.fn(),
     scanToken: vi.fn(),
+    getVerificationMe: vi.fn().mockResolvedValue({ success: true, data: { user: null } }),
     reportFraud: vi.fn(),
+    submitFraudReport: vi.fn(),
     submitIncidentReport: vi.fn(),
     submitProductFeedback: vi.fn(),
   },
@@ -29,7 +31,7 @@ describe("Verify page", () => {
   });
 
   it("renders blocked state in StrictMode without falling back to unavailable", async () => {
-    vi.mocked(apiClient.verifyQRCode).mockResolvedValue({
+    vi.mocked(apiClient.scanCode).mockResolvedValue({
       success: true,
       data: {
         isAuthentic: false,
@@ -58,6 +60,6 @@ describe("Verify page", () => {
 
     expect(await screen.findByText("Blocked by Security")).toBeTruthy();
     expect(screen.queryByText("Verification Unavailable")).toBeNull();
-    expect(vi.mocked(apiClient.verifyQRCode)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(apiClient.scanCode)).toHaveBeenCalledTimes(1);
   });
 });

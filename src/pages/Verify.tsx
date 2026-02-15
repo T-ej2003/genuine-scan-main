@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,15 +26,50 @@ import {
   ArrowRight,
   Sparkles,
   Star,
+  UserCheck,
+  LogIn,
+  MapPin,
+  RefreshCw,
 } from "lucide-react";
 import apiClient from "@/lib/api-client";
 import { useToast } from "@/hooks/use-toast";
+
+declare global {
+  interface Window {
+    google?: any;
+  }
+}
+
+type ScanClassification = "FIRST_SCAN" | "LEGIT_REPEAT" | "SUSPICIOUS_DUPLICATE";
+
+type VerificationUser = {
+  id: string;
+  email: string;
+  name?: string | null;
+  provider?: string;
+  createdAt?: string;
+};
+
+type OwnershipInfo = {
+  ownerCustomerId: string;
+  claimedAt: string;
+  isOwnedByYou: boolean;
+};
 
 type VerifyPayload = {
   isAuthentic: boolean;
   message?: string;
   code?: string;
   status?: string;
+  scanOutcome?: string;
+  scanClassification?: ScanClassification;
+  reasons?: string[];
+  warningMessage?: string | null;
+  claimRecommended?: boolean;
+  anonVisitorId?: string | null;
+  verifiedByYouCount?: number;
+  topLocations?: Array<{ label: string; count: number }>;
+  ownership?: OwnershipInfo | null;
   licensee?: {
     id: string;
     name: string;
@@ -66,11 +101,16 @@ type VerifyPayload = {
   previousScanAt?: string | null;
   previousScanLocation?: string | null;
   scanCount?: number;
-  scanOutcome?: string;
-  warningMessage?: string | null;
 };
 
-type StatusKind = "genuine" | "reused" | "suspicious" | "blocked" | "unassigned" | "invalid";
+type StatusKind =
+  | "genuine"
+  | "verifiedAgain"
+  | "duplicate"
+  | "suspicious"
+  | "blocked"
+  | "unassigned"
+  | "invalid";
 
 const INCIDENT_TYPE_OPTIONS = [
   { value: "counterfeit_suspected", label: "Counterfeit suspected" },
@@ -92,8 +132,8 @@ type SatisfactionValue = (typeof SATISFACTION_OPTIONS)[number]["value"];
 
 const VERIFY_LOADING_STEPS = [
   "Reading secure QR signature",
-  "Checking print lifecycle",
-  "Validating authenticity records",
+  "Checking authenticity records",
+  "Computing duplicate-risk signals",
 ] as const;
 
 const STATUS_META: Record<
@@ -108,15 +148,22 @@ const STATUS_META: Record<
 > = {
   genuine: {
     title: "Verified Authentic",
-    subtitle: "This code matches official records and is safe to trust.",
+    subtitle: "First-time verification completed successfully.",
     chip: "Authentic",
     panelClass: "from-emerald-600 to-teal-600",
     icon: <CheckCircle2 className="h-10 w-10 text-white" />,
   },
-  reused: {
-    title: "Previously Redeemed",
-    subtitle: "This code has already been verified before. Review product source.",
-    chip: "Possible Duplicate",
+  verifiedAgain: {
+    title: "Verified Again",
+    subtitle: "Authentic product. You have verified this before.",
+    chip: "Authentic",
+    panelClass: "from-emerald-600 to-cyan-600",
+    icon: <UserCheck className="h-10 w-10 text-white" />,
+  },
+  duplicate: {
+    title: "Possible Duplicate",
+    subtitle: "This QR shows unusual scan patterns that may indicate label copying.",
+    chip: "Fraud Risk",
     panelClass: "from-orange-500 to-amber-600",
     icon: <AlertTriangle className="h-10 w-10 text-white" />,
   },
@@ -150,6 +197,34 @@ const STATUS_META: Record<
   },
 };
 
+const computeVisitorFingerprint = () => {
+  if (typeof navigator === "undefined") return "";
+
+  const raw = [
+    navigator.userAgent || "",
+    navigator.language || "",
+    (navigator as any).platform || "",
+    Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+  ].join("|");
+
+  let hash = 2166136261;
+  for (let i = 0; i < raw.length; i += 1) {
+    hash ^= raw.charCodeAt(i);
+    hash +=
+      (hash << 1) +
+      (hash << 4) +
+      (hash << 7) +
+      (hash << 8) +
+      (hash << 24);
+  }
+  return `vf_${(hash >>> 0).toString(36)}`;
+};
+
+const parseGoogleClientId = () => {
+  const id = String(import.meta.env.VITE_GOOGLE_CLIENT_ID || "").trim();
+  return id || "";
+};
+
 export default function Verify() {
   const { code } = useParams<{ code: string }>();
   const [searchParams] = useSearchParams();
@@ -159,8 +234,13 @@ export default function Verify() {
   const [result, setResult] = useState<VerifyPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [viewer, setViewer] = useState<VerificationUser | null>(null);
+  const [viewerLoading, setViewerLoading] = useState(true);
+
+  const [scanRefreshKey, setScanRefreshKey] = useState(0);
+
   const [reportOpen, setReportOpen] = useState(false);
-  const [incidentType, setIncidentType] = useState<string>(INCIDENT_TYPE_OPTIONS[0].value);
+  const [incidentType, setIncidentType] = useState<string>(INCIDENT_TYPE_OPTIONS[1].value);
   const [reportDescription, setReportDescription] = useState("");
   const [purchasePlace, setPurchasePlace] = useState("");
   const [purchaseDate, setPurchaseDate] = useState("");
@@ -181,6 +261,18 @@ export default function Verify() {
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
+  const [otpEmail, setOtpEmail] = useState("");
+  const [otpName, setOtpName] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpRequested, setOtpRequested] = useState(false);
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [claiming, setClaiming] = useState(false);
+
+  const visitorFp = useMemo(() => computeVisitorFingerprint(), []);
+  const googleClientId = useMemo(() => parseGoogleClientId(), []);
+  const googleButtonRef = useRef<HTMLDivElement | null>(null);
+
   const token = useMemo(() => searchParams.get("t")?.trim() || "", [searchParams.toString()]);
   const codeParam = useMemo(() => {
     const raw = String(code || "");
@@ -190,8 +282,35 @@ export default function Verify() {
       return raw.trim();
     }
   }, [code]);
-  const requestKey = token ? `token:${token}` : codeParam ? `code:${codeParam.toUpperCase()}` : "";
+
+  const requestKey = token
+    ? `token:${token}:refresh:${scanRefreshKey}`
+    : codeParam
+    ? `code:${codeParam.toUpperCase()}:refresh:${scanRefreshKey}`
+    : "";
   const inFlightByKeyRef = useRef(new Map<string, Promise<any>>());
+
+  const loadViewer = useCallback(async () => {
+    setViewerLoading(true);
+    try {
+      const meRes = await apiClient.getVerificationMe();
+      if (meRes.success) {
+        setViewer((meRes.data as any)?.user || null);
+      }
+    } finally {
+      setViewerLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadViewer();
+  }, [loadViewer]);
+
+  useEffect(() => {
+    if (viewer?.email && !reportEmail) setReportEmail(viewer.email);
+    if (viewer?.name && !reportCustomerName) setReportCustomerName(viewer.name);
+    if (viewer?.name && !otpName) setOtpName(viewer.name);
+  }, [otpName, reportCustomerName, reportEmail, viewer]);
 
   useEffect(() => {
     let active = true;
@@ -210,6 +329,7 @@ export default function Verify() {
 
       try {
         let requestPromise = inFlightByKeyRef.current.get(requestKey);
+
         if (!requestPromise) {
           requestPromise = (async () => {
             const device = typeof navigator !== "undefined" ? navigator.userAgent : undefined;
@@ -230,18 +350,21 @@ export default function Verify() {
               });
 
             const geo = await getGeo();
+
             return token
               ? apiClient.scanToken(token, {
                   device,
                   lat: geo.lat,
                   lon: geo.lon,
                   acc: geo.acc,
+                  visitorFp,
                 })
-              : apiClient.verifyQRCode(codeParam, {
+              : apiClient.scanCode(codeParam, {
                   device,
                   lat: geo.lat,
                   lon: geo.lon,
                   acc: geo.acc,
+                  visitorFp,
                 });
           })();
           inFlightByKeyRef.current.set(requestKey, requestPromise);
@@ -272,52 +395,7 @@ export default function Verify() {
     return () => {
       active = false;
     };
-  }, [codeParam, requestKey, token]);
-
-  const statusKind: StatusKind = useMemo(() => {
-    if (result?.scanOutcome === "VALID" || result?.isAuthentic) return "genuine";
-    if (
-      result?.scanOutcome === "ALREADY_REDEEMED" ||
-      result?.status === "REDEEMED" ||
-      result?.status === "SCANNED"
-    ) {
-      return "reused";
-    }
-    if (result?.scanOutcome === "BLOCKED" || result?.status === "BLOCKED") return "blocked";
-    if (
-      result?.scanOutcome === "SUSPICIOUS" ||
-      result?.status === "ALLOCATED" ||
-      result?.status === "ACTIVATED"
-    ) {
-      return "suspicious";
-    }
-    if (result?.status === "DORMANT" || result?.status === "ACTIVE" || result?.scanOutcome === "NOT_PRINTED") {
-      return "unassigned";
-    }
-    const lowerMessage = String(result?.message || "").toLowerCase();
-    if (lowerMessage.includes("blocked")) return "blocked";
-    if (lowerMessage.includes("already redeemed")) return "reused";
-    if (lowerMessage.includes("allocated but not yet printed")) return "suspicious";
-    if (lowerMessage.includes("not been assigned")) return "unassigned";
-    return "invalid";
-  }, [result?.isAuthentic, result?.message, result?.scanOutcome, result?.status]);
-
-  const meta = STATUS_META[statusKind];
-  const manufacturer = result?.batch?.manufacturer || null;
-  const displayedCode = result?.code || codeParam || "—";
-  const printedAt = result?.printedAt || result?.batch?.printedAt || null;
-  const isReportable = statusKind !== "genuine";
-  const canSubmitFeedback = displayedCode !== "—" && statusKind !== "invalid";
-  const firstScanAt = result?.firstScanAt || result?.firstScanned || null;
-  const firstScanLocation = result?.firstScanLocation || null;
-  const latestScanAt = result?.latestScanAt || null;
-  const latestScanLocation = result?.latestScanLocation || null;
-  const previousScanAt = result?.previousScanAt || null;
-  const previousScanLocation = result?.previousScanLocation || null;
-  const feedbackStorageKey = useMemo(() => {
-    const normalized = String(displayedCode || "").trim().toUpperCase();
-    return normalized && normalized !== "—" ? `authenticqr_feedback_${normalized}` : "";
-  }, [displayedCode]);
+  }, [codeParam, requestKey, token, visitorFp]);
 
   useEffect(() => {
     if (!isLoading) return;
@@ -326,6 +404,71 @@ export default function Verify() {
     }, 1100);
     return () => window.clearInterval(timer);
   }, [isLoading]);
+
+  const statusKind: StatusKind = useMemo(() => {
+    if (result?.status === "BLOCKED" || result?.scanOutcome === "BLOCKED") return "blocked";
+
+    if (
+      result?.scanClassification === "SUSPICIOUS_DUPLICATE" ||
+      result?.scanOutcome === "SUSPICIOUS_DUPLICATE"
+    ) {
+      return "duplicate";
+    }
+
+    if (result?.scanClassification === "LEGIT_REPEAT" || result?.scanOutcome === "VALID_REPEAT") {
+      return "verifiedAgain";
+    }
+
+    if (result?.scanClassification === "FIRST_SCAN" || result?.scanOutcome === "VALID" || result?.isAuthentic) {
+      return "genuine";
+    }
+
+    if (
+      result?.scanOutcome === "SUSPICIOUS" ||
+      result?.status === "ALLOCATED" ||
+      result?.status === "ACTIVATED"
+    ) {
+      return "suspicious";
+    }
+
+    if (result?.status === "DORMANT" || result?.status === "ACTIVE" || result?.scanOutcome === "NOT_PRINTED") {
+      return "unassigned";
+    }
+
+    const lowerMessage = String(result?.message || "").toLowerCase();
+    if (lowerMessage.includes("blocked")) return "blocked";
+    if (lowerMessage.includes("duplicate")) return "duplicate";
+    if (lowerMessage.includes("allocated but not yet printed")) return "suspicious";
+    if (lowerMessage.includes("not been assigned")) return "unassigned";
+
+    return "invalid";
+  }, [
+    result?.isAuthentic,
+    result?.message,
+    result?.scanClassification,
+    result?.scanOutcome,
+    result?.status,
+  ]);
+
+  const meta = STATUS_META[statusKind];
+  const manufacturer = result?.batch?.manufacturer || null;
+  const displayedCode = result?.code || codeParam || "—";
+  const printedAt = result?.printedAt || result?.batch?.printedAt || null;
+  const firstScanAt = result?.firstScanAt || result?.firstScanned || null;
+  const latestScanAt = result?.latestScanAt || null;
+  const previousScanAt = result?.previousScanAt || null;
+
+  const firstScanLocation = result?.firstScanLocation || null;
+  const latestScanLocation = result?.latestScanLocation || null;
+  const previousScanLocation = result?.previousScanLocation || null;
+
+  const isReportable = statusKind === "duplicate" || statusKind === "blocked" || statusKind === "suspicious";
+  const canSubmitFeedback = displayedCode !== "—" && statusKind !== "invalid";
+
+  const feedbackStorageKey = useMemo(() => {
+    const normalized = String(displayedCode || "").trim().toUpperCase();
+    return normalized && normalized !== "—" ? `authenticqr_feedback_${normalized}` : "";
+  }, [displayedCode]);
 
   useEffect(() => {
     if (!feedbackStorageKey) {
@@ -345,6 +488,185 @@ export default function Verify() {
     setFeedbackNote("");
   }, [feedbackStorageKey]);
 
+  useEffect(() => {
+    if (!googleClientId || !googleButtonRef.current || viewer) return;
+
+    let cancelled = false;
+
+    const loadGoogleScript = () => {
+      return new Promise<void>((resolve, reject) => {
+        if (window.google?.accounts?.id) {
+          resolve();
+          return;
+        }
+
+        const existing = document.getElementById("google-identity-script") as HTMLScriptElement | null;
+        if (existing) {
+          existing.addEventListener("load", () => resolve(), { once: true });
+          existing.addEventListener("error", () => reject(new Error("Google script failed")), {
+            once: true,
+          });
+          return;
+        }
+
+        const script = document.createElement("script");
+        script.id = "google-identity-script";
+        script.src = "https://accounts.google.com/gsi/client";
+        script.async = true;
+        script.defer = true;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error("Google script failed"));
+        document.head.appendChild(script);
+      });
+    };
+
+    const setup = async () => {
+      try {
+        await loadGoogleScript();
+        if (cancelled || !window.google?.accounts?.id || !googleButtonRef.current) return;
+
+        window.google.accounts.id.initialize({
+          client_id: googleClientId,
+          callback: async (response: any) => {
+            const credential = String(response?.credential || "").trim();
+            if (!credential) return;
+
+            const authRes = await apiClient.authGoogle(credential);
+            if (!authRes.success) {
+              toast({
+                title: "Google sign-in failed",
+                description: authRes.error || "Could not sign in with Google.",
+                variant: "destructive",
+              });
+              return;
+            }
+
+            await loadViewer();
+            setScanRefreshKey((k) => k + 1);
+            toast({ title: "Signed in", description: "Ownership protection is now enabled." });
+          },
+        });
+
+        googleButtonRef.current.innerHTML = "";
+        window.google.accounts.id.renderButton(googleButtonRef.current, {
+          theme: "outline",
+          size: "large",
+          shape: "pill",
+          text: "continue_with",
+          width: 260,
+        });
+      } catch {
+        // keep email OTP fallback only
+      }
+    };
+
+    setup();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [googleClientId, loadViewer, toast, viewer]);
+
+  const requestOtp = async () => {
+    if (!otpEmail.trim()) {
+      toast({ title: "Email required", description: "Enter your email to receive a one-time code.", variant: "destructive" });
+      return;
+    }
+
+    setOtpSending(true);
+    try {
+      const res = await apiClient.requestVerificationOtp({
+        email: otpEmail.trim(),
+        name: otpName.trim() || undefined,
+      });
+
+      if (!res.success) {
+        toast({
+          title: "Could not send code",
+          description: res.error || "Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setOtpRequested(true);
+      toast({ title: "Code sent", description: "Check your email for a one-time code." });
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  const verifyOtp = async () => {
+    if (!otpCode.trim()) {
+      toast({ title: "Code required", description: "Enter the OTP from your email.", variant: "destructive" });
+      return;
+    }
+
+    setOtpVerifying(true);
+    try {
+      const res = await apiClient.verifyVerificationOtp({
+        email: otpEmail.trim(),
+        otp: otpCode.trim(),
+        name: otpName.trim() || undefined,
+      });
+
+      if (!res.success) {
+        toast({
+          title: "Could not verify code",
+          description: res.error || "Please check the code and try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      await loadViewer();
+      setOtpCode("");
+      setOtpRequested(false);
+      setScanRefreshKey((k) => k + 1);
+      toast({ title: "Signed in", description: "You can now claim ownership of this product." });
+    } finally {
+      setOtpVerifying(false);
+    }
+  };
+
+  const logoutViewer = async () => {
+    await apiClient.logoutVerificationUser();
+    setViewer(null);
+    setScanRefreshKey((k) => k + 1);
+  };
+
+  const claimOwnership = async () => {
+    if (!displayedCode || displayedCode === "—") return;
+
+    setClaiming(true);
+    try {
+      const res = await apiClient.claimProduct(displayedCode);
+      if (!res.success) {
+        toast({
+          title: "Could not claim product",
+          description: res.error || "Please sign in and try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const ownership = (res.data as any)?.ownership;
+      setResult((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          ownership,
+          claimRecommended: false,
+        };
+      });
+
+      setScanRefreshKey((k) => k + 1);
+      toast({ title: "Ownership claimed", description: "This product is now linked to your account." });
+    } finally {
+      setClaiming(false);
+    }
+  };
+
   const submitReport = async () => {
     const normalizedCode = String(displayedCode || "").trim();
     if (!normalizedCode || normalizedCode === "—") {
@@ -355,6 +677,7 @@ export default function Verify() {
       });
       return;
     }
+
     if (reportDescription.trim().length < 6) {
       toast({
         title: "More details needed",
@@ -367,26 +690,46 @@ export default function Verify() {
     setReporting(true);
     try {
       const formData = new FormData();
-      formData.append("qrCodeValue", normalizedCode);
+      formData.append("code", normalizedCode);
+      formData.append("reason", reportDescription.trim());
+      formData.append("notes", reportDescription.trim());
       formData.append("incidentType", incidentType);
-      formData.append("description", reportDescription.trim());
       if (purchasePlace.trim()) formData.append("purchasePlace", purchasePlace.trim());
       if (purchaseDate.trim()) formData.append("purchaseDate", purchaseDate.trim());
       if (productBatchNo.trim()) formData.append("productBatchNo", productBatchNo.trim());
       if (reportCustomerName.trim()) formData.append("customerName", reportCustomerName.trim());
-      if (reportEmail.trim()) formData.append("customerEmail", reportEmail.trim());
+      if (reportEmail.trim()) formData.append("contactEmail", reportEmail.trim());
       if (reportPhone.trim()) formData.append("customerPhone", reportPhone.trim());
       if (reportCountry.trim()) formData.append("customerCountry", reportCountry.trim());
+
       formData.append("consentToContact", String(reportConsent));
-      formData.append("preferredContactMethod", reportConsent && reportEmail.trim() ? "email" : "none");
+      if (result?.scanClassification) formData.append("scanClassification", result.scanClassification);
+      if (Array.isArray(result?.reasons)) formData.append("riskReasons", JSON.stringify(result.reasons));
+
+      formData.append(
+        "historySummary",
+        JSON.stringify({
+          totalScans: result?.scanCount ?? 0,
+          firstScanAt,
+          latestScanAt,
+          previousScanAt,
+          firstScanLocation,
+          latestScanLocation,
+          previousScanLocation,
+          verifiedByYouCount: result?.verifiedByYouCount ?? 0,
+          topLocations: result?.topLocations || [],
+        })
+      );
+
       if (typeof window !== "undefined" && window.location.href) {
-        formData.append("tags", JSON.stringify(["verify_page_report", `status_${String(result?.status || "unknown").toLowerCase()}`]));
+        formData.append("pageUrl", window.location.href);
       }
+
       for (const photo of reportPhotos.slice(0, 4)) {
         formData.append("photos", photo);
       }
 
-      const res = await apiClient.submitIncidentReport(formData);
+      const res = await apiClient.submitFraudReport(formData, visitorFp || undefined);
 
       if (!res.success) {
         toast({
@@ -401,14 +744,15 @@ export default function Verify() {
         title: "Report submitted",
         description: "Our security team has received your report.",
       });
-      setReportReference((res.data as any)?.reference || (res.data as any)?.incidentId || null);
-      setIncidentType(INCIDENT_TYPE_OPTIONS[0].value);
+
+      setReportReference((res.data as any)?.reportId || (res.data as any)?.incidentId || null);
+      setIncidentType(INCIDENT_TYPE_OPTIONS[1].value);
       setReportDescription("");
       setPurchasePlace("");
       setPurchaseDate("");
       setProductBatchNo("");
-      setReportCustomerName("");
-      setReportEmail("");
+      setReportCustomerName(viewer?.name || "");
+      setReportEmail(viewer?.email || "");
       setReportPhone("");
       setReportCountry("");
       setReportConsent(true);
@@ -464,6 +808,9 @@ export default function Verify() {
     }
   };
 
+  const ownership = result?.ownership || null;
+  const canClaim = Boolean(viewer && displayedCode !== "—" && (!ownership || !ownership.isOwnedByYou));
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-[linear-gradient(145deg,#052f2f_0%,#0b3a53_45%,#0f2740_100%)] px-4 py-10">
       <style>{`
@@ -486,6 +833,7 @@ export default function Verify() {
           50% { transform: scale(1.04); }
         }
       `}</style>
+
       <div className="pointer-events-none absolute -left-24 top-8 h-72 w-72 rounded-full bg-cyan-300/15 blur-3xl" />
       <div className="pointer-events-none absolute right-0 top-0 h-96 w-96 rounded-full bg-emerald-300/10 blur-3xl" />
       <div className="pointer-events-none absolute bottom-0 left-1/3 h-80 w-80 rounded-full bg-sky-300/10 blur-3xl" />
@@ -514,7 +862,7 @@ export default function Verify() {
                       style={{ animation: "verify-scanline 1.8s ease-in-out infinite" }}
                     />
                     <div className="absolute inset-0 flex items-center justify-center">
-                      <Shield className="h-12 w-12 text-slate-700 animate-pulse" />
+                      <Shield className="h-12 w-12 animate-pulse text-slate-700" />
                     </div>
                   </div>
                 </div>
@@ -542,10 +890,7 @@ export default function Verify() {
             <div style={{ animation: "verify-card-enter 360ms cubic-bezier(.22,1,.36,1) both" }}>
               <div className={`bg-gradient-to-r ${meta.panelClass} px-6 py-7 text-white`}>
                 <div className="mx-auto flex max-w-xl items-center gap-4">
-                  <div
-                    className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border border-white/30 bg-white/15"
-                    style={{ animation: "verify-icon-pulse 1.8s ease-in-out infinite" }}
-                  >
+                  <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border border-white/30 bg-white/15" style={{ animation: "verify-icon-pulse 1.8s ease-in-out infinite" }}>
                     {meta.icon}
                   </div>
                   <div>
@@ -570,9 +915,7 @@ export default function Verify() {
                       <Building2 className="h-4 w-4 text-teal-600" />
                       Licensed by
                     </div>
-                    <p className="text-base font-semibold text-slate-900">
-                      {result?.licensee?.brandName || result?.licensee?.name || "—"}
-                    </p>
+                    <p className="text-base font-semibold text-slate-900">{result?.licensee?.brandName || result?.licensee?.name || "—"}</p>
                   </div>
 
                   <div className="rounded-xl border border-slate-200 bg-white p-4">
@@ -597,38 +940,185 @@ export default function Verify() {
                 {(result?.message || result?.warningMessage) && (
                   <div
                     className={
-                      statusKind === "genuine"
+                      statusKind === "genuine" || statusKind === "verifiedAgain"
                         ? "rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"
                         : "rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
                     }
                   >
                     <p className="font-medium">{result?.message || "Verification details"}</p>
-                    {result?.warningMessage ? <p className="mt-1 text-amber-900/90">{result.warningMessage}</p> : null}
+                    {result?.warningMessage ? <p className="mt-1">{result.warningMessage}</p> : null}
+                    {statusKind === "verifiedAgain" ? (
+                      <p className="mt-1 text-emerald-800">You can safely show this screen again if someone asks for proof.</p>
+                    ) : null}
                   </div>
                 )}
 
-                {(statusKind === "reused" || statusKind === "blocked") && (
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <div className="rounded-xl border border-slate-200 bg-white p-4">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Total scans</p>
-                      <p className="mt-1 text-2xl font-semibold text-slate-900">{result?.scanCount ?? 0}</p>
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Scan history summary</p>
+                    <Badge variant="outline" className="text-xs">Coarse city/country only</Badge>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-4">
+                    <div>
+                      <p className="text-xs text-slate-500">Total scans</p>
+                      <p className="text-xl font-semibold text-slate-900">{result?.scanCount ?? 0}</p>
                     </div>
-                    <div className="rounded-xl border border-slate-200 bg-white p-4">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">First verified</p>
-                      <p className="mt-1 text-sm font-medium text-slate-900">
-                        {firstScanAt ? new Date(firstScanAt).toLocaleString() : "Not available"}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500">{firstScanLocation || "Location unavailable"}</p>
+                    <div>
+                      <p className="text-xs text-slate-500">First verified</p>
+                      <p className="text-sm font-medium text-slate-900">{firstScanAt ? new Date(firstScanAt).toLocaleString() : "Not available"}</p>
                     </div>
-                    <div className="rounded-xl border border-slate-200 bg-white p-4">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Latest verification</p>
-                      <p className="mt-1 text-sm font-medium text-slate-900">
-                        {latestScanAt ? new Date(latestScanAt).toLocaleString() : "Not available"}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500">{latestScanLocation || previousScanLocation || "Location unavailable"}</p>
+                    <div>
+                      <p className="text-xs text-slate-500">Last verified</p>
+                      <p className="text-sm font-medium text-slate-900">{latestScanAt ? new Date(latestScanAt).toLocaleString() : "Not available"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500">Verified by you</p>
+                      <p className="text-xl font-semibold text-slate-900">{result?.verifiedByYouCount ?? 0}</p>
                     </div>
                   </div>
+
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <p className="text-xs text-slate-500">
+                      First location: <span className="font-medium text-slate-700">{firstScanLocation || "Unavailable"}</span>
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Last location: <span className="font-medium text-slate-700">{latestScanLocation || previousScanLocation || "Unavailable"}</span>
+                    </p>
+                  </div>
+
+                  {result?.topLocations && result.topLocations.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {result.topLocations.map((entry) => (
+                        <Badge key={`${entry.label}_${entry.count}`} variant="secondary" className="bg-slate-100 text-slate-700">
+                          <MapPin className="mr-1 h-3 w-3" />
+                          {entry.label} ({entry.count})
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+
+                {(statusKind === "duplicate" || statusKind === "blocked") && (
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+                    <p className="text-sm font-semibold text-red-800">Why this was flagged</p>
+                    <ul className="mt-2 space-y-1 text-sm text-red-700">
+                      {(result?.reasons || ["Unusual scan pattern detected"]).slice(0, 5).map((reason, idx) => (
+                        <li key={`${reason}-${idx}`}>• {reason}</li>
+                      ))}
+                    </ul>
+                    <p className="mt-2 text-xs text-red-700/90">
+                      If this is your product, sign in and claim ownership to strengthen protection.
+                    </p>
+                  </div>
                 )}
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Ownership protection</p>
+                      <p className="text-xs text-slate-600">
+                        Sign-in is optional. We store scan events to detect duplicates and only keep coarse location signals.
+                      </p>
+                    </div>
+                    {viewerLoading ? <Loader2 className="h-4 w-4 animate-spin text-slate-500" /> : null}
+                  </div>
+
+                  {viewer ? (
+                    <div className="mt-4 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                        <div>
+                          <p className="text-xs text-slate-500">Signed in as</p>
+                          <p className="text-sm font-medium text-slate-900">{viewer.email}</p>
+                        </div>
+                        <Button variant="outline" size="sm" onClick={logoutViewer}>
+                          Sign out
+                        </Button>
+                      </div>
+
+                      {ownership?.isOwnedByYou ? (
+                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                          Claimed by you on {ownership.claimedAt ? new Date(ownership.claimedAt).toLocaleString() : "this account"}.
+                        </div>
+                      ) : canClaim ? (
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <p className="text-sm text-slate-700">Claim this product to mark your ownership and improve duplicate detection.</p>
+                          <Button type="button" onClick={claimOwnership} disabled={claiming}>
+                            {claiming ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Claiming...
+                              </>
+                            ) : (
+                              "Claim this product"
+                            )}
+                          </Button>
+                        </div>
+                      ) : ownership && !ownership.isOwnedByYou ? (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                          This product is already claimed by another account.
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="mt-4 space-y-4">
+                      {googleClientId ? <div ref={googleButtonRef} className="min-h-10" /> : null}
+
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Email OTP sign-in</Label>
+                          <Input
+                            type="email"
+                            value={otpEmail}
+                            onChange={(e) => setOtpEmail(e.target.value)}
+                            placeholder="you@example.com"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Name (optional)</Label>
+                          <Input value={otpName} onChange={(e) => setOtpName(e.target.value)} placeholder="Your name" />
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <Button type="button" variant="outline" onClick={requestOtp} disabled={otpSending}>
+                          {otpSending ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Sending code...
+                            </>
+                          ) : (
+                            <>
+                              <LogIn className="mr-2 h-4 w-4" />
+                              Continue with email OTP
+                            </>
+                          )}
+                        </Button>
+
+                        {otpRequested ? (
+                          <div className="flex w-full items-center gap-2 sm:w-auto">
+                            <Input
+                              value={otpCode}
+                              onChange={(e) => setOtpCode(e.target.value)}
+                              placeholder="Enter OTP"
+                              className="sm:w-36"
+                            />
+                            <Button type="button" onClick={verifyOtp} disabled={otpVerifying}>
+                              {otpVerifying ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Verifying...
+                                </>
+                              ) : (
+                                "Verify"
+                              )}
+                            </Button>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 <div className="grid gap-3 md:grid-cols-3">
                   {result?.licensee?.supportEmail && (
@@ -761,9 +1251,31 @@ export default function Verify() {
                         className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
                       >
                         <Flag className="mr-2 h-4 w-4" />
-                        Report Fraud
+                        Report suspected counterfeit
                       </Button>
                     )}
+
+                    {statusKind === "duplicate" && canClaim ? (
+                      <Button type="button" onClick={claimOwnership} disabled={claiming} className="bg-slate-900 text-white hover:bg-slate-800">
+                        {claiming ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Claiming...
+                          </>
+                        ) : (
+                          "I'm the owner"
+                        )}
+                      </Button>
+                    ) : null}
+
+                    {result?.licensee?.supportEmail ? (
+                      <Button asChild variant="outline">
+                        <a href={`mailto:${result.licensee.supportEmail}`}>
+                          Contact support
+                        </a>
+                      </Button>
+                    ) : null}
+
                     <Button asChild className="bg-slate-900 text-white hover:bg-slate-800">
                       <Link to="/verify">
                         Check another product
@@ -783,9 +1295,9 @@ export default function Verify() {
       <Dialog open={reportOpen} onOpenChange={setReportOpen}>
         <DialogContent className="sm:max-w-[680px]">
           <DialogHeader>
-            <DialogTitle>Report suspected fraud</DialogTitle>
+            <DialogTitle>Report suspected counterfeit</DialogTitle>
             <DialogDescription>
-              Share what you noticed. This goes directly to incident response.
+              We will attach scan metadata automatically so investigators can act faster.
             </DialogDescription>
           </DialogHeader>
 
@@ -806,6 +1318,15 @@ export default function Verify() {
               <div className="rounded-lg border bg-slate-50 p-3 text-sm">
                 <span className="text-slate-500">Code:</span>
                 <span className="ml-2 font-mono font-semibold text-slate-900">{displayedCode}</span>
+              </div>
+
+              <div className="rounded-lg border bg-slate-50 p-3 text-sm text-slate-700">
+                <p>
+                  Classification: <span className="font-medium">{result?.scanClassification || "Unknown"}</span>
+                </p>
+                <p>
+                  Risk reasons: <span className="font-medium">{(result?.reasons || []).join("; ") || "None"}</span>
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -852,14 +1373,14 @@ export default function Verify() {
               </div>
 
               <div className="space-y-2">
-                <Label>Photos (optional)</Label>
+                <Label>Purchase proof (optional)</Label>
                 <Input
                   type="file"
                   multiple
-                  accept="image/png,image/jpeg,image/jpg,image/webp"
+                  accept="image/png,image/jpeg,image/jpg,image/webp,application/pdf"
                   onChange={(e) => setReportPhotos(Array.from(e.target.files || []))}
                 />
-                <p className="text-xs text-slate-500">Up to 4 photos, 5MB each.</p>
+                <p className="text-xs text-slate-500">Up to 4 files, 5MB each.</p>
               </div>
 
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -906,7 +1427,14 @@ export default function Verify() {
             </Button>
             {!reportReference ? (
               <Button type="button" onClick={submitReport} disabled={reporting} className="bg-red-600 text-white hover:bg-red-700">
-                {reporting ? "Submitting..." : "Submit report"}
+                {reporting ? (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  "Submit report"
+                )}
               </Button>
             ) : null}
           </DialogFooter>
