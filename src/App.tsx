@@ -8,6 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import HelpAssistantWidget from "@/components/help/HelpAssistantWidget";
+import { getRoleHelpHome } from "@/help/contextual-help";
 
 const Login = lazy(() => import("@/pages/Login"));
 const AcceptInvite = lazy(() => import("@/pages/AcceptInvite"));
@@ -100,6 +101,33 @@ function RootRoute() {
   return <Navigate to={isAuthenticated ? "/dashboard" : "/verify"} replace />;
 }
 
+function HelpRoleRoute({
+  children,
+  allowedRoles,
+  allowPublic = true,
+}: {
+  children: React.ReactNode;
+  allowedRoles?: string[];
+  allowPublic?: boolean;
+}) {
+  const { user, isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) return <LoadingScreen />;
+
+  if (!isAuthenticated) {
+    if (allowPublic) return <>{children}</>;
+    return <Navigate to="/help/customer" replace />;
+  }
+
+  if (user?.role === "super_admin") return <>{children}</>;
+
+  if (allowedRoles && user && !allowedRoles.includes(user.role)) {
+    return <Navigate to={getRoleHelpHome(user.role)} replace />;
+  }
+
+  return <>{children}</>;
+}
+
 /* =========================
    Routes
 ========================= */
@@ -113,20 +141,104 @@ function AppRoutes() {
         <Route path="/verify/:code" element={<Verify />} />
         <Route path="/scan" element={<Verify />} />
         <Route path="/help" element={<HelpHub />} />
-        <Route path="/help/auth-overview" element={<HelpAuthOverview />} />
-        <Route path="/help/getting-access" element={<HelpGettingAccess />} />
-        <Route path="/help/setting-password" element={<HelpSettingPassword />} />
-        <Route path="/help/roles-permissions" element={<HelpRolesPermissions />} />
-        <Route path="/help/super-admin" element={<HelpSuperAdmin />} />
+        <Route
+          path="/help/auth-overview"
+          element={
+            <HelpRoleRoute>
+              <HelpAuthOverview />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/getting-access"
+          element={
+            <HelpRoleRoute>
+              <HelpGettingAccess />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/setting-password"
+          element={
+            <HelpRoleRoute>
+              <HelpSettingPassword />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/roles-permissions"
+          element={
+            <HelpRoleRoute>
+              <HelpRolesPermissions />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/super-admin"
+          element={
+            <HelpRoleRoute allowedRoles={["super_admin"]} allowPublic={false}>
+              <HelpSuperAdmin />
+            </HelpRoleRoute>
+          }
+        />
         <Route path="/help/superadmin" element={<Navigate to="/help/super-admin" replace />} />
-        <Route path="/help/licensee-admin" element={<HelpLicenseeAdmin />} />
+        <Route
+          path="/help/licensee-admin"
+          element={
+            <HelpRoleRoute allowedRoles={["licensee_admin"]} allowPublic={false}>
+              <HelpLicenseeAdmin />
+            </HelpRoleRoute>
+          }
+        />
         <Route path="/help/licensee" element={<Navigate to="/help/licensee-admin" replace />} />
-        <Route path="/help/manufacturer" element={<HelpManufacturer />} />
-        <Route path="/help/customer" element={<HelpCustomer />} />
-        <Route path="/help/incident-response" element={<HelpIncidentResponse />} />
-        <Route path="/help/policy-alerts" element={<HelpPolicyAlerts />} />
-        <Route path="/help/incident-actions" element={<HelpIncidentActions />} />
-        <Route path="/help/communications" element={<HelpCommunications />} />
+        <Route
+          path="/help/manufacturer"
+          element={
+            <HelpRoleRoute allowedRoles={["manufacturer"]} allowPublic={false}>
+              <HelpManufacturer />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/customer"
+          element={
+            <HelpRoleRoute allowPublic={true}>
+              <HelpCustomer />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/incident-response"
+          element={
+            <HelpRoleRoute allowedRoles={["super_admin"]} allowPublic={false}>
+              <HelpIncidentResponse />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/policy-alerts"
+          element={
+            <HelpRoleRoute allowedRoles={["super_admin"]} allowPublic={false}>
+              <HelpPolicyAlerts />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/incident-actions"
+          element={
+            <HelpRoleRoute allowedRoles={["super_admin"]} allowPublic={false}>
+              <HelpIncidentActions />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/communications"
+          element={
+            <HelpRoleRoute allowedRoles={["super_admin"]} allowPublic={false}>
+              <HelpCommunications />
+            </HelpRoleRoute>
+          }
+        />
 
         {/* Auth */}
         <Route
@@ -240,7 +352,7 @@ function AppRoutes() {
         <Route
           path="/incidents"
           element={
-            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
+            <ProtectedRoute allowedRoles={["super_admin"]}>
               <Incidents />
             </ProtectedRoute>
           }

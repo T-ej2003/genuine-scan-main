@@ -3,6 +3,7 @@ import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { getContextualHelpRoute, getPageGuidance } from "@/help/contextual-help";
 import {
   LayoutDashboard,
   Building2,
@@ -17,6 +18,7 @@ import {
   ScanEye,
   ShieldAlert,
   CircleHelp,
+  Lightbulb,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -42,7 +44,7 @@ const navItems: NavItem[] = [
   { label: "Manufacturers", href: "/manufacturers", icon: Factory, roles: ["super_admin", "licensee_admin"] },
   { label: "QR Tracking", href: "/qr-tracking", icon: ScanEye, roles: ["super_admin", "licensee_admin", "manufacturer"] },
   { label: "IR Center", href: "/ir", icon: Shield, roles: ["super_admin"] },
-  { label: "Incidents", href: "/incidents", icon: ShieldAlert, roles: ["licensee_admin"] },
+  { label: "Incidents", href: "/incidents", icon: ShieldAlert, roles: ["super_admin"] },
   { label: "Audit Logs", href: "/audit-logs", icon: FileText, roles: ["super_admin", "licensee_admin"] },
   { label: "Help", href: "/help", icon: CircleHelp, roles: ["super_admin", "licensee_admin", "manufacturer"] },
 ];
@@ -54,6 +56,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const filteredNavItems = navItems.filter((item) => user && item.roles.includes(user.role));
+  const contextualHelpRoute = getContextualHelpRoute(location.pathname, user?.role);
+  const pageGuidance = getPageGuidance(location.pathname, user?.role);
 
   const handleLogout = () => {
     logout();
@@ -146,7 +150,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           <div className="flex-1" />
 
           <Button asChild variant="ghost" className="mr-1 gap-2">
-            <Link to="/help">
+            <Link to={contextualHelpRoute}>
               <CircleHelp className="h-4 w-4 text-muted-foreground" />
               <span className="hidden sm:inline">Help</span>
             </Link>
@@ -188,12 +192,34 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           </DropdownMenu>
         </header>
 
-        <main className="p-4 lg:p-6">{children}</main>
+        <main className="p-4 lg:p-6">
+          {pageGuidance ? (
+            <section className="mb-4 rounded-xl border border-cyan-200 bg-cyan-50 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <p className="flex items-center gap-2 text-sm font-semibold text-cyan-900">
+                    <Lightbulb className="h-4 w-4" />
+                    {pageGuidance.title}
+                  </p>
+                  <p className="text-sm text-cyan-900/90">{pageGuidance.summary}</p>
+                  <p className="text-sm text-cyan-900/90">
+                    <span className="font-medium">First step:</span> {pageGuidance.firstAction}
+                  </p>
+                  {pageGuidance.note ? <p className="text-xs text-cyan-900/80">{pageGuidance.note}</p> : null}
+                </div>
+                <Button asChild variant="outline" size="sm" className="border-cyan-300 bg-white text-cyan-900 hover:bg-cyan-100">
+                  <Link to={contextualHelpRoute}>Open help for this page</Link>
+                </Button>
+              </div>
+            </section>
+          ) : null}
+          {children}
+        </main>
         <footer className="px-4 pb-6 lg:px-6">
           <div className="text-center text-xs text-muted-foreground">
-            Need guidance?{" "}
-            <Link to="/help" className="text-foreground underline-offset-4 hover:underline">
-              Open the help center
+            Need guidance on this page?{" "}
+            <Link to={contextualHelpRoute} className="text-foreground underline-offset-4 hover:underline">
+              Open the relevant help section
             </Link>
             .
           </div>

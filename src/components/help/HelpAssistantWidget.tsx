@@ -48,6 +48,10 @@ const routeLabel = (route: string) => {
     "/help/licensee-admin": "Licensee/Admin docs",
     "/help/manufacturer": "Manufacturer docs",
     "/help/customer": "Customer docs",
+    "/help/incident-response": "Incident Response docs",
+    "/help/policy-alerts": "Policy alerts docs",
+    "/help/incident-actions": "Incident actions docs",
+    "/help/communications": "Communications docs",
     "/verify": "Verify page",
     "/qr-requests": "QR Requests",
     "/batches": "Batches",
@@ -67,7 +71,7 @@ const routeLabel = (route: string) => {
 };
 
 const ROLE_LABELS: Record<HelpKbRole, string> = {
-  all: "General",
+  all: "All Roles",
   super_admin: "Super Admin",
   licensee: "Licensee/Admin",
   manufacturer: "Manufacturer",
@@ -75,11 +79,30 @@ const ROLE_LABELS: Record<HelpKbRole, string> = {
 };
 
 const getActiveHelpRole = (pathname: string, role?: string): HelpKbRole => {
+  if (role === "super_admin") return "all";
   if (pathname.startsWith("/verify") || pathname.startsWith("/scan")) return "customer";
-  if (role === "super_admin") return "super_admin";
   if (role === "licensee_admin") return "licensee";
   if (role === "manufacturer") return "manufacturer";
-  return "all";
+  return "customer";
+};
+
+const canUseEntryForRole = (entryRole: HelpKbRole, activeRole: HelpKbRole) => {
+  if (activeRole === "all") return true;
+  if (entryRole === "all") return true;
+  return entryRole === activeRole;
+};
+
+const roleScopedIntro = (activeRole: HelpKbRole) => {
+  if (activeRole === "all") {
+    return "Super Admin mode: ask about any role workflow, policy, incident response, or customer verification.";
+  }
+  if (activeRole === "licensee") {
+    return "Licensee/Admin mode: ask about inventory requests, batches, manufacturers, tracking, and account access.";
+  }
+  if (activeRole === "manufacturer") {
+    return "Manufacturer mode: ask about assigned batches, print jobs, print pack download, and status updates.";
+  }
+  return "Customer mode: ask about verification results, repeat scans, ownership claim, and counterfeit reporting.";
 };
 
 export default function HelpAssistantWidget() {
@@ -93,18 +116,23 @@ export default function HelpAssistantWidget() {
   const [query, setQuery] = useState("");
   const [isMobile, setIsMobile] = useState(false);
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
-  const [turns, setTurns] = useState<AssistantTurn[]>([
-    {
-      id: mkTurnId(),
-      kind: "intro",
-      text: "Ask me about access, password setup, QR requests, fraud reporting, or scan warnings. I use local help content only.",
-    },
-  ]);
+  const [turns, setTurns] = useState<AssistantTurn[]>([]);
 
   const activeRole = useMemo(
     () => getActiveHelpRole(location.pathname, user?.role),
     [location.pathname, user?.role]
   );
+
+  useEffect(() => {
+    setTurns([
+      {
+        id: mkTurnId(),
+        kind: "intro",
+        text: roleScopedIntro(activeRole),
+      },
+    ]);
+    setExpandedCards({});
+  }, [activeRole]);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 640px)");
@@ -127,6 +155,13 @@ export default function HelpAssistantWidget() {
       if (detail.entryId) {
         const entry = getEntryById(detail.entryId);
         if (!entry) return;
+        if (!canUseEntryForRole(entry.role, activeRole)) {
+          toast({
+            title: "Role-scoped help",
+            description: "This topic is outside your current support scope.",
+          });
+          return;
+        }
 
         setTurns((prev) => [
           ...prev,
@@ -224,13 +259,37 @@ export default function HelpAssistantWidget() {
   };
 
   const quickPrompts = useMemo(() => {
+    if (activeRole === "all") {
+      return [
+        "How do I review incident response lifecycle?",
+        "How do I approve QR requests?",
+        "How do policy alerts work?",
+        "How does customer fraud reporting attach metadata?",
+      ];
+    }
+    if (activeRole === "licensee") {
+      return [
+        "How do I request QR inventory?",
+        "How do I assign batches to manufacturers?",
+        "How do I add a manufacturer account?",
+        "How do I read scan tracking signals?",
+      ];
+    }
+    if (activeRole === "manufacturer") {
+      return [
+        "How do I create a print job?",
+        "How do I download print pack ZIP?",
+        "Why is a batch not visible to me?",
+        "When does printed status update?",
+      ];
+    }
     return [
-      "How do I reset my password?",
-      "How does possible duplicate work?",
-      "How do I request QR inventory?",
+      "What does Verified Again mean?",
+      "What does Suspicious Duplicate mean?",
+      "How do I claim ownership?",
       "How do I report suspected counterfeit?",
     ];
-  }, []);
+  }, [activeRole]);
 
   const activeRoleLabel = ROLE_LABELS[activeRole] || "General";
 
@@ -425,7 +484,15 @@ export default function HelpAssistantWidget() {
                 <Input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Ask about access, scans, fraud, or workflows..."
+                  placeholder={
+                    activeRole === "all"
+                      ? "Ask any workflow question..."
+                      : activeRole === "licensee"
+                      ? "Ask about requests, batches, tracking..."
+                      : activeRole === "manufacturer"
+                      ? "Ask about print jobs and batch flow..."
+                      : "Ask about verify results or counterfeit reporting..."
+                  }
                 />
                 <Button type="submit" className="bg-slate-900 text-white hover:bg-slate-800">
                   <Send className="h-4 w-4" />

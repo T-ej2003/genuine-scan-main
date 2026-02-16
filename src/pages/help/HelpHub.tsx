@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,20 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator";
 import { HelpShell } from "@/pages/help/HelpShell";
 import { ScreenshotChecklist, type ScreenshotNeed } from "@/components/help/ScreenshotChecklist";
+import { useAuth } from "@/contexts/AuthContext";
 import { Shield, Users, Factory, ScanLine, KeyRound, Siren, ClipboardList, Gavel, Mail } from "lucide-react";
+import type { UserRole } from "@/types";
+
+type ViewerRole = UserRole | "customer";
+
+type HubCardConfig = {
+  title: string;
+  description: string;
+  icon: React.ElementType;
+  href: string;
+  badge?: string;
+  roles: Array<ViewerRole | "all">;
+};
 
 const SCREENSHOTS: ScreenshotNeed[] = [
   { filename: "access-super-admin-login.png", whereToCapture: "Login page with Super Admin credentials entered.", usedIn: "Getting Access, Setting Your Password" },
@@ -30,6 +43,112 @@ const SCREENSHOTS: ScreenshotNeed[] = [
   { filename: "ir-policy-create.png", whereToCapture: "Policies tab with Create Policy dialog open.", usedIn: "Policy Alerts" },
   { filename: "ir-communication-compose.png", whereToCapture: "Incident detail page Communications section (compose email).", usedIn: "Communications" },
 ];
+
+const START_CARDS: HubCardConfig[] = [
+  {
+    title: "Auth overview",
+    description: "Simple explanation of sign-in, session, and account security basics.",
+    icon: KeyRound,
+    href: "/help/auth-overview",
+    roles: ["all"],
+  },
+  {
+    title: "Getting access",
+    description: "How users are invited and activated safely.",
+    icon: Users,
+    href: "/help/getting-access",
+    roles: ["all"],
+  },
+  {
+    title: "Setting your password",
+    description: "First-time setup and reset steps in plain language.",
+    icon: KeyRound,
+    href: "/help/setting-password",
+    roles: ["all"],
+  },
+  {
+    title: "Roles & permissions",
+    description: "Who can do what, and what data each role can see.",
+    icon: Gavel,
+    href: "/help/roles-permissions",
+    roles: ["all"],
+  },
+];
+
+const ROLE_CARDS: HubCardConfig[] = [
+  {
+    title: "Super Admin",
+    description: "Platform governance, tenant setup, approvals, and full incident response.",
+    icon: Shield,
+    href: "/help/super-admin",
+    badge: "Admin",
+    roles: ["super_admin"],
+  },
+  {
+    title: "Licensee/Admin",
+    description: "Brand-level operations: requests, batches, and manufacturer onboarding.",
+    icon: ClipboardList,
+    href: "/help/licensee-admin",
+    roles: ["licensee_admin"],
+  },
+  {
+    title: "Manufacturer",
+    description: "Factory-side print workflow and assigned batch execution.",
+    icon: Factory,
+    href: "/help/manufacturer",
+    roles: ["manufacturer"],
+  },
+  {
+    title: "Customer",
+    description: "Public verification meanings, repeat scans, and fraud report steps.",
+    icon: ScanLine,
+    href: "/help/customer",
+    badge: "Public",
+    roles: ["customer"],
+  },
+];
+
+const INCIDENT_CARDS: HubCardConfig[] = [
+  {
+    title: "Incident Response overview",
+    description: "How to triage, contain, document, and resolve incidents.",
+    icon: Siren,
+    href: "/help/incident-response",
+    badge: "Super Admin",
+    roles: ["super_admin"],
+  },
+  {
+    title: "Policy alerts",
+    description: "How policy alerts are created, reviewed, and actioned.",
+    icon: ClipboardList,
+    href: "/help/policy-alerts",
+    badge: "Super Admin",
+    roles: ["super_admin"],
+  },
+  {
+    title: "Incident actions",
+    description: "Containment and reinstatement actions with audit-safe justification.",
+    icon: Gavel,
+    href: "/help/incident-actions",
+    badge: "Super Admin",
+    roles: ["super_admin"],
+  },
+  {
+    title: "Communications",
+    description: "Customer and admin communication guidance with traceability.",
+    icon: Mail,
+    href: "/help/communications",
+    badge: "Super Admin",
+    roles: ["super_admin"],
+  },
+];
+
+const roleLabel = (role: ViewerRole) => {
+  if (role === "super_admin") return "Super Admin";
+  if (role === "licensee_admin") return "Licensee Admin";
+  if (role === "manufacturer") return "Manufacturer";
+  return "Customer";
+};
 
 function HubCard({
   title,
@@ -68,120 +187,92 @@ function HubCard({
 }
 
 export default function HelpHub() {
+  const { user } = useAuth();
+
+  const viewerRole: ViewerRole = user?.role || "customer";
+  const isSuperAdmin = viewerRole === "super_admin";
+
+  const visibleCards = useMemo(() => {
+    const includeCard = (card: HubCardConfig) => {
+      if (isSuperAdmin) return true;
+      return card.roles.includes("all") || card.roles.includes(viewerRole);
+    };
+
+    return {
+      start: START_CARDS.filter(includeCard),
+      role: ROLE_CARDS.filter(includeCard),
+      incident: INCIDENT_CARDS.filter(includeCard),
+    };
+  }, [isSuperAdmin, viewerRole]);
+
   return (
     <HelpShell
       title="Help Center"
-      subtitle="Controlled operating procedures for Super Admin, Licensee/Admin, Manufacturer, and Customer workflows."
+      subtitle="Role-based, plain-language guides so users can complete tasks without prior technical knowledge."
     >
       <div className="space-y-8">
-        <section className="space-y-4">
-          <h2 className="text-lg font-semibold text-foreground">Start here</h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            <HubCard
-              title="Auth overview"
-              description="Authentication controls, session handling, and baseline security requirements."
-              icon={KeyRound}
-              href="/help/auth-overview"
-            />
-            <HubCard
-              title="Getting access"
-              description="Role onboarding and access provisioning using invite-based controls."
-              icon={Users}
-              href="/help/getting-access"
-            />
-            <HubCard
-              title="Setting your password"
-              description="First-time password setup, reset procedure, and lockout recovery path."
-              icon={KeyRound}
-              href="/help/setting-password"
-            />
-            <HubCard
-              title="Roles & permissions"
-              description="Role authorization matrix and tenant data visibility boundaries."
-              icon={Gavel}
-              href="/help/roles-permissions"
-            />
-          </div>
+        <section className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p className="text-sm text-slate-700">
+            Showing guidance for <span className="font-semibold">{roleLabel(viewerRole)}</span>
+            {isSuperAdmin ? " (full access)." : "."}
+          </p>
         </section>
 
-        <Separator />
+        {visibleCards.start.length > 0 ? (
+          <section className="space-y-4">
+            <h2 className="text-lg font-semibold text-foreground">Start here</h2>
+            <div className="grid gap-4 md:grid-cols-2">
+              {visibleCards.start.map((card) => (
+                <HubCard key={card.href} {...card} />
+              ))}
+            </div>
+          </section>
+        ) : null}
 
-        <section className="space-y-4">
-          <h2 className="text-lg font-semibold text-foreground">By role</h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            <HubCard
-              title="Super Admin"
-              description="Platform governance: tenant administration, inventory approvals, and IR operations."
-              icon={Shield}
-              href="/help/superadmin"
-              badge="Admin"
-            />
-            <HubCard
-              title="Licensee/Admin (brand/company)"
-              description="Organization-scoped operations: manufacturer onboarding, inventory requests, and batch assignment."
-              icon={ClipboardList}
-              href="/help/licensee"
-            />
-            <HubCard
-              title="Manufacturer (factory user)"
-              description="Factory execution procedure: print job creation, secure ZIP handling, and print validation."
-              icon={Factory}
-              href="/help/manufacturer"
-            />
-            <HubCard
-              title="Customer (scanner / verification page)"
-              description="Public verification workflow, repeat-scan interpretation, and counterfeit reporting."
-              icon={ScanLine}
-              href="/help/customer"
-              badge="Public"
-            />
-          </div>
-        </section>
+        {visibleCards.role.length > 0 ? (
+          <>
+            <Separator />
+            <section className="space-y-4">
+              <h2 className="text-lg font-semibold text-foreground">Your role guides</h2>
+              <div className="grid gap-4 md:grid-cols-2">
+                {visibleCards.role.map((card) => (
+                  <HubCard key={card.href} {...card} />
+                ))}
+              </div>
+            </section>
+          </>
+        ) : null}
 
-        <Separator />
-
-        <section className="space-y-4">
-          <h2 className="text-lg font-semibold text-foreground">Incident Response</h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            <HubCard
-              title="Incident Response overview"
-              description="IR lifecycle control, triage procedure, and case ownership model."
-              icon={Siren}
-              href="/help/incident-response"
-              badge="Super Admin"
-            />
-            <HubCard
-              title="Policy alerts"
-              description="Policy-rule design, alert triggers, and incident auto-creation behavior."
-              icon={ClipboardList}
-              href="/help/policy-alerts"
-              badge="Super Admin"
-            />
-            <HubCard
-              title="Incident actions"
-              description="Containment controls, reinstatement process, and required justification records."
-              icon={Gavel}
-              href="/help/incident-actions"
-              badge="Super Admin"
-            />
-            <HubCard
-              title="Communications"
-              description="Incident communications protocol, message logging, and traceability requirements."
-              icon={Mail}
-              href="/help/communications"
-              badge="Super Admin"
-            />
-          </div>
-        </section>
+        {visibleCards.incident.length > 0 ? (
+          <>
+            <Separator />
+            <section className="space-y-4">
+              <h2 className="text-lg font-semibold text-foreground">Incident Response</h2>
+              <div className="grid gap-4 md:grid-cols-2">
+                {visibleCards.incident.map((card) => (
+                  <HubCard key={card.href} {...card} />
+                ))}
+              </div>
+            </section>
+          </>
+        ) : null}
 
         <Separator />
 
         <section className="space-y-3">
           <h2 className="text-lg font-semibold text-foreground">Documentation Assets</h2>
-          <p className="text-sm text-muted-foreground">
-            Screenshot validation runs automatically. Capture reminders appear only when a required documentation image is unavailable.
-          </p>
-          <ScreenshotChecklist items={SCREENSHOTS} />
+          {isSuperAdmin ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Screenshot validation runs automatically. Capture reminders appear only when a required documentation image is unavailable.
+              </p>
+              <ScreenshotChecklist items={SCREENSHOTS} />
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Documentation asset management is available to Super Admin only.
+            </p>
+          )}
         </section>
       </div>
     </HelpShell>
