@@ -7,33 +7,42 @@ exports.authenticateSSE = exports.optionalAuth = exports.authenticate = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const database_1 = __importDefault(require("../config/database"));
 const client_1 = require("@prisma/client");
+const tokenService_1 = require("../services/auth/tokenService");
 const getBearerToken = (req) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer "))
         return null;
     return authHeader.split(" ")[1] || null;
 };
+const getCookieAccessToken = (req) => {
+    const cookies = req.cookies;
+    const token = cookies?.[tokenService_1.ACCESS_TOKEN_COOKIE];
+    return token ? String(token) : null;
+};
 async function hydrateTenantIfNeeded(payload) {
     if (!payload?.userId || !payload?.role)
         return payload;
-    if (payload.role === client_1.UserRole.SUPER_ADMIN)
+    if (payload.role === client_1.UserRole.SUPER_ADMIN || payload.role === client_1.UserRole.PLATFORM_SUPER_ADMIN)
         return payload;
-    if (payload.licenseeId)
+    if (payload.licenseeId && payload.orgId)
         return payload;
     // fallback: lookup the user to get licenseeId
     const u = await database_1.default.user.findUnique({
         where: { id: payload.userId },
-        select: { licenseeId: true },
+        select: { licenseeId: true, orgId: true },
     });
-    return { ...payload, licenseeId: u?.licenseeId ?? null };
+    return { ...payload, licenseeId: u?.licenseeId ?? null, orgId: u?.orgId ?? null };
 }
 const authenticate = async (req, res, next) => {
-    const token = getBearerToken(req);
+    const bearer = getBearerToken(req);
+    const cookieToken = bearer ? null : getCookieAccessToken(req);
+    const token = bearer || cookieToken;
     if (!token)
         return res.status(401).json({ success: false, error: "No token provided" });
     try {
         const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET);
         req.user = await hydrateTenantIfNeeded(decoded);
+        req.authMode = bearer ? "bearer" : "cookie";
         return next();
     }
     catch {
@@ -42,12 +51,15 @@ const authenticate = async (req, res, next) => {
 };
 exports.authenticate = authenticate;
 const optionalAuth = async (req, _res, next) => {
-    const token = getBearerToken(req);
+    const bearer = getBearerToken(req);
+    const cookieToken = bearer ? null : getCookieAccessToken(req);
+    const token = bearer || cookieToken;
     if (!token)
         return next();
     try {
         const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET);
         req.user = await hydrateTenantIfNeeded(decoded);
+        req.authMode = bearer ? "bearer" : "cookie";
     }
     catch {
         // ignore
@@ -59,16 +71,19 @@ exports.optionalAuth = optionalAuth;
  * SSE auth supports:
  * - ?token= (for EventSource)
  * - Authorization: Bearer (normal)
+ * - Cookie access token (preferred; avoids putting tokens in URLs)
  */
 const authenticateSSE = async (req, res, next) => {
     const queryToken = req.query.token || "";
     const headerToken = getBearerToken(req) || "";
-    const token = queryToken || headerToken;
+    const cookieToken = !queryToken && !headerToken ? getCookieAccessToken(req) || "" : "";
+    const token = queryToken || headerToken || cookieToken;
     if (!token)
         return res.status(401).json({ success: false, error: "No token provided" });
     try {
         const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET);
         req.user = await hydrateTenantIfNeeded(decoded);
+        req.authMode = queryToken ? "bearer" : headerToken ? "bearer" : "cookie";
         return next();
     }
     catch {

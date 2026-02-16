@@ -38,25 +38,30 @@ const getLogs = async (req, res) => {
         const entityType = req.query.entityType;
         const entityId = req.query.entityId;
         const action = req.query.action;
-        const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN
+        const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
             ? req.query.licenseeId
             : req.user.licenseeId ?? undefined;
         let userIds;
-        if (req.user.role !== client_1.UserRole.SUPER_ADMIN && licenseeId) {
+        if (req.user.role !== client_1.UserRole.SUPER_ADMIN && req.user.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN && licenseeId) {
             const users = await database_1.default.user.findMany({
                 where: { licenseeId },
                 select: { id: true },
             });
             userIds = users.map((u) => u.id);
         }
-        if (req.user.role !== client_1.UserRole.SUPER_ADMIN && action && hiddenActionsForNonSuper.includes(action)) {
+        if (req.user.role !== client_1.UserRole.SUPER_ADMIN &&
+            req.user.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN &&
+            action &&
+            hiddenActionsForNonSuper.includes(action)) {
             return res.json({ success: true, data: { logs: [], total: 0, limit, offset } });
         }
         const result = await (0, auditService_1.getAuditLogs)({
             entityType,
             entityId,
             action,
-            excludeActions: req.user.role === client_1.UserRole.SUPER_ADMIN ? undefined : hiddenActionsForNonSuper,
+            excludeActions: req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
+                ? undefined
+                : hiddenActionsForNonSuper,
             licenseeId,
             userIds,
             limit,
@@ -92,18 +97,21 @@ const exportLogsCsv = async (req, res) => {
         const entityType = req.query.entityType;
         const entityId = req.query.entityId;
         const action = req.query.action;
-        const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN
+        const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
             ? req.query.licenseeId
             : req.user.licenseeId ?? undefined;
         let userIds;
-        if (req.user.role !== client_1.UserRole.SUPER_ADMIN && licenseeId) {
+        if (req.user.role !== client_1.UserRole.SUPER_ADMIN && req.user.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN && licenseeId) {
             const users = await database_1.default.user.findMany({
                 where: { licenseeId },
                 select: { id: true },
             });
             userIds = users.map((u) => u.id);
         }
-        if (req.user.role !== client_1.UserRole.SUPER_ADMIN && action && hiddenActionsForNonSuper.includes(action)) {
+        if (req.user.role !== client_1.UserRole.SUPER_ADMIN &&
+            req.user.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN &&
+            action &&
+            hiddenActionsForNonSuper.includes(action)) {
             res.setHeader("Content-Type", "text/csv");
             res.setHeader("Content-Disposition", "attachment; filename=\"audit-logs.csv\"");
             return res.status(200).send("createdAt,action,entityType,entityId,userId,userName,userEmail,licenseeId,ipAddress,details\n");
@@ -112,7 +120,9 @@ const exportLogsCsv = async (req, res) => {
             entityType,
             entityId,
             action,
-            excludeActions: req.user.role === client_1.UserRole.SUPER_ADMIN ? undefined : hiddenActionsForNonSuper,
+            excludeActions: req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
+                ? undefined
+                : hiddenActionsForNonSuper,
             licenseeId,
             userIds,
             limit,
@@ -183,7 +193,7 @@ const streamLogs = async (req, res) => {
     const heartbeat = setInterval(() => {
         res.write(`event: ping\ndata: {}\n\n`);
     }, 20000);
-    const isSuper = req.user.role === client_1.UserRole.SUPER_ADMIN;
+    const isSuper = req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN;
     const tenantId = req.user.licenseeId;
     const unsubscribe = (0, auditService_1.onAuditLog)((log) => {
         if (!isSuper && hiddenActionsForNonSuper.includes(String(log.action || "")))
@@ -204,7 +214,7 @@ const getFraudReports = async (req, res) => {
         if (!req.user) {
             return res.status(401).json({ success: false, error: "Not authenticated" });
         }
-        if (req.user.role !== client_1.UserRole.SUPER_ADMIN) {
+        if (req.user.role !== client_1.UserRole.SUPER_ADMIN && req.user.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
         const limit = Math.min(Number(req.query.limit) || 100, 500);
@@ -302,7 +312,7 @@ const respondToFraudReport = async (req, res) => {
         if (!req.user) {
             return res.status(401).json({ success: false, error: "Not authenticated" });
         }
-        if (req.user.role !== client_1.UserRole.SUPER_ADMIN) {
+        if (req.user.role !== client_1.UserRole.SUPER_ADMIN && req.user.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
         const reportId = String(req.params.id || "").trim();

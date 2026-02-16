@@ -9,6 +9,7 @@ const database_1 = __importDefault(require("../config/database"));
 const auditService_1 = require("./auditService");
 const securityHashService_1 = require("./securityHashService");
 const locationService_1 = require("./locationService");
+const policyRuleEngineService_1 = require("./ir/policyRuleEngineService");
 const MAX_SAFE_TEXT = 3000;
 const cleanText = (value, max = MAX_SAFE_TEXT) => {
     const raw = String(value || "").trim();
@@ -75,7 +76,10 @@ const normalizeCustomerContact = (input) => {
     };
 };
 exports.normalizeCustomerContact = normalizeCustomerContact;
-const isIncidentAdminRole = (role) => role === client_1.UserRole.SUPER_ADMIN || role === client_1.UserRole.LICENSEE_ADMIN;
+const isIncidentAdminRole = (role) => role === client_1.UserRole.SUPER_ADMIN ||
+    role === client_1.UserRole.PLATFORM_SUPER_ADMIN ||
+    role === client_1.UserRole.LICENSEE_ADMIN ||
+    role === client_1.UserRole.ORG_ADMIN;
 exports.isIncidentAdminRole = isIncidentAdminRole;
 const computeSpamSignal = async (input) => {
     const maxPerHour = Number(process.env.INCIDENT_SPAM_MAX_PER_HOUR || "5");
@@ -275,12 +279,22 @@ const createIncidentFromReport = async (payload, actor, uploads) => {
             suspectedSpam,
         },
     });
+    // IR volume rules - best effort and never block incident creation.
+    try {
+        await (0, policyRuleEngineService_1.evaluatePolicyRulesForIncidentVolume)({
+            incidentId: incident.id,
+            licenseeId: incident.licenseeId || null,
+        });
+    }
+    catch (e) {
+        console.error("evaluatePolicyRulesForIncidentVolume failed:", e);
+    }
     return incident;
 };
 exports.createIncidentFromReport = createIncidentFromReport;
 const getIncidentByIdScoped = async (incidentId, actor) => {
     const where = { id: incidentId };
-    if (actor.role !== client_1.UserRole.SUPER_ADMIN) {
+    if (actor.role !== client_1.UserRole.SUPER_ADMIN && actor.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN) {
         where.licenseeId = actor.licenseeId || "__none__";
     }
     return database_1.default.incident.findFirst({
@@ -299,7 +313,7 @@ const getIncidentByIdScoped = async (incidentId, actor) => {
 exports.getIncidentByIdScoped = getIncidentByIdScoped;
 const listIncidentsScoped = async (input) => {
     const where = {};
-    if (input.role !== client_1.UserRole.SUPER_ADMIN) {
+    if (input.role !== client_1.UserRole.SUPER_ADMIN && input.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN) {
         where.licenseeId = input.actorLicenseeId || "__none__";
     }
     else if (input.filters.licenseeId) {
@@ -370,8 +384,16 @@ const sanitizeIncidentStatus = (value) => {
         return client_1.IncidentStatus.NEW;
     if (normalized === "TRIAGED")
         return client_1.IncidentStatus.TRIAGED;
+    if (normalized === "TRIAGE")
+        return client_1.IncidentStatus.TRIAGE;
     if (normalized === "INVESTIGATING")
         return client_1.IncidentStatus.INVESTIGATING;
+    if (normalized === "CONTAINMENT")
+        return client_1.IncidentStatus.CONTAINMENT;
+    if (normalized === "ERADICATION")
+        return client_1.IncidentStatus.ERADICATION;
+    if (normalized === "RECOVERY")
+        return client_1.IncidentStatus.RECOVERY;
     if (normalized === "AWAITING_CUSTOMER")
         return client_1.IncidentStatus.AWAITING_CUSTOMER;
     if (normalized === "AWAITING_LICENSEE")
@@ -382,6 +404,8 @@ const sanitizeIncidentStatus = (value) => {
         return client_1.IncidentStatus.RESOLVED;
     if (normalized === "CLOSED")
         return client_1.IncidentStatus.CLOSED;
+    if (normalized === "REOPENED")
+        return client_1.IncidentStatus.REOPENED;
     if (normalized === "REJECTED_SPAM")
         return client_1.IncidentStatus.REJECTED_SPAM;
     return null;
@@ -427,12 +451,17 @@ const toHumanIncidentStatus = (status) => {
     const map = {
         NEW: "New",
         TRIAGED: "Triaged",
+        TRIAGE: "Triage",
         INVESTIGATING: "Investigating",
+        CONTAINMENT: "Containment",
+        ERADICATION: "Eradication",
+        RECOVERY: "Recovery",
         AWAITING_CUSTOMER: "Awaiting customer",
         AWAITING_LICENSEE: "Awaiting licensee",
         MITIGATED: "Mitigated",
         RESOLVED: "Resolved",
         CLOSED: "Closed",
+        REOPENED: "Reopened",
         REJECTED_SPAM: "Rejected as spam",
     };
     return map[status] || status;

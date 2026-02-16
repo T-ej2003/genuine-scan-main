@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getAuditLogs = exports.createAuditLog = exports.onAuditLog = void 0;
 const database_1 = __importDefault(require("../config/database"));
 const traceEventService_1 = require("./traceEventService");
+const security_1 = require("../utils/security");
 const listeners = new Set();
 const onAuditLog = (cb) => {
     listeners.add(cb);
@@ -17,7 +18,19 @@ const emitAuditLog = (log) => {
         cb(log);
 };
 const createAuditLog = async (data) => {
-    const log = await database_1.default.auditLog.create({ data });
+    const storeRawIp = ["1", "true", "yes", "on"].includes(String(process.env.AUDIT_LOG_STORE_RAW_IP || "").trim().toLowerCase());
+    const resolvedOrgId = data.orgId ?? data.licenseeId;
+    const resolvedIpHash = data.ipHash ?? (0, security_1.hashIp)(data.ipAddress);
+    const resolvedUserAgent = (0, security_1.normalizeUserAgent)(data.userAgent);
+    const log = await database_1.default.auditLog.create({
+        data: {
+            ...data,
+            orgId: resolvedOrgId,
+            ipHash: resolvedIpHash || undefined,
+            userAgent: resolvedUserAgent || undefined,
+            ipAddress: storeRawIp ? data.ipAddress : undefined,
+        },
+    });
     try {
         await (0, traceEventService_1.createTraceEventFromAuditLog)({
             id: log.id,

@@ -6,10 +6,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.hardDeleteManufacturer = exports.restoreManufacturer = exports.deactivateManufacturer = exports.deleteUser = exports.updateUser = exports.getManufacturers = exports.getUsers = exports.createUser = void 0;
 const zod_1 = require("zod");
-const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const client_1 = require("@prisma/client");
 const database_1 = __importDefault(require("../config/database"));
 const auditService_1 = require("../services/auditService");
+const passwordService_1 = require("../services/auth/passwordService");
 /**
  * Notes:
  * - Manufacturers are Users with role=MANUFACTURER
@@ -26,7 +26,13 @@ const createUserSchema = zod_1.z.object({
     email: zod_1.z.string().email(),
     password: zod_1.z.string().min(6),
     name: zod_1.z.string().min(2),
-    role: zod_1.z.enum(["LICENSEE_ADMIN", "MANUFACTURER"]),
+    role: zod_1.z.enum([
+        "LICENSEE_ADMIN",
+        "ORG_ADMIN",
+        "MANUFACTURER",
+        "MANUFACTURER_ADMIN",
+        "MANUFACTURER_USER",
+    ]),
     licenseeId: zod_1.z.string().uuid().optional(),
     location: zod_1.z.string().trim().max(200).optional(),
     website: zod_1.z.string().trim().max(200).optional(),
@@ -41,6 +47,12 @@ const updateUserSchema = zod_1.z.object({
     website: zod_1.z.string().trim().max(200).optional(),
 });
 /* ===================== HELPERS ===================== */
+const MANUFACTURER_ROLES = [
+    client_1.UserRole.MANUFACTURER,
+    client_1.UserRole.MANUFACTURER_ADMIN,
+    client_1.UserRole.MANUFACTURER_USER,
+];
+const isManufacturerRole = (role) => MANUFACTURER_ROLES.includes(role);
 const ensureAuth = (req) => {
     const role = req.user?.role;
     const userId = req.user?.userId;
@@ -48,13 +60,13 @@ const ensureAuth = (req) => {
         return null;
     return { role, userId };
 };
-const isSuper = (role) => role === client_1.UserRole.SUPER_ADMIN;
+const isPlatform = (role) => role === client_1.UserRole.SUPER_ADMIN || role === client_1.UserRole.PLATFORM_SUPER_ADMIN;
 const getTenantLicenseeId = (req) => {
     // if your middleware sets (req as any).licenseeId you can support it
     return req.licenseeId || req.user?.licenseeId || null;
 };
 const enforceTenantForTarget = (actorRole, actorLicenseeId, targetLicenseeId) => {
-    if (isSuper(actorRole))
+    if (isPlatform(actorRole))
         return { ok: true };
     if (!actorLicenseeId) {
         return { ok: false, status: 403, error: "No licensee association found" };
@@ -80,8 +92,8 @@ const assertManufacturerTarget = async (id) => {
     });
     if (!target)
         return { ok: false, status: 404, error: "User not found" };
-    if (target.role !== client_1.UserRole.MANUFACTURER) {
-        return { ok: false, status: 400, error: "Target must be a MANUFACTURER user" };
+    if (!isManufacturerRole(target.role)) {
+        return { ok: false, status: 400, error: "Target must be a manufacturer user" };
     }
     return { ok: true, target };
 };
@@ -104,7 +116,7 @@ const createUser = async (req, res) => {
         // - LICENSEE_ADMIN: should only create MANUFACTURER under own licensee (licenseeId ignored)
         const actorLicenseeId = getTenantLicenseeId(req);
         let effectiveLicenseeId = null;
-        if (isSuper(auth.role)) {
+        if (isPlatform(auth.role)) {
             effectiveLicenseeId = parsed.data.licenseeId || null;
             if (!effectiveLicenseeId) {
                 return res.status(400).json({ success: false, error: "licenseeId is required for super admin createUser" });
@@ -117,17 +129,19 @@ const createUser = async (req, res) => {
             }
             effectiveLicenseeId = actorLicenseeId;
             // non-super cannot create licensee admins
-            if (role !== client_1.UserRole.MANUFACTURER) {
-                return res.status(403).json({ success: false, error: "Only super admin can create LICENSEE_ADMIN users" });
+            if (!isManufacturerRole(role)) {
+                return res.status(403).json({ success: false, error: "Only platform admin can create org admin users" });
             }
         }
         if (!effectiveLicenseeId) {
             return res.status(400).json({ success: false, error: "licenseeId is required" });
         }
-        const lic = await database_1.default.licensee.findUnique({ where: { id: effectiveLicenseeId } });
+        const lic = await database_1.default.licensee.findUnique({ where: { id: effectiveLicenseeId }, select: { id: true, orgId: true } });
         if (!lic)
             return res.status(404).json({ success: false, error: "Licensee not found" });
-        const passwordHash = await bcryptjs_1.default.hash(password, 10);
+        if (!lic.orgId)
+            return res.status(500).json({ success: false, error: "Licensee org not configured" });
+        const passwordHash = await (0, passwordService_1.hashPassword)(password);
         const licenseeId = effectiveLicenseeId || undefined;
         const created = await database_1.default.user.create({
             data: {
@@ -136,6 +150,7 @@ const createUser = async (req, res) => {
                 name,
                 role,
                 licenseeId,
+                orgId: lic.orgId,
                 isActive: true,
                 deletedAt: null,
                 location: parsed.data.location?.trim() ? parsed.data.location.trim() : null,
@@ -183,7 +198,7 @@ const getUsers = async (req, res) => {
         const queryLicenseeId = req.query.licenseeId || undefined;
         const includeInactive = String(req.query.includeInactive || "false").toLowerCase() === "true";
         const roleFilter = req.query.role || undefined;
-        const effectiveLicenseeId = isSuper(auth.role) ? queryLicenseeId : getTenantLicenseeId(req) || undefined;
+        const effectiveLicenseeId = isPlatform(auth.role) ? queryLicenseeId : getTenantLicenseeId(req) || undefined;
         const where = {};
         if (effectiveLicenseeId)
             where.licenseeId = effectiveLicenseeId;
@@ -225,10 +240,10 @@ const getManufacturers = async (req, res) => {
         if (!auth)
             return res.status(401).json({ success: false, error: "Not authenticated" });
         includeInactive = String(req.query.includeInactive || "false").toLowerCase() === "true";
-        licenseeId = isSuper(auth.role)
+        licenseeId = isPlatform(auth.role)
             ? (req.query.licenseeId || undefined)
             : (getTenantLicenseeId(req) || undefined);
-        const where = { role: client_1.UserRole.MANUFACTURER };
+        const where = { role: { in: [client_1.UserRole.MANUFACTURER, client_1.UserRole.MANUFACTURER_ADMIN, client_1.UserRole.MANUFACTURER_USER] } };
         if (licenseeId)
             where.licenseeId = licenseeId;
         if (!includeInactive)
@@ -256,7 +271,7 @@ const getManufacturers = async (req, res) => {
         console.error("getManufacturers error:", e);
         try {
             // Fallback for schema mismatch or older DB: return minimal fields
-            const fallbackWhere = { role: client_1.UserRole.MANUFACTURER };
+            const fallbackWhere = { role: { in: [client_1.UserRole.MANUFACTURER, client_1.UserRole.MANUFACTURER_ADMIN, client_1.UserRole.MANUFACTURER_USER] } };
             if (licenseeId)
                 fallbackWhere.licenseeId = licenseeId;
             if (!includeInactive)
@@ -304,11 +319,11 @@ const updateUser = async (req, res) => {
             return res.status(tenantCheck.status).json({ success: false, error: tenantCheck.error });
         const data = { ...parsed.data };
         // only super can change tenant
-        if (!isSuper(auth.role))
+        if (!isPlatform(auth.role))
             delete data.licenseeId;
         // password -> passwordHash
         if (data.password) {
-            data.passwordHash = await bcryptjs_1.default.hash(String(data.password), 10);
+            data.passwordHash = await (0, passwordService_1.hashPassword)(String(data.password));
             delete data.password;
         }
         // keep deletedAt consistent with isActive
@@ -368,7 +383,7 @@ const deleteUser = async (req, res) => {
         if (!tenantCheck.ok)
             return res.status(tenantCheck.status).json({ success: false, error: tenantCheck.error });
         if (hard) {
-            if (!isSuper(auth.role)) {
+            if (!isPlatform(auth.role)) {
                 return res.status(403).json({ success: false, error: "Only super admin can hard delete" });
             }
             const tx = await database_1.default.$transaction(async (pr) => {

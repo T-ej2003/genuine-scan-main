@@ -80,6 +80,44 @@ const ACTION_LABEL: Record<ContainmentAction, string> = {
   REINSTATE_MANUFACTURER_USERS: "Reinstate manufacturer users",
 };
 
+const humanKey = (key: string) =>
+  String(key || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+
+const humanValue = (rawValue: unknown): string => {
+  if (rawValue == null || rawValue === "") return "";
+  if (typeof rawValue === "boolean") return rawValue ? "Yes" : "No";
+  if (Array.isArray(rawValue)) {
+    return rawValue
+      .map((item) => humanValue(item))
+      .filter(Boolean)
+      .join(", ");
+  }
+  if (typeof rawValue === "object") {
+    const pairs = Object.entries(rawValue as Record<string, unknown>)
+      .map(([key, value]) => `${humanKey(key)}: ${humanValue(value)}`)
+      .filter((line) => !line.endsWith(": "));
+    return pairs.join(" • ");
+  }
+  return String(rawValue);
+};
+
+const readableDetailEntries = (details: unknown): Array<{ label: string; value: string }> => {
+  if (!details || typeof details !== "object" || Array.isArray(details)) return [];
+
+  const entries: Array<{ label: string; value: string }> = [];
+  for (const [key, value] of Object.entries(details as Record<string, unknown>)) {
+    const formatted = humanValue(value);
+    if (!formatted) continue;
+    entries.push({ label: humanKey(key), value: formatted });
+  }
+  return entries;
+};
+
 export default function IRIncidentDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -717,24 +755,32 @@ export default function IRIncidentDetail() {
                     <div className="rounded-lg border p-4 text-sm text-muted-foreground">No timeline events.</div>
                   ) : (
                     <div className="space-y-2">
-                      {eventRows.map((ev: any) => (
-                        <div key={ev.id} className="rounded-lg border p-3 text-sm">
-                          <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
-                            <div className="font-medium">{ev.eventType}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {ev.createdAt ? formatDistanceToNow(new Date(ev.createdAt), { addSuffix: true }) : "—"}
+                      {eventRows.map((ev: any) => {
+                        const payloadEntries = readableDetailEntries(ev.eventPayload);
+                        return (
+                          <div key={ev.id} className="rounded-lg border p-3 text-sm">
+                            <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                              <div className="font-medium">{ev.eventType}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {ev.createdAt ? formatDistanceToNow(new Date(ev.createdAt), { addSuffix: true }) : "—"}
+                              </div>
                             </div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {ev.actorUser?.email || ev.actorType}
+                            </div>
+                            {payloadEntries.length > 0 ? (
+                              <dl className="mt-2 grid gap-1 rounded bg-slate-50 p-2 text-xs text-slate-700">
+                                {payloadEntries.map((entry) => (
+                                  <div key={`${ev.id}-${entry.label}`} className="grid gap-1 sm:grid-cols-[160px_1fr]">
+                                    <dt className="font-medium text-slate-600">{entry.label}</dt>
+                                    <dd className="break-words">{entry.value}</dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            ) : null}
                           </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {ev.actorUser?.email || ev.actorType}
-                          </div>
-                          {ev.eventPayload ? (
-                            <pre className="mt-2 max-h-40 overflow-auto rounded bg-slate-50 p-2 text-xs text-slate-700">
-                              {JSON.stringify(ev.eventPayload, null, 2)}
-                            </pre>
-                          ) : null}
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </CardContent>
@@ -752,24 +798,32 @@ export default function IRIncidentDetail() {
                     <div className="rounded-lg border p-4 text-sm text-muted-foreground">No linked alerts.</div>
                   ) : (
                     <div className="space-y-2">
-                      {policyAlertRows.map((a: any) => (
-                        <div key={a.id} className="rounded-lg border p-3 text-sm">
-                          <div className="flex items-center justify-between gap-2">
-                            <Badge variant="outline" className={SEVERITY_TONE[a.severity] || "border-slate-200 bg-slate-50 text-slate-700"}>
-                              {a.severity}
-                            </Badge>
-                            <div className="text-xs text-muted-foreground">
-                              {a.createdAt ? formatDistanceToNow(new Date(a.createdAt), { addSuffix: true }) : "—"}
+                      {policyAlertRows.map((a: any) => {
+                        const detailEntries = readableDetailEntries(a.details);
+                        return (
+                          <div key={a.id} className="rounded-lg border p-3 text-sm">
+                            <div className="flex items-center justify-between gap-2">
+                              <Badge variant="outline" className={SEVERITY_TONE[a.severity] || "border-slate-200 bg-slate-50 text-slate-700"}>
+                                {a.severity}
+                              </Badge>
+                              <div className="text-xs text-muted-foreground">
+                                {a.createdAt ? formatDistanceToNow(new Date(a.createdAt), { addSuffix: true }) : "—"}
+                              </div>
                             </div>
+                            <div className="mt-2">{a.message}</div>
+                            {detailEntries.length > 0 ? (
+                              <dl className="mt-2 grid gap-1 rounded bg-slate-50 p-2 text-xs text-slate-700">
+                                {detailEntries.map((entry) => (
+                                  <div key={`${a.id}-${entry.label}`} className="grid gap-1 sm:grid-cols-[160px_1fr]">
+                                    <dt className="font-medium text-slate-600">{entry.label}</dt>
+                                    <dd className="break-words">{entry.value}</dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            ) : null}
                           </div>
-                          <div className="mt-2">{a.message}</div>
-                          {a.details ? (
-                            <pre className="mt-2 max-h-40 overflow-auto rounded bg-slate-50 p-2 text-xs text-slate-700">
-                              {JSON.stringify(a.details, null, 2)}
-                            </pre>
-                          ) : null}
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </CardContent>
@@ -816,4 +870,3 @@ export default function IRIncidentDetail() {
     </DashboardLayout>
   );
 }
-

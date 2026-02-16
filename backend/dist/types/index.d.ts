@@ -4,6 +4,7 @@ export interface JWTPayload {
     email: string;
     role: UserRole;
     licenseeId: string | null;
+    orgId: string | null;
 }
 export interface AuthenticatedRequest extends Express.Request {
     user?: JWTPayload;

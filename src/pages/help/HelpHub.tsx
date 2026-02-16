@@ -71,7 +71,7 @@ export default function HelpHub() {
   return (
     <HelpShell
       title="Help Center"
-      subtitle="Step-by-step guides for platform admins, licensee admins, manufacturers, and customers."
+      subtitle="Controlled operating procedures for Super Admin, Licensee/Admin, Manufacturer, and Customer workflows."
     >
       <div className="space-y-8">
         <section className="space-y-4">
@@ -79,25 +79,25 @@ export default function HelpHub() {
           <div className="grid gap-4 md:grid-cols-2">
             <HubCard
               title="Auth overview"
-              description="How sign-in works, sessions, cookies, and security basics."
+              description="Authentication controls, session handling, and baseline security requirements."
               icon={KeyRound}
               href="/help/auth-overview"
             />
             <HubCard
               title="Getting access"
-              description="How each role receives access (invite-based onboarding)."
+              description="Role onboarding and access provisioning using invite-based controls."
               icon={Users}
               href="/help/getting-access"
             />
             <HubCard
               title="Setting your password"
-              description="Accept an invite, set your first password, and reset if needed."
+              description="First-time password setup, reset procedure, and lockout recovery path."
               icon={KeyRound}
               href="/help/setting-password"
             />
             <HubCard
               title="Roles & permissions"
-              description="What each role can do and what data they can see (org scoping)."
+              description="Role authorization matrix and tenant data visibility boundaries."
               icon={Gavel}
               href="/help/roles-permissions"
             />
@@ -111,26 +111,26 @@ export default function HelpHub() {
           <div className="grid gap-4 md:grid-cols-2">
             <HubCard
               title="Super Admin"
-              description="Platform-wide management: licensees, QR requests, audit logs, and IR Center."
+              description="Platform governance: tenant administration, inventory approvals, and IR operations."
               icon={Shield}
               href="/help/superadmin"
               badge="Admin"
             />
             <HubCard
               title="Licensee/Admin (brand/company)"
-              description="Manage manufacturers, request inventory, assign batches, and review activity."
+              description="Organization-scoped operations: manufacturer onboarding, inventory requests, and batch assignment."
               icon={ClipboardList}
               href="/help/licensee"
             />
             <HubCard
               title="Manufacturer (factory user)"
-              description="Create print jobs, download secure print packs, and confirm printing."
+              description="Factory execution procedure: print job creation, secure ZIP handling, and print validation."
               icon={Factory}
               href="/help/manufacturer"
             />
             <HubCard
               title="Customer (scanner / verification page)"
-              description="Verify authenticity, understand repeat scans, and report suspected counterfeit."
+              description="Public verification workflow, repeat-scan interpretation, and counterfeit reporting."
               icon={ScanLine}
               href="/help/customer"
               badge="Public"
@@ -145,28 +145,28 @@ export default function HelpHub() {
           <div className="grid gap-4 md:grid-cols-2">
             <HubCard
               title="Incident Response overview"
-              description="Incidents lifecycle, triage workflow, and dashboards."
+              description="IR lifecycle control, triage procedure, and case ownership model."
               icon={Siren}
               href="/help/incident-response"
               badge="Super Admin"
             />
             <HubCard
               title="Policy alerts"
-              description="How policy rules trigger alerts and optionally create incidents."
+              description="Policy-rule design, alert triggers, and incident auto-creation behavior."
               icon={ClipboardList}
               href="/help/policy-alerts"
               badge="Super Admin"
             />
             <HubCard
               title="Incident actions"
-              description="Containment actions: under investigation flags, suspensions, and reinstatement."
+              description="Containment controls, reinstatement process, and required justification records."
               icon={Gavel}
               href="/help/incident-actions"
               badge="Super Admin"
             />
             <HubCard
               title="Communications"
-              description="Email reporters/org admins, log messages, and track timelines."
+              description="Incident communications protocol, message logging, and traceability requirements."
               icon={Mail}
               href="/help/communications"
               badge="Super Admin"
@@ -177,9 +177,9 @@ export default function HelpHub() {
         <Separator />
 
         <section className="space-y-3">
-          <h2 className="text-lg font-semibold text-foreground">Docs screenshots</h2>
+          <h2 className="text-lg font-semibold text-foreground">Documentation Assets</h2>
           <p className="text-sm text-muted-foreground">
-            The Help pages below will automatically render screenshots if the files exist. Use the checklist to capture missing screens.
+            Screenshot validation runs automatically. Capture reminders appear only when a required documentation image is unavailable.
           </p>
           <ScreenshotChecklist items={SCREENSHOTS} />
         </section>

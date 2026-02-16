@@ -66,6 +66,14 @@ const routeLabel = (route: string) => {
   return segment.replace(/[-_]/g, " ");
 };
 
+const ROLE_LABELS: Record<HelpKbRole, string> = {
+  all: "General",
+  super_admin: "Super Admin",
+  licensee: "Licensee/Admin",
+  manufacturer: "Manufacturer",
+  customer: "Customer",
+};
+
 const getActiveHelpRole = (pathname: string, role?: string): HelpKbRole => {
   if (pathname.startsWith("/verify") || pathname.startsWith("/scan")) return "customer";
   if (role === "super_admin") return "super_admin";
@@ -224,6 +232,8 @@ export default function HelpAssistantWidget() {
     ];
   }, []);
 
+  const activeRoleLabel = ROLE_LABELS[activeRole] || "General";
+
   return (
     <div className="fixed bottom-4 right-4 z-50 sm:bottom-5 sm:right-5">
       <Sheet open={open} onOpenChange={setOpen}>
@@ -254,11 +264,11 @@ export default function HelpAssistantWidget() {
                     Help & Fraud Assistant
                   </SheetTitle>
                   <SheetDescription>
-                    Free local assistant. No external AI APIs.
+                    Local assistant powered by approved help documentation only.
                   </SheetDescription>
                 </div>
                 <Badge variant="outline" className="text-[11px] uppercase tracking-wide">
-                  {activeRole}
+                  {activeRoleLabel}
                 </Badge>
               </div>
             </SheetHeader>
@@ -336,7 +346,7 @@ export default function HelpAssistantWidget() {
                             <div className="flex items-center justify-between gap-2">
                               <h4 className="text-sm font-semibold text-slate-900">{hit.entry.title}</h4>
                               <Badge variant="secondary" className="text-[10px] uppercase">
-                                {hit.entry.role}
+                                {ROLE_LABELS[hit.entry.role] || "General"}
                               </Badge>
                             </div>
                             <p className="mt-1 text-xs text-slate-600">{hit.shortAnswer}</p>
@@ -428,4 +438,3 @@ export default function HelpAssistantWidget() {
     </div>
   );
 }
-

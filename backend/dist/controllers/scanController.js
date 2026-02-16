@@ -94,6 +94,8 @@ const scanToken = async (req, res) => {
                         website: true,
                         supportEmail: true,
                         supportPhone: true,
+                        suspendedAt: true,
+                        suspendedReason: true,
                     },
                 },
                 batch: {
@@ -101,6 +103,8 @@ const scanToken = async (req, res) => {
                         id: true,
                         name: true,
                         printedAt: true,
+                        suspendedAt: true,
+                        suspendedReason: true,
                         manufacturer: { select: { id: true, name: true, email: true, location: true, website: true } },
                     },
                 },
@@ -259,7 +263,21 @@ const scanToken = async (req, res) => {
         });
         const finalStatus = policy.autoBlockedQr || policy.autoBlockedBatch ? client_1.QRStatus.BLOCKED : updated.status;
         const effectiveOutcome = finalStatus === client_1.QRStatus.BLOCKED ? "BLOCKED" : decision.outcome;
-        const scanInsight = await (0, scanInsightService_1.getScanInsight)(updated.id);
+        const scanInsight = await (0, scanInsightService_1.getScanInsight)(updated.id, fp || null);
+        const containment = {
+            qrUnderInvestigation: updated.underInvestigationAt
+                ? { at: new Date(updated.underInvestigationAt).toISOString(), reason: updated.underInvestigationReason || null }
+                : null,
+            batchSuspended: updated.batch?.suspendedAt
+                ? { at: new Date(updated.batch.suspendedAt).toISOString(), reason: updated.batch.suspendedReason || null }
+                : null,
+            orgSuspended: updated.licensee?.suspendedAt
+                ? { at: new Date(updated.licensee.suspendedAt).toISOString(), reason: updated.licensee.suspendedReason || null }
+                : null,
+        };
+        const hasContainment = Boolean(containment.qrUnderInvestigation) ||
+            Boolean(containment.batchSuspended) ||
+            Boolean(containment.orgSuspended);
         const warningMessage = effectiveOutcome === "ALREADY_REDEEMED"
             ? `Already verified before. First verification was at ${scanInsight.firstScanAt || updated.redeemedAt?.toISOString?.() || "unknown time"}.`
             : effectiveOutcome === "SUSPICIOUS"
@@ -268,7 +286,9 @@ const scanToken = async (req, res) => {
                     ? policy.autoBlockedQr || policy.autoBlockedBatch
                         ? "This code has been auto-blocked by security policy due to anomaly detection."
                         : "This code has been blocked due to fraud or recall."
-                    : null;
+                    : hasContainment
+                        ? "This product is currently under investigation. Please review details and contact support if needed."
+                        : null;
         const message = effectiveOutcome === "VALID"
             ? "Authentic item. First-time verification successful."
             : effectiveOutcome === "ALREADY_REDEEMED"
@@ -281,12 +301,14 @@ const scanToken = async (req, res) => {
         return res.json({
             success: true,
             data: {
-                isAuthentic: effectiveOutcome === "VALID",
+                // Consumers may re-verify the same product; treat repeat scans as authentic unless blocked.
+                isAuthentic: effectiveOutcome === "VALID" || effectiveOutcome === "ALREADY_REDEEMED",
                 scanOutcome: effectiveOutcome,
                 message,
                 warningMessage,
                 code: updated.code,
                 status: finalStatus,
+                containment,
                 licensee: updated.licensee
                     ? {
                         id: updated.licensee.id,
@@ -317,6 +339,7 @@ const scanToken = async (req, res) => {
                 latestScanLocation: scanInsight.latestScanLocation,
                 previousScanAt: scanInsight.previousScanAt,
                 previousScanLocation: scanInsight.previousScanLocation,
+                scanSignals: scanInsight.signals,
                 policy,
             },
         });

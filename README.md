@@ -772,7 +772,7 @@ Search/scoring logic lives in `src/help/kb-search.ts`.
 ### Screenshots for docs/help pages
 
 - Store docs images under `public/docs/`.
-- Help pages render real images automatically if files exist, else placeholders.
+- Help pages automatically check image availability and only show capture reminders for missing files.
 
 Optional automated capture:
 
@@ -788,12 +788,29 @@ Supported environment variables for capture script:
 - `DOCS_MANUFACTURER_EMAIL`, `DOCS_MANUFACTURER_PASSWORD`
 - `DOCS_QR_CODE`
 
-Generate DOCX manual from markdown:
+Generate consolidated DOCX manual from markdown:
 
 ```bash
 npm run docs:docx
 ```
 
+Generated outputs (current):
+
+- `docs/USER_MANUAL_v2.docx`
+- `docs/SUPER_ADMIN_GUIDE.docx`
+- `docs/LICENSEE_ADMIN_GUIDE.docx`
+- `docs/MANUFACTURER_GUIDE.docx`
+- `docs/CUSTOMER_VERIFICATION_GUIDE.docx`
+
+Optional legacy generator:
+
+```bash
+npm run docs:docx:roles
+```
+
 ---
 
-For role-specific operational procedures, see `docs/USER_MANUAL.md`.
+Source documentation in repo:
+
+- `docs/USER_MANUAL.md`
+- `/help/*` pages in the web app

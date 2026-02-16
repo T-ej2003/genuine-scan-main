@@ -32,14 +32,17 @@ const createQrAllocationRequest = async (req, res) => {
         const auth = ensureAuth(req);
         if (!auth)
             return res.status(401).json({ success: false, error: "Not authenticated" });
-        if (auth.role !== client_1.UserRole.LICENSEE_ADMIN && auth.role !== client_1.UserRole.SUPER_ADMIN) {
+        if (auth.role !== client_1.UserRole.LICENSEE_ADMIN &&
+            auth.role !== client_1.UserRole.ORG_ADMIN &&
+            auth.role !== client_1.UserRole.SUPER_ADMIN &&
+            auth.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
         const parsed = createRequestSchema.safeParse(req.body);
         if (!parsed.success) {
             return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
         }
-        const licenseeId = auth.role === client_1.UserRole.SUPER_ADMIN
+        const licenseeId = auth.role === client_1.UserRole.SUPER_ADMIN || auth.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
             ? req.body?.licenseeId
             : req.user?.licenseeId;
         if (!licenseeId) {
@@ -80,7 +83,10 @@ const getQrAllocationRequests = async (req, res) => {
         const auth = ensureAuth(req);
         if (!auth)
             return res.status(401).json({ success: false, error: "Not authenticated" });
-        if (auth.role !== client_1.UserRole.LICENSEE_ADMIN && auth.role !== client_1.UserRole.SUPER_ADMIN) {
+        if (auth.role !== client_1.UserRole.LICENSEE_ADMIN &&
+            auth.role !== client_1.UserRole.ORG_ADMIN &&
+            auth.role !== client_1.UserRole.SUPER_ADMIN &&
+            auth.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
         const status = req.query.status || undefined;
@@ -88,7 +94,7 @@ const getQrAllocationRequests = async (req, res) => {
         const where = {};
         if (status)
             where.status = status;
-        if (auth.role === client_1.UserRole.SUPER_ADMIN) {
+        if (auth.role === client_1.UserRole.SUPER_ADMIN || auth.role === client_1.UserRole.PLATFORM_SUPER_ADMIN) {
             if (qLicenseeId)
                 where.licenseeId = qLicenseeId;
         }
@@ -121,7 +127,7 @@ const approveQrAllocationRequest = async (req, res) => {
         const auth = ensureAuth(req);
         if (!auth)
             return res.status(401).json({ success: false, error: "Not authenticated" });
-        if (auth.role !== client_1.UserRole.SUPER_ADMIN) {
+        if (auth.role !== client_1.UserRole.SUPER_ADMIN && auth.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
         const parsed = approveSchema.safeParse(req.body);
@@ -207,7 +213,7 @@ const rejectQrAllocationRequest = async (req, res) => {
         const auth = ensureAuth(req);
         if (!auth)
             return res.status(401).json({ success: false, error: "Not authenticated" });
-        if (auth.role !== client_1.UserRole.SUPER_ADMIN) {
+        if (auth.role !== client_1.UserRole.SUPER_ADMIN && auth.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
         const parsed = rejectSchema.safeParse(req.body || {});

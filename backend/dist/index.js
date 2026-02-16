@@ -7,6 +7,7 @@ const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const path_1 = __importDefault(require("path"));
+const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const routes_1 = __importDefault(require("./routes"));
 const database_1 = __importDefault(require("./config/database"));
 dotenv_1.default.config();
@@ -23,6 +24,7 @@ if (!smtpConfigured) {
 }
 const app = (0, express_1.default)();
 app.disable("etag");
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 4000;
 // ✅ Allow multiple dev frontends (WEB APP 1 on 8081, landing on 8080, default Vite on 5173)
 const allowedOrigins = new Set([
@@ -49,9 +51,18 @@ app.use((0, cors_1.default)({
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Device-Fp", "Cache-Control", "Pragma"],
+    allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "X-Device-Fp",
+        "X-CSRF-Token",
+        "X-Captcha-Token",
+        "Cache-Control",
+        "Pragma",
+    ],
 }));
 app.use(express_1.default.json({ limit: "1mb" }));
+app.use((0, cookie_parser_1.default)());
 app.get("/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
@@ -92,9 +103,17 @@ app.use((err, _req, res, _next) => {
 app.use((_req, res) => {
     res.status(404).json({ success: false, error: "Endpoint not found" });
 });
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
     console.log(`📚 API available at http://localhost:${PORT}/api`);
     console.log(`🔍 Health check at http://localhost:${PORT}/health`);
+});
+server.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+        console.error(`Port ${PORT} is already in use. Stop the existing process or set a different PORT in backend/.env.`);
+        process.exit(1);
+    }
+    console.error("Server failed to start:", err);
+    process.exit(1);
 });
 //# sourceMappingURL=index.js.map

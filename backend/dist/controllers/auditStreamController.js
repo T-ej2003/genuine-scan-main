@@ -29,7 +29,10 @@ const streamAuditLogs = async (req, res) => {
     // - SUPER_ADMIN: sees all
     // - LICENSEE_ADMIN: sees only their licensee (requires licenseeId stored on logs)
     // - MANUFACTURER: usually no access (you said controls yes all, but normally no)
-    if (user.role !== client_1.UserRole.SUPER_ADMIN && user.role !== client_1.UserRole.LICENSEE_ADMIN) {
+    if (user.role !== client_1.UserRole.SUPER_ADMIN &&
+        user.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN &&
+        user.role !== client_1.UserRole.LICENSEE_ADMIN &&
+        user.role !== client_1.UserRole.ORG_ADMIN) {
         return res.status(403).json({ success: false, error: "Access denied" });
     }
     res.setHeader("Content-Type", "text/event-stream");
@@ -41,7 +44,7 @@ const streamAuditLogs = async (req, res) => {
     }, 25000);
     const off = auditStream_1.auditStream.onLog((evt) => {
         // tenant filter (only works well if AuditLog has licenseeId)
-        if (user.role === client_1.UserRole.LICENSEE_ADMIN) {
+        if (user.role === client_1.UserRole.LICENSEE_ADMIN || user.role === client_1.UserRole.ORG_ADMIN) {
             if (!user.licenseeId)
                 return;
             if ((evt.licenseeId || null) !== user.licenseeId)

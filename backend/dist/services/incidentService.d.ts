@@ -41,7 +41,7 @@ export declare const normalizeCustomerContact: (input: {
     customerCountry: string | null;
     preferredContactMethod: import(".prisma/client").$Enums.IncidentContactMethod;
 };
-export declare const isIncidentAdminRole: (role: UserRole) => role is "SUPER_ADMIN" | "LICENSEE_ADMIN";
+export declare const isIncidentAdminRole: (role: UserRole) => role is "SUPER_ADMIN" | "LICENSEE_ADMIN" | "PLATFORM_SUPER_ADMIN" | "ORG_ADMIN";
 export declare const recordIncidentEvent: (input: {
     incidentId: string;
     actorType: IncidentActorType;
@@ -64,16 +64,18 @@ export declare const createIncidentFromReport: (payload: IncidentReportInput, ac
 }>) => Promise<{
     id: string;
     licenseeId: string | null;
+    status: import(".prisma/client").$Enums.IncidentStatus;
     createdAt: Date;
     updatedAt: Date;
     qrCodeId: string | null;
-    status: import(".prisma/client").$Enums.IncidentStatus;
+    ipHash: string | null;
+    priority: import(".prisma/client").$Enums.IncidentPriority;
     description: string;
+    userAgentHash: string | null;
     locationName: string | null;
     locationCountry: string | null;
     locationRegion: string | null;
     locationCity: string | null;
-    severity: import(".prisma/client").$Enums.IncidentSeverity;
     incidentType: import(".prisma/client").$Enums.IncidentType;
     preferredContactMethod: import(".prisma/client").$Enums.IncidentContactMethod;
     customerPhone: string | null;
@@ -85,13 +87,12 @@ export declare const createIncidentFromReport: (payload: IncidentReportInput, ac
     customerName: string | null;
     customerCountry: string | null;
     consentToContact: boolean;
+    severity: import(".prisma/client").$Enums.IncidentSeverity;
     severityOverridden: boolean;
     photos: string[];
     purchasePlace: string | null;
     purchaseDate: Date | null;
     productBatchNo: string | null;
-    ipHash: string | null;
-    userAgentHash: string | null;
     deviceFingerprintHash: string | null;
     slaDueAt: Date | null;
     tags: string[];
@@ -127,18 +128,18 @@ export declare const getIncidentByIdScoped: (incidentId: string, actor: {
     } | null;
     communications: {
         id: string;
-        createdAt: Date;
         status: import(".prisma/client").$Enums.IncidentCommStatus;
-        incidentId: string;
+        createdAt: Date;
         replyTo: string | null;
         subject: string;
+        attemptedFrom: string | null;
+        usedFrom: string | null;
+        providerMessageId: string | null;
+        incidentId: string;
         direction: import(".prisma/client").$Enums.IncidentCommDirection;
         channel: import(".prisma/client").$Enums.IncidentCommChannel;
         toAddress: string;
         bodyPreview: string;
-        attemptedFrom: string | null;
-        usedFrom: string | null;
-        providerMessageId: string | null;
         errorMessage: string | null;
     }[];
     evidence: {
@@ -154,16 +155,18 @@ export declare const getIncidentByIdScoped: (incidentId: string, actor: {
 } & {
     id: string;
     licenseeId: string | null;
+    status: import(".prisma/client").$Enums.IncidentStatus;
     createdAt: Date;
     updatedAt: Date;
     qrCodeId: string | null;
-    status: import(".prisma/client").$Enums.IncidentStatus;
+    ipHash: string | null;
+    priority: import(".prisma/client").$Enums.IncidentPriority;
     description: string;
+    userAgentHash: string | null;
     locationName: string | null;
     locationCountry: string | null;
     locationRegion: string | null;
     locationCity: string | null;
-    severity: import(".prisma/client").$Enums.IncidentSeverity;
     incidentType: import(".prisma/client").$Enums.IncidentType;
     preferredContactMethod: import(".prisma/client").$Enums.IncidentContactMethod;
     customerPhone: string | null;
@@ -175,13 +178,12 @@ export declare const getIncidentByIdScoped: (incidentId: string, actor: {
     customerName: string | null;
     customerCountry: string | null;
     consentToContact: boolean;
+    severity: import(".prisma/client").$Enums.IncidentSeverity;
     severityOverridden: boolean;
     photos: string[];
     purchasePlace: string | null;
     purchaseDate: Date | null;
     productBatchNo: string | null;
-    ipHash: string | null;
-    userAgentHash: string | null;
     deviceFingerprintHash: string | null;
     slaDueAt: Date | null;
     tags: string[];
@@ -226,16 +228,18 @@ export declare const listIncidentsScoped: (input: {
     } & {
         id: string;
         licenseeId: string | null;
+        status: import(".prisma/client").$Enums.IncidentStatus;
         createdAt: Date;
         updatedAt: Date;
         qrCodeId: string | null;
-        status: import(".prisma/client").$Enums.IncidentStatus;
+        ipHash: string | null;
+        priority: import(".prisma/client").$Enums.IncidentPriority;
         description: string;
+        userAgentHash: string | null;
         locationName: string | null;
         locationCountry: string | null;
         locationRegion: string | null;
         locationCity: string | null;
-        severity: import(".prisma/client").$Enums.IncidentSeverity;
         incidentType: import(".prisma/client").$Enums.IncidentType;
         preferredContactMethod: import(".prisma/client").$Enums.IncidentContactMethod;
         customerPhone: string | null;
@@ -247,13 +251,12 @@ export declare const listIncidentsScoped: (input: {
         customerName: string | null;
         customerCountry: string | null;
         consentToContact: boolean;
+        severity: import(".prisma/client").$Enums.IncidentSeverity;
         severityOverridden: boolean;
         photos: string[];
         purchasePlace: string | null;
         purchaseDate: Date | null;
         productBatchNo: string | null;
-        ipHash: string | null;
-        userAgentHash: string | null;
         deviceFingerprintHash: string | null;
         slaDueAt: Date | null;
         tags: string[];

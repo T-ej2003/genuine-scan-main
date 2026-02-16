@@ -134,7 +134,10 @@ const preview = (body) => body.slice(0, 500);
 const formatFromAddress = (email) => `"AuthenticQR" <${email}>`;
 const isAdminRole = (role) => {
     const normalized = String(role || "").toUpperCase();
-    return normalized === client_1.UserRole.SUPER_ADMIN || normalized === client_1.UserRole.LICENSEE_ADMIN;
+    return (normalized === client_1.UserRole.SUPER_ADMIN ||
+        normalized === client_1.UserRole.PLATFORM_SUPER_ADMIN ||
+        normalized === client_1.UserRole.LICENSEE_ADMIN ||
+        normalized === client_1.UserRole.ORG_ADMIN);
 };
 const isFromRejectedError = (error) => {
     const message = String(error?.message || "").toLowerCase();
@@ -210,7 +213,7 @@ const resolveActorUser = async (actorUser) => {
 const getPrimarySuperadminEmail = async () => {
     const primary = await database_1.default.user.findFirst({
         where: {
-            role: client_1.UserRole.SUPER_ADMIN,
+            role: { in: [client_1.UserRole.SUPER_ADMIN, client_1.UserRole.PLATFORM_SUPER_ADMIN] },
             isActive: true,
             deletedAt: null,
         },
@@ -410,7 +413,7 @@ const getSuperadminAlertEmails = async () => {
         return Array.from(new Set(fromEnv));
     const users = await database_1.default.user.findMany({
         where: {
-            role: client_1.UserRole.SUPER_ADMIN,
+            role: { in: [client_1.UserRole.SUPER_ADMIN, client_1.UserRole.PLATFORM_SUPER_ADMIN] },
             isActive: true,
             deletedAt: null,
         },

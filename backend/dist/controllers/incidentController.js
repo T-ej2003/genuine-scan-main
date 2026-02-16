@@ -241,7 +241,7 @@ const listIncidents = async (req, res) => {
         const dateFromRaw = String(req.query.date_from || "").trim();
         const dateToRaw = String(req.query.date_to || "").trim();
         const assignedTo = String(req.query.assigned_to || "").trim() || undefined;
-        const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN
+        const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
             ? String(req.query.licenseeId || "").trim() || undefined
             : undefined;
         const dateFrom = dateFromRaw ? new Date(dateFromRaw) : undefined;
@@ -630,7 +630,7 @@ const serveIncidentEvidenceFile = async (req, res) => {
         const evidence = await database_1.default.incidentEvidence.findFirst({
             where: {
                 storageKey: fileName,
-                incident: req.user.role === client_1.UserRole.SUPER_ADMIN
+                incident: req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
                     ? undefined
                     : { licenseeId: req.user.licenseeId || "__none__" },
             },
