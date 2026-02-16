@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { ComplianceStatements } from "@/components/help/ComplianceStatements";
+import { getRoleHelpHome } from "@/help/contextual-help";
 
 export function HelpShell({
   title,
@@ -17,7 +18,16 @@ export function HelpShell({
   children: React.ReactNode;
   className?: string;
 }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  const roleHelpHome = getRoleHelpHome(user?.role);
+  const secondaryHelpLink =
+    user?.role === "super_admin"
+      ? { href: "/help/incident-response", label: "Incident Response" }
+      : user?.role === "licensee_admin"
+      ? { href: "/help/licensee-admin", label: "Licensee/Admin guide" }
+      : user?.role === "manufacturer"
+      ? { href: "/help/manufacturer", label: "Manufacturer guide" }
+      : { href: "/help/customer", label: "Customer guide" };
 
   return (
     <div className="min-h-screen bg-background">
@@ -69,14 +79,14 @@ export function HelpShell({
 
       <footer className="border-t bg-muted/30">
         <div className="mx-auto flex max-w-5xl flex-col gap-2 px-4 py-6 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-          <p>Need something else? Start from the help hub.</p>
+          <p>Need something else? Open your role-specific help hub.</p>
           <div className="flex items-center gap-3">
-            <Link to="/help" className="hover:text-foreground">
+            <Link to={roleHelpHome} className="hover:text-foreground">
               Help hub
             </Link>
             <span className="text-muted-foreground/50">|</span>
-            <Link to="/help/incident-response" className="hover:text-foreground">
-              Incident Response
+            <Link to={secondaryHelpLink.href} className="hover:text-foreground">
+              {secondaryHelpLink.label}
             </Link>
           </div>
         </div>

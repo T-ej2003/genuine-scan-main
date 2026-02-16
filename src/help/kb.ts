@@ -256,7 +256,7 @@ export const HELP_KB: HelpKbEntry[] = [
       "",
       "You can retry from the incident communication panel after fixing config.",
     ].join("\n"),
-    linksToRoutes: ["/incidents", "/help/communications"],
+    linksToRoutes: ["/help/communications"],
   },
   {
     id: "compliance-mandatory-statements",
