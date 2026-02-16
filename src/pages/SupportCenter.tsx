@@ -89,7 +89,7 @@ export default function SupportCenter() {
     isInternal: true,
   });
 
-  const canEdit = user?.role === "super_admin" || user?.role === "licensee_admin";
+  const canEdit = user?.role === "super_admin";
 
   const loadTickets = async () => {
     setLoading(true);

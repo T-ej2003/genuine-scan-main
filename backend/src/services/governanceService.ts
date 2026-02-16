@@ -7,6 +7,7 @@ import { IncidentStatus, UserRole } from "@prisma/client";
 import prisma from "../config/database";
 import { resolveUploadPath } from "../middleware/incidentUpload";
 import { createAuditLog } from "./auditService";
+import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
 
 type VerifyUxPolicy = {
   showTimelineCard: boolean;
@@ -35,17 +36,28 @@ const VERIFY_POLICY_FLAG_MAP: Array<{ key: string; field: keyof VerifyUxPolicy }
 export const resolveVerifyUxPolicy = async (licenseeId?: string | null): Promise<VerifyUxPolicy> => {
   if (!licenseeId) return { ...VERIFY_POLICY_DEFAULTS };
 
-  const flags = await prisma.tenantFeatureFlag.findMany({
-    where: {
-      licenseeId,
-      key: { in: VERIFY_POLICY_FLAG_MAP.map((item) => item.key) },
-    },
-    select: {
-      key: true,
-      enabled: true,
-      config: true,
-    },
-  });
+  const flags = await prisma.tenantFeatureFlag
+    .findMany({
+      where: {
+        licenseeId,
+        key: { in: VERIFY_POLICY_FLAG_MAP.map((item) => item.key) },
+      },
+      select: {
+        key: true,
+        enabled: true,
+        config: true,
+      },
+    })
+    .catch((error) => {
+      if (isPrismaMissingTableError(error, ["tenantfeatureflag"])) {
+        warnStorageUnavailableOnce(
+          "tenant-feature-flag-verify-policy",
+          "[governance] TenantFeatureFlag table is unavailable. Using default verify UX policy."
+        );
+        return [];
+      }
+      throw error;
+    });
 
   const byKey = new Map(flags.map((f) => [f.key, f]));
   const policy = { ...VERIFY_POLICY_DEFAULTS };
@@ -66,10 +78,21 @@ export const resolveVerifyUxPolicy = async (licenseeId?: string | null): Promise
 };
 
 export const listTenantFeatureFlags = async (licenseeId: string) => {
-  return prisma.tenantFeatureFlag.findMany({
-    where: { licenseeId },
-    orderBy: [{ key: "asc" }],
-  });
+  try {
+    return await prisma.tenantFeatureFlag.findMany({
+      where: { licenseeId },
+      orderBy: [{ key: "asc" }],
+    });
+  } catch (error) {
+    if (isPrismaMissingTableError(error, ["tenantfeatureflag"])) {
+      warnStorageUnavailableOnce(
+        "tenant-feature-flag-list",
+        "[governance] TenantFeatureFlag table is unavailable. Returning empty flag list."
+      );
+      return [];
+    }
+    throw error;
+  }
 };
 
 export const upsertTenantFeatureFlag = async (params: {
@@ -79,40 +102,83 @@ export const upsertTenantFeatureFlag = async (params: {
   config?: any;
   updatedByUserId?: string | null;
 }) => {
-  return prisma.tenantFeatureFlag.upsert({
-    where: {
-      licenseeId_key: {
+  try {
+    return await prisma.tenantFeatureFlag.upsert({
+      where: {
+        licenseeId_key: {
+          licenseeId: params.licenseeId,
+          key: params.key,
+        },
+      },
+      update: {
+        enabled: params.enabled,
+        config: params.config ?? null,
+        updatedByUserId: params.updatedByUserId || null,
+      },
+      create: {
         licenseeId: params.licenseeId,
         key: params.key,
+        enabled: params.enabled,
+        config: params.config ?? null,
+        updatedByUserId: params.updatedByUserId || null,
       },
-    },
-    update: {
-      enabled: params.enabled,
-      config: params.config ?? null,
-      updatedByUserId: params.updatedByUserId || null,
-    },
-    create: {
-      licenseeId: params.licenseeId,
-      key: params.key,
-      enabled: params.enabled,
-      config: params.config ?? null,
-      updatedByUserId: params.updatedByUserId || null,
-    },
-  });
+    });
+  } catch (error) {
+    if (isPrismaMissingTableError(error, ["tenantfeatureflag"])) {
+      warnStorageUnavailableOnce(
+        "tenant-feature-flag-upsert",
+        "[governance] TenantFeatureFlag table is unavailable. Returning no-op feature flag result."
+      );
+      const now = new Date();
+      return {
+        id: `ephemeral-${params.licenseeId}-${params.key}`,
+        licenseeId: params.licenseeId,
+        key: params.key,
+        enabled: params.enabled,
+        config: params.config ?? null,
+        updatedByUserId: params.updatedByUserId || null,
+        createdAt: now,
+        updatedAt: now,
+      } as any;
+    }
+    throw error;
+  }
 };
 
 export const getOrCreateRetentionPolicy = async (licenseeId: string) => {
-  return prisma.evidenceRetentionPolicy.upsert({
-    where: { licenseeId },
-    update: {},
-    create: {
-      licenseeId,
-      retentionDays: Number(process.env.RETENTION_DAYS || "180"),
-      purgeEnabled: false,
-      exportBeforePurge: true,
-      legalHoldTags: ["legal_hold", "compliance_hold"],
-    },
-  });
+  try {
+    return await prisma.evidenceRetentionPolicy.upsert({
+      where: { licenseeId },
+      update: {},
+      create: {
+        licenseeId,
+        retentionDays: Number(process.env.RETENTION_DAYS || "180"),
+        purgeEnabled: false,
+        exportBeforePurge: true,
+        legalHoldTags: ["legal_hold", "compliance_hold"],
+      },
+    });
+  } catch (error) {
+    if (isPrismaMissingTableError(error, ["evidenceretentionpolicy"])) {
+      warnStorageUnavailableOnce(
+        "retention-policy-upsert",
+        "[governance] EvidenceRetentionPolicy table is unavailable. Using default retention policy in-memory."
+      );
+      const now = new Date();
+      return {
+        id: `ephemeral-retention-${licenseeId}`,
+        licenseeId,
+        retentionDays: Number(process.env.RETENTION_DAYS || "180"),
+        purgeEnabled: false,
+        exportBeforePurge: true,
+        legalHoldTags: ["legal_hold", "compliance_hold"],
+        createdAt: now,
+        updatedAt: now,
+        updatedByUserId: null,
+      } as any;
+    }
+    throw error;
+  }
 };
 
 export const updateRetentionPolicy = async (params: {
@@ -123,24 +189,46 @@ export const updateRetentionPolicy = async (params: {
   legalHoldTags?: string[];
   updatedByUserId?: string | null;
 }) => {
-  return prisma.evidenceRetentionPolicy.upsert({
-    where: { licenseeId: params.licenseeId },
-    update: {
-      retentionDays: params.retentionDays,
-      purgeEnabled: params.purgeEnabled,
-      exportBeforePurge: params.exportBeforePurge,
-      legalHoldTags: params.legalHoldTags,
-      updatedByUserId: params.updatedByUserId || null,
-    },
-    create: {
-      licenseeId: params.licenseeId,
-      retentionDays: params.retentionDays ?? Number(process.env.RETENTION_DAYS || "180"),
-      purgeEnabled: Boolean(params.purgeEnabled),
-      exportBeforePurge: params.exportBeforePurge ?? true,
-      legalHoldTags: params.legalHoldTags || ["legal_hold", "compliance_hold"],
-      updatedByUserId: params.updatedByUserId || null,
-    },
-  });
+  try {
+    return await prisma.evidenceRetentionPolicy.upsert({
+      where: { licenseeId: params.licenseeId },
+      update: {
+        retentionDays: params.retentionDays,
+        purgeEnabled: params.purgeEnabled,
+        exportBeforePurge: params.exportBeforePurge,
+        legalHoldTags: params.legalHoldTags,
+        updatedByUserId: params.updatedByUserId || null,
+      },
+      create: {
+        licenseeId: params.licenseeId,
+        retentionDays: params.retentionDays ?? Number(process.env.RETENTION_DAYS || "180"),
+        purgeEnabled: Boolean(params.purgeEnabled),
+        exportBeforePurge: params.exportBeforePurge ?? true,
+        legalHoldTags: params.legalHoldTags || ["legal_hold", "compliance_hold"],
+        updatedByUserId: params.updatedByUserId || null,
+      },
+    });
+  } catch (error) {
+    if (isPrismaMissingTableError(error, ["evidenceretentionpolicy"])) {
+      warnStorageUnavailableOnce(
+        "retention-policy-update",
+        "[governance] EvidenceRetentionPolicy table is unavailable. Returning no-op retention policy update."
+      );
+      const now = new Date();
+      return {
+        id: `ephemeral-retention-${params.licenseeId}`,
+        licenseeId: params.licenseeId,
+        retentionDays: params.retentionDays ?? Number(process.env.RETENTION_DAYS || "180"),
+        purgeEnabled: Boolean(params.purgeEnabled),
+        exportBeforePurge: params.exportBeforePurge ?? true,
+        legalHoldTags: params.legalHoldTags || ["legal_hold", "compliance_hold"],
+        updatedByUserId: params.updatedByUserId || null,
+        createdAt: now,
+        updatedAt: now,
+      } as any;
+    }
+    throw error;
+  }
 };
 
 const filterRetentionCandidates = (rows: Array<any>, legalHoldTags: string[]) => {
@@ -184,11 +272,17 @@ export const runRetentionLifecycle = async (params: {
 
     const ids = eligible.map((row) => row.id);
 
-    await prisma.incidentEvidenceFingerprint.deleteMany({
-      where: {
-        incidentEvidenceId: { in: ids },
-      },
-    });
+    try {
+      await prisma.incidentEvidenceFingerprint.deleteMany({
+        where: {
+          incidentEvidenceId: { in: ids },
+        },
+      });
+    } catch (error) {
+      if (!isPrismaMissingTableError(error, ["incidentevidencefingerprint"])) {
+        throw error;
+      }
+    }
 
     await prisma.incidentEvidence.deleteMany({
       where: {
@@ -210,11 +304,40 @@ export const runRetentionLifecycle = async (params: {
     }
   }
 
-  const job = await prisma.evidenceRetentionJob.create({
-    data: {
+  let job: any;
+  try {
+    job = await prisma.evidenceRetentionJob.create({
+      data: {
+        licenseeId: params.licenseeId,
+        status:
+          params.mode === "APPLY" ? (policy.purgeEnabled ? "COMPLETED" : "FAILED") : "PREVIEW",
+        mode: params.mode,
+        cutoffAt,
+        recordsEvaluated: evidenceRows.length,
+        recordsPurged: purged,
+        recordsExported: exported,
+        startedByUserId: params.startedByUserId || null,
+        finishedAt: new Date(),
+        summary: {
+          policy,
+          eligibleCount: eligible.length,
+          skippedDueToLegalHold: evidenceRows.length - eligible.length,
+          purgeEnabled: policy.purgeEnabled,
+        },
+      },
+    });
+  } catch (error) {
+    if (!isPrismaMissingTableError(error, ["evidenceretentionjob"])) {
+      throw error;
+    }
+    warnStorageUnavailableOnce(
+      "retention-job-create",
+      "[governance] EvidenceRetentionJob table is unavailable. Returning in-memory retention job result."
+    );
+    job = {
+      id: `ephemeral-retention-job-${params.licenseeId}-${Date.now()}`,
       licenseeId: params.licenseeId,
-      status:
-        params.mode === "APPLY" ? (policy.purgeEnabled ? "COMPLETED" : "FAILED") : "PREVIEW",
+      status: params.mode === "APPLY" ? (policy.purgeEnabled ? "COMPLETED" : "FAILED") : "PREVIEW",
       mode: params.mode,
       cutoffAt,
       recordsEvaluated: evidenceRows.length,
@@ -228,8 +351,8 @@ export const runRetentionLifecycle = async (params: {
         skippedDueToLegalHold: evidenceRows.length - eligible.length,
         purgeEnabled: policy.purgeEnabled,
       },
-    },
-  });
+    };
+  }
 
   return {
     job,
@@ -373,11 +496,22 @@ export const generateComplianceReport = async (params: {
     prisma.auditLog.count({ where: auditWhere }),
     prisma.auditLog.count({ where: { ...auditWhere, action: { contains: "LOGIN_FAILED" } } }),
     scopedLicenseeId ? getOrCreateRetentionPolicy(scopedLicenseeId) : null,
-    prisma.incidentHandoff.groupBy({
-      by: ["currentStage"],
-      _count: { _all: true },
-      where: scopedLicenseeId ? { incident: { licenseeId: scopedLicenseeId } } : undefined,
-    }),
+    prisma.incidentHandoff
+      .groupBy({
+        by: ["currentStage"],
+        _count: { _all: true },
+        where: scopedLicenseeId ? { incident: { licenseeId: scopedLicenseeId } } : undefined,
+      })
+      .catch((error) => {
+        if (isPrismaMissingTableError(error, ["incidenthandoff"])) {
+          warnStorageUnavailableOnce(
+            "incident-handoff-summary",
+            "[governance] IncidentHandoff table is unavailable. Compliance handoff summary will be empty."
+          );
+          return [];
+        }
+        throw error;
+      }),
   ]);
 
   const handoff = handoffSummary.reduce((acc, row) => {

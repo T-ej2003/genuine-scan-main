@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
+import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
 
 const routeTransitionSchema = z.object({
   routeFrom: z.string().trim().max(300).optional().nullable(),
@@ -58,6 +59,16 @@ export const captureRouteTransitionMetric = async (req: AuthRequest, res: Respon
 
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
+    if (isPrismaMissingTableError(error, ["routetransitionmetric"])) {
+      warnStorageUnavailableOnce(
+        "route-transition-metric",
+        "[telemetry] RouteTransitionMetric table is unavailable. Telemetry capture is running in no-op mode."
+      );
+      return res.status(202).json({
+        success: true,
+        data: { accepted: false, reason: "telemetry_storage_unavailable" },
+      });
+    }
     console.error("captureRouteTransitionMetric error:", error);
     return res.status(500).json({ success: false, error: "Failed to capture telemetry" });
   }
@@ -128,6 +139,28 @@ export const getRouteTransitionSummary = async (req: AuthRequest, res: Response)
       },
     });
   } catch (error) {
+    if (isPrismaMissingTableError(error, ["routetransitionmetric"])) {
+      warnStorageUnavailableOnce(
+        "route-transition-summary",
+        "[telemetry] RouteTransitionMetric table is unavailable. Returning empty telemetry summary."
+      );
+      return res.json({
+        success: true,
+        data: {
+          telemetryAvailable: false,
+          totals: {
+            transitions: 0,
+            avgTransitionMs: 0,
+          },
+          verifyFunnel: {
+            transitions: 0,
+            dropped: 0,
+            avgTransitionMs: 0,
+          },
+          routes: [],
+        },
+      });
+    }
     console.error("getRouteTransitionSummary error:", error);
     return res.status(500).json({ success: false, error: "Failed to load telemetry summary" });
   }
