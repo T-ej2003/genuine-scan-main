@@ -562,14 +562,31 @@ class ApiClient {
     });
   }
 
-  streamAuditLogs(onMessage: (log: any) => void) {
+  streamAuditLogs(onMessage: (log: any) => void, onError?: () => void) {
     const token = this.getToken();
-    if (!token) throw new Error("No auth token");
+    const query = token ? `?token=${encodeURIComponent(token)}` : "";
+    const url = `${BASE_URL}/audit/stream${query}`;
 
-    const url = `${BASE_URL}/audit/stream?token=${encodeURIComponent(token)}`;
-    const es = new EventSource(url);
+    let es: EventSource;
+    try {
+      es = new EventSource(url, { withCredentials: true });
+    } catch {
+      es = new EventSource(url);
+    }
 
-    es.addEventListener("audit", (e: MessageEvent) => onMessage(JSON.parse(e.data)));
+    es.addEventListener("audit", (e: MessageEvent) => {
+      try {
+        onMessage(JSON.parse(e.data));
+      } catch {
+        // Ignore malformed events.
+      }
+    });
+
+    es.onerror = () => {
+      onError?.();
+      es.close();
+    };
+
     return () => es.close();
   }
 
