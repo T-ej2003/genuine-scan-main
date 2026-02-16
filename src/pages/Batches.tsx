@@ -470,7 +470,7 @@ export default function Batches() {
 
   const eventBadgeClass = (eventType?: string) => {
     if (eventType === "COMMISSIONED") return "bg-sky-500/10 text-sky-700";
-    if (eventType === "ASSIGNED") return "bg-indigo-500/10 text-indigo-700";
+    if (eventType === "ASSIGNED") return "bg-cyan-500/10 text-cyan-700";
     if (eventType === "PRINTED") return "bg-amber-500/10 text-amber-700";
     if (eventType === "REDEEMED") return "bg-emerald-500/10 text-emerald-700";
     if (eventType === "BLOCKED") return "bg-red-500/10 text-red-700";

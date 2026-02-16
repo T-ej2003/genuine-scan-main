@@ -43,13 +43,26 @@ const verifyQRCode = async (req, res) => {
             where: { code: code.toUpperCase() },
             include: {
                 licensee: {
-                    select: { id: true, name: true, prefix: true, brandName: true, location: true, website: true, supportEmail: true, supportPhone: true },
+                    select: {
+                        id: true,
+                        name: true,
+                        prefix: true,
+                        brandName: true,
+                        location: true,
+                        website: true,
+                        supportEmail: true,
+                        supportPhone: true,
+                        suspendedAt: true,
+                        suspendedReason: true,
+                    },
                 },
                 batch: {
                     select: {
                         id: true,
                         name: true,
                         printedAt: true,
+                        suspendedAt: true,
+                        suspendedReason: true,
                         manufacturer: { select: { id: true, name: true, email: true, location: true, website: true } },
                     },
                 },
@@ -73,6 +86,26 @@ const verifyQRCode = async (req, res) => {
                 },
             });
         }
+        const containment = {
+            qrUnderInvestigation: qrCode.underInvestigationAt
+                ? {
+                    at: qrCode.underInvestigationAt.toISOString(),
+                    reason: qrCode.underInvestigationReason || null,
+                }
+                : null,
+            batchSuspended: qrCode.batch?.suspendedAt
+                ? {
+                    at: qrCode.batch.suspendedAt.toISOString(),
+                    reason: qrCode.batch.suspendedReason || null,
+                }
+                : null,
+            orgSuspended: qrCode.licensee?.suspendedAt
+                ? {
+                    at: new Date(qrCode.licensee.suspendedAt).toISOString(),
+                    reason: qrCode.licensee.suspendedReason || null,
+                }
+                : null,
+        };
         // Blocked code
         if (qrCode.status === client_1.QRStatus.BLOCKED) {
             return res.json({
@@ -82,6 +115,7 @@ const verifyQRCode = async (req, res) => {
                     message: "This QR code has been blocked due to fraud or recall.",
                     code,
                     status: qrCode.status,
+                    containment,
                     licensee: qrCode.licensee
                         ? {
                             id: qrCode.licensee.id,
@@ -114,6 +148,7 @@ const verifyQRCode = async (req, res) => {
                     message: "This QR code has not been assigned to a product yet.",
                     code,
                     status: qrCode.status,
+                    containment,
                     licensee: qrCode.licensee
                         ? {
                             id: qrCode.licensee.id,
@@ -146,6 +181,7 @@ const verifyQRCode = async (req, res) => {
                     message: "This QR code is allocated but not yet printed.",
                     code,
                     status: qrCode.status,
+                    containment,
                     licensee: qrCode.licensee
                         ? {
                             id: qrCode.licensee.id,
@@ -179,6 +215,7 @@ const verifyQRCode = async (req, res) => {
                     message: "This QR code has not been activated (print not confirmed).",
                     code,
                     status: qrCode.status,
+                    containment,
                     licensee: qrCode.licensee
                         ? {
                             id: qrCode.licensee.id,
@@ -245,16 +282,42 @@ const verifyQRCode = async (req, res) => {
         const blockedByPolicy = policy.autoBlockedQr || policy.autoBlockedBatch;
         const finalStatus = blockedByPolicy ? client_1.QRStatus.BLOCKED : updated.status;
         const firstScanTime = updated.scannedAt ? new Date(updated.scannedAt) : null;
-        const scanInsight = await (0, scanInsightService_1.getScanInsight)(updated.id);
+        const scanInsight = await (0, scanInsightService_1.getScanInsight)(updated.id, req.query.device || null);
+        const runtimeContainment = {
+            qrUnderInvestigation: updated.underInvestigationAt
+                ? {
+                    at: new Date(updated.underInvestigationAt).toISOString(),
+                    reason: updated.underInvestigationReason || null,
+                }
+                : null,
+            batchSuspended: updated.batch?.suspendedAt
+                ? {
+                    at: new Date(updated.batch.suspendedAt).toISOString(),
+                    reason: updated.batch.suspendedReason || null,
+                }
+                : null,
+            orgSuspended: updated.licensee?.suspendedAt
+                ? {
+                    at: new Date(updated.licensee.suspendedAt).toISOString(),
+                    reason: updated.licensee.suspendedReason || null,
+                }
+                : null,
+        };
+        const hasContainment = Boolean(runtimeContainment.qrUnderInvestigation) ||
+            Boolean(runtimeContainment.batchSuspended) ||
+            Boolean(runtimeContainment.orgSuspended);
         const warningMessage = blockedByPolicy
             ? "This code has been auto-blocked by security policy due to anomaly detection."
-            : !isFirstScan && firstScanTime
-                ? `Already verified before. First verification was on ${scanInsight.firstScanAt || firstScanTime.toISOString()}.`
-                : null;
+            : hasContainment
+                ? "This product is currently under investigation. Please review details and contact support if needed."
+                : !isFirstScan && firstScanTime
+                    ? `Already verified before. First verification was on ${scanInsight.firstScanAt || firstScanTime.toISOString()}.`
+                    : null;
         return res.json({
             success: true,
             data: {
-                isAuthentic: isFirstScan && !blockedByPolicy,
+                // Consumers may re-verify the same product; treat repeat scans as authentic unless blocked.
+                isAuthentic: !blockedByPolicy && finalStatus !== client_1.QRStatus.BLOCKED,
                 message: blockedByPolicy
                     ? "Blocked code."
                     : isFirstScan
@@ -262,6 +325,7 @@ const verifyQRCode = async (req, res) => {
                         : "Already verified. Please review scan details below.",
                 code: updated.code,
                 status: finalStatus,
+                containment: runtimeContainment,
                 licensee: updated.licensee
                     ? {
                         id: updated.licensee.id,
@@ -294,6 +358,7 @@ const verifyQRCode = async (req, res) => {
                 latestScanLocation: scanInsight.latestScanLocation,
                 previousScanAt: scanInsight.previousScanAt,
                 previousScanLocation: scanInsight.previousScanLocation,
+                scanSignals: scanInsight.signals,
                 warningMessage,
                 policy,
             },

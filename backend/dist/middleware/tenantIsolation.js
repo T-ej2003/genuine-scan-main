@@ -35,7 +35,7 @@ const enforceTenantIsolation = (req, res, next) => {
         return res.status(401).json({ success: false, error: "Authentication required" });
     }
     // Super admin can operate across tenants (but may still choose a scope via licenseeId)
-    if (req.user.role === client_1.UserRole.SUPER_ADMIN)
+    if (req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN)
         return next();
     // Everyone else must be attached to a licensee
     if (!req.user.licenseeId) {
@@ -57,7 +57,7 @@ exports.enforceTenantIsolation = enforceTenantIsolation;
 const getEffectiveLicenseeId = (req) => {
     if (!req.user)
         return null;
-    if (req.user.role === client_1.UserRole.SUPER_ADMIN) {
+    if (req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN) {
         return extractRouteLicenseeId(req);
     }
     return req.user.licenseeId || null;

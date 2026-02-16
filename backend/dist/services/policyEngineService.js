@@ -7,6 +7,7 @@ exports.evaluateScanAndEnforcePolicy = exports.getOrCreateSecurityPolicy = void 
 const client_1 = require("@prisma/client");
 const database_1 = __importDefault(require("../config/database"));
 const auditService_1 = require("./auditService");
+const policyRuleEngineService_1 = require("./ir/policyRuleEngineService");
 const ALERT_DEDUPE_WINDOW_MS = 15 * 60_000;
 const EARTH_RADIUS_KM = 6371;
 const toRadians = (deg) => (deg * Math.PI) / 180;
@@ -289,6 +290,22 @@ const evaluateScanAndEnforcePolicy = async (input) => {
                 ipAddress: input.ipAddress || undefined,
             });
         }
+    }
+    // Additional IR policy rules (superadmin-configurable)
+    try {
+        const ruleEval = await (0, policyRuleEngineService_1.evaluatePolicyRulesForScan)({
+            licenseeId: input.licenseeId,
+            qrCodeId: input.qrCodeId,
+            code: input.code,
+            batchId: input.batchId || null,
+            manufacturerId: input.manufacturerId || null,
+        });
+        if (ruleEval.alerts.length > 0)
+            createdAlerts.push(...ruleEval.alerts);
+    }
+    catch (e) {
+        // Never fail scan verification because rule evaluation failed.
+        console.error("evaluatePolicyRulesForScan failed:", e);
     }
     return {
         policy: {

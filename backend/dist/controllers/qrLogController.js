@@ -12,8 +12,12 @@ const getScanLogs = async (req, res) => {
         if (!req.user)
             return res.status(401).json({ success: false, error: "Not authenticated" });
         if (req.user.role !== client_1.UserRole.SUPER_ADMIN &&
+            req.user.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN &&
             req.user.role !== client_1.UserRole.LICENSEE_ADMIN &&
-            req.user.role !== client_1.UserRole.MANUFACTURER) {
+            req.user.role !== client_1.UserRole.ORG_ADMIN &&
+            req.user.role !== client_1.UserRole.MANUFACTURER &&
+            req.user.role !== client_1.UserRole.MANUFACTURER_ADMIN &&
+            req.user.role !== client_1.UserRole.MANUFACTURER_USER) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
         const prismaAny = database_1.default;
@@ -22,7 +26,7 @@ const getScanLogs = async (req, res) => {
         }
         const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 1000);
         const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
-        const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN
+        const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
             ? req.query.licenseeId || undefined
             : req.user.licenseeId || undefined;
         const batchId = req.query.batchId || undefined;
@@ -52,7 +56,9 @@ const getScanLogs = async (req, res) => {
             if (to)
                 where.scannedAt.lte = new Date(to);
         }
-        if (req.user.role === client_1.UserRole.MANUFACTURER) {
+        if (req.user.role === client_1.UserRole.MANUFACTURER ||
+            req.user.role === client_1.UserRole.MANUFACTURER_ADMIN ||
+            req.user.role === client_1.UserRole.MANUFACTURER_USER) {
             where.batch = { manufacturerId: req.user.userId };
         }
         const [logs, total] = await Promise.all([
@@ -104,14 +110,18 @@ const getBatchSummary = async (req, res) => {
         if (!req.user)
             return res.status(401).json({ success: false, error: "Not authenticated" });
         if (req.user.role !== client_1.UserRole.SUPER_ADMIN &&
+            req.user.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN &&
             req.user.role !== client_1.UserRole.LICENSEE_ADMIN &&
-            req.user.role !== client_1.UserRole.MANUFACTURER) {
+            req.user.role !== client_1.UserRole.ORG_ADMIN &&
+            req.user.role !== client_1.UserRole.MANUFACTURER &&
+            req.user.role !== client_1.UserRole.MANUFACTURER_ADMIN &&
+            req.user.role !== client_1.UserRole.MANUFACTURER_USER) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
-        const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN
+        const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
             ? req.query.licenseeId || undefined
             : req.user.licenseeId || undefined;
-        const manufacturerId = req.user.role === client_1.UserRole.SUPER_ADMIN
+        const manufacturerId = req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
             ? req.query.manufacturerId || undefined
             : undefined;
         const whereBatch = {};
@@ -119,7 +129,9 @@ const getBatchSummary = async (req, res) => {
             whereBatch.licenseeId = licenseeId;
         if (manufacturerId)
             whereBatch.manufacturerId = manufacturerId;
-        if (req.user.role === client_1.UserRole.MANUFACTURER) {
+        if (req.user.role === client_1.UserRole.MANUFACTURER ||
+            req.user.role === client_1.UserRole.MANUFACTURER_ADMIN ||
+            req.user.role === client_1.UserRole.MANUFACTURER_USER) {
             whereBatch.manufacturerId = req.user.userId;
         }
         const batches = await database_1.default.batch.findMany({

@@ -234,7 +234,7 @@ const openAssignManufacturerDialog = async (page: Page) => {
 };
 
 test.describe.configure({ mode: "serial" });
-test.setTimeout(10 * 60_000);
+test.setTimeout(20 * 60_000);
 
 test("capture help screenshots", async ({ browser }) => {
   fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -460,10 +460,9 @@ test("capture help screenshots", async ({ browser }) => {
     // ignore
   }
 
-  // Close print job modal and capture printed status
-  // Prefer the footer Close button (more stable than the dialog X button).
-  await manuPage.getByRole("dialog").getByRole("button", { name: /^close$/i }).last().click();
-  await manuPage.waitForTimeout(600);
+  // Capture printed status from fresh list view.
+  // We intentionally navigate directly instead of relying on modal-close clicks,
+  // because dialog animations/state changes can be flaky across environments.
   await goto(manuPage, `${BASE_URL}/batches`);
 
   const printedStatusCell = manuPage.locator("tbody tr").first().locator("td").nth(7);
@@ -515,7 +514,7 @@ test("capture help screenshots", async ({ browser }) => {
   });
 
   // Report dialog
-  await customerPage.getByRole("button", { name: /report suspected counterfeit/i }).click();
+  await customerPage.getByRole("button", { name: /report suspected counterfeit/i }).first().click();
   await customerPage.getByPlaceholder("Describe what looked suspicious.").fill("Docs capture: possible duplicate label observed.");
   await screenshot(customerPage, "customer-report-dialog.png", {
     title: "Documentation Capture - Customer - Fraud Report",

@@ -55,7 +55,7 @@ const asOptionalBool = (value) => {
 const resolveScopedLicenseeId = (req) => {
     if (!req.user)
         return undefined;
-    if (req.user.role === client_1.UserRole.SUPER_ADMIN) {
+    if (req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN) {
         return asOptionalString(req.query.licenseeId) || undefined;
     }
     return req.user.licenseeId || undefined;
@@ -63,7 +63,7 @@ const resolveScopedLicenseeId = (req) => {
 const requirePolicyLicenseeId = (req, bodyLicenseeId) => {
     if (!req.user)
         return null;
-    if (req.user.role === client_1.UserRole.SUPER_ADMIN) {
+    if (req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN) {
         return bodyLicenseeId || asOptionalString(req.query.licenseeId) || undefined;
     }
     return req.user.licenseeId || undefined;
@@ -85,7 +85,9 @@ const getTraceTimelineController = async (req, res) => {
             eventType = normalized;
         }
         let manufacturerId = asOptionalString(req.query.manufacturerId);
-        if (req.user.role === client_1.UserRole.MANUFACTURER) {
+        if (req.user.role === client_1.UserRole.MANUFACTURER ||
+            req.user.role === client_1.UserRole.MANUFACTURER_ADMIN ||
+            req.user.role === client_1.UserRole.MANUFACTURER_USER) {
             manufacturerId = req.user.userId;
         }
         await (0, traceEventService_1.backfillTraceEventsFromAuditLogs)({
@@ -348,7 +350,9 @@ const exportBatchAuditPackageController = async (req, res) => {
         });
         if (!batch)
             return res.status(404).json({ success: false, error: "Batch not found" });
-        if (req.user.role !== client_1.UserRole.SUPER_ADMIN && req.user.licenseeId !== batch.licenseeId) {
+        if (req.user.role !== client_1.UserRole.SUPER_ADMIN &&
+            req.user.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN &&
+            req.user.licenseeId !== batch.licenseeId) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
         const pkg = await (0, immutableAuditExportService_1.buildImmutableBatchAuditPackage)(batch.id);

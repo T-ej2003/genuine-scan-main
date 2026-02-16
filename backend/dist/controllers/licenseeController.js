@@ -5,10 +5,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.exportLicenseesCsv = exports.deleteLicensee = exports.updateLicensee = exports.getLicensee = exports.getLicensees = exports.createLicensee = void 0;
 const zod_1 = require("zod");
-const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const database_1 = __importDefault(require("../config/database"));
 const client_1 = require("@prisma/client");
 const auditService_1 = require("../services/auditService");
+const crypto_1 = require("crypto");
+const passwordService_1 = require("../services/auth/passwordService");
 const prefixSchema = zod_1.z
     .string()
     .trim()
@@ -71,7 +72,7 @@ const escapeCsv = (v) => {
 };
 const createLicensee = async (req, res) => {
     try {
-        if (req.user?.role !== client_1.UserRole.SUPER_ADMIN) {
+        if (req.user?.role !== client_1.UserRole.SUPER_ADMIN && req.user?.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN) {
             return res.status(403).json({ success: false, error: "Insufficient permissions" });
         }
         const parsed = createLicenseeSchema.safeParse(req.body);
@@ -98,8 +99,18 @@ const createLicensee = async (req, res) => {
             return res.status(409).json({ success: false, error: "Admin email already in use" });
         }
         const result = await database_1.default.$transaction(async (tx) => {
+            const id = (0, crypto_1.randomUUID)();
+            await tx.organization.create({
+                data: {
+                    id,
+                    name: licenseePayload.name,
+                    isActive: licenseePayload.isActive ?? true,
+                },
+            });
             const lic = await tx.licensee.create({
                 data: {
+                    id,
+                    orgId: id,
                     name: licenseePayload.name,
                     prefix,
                     description: licenseePayload.description?.trim() ? licenseePayload.description.trim() : null,
@@ -113,7 +124,7 @@ const createLicensee = async (req, res) => {
                     isActive: licenseePayload.isActive ?? true,
                 },
             });
-            const passwordHash = await bcryptjs_1.default.hash(adminPayload.password, 12);
+            const passwordHash = await (0, passwordService_1.hashPassword)(adminPayload.password);
             const adminUser = await tx.user.create({
                 data: {
                     email,
@@ -121,6 +132,7 @@ const createLicensee = async (req, res) => {
                     passwordHash,
                     role: client_1.UserRole.LICENSEE_ADMIN,
                     licenseeId: lic.id,
+                    orgId: lic.orgId,
                     isActive: true,
                     deletedAt: null,
                 },
@@ -137,11 +149,13 @@ const createLicensee = async (req, res) => {
             await (0, auditService_1.createAuditLog)({
                 userId: req.user.userId,
                 licenseeId: lic.id,
+                orgId: lic.orgId,
                 action: "CREATE_LICENSEE_WITH_ADMIN",
                 entityType: "Licensee",
                 entityId: lic.id,
                 details: { licenseeName: lic.name, prefix: lic.prefix, adminEmail: adminUser.email },
                 ipAddress: req.ip,
+                userAgent: req.get("user-agent"),
             });
             return { licensee: lic, adminUser };
         });
