@@ -169,6 +169,42 @@ enum IncidentCommStatus {
   FAILED
 }
 
+enum IncidentHandoffStage {
+  INTAKE
+  REVIEW
+  CONTAINMENT
+  DOCUMENTATION
+  RESOLUTION
+  COMPLETE
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_CUSTOMER
+  RESOLVED
+  CLOSED
+}
+
+enum NotificationChannel {
+  WEB
+  EMAIL
+}
+
+enum NotificationAudience {
+  SUPER_ADMIN
+  LICENSEE_ADMIN
+  MANUFACTURER
+  ALL
+}
+
+enum EvidenceRetentionJobStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  PREVIEW
+}
+
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
@@ -212,6 +248,13 @@ model User {
   assignedIncidents Incident[] @relation("IncidentAssignedTo")
   incidentEvents IncidentEvent[] @relation("IncidentActorUser")
   incidentEvidence IncidentEvidence[] @relation("IncidentEvidenceUploadedBy")
+  supportTicketsAssigned SupportTicket[] @relation("SupportTicketAssignedTo")
+  supportTicketMessages SupportTicketMessage[] @relation("SupportTicketMessageAuthor")
+  notifications Notification[] @relation("UserNotifications")
+  tenantFeatureFlagsUpdated TenantFeatureFlag[] @relation("TenantFeatureFlagUpdatedBy")
+  evidenceRetentionPoliciesUpdated EvidenceRetentionPolicy[] @relation("EvidenceRetentionPolicyUpdatedBy")
+  evidenceRetentionJobsStarted EvidenceRetentionJob[] @relation("EvidenceRetentionJobStartedBy")
+  routeTransitionMetrics RouteTransitionMetric[] @relation("RouteTransitionMetricUser")
 
   invitesCreated Invite[] @relation("InviteCreatedBy")
   invitesAccepted Invite[] @relation("InviteAcceptedBy")
@@ -242,6 +285,7 @@ model Organization {
   refreshTokens  RefreshToken[]
   auditLogs AuditLog[]
   policyRules PolicyRule[]
+  notifications Notification[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -279,6 +323,12 @@ model Licensee {
   policyAlerts         PolicyAlert[]
   incidents            Incident[]
   invites              Invite[]
+  notifications        Notification[]
+  tenantFeatureFlags   TenantFeatureFlag[]
+  supportTickets       SupportTicket[]
+  evidenceRetentionPolicy EvidenceRetentionPolicy?
+  evidenceRetentionJobs EvidenceRetentionJob[]
+  routeTransitionMetrics RouteTransitionMetric[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -825,6 +875,10 @@ model Incident {
   events IncidentEvent[]
   communications IncidentCommunication[]
   evidence IncidentEvidence[]
+  handoff IncidentHandoff?
+  supportTicket SupportTicket?
+  evidenceFingerprints IncidentEvidenceFingerprint[]
+  notifications Notification[]
 
   policyAlerts PolicyAlert[]
 
@@ -896,8 +950,236 @@ model IncidentEvidence {
   uploadedByUser User? @relation("IncidentEvidenceUploadedBy", fields: [uploadedByUserId], references: [id])
   uploadedBy IncidentActorType @default(CUSTOMER)
   createdAt DateTime @default(now())
+  fingerprint IncidentEvidenceFingerprint?
 
   @@index([incidentId])
   @@index([uploadedByUserId])
   @@index([createdAt])
+}
+
+model IncidentHandoff {
+  id String @id @default(uuid())
+
+  incidentId String @unique
+  incident Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  currentStage IncidentHandoffStage @default(INTAKE)
+  intakeAt DateTime @default(now())
+  reviewAt DateTime?
+  containmentAt DateTime?
+  documentationAt DateTime?
+  resolutionAt DateTime?
+  completedAt DateTime?
+  slaDueAt DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([currentStage])
+  @@index([slaDueAt])
+}
+
+model SupportTicket {
+  id String @id @default(uuid())
+
+  incidentId String @unique
+  incident Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  referenceCode String @unique
+
+  licenseeId String?
+  licensee Licensee? @relation(fields: [licenseeId], references: [id])
+
+  customerEmail String?
+  subject String
+  status SupportTicketStatus @default(OPEN)
+  priority IncidentPriority @default(P3)
+
+  assignedToUserId String?
+  assignedToUser User? @relation("SupportTicketAssignedTo", fields: [assignedToUserId], references: [id])
+
+  slaDueAt DateTime?
+  firstResponseAt DateTime?
+  resolvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages SupportTicketMessage[]
+
+  @@index([licenseeId])
+  @@index([status])
+  @@index([priority])
+  @@index([assignedToUserId])
+  @@index([createdAt])
+}
+
+model SupportTicketMessage {
+  id String @id @default(uuid())
+
+  ticketId String
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  actorType IncidentActorType @default(CUSTOMER)
+  actorUserId String?
+  actorUser User? @relation("SupportTicketMessageAuthor", fields: [actorUserId], references: [id])
+
+  message String
+  isInternal Boolean @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([ticketId])
+  @@index([actorUserId])
+  @@index([createdAt])
+}
+
+model Notification {
+  id String @id @default(uuid())
+
+  userId String?
+  user User? @relation("UserNotifications", fields: [userId], references: [id])
+
+  orgId String?
+  organization Organization? @relation(fields: [orgId], references: [id])
+
+  licenseeId String?
+  licensee Licensee? @relation(fields: [licenseeId], references: [id])
+
+  incidentId String?
+  incident Incident? @relation(fields: [incidentId], references: [id], onDelete: SetNull)
+
+  audience NotificationAudience @default(ALL)
+  channel NotificationChannel @default(WEB)
+  type String
+  title String
+  body String
+  data Json?
+
+  readAt DateTime?
+  emailedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, readAt])
+  @@index([licenseeId, createdAt])
+  @@index([orgId, createdAt])
+  @@index([incidentId])
+  @@index([channel, createdAt])
+}
+
+model TenantFeatureFlag {
+  id String @id @default(uuid())
+
+  licenseeId String
+  licensee Licensee @relation(fields: [licenseeId], references: [id], onDelete: Cascade)
+
+  key String
+  enabled Boolean @default(false)
+  config Json?
+
+  updatedByUserId String?
+  updatedByUser User? @relation("TenantFeatureFlagUpdatedBy", fields: [updatedByUserId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([licenseeId, key])
+  @@index([key])
+  @@index([updatedByUserId])
+}
+
+model EvidenceRetentionPolicy {
+  id String @id @default(uuid())
+
+  licenseeId String @unique
+  licensee Licensee @relation(fields: [licenseeId], references: [id], onDelete: Cascade)
+
+  retentionDays Int @default(180)
+  purgeEnabled Boolean @default(false)
+  exportBeforePurge Boolean @default(true)
+  legalHoldTags String[]
+
+  updatedByUserId String?
+  updatedByUser User? @relation("EvidenceRetentionPolicyUpdatedBy", fields: [updatedByUserId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedByUserId])
+}
+
+model EvidenceRetentionJob {
+  id String @id @default(uuid())
+
+  licenseeId String?
+  licensee Licensee? @relation(fields: [licenseeId], references: [id], onDelete: SetNull)
+
+  status EvidenceRetentionJobStatus @default(PREVIEW)
+  mode String
+  cutoffAt DateTime
+  recordsEvaluated Int @default(0)
+  recordsPurged Int @default(0)
+  recordsExported Int @default(0)
+  summary Json?
+
+  startedByUserId String?
+  startedByUser User? @relation("EvidenceRetentionJobStartedBy", fields: [startedByUserId], references: [id])
+
+  startedAt DateTime @default(now())
+  finishedAt DateTime?
+
+  @@index([licenseeId, startedAt])
+  @@index([status])
+  @@index([startedByUserId])
+}
+
+model IncidentEvidenceFingerprint {
+  id String @id @default(uuid())
+
+  incidentEvidenceId String @unique
+  incidentEvidence IncidentEvidence @relation(fields: [incidentEvidenceId], references: [id], onDelete: Cascade)
+
+  incidentId String
+  incident Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  sha256 String
+  fileSize Int
+  mimeType String
+  ext String?
+
+  duplicateCount Int @default(0)
+  seenInOtherIncidents Int @default(0)
+  riskScore Int @default(0)
+  checks Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([incidentId])
+  @@index([sha256])
+}
+
+model RouteTransitionMetric {
+  id String @id @default(uuid())
+
+  userId String?
+  user User? @relation("RouteTransitionMetricUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  licenseeId String?
+  licensee Licensee? @relation(fields: [licenseeId], references: [id], onDelete: SetNull)
+
+  routeFrom String?
+  routeTo String
+  source String?
+  role UserRole?
+  deviceType String?
+  networkType String?
+  online Boolean @default(true)
+  transitionMs Int
+  verifyCodePresent Boolean @default(false)
+  verifyResult String?
+  dropped Boolean @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([routeTo, createdAt])
+  @@index([licenseeId, createdAt])
+  @@index([role, createdAt])
 }

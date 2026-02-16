@@ -30,6 +30,16 @@ type IncidentRow = {
   locationName?: string | null;
   assignedToUserId?: string | null;
   assignedToUser?: { id: string; name?: string | null; email?: string | null } | null;
+  handoff?: {
+    currentStage?: string | null;
+    slaDueAt?: string | null;
+  } | null;
+  supportTicket?: {
+    id: string;
+    referenceCode?: string | null;
+    status?: string | null;
+    slaDueAt?: string | null;
+  } | null;
 };
 
 type IncidentDetail = IncidentRow & {
@@ -536,8 +546,24 @@ export default function Incidents() {
                         <span className="text-slate-500">Contact</span>
                         <div>{detail.customerEmail || detail.customerPhone || "Not shared"}</div>
                       </div>
+                      <div>
+                        <span className="text-slate-500">Workflow stage</span>
+                        <div>{toLabel(detail.handoff?.currentStage || "INTAKE")}</div>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Support ticket</span>
+                        <div className="font-mono">{detail.supportTicket?.referenceCode || "Pending"}</div>
+                      </div>
                     </div>
                     <p className="mt-3 text-sm text-slate-700">{detail.description}</p>
+                    {detail.supportTicket?.slaDueAt ? (
+                      <p className="mt-2 text-xs text-slate-600">
+                        SLA due by: {format(new Date(detail.supportTicket.slaDueAt), "PPp")}
+                      </p>
+                    ) : null}
+                    <p className="mt-2 text-xs text-slate-600">
+                      Guided handoff: Intake to Review to Containment to Documentation to Resolution.
+                    </p>
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2">

@@ -17,6 +17,9 @@ import { createIncidentFromReport } from "../services/incidentService";
 import { evaluateScanAndEnforcePolicy } from "../services/policyEngineService";
 import { recordScan } from "../services/qrService";
 import { getScanInsight } from "../services/scanInsightService";
+import { resolveVerifyUxPolicy } from "../services/governanceService";
+import { runTamperEvidenceChecks, summarizeTamperFindings } from "../services/tamperEvidenceService";
+import { ticketSlaSnapshot } from "../services/supportWorkflowService";
 
 type VerifyClassification =
   | "FIRST_SCAN"
@@ -258,6 +261,72 @@ const buildScanSummary = (params: {
     latestVerifiedAt,
     firstVerifiedLocation: params.scanInsight?.firstScanLocation || null,
     latestVerifiedLocation: params.scanInsight?.latestScanLocation || null,
+  };
+};
+
+const buildVerificationTimeline = (params: {
+  scanSummary: ScanSummary;
+  classification: VerifyClassification;
+  reasons: string[];
+}) => {
+  const firstSeen = params.scanSummary.firstVerifiedAt || null;
+  const latestSeen = params.scanSummary.latestVerifiedAt || null;
+  const anomalyReason =
+    params.classification === "SUSPICIOUS_DUPLICATE" || params.classification === "BLOCKED_BY_SECURITY"
+      ? params.reasons[0] || "Anomaly indicators detected."
+      : null;
+
+  return {
+    firstSeen,
+    latestSeen,
+    anomalyReason,
+    visualSignal:
+      params.classification === "FIRST_SCAN" || params.classification === "LEGIT_REPEAT"
+        ? "stable"
+        : params.classification === "SUSPICIOUS_DUPLICATE"
+          ? "warning"
+          : "critical",
+  };
+};
+
+const buildRiskExplanation = (params: {
+  classification: VerifyClassification;
+  reasons: string[];
+  scanSummary: ScanSummary;
+  ownershipStatus: OwnershipStatus;
+}) => {
+  if (params.classification === "SUSPICIOUS_DUPLICATE") {
+    return {
+      level: "elevated",
+      title: "Duplicate risk signals detected",
+      details: params.reasons,
+      recommendedAction: "Review seller source and report suspected counterfeit if this is unexpected.",
+    };
+  }
+
+  if (params.classification === "BLOCKED_BY_SECURITY") {
+    return {
+      level: "high",
+      title: "Blocked by security controls",
+      details: params.reasons,
+      recommendedAction: "Do not use this product until support confirms resolution.",
+    };
+  }
+
+  if (params.ownershipStatus.isClaimedByAnother) {
+    return {
+      level: "medium",
+      title: "Ownership conflict detected",
+      details: ["This code is already claimed by another account."],
+      recommendedAction: "Treat as potential duplicate and submit a report for investigation.",
+    };
+  }
+
+  return {
+    level: "low",
+    title: "No high-risk anomaly detected",
+    details: params.reasons,
+    recommendedAction: params.scanSummary.totalScans > 1 ? "Keep purchase proof and monitor future scans." : "No action required.",
   };
 };
 
@@ -575,6 +644,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
     }
 
     const normalizedCode = normalizeCode(code);
+    const defaultVerifyUxPolicy = await resolveVerifyUxPolicy(null);
 
     const qrCode = await prisma.qRCode.findUnique({
       where: { code: normalizedCode },
@@ -607,6 +677,21 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
     });
 
     if (!qrCode) {
+      const reasons = ["Code not found in registry."];
+      const emptySummary: ScanSummary = {
+        totalScans: 0,
+        firstVerifiedAt: null,
+        latestVerifiedAt: null,
+        firstVerifiedLocation: null,
+        latestVerifiedLocation: null,
+      };
+      const emptyOwnership: OwnershipStatus = {
+        isClaimed: false,
+        claimedAt: null,
+        isOwnedByRequester: false,
+        isClaimedByAnother: false,
+        canClaim: false,
+      };
       await createAuditLog({
         action: "VERIFY_FAILED",
         entityType: "QRCode",
@@ -622,21 +707,21 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
           message: "This QR code is not registered in our system.",
           code: normalizedCode,
           classification: "NOT_READY_FOR_CUSTOMER_USE",
-          reasons: ["Code not found in registry."],
-          scanSummary: {
-            totalScans: 0,
-            firstVerifiedAt: null,
-            latestVerifiedAt: null,
-            firstVerifiedLocation: null,
-            latestVerifiedLocation: null,
-          },
-          ownershipStatus: {
-            isClaimed: false,
-            claimedAt: null,
-            isOwnedByRequester: false,
-            isClaimedByAnother: false,
-            canClaim: false,
-          },
+          reasons,
+          scanSummary: emptySummary,
+          ownershipStatus: emptyOwnership,
+          verificationTimeline: buildVerificationTimeline({
+            scanSummary: emptySummary,
+            classification: "NOT_READY_FOR_CUSTOMER_USE",
+            reasons,
+          }),
+          riskExplanation: buildRiskExplanation({
+            classification: "NOT_READY_FOR_CUSTOMER_USE",
+            reasons,
+            scanSummary: emptySummary,
+            ownershipStatus: emptyOwnership,
+          }),
+          verifyUxPolicy: defaultVerifyUxPolicy,
           isBlocked: false,
           isReady: false,
           totalScans: 0,
@@ -645,6 +730,8 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
         },
       });
     }
+
+    const verifyUxPolicy = await resolveVerifyUxPolicy(qrCode.licenseeId || null);
 
     const customerUserId = req.customer?.userId || null;
     const containment = buildContainment(qrCode);
@@ -688,6 +775,17 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
         "This QR code has been blocked due to fraud or recall.",
         ...buildSecurityContainmentReasons(containment),
       ];
+      const verificationTimeline = buildVerificationTimeline({
+        scanSummary: baseScanSummary,
+        classification: "BLOCKED_BY_SECURITY",
+        reasons,
+      });
+      const riskExplanation = buildRiskExplanation({
+        classification: "BLOCKED_BY_SECURITY",
+        reasons,
+        scanSummary: baseScanSummary,
+        ownershipStatus: baseOwnershipStatus,
+      });
 
       return res.json({
         success: true,
@@ -699,6 +797,9 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
           reasons,
           scanSummary: baseScanSummary,
           ownershipStatus: baseOwnershipStatus,
+          verificationTimeline,
+          riskExplanation,
+          verifyUxPolicy,
           isBlocked: true,
           isReady: false,
           totalScans: baseScanSummary.totalScans,
@@ -715,6 +816,18 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
           : qrCode.status === QRStatus.ACTIVATED
             ? "This QR code has not been activated (print not confirmed)."
             : "This QR code has not been assigned to a product yet.";
+      const reasons = [statusNotReadyReason(qrCode.status)];
+      const verificationTimeline = buildVerificationTimeline({
+        scanSummary: baseScanSummary,
+        classification: "NOT_READY_FOR_CUSTOMER_USE",
+        reasons,
+      });
+      const riskExplanation = buildRiskExplanation({
+        classification: "NOT_READY_FOR_CUSTOMER_USE",
+        reasons,
+        scanSummary: baseScanSummary,
+        ownershipStatus: baseOwnershipStatus,
+      });
 
       return res.json({
         success: true,
@@ -723,9 +836,12 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
           isAuthentic: false,
           message,
           classification: "NOT_READY_FOR_CUSTOMER_USE" as VerifyClassification,
-          reasons: [statusNotReadyReason(qrCode.status)],
+          reasons,
           scanSummary: baseScanSummary,
           ownershipStatus: baseOwnershipStatus,
+          verificationTimeline,
+          riskExplanation,
+          verifyUxPolicy,
           isBlocked: false,
           isReady: false,
           totalScans: baseScanSummary.totalScans,
@@ -850,6 +966,18 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       }
     }
 
+    const verificationTimeline = buildVerificationTimeline({
+      scanSummary: postScanSummary,
+      classification,
+      reasons,
+    });
+    const riskExplanation = buildRiskExplanation({
+      classification,
+      reasons,
+      scanSummary: postScanSummary,
+      ownershipStatus,
+    });
+
     return res.json({
       success: true,
       data: {
@@ -884,6 +1012,9 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
         reasons,
         scanSummary: postScanSummary,
         ownershipStatus,
+        verificationTimeline,
+        riskExplanation,
+        verifyUxPolicy,
         isBlocked,
         isReady,
         totalScans: postScanSummary.totalScans,
@@ -1148,6 +1279,36 @@ export const reportFraud = async (req: Request, res: Response) => {
       uploadRecords
     );
 
+    const evidenceRows = await prisma.incidentEvidence.findMany({
+      where: { incidentId: incident.id },
+      select: {
+        id: true,
+        incidentId: true,
+        storageKey: true,
+        fileType: true,
+      },
+    });
+    const tamperFindings = await runTamperEvidenceChecks(evidenceRows);
+    const tamperSummary = summarizeTamperFindings(tamperFindings);
+
+    if (tamperSummary.hasWarnings) {
+      const nextTags = Array.from(new Set([...(incident.tags || []), "tamper_check_warning"]));
+      await prisma.incident.update({
+        where: { id: incident.id },
+        data: { tags: nextTags },
+      });
+    }
+
+    const supportTicket = await prisma.supportTicket.findUnique({
+      where: { incidentId: incident.id },
+      select: {
+        id: true,
+        referenceCode: true,
+        status: true,
+        slaDueAt: true,
+      },
+    });
+
     const superadminEmails = await getSuperadminAlertEmails();
     const alertSubject = `[Incident][${incident.severity}] New fraud report ${incident.id}`;
     const alertBody = incidentSummaryText(incident);
@@ -1168,11 +1329,19 @@ export const reportFraud = async (req: Request, res: Response) => {
       success: true,
       data: {
         reportId: incident.id,
+        supportTicketRef: supportTicket?.referenceCode || null,
+        supportTicketStatus: supportTicket?.status || null,
+        supportTicketSla: supportTicket ? ticketSlaSnapshot(supportTicket.slaDueAt) : null,
         message: "Fraud report submitted successfully.",
         classification: snapshot.classification,
         reasons: snapshot.reasons,
         scanSummary: snapshot.scanSummary,
         ownershipStatus: snapshot.ownershipStatus,
+        tamperChecks: {
+          summary: tamperSummary.summary,
+          highestRisk: tamperSummary.highestRisk,
+          hasWarnings: tamperSummary.hasWarnings,
+        },
       },
     });
   } catch (error) {

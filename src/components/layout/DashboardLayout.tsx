@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { getContextualHelpRoute } from "@/help/contextual-help";
+import apiClient from "@/lib/api-client";
 import {
   LayoutDashboard,
   Building2,
@@ -18,6 +19,7 @@ import {
   ScanEye,
   ShieldAlert,
   CircleHelp,
+  Bell,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -42,8 +44,10 @@ const navItems: NavItem[] = [
   { label: "Batches", href: "/batches", icon: FileText, roles: ["super_admin", "licensee_admin", "manufacturer"] },
   { label: "Manufacturers", href: "/manufacturers", icon: Factory, roles: ["super_admin", "licensee_admin"] },
   { label: "QR Tracking", href: "/qr-tracking", icon: ScanEye, roles: ["super_admin", "licensee_admin", "manufacturer"] },
+  { label: "Support", href: "/support", icon: CircleHelp, roles: ["super_admin", "licensee_admin", "manufacturer"] },
   { label: "IR Center", href: "/ir", icon: Shield, roles: ["super_admin"] },
   { label: "Incidents", href: "/incidents", icon: ShieldAlert, roles: ["super_admin"] },
+  { label: "Governance", href: "/governance", icon: Shield, roles: ["super_admin", "licensee_admin"] },
   { label: "Audit Logs", href: "/audit-logs", icon: FileText, roles: ["super_admin", "licensee_admin"] },
 ];
 
@@ -52,9 +56,57 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
 
   const filteredNavItems = navItems.filter((item) => user && item.roles.includes(user.role));
   const contextualHelpRoute = getContextualHelpRoute(location.pathname, user?.role);
+
+  const loadNotifications = async () => {
+    if (!user) return;
+    setNotificationsLoading(true);
+    try {
+      const response = await apiClient.getNotifications({ limit: 8, offset: 0 });
+      if (!response.success) return;
+      const payload: any = response.data || {};
+      const rows = Array.isArray(payload.notifications) ? payload.notifications : [];
+      setNotifications(rows);
+      setUnreadNotifications(Number(payload.unread || 0));
+    } finally {
+      setNotificationsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadNotifications();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user) return;
+    const timer = window.setInterval(() => {
+      loadNotifications();
+    }, 45_000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  const markNotificationRead = async (id: string) => {
+    if (!id) return;
+    await apiClient.markNotificationRead(id);
+    await loadNotifications();
+  };
+
+  const notificationTarget = (notification: any) => {
+    const data = (notification?.data && typeof notification.data === "object" ? notification.data : {}) as Record<string, any>;
+    if (data.ticketId) return `/support?ticketId=${encodeURIComponent(String(data.ticketId))}`;
+    if (data.ticketReference) return `/support?reference=${encodeURIComponent(String(data.ticketReference))}`;
+    if (notification?.incidentId) return `/support?incidentId=${encodeURIComponent(String(notification.incidentId))}`;
+    return "/support";
+  };
+
+  const notificationItems = useMemo(() => notifications.slice(0, 8), [notifications]);
 
   const handleLogout = () => {
     logout();
@@ -145,6 +197,55 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           </button>
 
           <div className="flex-1" />
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="relative mr-1">
+                <Bell className="h-4 w-4 text-muted-foreground" />
+                {unreadNotifications > 0 ? (
+                  <span className="absolute -right-0.5 -top-0.5 inline-flex min-h-4 min-w-4 items-center justify-center rounded-full bg-emerald-600 px-1 text-[10px] font-semibold text-white">
+                    {unreadNotifications > 9 ? "9+" : unreadNotifications}
+                  </span>
+                ) : null}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-[340px]">
+              <div className="flex items-center justify-between px-3 py-2">
+                <p className="text-sm font-semibold">Notifications</p>
+                <Button
+                  variant="ghost"
+                  className="h-auto px-2 py-1 text-xs"
+                  onClick={async () => {
+                    await apiClient.markAllNotificationsRead();
+                    await loadNotifications();
+                  }}
+                >
+                  Mark all read
+                </Button>
+              </div>
+              <DropdownMenuSeparator />
+              {notificationsLoading ? (
+                <div className="px-3 py-6 text-center text-xs text-muted-foreground">Loading notifications...</div>
+              ) : notificationItems.length === 0 ? (
+                <div className="px-3 py-6 text-center text-xs text-muted-foreground">No notifications</div>
+              ) : (
+                notificationItems.map((item) => (
+                  <DropdownMenuItem
+                    key={item.id}
+                    onClick={async () => {
+                      await markNotificationRead(item.id);
+                      navigate(notificationTarget(item));
+                    }}
+                    className="flex cursor-pointer flex-col items-start gap-1 py-2"
+                  >
+                    <p className="line-clamp-1 text-sm font-medium">{item.title}</p>
+                    <p className="line-clamp-2 text-xs text-muted-foreground">{item.body}</p>
+                    <p className="text-[11px] text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</p>
+                  </DropdownMenuItem>
+                ))
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           <Button asChild variant="ghost" className="mr-1 gap-2">
             <Link to={contextualHelpRoute}>

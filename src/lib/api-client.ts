@@ -1220,6 +1220,156 @@ class ApiClient {
   async patchIrAlert(id: string, payload: { acknowledged?: boolean; incidentId?: string | null }) {
     return this.request(`/ir/alerts/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) });
   }
+
+  // ==================== NOTIFICATIONS ====================
+  async getNotifications(options?: { unreadOnly?: boolean; limit?: number; offset?: number }) {
+    const params = new URLSearchParams();
+    if (options?.unreadOnly != null) params.append("unreadOnly", String(options.unreadOnly));
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/notifications${query}`);
+  }
+
+  async markNotificationRead(id: string) {
+    return this.request(`/notifications/${encodeURIComponent(id)}/read`, { method: "POST" });
+  }
+
+  async markAllNotificationsRead() {
+    return this.request(`/notifications/read-all`, { method: "POST" });
+  }
+
+  // ==================== SUPPORT TICKETS ====================
+  async getSupportTickets(options?: {
+    status?: "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
+    priority?: "P1" | "P2" | "P3" | "P4";
+    licenseeId?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const params = new URLSearchParams();
+    if (options?.status) params.append("status", options.status);
+    if (options?.priority) params.append("priority", options.priority);
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.search) params.append("search", options.search);
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/support/tickets${query}`);
+  }
+
+  async getSupportTicket(id: string) {
+    return this.request(`/support/tickets/${encodeURIComponent(id)}`);
+  }
+
+  async patchSupportTicket(
+    id: string,
+    payload: Partial<{
+      status: "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
+      assignedToUserId: string | null;
+    }>
+  ) {
+    return this.request(`/support/tickets/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async addSupportTicketMessage(id: string, payload: { message: string; isInternal?: boolean }) {
+    return this.request(`/support/tickets/${encodeURIComponent(id)}/messages`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async trackSupportTicket(reference: string, email?: string) {
+    const query = email ? `?email=${encodeURIComponent(email)}` : "";
+    return this.request(`/support/tickets/track/${encodeURIComponent(reference)}${query}`);
+  }
+
+  // ==================== GOVERNANCE ====================
+  async getGovernanceFeatureFlags(licenseeId?: string) {
+    const query = licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : "";
+    return this.request(`/governance/feature-flags${query}`);
+  }
+
+  async upsertGovernanceFeatureFlag(payload: {
+    licenseeId?: string;
+    key: string;
+    enabled: boolean;
+    config?: any;
+  }) {
+    return this.request(`/governance/feature-flags`, { method: "POST", body: JSON.stringify(payload) });
+  }
+
+  async getEvidenceRetentionPolicy(licenseeId?: string) {
+    const query = licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : "";
+    return this.request(`/governance/evidence-retention${query}`);
+  }
+
+  async patchEvidenceRetentionPolicy(payload: {
+    licenseeId?: string;
+    retentionDays?: number;
+    purgeEnabled?: boolean;
+    exportBeforePurge?: boolean;
+    legalHoldTags?: string[];
+  }) {
+    return this.request(`/governance/evidence-retention`, { method: "PATCH", body: JSON.stringify(payload) });
+  }
+
+  async runEvidenceRetentionJob(payload: { licenseeId?: string; mode: "PREVIEW" | "APPLY" }) {
+    return this.request(`/governance/evidence-retention/run`, { method: "POST", body: JSON.stringify(payload) });
+  }
+
+  async getComplianceReport(options?: { licenseeId?: string; from?: string; to?: string }) {
+    const params = new URLSearchParams();
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.from) params.append("from", options.from);
+    if (options?.to) params.append("to", options.to);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/governance/compliance/report${query}`);
+  }
+
+  async exportIncidentEvidenceBundle(id: string) {
+    const headers: Record<string, string> = {};
+    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+    const resp = await fetch(`${BASE_URL}/audit/export/incidents/${encodeURIComponent(id)}/bundle`, {
+      headers,
+      credentials: "include",
+    });
+    if (!resp.ok) throw new Error(`Export failed: HTTP ${resp.status}`);
+    return resp.blob();
+  }
+
+  // ==================== TELEMETRY ====================
+  async captureRouteTransition(payload: {
+    routeFrom?: string | null;
+    routeTo: string;
+    source?: string;
+    transitionMs: number;
+    verifyCodePresent?: boolean;
+    verifyResult?: string | null;
+    dropped?: boolean;
+    deviceType?: string;
+    networkType?: string;
+    online?: boolean;
+  }) {
+    return this.request(`/telemetry/route-transition`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 8000,
+    });
+  }
+
+  async getRouteTransitionSummary(options?: { licenseeId?: string; from?: string; to?: string }) {
+    const params = new URLSearchParams();
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.from) params.append("from", options.from);
+    if (options?.to) params.append("to", options.to);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/telemetry/route-transition/summary${query}`);
+  }
 }
 
 const apiClient = new ApiClient();

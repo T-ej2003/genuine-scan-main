@@ -23,6 +23,8 @@ import {
   toHumanIncidentStatus,
   toHumanIncidentType,
 } from "../services/incidentService";
+import { runTamperEvidenceChecks, summarizeTamperFindings } from "../services/tamperEvidenceService";
+import { ensureIncidentWorkflowArtifacts, ticketSlaSnapshot } from "../services/supportWorkflowService";
 import { getSuperadminAlertEmails, sendIncidentEmail } from "../services/incidentEmailService";
 import { createAuditLog } from "../services/auditService";
 import { incidentEvidenceUpload, incidentReportUpload, resolveUploadPath } from "../middleware/incidentUpload";
@@ -205,6 +207,36 @@ export const reportIncident = async (req: Request, res: Response) => {
       uploadedRecords
     );
 
+    const evidenceRows = await prisma.incidentEvidence.findMany({
+      where: { incidentId: incident.id },
+      select: {
+        id: true,
+        incidentId: true,
+        storageKey: true,
+        fileType: true,
+      },
+    });
+    const tamperFindings = await runTamperEvidenceChecks(evidenceRows);
+    const tamperSummary = summarizeTamperFindings(tamperFindings);
+
+    if (tamperSummary.hasWarnings) {
+      const nextTags = Array.from(new Set([...(incident.tags || []), "tamper_check_warning"]));
+      await prisma.incident.update({
+        where: { id: incident.id },
+        data: { tags: nextTags },
+      });
+    }
+
+    const supportTicket = await prisma.supportTicket.findUnique({
+      where: { incidentId: incident.id },
+      select: {
+        id: true,
+        referenceCode: true,
+        status: true,
+        slaDueAt: true,
+      },
+    });
+
     const superadminEmails = await getSuperadminAlertEmails();
     const alertSubject = `[Incident][${incident.severity}] New fraud report ${incident.id}`;
     const alertBody = incidentSummaryText(incident);
@@ -226,7 +258,9 @@ export const reportIncident = async (req: Request, res: Response) => {
       const body =
         `Thanks for contacting AuthenticQR support.\n\n` +
         `Reference ID: ${incident.id}\n` +
+        `Support Ticket: ${supportTicket?.referenceCode || "Pending assignment"}\n` +
         `Current status: ${toHumanIncidentStatus(incident.status)}\n` +
+        `Workflow: intake -> review -> containment -> documentation -> resolution.\n` +
         `What next: Our team will review your report and update you if needed.\n\n` +
         `For your privacy, we only use your contact details for this incident workflow.`;
 
@@ -246,8 +280,16 @@ export const reportIncident = async (req: Request, res: Response) => {
       data: {
         incidentId: incident.id,
         reference: incident.id,
+        supportTicketRef: supportTicket?.referenceCode || null,
+        supportTicketStatus: supportTicket?.status || null,
+        supportTicketSla: supportTicket ? ticketSlaSnapshot(supportTicket.slaDueAt) : null,
         status: incident.status,
         severity: incident.severity,
+        tamperChecks: {
+          summary: tamperSummary.summary,
+          highestRisk: tamperSummary.highestRisk,
+          hasWarnings: tamperSummary.hasWarnings,
+        },
       },
     });
   } catch (error) {
@@ -439,6 +481,13 @@ export const patchIncident = async (req: AuthRequest, res: Response) => {
       },
     });
 
+    await ensureIncidentWorkflowArtifacts({
+      incidentId: updated.id,
+      actorUserId: req.user.userId,
+      actorType: IncidentActorType.ADMIN,
+      emitEvents: false,
+    });
+
     return res.json({ success: true, data: updated });
   } catch (error) {
     console.error("patchIncident error:", error);
@@ -515,6 +564,15 @@ export const addIncidentEvidence = async (req: AuthRequest, res: Response) => {
       },
     });
 
+    const tamperFindings = await runTamperEvidenceChecks([
+      {
+        id: evidence.id,
+        incidentId: incident.id,
+        storageKey: evidence.storageKey,
+        fileType: evidence.fileType,
+      },
+    ]);
+
     await recordIncidentEvent({
       incidentId: incident.id,
       actorType: IncidentActorType.ADMIN,
@@ -539,7 +597,13 @@ export const addIncidentEvidence = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    return res.status(201).json({ success: true, data: evidence });
+    return res.status(201).json({
+      success: true,
+      data: {
+        ...evidence,
+        tamperChecks: tamperFindings[0] || null,
+      },
+    });
   } catch (error) {
     console.error("addIncidentEvidence error:", error);
     return res.status(500).json({ success: false, error: "Failed to upload evidence" });

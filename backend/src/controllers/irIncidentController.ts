@@ -17,6 +17,8 @@ import { createAuditLog } from "../services/auditService";
 import { computeSlaDueAt, recordIncidentEvent, sanitizeResolutionOutcome, sanitizeIncidentStatus, sanitizeIncidentSeverity } from "../services/incidentService";
 import { sendIncidentEmail } from "../services/incidentEmailService";
 import { applyContainmentAction, type IrContainmentAction } from "../services/ir/incidentActionsService";
+import { ensureIncidentWorkflowArtifacts } from "../services/supportWorkflowService";
+import { notifyIncidentLifecycle } from "../services/notificationService";
 
 const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -239,6 +241,21 @@ export const createIrIncident = async (req: AuthRequest, res: Response) => {
       ipAddress: req.ip,
     });
 
+    await ensureIncidentWorkflowArtifacts({
+      incidentId: created.id,
+      actorUserId: req.user.userId,
+      actorType: IncidentActorType.ADMIN,
+      emitEvents: false,
+    });
+    await notifyIncidentLifecycle({
+      incidentId: created.id,
+      licenseeId,
+      type: "ir_incident_created",
+      title: `IR incident ${created.id.slice(0, 8)} created`,
+      body: `Incident ${created.id} created with priority ${priority} and severity ${severity}.`,
+      data: { priority, severity, status: created.status },
+    });
+
     return res.status(201).json({ success: true, data: created });
   } catch (e) {
     console.error("createIrIncident error:", e);
@@ -403,6 +420,22 @@ export const patchIrIncident = async (req: AuthRequest, res: Response) => {
       ipAddress: req.ip,
     });
 
+    await ensureIncidentWorkflowArtifacts({
+      incidentId: id,
+      actorUserId: req.user.userId,
+      actorType: IncidentActorType.ADMIN,
+      emitEvents: false,
+    });
+
+    await notifyIncidentLifecycle({
+      incidentId: id,
+      licenseeId: existing.licenseeId || null,
+      type: "ir_incident_updated",
+      title: `IR incident ${id.slice(0, 8)} updated`,
+      body: `Fields updated: ${changedFields.join(", ") || "none"}.`,
+      data: { changedFields },
+    });
+
     return res.json({ success: true, data: updated });
   } catch (e) {
     console.error("patchIrIncident error:", e);
@@ -552,4 +585,3 @@ export const sendIrIncidentCommunication = async (req: AuthRequest, res: Respons
     return res.status(500).json({ success: false, error: "Failed to send communication" });
   }
 };
-

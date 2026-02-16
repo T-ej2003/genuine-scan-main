@@ -13,6 +13,8 @@ import { createAuditLog } from "./auditService";
 import { deviceFingerprintFromRequest, sha256Hash } from "./securityHashService";
 import { reverseGeocode } from "./locationService";
 import { evaluatePolicyRulesForIncidentVolume } from "./ir/policyRuleEngineService";
+import { ensureIncidentWorkflowArtifacts } from "./supportWorkflowService";
+import { notifyIncidentLifecycle } from "./notificationService";
 
 type IncidentReportInput = {
   qrCodeValue: string;
@@ -377,6 +379,31 @@ export const createIncidentFromReport = async (
     console.error("evaluatePolicyRulesForIncidentVolume failed:", e);
   }
 
+  // Workflow artifacts and role-aware notifications are best-effort.
+  try {
+    await ensureIncidentWorkflowArtifacts({
+      incidentId: incident.id,
+      actorUserId: actor.actorUserId || null,
+      actorType: actor.actorType,
+      emitEvents: false,
+    });
+
+    await notifyIncidentLifecycle({
+      incidentId: incident.id,
+      licenseeId: incident.licenseeId || null,
+      type: "incident_created",
+      title: `New incident ${incident.id.slice(0, 8)}`,
+      body: `Incident ${incident.id} has entered intake with severity ${incident.severity}.`,
+      data: {
+        severity: incident.severity,
+        status: incident.status,
+        qrCodeValue: incident.qrCodeValue,
+      },
+    });
+  } catch (e) {
+    console.error("Incident workflow/notification setup failed:", e);
+  }
+
   return incident;
 };
 
@@ -390,6 +417,18 @@ export const getIncidentByIdScoped = async (incidentId: string, actor: { role: U
     where,
     include: {
       assignedToUser: { select: { id: true, name: true, email: true } },
+      handoff: true,
+      supportTicket: {
+        include: {
+          messages: {
+            orderBy: { createdAt: "desc" },
+            take: 50,
+            include: {
+              actorUser: { select: { id: true, name: true, email: true } },
+            },
+          },
+        },
+      },
       events: {
         orderBy: { createdAt: "asc" },
         include: { actorUser: { select: { id: true, name: true, email: true } } },
@@ -452,6 +491,15 @@ export const listIncidentsScoped = async (input: {
       skip: input.filters.offset,
       include: {
         assignedToUser: { select: { id: true, name: true, email: true } },
+        handoff: true,
+        supportTicket: {
+          select: {
+            id: true,
+            referenceCode: true,
+            status: true,
+            slaDueAt: true,
+          },
+        },
         evidence: {
           orderBy: { createdAt: "desc" },
           take: 3,
