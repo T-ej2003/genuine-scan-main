@@ -6,6 +6,7 @@ import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { addSupportTicketMessage, ensureIncidentWorkflowArtifacts, ticketSlaSnapshot } from "../services/supportWorkflowService";
 import { createAuditLog } from "../services/auditService";
+import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
 
 const toInt = (value: unknown, fallback: number, min: number, max: number) => {
   const n = Number.parseInt(String(value ?? ""), 10);
@@ -33,6 +34,9 @@ const messageSchema = z.object({
 const isPlatform = (role: UserRole) => role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN;
 
 export const listSupportTickets = async (req: AuthRequest, res: Response) => {
+  const limit = toInt(req.query.limit, 50, 1, 200);
+  const offset = toInt(req.query.offset, 0, 0, 2000);
+
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
 
@@ -40,9 +44,6 @@ export const listSupportTickets = async (req: AuthRequest, res: Response) => {
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
     }
-
-    const limit = toInt(req.query.limit, 50, 1, 200);
-    const offset = toInt(req.query.offset, 0, 0, 2000);
 
     const where: any = {};
     if (parsed.data.status) where.status = parsed.data.status;
@@ -98,6 +99,22 @@ export const listSupportTickets = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
+    if (isPrismaMissingTableError(error, ["supportticket", "supportticketmessage", "incidenthandoff"])) {
+      warnStorageUnavailableOnce(
+        "support-ticket-storage",
+        "[support] Support workflow tables are unavailable. Returning empty support ticket list."
+      );
+      return res.json({
+        success: true,
+        data: {
+          tickets: [],
+          total: 0,
+          limit,
+          offset,
+          storageUnavailable: true,
+        },
+      });
+    }
     console.error("listSupportTickets error:", error);
     return res.status(500).json({ success: false, error: "Failed to load support tickets" });
   }
@@ -149,6 +166,13 @@ export const getSupportTicket = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
+    if (isPrismaMissingTableError(error, ["supportticket", "supportticketmessage", "incidenthandoff"])) {
+      warnStorageUnavailableOnce(
+        "support-ticket-detail-storage",
+        "[support] Support workflow tables are unavailable. Ticket detail is not available."
+      );
+      return res.status(404).json({ success: false, error: "Support ticket storage unavailable" });
+    }
     console.error("getSupportTicket error:", error);
     return res.status(500).json({ success: false, error: "Failed to load support ticket" });
   }
@@ -231,6 +255,13 @@ export const patchSupportTicket = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
+    if (isPrismaMissingTableError(error, ["supportticket", "supportticketmessage", "incidenthandoff"])) {
+      warnStorageUnavailableOnce(
+        "support-ticket-update-storage",
+        "[support] Support workflow tables are unavailable. Update operation skipped."
+      );
+      return res.status(503).json({ success: false, error: "Support ticket storage unavailable" });
+    }
     console.error("patchSupportTicket error:", error);
     return res.status(500).json({ success: false, error: "Failed to update support ticket" });
   }
@@ -279,6 +310,13 @@ export const addSupportMessage = async (req: AuthRequest, res: Response) => {
 
     return res.status(201).json({ success: true, data: message });
   } catch (error) {
+    if (isPrismaMissingTableError(error, ["supportticket", "supportticketmessage"])) {
+      warnStorageUnavailableOnce(
+        "support-ticket-message-storage",
+        "[support] Support message tables are unavailable. Add message operation skipped."
+      );
+      return res.status(503).json({ success: false, error: "Support ticket storage unavailable" });
+    }
     console.error("addSupportMessage error:", error);
     return res.status(500).json({ success: false, error: "Failed to add support message" });
   }
@@ -331,6 +369,13 @@ export const trackSupportTicketPublic = async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
+    if (isPrismaMissingTableError(error, ["supportticket", "supportticketmessage", "incidenthandoff"])) {
+      warnStorageUnavailableOnce(
+        "support-ticket-track-storage",
+        "[support] Support workflow tables are unavailable. Public tracking is temporarily unavailable."
+      );
+      return res.status(404).json({ success: false, error: "Support ticket tracking unavailable" });
+    }
     console.error("trackSupportTicketPublic error:", error);
     return res.status(500).json({ success: false, error: "Failed to track support ticket" });
   }

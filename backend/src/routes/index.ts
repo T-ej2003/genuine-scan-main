@@ -368,70 +368,62 @@ router.get(
 );
 
 // ==================== SUPPORT TICKETS ====================
-router.get("/support/tickets", authenticate, requireOpsUser, enforceTenantIsolation, listSupportTickets);
-router.get("/support/tickets/:id", authenticate, requireOpsUser, enforceTenantIsolation, getSupportTicket);
+router.get("/support/tickets", authenticate, requirePlatformAdmin, listSupportTickets);
+router.get("/support/tickets/:id", authenticate, requirePlatformAdmin, getSupportTicket);
 router.patch(
   "/support/tickets/:id",
   authenticate,
-  requireAnyAdmin,
-  enforceTenantIsolation,
+  requirePlatformAdmin,
   requireCsrf,
   patchSupportTicket
 );
 router.post(
   "/support/tickets/:id/messages",
   authenticate,
-  requireOpsUser,
-  enforceTenantIsolation,
+  requirePlatformAdmin,
   requireCsrf,
   addSupportMessage
 );
 
 // ==================== GOVERNANCE ====================
-router.get("/governance/feature-flags", authenticate, requireAnyAdmin, enforceTenantIsolation, getFeatureFlags);
+router.get("/governance/feature-flags", authenticate, requirePlatformAdmin, getFeatureFlags);
 router.post(
   "/governance/feature-flags",
   authenticate,
-  requireAnyAdmin,
-  enforceTenantIsolation,
+  requirePlatformAdmin,
   requireCsrf,
   upsertFeatureFlag
 );
 router.get(
   "/governance/evidence-retention",
   authenticate,
-  requireAnyAdmin,
-  enforceTenantIsolation,
+  requirePlatformAdmin,
   getRetentionPolicyController
 );
 router.patch(
   "/governance/evidence-retention",
   authenticate,
-  requireAnyAdmin,
-  enforceTenantIsolation,
+  requirePlatformAdmin,
   requireCsrf,
   patchRetentionPolicyController
 );
 router.post(
   "/governance/evidence-retention/run",
   authenticate,
-  requireAnyAdmin,
-  enforceTenantIsolation,
+  requirePlatformAdmin,
   requireCsrf,
   runRetentionJobController
 );
 router.get(
   "/governance/compliance/report",
   authenticate,
-  requireAnyAdmin,
-  enforceTenantIsolation,
+  requirePlatformAdmin,
   generateComplianceReportController
 );
 router.get(
   "/audit/export/incidents/:id/bundle",
   authenticate,
-  requireAnyAdmin,
-  enforceTenantIsolation,
+  requirePlatformAdmin,
   exportIncidentEvidenceBundleController
 );
 
