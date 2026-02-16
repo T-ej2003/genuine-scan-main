@@ -15,6 +15,18 @@ const getMaxLoginAttempts = () => parseIntEnv("AUTH_MAX_LOGIN_ATTEMPTS", 10);
 const getLockoutMinutes = () => parseIntEnv("AUTH_LOCKOUT_MINUTES", 15);
 
 const addMinutes = (d: Date, minutes: number) => new Date(d.getTime() + minutes * 60 * 1000);
+const DISABLED_STATUS = (UserStatus as unknown as { DISABLED?: string } | undefined)?.DISABLED || "DISABLED";
+
+const isDisabledUser = (u: {
+  deletedAt: Date | null;
+  isActive: boolean;
+  status: string | null;
+  disabledAt?: Date | null;
+}) =>
+  Boolean(u.deletedAt) ||
+  u.isActive === false ||
+  Boolean(u.disabledAt) ||
+  String(u.status || "").toUpperCase() === DISABLED_STATUS;
 
 export const isPlatformSuperAdminRole = (role: UserRole) =>
   role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN;
@@ -53,7 +65,7 @@ export const issueSessionForUser = async (input: {
   });
 
   if (!user) throw new Error("User not found");
-  if (user.deletedAt || user.isActive === false || user.status === UserStatus.DISABLED) {
+  if (isDisabledUser(user)) {
     throw new Error("Account is disabled");
   }
 
@@ -140,7 +152,7 @@ export const loginWithPassword = async (input: {
     throw new Error("Account temporarily locked. Try again later.");
   }
 
-  if (user.deletedAt || user.isActive === false || user.status === UserStatus.DISABLED) {
+  if (isDisabledUser(user)) {
     throw new Error("Account is disabled. Contact administrator.");
   }
 
@@ -282,4 +294,3 @@ export const logoutSession = async (input: {
 export const disableUserSessions = async (input: { userId: string; reason: string }) => {
   await revokeAllUserRefreshTokens({ userId: input.userId, reason: input.reason });
 };
-

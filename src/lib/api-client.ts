@@ -50,6 +50,19 @@ class ApiClient {
     window.dispatchEvent(new Event("auth:logout"));
   }
 
+  private readCookie(name: string) {
+    try {
+      const match = document.cookie
+        .split(";")
+        .map((c) => c.trim())
+        .find((c) => c.startsWith(`${name}=`));
+      if (!match) return "";
+      return decodeURIComponent(match.split("=").slice(1).join("="));
+    } catch {
+      return "";
+    }
+  }
+
   private isAuthRefreshEndpoint(endpoint: string) {
     return endpoint === "/auth/login" || endpoint === "/auth/refresh" || endpoint === "/auth/logout" || endpoint === "/auth/accept-invite";
   }
@@ -86,18 +99,7 @@ class ApiClient {
     // Double-submit CSRF: server sets `aq_csrf` cookie; client mirrors it in header.
     const isStateChanging = !["GET", "HEAD", "OPTIONS"].includes(method);
     if (isStateChanging) {
-      const csrf = (() => {
-        try {
-          const match = document.cookie
-            .split(";")
-            .map((c) => c.trim())
-            .find((c) => c.startsWith("aq_csrf="));
-          if (!match) return "";
-          return decodeURIComponent(match.split("=").slice(1).join("="));
-        } catch {
-          return "";
-        }
-      })();
+      const csrf = this.readCookie("aq_csrf");
       if (csrf && !headers["x-csrf-token"] && !headers["X-CSRF-Token"]) {
         headers["x-csrf-token"] = csrf;
       }
@@ -128,6 +130,17 @@ class ApiClient {
       const payload: any = isJson ? await res.json().catch(() => null) : await res.text().catch(() => "");
 
       if (res.status === 401 && !options.skipAuthRefresh && !this.isAuthRefreshEndpoint(endpoint)) {
+        const msg =
+          (payload && typeof payload === "object" && (payload.error || payload.message)) ||
+          (typeof payload === "string" && payload) ||
+          "Not authenticated";
+
+        // No in-memory token and no CSRF cookie means we almost certainly have no session
+        // to refresh (common on a fresh /login page load).
+        if (!this.token && !this.readCookie("aq_csrf")) {
+          return { success: false, error: msg };
+        }
+
         // Attempt to rotate refresh token and retry once (cookie-based sessions).
         const refreshed = await this.refreshOnce();
         if (refreshed.success) {
@@ -136,10 +149,6 @@ class ApiClient {
 
         this.logout();
         this.emitLogout();
-        const msg =
-          (payload && typeof payload === "object" && (payload.error || payload.message)) ||
-          (typeof payload === "string" && payload) ||
-          "Not authenticated";
         return { success: false, error: msg };
       }
 

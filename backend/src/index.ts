@@ -119,8 +119,17 @@ app.use((_req, res) => {
   res.status(404).json({ success: false, error: "Endpoint not found" });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log(`📚 API available at http://localhost:${PORT}/api`);
   console.log(`🔍 Health check at http://localhost:${PORT}/health`);
+});
+
+server.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`Port ${PORT} is already in use. Stop the existing process or set a different PORT in backend/.env.`);
+    process.exit(1);
+  }
+  console.error("Server failed to start:", err);
+  process.exit(1);
 });
