@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { AlertTriangle, Ban, CheckCircle2, Loader2, SearchX, Shield, UserCheck } from "lucide-react";
+import { AlertTriangle, Ban, Loader2, Lock, SearchX, Shield, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -108,6 +108,7 @@ const INCIDENT_TYPE_OPTIONS = [
 
 const CUSTOMER_TOKEN_KEY = "authenticqr_verify_customer_token";
 const CUSTOMER_EMAIL_KEY = "authenticqr_verify_customer_email";
+const APP_NAME = "AUTHENTIC QR";
 
 const DEFAULT_OWNERSHIP_STATUS: OwnershipStatus = {
   isClaimed: false,
@@ -124,6 +125,7 @@ const CLASS_META: Record<
     subtitle: string;
     badge: string;
     bannerClass: string;
+    badgeClass: string;
     icon: React.ReactNode;
   }
 > = {
@@ -131,35 +133,40 @@ const CLASS_META: Record<
     title: "Verified Authentic",
     subtitle: "First customer verification completed successfully.",
     badge: "Authentic",
-    bannerClass: "bg-emerald-700 text-white",
-    icon: <CheckCircle2 className="h-6 w-6" />,
+    bannerClass: "border border-emerald-600 bg-emerald-800 text-emerald-50 shadow-[0_12px_28px_rgba(6,78,59,0.25)]",
+    badgeClass: "border-emerald-200/30 bg-emerald-50/15 text-emerald-50",
+    icon: <ShieldCheck className="h-6 w-6" />,
   },
   LEGIT_REPEAT: {
     title: "Verified Again",
-    subtitle: "Product is authentic and repeat scans are consistent.",
+    subtitle: "Product is authentic and repeat verification signals are consistent.",
     badge: "Authentic",
-    bannerClass: "bg-teal-700 text-white",
-    icon: <UserCheck className="h-6 w-6" />,
+    bannerClass: "border border-emerald-500/70 bg-emerald-700 text-emerald-50 shadow-[0_12px_28px_rgba(6,95,70,0.24)]",
+    badgeClass: "border-emerald-200/30 bg-emerald-50/15 text-emerald-50",
+    icon: <ShieldCheck className="h-6 w-6" />,
   },
   SUSPICIOUS_DUPLICATE: {
     title: "Suspicious Duplicate",
-    subtitle: "Scan pattern indicates duplicate or cloned-label risk.",
+    subtitle: "Scan pattern requires additional authenticity checks.",
     badge: "Fraud Risk",
-    bannerClass: "bg-amber-700 text-white",
+    bannerClass: "border border-amber-500/60 bg-amber-700 text-amber-50 shadow-[0_10px_24px_rgba(146,95,22,0.24)]",
+    badgeClass: "border-amber-200/30 bg-amber-50/20 text-amber-50",
     icon: <AlertTriangle className="h-6 w-6" />,
   },
   BLOCKED_BY_SECURITY: {
     title: "Blocked by Security",
-    subtitle: "This code is blocked by security or containment controls.",
+    subtitle: "Security controls currently block this code.",
     badge: "Blocked",
-    bannerClass: "bg-rose-800 text-white",
+    bannerClass: "border border-rose-400/35 bg-rose-900 text-rose-50 shadow-[0_10px_24px_rgba(76,5,25,0.26)]",
+    badgeClass: "border-rose-200/30 bg-rose-50/15 text-rose-50",
     icon: <Ban className="h-6 w-6" />,
   },
   NOT_READY_FOR_CUSTOMER_USE: {
     title: "Not Ready for Customer Use",
     subtitle: "Code lifecycle is incomplete or unavailable for customer verification.",
     badge: "Not Ready",
-    bannerClass: "bg-slate-700 text-white",
+    bannerClass: "border border-slate-500 bg-slate-800 text-slate-50 shadow-[0_10px_24px_rgba(15,23,42,0.24)]",
+    badgeClass: "border-slate-300/35 bg-slate-100/15 text-slate-50",
     icon: <SearchX className="h-6 w-6" />,
   },
 };
@@ -255,6 +262,10 @@ const formatDateTime = (value: string | null | undefined) => {
   return dt.toLocaleString();
 };
 
+const SkeletonBlock = ({ className }: { className?: string }) => (
+  <div aria-hidden className={cn("animate-pulse rounded-md bg-slate-200", className)} />
+);
+
 export default function Verify() {
   const { code } = useParams<{ code: string }>();
   const [searchParams] = useSearchParams();
@@ -283,6 +294,7 @@ export default function Verify() {
   const [reportDescription, setReportDescription] = useState("");
   const [reportEmail, setReportEmail] = useState("");
   const [reportPhotos, setReportPhotos] = useState<File[]>([]);
+  const [loadingStage, setLoadingStage] = useState<0 | 1>(0);
 
   const token = useMemo(() => searchParams.get("t")?.trim() || "", [searchParams]);
   const codeParam = useMemo(() => {
@@ -310,10 +322,9 @@ export default function Verify() {
   const scanSummary = useMemo(() => deriveScanSummary(result), [result]);
   const ownershipStatus = result?.ownershipStatus || DEFAULT_OWNERSHIP_STATUS;
 
-  const isBlocked = Boolean(result?.isBlocked ?? (String(result?.status || "").toUpperCase() === "BLOCKED"));
-  const isReady = Boolean(result?.isReady ?? !["DORMANT", "ACTIVE", "ALLOCATED", "ACTIVATED", "BLOCKED"].includes(String(result?.status || "").toUpperCase()));
-
   const googleOauthUrl = String(import.meta.env.VITE_GOOGLE_OAUTH_URL || "").trim();
+  const showSkeleton = loading && !result && !error;
+  const motionButtonClass = "transition-transform duration-200 hover:scale-[1.02] active:scale-[0.99]";
 
   const fetchVerification = useCallback(async () => {
     if (!requestKey) {
@@ -403,6 +414,16 @@ export default function Verify() {
   useEffect(() => {
     fetchVerification();
   }, [fetchVerification]);
+
+  useEffect(() => {
+    if (!loading) {
+      setLoadingStage(0);
+      return;
+    }
+    setLoadingStage(0);
+    const timer = window.setTimeout(() => setLoadingStage(1), 1200);
+    return () => window.clearTimeout(timer);
+  }, [loading]);
 
   const handleRequestOtp = async () => {
     const email = otpEmail.trim();
@@ -590,245 +611,399 @@ export default function Verify() {
   const supportWebsite = result?.licensee?.website || "";
 
   return (
-    <div className="min-h-screen bg-slate-100 px-4 py-8">
+    <div className="relative min-h-screen bg-[radial-gradient(circle_at_top,_#e8eef8_0%,_#f4f7fb_45%,_#f8fafc_100%)] px-4 py-8">
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {loading
+          ? loadingStage === 0
+            ? "Securely verifying QR code."
+            : "Checking secure registry."
+          : error
+            ? "Verification service unavailable."
+            : `${classMeta.title}. ${classMeta.subtitle}`}
+      </div>
       <div className="mx-auto w-full max-w-4xl space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Link to="/verify" className="inline-flex items-center gap-2 text-slate-900">
             <Shield className="h-6 w-6" />
-            <span className="text-xl font-semibold">AuthenticQR Verification</span>
+            <span className="text-xl font-semibold tracking-tight">{APP_NAME} Verification</span>
           </Link>
-          <Button asChild variant="outline">
+          <Button asChild variant="outline" className={motionButtonClass}>
             <Link to="/verify">Verify another code</Link>
           </Button>
         </div>
 
-        <Card className="border-slate-200 shadow-sm">
-          {loading ? (
-            <CardContent className="flex items-center justify-center py-16 text-slate-600">
-              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-              Verifying product authenticity...
-            </CardContent>
-          ) : error ? (
+        <Card className="relative border-slate-300/80 shadow-[0_10px_30px_rgba(15,23,42,0.08)]" aria-busy={loading}>
+          {error ? (
             <CardContent className="space-y-3 py-12 text-center">
-              <SearchX className="mx-auto h-8 w-8 text-rose-700" />
+              <SearchX className="mx-auto h-8 w-8 text-rose-900" />
               <p className="text-lg font-semibold text-slate-900">Verification service unavailable</p>
               <p className="text-sm text-slate-600">{error}</p>
             </CardContent>
           ) : (
-            <CardContent className="space-y-6 p-5 sm:p-6">
-              <section className="space-y-3">
-                <div className={cn("rounded-xl p-4", classMeta.bannerClass)}>
-                  <div className="flex items-start gap-3">
-                    <div className="rounded-md bg-white/20 p-2">{classMeta.icon}</div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs uppercase tracking-wide text-white/80">1. Verification Result Banner</p>
-                      <h1 className="text-2xl font-semibold">{classMeta.title}</h1>
-                      <p className="mt-1 text-sm text-white/90">{classMeta.subtitle}</p>
-                      <p className="mt-2 text-sm text-white/90">{result?.message || "Verification completed."}</p>
-                      {result?.warningMessage ? <p className="mt-2 text-sm text-white/90">{result.warningMessage}</p> : null}
+            <CardContent className={cn("space-y-6 p-5 sm:p-6", !showSkeleton && "animate-fade-in")}>
+              {showSkeleton ? (
+                <>
+                  <section className="space-y-3">
+                    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                      <SkeletonBlock className="h-4 w-44" />
+                      <SkeletonBlock className="mt-3 h-7 w-64" />
+                      <SkeletonBlock className="mt-3 h-4 w-full" />
+                      <SkeletonBlock className="mt-2 h-4 w-5/6" />
                     </div>
-                    <Badge className="border-white/30 bg-white/20 text-white">{classMeta.badge}</Badge>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-slate-200 bg-white p-4">
-                  <p className="text-xs uppercase tracking-wide text-slate-500">Verified Code</p>
-                  <p className="mt-1 font-mono text-xl font-semibold text-slate-900">{displayedCode}</p>
-                  <div className="mt-3 space-y-1">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Reasons</p>
-                    <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
-                      {reasons.map((reason) => (
-                        <li key={reason}>{reason}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              </section>
-
-              <section className="rounded-xl border border-slate-200 bg-white p-4">
-                <p className="text-xs uppercase tracking-wide text-slate-500">2. Scan Summary</p>
-                <div className="mt-3 grid gap-3 md:grid-cols-3">
-                  <div className="rounded-lg border border-slate-200 p-3">
-                    <p className="text-xs text-slate-500">Total scans</p>
-                    <p className="mt-1 text-2xl font-semibold text-slate-900">{scanSummary.totalScans}</p>
-                  </div>
-                  <div className="rounded-lg border border-slate-200 p-3">
-                    <p className="text-xs text-slate-500">First verified</p>
-                    <p className="mt-1 text-sm font-medium text-slate-900">{formatDateTime(scanSummary.firstVerifiedAt)}</p>
-                    <p className="mt-1 text-xs text-slate-500">{scanSummary.firstVerifiedLocation || "Location unavailable"}</p>
-                  </div>
-                  <div className="rounded-lg border border-slate-200 p-3">
-                    <p className="text-xs text-slate-500">Latest verified</p>
-                    <p className="mt-1 text-sm font-medium text-slate-900">{formatDateTime(scanSummary.latestVerifiedAt)}</p>
-                    <p className="mt-1 text-xs text-slate-500">{scanSummary.latestVerifiedLocation || "Location unavailable"}</p>
-                  </div>
-                </div>
-
-                <div className="mt-3 grid gap-2 text-sm text-slate-700 md:grid-cols-2">
-                  <p>
-                    <span className="font-medium">Brand:</span> {result?.licensee?.brandName || result?.licensee?.name || "—"}
-                  </p>
-                  <p>
-                    <span className="font-medium">Manufacturer:</span> {result?.batch?.manufacturer?.name || "—"}
-                  </p>
-                  <p>
-                    <span className="font-medium">Blocked:</span> {isBlocked ? "Yes" : "No"}
-                  </p>
-                  <p>
-                    <span className="font-medium">Ready for customer use:</span> {isReady ? "Yes" : "No"}
-                  </p>
-                </div>
-              </section>
-
-              <section className="rounded-xl border border-slate-200 bg-white p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-xs uppercase tracking-wide text-slate-500">3. Ownership Section</p>
-                  {customerToken ? <Badge variant="outline">Signed in for protection</Badge> : null}
-                </div>
-
-                {!customerToken ? (
-                  <div className="mt-3 space-y-4">
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                      <p className="font-medium">Sign in for better protection</p>
-                      <p className="mt-1">Sign-in is optional. You can still verify without signing in.</p>
+                    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                      <SkeletonBlock className="h-3 w-full" />
                     </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <SkeletonBlock className="h-4 w-32" />
+                      <SkeletonBlock className="mt-2 h-8 w-72" />
+                      <SkeletonBlock className="mt-4 h-3 w-24" />
+                      <SkeletonBlock className="mt-2 h-3 w-full" />
+                      <SkeletonBlock className="mt-2 h-3 w-5/6" />
+                    </div>
+                  </section>
 
-                    {googleOauthUrl ? (
-                      <Button asChild variant="outline" className="w-full sm:w-auto">
-                        <a href={googleOauthUrl}>Continue with Google</a>
-                      </Button>
-                    ) : null}
-
-                    <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
-                      <div className="space-y-2">
-                        <Label>Email OTP sign-in</Label>
-                        <Input
-                          type="email"
-                          value={otpEmail}
-                          onChange={(e) => setOtpEmail(e.target.value)}
-                          placeholder="you@example.com"
-                        />
+                  <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <SkeletonBlock className="h-4 w-32" />
+                    <div className="mt-4 grid gap-3 md:grid-cols-3">
+                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/80 p-4">
+                        <SkeletonBlock className="h-3 w-20" />
+                        <SkeletonBlock className="mt-3 h-8 w-16" />
                       </div>
-                      <Button type="button" onClick={handleRequestOtp} disabled={otpSending} className="bg-slate-900 text-white hover:bg-slate-800">
-                        {otpSending ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Sending OTP
-                          </>
-                        ) : (
-                          "Send OTP"
-                        )}
-                      </Button>
+                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/80 p-4">
+                        <SkeletonBlock className="h-3 w-28" />
+                        <SkeletonBlock className="mt-3 h-4 w-full" />
+                        <SkeletonBlock className="mt-2 h-3 w-2/3" />
+                      </div>
+                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/80 p-4">
+                        <SkeletonBlock className="h-3 w-28" />
+                        <SkeletonBlock className="mt-3 h-4 w-full" />
+                        <SkeletonBlock className="mt-2 h-3 w-2/3" />
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <SkeletonBlock className="h-4 w-32" />
+                    <SkeletonBlock className="mt-4 h-20 w-full" />
+                  </section>
+
+                  <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <SkeletonBlock className="h-4 w-28" />
+                    <SkeletonBlock className="mt-4 h-10 w-56" />
+                  </section>
+
+                  <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <SkeletonBlock className="h-4 w-24" />
+                    <SkeletonBlock className="mt-3 h-3 w-full" />
+                    <SkeletonBlock className="mt-2 h-3 w-11/12" />
+                    <SkeletonBlock className="mt-2 h-3 w-4/5" />
+                  </section>
+                </>
+              ) : (
+                <>
+                  <section className="space-y-3">
+                    <div
+                      className={cn("rounded-xl p-5 sm:p-6", classMeta.bannerClass)}
+                      role="status"
+                      aria-live="polite"
+                      aria-atomic="true"
+                    >
+                      <div className="flex items-start gap-4">
+                        <div className="mt-0.5 rounded-lg bg-white/15 p-2.5 ring-1 ring-white/25">{classMeta.icon}</div>
+                        <div className="min-w-0 flex-1">
+                          <h1 className="mt-1 text-2xl font-semibold tracking-tight">{classMeta.title}</h1>
+                          <p className="mt-2 text-sm leading-relaxed text-white/90">{classMeta.subtitle}</p>
+                          <p className="mt-2 text-sm leading-relaxed text-white/90">{result?.message || "Verification completed."}</p>
+                          {result?.warningMessage ? <p className="mt-2 text-sm leading-relaxed text-white/90">{result.warningMessage}</p> : null}
+                        </div>
+                        <Badge className={cn("h-fit text-[11px] font-semibold uppercase tracking-wide", classMeta.badgeClass)}>
+                          {classMeta.badge}
+                        </Badge>
+                      </div>
                     </div>
 
-                    {otpChallengeToken ? (
-                      <div className="space-y-3 rounded-lg border border-slate-200 p-3">
-                        <p className="text-sm text-slate-700">Enter 6-digit OTP sent to {otpMaskedEmail || "your email"}.</p>
+                    <div className="rounded-lg border border-slate-200/90 bg-white px-3 py-2 shadow-sm">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                        <span className="inline-flex items-center gap-1.5">
+                          <Lock className="h-3.5 w-3.5 text-slate-700" />
+                          Encrypted verification
+                        </span>
+                        <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" />
+                        <span>Scan securely recorded for fraud prevention</span>
+                        <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" />
+                        <span className="font-medium text-slate-700">Secured by {APP_NAME}</span>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Verified Code</p>
+                      <p className="mt-1 font-mono text-xl font-semibold tracking-tight text-slate-900">{displayedCode}</p>
+                      <div className="mt-4 space-y-1.5">
+                        <p className="text-xs uppercase tracking-wide text-slate-500">Reasons</p>
+                        <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-slate-700">
+                          {reasons.map((reason) => (
+                            <li key={reason}>{reason}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <p className="text-sm font-semibold text-slate-900">Scan summary</p>
+                    <div className="mt-4 grid gap-3 md:grid-cols-3">
+                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
+                        <p className="text-xs uppercase tracking-wide text-slate-500">Total scans</p>
+                        <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{scanSummary.totalScans}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
+                        <p className="text-xs uppercase tracking-wide text-slate-500">First verified</p>
+                        <p className="mt-2 text-sm font-medium text-slate-900">{formatDateTime(scanSummary.firstVerifiedAt)}</p>
+                        <p className="mt-1 text-xs text-slate-500">{scanSummary.firstVerifiedLocation || "Location unavailable"}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
+                        <p className="text-xs uppercase tracking-wide text-slate-500">Latest verified</p>
+                        <p className="mt-2 text-sm font-medium text-slate-900">{formatDateTime(scanSummary.latestVerifiedAt)}</p>
+                        <p className="mt-1 text-xs text-slate-500">{scanSummary.latestVerifiedLocation || "Location unavailable"}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
+                        <p className="text-xs uppercase tracking-wide text-slate-500">Brand owner</p>
+                        <p className="mt-1 text-sm font-semibold text-slate-900">
+                          {result?.licensee?.brandName || result?.licensee?.name || "Not provided"}
+                        </p>
+                        <div className="mt-3 space-y-1.5 text-xs text-slate-600">
+                          <p>
+                            <span className="font-medium text-slate-700">Prefix:</span> {result?.licensee?.prefix || "Not provided"}
+                          </p>
+                          <p>
+                            <span className="font-medium text-slate-700">Location:</span> {result?.licensee?.location || "Not provided"}
+                          </p>
+                          <p>
+                            <span className="font-medium text-slate-700">Support email:</span> {result?.licensee?.supportEmail || "Not provided"}
+                          </p>
+                          <p>
+                            <span className="font-medium text-slate-700">Support phone:</span> {result?.licensee?.supportPhone || "Not provided"}
+                          </p>
+                          <p>
+                            <span className="font-medium text-slate-700">Website:</span> {result?.licensee?.website || "Not provided"}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
+                        <p className="text-xs uppercase tracking-wide text-slate-500">Manufacturer</p>
+                        <p className="mt-1 text-sm font-semibold text-slate-900">
+                          {result?.batch?.manufacturer?.name || "Not provided"}
+                        </p>
+                        <div className="mt-3 space-y-1.5 text-xs text-slate-600">
+                          <p>
+                            <span className="font-medium text-slate-700">Email:</span> {result?.batch?.manufacturer?.email || "Not provided"}
+                          </p>
+                          <p>
+                            <span className="font-medium text-slate-700">Location:</span> {result?.batch?.manufacturer?.location || "Not provided"}
+                          </p>
+                          <p>
+                            <span className="font-medium text-slate-700">Website:</span> {result?.batch?.manufacturer?.website || "Not provided"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-slate-900">Ownership</p>
+                      {customerToken ? <Badge variant="outline">Signed in for protection</Badge> : null}
+                    </div>
+
+                    {!customerToken ? (
+                      <div className="mt-3 space-y-4">
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                          <p className="font-medium">Sign in for better protection</p>
+                          <p className="mt-1">Sign-in is optional. You can still verify without signing in.</p>
+                        </div>
+
+                        {googleOauthUrl ? (
+                          <Button asChild variant="outline" className={cn("w-full sm:w-auto", motionButtonClass)}>
+                            <a href={googleOauthUrl}>Continue with Google</a>
+                          </Button>
+                        ) : null}
+
                         <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
                           <div className="space-y-2">
-                            <Label>One-time code</Label>
-                            <Input value={otpCode} onChange={(e) => setOtpCode(e.target.value)} maxLength={6} placeholder="123456" />
+                            <Label>Email OTP sign-in</Label>
+                            <Input
+                              type="email"
+                              value={otpEmail}
+                              onChange={(e) => setOtpEmail(e.target.value)}
+                              placeholder="you@example.com"
+                              disabled={loading}
+                            />
                           </div>
-                          <Button type="button" onClick={handleVerifyOtp} disabled={otpVerifying} className="bg-slate-900 text-white hover:bg-slate-800">
-                            {otpVerifying ? (
+                          <Button
+                            type="button"
+                            onClick={handleRequestOtp}
+                            disabled={loading || otpSending}
+                            className={cn("bg-slate-900 text-white hover:bg-slate-800", motionButtonClass)}
+                          >
+                            {otpSending ? (
                               <>
                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Verifying
+                                Sending OTP
                               </>
                             ) : (
-                              "Verify OTP"
+                              "Send OTP"
                             )}
                           </Button>
                         </div>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="mt-3 space-y-3">
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                      <p className="font-medium">Signed in as {customerEmail}</p>
-                      <p className="mt-1">Use this session to claim ownership and strengthen duplicate protection.</p>
-                    </div>
 
-                    {ownershipStatus.isOwnedByRequester ? (
-                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-                        <p className="font-semibold">Owned by you</p>
-                        <p className="mt-1">Claimed at: {formatDateTime(ownershipStatus.claimedAt)}</p>
-                      </div>
-                    ) : ownershipStatus.isClaimedByAnother ? (
-                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                        <p className="font-semibold">Already claimed by another account</p>
-                        <p className="mt-1">Do not trust this product blindly. Submit a counterfeit report for investigation.</p>
+                        {otpChallengeToken ? (
+                          <div className="space-y-3 rounded-lg border border-slate-200 p-3">
+                            <p className="text-sm text-slate-700">Enter 6-digit OTP sent to {otpMaskedEmail || "your email"}.</p>
+                            <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+                              <div className="space-y-2">
+                                <Label>One-time code</Label>
+                                <Input
+                                  value={otpCode}
+                                  onChange={(e) => setOtpCode(e.target.value)}
+                                  maxLength={6}
+                                  placeholder="123456"
+                                  disabled={loading}
+                                />
+                              </div>
+                              <Button
+                                type="button"
+                                onClick={handleVerifyOtp}
+                                disabled={loading || otpVerifying}
+                                className={cn("bg-slate-900 text-white hover:bg-slate-800", motionButtonClass)}
+                              >
+                                {otpVerifying ? (
+                                  <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Verifying
+                                  </>
+                                ) : (
+                                  "Verify OTP"
+                                )}
+                              </Button>
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     ) : (
-                      <div className="flex flex-wrap items-center gap-3">
-                        <Button
-                          type="button"
-                          onClick={handleClaimProduct}
-                          disabled={claiming}
-                          className="bg-slate-900 text-white hover:bg-slate-800"
-                        >
-                          {claiming ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Claiming
-                            </>
-                          ) : (
-                            "Claim this product"
-                          )}
+                      <div className="mt-3 space-y-3">
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                          <p className="font-medium">Signed in as {customerEmail}</p>
+                          <p className="mt-1">Use this session to claim ownership and strengthen duplicate protection.</p>
+                        </div>
+
+                        {ownershipStatus.isOwnedByRequester ? (
+                          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                            <p className="font-semibold">Owned by you</p>
+                            <p className="mt-1">Claimed at: {formatDateTime(ownershipStatus.claimedAt)}</p>
+                          </div>
+                        ) : ownershipStatus.isClaimedByAnother ? (
+                          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                            <p className="font-semibold">Already claimed by another account</p>
+                            <p className="mt-1">Do not trust this product blindly. Submit a counterfeit report for investigation.</p>
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap items-center gap-3">
+                            <Button
+                              type="button"
+                              onClick={handleClaimProduct}
+                              disabled={loading || claiming}
+                              className={cn("bg-slate-900 text-white hover:bg-slate-800", motionButtonClass)}
+                            >
+                              {claiming ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Claiming
+                                </>
+                              ) : (
+                                "Claim this product"
+                              )}
+                            </Button>
+                          </div>
+                        )}
+
+                        <Button type="button" variant="outline" onClick={handleSignOut} disabled={loading} className={motionButtonClass}>
+                          Sign out
                         </Button>
                       </div>
                     )}
+                  </section>
 
-                    <Button type="button" variant="outline" onClick={handleSignOut}>
-                      Sign out
-                    </Button>
-                  </div>
-                )}
-              </section>
+                  <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-slate-900">Report</p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={loading}
+                        onClick={() => {
+                          setReportReference(null);
+                          setReportOpen(true);
+                        }}
+                        className={cn("border-rose-300 text-rose-800 hover:bg-rose-50 hover:text-rose-900", motionButtonClass)}
+                      >
+                        Report suspected counterfeit
+                      </Button>
+                    </div>
+                    <p className="mt-3 text-sm leading-relaxed text-slate-700">
+                      Reporting sends classification, reason summary, scan summary, and ownership status automatically to incident response.
+                    </p>
+                  </section>
 
-              <section className="rounded-xl border border-slate-200 bg-white p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-xs uppercase tracking-wide text-slate-500">4. Report Section</p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setReportReference(null);
-                      setReportOpen(true);
-                    }}
-                    className="border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
-                  >
-                    Report suspected counterfeit
-                  </Button>
-                </div>
-                <p className="mt-3 text-sm text-slate-700">
-                  Reporting sends classification, reason summary, scan summary, and ownership status automatically to incident response.
-                </p>
-              </section>
+                  <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <p className="text-sm font-semibold text-slate-900">Privacy note</p>
+                    <ul className="mt-3 list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-slate-700">
+                      <li>Sign-in is optional.</li>
+                      <li>Platform stores scan events to detect duplicates.</li>
+                      <li>Only coarse location context may be stored.</li>
+                      <li>No precise tracking interface is shown to customers.</li>
+                    </ul>
+                  </section>
 
-              <section className="rounded-xl border border-slate-200 bg-white p-4">
-                <p className="text-xs uppercase tracking-wide text-slate-500">5. Privacy Note</p>
-                <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-700">
-                  <li>Sign-in is optional.</li>
-                  <li>Platform stores scan events to detect duplicates.</li>
-                  <li>Only coarse location context may be stored.</li>
-                  <li>No precise tracking interface is shown to customers.</li>
-                </ul>
-              </section>
-
-              {(supportEmail || supportPhone || supportWebsite) && (
-                <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
-                  <p className="text-xs uppercase tracking-wide text-slate-500">Support Contact</p>
-                  <div className="mt-2 space-y-1">
-                    {supportEmail ? <p>Email: {supportEmail}</p> : null}
-                    {supportPhone ? <p>Phone: {supportPhone}</p> : null}
-                    {supportWebsite ? <p>Website: {supportWebsite}</p> : null}
-                  </div>
-                </section>
+                  {(supportEmail || supportPhone || supportWebsite) && (
+                    <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700 shadow-sm">
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Support Contact</p>
+                      <div className="mt-2 space-y-1">
+                        {supportEmail ? <p>Email: {supportEmail}</p> : null}
+                        {supportPhone ? <p>Phone: {supportPhone}</p> : null}
+                        {supportWebsite ? <p>Website: {supportWebsite}</p> : null}
+                      </div>
+                    </section>
+                  )}
+                </>
               )}
             </CardContent>
           )}
+
+          {loading ? (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/25 backdrop-blur-[2px]">
+              <div
+                className="mx-4 w-full max-w-sm rounded-xl border border-slate-200 bg-white/95 p-5 text-center shadow-xl"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                <Loader2 className="mx-auto h-6 w-6 animate-spin text-slate-800" />
+                <div className="relative mt-3 h-5 text-sm font-medium text-slate-900">
+                  <p className={cn("absolute inset-0 transition-opacity duration-500", loadingStage === 0 ? "opacity-100" : "opacity-0")}>
+                    Securely verifying QR code...
+                  </p>
+                  <p className={cn("absolute inset-0 transition-opacity duration-500", loadingStage === 1 ? "opacity-100" : "opacity-0")}>
+                    Checking secure registry...
+                  </p>
+                </div>
+                <p className="mt-2 text-xs text-slate-600">Please keep this page open.</p>
+              </div>
+            </div>
+          ) : null}
         </Card>
       </div>
 
@@ -898,11 +1073,16 @@ export default function Verify() {
           )}
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setReportOpen(false)} disabled={reporting}>
+            <Button type="button" variant="outline" onClick={() => setReportOpen(false)} disabled={loading || reporting}>
               {reportReference ? "Close" : "Cancel"}
             </Button>
             {!reportReference ? (
-              <Button type="button" onClick={handleSubmitReport} disabled={reporting} className="bg-rose-700 text-white hover:bg-rose-800">
+              <Button
+                type="button"
+                onClick={handleSubmitReport}
+                disabled={loading || reporting}
+                className={cn("bg-rose-900 text-white hover:bg-rose-950", motionButtonClass)}
+              >
                 {reporting ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
