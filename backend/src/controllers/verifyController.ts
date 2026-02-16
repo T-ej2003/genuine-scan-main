@@ -33,6 +33,11 @@ type OwnershipStatus = {
   canClaim: boolean;
 };
 
+type OwnershipRecord = {
+  userId: string;
+  claimedAt: Date;
+};
+
 type ScanSummary = {
   totalScans: number;
   firstVerifiedAt: string | null;
@@ -257,7 +262,7 @@ const buildScanSummary = (params: {
 };
 
 const buildOwnershipStatus = (params: {
-  ownership: { userId: string; claimedAt: Date } | null;
+  ownership: OwnershipRecord | null;
   customerUserId?: string | null;
   isReady: boolean;
   isBlocked: boolean;
@@ -284,6 +289,42 @@ const buildOwnershipStatus = (params: {
     isClaimedByAnother: !isOwnedByRequester,
     canClaim: false,
   };
+};
+
+let ownershipStorageWarningLogged = false;
+
+const isOwnershipStorageMissingError = (error: unknown) => {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+  if (error.code !== "P2021" && error.code !== "P2022") return false;
+
+  const meta = (error.meta || {}) as Record<string, unknown>;
+  const metaInfo = `${String(meta.table || "")} ${String(meta.modelName || "")} ${String(meta.column || "")}`.toLowerCase();
+  if (metaInfo.includes("ownership")) return true;
+
+  return String(error.message || "").toLowerCase().includes("ownership");
+};
+
+const loadOwnershipByQrCodeId = async (qrCodeId: string): Promise<OwnershipRecord | null> => {
+  try {
+    return await prisma.ownership.findUnique({
+      where: { qrCodeId },
+      select: {
+        userId: true,
+        claimedAt: true,
+      },
+    });
+  } catch (error) {
+    if (isOwnershipStorageMissingError(error)) {
+      if (!ownershipStorageWarningLogged) {
+        ownershipStorageWarningLogged = true;
+        console.warn(
+          "[verify] Ownership table is unavailable. Continuing verification without ownership data. Apply migration 20260216183000_add_verify_ownership."
+        );
+      }
+      return null;
+    }
+    throw error;
+  }
 };
 
 const buildSecurityContainmentReasons = (containment: ReturnType<typeof buildContainment>) => {
@@ -317,14 +358,6 @@ const incidentSummaryText = (incident: any) =>
 const buildFraudVerificationSnapshot = async (normalizedCode: string) => {
   const qrCode = await prisma.qRCode.findUnique({
     where: { code: normalizedCode },
-    include: {
-      ownership: {
-        select: {
-          userId: true,
-          claimedAt: true,
-        },
-      },
-    },
   });
 
   if (!qrCode) {
@@ -361,9 +394,10 @@ const buildFraudVerificationSnapshot = async (normalizedCode: string) => {
 
   const isBlocked = qrCode.status === QRStatus.BLOCKED;
   const isReady = isQrReadyForCustomerUse(qrCode.status);
+  const ownership = await loadOwnershipByQrCodeId(qrCode.id);
 
   const ownershipStatus = buildOwnershipStatus({
-    ownership: qrCode.ownership,
+    ownership,
     isReady,
     isBlocked,
   });
@@ -569,12 +603,6 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
             manufacturer: { select: { id: true, name: true, email: true, location: true, website: true } },
           },
         },
-        ownership: {
-          select: {
-            userId: true,
-            claimedAt: true,
-          },
-        },
       },
     });
 
@@ -629,8 +657,9 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
 
     const qrBlocked = qrCode.status === QRStatus.BLOCKED;
     const qrReady = isQrReadyForCustomerUse(qrCode.status);
+    const baseOwnership = await loadOwnershipByQrCodeId(qrCode.id);
     const baseOwnershipStatus = buildOwnershipStatus({
-      ownership: qrCode.ownership,
+      ownership: baseOwnership,
       customerUserId,
       isReady: qrReady,
       isBlocked: qrBlocked,
@@ -777,13 +806,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
           ? `Already verified before. First verification was on ${postScanSummary.firstVerifiedAt}.`
           : null;
 
-    const ownership = await prisma.ownership.findUnique({
-      where: { qrCodeId: updated.id },
-      select: {
-        userId: true,
-        claimedAt: true,
-      },
-    });
+    const ownership = await loadOwnershipByQrCodeId(updated.id);
 
     const ownershipStatus = buildOwnershipStatus({
       ownership,
@@ -905,12 +928,6 @@ export const claimProductOwnership = async (req: CustomerVerifyRequest, res: Res
         code: true,
         status: true,
         licenseeId: true,
-        ownership: {
-          select: {
-            userId: true,
-            claimedAt: true,
-          },
-        },
       },
     });
 
@@ -923,6 +940,7 @@ export const claimProductOwnership = async (req: CustomerVerifyRequest, res: Res
 
     const isBlocked = qrCode.status === QRStatus.BLOCKED;
     const isReady = isQrReadyForCustomerUse(qrCode.status);
+    const existingOwnership = await loadOwnershipByQrCodeId(qrCode.id);
 
     const buildClaimResponse = (ownership: { userId: string; claimedAt: Date } | null) => {
       const ownershipStatus = buildOwnershipStatus({
@@ -946,14 +964,14 @@ export const claimProductOwnership = async (req: CustomerVerifyRequest, res: Res
       });
     }
 
-    if (qrCode.ownership) {
-      if (qrCode.ownership.userId === customer.userId) {
+    if (existingOwnership) {
+      if (existingOwnership.userId === customer.userId) {
         return res.json({
           success: true,
           data: {
             claimResult: "ALREADY_OWNED_BY_YOU",
             message: "This product is already owned by your account.",
-            ...buildClaimResponse(qrCode.ownership),
+            ...buildClaimResponse(existingOwnership),
           },
         });
       }
@@ -983,7 +1001,7 @@ export const claimProductOwnership = async (req: CustomerVerifyRequest, res: Res
             "If this is unexpected, report suspected counterfeit immediately.",
           ],
           warningMessage: "Ownership conflict detected. Treat this product as potential duplicate until reviewed.",
-          ...buildClaimResponse(qrCode.ownership),
+          ...buildClaimResponse(existingOwnership),
         },
       });
     }
@@ -1003,14 +1021,15 @@ export const claimProductOwnership = async (req: CustomerVerifyRequest, res: Res
       });
       createdOwnership = created;
     } catch (error: any) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-        const existing = await prisma.ownership.findUnique({
-          where: { qrCodeId: qrCode.id },
-          select: {
-            userId: true,
-            claimedAt: true,
-          },
+      if (isOwnershipStorageMissingError(error)) {
+        return res.status(503).json({
+          success: false,
+          error: "Ownership feature is temporarily unavailable. Please retry after maintenance.",
         });
+      }
+
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const existing = await loadOwnershipByQrCodeId(qrCode.id);
 
         if (existing && existing.userId === customer.userId) {
           createdOwnership = existing;
