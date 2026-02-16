@@ -8,7 +8,10 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { openHelpAssistant } from "@/help/assistant-events";
+import { getOrCreateAnonDeviceId } from "@/lib/anon-device";
 import {
   Shield,
   CheckCircle2,
@@ -27,6 +30,9 @@ import {
   ArrowRight,
   Sparkles,
   Star,
+  ChevronDown,
+  ChevronUp,
+  LifeBuoy,
 } from "lucide-react";
 import apiClient from "@/lib/api-client";
 import { useToast } from "@/hooks/use-toast";
@@ -76,6 +82,13 @@ type VerifyPayload = {
   scanCount?: number;
   scanOutcome?: string;
   warningMessage?: string | null;
+  scanSignals?: {
+    distinctDeviceCount24h?: number;
+    recentScanCount10m?: number;
+    distinctCountryCount24h?: number;
+    seenOnCurrentDeviceBefore?: boolean;
+    previousScanSameDevice?: boolean | null;
+  } | null;
 };
 
 type StatusKind = "first" | "verified_again" | "possible_duplicate" | "blocked" | "suspicious" | "unassigned" | "invalid";
@@ -103,6 +116,8 @@ const VERIFY_LOADING_STEPS = [
   "Checking print lifecycle",
   "Validating authenticity records",
 ] as const;
+
+const LOCAL_SCAN_HISTORY_KEY = "authenticqr_local_scan_history_v1";
 
 const STATUS_META: Record<
   StatusKind,
@@ -195,8 +210,12 @@ export default function Verify() {
   const [feedbackNote, setFeedbackNote] = useState("");
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  const [showRepeatDetails, setShowRepeatDetails] = useState(false);
+  const [localSeenOnDeviceBefore, setLocalSeenOnDeviceBefore] = useState(false);
+  const [localDeviceScanCount, setLocalDeviceScanCount] = useState(0);
 
   const token = useMemo(() => searchParams.get("t")?.trim() || "", [searchParams.toString()]);
+  const deviceId = useMemo(() => getOrCreateAnonDeviceId(), []);
   const codeParam = useMemo(() => {
     const raw = String(code || "");
     try {
@@ -227,7 +246,7 @@ export default function Verify() {
         let requestPromise = inFlightByKeyRef.current.get(requestKey);
         if (!requestPromise) {
           requestPromise = (async () => {
-            const device = typeof navigator !== "undefined" ? navigator.userAgent : undefined;
+            const device = deviceId || undefined;
 
             const getGeo = () =>
               new Promise<{ lat?: number; lon?: number; acc?: number }>((resolve) => {
@@ -287,7 +306,7 @@ export default function Verify() {
     return () => {
       active = false;
     };
-  }, [codeParam, requestKey, token]);
+  }, [codeParam, deviceId, requestKey, token]);
 
   const statusKind: StatusKind = useMemo(() => {
     const scanOutcome = String(result?.scanOutcome || "").toUpperCase();
@@ -308,12 +327,22 @@ export default function Verify() {
     const policy: any = (result as any)?.policy || null;
     const triggered: any = policy?.triggered || {};
     const alerts: any[] = Array.isArray(policy?.alerts) ? policy.alerts : [];
+    const scanCount = Number(result?.scanCount ?? 0);
+    const signals = result?.scanSignals || null;
+
+    // Treat a small number of repeats as normal buyer behavior.
+    // Multi-scan becomes meaningful when the count grows beyond casual re-checks.
+    const multiScanSignal = Boolean(triggered.multiScan) && scanCount >= 4;
+    const multiDeviceSignal = Number(signals?.distinctDeviceCount24h ?? 0) > 1;
+    const recentBurstSignal = Number(signals?.recentScanCount10m ?? 0) >= 3;
+    const multiCountrySignal = Number(signals?.distinctCountryCount24h ?? 0) > 1;
 
     const hasDuplicateSignals =
-      Boolean(triggered.multiScan || triggered.geoDrift || triggered.velocitySpike) ||
+      Boolean(multiScanSignal || triggered.geoDrift || triggered.velocitySpike || multiDeviceSignal || recentBurstSignal || multiCountrySignal) ||
       alerts.some((a) => {
         const t = String(a?.alertType || "").toUpperCase();
-        return ["POLICY_RULE", "MULTI_SCAN", "GEO_DRIFT", "VELOCITY_SPIKE", "AUTO_BLOCK_QR", "AUTO_BLOCK_BATCH"].includes(t);
+        if (t === "MULTI_SCAN") return scanCount >= 4;
+        return ["POLICY_RULE", "GEO_DRIFT", "VELOCITY_SPIKE", "AUTO_BLOCK_QR", "AUTO_BLOCK_BATCH"].includes(t);
       });
 
     const possibleDuplicate = isAuthentic && !isFirstScan && hasDuplicateSignals;
@@ -342,6 +371,13 @@ export default function Verify() {
   const latestScanLocation = result?.latestScanLocation || null;
   const previousScanAt = result?.previousScanAt || null;
   const previousScanLocation = result?.previousScanLocation || null;
+  const supportEmail = result?.licensee?.supportEmail || "";
+  const supportPhone = result?.licensee?.supportPhone || "";
+  const supportContactHref = supportEmail
+    ? `mailto:${supportEmail}`
+    : supportPhone
+    ? `tel:${supportPhone.replace(/\s+/g, "")}`
+    : "";
 
   const containment = result?.containment || null;
   const hasContainment =
@@ -354,17 +390,56 @@ export default function Verify() {
     return Array.isArray(alerts) ? alerts : [];
   }, [result]);
 
-  const riskReasons = useMemo(() => {
+  const repeatReasons = useMemo(() => {
+    if (statusKind !== "verified_again") return [];
+    const reasons: string[] = [];
+    const signals = result?.scanSignals || null;
+
+    if (signals?.seenOnCurrentDeviceBefore || signals?.previousScanSameDevice || localSeenOnDeviceBefore) {
+      reasons.push("You scanned this before on this device.");
+    }
+    if (previousScanAt) {
+      reasons.push(`Last verification was at ${new Date(previousScanAt).toLocaleString()}.`);
+    }
+    if (Number(signals?.distinctDeviceCount24h ?? 0) <= 1) {
+      reasons.push("Recent checks come from a single device pattern.");
+    }
+    if (localDeviceScanCount >= 2) {
+      reasons.push(`This device has verified this code ${localDeviceScanCount} times.`);
+    }
+    if (!reasons.length) {
+      reasons.push("Repeat scans are normal when you re-check or show proof of authenticity.");
+    }
+
+    return reasons.slice(0, 5);
+  }, [localDeviceScanCount, localSeenOnDeviceBefore, previousScanAt, result?.scanSignals, statusKind]);
+
+  const duplicateReasons = useMemo(() => {
     if (statusKind !== "possible_duplicate") return [];
     const policy: any = (result as any)?.policy || null;
     const triggered: any = policy?.triggered || {};
+    const scanCount = Number(result?.scanCount ?? 0);
+    const signals = result?.scanSignals || null;
     const reasons: string[] = [];
-    if (triggered.multiScan) reasons.push("High repeat scan count for this QR.");
-    if (triggered.geoDrift) reasons.push("Recent scans show large location drift.");
-    if (triggered.velocitySpike) reasons.push("Unusually high scan frequency in this batch.");
 
-    for (const a of policyAlerts) {
-      const msg = String(a?.message || "").trim();
+    if (Number(signals?.distinctDeviceCount24h ?? 0) > 1) {
+      reasons.push("This code has been scanned from multiple devices recently.");
+    }
+    if (Number(signals?.recentScanCount10m ?? 0) >= 3) {
+      reasons.push("Many scans happened in a short time window.");
+    }
+    if (Number(signals?.distinctCountryCount24h ?? 0) > 1) {
+      reasons.push("Recent scans came from different countries.");
+    }
+    if (!signals?.seenOnCurrentDeviceBefore && scanCount > 1) {
+      reasons.push("This appears to be a different device from earlier verifications.");
+    }
+    if (triggered.multiScan && scanCount >= 4) reasons.push("High repeat scan count detected.");
+    if (triggered.geoDrift) reasons.push("Recent scans show large location drift.");
+    if (triggered.velocitySpike) reasons.push("Unusually high scan frequency was detected.");
+
+    for (const alert of policyAlerts) {
+      const msg = String(alert?.message || "").trim();
       if (msg && !reasons.includes(msg)) reasons.push(msg);
     }
 
@@ -418,6 +493,43 @@ export default function Verify() {
     setFeedbackNote("");
   }, [feedbackStorageKey]);
 
+  useEffect(() => {
+    setShowRepeatDetails(false);
+  }, [statusKind, requestKey]);
+
+  useEffect(() => {
+    if (!result || !displayedCode || displayedCode === "—" || !deviceId) {
+      setLocalSeenOnDeviceBefore(false);
+      setLocalDeviceScanCount(0);
+      return;
+    }
+
+    if (!result.isAuthentic) {
+      setLocalSeenOnDeviceBefore(false);
+      setLocalDeviceScanCount(0);
+      return;
+    }
+
+    const normalizedCode = displayedCode.toUpperCase();
+
+    try {
+      const raw = window.localStorage.getItem(LOCAL_SCAN_HISTORY_KEY);
+      const store = raw ? (JSON.parse(raw) as Record<string, Record<string, number>>) : {};
+      const perCode = store[normalizedCode] || {};
+      const previousCount = Number(perCode[deviceId] || 0);
+
+      setLocalSeenOnDeviceBefore(previousCount > 0);
+      setLocalDeviceScanCount(previousCount + 1);
+
+      perCode[deviceId] = previousCount + 1;
+      store[normalizedCode] = perCode;
+      window.localStorage.setItem(LOCAL_SCAN_HISTORY_KEY, JSON.stringify(store));
+    } catch {
+      setLocalSeenOnDeviceBefore(false);
+      setLocalDeviceScanCount(0);
+    }
+  }, [deviceId, displayedCode, result?.isAuthentic, result?.latestScanAt]);
+
   const submitReport = async () => {
     const normalizedCode = String(displayedCode || "").trim();
     if (!normalizedCode || normalizedCode === "—") {
@@ -440,9 +552,35 @@ export default function Verify() {
     setReporting(true);
     try {
       const formData = new FormData();
+      const scanStatus = String(result?.status || "unknown").toLowerCase();
+      const scanOutcome = String(result?.scanOutcome || "unknown").toLowerCase();
+      const classificationTag = `classification_${statusKind}`;
+      const reasonTags = duplicateReasons
+        .slice(0, 3)
+        .map((reason) =>
+          reason
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "_")
+            .replace(/^_+|_+$/g, "")
+            .slice(0, 36)
+        )
+        .filter(Boolean)
+        .map((slug) => `reason_${slug}`);
+
+      const metadataLines = [
+        `Code: ${normalizedCode}`,
+        `Scan status: ${String(result?.status || "unknown")}`,
+        `Scan outcome: ${String(result?.scanOutcome || "unknown")}`,
+        `Classification: ${statusKind.toUpperCase()}`,
+        `Detected reasons: ${(duplicateReasons.length ? duplicateReasons : repeatReasons).join(" | ") || "n/a"}`,
+        `Scan count: ${String(result?.scanCount ?? "0")}`,
+        `Latest scan: ${latestScanAt ? new Date(latestScanAt).toISOString() : "n/a"}`,
+      ];
+      const composedDescription = `${reportDescription.trim()}\n\n--- Scan metadata ---\n${metadataLines.join("\n")}`.slice(0, 2000);
+
       formData.append("qrCodeValue", normalizedCode);
       formData.append("incidentType", incidentType);
-      formData.append("description", reportDescription.trim());
+      formData.append("description", composedDescription);
       if (purchasePlace.trim()) formData.append("purchasePlace", purchasePlace.trim());
       if (purchaseDate.trim()) formData.append("purchaseDate", purchaseDate.trim());
       if (productBatchNo.trim()) formData.append("productBatchNo", productBatchNo.trim());
@@ -453,7 +591,16 @@ export default function Verify() {
       formData.append("consentToContact", String(reportConsent));
       formData.append("preferredContactMethod", reportConsent && reportEmail.trim() ? "email" : "none");
       if (typeof window !== "undefined" && window.location.href) {
-        formData.append("tags", JSON.stringify(["verify_page_report", `status_${String(result?.status || "unknown").toLowerCase()}`]));
+        formData.append(
+          "tags",
+          JSON.stringify([
+            "verify_page_report",
+            `status_${scanStatus}`,
+            `outcome_${scanOutcome}`,
+            classificationTag,
+            ...reasonTags,
+          ])
+        );
       }
       for (const photo of reportPhotos.slice(0, 4)) {
         formData.append("photos", photo);
@@ -690,9 +837,33 @@ export default function Verify() {
                   >
                     <p className="font-medium">{primaryMessage}</p>
                     {statusKind === "verified_again" ? (
-                      <div className="mt-1 space-y-1 text-emerald-900/90">
+                      <div className="mt-1 space-y-2 text-emerald-900/90">
                         <p>You have verified this product before.</p>
                         <p>You can safely show this screen again if someone asks for proof.</p>
+                        <Collapsible open={showRepeatDetails} onOpenChange={setShowRepeatDetails}>
+                          <CollapsibleTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-auto px-0 py-0 text-emerald-800 hover:text-emerald-900"
+                            >
+                              Show details
+                              {showRepeatDetails ? (
+                                <ChevronUp className="ml-1 h-4 w-4" />
+                              ) : (
+                                <ChevronDown className="ml-1 h-4 w-4" />
+                              )}
+                            </Button>
+                          </CollapsibleTrigger>
+                          <CollapsibleContent>
+                            <ul className="mt-2 list-disc space-y-1 pl-5 text-emerald-900/90">
+                              {repeatReasons.map((reason) => (
+                                <li key={reason}>{reason}</li>
+                              ))}
+                            </ul>
+                          </CollapsibleContent>
+                        </Collapsible>
                       </div>
                     ) : null}
                     {statusKind === "possible_duplicate" ? (
@@ -716,13 +887,48 @@ export default function Verify() {
                 ) : null}
 
                 {statusKind === "possible_duplicate" ? (
-                  <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+                  <div className="space-y-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
                     <p className="font-semibold">Why this was flagged</p>
                     <ul className="mt-2 list-disc space-y-1 pl-5 text-red-900/90">
-                      {(riskReasons.length > 0 ? riskReasons : ["Unusual scan pattern detected by security policy."]).map((r) => (
+                      {(duplicateReasons.length > 0 ? duplicateReasons : ["Unusual scan pattern detected by security policy."]).map((r) => (
                         <li key={r}>{r}</li>
                       ))}
                     </ul>
+                    <div className="flex flex-col gap-2 pt-1 md:flex-row">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setReportReference(null);
+                          setReportOpen(true);
+                        }}
+                        className="border-red-300 bg-white text-red-700 hover:bg-red-100 hover:text-red-800"
+                      >
+                        <Flag className="mr-2 h-4 w-4" />
+                        Report suspected counterfeit
+                      </Button>
+                      {supportContactHref ? (
+                        <Button asChild type="button" variant="outline" className="border-red-300 bg-white text-red-700 hover:bg-red-100 hover:text-red-800">
+                          <a href={supportContactHref}>
+                            <LifeBuoy className="mr-2 h-4 w-4" />
+                            Contact support
+                          </a>
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="border-red-300 bg-white text-red-700 hover:bg-red-100 hover:text-red-800"
+                        onClick={() =>
+                          openHelpAssistant({
+                            entryId: "customer-duplicate-explainer",
+                            query: "How does duplication happen?",
+                          })
+                        }
+                      >
+                        How does duplication happen?
+                      </Button>
+                    </div>
                   </div>
                 ) : null}
 
@@ -935,8 +1141,19 @@ export default function Verify() {
                 <span className="ml-2 font-mono font-semibold text-slate-900">{displayedCode}</span>
               </div>
 
+              <div className="rounded-lg border bg-slate-50 p-3 text-sm text-slate-700">
+                <p>
+                  <span className="text-slate-500">Classification:</span>{" "}
+                  <span className="font-semibold">{statusKind.toUpperCase()}</span>
+                </p>
+                <p className="mt-1">
+                  <span className="text-slate-500">Risk reasons:</span>{" "}
+                  {(duplicateReasons.length ? duplicateReasons : repeatReasons).join(" | ") || "Not available"}
+                </p>
+              </div>
+
               <div className="space-y-2">
-                <Label>Incident type</Label>
+                <Label>Issue type</Label>
                 <Select value={incidentType} onValueChange={setIncidentType}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select incident type" />
@@ -952,7 +1169,7 @@ export default function Verify() {
               </div>
 
               <div className="space-y-2">
-                <Label>What did you observe?</Label>
+                <Label>Notes</Label>
                 <Textarea
                   value={reportDescription}
                   onChange={(e) => setReportDescription(e.target.value)}

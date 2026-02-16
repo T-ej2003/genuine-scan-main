@@ -733,6 +733,67 @@ Local machine (`localhost`) note:
 - Network bandwidth is usually not the bottleneck.
 - Throughput is mostly limited by CPU (PNG generation/compression) and disk write speed in the browser download path.
 
+## 20. Help Assistant (Free)
+
+AuthenticQR now includes a fully local, no-cost in-app assistant:
+
+- Floating widget: **Help** button at bottom-right on all pages.
+- Assistant panel: local KB search + role-aware suggestions.
+- No paid AI APIs required (no OpenAI/Gemini keys).
+
+### Open documentation pages
+
+- Help hub: `/help`
+- Role pages:
+  - `/help/superadmin` (alias of `/help/super-admin`)
+  - `/help/licensee` (alias of `/help/licensee-admin`)
+  - `/help/manufacturer`
+  - `/help/customer`
+
+### Local knowledge base source
+
+- File: `src/help/kb.ts`
+- Each entry includes:
+  - `id`
+  - `role` (`all|super_admin|licensee|manufacturer|customer`)
+  - `keywords[]`
+  - `title`
+  - `answer` (markdown)
+  - `linksToRoutes[]`
+
+Search/scoring logic lives in `src/help/kb-search.ts`.
+
+### Rule-based scan explanation (customer verify page)
+
+- `Verified Again`: friendly repeat-verification messaging with “Show details”.
+- `Possible Duplicate`: reasons generated from scan signals (multi-device, burst scans, location/country drift) with clear action CTAs.
+- Fraud report form auto-attaches scan metadata and stores incident report in DB.
+
+### Screenshots for docs/help pages
+
+- Store docs images under `public/docs/`.
+- Help pages render real images automatically if files exist, else placeholders.
+
+Optional automated capture:
+
+```bash
+npm run docs:screenshots
+```
+
+Supported environment variables for capture script:
+
+- `DOCS_BASE_URL`
+- `DOCS_SUPERADMIN_EMAIL`, `DOCS_SUPERADMIN_PASSWORD`
+- `DOCS_LICENSEE_ADMIN_EMAIL`, `DOCS_LICENSEE_ADMIN_PASSWORD`
+- `DOCS_MANUFACTURER_EMAIL`, `DOCS_MANUFACTURER_PASSWORD`
+- `DOCS_QR_CODE`
+
+Generate DOCX manual from markdown:
+
+```bash
+npm run docs:docx
+```
+
 ---
 
 For role-specific operational procedures, see `docs/USER_MANUAL.md`.

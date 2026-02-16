@@ -7,6 +7,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import HelpAssistantWidget from "@/components/help/HelpAssistantWidget";
 
 const Login = lazy(() => import("@/pages/Login"));
 const AcceptInvite = lazy(() => import("@/pages/AcceptInvite"));
@@ -27,6 +28,19 @@ const Verify = lazy(() => import("@/pages/Verify"));
 const VerifyLanding = lazy(() => import("@/pages/VerifyLanding"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 const AccountSettings = lazy(() => import("@/pages/AccountSettings"));
+const HelpHub = lazy(() => import("@/pages/help/HelpHub"));
+const HelpAuthOverview = lazy(() => import("@/pages/help/AuthOverview"));
+const HelpGettingAccess = lazy(() => import("@/pages/help/GettingAccess"));
+const HelpSettingPassword = lazy(() => import("@/pages/help/SettingPassword"));
+const HelpRolesPermissions = lazy(() => import("@/pages/help/RolesPermissions"));
+const HelpSuperAdmin = lazy(() => import("@/pages/help/SuperAdmin"));
+const HelpLicenseeAdmin = lazy(() => import("@/pages/help/LicenseeAdmin"));
+const HelpManufacturer = lazy(() => import("@/pages/help/Manufacturer"));
+const HelpCustomer = lazy(() => import("@/pages/help/Customer"));
+const HelpIncidentResponse = lazy(() => import("@/pages/help/IncidentResponse"));
+const HelpPolicyAlerts = lazy(() => import("@/pages/help/PolicyAlerts"));
+const HelpIncidentActions = lazy(() => import("@/pages/help/IncidentActions"));
+const HelpCommunications = lazy(() => import("@/pages/help/Communications"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -98,6 +112,21 @@ function AppRoutes() {
         <Route path="/verify" element={<VerifyLanding />} />
         <Route path="/verify/:code" element={<Verify />} />
         <Route path="/scan" element={<Verify />} />
+        <Route path="/help" element={<HelpHub />} />
+        <Route path="/help/auth-overview" element={<HelpAuthOverview />} />
+        <Route path="/help/getting-access" element={<HelpGettingAccess />} />
+        <Route path="/help/setting-password" element={<HelpSettingPassword />} />
+        <Route path="/help/roles-permissions" element={<HelpRolesPermissions />} />
+        <Route path="/help/super-admin" element={<HelpSuperAdmin />} />
+        <Route path="/help/superadmin" element={<Navigate to="/help/super-admin" replace />} />
+        <Route path="/help/licensee-admin" element={<HelpLicenseeAdmin />} />
+        <Route path="/help/licensee" element={<Navigate to="/help/licensee-admin" replace />} />
+        <Route path="/help/manufacturer" element={<HelpManufacturer />} />
+        <Route path="/help/customer" element={<HelpCustomer />} />
+        <Route path="/help/incident-response" element={<HelpIncidentResponse />} />
+        <Route path="/help/policy-alerts" element={<HelpPolicyAlerts />} />
+        <Route path="/help/incident-actions" element={<HelpIncidentActions />} />
+        <Route path="/help/communications" element={<HelpCommunications />} />
 
         {/* Auth */}
         <Route
@@ -265,6 +294,7 @@ export default function App() {
             }}
           >
             <AppRoutes />
+            <HelpAssistantWidget />
           </BrowserRouter>
         </TooltipProvider>
       </AuthProvider>

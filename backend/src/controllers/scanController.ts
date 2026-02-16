@@ -282,7 +282,7 @@ export const scanToken = async (req: Request, res: Response) => {
     const finalStatus =
       policy.autoBlockedQr || policy.autoBlockedBatch ? QRStatus.BLOCKED : updated.status;
     const effectiveOutcome = finalStatus === QRStatus.BLOCKED ? "BLOCKED" : decision.outcome;
-    const scanInsight = await getScanInsight(updated.id);
+    const scanInsight = await getScanInsight(updated.id, fp || null);
 
     const containment = {
       qrUnderInvestigation: updated.underInvestigationAt
@@ -366,6 +366,7 @@ export const scanToken = async (req: Request, res: Response) => {
         latestScanLocation: scanInsight.latestScanLocation,
         previousScanAt: scanInsight.previousScanAt,
         previousScanLocation: scanInsight.previousScanLocation,
+        scanSignals: scanInsight.signals,
         policy,
       },
     });

@@ -16,6 +16,7 @@ import {
   Shield,
   ScanEye,
   ShieldAlert,
+  CircleHelp,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -43,6 +44,7 @@ const navItems: NavItem[] = [
   { label: "IR Center", href: "/ir", icon: Shield, roles: ["super_admin"] },
   { label: "Incidents", href: "/incidents", icon: ShieldAlert, roles: ["licensee_admin"] },
   { label: "Audit Logs", href: "/audit-logs", icon: FileText, roles: ["super_admin", "licensee_admin"] },
+  { label: "Help", href: "/help", icon: CircleHelp, roles: ["super_admin", "licensee_admin", "manufacturer"] },
 ];
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -143,6 +145,13 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
           <div className="flex-1" />
 
+          <Button asChild variant="ghost" className="mr-1 gap-2">
+            <Link to="/help">
+              <CircleHelp className="h-4 w-4 text-muted-foreground" />
+              <span className="hidden sm:inline">Help</span>
+            </Link>
+          </Button>
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="gap-2">
@@ -180,6 +189,15 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         </header>
 
         <main className="p-4 lg:p-6">{children}</main>
+        <footer className="px-4 pb-6 lg:px-6">
+          <div className="text-center text-xs text-muted-foreground">
+            Need guidance?{" "}
+            <Link to="/help" className="text-foreground underline-offset-4 hover:underline">
+              Open the help center
+            </Link>
+            .
+          </div>
+        </footer>
       </div>
     </div>
   );

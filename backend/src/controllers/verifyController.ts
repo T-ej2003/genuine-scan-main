@@ -295,7 +295,7 @@ export const verifyQRCode = async (req: Request, res: Response) => {
     const finalStatus = blockedByPolicy ? QRStatus.BLOCKED : updated.status;
 
     const firstScanTime = updated.scannedAt ? new Date(updated.scannedAt) : null;
-    const scanInsight = await getScanInsight(updated.id);
+    const scanInsight = await getScanInsight(updated.id, (req.query.device as string | undefined) || null);
 
     const runtimeContainment = {
       qrUnderInvestigation: updated.underInvestigationAt
@@ -380,6 +380,7 @@ export const verifyQRCode = async (req: Request, res: Response) => {
         latestScanLocation: scanInsight.latestScanLocation,
         previousScanAt: scanInsight.previousScanAt,
         previousScanLocation: scanInsight.previousScanLocation,
+        scanSignals: scanInsight.signals,
 
         warningMessage,
         policy,
