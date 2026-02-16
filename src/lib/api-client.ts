@@ -94,7 +94,8 @@ class ApiClient {
     if (!options.skipJson && hasBody && !isForm) {
       headers["Content-Type"] = "application/json";
     }
-    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+    const hasAuthorizationHeader = Object.keys(headers).some((key) => key.toLowerCase() === "authorization");
+    if (this.token && !hasAuthorizationHeader) headers["Authorization"] = `Bearer ${this.token}`;
 
     // Double-submit CSRF: server sets `aq_csrf` cookie; client mirrors it in header.
     const isStateChanging = !["GET", "HEAD", "OPTIONS"].includes(method);
@@ -637,7 +638,10 @@ class ApiClient {
 
   // ==================== PUBLIC VERIFY ====================
   // Public endpoint, no auth required. Still works if token exists.
-  async verifyQRCode(code: string, opts?: { device?: string; lat?: number; lon?: number; acc?: number }) {
+  async verifyQRCode(
+    code: string,
+    opts?: { device?: string; lat?: number; lon?: number; acc?: number; customerToken?: string }
+  ) {
     const c = String(code || "").trim();
     const params = new URLSearchParams();
     if (opts?.device) params.append("device", opts.device);
@@ -645,7 +649,8 @@ class ApiClient {
     if (opts?.lon != null) params.append("lon", String(opts.lon));
     if (opts?.acc != null) params.append("acc", String(opts.acc));
     const query = params.toString() ? `?${params.toString()}` : "";
-    return this.request(`/verify/${encodeURIComponent(c)}${query}`, { method: "GET" });
+    const headers = opts?.customerToken ? { Authorization: `Bearer ${opts.customerToken}` } : undefined;
+    return this.request(`/verify/${encodeURIComponent(c)}${query}`, { method: "GET", headers });
   }
 
   async reportFraud(payload: {
@@ -657,7 +662,7 @@ class ApiClient {
     observedOutcome?: string;
     pageUrl?: string;
   }) {
-    return this.request(`/verify/report-fraud`, { method: "POST", body: JSON.stringify(payload) });
+    return this.request(`/fraud-report`, { method: "POST", body: JSON.stringify(payload) });
   }
 
   async submitProductFeedback(payload: {
@@ -672,7 +677,10 @@ class ApiClient {
     return this.request(`/verify/feedback`, { method: "POST", body: JSON.stringify(payload) });
   }
 
-  async scanToken(token: string, opts?: { device?: string; lat?: number; lon?: number; acc?: number }) {
+  async scanToken(
+    token: string,
+    opts?: { device?: string; lat?: number; lon?: number; acc?: number; customerToken?: string }
+  ) {
     const params = new URLSearchParams();
     params.append("t", token);
     if (opts?.device) params.append("device", opts.device);
@@ -680,7 +688,67 @@ class ApiClient {
     if (opts?.lon != null) params.append("lon", String(opts.lon));
     if (opts?.acc != null) params.append("acc", String(opts.acc));
     const query = params.toString() ? `?${params.toString()}` : "";
-    return this.request(`/scan${query}`, { method: "GET" });
+    const headers = opts?.customerToken ? { Authorization: `Bearer ${opts.customerToken}` } : undefined;
+    return this.request(`/scan${query}`, { method: "GET", headers });
+  }
+
+  async requestVerifyEmailOtp(email: string) {
+    return this.request<{
+      challengeToken: string;
+      expiresAt: string;
+      maskedEmail: string;
+    }>(`/verify/auth/email-otp/request`, {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async verifyEmailOtp(challengeToken: string, otp: string) {
+    return this.request<{
+      token: string;
+      customer: {
+        userId: string;
+        email: string;
+        maskedEmail: string;
+      };
+    }>(`/verify/auth/email-otp/verify`, {
+      method: "POST",
+      body: JSON.stringify({ challengeToken, otp }),
+    });
+  }
+
+  async claimVerifiedProduct(code: string, customerToken: string) {
+    return this.request<{
+      claimResult: string;
+      message?: string;
+      conflict?: boolean;
+      classification?: string;
+      reasons?: string[];
+      warningMessage?: string;
+      claimTimestamp?: string | null;
+      ownershipStatus?: {
+        isClaimed: boolean;
+        claimedAt: string | null;
+        isOwnedByRequester: boolean;
+        isClaimedByAnother: boolean;
+        canClaim: boolean;
+      };
+    }>(`/verify/${encodeURIComponent(code)}/claim`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${customerToken}` },
+    });
+  }
+
+  async submitFraudReport(formData: FormData, customerToken?: string) {
+    const headers: Record<string, string> = {};
+    if (customerToken) headers["Authorization"] = `Bearer ${customerToken}`;
+    return this.request(`/fraud-report`, {
+      method: "POST",
+      body: formData,
+      headers,
+      skipJson: true,
+      timeoutMs: 45_000,
+    });
   }
 
   async getScanLogs(options?: {
