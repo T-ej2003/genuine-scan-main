@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { authenticate, authenticateSSE } from "../middleware/auth";
+import { optionalCustomerVerifyAuth, requireCustomerVerifyAuth } from "../middleware/customerVerifyAuth";
 import { enforceTenantIsolation } from "../middleware/tenantIsolation";
 import {
   requirePlatformAdmin,
@@ -79,7 +80,14 @@ import {
   hardDeleteManufacturer,
 } from "../controllers/userController";
 
-import { verifyQRCode, reportFraud, submitProductFeedback } from "../controllers/verifyController";
+import {
+  verifyQRCode,
+  reportFraud,
+  submitProductFeedback,
+  requestCustomerEmailOtp,
+  verifyCustomerEmailOtp,
+  claimProductOwnership,
+} from "../controllers/verifyController";
 import { scanToken } from "../controllers/scanController";
 import { createPrintJob, downloadPrintJobPack, confirmPrintJob } from "../controllers/printJobController";
 import auditRoutes from "./auditRoutes";
@@ -131,16 +139,34 @@ const forgotPasswordLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const verifyOtpRequestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const verifyOtpVerifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ==================== PUBLIC ====================
 router.post("/auth/login", loginLimiter, login);
 router.post("/auth/accept-invite", loginLimiter, acceptInviteController);
 router.post("/auth/forgot-password", forgotPasswordLimiter, forgotPassword);
 router.post("/auth/reset-password", forgotPasswordLimiter, resetPassword);
-router.get("/verify/:code", verifyQRCode);
-router.post("/verify/report-fraud", reportFraud);
+router.get("/verify/:code", optionalCustomerVerifyAuth, verifyQRCode);
+router.post("/verify/auth/email-otp/request", verifyOtpRequestLimiter, requestCustomerEmailOtp);
+router.post("/verify/auth/email-otp/verify", verifyOtpVerifyLimiter, verifyCustomerEmailOtp);
+router.post("/verify/:code/claim", requireCustomerVerifyAuth, claimProductOwnership);
+router.post("/verify/report-fraud", uploadIncidentReportPhotos, reportFraud);
+router.post("/fraud-report", uploadIncidentReportPhotos, reportFraud);
 router.post("/verify/feedback", submitProductFeedback);
 router.post("/incidents/report", uploadIncidentReportPhotos, reportIncident);
-router.get("/scan", scanToken);
+router.get("/scan", optionalCustomerVerifyAuth, scanToken);
 router.get("/health", healthCheck);
 
 // ==================== AUTH ====================

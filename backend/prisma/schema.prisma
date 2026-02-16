@@ -400,6 +400,7 @@ model QRCode {
   traceEvents TraceEvent[]
   policyAlerts PolicyAlert[]
   incidents Incident[]
+  ownership Ownership?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -410,6 +411,16 @@ model QRCode {
   @@index([printJobId])
   @@index([tokenHash])
   @@index([underInvestigationAt])
+}
+
+model Ownership {
+  id        String   @id @default(cuid())
+  qrCodeId  String   @unique
+  qrCode    QRCode   @relation(fields: [qrCodeId], references: [id])
+  userId    String
+  claimedAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 model QrScanLog {

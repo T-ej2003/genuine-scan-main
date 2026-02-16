@@ -1,22 +1,71 @@
 import { Request, Response } from "express";
-import prisma from "../config/database";
-import { IncidentActorType, QRStatus } from "@prisma/client";
-import { recordScan } from "../services/qrService";
-import { createAuditLog } from "../services/auditService";
-import { evaluateScanAndEnforcePolicy } from "../services/policyEngineService";
+import { IncidentActorType, Prisma, QRStatus } from "@prisma/client";
 import { z } from "zod";
+
+import prisma from "../config/database";
+import { CustomerVerifyRequest } from "../middleware/customerVerifyAuth";
+import { createAuditLog } from "../services/auditService";
+import {
+  createCustomerOtpChallenge,
+  issueCustomerVerifyToken,
+  maskEmail,
+  verifyCustomerOtpChallenge,
+} from "../services/customerVerifyAuthService";
+import { sendAuthEmail } from "../services/auth/authEmailService";
+import { getSuperadminAlertEmails, sendIncidentEmail } from "../services/incidentEmailService";
 import { createIncidentFromReport } from "../services/incidentService";
+import { evaluateScanAndEnforcePolicy } from "../services/policyEngineService";
+import { recordScan } from "../services/qrService";
 import { getScanInsight } from "../services/scanInsightService";
 
-const reportFraudSchema = z.object({
-  code: z.string().trim().min(2).max(128),
-  reason: z.string().trim().min(3).max(120),
-  notes: z.string().trim().max(1500).optional(),
-  contactEmail: z.string().trim().email().max(160).optional(),
-  observedStatus: z.string().trim().max(64).optional(),
-  observedOutcome: z.string().trim().max(64).optional(),
-  pageUrl: z.string().trim().max(1000).optional(),
-});
+type VerifyClassification =
+  | "FIRST_SCAN"
+  | "LEGIT_REPEAT"
+  | "SUSPICIOUS_DUPLICATE"
+  | "BLOCKED_BY_SECURITY"
+  | "NOT_READY_FOR_CUSTOMER_USE";
+
+type OwnershipStatus = {
+  isClaimed: boolean;
+  claimedAt: string | null;
+  isOwnedByRequester: boolean;
+  isClaimedByAnother: boolean;
+  canClaim: boolean;
+};
+
+type ScanSummary = {
+  totalScans: number;
+  firstVerifiedAt: string | null;
+  latestVerifiedAt: string | null;
+  firstVerifiedLocation: string | null;
+  latestVerifiedLocation: string | null;
+};
+
+const INCIDENT_TYPES = ["counterfeit_suspected", "duplicate_scan", "tampered_label", "wrong_product", "other"] as const;
+
+type ReportIncidentType = (typeof INCIDENT_TYPES)[number];
+
+const reportFraudSchema = z
+  .object({
+    code: z.string().trim().max(128).optional(),
+    qrCodeValue: z.string().trim().max(128).optional(),
+    reason: z.string().trim().min(3).max(120).optional(),
+    description: z.string().trim().max(2000).optional(),
+    notes: z.string().trim().max(2000).optional(),
+    incidentType: z.enum(INCIDENT_TYPES).optional(),
+    contactEmail: z.string().trim().email().max(160).optional(),
+    customerEmail: z.string().trim().email().max(160).optional(),
+    consentToContact: z.union([z.boolean(), z.string()]).optional(),
+    preferredContactMethod: z.enum(["email", "phone", "whatsapp", "none"]).optional(),
+    observedStatus: z.string().trim().max(64).optional(),
+    observedOutcome: z.string().trim().max(64).optional(),
+    pageUrl: z.string().trim().max(1000).optional(),
+    tags: z.union([z.string(), z.array(z.string())]).optional(),
+  })
+  .refine((v) => Boolean(String(v.code || v.qrCodeValue || "").trim()), {
+    message: "Code is required",
+    path: ["code"],
+  });
 
 const productFeedbackSchema = z.object({
   code: z.string().trim().min(2).max(128),
@@ -28,7 +77,459 @@ const productFeedbackSchema = z.object({
   pageUrl: z.string().trim().max(1000).optional(),
 });
 
-export const verifyQRCode = async (req: Request, res: Response) => {
+const requestOtpSchema = z.object({
+  email: z.string().trim().email().max(160),
+});
+
+const verifyOtpSchema = z.object({
+  challengeToken: z.string().trim().min(16),
+  otp: z.string().trim().min(4).max(12),
+});
+
+const mapLicensee = (licensee: any) =>
+  licensee
+    ? {
+        id: licensee.id,
+        name: licensee.name,
+        prefix: licensee.prefix,
+        brandName: licensee.brandName,
+        location: licensee.location,
+        website: licensee.website,
+        supportEmail: licensee.supportEmail,
+        supportPhone: licensee.supportPhone,
+      }
+    : null;
+
+const mapBatch = (batch: any) =>
+  batch
+    ? {
+        id: batch.id,
+        name: batch.name,
+        printedAt: batch.printedAt,
+        manufacturer: batch.manufacturer || null,
+      }
+    : null;
+
+const normalizeCode = (value: string) => String(value || "").trim().toUpperCase();
+
+const parseBoolean = (value: unknown, fallback = false) => {
+  if (typeof value === "boolean") return value;
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+};
+
+const parseTags = (value: unknown) => {
+  if (Array.isArray(value)) {
+    return value.map((v) => String(v || "").trim()).filter(Boolean);
+  }
+  const raw = String(value || "").trim();
+  if (!raw) return [] as string[];
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.map((v) => String(v || "").trim()).filter(Boolean);
+    }
+  } catch {
+    // fall through
+  }
+
+  return raw
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+};
+
+const toIso = (value: Date | string | null | undefined) => {
+  if (!value) return null;
+  const dt = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(dt.getTime()) ? dt.toISOString() : null;
+};
+
+const isQrReadyForCustomerUse = (status: QRStatus) => {
+  return status === QRStatus.PRINTED || status === QRStatus.REDEEMED || status === QRStatus.SCANNED;
+};
+
+const statusNotReadyReason = (status: QRStatus) => {
+  if (status === QRStatus.DORMANT || status === QRStatus.ACTIVE) {
+    return "Code exists but has not been assigned to a finished product.";
+  }
+  if (status === QRStatus.ALLOCATED) {
+    return "Code is allocated but the print lifecycle is not complete.";
+  }
+  if (status === QRStatus.ACTIVATED) {
+    return "Code is awaiting print confirmation before customer use.";
+  }
+  return "Code is not ready for customer verification.";
+};
+
+const buildContainment = (qrCode: any) => ({
+  qrUnderInvestigation: qrCode.underInvestigationAt
+    ? {
+        at: toIso(qrCode.underInvestigationAt),
+        reason: qrCode.underInvestigationReason || null,
+      }
+    : null,
+  batchSuspended: qrCode.batch?.suspendedAt
+    ? {
+        at: toIso(qrCode.batch.suspendedAt),
+        reason: qrCode.batch.suspendedReason || null,
+      }
+    : null,
+  orgSuspended: qrCode.licensee?.suspendedAt
+    ? {
+        at: toIso(qrCode.licensee.suspendedAt),
+        reason: qrCode.licensee.suspendedReason || null,
+      }
+    : null,
+});
+
+const deriveDuplicateReasons = (params: {
+  scanCount: number;
+  scanSignals?: {
+    distinctDeviceCount24h?: number;
+    recentScanCount10m?: number;
+    distinctCountryCount24h?: number;
+  } | null;
+  policy?: any;
+}) => {
+  const reasons: string[] = [];
+  const scanSignals = params.scanSignals || null;
+  const policy = params.policy || null;
+  const triggered = policy?.triggered || {};
+  const alerts = Array.isArray(policy?.alerts) ? policy.alerts : [];
+
+  if (Number(scanSignals?.distinctDeviceCount24h ?? 0) > 1) {
+    reasons.push("Multiple devices scanned this code recently.");
+  }
+  if (Number(scanSignals?.recentScanCount10m ?? 0) >= 3) {
+    reasons.push("A short burst of scans was detected.");
+  }
+  if (Number(scanSignals?.distinctCountryCount24h ?? 0) > 1) {
+    reasons.push("Recent scans came from different countries.");
+  }
+  if (params.scanCount >= 4 || triggered.multiScan) {
+    reasons.push("High repeat-scan volume was detected.");
+  }
+  if (triggered.geoDrift) {
+    reasons.push("Scan geography drift exceeded policy threshold.");
+  }
+  if (triggered.velocitySpike) {
+    reasons.push("Scan velocity exceeded policy threshold.");
+  }
+
+  for (const alert of alerts) {
+    const message = String(alert?.message || "").trim();
+    if (!message) continue;
+    if (!reasons.includes(message)) reasons.push(message);
+  }
+
+  return reasons.slice(0, 6);
+};
+
+const buildScanSummary = (params: {
+  scanCount: number;
+  scannedAt?: Date | null;
+  scanInsight?: {
+    firstScanAt?: string | null;
+    firstScanLocation?: string | null;
+    latestScanAt?: string | null;
+    latestScanLocation?: string | null;
+  } | null;
+}): ScanSummary => {
+  const firstVerifiedAt =
+    params.scanInsight?.firstScanAt ||
+    (params.scannedAt && Number.isFinite(params.scannedAt.getTime()) ? params.scannedAt.toISOString() : null);
+  const latestVerifiedAt =
+    params.scanInsight?.latestScanAt ||
+    params.scanInsight?.firstScanAt ||
+    (params.scannedAt && Number.isFinite(params.scannedAt.getTime()) ? params.scannedAt.toISOString() : null);
+
+  return {
+    totalScans: Number(params.scanCount || 0),
+    firstVerifiedAt,
+    latestVerifiedAt,
+    firstVerifiedLocation: params.scanInsight?.firstScanLocation || null,
+    latestVerifiedLocation: params.scanInsight?.latestScanLocation || null,
+  };
+};
+
+const buildOwnershipStatus = (params: {
+  ownership: { userId: string; claimedAt: Date } | null;
+  customerUserId?: string | null;
+  isReady: boolean;
+  isBlocked: boolean;
+}): OwnershipStatus => {
+  const ownership = params.ownership;
+  const customerUserId = String(params.customerUserId || "").trim();
+
+  if (!ownership) {
+    return {
+      isClaimed: false,
+      claimedAt: null,
+      isOwnedByRequester: false,
+      isClaimedByAnother: false,
+      canClaim: params.isReady && !params.isBlocked && Boolean(customerUserId),
+    };
+  }
+
+  const isOwnedByRequester = Boolean(customerUserId) && ownership.userId === customerUserId;
+
+  return {
+    isClaimed: true,
+    claimedAt: ownership.claimedAt.toISOString(),
+    isOwnedByRequester,
+    isClaimedByAnother: !isOwnedByRequester,
+    canClaim: false,
+  };
+};
+
+const buildSecurityContainmentReasons = (containment: ReturnType<typeof buildContainment>) => {
+  const reasons: string[] = [];
+  if (containment.qrUnderInvestigation?.reason) reasons.push(`QR containment: ${containment.qrUnderInvestigation.reason}`);
+  if (containment.batchSuspended?.reason) reasons.push(`Batch containment: ${containment.batchSuspended.reason}`);
+  if (containment.orgSuspended?.reason) reasons.push(`Organization containment: ${containment.orgSuspended.reason}`);
+  return reasons;
+};
+
+const inferIncidentType = (input: { reason?: string; incidentType?: ReportIncidentType }): ReportIncidentType => {
+  if (input.incidentType) return input.incidentType;
+  const reason = String(input.reason || "").toLowerCase();
+  if (reason.includes("mismatch")) return "wrong_product";
+  if (reason.includes("used") || reason.includes("duplicate")) return "duplicate_scan";
+  if (reason.includes("seller") || reason.includes("fake") || reason.includes("counterfeit")) return "counterfeit_suspected";
+  return "other";
+};
+
+const incidentSummaryText = (incident: any) =>
+  [
+    `Incident ID: ${incident.id}`,
+    `QR Code: ${incident.qrCodeValue}`,
+    `Severity: ${incident.severity}`,
+    `Status: ${incident.status}`,
+    `Description: ${incident.description}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+const buildFraudVerificationSnapshot = async (normalizedCode: string) => {
+  const qrCode = await prisma.qRCode.findUnique({
+    where: { code: normalizedCode },
+    include: {
+      ownership: {
+        select: {
+          userId: true,
+          claimedAt: true,
+        },
+      },
+    },
+  });
+
+  if (!qrCode) {
+    const emptySummary: ScanSummary = {
+      totalScans: 0,
+      firstVerifiedAt: null,
+      latestVerifiedAt: null,
+      firstVerifiedLocation: null,
+      latestVerifiedLocation: null,
+    };
+
+    const emptyOwnership: OwnershipStatus = {
+      isClaimed: false,
+      claimedAt: null,
+      isOwnedByRequester: false,
+      isClaimedByAnother: false,
+      canClaim: false,
+    };
+
+    return {
+      classification: "NOT_READY_FOR_CUSTOMER_USE" as VerifyClassification,
+      reasons: ["Code not found in registry."],
+      scanSummary: emptySummary,
+      ownershipStatus: emptyOwnership,
+    };
+  }
+
+  const scanInsight = await getScanInsight(qrCode.id, null);
+  const scanSummary = buildScanSummary({
+    scanCount: Number(qrCode.scanCount || 0),
+    scannedAt: qrCode.scannedAt,
+    scanInsight,
+  });
+
+  const isBlocked = qrCode.status === QRStatus.BLOCKED;
+  const isReady = isQrReadyForCustomerUse(qrCode.status);
+
+  const ownershipStatus = buildOwnershipStatus({
+    ownership: qrCode.ownership,
+    isReady,
+    isBlocked,
+  });
+
+  if (isBlocked) {
+    return {
+      classification: "BLOCKED_BY_SECURITY" as VerifyClassification,
+      reasons: ["Code is blocked by security policy or containment controls."],
+      scanSummary,
+      ownershipStatus,
+    };
+  }
+
+  if (!isReady) {
+    return {
+      classification: "NOT_READY_FOR_CUSTOMER_USE" as VerifyClassification,
+      reasons: [statusNotReadyReason(qrCode.status)],
+      scanSummary,
+      ownershipStatus,
+    };
+  }
+
+  if (scanSummary.totalScans <= 1) {
+    return {
+      classification: "FIRST_SCAN" as VerifyClassification,
+      reasons: ["First successful verification recorded."],
+      scanSummary,
+      ownershipStatus,
+    };
+  }
+
+  const duplicateReasons = deriveDuplicateReasons({
+    scanCount: scanSummary.totalScans,
+    scanSignals: scanInsight.signals,
+  });
+
+  return {
+    classification: duplicateReasons.length ? ("SUSPICIOUS_DUPLICATE" as VerifyClassification) : ("LEGIT_REPEAT" as VerifyClassification),
+    reasons: duplicateReasons.length ? duplicateReasons : ["Repeat scans match expected customer re-verification behavior."],
+    scanSummary,
+    ownershipStatus,
+  };
+};
+
+const mapUploadedEvidence = (files: Express.Multer.File[]) => {
+  return files.map((file) => {
+    const fileName = String(file.filename || "").trim();
+    return {
+      fileUrl: fileName ? `/api/incidents/evidence-files/${encodeURIComponent(fileName)}` : null,
+      storageKey: fileName || null,
+      fileType: String(file.mimetype || "application/octet-stream"),
+    };
+  });
+};
+
+export const requestCustomerEmailOtp = async (req: Request, res: Response) => {
+  try {
+    const parsed = requestOtpSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: parsed.error.errors[0]?.message || "Invalid email address",
+      });
+    }
+
+    const challenge = createCustomerOtpChallenge(parsed.data.email);
+
+    const subject = "Your AuthenticQR sign-in code";
+    const text =
+      `Use this one-time code to continue product protection sign-in: ${challenge.otp}\n\n` +
+      `This code expires in 10 minutes. If you did not request this code, you can ignore this message.`;
+
+    const emailResult = await sendAuthEmail({
+      toAddress: challenge.email,
+      subject,
+      text,
+      template: "verify_customer_email_otp",
+      actorUserId: null,
+      ipHash: null,
+      userAgent: req.get("user-agent") || undefined,
+    });
+
+    if (!emailResult.delivered) {
+      return res.status(500).json({
+        success: false,
+        error: emailResult.error || "Could not send OTP email",
+      });
+    }
+
+    await createAuditLog({
+      action: "VERIFY_CUSTOMER_OTP_SENT",
+      entityType: "CustomerVerifyAuth",
+      entityId: challenge.email,
+      details: {
+        maskedEmail: maskEmail(challenge.email),
+        expiresAt: challenge.expiresAt,
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || undefined,
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        challengeToken: challenge.challengeToken,
+        expiresAt: challenge.expiresAt,
+        maskedEmail: maskEmail(challenge.email),
+      },
+    });
+  } catch (error) {
+    console.error("requestCustomerEmailOtp error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Could not start email verification",
+    });
+  }
+};
+
+export const verifyCustomerEmailOtp = async (req: Request, res: Response) => {
+  try {
+    const parsed = verifyOtpSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: parsed.error.errors[0]?.message || "Invalid OTP payload",
+      });
+    }
+
+    const identity = verifyCustomerOtpChallenge({
+      challengeToken: parsed.data.challengeToken,
+      otp: parsed.data.otp,
+    });
+
+    const token = issueCustomerVerifyToken(identity);
+
+    await createAuditLog({
+      action: "VERIFY_CUSTOMER_OTP_VERIFIED",
+      entityType: "CustomerVerifyAuth",
+      entityId: identity.userId,
+      details: {
+        maskedEmail: maskEmail(identity.email),
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || undefined,
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        token,
+        customer: {
+          userId: identity.userId,
+          email: identity.email,
+          maskedEmail: maskEmail(identity.email),
+        },
+      },
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      success: false,
+      error: error?.message || "Invalid OTP code",
+    });
+  }
+};
+
+export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) => {
   try {
     const { code } = req.params;
 
@@ -39,8 +540,10 @@ export const verifyQRCode = async (req: Request, res: Response) => {
       });
     }
 
+    const normalizedCode = normalizeCode(code);
+
     const qrCode = await prisma.qRCode.findUnique({
-      where: { code: code.toUpperCase() },
+      where: { code: normalizedCode },
       include: {
         licensee: {
           select: {
@@ -66,7 +569,12 @@ export const verifyQRCode = async (req: Request, res: Response) => {
             manufacturer: { select: { id: true, name: true, email: true, location: true, website: true } },
           },
         },
-        // product batch removed
+        ownership: {
+          select: {
+            userId: true,
+            claimedAt: true,
+          },
+        },
       },
     });
 
@@ -74,7 +582,7 @@ export const verifyQRCode = async (req: Request, res: Response) => {
       await createAuditLog({
         action: "VERIFY_FAILED",
         entityType: "QRCode",
-        entityId: code,
+        entityId: normalizedCode,
         details: { reason: "Code not found" },
         ipAddress: req.ip,
       });
@@ -84,180 +592,130 @@ export const verifyQRCode = async (req: Request, res: Response) => {
         data: {
           isAuthentic: false,
           message: "This QR code is not registered in our system.",
-          code,
+          code: normalizedCode,
+          classification: "NOT_READY_FOR_CUSTOMER_USE",
+          reasons: ["Code not found in registry."],
+          scanSummary: {
+            totalScans: 0,
+            firstVerifiedAt: null,
+            latestVerifiedAt: null,
+            firstVerifiedLocation: null,
+            latestVerifiedLocation: null,
+          },
+          ownershipStatus: {
+            isClaimed: false,
+            claimedAt: null,
+            isOwnedByRequester: false,
+            isClaimedByAnother: false,
+            canClaim: false,
+          },
+          isBlocked: false,
+          isReady: false,
+          totalScans: 0,
+          firstVerifiedAt: null,
+          latestVerifiedAt: null,
         },
       });
     }
 
-    const containment = {
-      qrUnderInvestigation: qrCode.underInvestigationAt
-        ? {
-            at: qrCode.underInvestigationAt.toISOString(),
-            reason: qrCode.underInvestigationReason || null,
-          }
-        : null,
-      batchSuspended: qrCode.batch?.suspendedAt
-        ? {
-            at: qrCode.batch.suspendedAt.toISOString(),
-            reason: qrCode.batch.suspendedReason || null,
-          }
-        : null,
-      orgSuspended: qrCode.licensee?.suspendedAt
-        ? {
-            at: new Date(qrCode.licensee.suspendedAt).toISOString(),
-            reason: qrCode.licensee.suspendedReason || null,
-          }
-        : null,
+    const customerUserId = req.customer?.userId || null;
+    const containment = buildContainment(qrCode);
+    const scanInsight = await getScanInsight(qrCode.id, (req.query.device as string | undefined) || null);
+    const baseScanSummary = buildScanSummary({
+      scanCount: Number(qrCode.scanCount || 0),
+      scannedAt: qrCode.scannedAt,
+      scanInsight,
+    });
+
+    const qrBlocked = qrCode.status === QRStatus.BLOCKED;
+    const qrReady = isQrReadyForCustomerUse(qrCode.status);
+    const baseOwnershipStatus = buildOwnershipStatus({
+      ownership: qrCode.ownership,
+      customerUserId,
+      isReady: qrReady,
+      isBlocked: qrBlocked,
+    });
+
+    const basePayload = {
+      code: qrCode.code,
+      status: qrCode.status,
+      containment,
+      licensee: mapLicensee(qrCode.licensee),
+      batch: mapBatch(qrCode.batch),
+      batchName: qrCode.batch?.name || null,
+      printedAt: qrCode.batch?.printedAt || null,
+      scanCount: baseScanSummary.totalScans,
+      firstScanAt: scanInsight.firstScanAt,
+      firstScanLocation: scanInsight.firstScanLocation,
+      latestScanAt: scanInsight.latestScanAt,
+      latestScanLocation: scanInsight.latestScanLocation,
+      previousScanAt: scanInsight.previousScanAt,
+      previousScanLocation: scanInsight.previousScanLocation,
+      scanSignals: scanInsight.signals,
     };
 
-    // Blocked code
     if (qrCode.status === QRStatus.BLOCKED) {
+      const reasons = [
+        "This QR code has been blocked due to fraud or recall.",
+        ...buildSecurityContainmentReasons(containment),
+      ];
+
       return res.json({
         success: true,
         data: {
+          ...basePayload,
           isAuthentic: false,
           message: "This QR code has been blocked due to fraud or recall.",
-          code,
-          status: qrCode.status,
-          containment,
-          licensee: qrCode.licensee
-            ? {
-                id: qrCode.licensee.id,
-                name: qrCode.licensee.name,
-                prefix: qrCode.licensee.prefix,
-                brandName: qrCode.licensee.brandName,
-                location: qrCode.licensee.location,
-                website: qrCode.licensee.website,
-                supportEmail: qrCode.licensee.supportEmail,
-                supportPhone: qrCode.licensee.supportPhone,
-              }
-            : null,
-          batch: qrCode.batch
-            ? {
-                id: qrCode.batch.id,
-                name: qrCode.batch.name,
-                printedAt: qrCode.batch.printedAt,
-                manufacturer: qrCode.batch.manufacturer || null,
-              }
-            : null,
+          classification: "BLOCKED_BY_SECURITY" as VerifyClassification,
+          reasons,
+          scanSummary: baseScanSummary,
+          ownershipStatus: baseOwnershipStatus,
+          isBlocked: true,
+          isReady: false,
+          totalScans: baseScanSummary.totalScans,
+          firstVerifiedAt: baseScanSummary.firstVerifiedAt,
+          latestVerifiedAt: baseScanSummary.latestVerifiedAt,
         },
       });
     }
 
-    // If not yet assigned into any batch
-    if (qrCode.status === QRStatus.DORMANT || qrCode.status === QRStatus.ACTIVE) {
+    if (qrCode.status === QRStatus.DORMANT || qrCode.status === QRStatus.ACTIVE || qrCode.status === QRStatus.ALLOCATED || qrCode.status === QRStatus.ACTIVATED) {
+      const message =
+        qrCode.status === QRStatus.ALLOCATED
+          ? "This QR code is allocated but not yet printed."
+          : qrCode.status === QRStatus.ACTIVATED
+            ? "This QR code has not been activated (print not confirmed)."
+            : "This QR code has not been assigned to a product yet.";
+
       return res.json({
         success: true,
         data: {
+          ...basePayload,
           isAuthentic: false,
-          message: "This QR code has not been assigned to a product yet.",
-          code,
-          status: qrCode.status,
-          containment,
-          licensee: qrCode.licensee
-            ? {
-                id: qrCode.licensee.id,
-                name: qrCode.licensee.name,
-                prefix: qrCode.licensee.prefix,
-                brandName: qrCode.licensee.brandName,
-                location: qrCode.licensee.location,
-                website: qrCode.licensee.website,
-                supportEmail: qrCode.licensee.supportEmail,
-                supportPhone: qrCode.licensee.supportPhone,
-              }
-            : null,
-          batch: qrCode.batch
-            ? {
-                id: qrCode.batch.id,
-                name: qrCode.batch.name,
-                printedAt: qrCode.batch.printedAt,
-                manufacturer: qrCode.batch.manufacturer || null,
-              }
-            : null,
+          message,
+          classification: "NOT_READY_FOR_CUSTOMER_USE" as VerifyClassification,
+          reasons: [statusNotReadyReason(qrCode.status)],
+          scanSummary: baseScanSummary,
+          ownershipStatus: baseOwnershipStatus,
+          isBlocked: false,
+          isReady: false,
+          totalScans: baseScanSummary.totalScans,
+          firstVerifiedAt: baseScanSummary.firstVerifiedAt,
+          latestVerifiedAt: baseScanSummary.latestVerifiedAt,
         },
       });
     }
 
-    // allocated but not printed
-    if (qrCode.status === QRStatus.ALLOCATED) {
-      return res.json({
-        success: true,
-        data: {
-          isAuthentic: false,
-          message: "This QR code is allocated but not yet printed.",
-          code,
-          status: qrCode.status,
-          containment,
-          licensee: qrCode.licensee
-            ? {
-                id: qrCode.licensee.id,
-                name: qrCode.licensee.name,
-                prefix: qrCode.licensee.prefix,
-                brandName: qrCode.licensee.brandName,
-                location: qrCode.licensee.location,
-                website: qrCode.licensee.website,
-                supportEmail: qrCode.licensee.supportEmail,
-                supportPhone: qrCode.licensee.supportPhone,
-              }
-            : null,
-          batch: qrCode.batch
-            ? {
-                id: qrCode.batch.id,
-                name: qrCode.batch.name,
-                printedAt: qrCode.batch.printedAt,
-                manufacturer: qrCode.batch.manufacturer || null,
-              }
-            : null,
-          batchName: qrCode.batch?.name || null,
-        },
-      });
-    }
-
-    // Print job created but not confirmed
-    if (qrCode.status === QRStatus.ACTIVATED) {
-      return res.json({
-        success: true,
-        data: {
-          isAuthentic: false,
-          message: "This QR code has not been activated (print not confirmed).",
-          code,
-          status: qrCode.status,
-          containment,
-          licensee: qrCode.licensee
-            ? {
-                id: qrCode.licensee.id,
-                name: qrCode.licensee.name,
-                prefix: qrCode.licensee.prefix,
-                brandName: qrCode.licensee.brandName,
-                location: qrCode.licensee.location,
-                website: qrCode.licensee.website,
-                supportEmail: qrCode.licensee.supportEmail,
-                supportPhone: qrCode.licensee.supportPhone,
-              }
-            : null,
-          batch: qrCode.batch
-            ? {
-                id: qrCode.batch.id,
-                name: qrCode.batch.name,
-                printedAt: qrCode.batch.printedAt,
-                manufacturer: qrCode.batch.manufacturer || null,
-              }
-            : null,
-          batchName: qrCode.batch?.name || null,
-        },
-      });
-    }
-
-    // Valid printed/redeemed QR - record scan
     const toNum = (v: any) => {
       const n = parseFloat(String(v));
       return Number.isFinite(n) ? n : null;
     };
+
     const latitude = toNum(req.query.lat);
     const longitude = toNum(req.query.lon);
     const accuracy = toNum(req.query.acc);
 
-    const { isFirstScan, qrCode: updated } = await recordScan(code.toUpperCase(), {
+    const { isFirstScan, qrCode: updated } = await recordScan(normalizedCode, {
       ipAddress: req.ip,
       userAgent: req.get("user-agent") || null,
       device: (req.query.device as string | undefined) || null,
@@ -272,7 +730,7 @@ export const verifyQRCode = async (req: Request, res: Response) => {
       entityId: qrCode.id,
       details: {
         isFirstScan,
-        scanCount: (updated.scanCount ?? 0),
+        scanCount: updated.scanCount ?? 0,
       },
       ipAddress: req.ip,
     });
@@ -291,32 +749,20 @@ export const verifyQRCode = async (req: Request, res: Response) => {
       userAgent: req.get("user-agent") || null,
     });
 
-    const blockedByPolicy = policy.autoBlockedQr || policy.autoBlockedBatch;
+    const blockedByPolicy = Boolean(policy.autoBlockedQr || policy.autoBlockedBatch);
     const finalStatus = blockedByPolicy ? QRStatus.BLOCKED : updated.status;
+    const isBlocked = blockedByPolicy || finalStatus === QRStatus.BLOCKED;
+    const isReady = isQrReadyForCustomerUse(finalStatus);
 
     const firstScanTime = updated.scannedAt ? new Date(updated.scannedAt) : null;
-    const scanInsight = await getScanInsight(updated.id, (req.query.device as string | undefined) || null);
+    const postScanInsight = await getScanInsight(updated.id, (req.query.device as string | undefined) || null);
+    const postScanSummary = buildScanSummary({
+      scanCount: Number(updated.scanCount || 0),
+      scannedAt: firstScanTime,
+      scanInsight: postScanInsight,
+    });
 
-    const runtimeContainment = {
-      qrUnderInvestigation: updated.underInvestigationAt
-        ? {
-            at: new Date(updated.underInvestigationAt).toISOString(),
-            reason: updated.underInvestigationReason || null,
-          }
-        : null,
-      batchSuspended: updated.batch?.suspendedAt
-        ? {
-            at: new Date(updated.batch.suspendedAt).toISOString(),
-            reason: updated.batch.suspendedReason || null,
-          }
-        : null,
-      orgSuspended: updated.licensee?.suspendedAt
-        ? {
-            at: new Date(updated.licensee.suspendedAt).toISOString(),
-            reason: updated.licensee.suspendedReason || null,
-          }
-        : null,
-    };
+    const runtimeContainment = buildContainment(updated);
 
     const hasContainment =
       Boolean(runtimeContainment.qrUnderInvestigation) ||
@@ -326,61 +772,100 @@ export const verifyQRCode = async (req: Request, res: Response) => {
     const warningMessage = blockedByPolicy
       ? "This code has been auto-blocked by security policy due to anomaly detection."
       : hasContainment
-      ? "This product is currently under investigation. Please review details and contact support if needed."
-      : !isFirstScan && firstScanTime
-      ? `Already verified before. First verification was on ${scanInsight.firstScanAt || firstScanTime.toISOString()}.`
-      : null;
+        ? "This product is currently under investigation. Please review details and contact support if needed."
+        : !isFirstScan && postScanSummary.firstVerifiedAt
+          ? `Already verified before. First verification was on ${postScanSummary.firstVerifiedAt}.`
+          : null;
+
+    const ownership = await prisma.ownership.findUnique({
+      where: { qrCodeId: updated.id },
+      select: {
+        userId: true,
+        claimedAt: true,
+      },
+    });
+
+    const ownershipStatus = buildOwnershipStatus({
+      ownership,
+      customerUserId,
+      isReady,
+      isBlocked,
+    });
+
+    const duplicateReasons = deriveDuplicateReasons({
+      scanCount: postScanSummary.totalScans,
+      scanSignals: postScanInsight.signals,
+      policy,
+    });
+
+    let classification: VerifyClassification;
+    let reasons: string[];
+
+    if (isBlocked) {
+      classification = "BLOCKED_BY_SECURITY";
+      reasons = [
+        blockedByPolicy
+          ? "Security policy auto-blocked this code after anomaly detection."
+          : "This code is blocked by security controls.",
+        ...buildSecurityContainmentReasons(runtimeContainment),
+      ];
+    } else if (isFirstScan) {
+      classification = "FIRST_SCAN";
+      reasons = ["First successful customer verification recorded."];
+    } else if (duplicateReasons.length > 0) {
+      classification = "SUSPICIOUS_DUPLICATE";
+      reasons = duplicateReasons;
+    } else {
+      classification = "LEGIT_REPEAT";
+      reasons = ["Repeat verification pattern matches normal customer behavior."];
+    }
+
+    if (ownershipStatus.isClaimedByAnother && customerUserId && !isBlocked) {
+      classification = "SUSPICIOUS_DUPLICATE";
+      if (!reasons.includes("Ownership is already claimed by another account.")) {
+        reasons.unshift("Ownership is already claimed by another account.");
+      }
+    }
 
     return res.json({
       success: true,
       data: {
-        // Consumers may re-verify the same product; treat repeat scans as authentic unless blocked.
-        isAuthentic: !blockedByPolicy && finalStatus !== QRStatus.BLOCKED,
-        message: blockedByPolicy
+        isAuthentic: !isBlocked,
+        message: isBlocked
           ? "Blocked code."
           : isFirstScan
-          ? "This is a genuine product."
-          : "Already verified. Please review scan details below.",
+            ? "This is a genuine product."
+            : "Already verified. Please review scan details below.",
         code: updated.code,
         status: finalStatus,
         containment: runtimeContainment,
 
-        licensee: updated.licensee
-          ? {
-              id: updated.licensee.id,
-              name: updated.licensee.name,
-              prefix: updated.licensee.prefix,
-              brandName: updated.licensee.brandName,
-              location: updated.licensee.location,
-              website: updated.licensee.website,
-              supportEmail: updated.licensee.supportEmail,
-              supportPhone: updated.licensee.supportPhone,
-            }
-          : null,
+        licensee: mapLicensee(updated.licensee),
+        batch: mapBatch(updated.batch),
 
-        batch: updated.batch
-          ? {
-              id: updated.batch.id,
-              name: updated.batch.name,
-              printedAt: updated.batch.printedAt,
-              manufacturer: updated.batch.manufacturer || null,
-            }
-          : null,
-
-        // legacy batch info (if you still use it sometimes)
         batchName: updated.batch?.name || null,
         printedAt: updated.batch?.printedAt || null,
 
         firstScanned: firstScanTime ? firstScanTime.toISOString() : null,
         scanCount: updated.scanCount ?? 0,
         isFirstScan,
-        firstScanAt: scanInsight.firstScanAt,
-        firstScanLocation: scanInsight.firstScanLocation,
-        latestScanAt: scanInsight.latestScanAt,
-        latestScanLocation: scanInsight.latestScanLocation,
-        previousScanAt: scanInsight.previousScanAt,
-        previousScanLocation: scanInsight.previousScanLocation,
-        scanSignals: scanInsight.signals,
+        firstScanAt: postScanInsight.firstScanAt,
+        firstScanLocation: postScanInsight.firstScanLocation,
+        latestScanAt: postScanInsight.latestScanAt,
+        latestScanLocation: postScanInsight.latestScanLocation,
+        previousScanAt: postScanInsight.previousScanAt,
+        previousScanLocation: postScanInsight.previousScanLocation,
+        scanSignals: postScanInsight.signals,
+
+        classification,
+        reasons,
+        scanSummary: postScanSummary,
+        ownershipStatus,
+        isBlocked,
+        isReady,
+        totalScans: postScanSummary.totalScans,
+        firstVerifiedAt: postScanSummary.firstVerifiedAt,
+        latestVerifiedAt: postScanSummary.latestVerifiedAt,
 
         warningMessage,
         policy,
@@ -391,6 +876,191 @@ export const verifyQRCode = async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       error: "Verification service unavailable",
+    });
+  }
+};
+
+export const claimProductOwnership = async (req: CustomerVerifyRequest, res: Response) => {
+  try {
+    const customer = req.customer;
+    if (!customer) {
+      return res.status(401).json({
+        success: false,
+        error: "Customer authentication required",
+      });
+    }
+
+    const normalizedCode = normalizeCode(req.params.code || "");
+    if (!normalizedCode || normalizedCode.length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid QR code format",
+      });
+    }
+
+    const qrCode = await prisma.qRCode.findUnique({
+      where: { code: normalizedCode },
+      select: {
+        id: true,
+        code: true,
+        status: true,
+        licenseeId: true,
+        ownership: {
+          select: {
+            userId: true,
+            claimedAt: true,
+          },
+        },
+      },
+    });
+
+    if (!qrCode) {
+      return res.status(404).json({
+        success: false,
+        error: "QR code not found",
+      });
+    }
+
+    const isBlocked = qrCode.status === QRStatus.BLOCKED;
+    const isReady = isQrReadyForCustomerUse(qrCode.status);
+
+    const buildClaimResponse = (ownership: { userId: string; claimedAt: Date } | null) => {
+      const ownershipStatus = buildOwnershipStatus({
+        ownership,
+        customerUserId: customer.userId,
+        isReady,
+        isBlocked,
+      });
+      return {
+        ownershipStatus,
+        claimTimestamp: ownership?.claimedAt?.toISOString?.() || null,
+      };
+    };
+
+    if (isBlocked || !isReady) {
+      return res.status(409).json({
+        success: false,
+        error: isBlocked
+          ? "Claim not allowed for blocked products"
+          : "Claim is available only after product activation",
+      });
+    }
+
+    if (qrCode.ownership) {
+      if (qrCode.ownership.userId === customer.userId) {
+        return res.json({
+          success: true,
+          data: {
+            claimResult: "ALREADY_OWNED_BY_YOU",
+            message: "This product is already owned by your account.",
+            ...buildClaimResponse(qrCode.ownership),
+          },
+        });
+      }
+
+      await createAuditLog({
+        action: "VERIFY_CLAIM_CONFLICT",
+        entityType: "Ownership",
+        entityId: qrCode.id,
+        licenseeId: qrCode.licenseeId || undefined,
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") || undefined,
+        details: {
+          qrCodeId: qrCode.id,
+          requesterUserId: customer.userId,
+          existingOwnership: true,
+        },
+      });
+
+      return res.json({
+        success: true,
+        data: {
+          claimResult: "OWNED_BY_ANOTHER_USER",
+          conflict: true,
+          classification: "SUSPICIOUS_DUPLICATE",
+          reasons: [
+            "Ownership is already claimed by another account.",
+            "If this is unexpected, report suspected counterfeit immediately.",
+          ],
+          warningMessage: "Ownership conflict detected. Treat this product as potential duplicate until reviewed.",
+          ...buildClaimResponse(qrCode.ownership),
+        },
+      });
+    }
+
+    let createdOwnership: { userId: string; claimedAt: Date } | null = null;
+
+    try {
+      const created = await prisma.ownership.create({
+        data: {
+          qrCodeId: qrCode.id,
+          userId: customer.userId,
+        },
+        select: {
+          userId: true,
+          claimedAt: true,
+        },
+      });
+      createdOwnership = created;
+    } catch (error: any) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const existing = await prisma.ownership.findUnique({
+          where: { qrCodeId: qrCode.id },
+          select: {
+            userId: true,
+            claimedAt: true,
+          },
+        });
+
+        if (existing && existing.userId === customer.userId) {
+          createdOwnership = existing;
+        } else {
+          return res.json({
+            success: true,
+            data: {
+              claimResult: "OWNED_BY_ANOTHER_USER",
+              conflict: true,
+              classification: "SUSPICIOUS_DUPLICATE",
+              reasons: [
+                "Ownership is already claimed by another account.",
+                "If this is unexpected, report suspected counterfeit immediately.",
+              ],
+              warningMessage: "Ownership conflict detected. Treat this product as potential duplicate until reviewed.",
+              ...buildClaimResponse(existing),
+            },
+          });
+        }
+      } else {
+        throw error;
+      }
+    }
+
+    await createAuditLog({
+      action: "VERIFY_CLAIM_SUCCESS",
+      entityType: "Ownership",
+      entityId: qrCode.id,
+      licenseeId: qrCode.licenseeId || undefined,
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || undefined,
+      details: {
+        qrCodeId: qrCode.id,
+        customerUserId: customer.userId,
+      },
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        claimResult: "CLAIMED",
+        message: "Product ownership claimed successfully.",
+        ...buildClaimResponse(createdOwnership),
+      },
+    });
+  } catch (error) {
+    console.error("claimProductOwnership error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to claim ownership",
     });
   }
 };
@@ -406,39 +1076,84 @@ export const reportFraud = async (req: Request, res: Response) => {
     }
 
     const payload = parsed.data;
-    const normalizedCode = payload.code.toUpperCase();
-    const reason = String(payload.reason || "").toLowerCase();
-    const mappedType =
-      reason.includes("mismatch")
-        ? "wrong_product"
-        : reason.includes("used")
-        ? "duplicate_scan"
-        : reason.includes("seller")
-        ? "counterfeit_suspected"
-        : "other";
+    const normalizedCode = normalizeCode(payload.code || payload.qrCodeValue || "");
+    const incidentType = inferIncidentType({
+      reason: payload.reason,
+      incidentType: payload.incidentType,
+    });
+
+    const snapshot = await buildFraudVerificationSnapshot(normalizedCode);
+
+    const metadataLines = [
+      `Classification: ${snapshot.classification}`,
+      `Reasons: ${snapshot.reasons.join(" | ") || "n/a"}`,
+      `Scan summary: total=${snapshot.scanSummary.totalScans}, first=${snapshot.scanSummary.firstVerifiedAt || "n/a"}, latest=${snapshot.scanSummary.latestVerifiedAt || "n/a"}`,
+      `Ownership: claimed=${String(snapshot.ownershipStatus.isClaimed)}, ownedByRequester=${String(snapshot.ownershipStatus.isOwnedByRequester)}`,
+    ];
+
+    const userDescription =
+      String(payload.description || "").trim() ||
+      String(payload.notes || "").trim() ||
+      String(payload.reason || "").trim() ||
+      "Suspected counterfeit report from verify page.";
+
+    const finalDescription = `${userDescription}\n\n--- Verification metadata ---\n${metadataLines.join("\n")}`.slice(0, 2000);
+
+    const uploadedFiles = Array.isArray(req.files) ? (req.files as Express.Multer.File[]) : [];
+    const uploadRecords = mapUploadedEvidence(uploadedFiles);
+
+    const tags = [
+      ...parseTags(payload.tags),
+      "verify_fraud_report",
+      `classification_${snapshot.classification.toLowerCase()}`,
+      snapshot.ownershipStatus.isClaimed ? "ownership_claimed" : "ownership_unclaimed",
+    ].slice(0, 10);
+
+    const customerEmail = String(payload.contactEmail || payload.customerEmail || "").trim() || undefined;
 
     const incident = await createIncidentFromReport(
       {
         qrCodeValue: normalizedCode,
-        incidentType: mappedType,
-        description: payload.notes || payload.reason,
-        consentToContact: Boolean(payload.contactEmail),
-        customerEmail: payload.contactEmail || undefined,
-        preferredContactMethod: payload.contactEmail ? "email" : "none",
-        tags: ["legacy_verify_report_fraud"],
+        incidentType,
+        description: finalDescription,
+        consentToContact: parseBoolean(payload.consentToContact, Boolean(customerEmail)),
+        customerEmail,
+        preferredContactMethod: customerEmail ? "email" : payload.preferredContactMethod || "none",
+        tags,
       },
       {
         actorType: IncidentActorType.CUSTOMER,
         ipAddress: req.ip,
         userAgent: req.get("user-agent") || undefined,
-      }
+      },
+      uploadRecords
     );
+
+    const superadminEmails = await getSuperadminAlertEmails();
+    const alertSubject = `[Incident][${incident.severity}] New fraud report ${incident.id}`;
+    const alertBody = incidentSummaryText(incident);
+
+    for (const email of superadminEmails) {
+      await sendIncidentEmail({
+        incidentId: incident.id,
+        licenseeId: incident.licenseeId || null,
+        toAddress: email,
+        subject: alertSubject,
+        text: alertBody,
+        senderMode: "system",
+        template: "superadmin_alert",
+      });
+    }
 
     return res.status(201).json({
       success: true,
       data: {
         reportId: incident.id,
         message: "Fraud report submitted successfully.",
+        classification: snapshot.classification,
+        reasons: snapshot.reasons,
+        scanSummary: snapshot.scanSummary,
+        ownershipStatus: snapshot.ownershipStatus,
       },
     });
   } catch (error) {

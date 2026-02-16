@@ -1,54 +1,79 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { AlertTriangle, Ban, CheckCircle2, Loader2, SearchX, Shield, UserCheck } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { cn } from "@/lib/utils";
-import { openHelpAssistant } from "@/help/assistant-events";
-import { getOrCreateAnonDeviceId } from "@/lib/anon-device";
-import {
-  Shield,
-  CheckCircle2,
-  UserCheck,
-  AlertTriangle,
-  Ban,
-  SearchX,
-  Building2,
-  Factory,
-  CalendarClock,
-  Mail,
-  Phone,
-  Globe2,
-  Loader2,
-  Flag,
-  ArrowRight,
-  Sparkles,
-  Star,
-  ChevronDown,
-  ChevronUp,
-  LifeBuoy,
-} from "lucide-react";
-import apiClient from "@/lib/api-client";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import apiClient from "@/lib/api-client";
+import { getOrCreateAnonDeviceId } from "@/lib/anon-device";
+import { cn } from "@/lib/utils";
+
+type VerificationClassification =
+  | "FIRST_SCAN"
+  | "LEGIT_REPEAT"
+  | "SUSPICIOUS_DUPLICATE"
+  | "BLOCKED_BY_SECURITY"
+  | "NOT_READY_FOR_CUSTOMER_USE";
+
+type OwnershipStatus = {
+  isClaimed: boolean;
+  claimedAt: string | null;
+  isOwnedByRequester: boolean;
+  isClaimedByAnother: boolean;
+  canClaim: boolean;
+};
+
+type ScanSummary = {
+  totalScans: number;
+  firstVerifiedAt: string | null;
+  latestVerifiedAt: string | null;
+  firstVerifiedLocation?: string | null;
+  latestVerifiedLocation?: string | null;
+};
 
 type VerifyPayload = {
   isAuthentic: boolean;
   message?: string;
+  warningMessage?: string | null;
   code?: string;
   status?: string;
+  scanOutcome?: string;
+
+  classification?: VerificationClassification;
+  reasons?: string[];
+  scanSummary?: ScanSummary;
+  ownershipStatus?: OwnershipStatus;
+  isBlocked?: boolean;
+  isReady?: boolean;
+  totalScans?: number;
+  firstVerifiedAt?: string | null;
+  latestVerifiedAt?: string | null;
+
   isFirstScan?: boolean;
+  scanCount?: number;
+  firstScanAt?: string | null;
+  firstScanLocation?: string | null;
+  latestScanAt?: string | null;
+  latestScanLocation?: string | null;
+  previousScanAt?: string | null;
+  previousScanLocation?: string | null;
+
   policy?: any;
-  containment?: {
-    qrUnderInvestigation?: { at: string; reason: string | null } | null;
-    batchSuspended?: { at: string; reason: string | null } | null;
-    orgSuspended?: { at: string; reason: string | null } | null;
+  scanSignals?: {
+    distinctDeviceCount24h?: number;
+    recentScanCount10m?: number;
+    distinctCountryCount24h?: number;
+    seenOnCurrentDeviceBefore?: boolean;
+    previousScanSameDevice?: boolean | null;
   } | null;
+
   licensee?: {
     id: string;
     name: string;
@@ -71,27 +96,7 @@ type VerifyPayload = {
       website?: string | null;
     } | null;
   } | null;
-  printedAt?: string | null;
-  firstScanned?: string | null;
-  firstScanAt?: string | null;
-  firstScanLocation?: string | null;
-  latestScanAt?: string | null;
-  latestScanLocation?: string | null;
-  previousScanAt?: string | null;
-  previousScanLocation?: string | null;
-  scanCount?: number;
-  scanOutcome?: string;
-  warningMessage?: string | null;
-  scanSignals?: {
-    distinctDeviceCount24h?: number;
-    recentScanCount10m?: number;
-    distinctCountryCount24h?: number;
-    seenOnCurrentDeviceBefore?: boolean;
-    previousScanSameDevice?: boolean | null;
-  } | null;
 };
-
-type StatusKind = "first" | "verified_again" | "possible_duplicate" | "blocked" | "suspicious" | "unassigned" | "invalid";
 
 const INCIDENT_TYPE_OPTIONS = [
   { value: "counterfeit_suspected", label: "Counterfeit suspected" },
@@ -101,83 +106,153 @@ const INCIDENT_TYPE_OPTIONS = [
   { value: "other", label: "Other" },
 ] as const;
 
-const SATISFACTION_OPTIONS = [
-  { value: "very_satisfied", label: "Loved it" },
-  { value: "satisfied", label: "Satisfied" },
-  { value: "neutral", label: "Neutral" },
-  { value: "disappointed", label: "Not great" },
-  { value: "very_disappointed", label: "Disappointed" },
-] as const;
+const CUSTOMER_TOKEN_KEY = "authenticqr_verify_customer_token";
+const CUSTOMER_EMAIL_KEY = "authenticqr_verify_customer_email";
 
-type SatisfactionValue = (typeof SATISFACTION_OPTIONS)[number]["value"];
+const DEFAULT_OWNERSHIP_STATUS: OwnershipStatus = {
+  isClaimed: false,
+  claimedAt: null,
+  isOwnedByRequester: false,
+  isClaimedByAnother: false,
+  canClaim: false,
+};
 
-const VERIFY_LOADING_STEPS = [
-  "Reading secure QR signature",
-  "Checking print lifecycle",
-  "Validating authenticity records",
-] as const;
-
-const LOCAL_SCAN_HISTORY_KEY = "authenticqr_local_scan_history_v1";
-
-const STATUS_META: Record<
-  StatusKind,
+const CLASS_META: Record<
+  VerificationClassification,
   {
     title: string;
     subtitle: string;
-    chip: string;
-    panelClass: string;
+    badge: string;
+    bannerClass: string;
     icon: React.ReactNode;
   }
 > = {
-  first: {
+  FIRST_SCAN: {
     title: "Verified Authentic",
-    subtitle: "First-time verification completed successfully.",
-    chip: "Authentic",
-    panelClass: "from-emerald-600 to-teal-600",
-    icon: <CheckCircle2 className="h-10 w-10 text-white" />,
+    subtitle: "First customer verification completed successfully.",
+    badge: "Authentic",
+    bannerClass: "bg-emerald-700 text-white",
+    icon: <CheckCircle2 className="h-6 w-6" />,
   },
-  verified_again: {
+  LEGIT_REPEAT: {
     title: "Verified Again",
-    subtitle: "Authentic product. You have verified this before.",
-    chip: "Authentic",
-    panelClass: "from-emerald-600 to-cyan-600",
-    icon: <UserCheck className="h-10 w-10 text-white" />,
+    subtitle: "Product is authentic and repeat scans are consistent.",
+    badge: "Authentic",
+    bannerClass: "bg-teal-700 text-white",
+    icon: <UserCheck className="h-6 w-6" />,
   },
-  possible_duplicate: {
-    title: "Possible Duplicate",
-    subtitle: "This QR shows unusual scan patterns that may indicate label copying.",
-    chip: "Fraud Risk",
-    panelClass: "from-orange-500 to-amber-600",
-    icon: <AlertTriangle className="h-10 w-10 text-white" />,
+  SUSPICIOUS_DUPLICATE: {
+    title: "Suspicious Duplicate",
+    subtitle: "Scan pattern indicates duplicate or cloned-label risk.",
+    badge: "Fraud Risk",
+    bannerClass: "bg-amber-700 text-white",
+    icon: <AlertTriangle className="h-6 w-6" />,
   },
-  suspicious: {
-    title: "Verification Warning",
-    subtitle: "Code exists, but lifecycle checks indicate abnormal state.",
-    chip: "Suspicious",
-    panelClass: "from-amber-500 to-orange-600",
-    icon: <AlertTriangle className="h-10 w-10 text-white" />,
-  },
-  blocked: {
+  BLOCKED_BY_SECURITY: {
     title: "Blocked by Security",
-    subtitle: "This code is blocked due to policy or fraud controls.",
-    chip: "Blocked",
-    panelClass: "from-red-600 to-rose-700",
-    icon: <Ban className="h-10 w-10 text-white" />,
+    subtitle: "This code is blocked by security or containment controls.",
+    badge: "Blocked",
+    bannerClass: "bg-rose-800 text-white",
+    icon: <Ban className="h-6 w-6" />,
   },
-  unassigned: {
+  NOT_READY_FOR_CUSTOMER_USE: {
     title: "Not Ready for Customer Use",
-    subtitle: "Code exists but has not been finalized for product verification.",
-    chip: "Not Active",
-    panelClass: "from-slate-600 to-slate-700",
-    icon: <SearchX className="h-10 w-10 text-white" />,
+    subtitle: "Code lifecycle is incomplete or unavailable for customer verification.",
+    badge: "Not Ready",
+    bannerClass: "bg-slate-700 text-white",
+    icon: <SearchX className="h-6 w-6" />,
   },
-  invalid: {
-    title: "Verification Unavailable",
-    subtitle: "This code could not be verified in the platform.",
-    chip: "Unavailable",
-    panelClass: "from-red-600 to-rose-700",
-    icon: <SearchX className="h-10 w-10 text-white" />,
-  },
+};
+
+const inferClassification = (result: VerifyPayload | null): VerificationClassification => {
+  const explicit = String(result?.classification || "").toUpperCase();
+  if (
+    explicit === "FIRST_SCAN" ||
+    explicit === "LEGIT_REPEAT" ||
+    explicit === "SUSPICIOUS_DUPLICATE" ||
+    explicit === "BLOCKED_BY_SECURITY" ||
+    explicit === "NOT_READY_FOR_CUSTOMER_USE"
+  ) {
+    return explicit as VerificationClassification;
+  }
+
+  const status = String(result?.status || "").toUpperCase();
+  const scanOutcome = String(result?.scanOutcome || "").toUpperCase();
+
+  if (status === "BLOCKED" || scanOutcome === "BLOCKED") return "BLOCKED_BY_SECURITY";
+  if (status === "DORMANT" || status === "ACTIVE" || status === "ALLOCATED" || status === "ACTIVATED") {
+    return "NOT_READY_FOR_CUSTOMER_USE";
+  }
+
+  if (Boolean(result?.isAuthentic) && Boolean(result?.isFirstScan)) return "FIRST_SCAN";
+
+  const duplicateSignals =
+    Number(result?.scanSignals?.distinctDeviceCount24h ?? 0) > 1 ||
+    Number(result?.scanSignals?.recentScanCount10m ?? 0) >= 3 ||
+    Number(result?.scanSignals?.distinctCountryCount24h ?? 0) > 1 ||
+    Number(result?.scanCount ?? 0) >= 4;
+
+  if (Boolean(result?.isAuthentic) && duplicateSignals) return "SUSPICIOUS_DUPLICATE";
+  if (Boolean(result?.isAuthentic)) return "LEGIT_REPEAT";
+
+  return "NOT_READY_FOR_CUSTOMER_USE";
+};
+
+const deriveReasons = (result: VerifyPayload | null, classification: VerificationClassification): string[] => {
+  if (Array.isArray(result?.reasons) && result?.reasons.length) return result.reasons;
+
+  if (classification === "FIRST_SCAN") {
+    return ["First successful verification recorded."];
+  }
+
+  if (classification === "LEGIT_REPEAT") {
+    return ["Repeat verification behavior appears normal."];
+  }
+
+  if (classification === "BLOCKED_BY_SECURITY") {
+    return ["Code is blocked by security policy or containment workflow."];
+  }
+
+  if (classification === "SUSPICIOUS_DUPLICATE") {
+    const reasons: string[] = [];
+    if (Number(result?.scanSignals?.distinctDeviceCount24h ?? 0) > 1) reasons.push("Multiple devices scanned this code recently.");
+    if (Number(result?.scanSignals?.recentScanCount10m ?? 0) >= 3) reasons.push("High short-window scan burst detected.");
+    if (Number(result?.scanSignals?.distinctCountryCount24h ?? 0) > 1) reasons.push("Recent scans came from multiple countries.");
+    if (Number(result?.scanCount ?? 0) >= 4) reasons.push("High repeat scan count detected.");
+    return reasons.length ? reasons : ["Unusual scan pattern requires caution."];
+  }
+
+  return ["Code lifecycle is not ready for customer verification."];
+};
+
+const deriveScanSummary = (result: VerifyPayload | null): ScanSummary => {
+  if (result?.scanSummary) {
+    return {
+      totalScans: Number(result.scanSummary.totalScans || 0),
+      firstVerifiedAt: result.scanSummary.firstVerifiedAt || null,
+      latestVerifiedAt: result.scanSummary.latestVerifiedAt || null,
+      firstVerifiedLocation: result.scanSummary.firstVerifiedLocation || null,
+      latestVerifiedLocation: result.scanSummary.latestVerifiedLocation || null,
+    };
+  }
+
+  const firstVerifiedAt = result?.firstVerifiedAt || result?.firstScanAt || null;
+  const latestVerifiedAt = result?.latestVerifiedAt || result?.latestScanAt || null;
+
+  return {
+    totalScans: Number(result?.totalScans ?? result?.scanCount ?? 0),
+    firstVerifiedAt,
+    latestVerifiedAt,
+    firstVerifiedLocation: result?.firstScanLocation || null,
+    latestVerifiedLocation: result?.latestScanLocation || result?.previousScanLocation || null,
+  };
+};
+
+const formatDateTime = (value: string | null | undefined) => {
+  if (!value) return "Not available";
+  const dt = new Date(value);
+  if (!Number.isFinite(dt.getTime())) return "Not available";
+  return dt.toLocaleString();
 };
 
 export default function Verify() {
@@ -185,37 +260,31 @@ export default function Verify() {
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
 
-  const [isLoading, setIsLoading] = useState(true);
   const [result, setResult] = useState<VerifyPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const [customerToken, setCustomerToken] = useState<string>("");
+  const [customerEmail, setCustomerEmail] = useState<string>("");
+
+  const [otpEmail, setOtpEmail] = useState("");
+  const [otpChallengeToken, setOtpChallengeToken] = useState("");
+  const [otpMaskedEmail, setOtpMaskedEmail] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+
+  const [claiming, setClaiming] = useState(false);
 
   const [reportOpen, setReportOpen] = useState(false);
-  const [incidentType, setIncidentType] = useState<string>(INCIDENT_TYPE_OPTIONS[0].value);
-  const [reportDescription, setReportDescription] = useState("");
-  const [purchasePlace, setPurchasePlace] = useState("");
-  const [purchaseDate, setPurchaseDate] = useState("");
-  const [productBatchNo, setProductBatchNo] = useState("");
-  const [reportCustomerName, setReportCustomerName] = useState("");
-  const [reportEmail, setReportEmail] = useState("");
-  const [reportPhone, setReportPhone] = useState("");
-  const [reportCountry, setReportCountry] = useState("");
-  const [reportConsent, setReportConsent] = useState(true);
-  const [reportPhotos, setReportPhotos] = useState<File[]>([]);
-  const [reportReference, setReportReference] = useState<string | null>(null);
   const [reporting, setReporting] = useState(false);
+  const [reportReference, setReportReference] = useState<string | null>(null);
+  const [reportType, setReportType] = useState<string>(INCIDENT_TYPE_OPTIONS[0].value);
+  const [reportDescription, setReportDescription] = useState("");
+  const [reportEmail, setReportEmail] = useState("");
+  const [reportPhotos, setReportPhotos] = useState<File[]>([]);
 
-  const [loadingStepIdx, setLoadingStepIdx] = useState(0);
-  const [feedbackRating, setFeedbackRating] = useState(0);
-  const [feedbackSatisfaction, setFeedbackSatisfaction] = useState<SatisfactionValue | "">("");
-  const [feedbackNote, setFeedbackNote] = useState("");
-  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
-  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
-  const [showRepeatDetails, setShowRepeatDetails] = useState(false);
-  const [localSeenOnDeviceBefore, setLocalSeenOnDeviceBefore] = useState(false);
-  const [localDeviceScanCount, setLocalDeviceScanCount] = useState(0);
-
-  const token = useMemo(() => searchParams.get("t")?.trim() || "", [searchParams.toString()]);
-  const deviceId = useMemo(() => getOrCreateAnonDeviceId(), []);
+  const token = useMemo(() => searchParams.get("t")?.trim() || "", [searchParams]);
   const codeParam = useMemo(() => {
     const raw = String(code || "");
     try {
@@ -224,326 +293,265 @@ export default function Verify() {
       return raw.trim();
     }
   }, [code]);
-  const requestKey = token ? `token:${token}` : codeParam ? `code:${codeParam.toUpperCase()}` : "";
-  const inFlightByKeyRef = useRef(new Map<string, Promise<any>>());
 
-  useEffect(() => {
-    let active = true;
+  const requestKey = useMemo(() => {
+    if (token) return `token:${token}|cust:${customerToken.slice(-10)}`;
+    if (codeParam) return `code:${codeParam.toUpperCase()}|cust:${customerToken.slice(-10)}`;
+    return "";
+  }, [codeParam, customerToken, token]);
 
+  const deviceId = useMemo(() => getOrCreateAnonDeviceId(), []);
+  const inFlightRef = useRef(new Map<string, Promise<any>>());
+
+  const displayedCode = result?.code || codeParam || "—";
+  const classification = useMemo(() => inferClassification(result), [result]);
+  const classMeta = CLASS_META[classification];
+  const reasons = useMemo(() => deriveReasons(result, classification), [classification, result]);
+  const scanSummary = useMemo(() => deriveScanSummary(result), [result]);
+  const ownershipStatus = result?.ownershipStatus || DEFAULT_OWNERSHIP_STATUS;
+
+  const isBlocked = Boolean(result?.isBlocked ?? (String(result?.status || "").toUpperCase() === "BLOCKED"));
+  const isReady = Boolean(result?.isReady ?? !["DORMANT", "ACTIVE", "ALLOCATED", "ACTIVATED", "BLOCKED"].includes(String(result?.status || "").toUpperCase()));
+
+  const googleOauthUrl = String(import.meta.env.VITE_GOOGLE_OAUTH_URL || "").trim();
+
+  const fetchVerification = useCallback(async () => {
     if (!requestKey) {
-      setIsLoading(false);
+      setLoading(false);
       setResult({ isAuthentic: false, message: "Missing verification code" });
-      return () => {
-        active = false;
-      };
+      return;
     }
 
-    (async () => {
-      setIsLoading(true);
-      setError(null);
+    setLoading(true);
+    setError(null);
+
+    try {
+      let pending = inFlightRef.current.get(requestKey);
+
+      if (!pending) {
+        pending = (async () => {
+          const getGeo = () =>
+            new Promise<{ lat?: number; lon?: number; acc?: number }>((resolve) => {
+              if (!navigator?.geolocation) return resolve({});
+              navigator.geolocation.getCurrentPosition(
+                (pos) =>
+                  resolve({
+                    lat: pos.coords.latitude,
+                    lon: pos.coords.longitude,
+                    acc: pos.coords.accuracy,
+                  }),
+                () => resolve({}),
+                { enableHighAccuracy: false, timeout: 1500 }
+              );
+            });
+
+          const geo = await getGeo();
+          if (token) {
+            return apiClient.scanToken(token, {
+              device: deviceId,
+              lat: geo.lat,
+              lon: geo.lon,
+              acc: geo.acc,
+              customerToken: customerToken || undefined,
+            });
+          }
+
+          return apiClient.verifyQRCode(codeParam, {
+            device: deviceId,
+            lat: geo.lat,
+            lon: geo.lon,
+            acc: geo.acc,
+            customerToken: customerToken || undefined,
+          });
+        })();
+
+        inFlightRef.current.set(requestKey, pending);
+      }
+
+      const response = await pending;
+      inFlightRef.current.delete(requestKey);
+
+      if (!response.success) {
+        setError(response.error || "Verification failed");
+        setResult(null);
+        return;
+      }
+
+      setResult((response.data as VerifyPayload) || null);
+    } catch (err: any) {
+      inFlightRef.current.delete(requestKey);
+      setError(err?.message || "Verification failed");
+      setResult(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [codeParam, customerToken, deviceId, requestKey, token]);
+
+  useEffect(() => {
+    try {
+      const savedToken = window.localStorage.getItem(CUSTOMER_TOKEN_KEY) || "";
+      const savedEmail = window.localStorage.getItem(CUSTOMER_EMAIL_KEY) || "";
+      setCustomerToken(savedToken);
+      setCustomerEmail(savedEmail);
+      if (!otpEmail && savedEmail) setOtpEmail(savedEmail);
+    } catch {
+      // ignore storage access issues
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    fetchVerification();
+  }, [fetchVerification]);
+
+  const handleRequestOtp = async () => {
+    const email = otpEmail.trim();
+    if (!email) {
+      toast({ title: "Email required", description: "Enter your email to receive OTP.", variant: "destructive" });
+      return;
+    }
+
+    setOtpSending(true);
+    try {
+      const response = await apiClient.requestVerifyEmailOtp(email);
+      if (!response.success || !response.data) {
+        toast({
+          title: "Could not send OTP",
+          description: response.error || "Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setOtpChallengeToken(response.data.challengeToken);
+      setOtpMaskedEmail(response.data.maskedEmail);
+      toast({ title: "OTP sent", description: `Code sent to ${response.data.maskedEmail}` });
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!otpChallengeToken) {
+      toast({ title: "OTP not requested", description: "Request an OTP first.", variant: "destructive" });
+      return;
+    }
+
+    if (otpCode.trim().length < 6) {
+      toast({ title: "Invalid OTP", description: "Enter the 6-digit code.", variant: "destructive" });
+      return;
+    }
+
+    setOtpVerifying(true);
+    try {
+      const response = await apiClient.verifyEmailOtp(otpChallengeToken, otpCode.trim());
+      if (!response.success || !response.data?.token) {
+        toast({
+          title: "OTP verification failed",
+          description: response.error || "Please check the code and try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const tokenValue = response.data.token;
+      const emailValue = response.data.customer?.email || otpEmail.trim();
+
+      setCustomerToken(tokenValue);
+      setCustomerEmail(emailValue);
+      setOtpChallengeToken("");
+      setOtpCode("");
 
       try {
-        let requestPromise = inFlightByKeyRef.current.get(requestKey);
-        if (!requestPromise) {
-          requestPromise = (async () => {
-            const device = deviceId || undefined;
-
-            const getGeo = () =>
-              new Promise<{ lat?: number; lon?: number; acc?: number }>((resolve) => {
-                if (!navigator?.geolocation) return resolve({});
-                navigator.geolocation.getCurrentPosition(
-                  (pos) =>
-                    resolve({
-                      lat: pos.coords.latitude,
-                      lon: pos.coords.longitude,
-                      acc: pos.coords.accuracy,
-                    }),
-                  () => resolve({}),
-                  { enableHighAccuracy: false, timeout: 1500 }
-                );
-              });
-
-            const geo = await getGeo();
-            return token
-              ? apiClient.scanToken(token, {
-                  device,
-                  lat: geo.lat,
-                  lon: geo.lon,
-                  acc: geo.acc,
-                })
-              : apiClient.verifyQRCode(codeParam, {
-                  device,
-                  lat: geo.lat,
-                  lon: geo.lon,
-                  acc: geo.acc,
-                });
-          })();
-          inFlightByKeyRef.current.set(requestKey, requestPromise);
-        }
-
-        const res = await requestPromise;
-        inFlightByKeyRef.current.delete(requestKey);
-
-        if (!active) return;
-
-        if (!res.success) {
-          setError(res.error || "Verification failed");
-          setResult(null);
-          return;
-        }
-
-        setResult((res.data as VerifyPayload) || null);
-      } catch (e: any) {
-        inFlightByKeyRef.current.delete(requestKey);
-        if (!active) return;
-        setError(e?.message || "Verification failed");
-        setResult(null);
-      } finally {
-        if (active) setIsLoading(false);
+        window.localStorage.setItem(CUSTOMER_TOKEN_KEY, tokenValue);
+        window.localStorage.setItem(CUSTOMER_EMAIL_KEY, emailValue);
+      } catch {
+        // ignore storage issues
       }
-    })();
 
-    return () => {
-      active = false;
-    };
-  }, [codeParam, deviceId, requestKey, token]);
-
-  const statusKind: StatusKind = useMemo(() => {
-    const scanOutcome = String(result?.scanOutcome || "").toUpperCase();
-    const status = String(result?.status || "").toUpperCase();
-
-    if (scanOutcome === "BLOCKED" || status === "BLOCKED") return "blocked";
-
-    if (scanOutcome === "SUSPICIOUS" || status === "ALLOCATED" || status === "ACTIVATED") {
-      return "suspicious";
+      toast({ title: "Signed in", description: "Protection sign-in is active for this device." });
+      await fetchVerification();
+    } finally {
+      setOtpVerifying(false);
     }
+  };
 
-    if (status === "DORMANT" || status === "ACTIVE" || scanOutcome === "NOT_PRINTED") {
-      return "unassigned";
-    }
-
-    const isAuthentic = Boolean(result?.isAuthentic);
-    const isFirstScan = Boolean((result as any)?.isFirstScan);
-    const policy: any = (result as any)?.policy || null;
-    const triggered: any = policy?.triggered || {};
-    const alerts: any[] = Array.isArray(policy?.alerts) ? policy.alerts : [];
-    const scanCount = Number(result?.scanCount ?? 0);
-    const signals = result?.scanSignals || null;
-
-    // Treat a small number of repeats as normal buyer behavior.
-    // Multi-scan becomes meaningful when the count grows beyond casual re-checks.
-    const multiScanSignal = Boolean(triggered.multiScan) && scanCount >= 4;
-    const multiDeviceSignal = Number(signals?.distinctDeviceCount24h ?? 0) > 1;
-    const recentBurstSignal = Number(signals?.recentScanCount10m ?? 0) >= 3;
-    const multiCountrySignal = Number(signals?.distinctCountryCount24h ?? 0) > 1;
-
-    const hasDuplicateSignals =
-      Boolean(multiScanSignal || triggered.geoDrift || triggered.velocitySpike || multiDeviceSignal || recentBurstSignal || multiCountrySignal) ||
-      alerts.some((a) => {
-        const t = String(a?.alertType || "").toUpperCase();
-        if (t === "MULTI_SCAN") return scanCount >= 4;
-        return ["POLICY_RULE", "GEO_DRIFT", "VELOCITY_SPIKE", "AUTO_BLOCK_QR", "AUTO_BLOCK_BATCH"].includes(t);
-      });
-
-    const possibleDuplicate = isAuthentic && !isFirstScan && hasDuplicateSignals;
-
-    if (isAuthentic) {
-      if (possibleDuplicate) return "possible_duplicate";
-      return isFirstScan ? "first" : "verified_again";
-    }
-
-    const lowerMessage = String(result?.message || "").toLowerCase();
-    if (lowerMessage.includes("blocked")) return "blocked";
-    if (lowerMessage.includes("allocated but not yet printed")) return "suspicious";
-    if (lowerMessage.includes("not been assigned")) return "unassigned";
-    return "invalid";
-  }, [result]);
-
-  const meta = STATUS_META[statusKind];
-  const manufacturer = result?.batch?.manufacturer || null;
-  const displayedCode = result?.code || codeParam || "—";
-  const printedAt = result?.printedAt || result?.batch?.printedAt || null;
-  const isReportable = statusKind === "possible_duplicate" || statusKind === "blocked" || statusKind === "suspicious" || statusKind === "invalid";
-  const canSubmitFeedback = displayedCode !== "—" && statusKind !== "invalid";
-  const firstScanAt = result?.firstScanAt || result?.firstScanned || null;
-  const firstScanLocation = result?.firstScanLocation || null;
-  const latestScanAt = result?.latestScanAt || null;
-  const latestScanLocation = result?.latestScanLocation || null;
-  const previousScanAt = result?.previousScanAt || null;
-  const previousScanLocation = result?.previousScanLocation || null;
-  const supportEmail = result?.licensee?.supportEmail || "";
-  const supportPhone = result?.licensee?.supportPhone || "";
-  const supportContactHref = supportEmail
-    ? `mailto:${supportEmail}`
-    : supportPhone
-    ? `tel:${supportPhone.replace(/\s+/g, "")}`
-    : "";
-
-  const containment = result?.containment || null;
-  const hasContainment =
-    Boolean(containment?.qrUnderInvestigation) ||
-    Boolean(containment?.batchSuspended) ||
-    Boolean(containment?.orgSuspended);
-
-  const policyAlerts = useMemo(() => {
-    const alerts = (result as any)?.policy?.alerts;
-    return Array.isArray(alerts) ? alerts : [];
-  }, [result]);
-
-  const repeatReasons = useMemo(() => {
-    if (statusKind !== "verified_again") return [];
-    const reasons: string[] = [];
-    const signals = result?.scanSignals || null;
-
-    if (signals?.seenOnCurrentDeviceBefore || signals?.previousScanSameDevice || localSeenOnDeviceBefore) {
-      reasons.push("You scanned this before on this device.");
-    }
-    if (previousScanAt) {
-      reasons.push(`Last verification was at ${new Date(previousScanAt).toLocaleString()}.`);
-    }
-    if (Number(signals?.distinctDeviceCount24h ?? 0) <= 1) {
-      reasons.push("Recent checks come from a single device pattern.");
-    }
-    if (localDeviceScanCount >= 2) {
-      reasons.push(`This device has verified this code ${localDeviceScanCount} times.`);
-    }
-    if (!reasons.length) {
-      reasons.push("Repeat scans are normal when you re-check or show proof of authenticity.");
-    }
-
-    return reasons.slice(0, 5);
-  }, [localDeviceScanCount, localSeenOnDeviceBefore, previousScanAt, result?.scanSignals, statusKind]);
-
-  const duplicateReasons = useMemo(() => {
-    if (statusKind !== "possible_duplicate") return [];
-    const policy: any = (result as any)?.policy || null;
-    const triggered: any = policy?.triggered || {};
-    const scanCount = Number(result?.scanCount ?? 0);
-    const signals = result?.scanSignals || null;
-    const reasons: string[] = [];
-
-    if (Number(signals?.distinctDeviceCount24h ?? 0) > 1) {
-      reasons.push("This code has been scanned from multiple devices recently.");
-    }
-    if (Number(signals?.recentScanCount10m ?? 0) >= 3) {
-      reasons.push("Many scans happened in a short time window.");
-    }
-    if (Number(signals?.distinctCountryCount24h ?? 0) > 1) {
-      reasons.push("Recent scans came from different countries.");
-    }
-    if (!signals?.seenOnCurrentDeviceBefore && scanCount > 1) {
-      reasons.push("This appears to be a different device from earlier verifications.");
-    }
-    if (triggered.multiScan && scanCount >= 4) reasons.push("High repeat scan count detected.");
-    if (triggered.geoDrift) reasons.push("Recent scans show large location drift.");
-    if (triggered.velocitySpike) reasons.push("Unusually high scan frequency was detected.");
-
-    for (const alert of policyAlerts) {
-      const msg = String(alert?.message || "").trim();
-      if (msg && !reasons.includes(msg)) reasons.push(msg);
-    }
-
-    return reasons.slice(0, 6);
-  }, [policyAlerts, result, statusKind]);
-
-  const primaryMessage = useMemo(() => {
-    if (statusKind === "first") return "This is a genuine product.";
-    if (statusKind === "verified_again") return "Authentic item verified again.";
-    if (statusKind === "possible_duplicate") return "Possible duplicate scan detected.";
-    return result?.message || "Verification details";
-  }, [result?.message, statusKind]);
-
-  const messageTone = useMemo(() => {
-    if (statusKind === "first" || statusKind === "verified_again") return "success";
-    if (statusKind === "blocked" || statusKind === "invalid") return "danger";
-    return "warning";
-  }, [statusKind]);
-
-  const showScanHistory =
-    statusKind !== "invalid" &&
-    (typeof result?.scanCount === "number" || Boolean(firstScanAt) || Boolean(latestScanAt));
-  const feedbackStorageKey = useMemo(() => {
-    const normalized = String(displayedCode || "").trim().toUpperCase();
-    return normalized && normalized !== "—" ? `authenticqr_feedback_${normalized}` : "";
-  }, [displayedCode]);
-
-  useEffect(() => {
-    if (!isLoading) return;
-    const timer = window.setInterval(() => {
-      setLoadingStepIdx((prev) => (prev + 1) % VERIFY_LOADING_STEPS.length);
-    }, 1100);
-    return () => window.clearInterval(timer);
-  }, [isLoading]);
-
-  useEffect(() => {
-    if (!feedbackStorageKey) {
-      setFeedbackSubmitted(false);
-      return;
-    }
-    try {
-      setFeedbackSubmitted(window.localStorage.getItem(feedbackStorageKey) === "1");
-    } catch {
-      setFeedbackSubmitted(false);
-    }
-  }, [feedbackStorageKey]);
-
-  useEffect(() => {
-    setFeedbackRating(0);
-    setFeedbackSatisfaction("");
-    setFeedbackNote("");
-  }, [feedbackStorageKey]);
-
-  useEffect(() => {
-    setShowRepeatDetails(false);
-  }, [statusKind, requestKey]);
-
-  useEffect(() => {
-    if (!result || !displayedCode || displayedCode === "—" || !deviceId) {
-      setLocalSeenOnDeviceBefore(false);
-      setLocalDeviceScanCount(0);
-      return;
-    }
-
-    if (!result.isAuthentic) {
-      setLocalSeenOnDeviceBefore(false);
-      setLocalDeviceScanCount(0);
-      return;
-    }
-
-    const normalizedCode = displayedCode.toUpperCase();
+  const handleSignOut = async () => {
+    setCustomerToken("");
+    setCustomerEmail("");
+    setOtpChallengeToken("");
+    setOtpCode("");
 
     try {
-      const raw = window.localStorage.getItem(LOCAL_SCAN_HISTORY_KEY);
-      const store = raw ? (JSON.parse(raw) as Record<string, Record<string, number>>) : {};
-      const perCode = store[normalizedCode] || {};
-      const previousCount = Number(perCode[deviceId] || 0);
-
-      setLocalSeenOnDeviceBefore(previousCount > 0);
-      setLocalDeviceScanCount(previousCount + 1);
-
-      perCode[deviceId] = previousCount + 1;
-      store[normalizedCode] = perCode;
-      window.localStorage.setItem(LOCAL_SCAN_HISTORY_KEY, JSON.stringify(store));
+      window.localStorage.removeItem(CUSTOMER_TOKEN_KEY);
+      window.localStorage.removeItem(CUSTOMER_EMAIL_KEY);
     } catch {
-      setLocalSeenOnDeviceBefore(false);
-      setLocalDeviceScanCount(0);
+      // ignore storage issues
     }
-  }, [deviceId, displayedCode, result?.isAuthentic, result?.latestScanAt]);
 
-  const submitReport = async () => {
-    const normalizedCode = String(displayedCode || "").trim();
-    if (!normalizedCode || normalizedCode === "—") {
-      toast({
-        title: "Report failed",
-        description: "No valid code found to report.",
-        variant: "destructive",
-      });
+    await fetchVerification();
+  };
+
+  const handleClaimProduct = async () => {
+    if (!customerToken) {
+      toast({ title: "Sign in required", description: "Sign in with email OTP to claim product ownership.", variant: "destructive" });
       return;
     }
+
+    if (!displayedCode || displayedCode === "—") {
+      toast({ title: "Invalid code", description: "Cannot claim without a valid verification code.", variant: "destructive" });
+      return;
+    }
+
+    setClaiming(true);
+    try {
+      const response = await apiClient.claimVerifiedProduct(displayedCode, customerToken);
+      if (!response.success || !response.data) {
+        toast({ title: "Claim failed", description: response.error || "Could not claim this product.", variant: "destructive" });
+        return;
+      }
+
+      if (response.data.claimResult === "OWNED_BY_ANOTHER_USER") {
+        toast({
+          title: "Ownership conflict",
+          description: response.data.warningMessage || "This product is already claimed by another account.",
+          variant: "destructive",
+        });
+      } else if (response.data.claimResult === "ALREADY_OWNED_BY_YOU") {
+        toast({ title: "Already owned", description: "This product is already linked to your account." });
+      } else {
+        toast({ title: "Ownership claimed", description: "Product ownership is now linked to your account." });
+      }
+
+      const nextOwnership = response.data.ownershipStatus || DEFAULT_OWNERSHIP_STATUS;
+      setResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              classification:
+                (response.data.classification as VerificationClassification | undefined) || prev.classification,
+              reasons: response.data.reasons || prev.reasons,
+              warningMessage: response.data.warningMessage || prev.warningMessage,
+              ownershipStatus: nextOwnership,
+            }
+          : prev
+      );
+    } finally {
+      setClaiming(false);
+    }
+  };
+
+  const handleSubmitReport = async () => {
+    const codeValue = String(displayedCode || "").trim();
+    if (!codeValue || codeValue === "—") {
+      toast({ title: "Report failed", description: "No valid code available.", variant: "destructive" });
+      return;
+    }
+
     if (reportDescription.trim().length < 6) {
       toast({
-        title: "More details needed",
-        description: "Please add a short description so the team can investigate.",
+        title: "More detail required",
+        description: "Please describe what looked suspicious.",
         variant: "destructive",
       });
       return;
@@ -552,616 +560,303 @@ export default function Verify() {
     setReporting(true);
     try {
       const formData = new FormData();
-      const scanStatus = String(result?.status || "unknown").toLowerCase();
-      const scanOutcome = String(result?.scanOutcome || "unknown").toLowerCase();
-      const classificationTag = `classification_${statusKind}`;
-      const reasonTags = duplicateReasons
-        .slice(0, 3)
-        .map((reason) =>
-          reason
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, "_")
-            .replace(/^_+|_+$/g, "")
-            .slice(0, 36)
-        )
-        .filter(Boolean)
-        .map((slug) => `reason_${slug}`);
-
-      const metadataLines = [
-        `Code: ${normalizedCode}`,
-        `Scan status: ${String(result?.status || "unknown")}`,
-        `Scan outcome: ${String(result?.scanOutcome || "unknown")}`,
-        `Classification: ${statusKind.toUpperCase()}`,
-        `Detected reasons: ${(duplicateReasons.length ? duplicateReasons : repeatReasons).join(" | ") || "n/a"}`,
-        `Scan count: ${String(result?.scanCount ?? "0")}`,
-        `Latest scan: ${latestScanAt ? new Date(latestScanAt).toISOString() : "n/a"}`,
-      ];
-      const composedDescription = `${reportDescription.trim()}\n\n--- Scan metadata ---\n${metadataLines.join("\n")}`.slice(0, 2000);
-
-      formData.append("qrCodeValue", normalizedCode);
-      formData.append("incidentType", incidentType);
-      formData.append("description", composedDescription);
-      if (purchasePlace.trim()) formData.append("purchasePlace", purchasePlace.trim());
-      if (purchaseDate.trim()) formData.append("purchaseDate", purchaseDate.trim());
-      if (productBatchNo.trim()) formData.append("productBatchNo", productBatchNo.trim());
-      if (reportCustomerName.trim()) formData.append("customerName", reportCustomerName.trim());
-      if (reportEmail.trim()) formData.append("customerEmail", reportEmail.trim());
-      if (reportPhone.trim()) formData.append("customerPhone", reportPhone.trim());
-      if (reportCountry.trim()) formData.append("customerCountry", reportCountry.trim());
-      formData.append("consentToContact", String(reportConsent));
-      formData.append("preferredContactMethod", reportConsent && reportEmail.trim() ? "email" : "none");
-      if (typeof window !== "undefined" && window.location.href) {
-        formData.append(
-          "tags",
-          JSON.stringify([
-            "verify_page_report",
-            `status_${scanStatus}`,
-            `outcome_${scanOutcome}`,
-            classificationTag,
-            ...reasonTags,
-          ])
-        );
-      }
+      formData.append("code", codeValue);
+      formData.append("incidentType", reportType);
+      formData.append("reason", reasons[0] || classification);
+      formData.append("description", reportDescription.trim());
+      if (reportEmail.trim()) formData.append("contactEmail", reportEmail.trim());
+      formData.append("consentToContact", String(Boolean(reportEmail.trim())));
+      formData.append("preferredContactMethod", reportEmail.trim() ? "email" : "none");
+      formData.append("tags", JSON.stringify(["verify_page_report", `classification_${classification.toLowerCase()}`]));
       for (const photo of reportPhotos.slice(0, 4)) {
         formData.append("photos", photo);
       }
 
-      const res = await apiClient.submitIncidentReport(formData);
-
-      if (!res.success) {
-        toast({
-          title: "Report failed",
-          description: res.error || "Could not submit report.",
-          variant: "destructive",
-        });
+      const response = await apiClient.submitFraudReport(formData, customerToken || undefined);
+      if (!response.success) {
+        toast({ title: "Report failed", description: response.error || "Please try again.", variant: "destructive" });
         return;
       }
 
-      toast({
-        title: "Report submitted",
-        description: "Our security team has received your report.",
-      });
-      setReportReference((res.data as any)?.reference || (res.data as any)?.incidentId || null);
-      setIncidentType(INCIDENT_TYPE_OPTIONS[0].value);
-      setReportDescription("");
-      setPurchasePlace("");
-      setPurchaseDate("");
-      setProductBatchNo("");
-      setReportCustomerName("");
-      setReportEmail("");
-      setReportPhone("");
-      setReportCountry("");
-      setReportConsent(true);
-      setReportPhotos([]);
+      setReportReference((response.data as any)?.reportId || null);
+      toast({ title: "Report submitted", description: "Security team has received your report." });
     } finally {
       setReporting(false);
     }
   };
 
-  const submitFeedback = async () => {
-    if (!canSubmitFeedback) return;
-    if (feedbackRating < 1 || !feedbackSatisfaction) {
-      toast({
-        title: "Add your rating",
-        description: "Please select star rating and satisfaction level.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setFeedbackSubmitting(true);
-    try {
-      const res = await apiClient.submitProductFeedback({
-        code: displayedCode,
-        rating: feedbackRating,
-        satisfaction: feedbackSatisfaction as SatisfactionValue,
-        notes: feedbackNote.trim() || undefined,
-        observedStatus: result?.status,
-        observedOutcome: result?.scanOutcome,
-        pageUrl: typeof window !== "undefined" ? window.location.href : undefined,
-      });
-
-      if (!res.success) {
-        toast({
-          title: "Could not submit feedback",
-          description: res.error || "Please try again.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      try {
-        if (feedbackStorageKey) window.localStorage.setItem(feedbackStorageKey, "1");
-      } catch {}
-
-      setFeedbackSubmitted(true);
-      toast({
-        title: "Thanks for your feedback",
-        description: "Your response was shared with the product team.",
-      });
-    } finally {
-      setFeedbackSubmitting(false);
-    }
-  };
+  const supportEmail = result?.licensee?.supportEmail || "";
+  const supportPhone = result?.licensee?.supportPhone || "";
+  const supportWebsite = result?.licensee?.website || "";
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[linear-gradient(145deg,#052f2f_0%,#0b3a53_45%,#0f2740_100%)] px-4 py-10">
-      <style>{`
-        @keyframes verify-scanline {
-          0% { transform: translateY(-16%); opacity: 0; }
-          18% { opacity: 1; }
-          82% { opacity: 1; }
-          100% { transform: translateY(260%); opacity: 0; }
-        }
-        @keyframes verify-orbit {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        @keyframes verify-card-enter {
-          from { opacity: 0; transform: translateY(10px) scale(0.99); }
-          to { opacity: 1; transform: translateY(0) scale(1); }
-        }
-        @keyframes verify-icon-pulse {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.04); }
-        }
-      `}</style>
-      <div className="pointer-events-none absolute -left-24 top-8 h-72 w-72 rounded-full bg-cyan-300/15 blur-3xl" />
-      <div className="pointer-events-none absolute right-0 top-0 h-96 w-96 rounded-full bg-emerald-300/10 blur-3xl" />
-      <div className="pointer-events-none absolute bottom-0 left-1/3 h-80 w-80 rounded-full bg-sky-300/10 blur-3xl" />
-
-      <div className="relative mx-auto w-full max-w-3xl">
-        <div className="mb-8 text-center">
-          <Link to="/verify" className="inline-flex items-center gap-3 text-white">
-            <span className="rounded-2xl border border-cyan-100/20 bg-white/10 p-2.5 backdrop-blur">
-              <Shield className="h-8 w-8 text-cyan-200" />
-            </span>
-            <span className="text-3xl font-semibold tracking-tight">AuthenticQR</span>
+    <div className="min-h-screen bg-slate-100 px-4 py-8">
+      <div className="mx-auto w-full max-w-4xl space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link to="/verify" className="inline-flex items-center gap-2 text-slate-900">
+            <Shield className="h-6 w-6" />
+            <span className="text-xl font-semibold">AuthenticQR Verification</span>
           </Link>
-          <p className="mt-3 text-sm uppercase tracking-[0.18em] text-cyan-100/80">Product Verification</p>
+          <Button asChild variant="outline">
+            <Link to="/verify">Verify another code</Link>
+          </Button>
         </div>
 
-        <Card className="overflow-hidden border-white/20 bg-white/95 shadow-[0_30px_80px_rgba(3,18,30,0.35)] backdrop-blur-sm">
-          {isLoading ? (
-            <CardContent className="py-14 sm:py-16">
-              <div className="mx-auto flex max-w-md flex-col items-center gap-6 text-center">
-                <div className="relative h-40 w-40">
-                  <div className="absolute -inset-3 rounded-[2.1rem] border border-cyan-300/30" style={{ animation: "verify-orbit 2.4s linear infinite" }} />
-                  <div className="absolute inset-0 rounded-[2rem] border border-cyan-200/70 bg-gradient-to-b from-cyan-100/60 to-white/80 shadow-inner" />
-                  <div className="absolute inset-4 overflow-hidden rounded-[1.4rem] border border-cyan-200/90 bg-white/70">
-                    <div
-                      className="absolute left-0 right-0 top-0 h-12 bg-gradient-to-b from-cyan-400/35 to-transparent"
-                      style={{ animation: "verify-scanline 1.8s ease-in-out infinite" }}
-                    />
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <Shield className="h-12 w-12 text-slate-700 animate-pulse" />
-                    </div>
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-lg font-semibold text-slate-900">{VERIFY_LOADING_STEPS[loadingStepIdx]}</p>
-                  <p className="text-sm text-slate-500">Please keep this screen open.</p>
-                </div>
-              </div>
+        <Card className="border-slate-200 shadow-sm">
+          {loading ? (
+            <CardContent className="flex items-center justify-center py-16 text-slate-600">
+              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              Verifying product authenticity...
             </CardContent>
           ) : error ? (
-            <CardContent className="space-y-4 py-12 text-center">
-              <SearchX className="mx-auto h-10 w-10 text-red-600" />
-              <p className="text-xl font-semibold text-slate-900">Verification service unavailable</p>
+            <CardContent className="space-y-3 py-12 text-center">
+              <SearchX className="mx-auto h-8 w-8 text-rose-700" />
+              <p className="text-lg font-semibold text-slate-900">Verification service unavailable</p>
               <p className="text-sm text-slate-600">{error}</p>
-              <div className="mx-auto flex max-w-sm gap-2">
-                <Button variant="outline" asChild className="flex-1">
-                  <Link to="/verify">Try another code</Link>
-                </Button>
-                <Button type="button" className="flex-1 bg-slate-900 text-white hover:bg-slate-800" onClick={() => window.location.reload()}>
-                  Retry
-                </Button>
-              </div>
             </CardContent>
           ) : (
-            <div style={{ animation: "verify-card-enter 360ms cubic-bezier(.22,1,.36,1) both" }}>
-              <div className={`bg-gradient-to-r ${meta.panelClass} px-6 py-7 text-white`}>
-                <div className="mx-auto flex max-w-xl items-center gap-4">
-                  <div
-                    className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border border-white/30 bg-white/15"
-                    style={{ animation: "verify-icon-pulse 1.8s ease-in-out infinite" }}
-                  >
-                    {meta.icon}
-                  </div>
-                  <div>
-                    <h1 className="text-3xl font-semibold leading-tight">{meta.title}</h1>
-                    <p className="mt-1 text-white/85">{meta.subtitle}</p>
-                  </div>
-                </div>
-              </div>
-
-              <CardContent className="space-y-6 p-6 md:p-8">
-                <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Verified code</p>
-                    <p className="mt-1 font-mono text-2xl font-semibold tracking-tight text-slate-900">{displayedCode}</p>
-                  </div>
-                  <Badge className="w-fit border-transparent bg-slate-900 text-white">{meta.chip}</Badge>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="rounded-xl border border-slate-200 bg-white p-4">
-                    <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500">
-                      <Building2 className="h-4 w-4 text-teal-600" />
-                      Licensed by
+            <CardContent className="space-y-6 p-5 sm:p-6">
+              <section className="space-y-3">
+                <div className={cn("rounded-xl p-4", classMeta.bannerClass)}>
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-md bg-white/20 p-2">{classMeta.icon}</div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs uppercase tracking-wide text-white/80">1. Verification Result Banner</p>
+                      <h1 className="text-2xl font-semibold">{classMeta.title}</h1>
+                      <p className="mt-1 text-sm text-white/90">{classMeta.subtitle}</p>
+                      <p className="mt-2 text-sm text-white/90">{result?.message || "Verification completed."}</p>
+                      {result?.warningMessage ? <p className="mt-2 text-sm text-white/90">{result.warningMessage}</p> : null}
                     </div>
-                    <p className="text-base font-semibold text-slate-900">
-                      {result?.licensee?.brandName || result?.licensee?.name || "—"}
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 bg-white p-4">
-                    <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500">
-                      <Factory className="h-4 w-4 text-cyan-700" />
-                      Manufacturer
-                    </div>
-                    <p className="text-base font-semibold text-slate-900">{manufacturer?.name || "—"}</p>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 bg-white p-4">
-                    <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500">
-                      <CalendarClock className="h-4 w-4 text-sky-700" />
-                      Printed on
-                    </div>
-                    <p className="text-base font-semibold text-slate-900">
-                      {printedAt ? new Date(printedAt).toLocaleDateString() : "Not available"}
-                    </p>
+                    <Badge className="border-white/30 bg-white/20 text-white">{classMeta.badge}</Badge>
                   </div>
                 </div>
 
-                {hasContainment ? (
-                  <div className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-900">
-                    <p className="font-semibold">Under investigation</p>
-                    <p className="mt-1 text-orange-900/90">
-                      This product is currently under investigation. If you need help, contact the brand support details below.
-                    </p>
-                    {containment?.qrUnderInvestigation?.reason ? (
-                      <p className="mt-1 text-xs text-orange-900/80">Reason: {containment.qrUnderInvestigation.reason}</p>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {(primaryMessage || result?.warningMessage) ? (
-                  <div
-                    className={cn(
-                      "rounded-xl border px-4 py-3 text-sm",
-                      messageTone === "success" && "border-emerald-200 bg-emerald-50 text-emerald-900",
-                      messageTone === "warning" && "border-amber-300 bg-amber-50 text-amber-900",
-                      messageTone === "danger" && "border-red-200 bg-red-50 text-red-900"
-                    )}
-                  >
-                    <p className="font-medium">{primaryMessage}</p>
-                    {statusKind === "verified_again" ? (
-                      <div className="mt-1 space-y-2 text-emerald-900/90">
-                        <p>You have verified this product before.</p>
-                        <p>You can safely show this screen again if someone asks for proof.</p>
-                        <Collapsible open={showRepeatDetails} onOpenChange={setShowRepeatDetails}>
-                          <CollapsibleTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="h-auto px-0 py-0 text-emerald-800 hover:text-emerald-900"
-                            >
-                              Show details
-                              {showRepeatDetails ? (
-                                <ChevronUp className="ml-1 h-4 w-4" />
-                              ) : (
-                                <ChevronDown className="ml-1 h-4 w-4" />
-                              )}
-                            </Button>
-                          </CollapsibleTrigger>
-                          <CollapsibleContent>
-                            <ul className="mt-2 list-disc space-y-1 pl-5 text-emerald-900/90">
-                              {repeatReasons.map((reason) => (
-                                <li key={reason}>{reason}</li>
-                              ))}
-                            </ul>
-                          </CollapsibleContent>
-                        </Collapsible>
-                      </div>
-                    ) : null}
-                    {statusKind === "possible_duplicate" ? (
-                      <p className="mt-1 text-amber-900/90">
-                        Review details below before trusting this label. If anything looks wrong, report it.
-                      </p>
-                    ) : null}
-                    {result?.warningMessage ? (
-                      <p
-                        className={cn(
-                          "mt-2",
-                          messageTone === "success" && "text-emerald-900/80",
-                          messageTone === "warning" && "text-amber-900/80",
-                          messageTone === "danger" && "text-red-900/80"
-                        )}
-                      >
-                        {result.warningMessage}
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {statusKind === "possible_duplicate" ? (
-                  <div className="space-y-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
-                    <p className="font-semibold">Why this was flagged</p>
-                    <ul className="mt-2 list-disc space-y-1 pl-5 text-red-900/90">
-                      {(duplicateReasons.length > 0 ? duplicateReasons : ["Unusual scan pattern detected by security policy."]).map((r) => (
-                        <li key={r}>{r}</li>
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Verified Code</p>
+                  <p className="mt-1 font-mono text-xl font-semibold text-slate-900">{displayedCode}</p>
+                  <div className="mt-3 space-y-1">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Reasons</p>
+                    <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
+                      {reasons.map((reason) => (
+                        <li key={reason}>{reason}</li>
                       ))}
                     </ul>
-                    <div className="flex flex-col gap-2 pt-1 md:flex-row">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => {
-                          setReportReference(null);
-                          setReportOpen(true);
-                        }}
-                        className="border-red-300 bg-white text-red-700 hover:bg-red-100 hover:text-red-800"
-                      >
-                        <Flag className="mr-2 h-4 w-4" />
-                        Report suspected counterfeit
-                      </Button>
-                      {supportContactHref ? (
-                        <Button asChild type="button" variant="outline" className="border-red-300 bg-white text-red-700 hover:bg-red-100 hover:text-red-800">
-                          <a href={supportContactHref}>
-                            <LifeBuoy className="mr-2 h-4 w-4" />
-                            Contact support
-                          </a>
-                        </Button>
-                      ) : null}
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="border-red-300 bg-white text-red-700 hover:bg-red-100 hover:text-red-800"
-                        onClick={() =>
-                          openHelpAssistant({
-                            entryId: "customer-duplicate-explainer",
-                            query: "How does duplication happen?",
-                          })
-                        }
-                      >
-                        How does duplication happen?
-                      </Button>
-                    </div>
                   </div>
-                ) : null}
+                </div>
+              </section>
 
-                {showScanHistory ? (
-                  <div className="rounded-xl border border-slate-200 bg-white p-4">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Scan history summary</p>
-                      <Badge variant="outline" className="text-xs">Coarse city/country only</Badge>
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-3">
-                      <div>
-                        <p className="text-xs uppercase tracking-wide text-slate-500">Total scans</p>
-                        <p className="mt-1 text-2xl font-semibold text-slate-900">{result?.scanCount ?? 0}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs uppercase tracking-wide text-slate-500">First verified</p>
-                        <p className="mt-1 text-sm font-medium text-slate-900">
-                          {firstScanAt ? new Date(firstScanAt).toLocaleString() : "Not available"}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500">{firstScanLocation || "Location unavailable"}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs uppercase tracking-wide text-slate-500">Latest verified</p>
-                        <p className="mt-1 text-sm font-medium text-slate-900">
-                          {latestScanAt ? new Date(latestScanAt).toLocaleString() : "Not available"}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {latestScanLocation || previousScanLocation || "Location unavailable"}
-                        </p>
-                      </div>
-                    </div>
+              <section className="rounded-xl border border-slate-200 bg-white p-4">
+                <p className="text-xs uppercase tracking-wide text-slate-500">2. Scan Summary</p>
+                <div className="mt-3 grid gap-3 md:grid-cols-3">
+                  <div className="rounded-lg border border-slate-200 p-3">
+                    <p className="text-xs text-slate-500">Total scans</p>
+                    <p className="mt-1 text-2xl font-semibold text-slate-900">{scanSummary.totalScans}</p>
                   </div>
-                ) : null}
-
-                <div className="grid gap-3 md:grid-cols-3">
-                  {result?.licensee?.supportEmail && (
-                    <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
-                      <Mail className="h-4 w-4 text-slate-500" />
-                      <span className="truncate">{result.licensee.supportEmail}</span>
-                    </div>
-                  )}
-                  {result?.licensee?.supportPhone && (
-                    <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
-                      <Phone className="h-4 w-4 text-slate-500" />
-                      <span>{result.licensee.supportPhone}</span>
-                    </div>
-                  )}
-                  {result?.licensee?.website && (
-                    <a
-                      href={result.licensee.website}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50"
-                    >
-                      <Globe2 className="h-4 w-4 text-slate-500" />
-                      <span className="truncate">Official website</span>
-                    </a>
-                  )}
+                  <div className="rounded-lg border border-slate-200 p-3">
+                    <p className="text-xs text-slate-500">First verified</p>
+                    <p className="mt-1 text-sm font-medium text-slate-900">{formatDateTime(scanSummary.firstVerifiedAt)}</p>
+                    <p className="mt-1 text-xs text-slate-500">{scanSummary.firstVerifiedLocation || "Location unavailable"}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 p-3">
+                    <p className="text-xs text-slate-500">Latest verified</p>
+                    <p className="mt-1 text-sm font-medium text-slate-900">{formatDateTime(scanSummary.latestVerifiedAt)}</p>
+                    <p className="mt-1 text-xs text-slate-500">{scanSummary.latestVerifiedLocation || "Location unavailable"}</p>
+                  </div>
                 </div>
 
-                {canSubmitFeedback && (
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 md:p-5">
-                    <div className="flex items-start gap-2">
-                      <Sparkles className="mt-0.5 h-4 w-4 text-cyan-700" />
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">How was this product?</p>
-                        <p className="text-xs text-slate-500">Share a quick rating for this verified item.</p>
-                      </div>
+                <div className="mt-3 grid gap-2 text-sm text-slate-700 md:grid-cols-2">
+                  <p>
+                    <span className="font-medium">Brand:</span> {result?.licensee?.brandName || result?.licensee?.name || "—"}
+                  </p>
+                  <p>
+                    <span className="font-medium">Manufacturer:</span> {result?.batch?.manufacturer?.name || "—"}
+                  </p>
+                  <p>
+                    <span className="font-medium">Blocked:</span> {isBlocked ? "Yes" : "No"}
+                  </p>
+                  <p>
+                    <span className="font-medium">Ready for customer use:</span> {isReady ? "Yes" : "No"}
+                  </p>
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">3. Ownership Section</p>
+                  {customerToken ? <Badge variant="outline">Signed in for protection</Badge> : null}
+                </div>
+
+                {!customerToken ? (
+                  <div className="mt-3 space-y-4">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                      <p className="font-medium">Sign in for better protection</p>
+                      <p className="mt-1">Sign-in is optional. You can still verify without signing in.</p>
                     </div>
 
-                    {feedbackSubmitted ? (
-                      <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                        Thanks, your feedback was shared with the brand team.
+                    {googleOauthUrl ? (
+                      <Button asChild variant="outline" className="w-full sm:w-auto">
+                        <a href={googleOauthUrl}>Continue with Google</a>
+                      </Button>
+                    ) : null}
+
+                    <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+                      <div className="space-y-2">
+                        <Label>Email OTP sign-in</Label>
+                        <Input
+                          type="email"
+                          value={otpEmail}
+                          onChange={(e) => setOtpEmail(e.target.value)}
+                          placeholder="you@example.com"
+                        />
                       </div>
-                    ) : (
-                      <div className="mt-4 space-y-4">
-                        <div className="space-y-2">
-                          <Label className="text-xs font-medium uppercase tracking-wide text-slate-500">Rating</Label>
-                          <div className="flex flex-wrap gap-2">
-                            {[1, 2, 3, 4, 5].map((star) => (
-                              <button
-                                key={star}
-                                type="button"
-                                onClick={() => setFeedbackRating(star)}
-                                className={cn(
-                                  "flex h-10 w-10 items-center justify-center rounded-full border transition-colors",
-                                  feedbackRating >= star
-                                    ? "border-amber-300 bg-amber-50 text-amber-500"
-                                    : "border-slate-200 bg-white text-slate-300 hover:bg-slate-50"
-                                )}
-                                aria-label={`Rate ${star} star${star > 1 ? "s" : ""}`}
-                              >
-                                <Star className={cn("h-4 w-4", feedbackRating >= star ? "fill-current" : "")} />
-                              </button>
-                            ))}
+                      <Button type="button" onClick={handleRequestOtp} disabled={otpSending} className="bg-slate-900 text-white hover:bg-slate-800">
+                        {otpSending ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Sending OTP
+                          </>
+                        ) : (
+                          "Send OTP"
+                        )}
+                      </Button>
+                    </div>
+
+                    {otpChallengeToken ? (
+                      <div className="space-y-3 rounded-lg border border-slate-200 p-3">
+                        <p className="text-sm text-slate-700">Enter 6-digit OTP sent to {otpMaskedEmail || "your email"}.</p>
+                        <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+                          <div className="space-y-2">
+                            <Label>One-time code</Label>
+                            <Input value={otpCode} onChange={(e) => setOtpCode(e.target.value)} maxLength={6} placeholder="123456" />
                           </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label className="text-xs font-medium uppercase tracking-wide text-slate-500">Satisfaction</Label>
-                          <div className="flex flex-wrap gap-2">
-                            {SATISFACTION_OPTIONS.map((option) => (
-                              <button
-                                key={option.value}
-                                type="button"
-                                onClick={() => setFeedbackSatisfaction(option.value)}
-                                className={cn(
-                                  "rounded-full border px-3 py-1.5 text-sm transition-colors",
-                                  feedbackSatisfaction === option.value
-                                    ? "border-slate-900 bg-slate-900 text-white"
-                                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                                )}
-                              >
-                                {option.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label className="text-xs font-medium uppercase tracking-wide text-slate-500">Comment (optional)</Label>
-                          <Textarea
-                            value={feedbackNote}
-                            onChange={(e) => setFeedbackNote(e.target.value)}
-                            placeholder="Anything you liked or want improved."
-                            rows={3}
-                            maxLength={500}
-                            className="bg-white"
-                          />
-                        </div>
-
-                        <div className="flex justify-end">
-                          <Button type="button" onClick={submitFeedback} disabled={feedbackSubmitting} className="bg-slate-900 text-white hover:bg-slate-800">
-                            {feedbackSubmitting ? (
+                          <Button type="button" onClick={handleVerifyOtp} disabled={otpVerifying} className="bg-slate-900 text-white hover:bg-slate-800">
+                            {otpVerifying ? (
                               <>
                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Sending...
+                                Verifying
                               </>
                             ) : (
-                              "Submit feedback"
+                              "Verify OTP"
                             )}
                           </Button>
                         </div>
                       </div>
-                    )}
+                    ) : null}
                   </div>
-                )}
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                      <p className="font-medium">Signed in as {customerEmail}</p>
+                      <p className="mt-1">Use this session to claim ownership and strengthen duplicate protection.</p>
+                    </div>
 
-                <div className="flex flex-col-reverse gap-3 pt-1 md:flex-row md:justify-between">
-                  <Button asChild variant="outline" className="md:w-auto">
-                    <Link to="/verify">Verify another code</Link>
-                  </Button>
-
-                  <div className="flex flex-col gap-3 md:flex-row">
-                    {isReportable && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => {
-                          setReportReference(null);
-                          setReportOpen(true);
-                        }}
-                        className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
-                      >
-                        <Flag className="mr-2 h-4 w-4" />
-                        Report suspected counterfeit
-                      </Button>
+                    {ownershipStatus.isOwnedByRequester ? (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                        <p className="font-semibold">Owned by you</p>
+                        <p className="mt-1">Claimed at: {formatDateTime(ownershipStatus.claimedAt)}</p>
+                      </div>
+                    ) : ownershipStatus.isClaimedByAnother ? (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                        <p className="font-semibold">Already claimed by another account</p>
+                        <p className="mt-1">Do not trust this product blindly. Submit a counterfeit report for investigation.</p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-3">
+                        <Button
+                          type="button"
+                          onClick={handleClaimProduct}
+                          disabled={claiming}
+                          className="bg-slate-900 text-white hover:bg-slate-800"
+                        >
+                          {claiming ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Claiming
+                            </>
+                          ) : (
+                            "Claim this product"
+                          )}
+                        </Button>
+                      </div>
                     )}
-                    <Button asChild className="bg-slate-900 text-white hover:bg-slate-800">
-                      <Link to="/verify">
-                        Check another product
-                        <ArrowRight className="ml-2 h-4 w-4" />
-                      </Link>
+
+                    <Button type="button" variant="outline" onClick={handleSignOut}>
+                      Sign out
                     </Button>
                   </div>
+                )}
+              </section>
+
+              <section className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">4. Report Section</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setReportReference(null);
+                      setReportOpen(true);
+                    }}
+                    className="border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+                  >
+                    Report suspected counterfeit
+                  </Button>
                 </div>
-              </CardContent>
-            </div>
+                <p className="mt-3 text-sm text-slate-700">
+                  Reporting sends classification, reason summary, scan summary, and ownership status automatically to incident response.
+                </p>
+              </section>
+
+              <section className="rounded-xl border border-slate-200 bg-white p-4">
+                <p className="text-xs uppercase tracking-wide text-slate-500">5. Privacy Note</p>
+                <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                  <li>Sign-in is optional.</li>
+                  <li>Platform stores scan events to detect duplicates.</li>
+                  <li>Only coarse location context may be stored.</li>
+                  <li>No precise tracking interface is shown to customers.</li>
+                </ul>
+              </section>
+
+              {(supportEmail || supportPhone || supportWebsite) && (
+                <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Support Contact</p>
+                  <div className="mt-2 space-y-1">
+                    {supportEmail ? <p>Email: {supportEmail}</p> : null}
+                    {supportPhone ? <p>Phone: {supportPhone}</p> : null}
+                    {supportWebsite ? <p>Website: {supportWebsite}</p> : null}
+                  </div>
+                </section>
+              )}
+            </CardContent>
           )}
         </Card>
-
-        <p className="mt-6 text-center text-sm text-cyan-100/90">Secure verification powered by AuthenticQR</p>
       </div>
 
       <Dialog open={reportOpen} onOpenChange={setReportOpen}>
-        <DialogContent className="sm:max-w-[680px]">
+        <DialogContent className="sm:max-w-[640px]">
           <DialogHeader>
             <DialogTitle>Report suspected counterfeit</DialogTitle>
             <DialogDescription>
-              We will attach scan metadata automatically so investigators can act faster.
+              Provide investigation details. Verification metadata will be attached automatically.
             </DialogDescription>
           </DialogHeader>
 
           {reportReference ? (
-            <div className="space-y-4">
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                <p className="text-sm font-semibold text-emerald-800">Report submitted successfully</p>
-                <p className="mt-1 text-sm text-emerald-700">
-                  Reference ID: <span className="font-mono font-semibold">{reportReference}</span>
-                </p>
-              </div>
-              <p className="text-sm text-slate-600">
-                Our team will review this and update you if contact consent was provided.
-              </p>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+              Report submitted successfully. Reference ID: <span className="font-mono font-semibold">{reportReference}</span>
             </div>
           ) : (
             <div className="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
-              <div className="rounded-lg border bg-slate-50 p-3 text-sm">
-                <span className="text-slate-500">Code:</span>
-                <span className="ml-2 font-mono font-semibold text-slate-900">{displayedCode}</span>
-              </div>
-
-              <div className="rounded-lg border bg-slate-50 p-3 text-sm text-slate-700">
-                <p>
-                  <span className="text-slate-500">Classification:</span>{" "}
-                  <span className="font-semibold">{statusKind.toUpperCase()}</span>
-                </p>
-                <p className="mt-1">
-                  <span className="text-slate-500">Risk reasons:</span>{" "}
-                  {(duplicateReasons.length ? duplicateReasons : repeatReasons).join(" | ") || "Not available"}
-                </p>
-              </div>
-
               <div className="space-y-2">
                 <Label>Issue type</Label>
-                <Select value={incidentType} onValueChange={setIncidentType}>
+                <Select value={reportType} onValueChange={setReportType}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select incident type" />
+                    <SelectValue placeholder="Select issue type" />
                   </SelectTrigger>
                   <SelectContent>
-                    {INCIDENT_TYPE_OPTIONS.map((reason) => (
-                      <SelectItem key={reason.value} value={reason.value}>
-                        {reason.label}
+                    {INCIDENT_TYPE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1169,7 +864,7 @@ export default function Verify() {
               </div>
 
               <div className="space-y-2">
-                <Label>Notes</Label>
+                <Label>Description</Label>
                 <Textarea
                   value={reportDescription}
                   onChange={(e) => setReportDescription(e.target.value)}
@@ -1179,67 +874,25 @@ export default function Verify() {
                 />
               </div>
 
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Purchase place (optional)</Label>
-                  <Input value={purchasePlace} onChange={(e) => setPurchasePlace(e.target.value)} placeholder="Store / seller name" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Purchase date (optional)</Label>
-                  <Input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
-                </div>
+              <div className="space-y-2">
+                <Label>Email (optional)</Label>
+                <Input
+                  type="email"
+                  value={reportEmail}
+                  onChange={(e) => setReportEmail(e.target.value)}
+                  placeholder="you@example.com"
+                />
               </div>
 
               <div className="space-y-2">
-                <Label>Product batch number (optional)</Label>
-                <Input value={productBatchNo} onChange={(e) => setProductBatchNo(e.target.value)} placeholder="Batch / lot code if available" />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Photos (optional)</Label>
+                <Label>Attachment (optional)</Label>
                 <Input
                   type="file"
                   multiple
                   accept="image/png,image/jpeg,image/jpg,image/webp"
                   onChange={(e) => setReportPhotos(Array.from(e.target.files || []))}
                 />
-                <p className="text-xs text-slate-500">Up to 4 photos, 5MB each.</p>
-              </div>
-
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <label className="flex cursor-pointer items-start gap-2">
-                  <input
-                    type="checkbox"
-                    checked={reportConsent}
-                    onChange={(e) => setReportConsent(e.target.checked)}
-                    className="mt-1 h-4 w-4 rounded border-slate-300"
-                  />
-                  <span className="text-sm text-slate-700">
-                    I consent to be contacted for investigation updates.
-                  </span>
-                </label>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Name (optional)</Label>
-                  <Input value={reportCustomerName} onChange={(e) => setReportCustomerName(e.target.value)} placeholder="Your name" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Email (optional)</Label>
-                  <Input type="email" value={reportEmail} onChange={(e) => setReportEmail(e.target.value)} placeholder="you@example.com" />
-                </div>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Phone (optional)</Label>
-                  <Input value={reportPhone} onChange={(e) => setReportPhone(e.target.value)} placeholder="+1 ..." />
-                </div>
-                <div className="space-y-2">
-                  <Label>Country (optional)</Label>
-                  <Input value={reportCountry} onChange={(e) => setReportCountry(e.target.value)} placeholder="Country" />
-                </div>
+                <p className="text-xs text-slate-500">Up to 4 images can be uploaded.</p>
               </div>
             </div>
           )}
@@ -1249,8 +902,15 @@ export default function Verify() {
               {reportReference ? "Close" : "Cancel"}
             </Button>
             {!reportReference ? (
-              <Button type="button" onClick={submitReport} disabled={reporting} className="bg-red-600 text-white hover:bg-red-700">
-                {reporting ? "Submitting..." : "Submit report"}
+              <Button type="button" onClick={handleSubmitReport} disabled={reporting} className="bg-rose-700 text-white hover:bg-rose-800">
+                {reporting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Submitting
+                  </>
+                ) : (
+                  "Submit report"
+                )}
               </Button>
             ) : null}
           </DialogFooter>
