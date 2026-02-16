@@ -39,6 +39,22 @@ const normalizeAuthError = (error: unknown): { status: number; error: string } =
   const raw = error instanceof Error ? error.message : String(error || "Unknown error");
   const lower = raw.toLowerCase();
 
+  if (lower.includes("invalid email or password")) {
+    return { status: 401, error: "Invalid email or password" };
+  }
+
+  if (lower.includes("temporarily locked")) {
+    return { status: 423, error: "Account temporarily locked. Try again later." };
+  }
+
+  if (lower.includes("account is disabled")) {
+    return { status: 403, error: "Account is disabled. Contact administrator." };
+  }
+
+  if (lower.includes("account not activated")) {
+    return { status: 403, error: "Account not activated. Please accept your invite or reset your password." };
+  }
+
   if (
     lower.includes("environment variable not found: database_url") ||
     lower.includes("can't reach database server") ||
