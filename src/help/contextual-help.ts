@@ -35,6 +35,8 @@ export const getContextualHelpRoute = (pathname: string, role?: UserRole | null)
     if (role === "manufacturer") return "/help/manufacturer";
     return "/help/licensee-admin";
   }
+  if (starts(pathname, "/support")) return role === "super_admin" ? "/help/incident-response" : "/help/communications";
+  if (starts(pathname, "/governance")) return role === "super_admin" ? "/help/policy-alerts" : "/help/licensee-admin";
   if (starts(pathname, "/audit-logs")) return "/help/auth-overview";
   if (starts(pathname, "/account")) return "/help/setting-password";
   if (starts(pathname, "/verify") || starts(pathname, "/scan")) return "/help/customer";

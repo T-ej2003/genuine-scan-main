@@ -58,6 +58,8 @@ const routeLabel = (route: string) => {
     "/manufacturers": "Manufacturers",
     "/qr-tracking": "QR Tracking",
     "/incidents": "Incidents",
+    "/support": "Support tickets",
+    "/governance": "Governance",
     "/ir": "IR Center",
     "/account": "Account settings",
     "/login": "Sign in",

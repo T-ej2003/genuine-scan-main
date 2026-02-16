@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate, authenticateSSE } from "../middleware/auth";
+import { authenticate, authenticateSSE, optionalAuth } from "../middleware/auth";
 import { optionalCustomerVerifyAuth, requireCustomerVerifyAuth } from "../middleware/customerVerifyAuth";
 import { enforceTenantIsolation } from "../middleware/tenantIsolation";
 import {
@@ -122,6 +122,24 @@ import { listIrAlerts, patchIrAlert } from "../controllers/irAlertController";
 import { getDashboardStats } from "../controllers/dashboardController";
 import { dashboardEvents } from "../controllers/eventsController";
 import { healthCheck } from "../controllers/healthController";
+import { captureRouteTransitionMetric, getRouteTransitionSummary } from "../controllers/telemetryController";
+import { listNotifications, readAllNotifications, readNotification } from "../controllers/notificationController";
+import {
+  addSupportMessage,
+  getSupportTicket,
+  listSupportTickets,
+  patchSupportTicket,
+  trackSupportTicketPublic,
+} from "../controllers/supportController";
+import {
+  exportIncidentEvidenceBundleController,
+  generateComplianceReportController,
+  getFeatureFlags,
+  getRetentionPolicyController,
+  patchRetentionPolicyController,
+  runRetentionJobController,
+  upsertFeatureFlag,
+} from "../controllers/governanceController";
 
 const router = Router();
 
@@ -166,7 +184,9 @@ router.post("/verify/report-fraud", uploadIncidentReportPhotos, reportFraud);
 router.post("/fraud-report", uploadIncidentReportPhotos, reportFraud);
 router.post("/verify/feedback", submitProductFeedback);
 router.post("/incidents/report", uploadIncidentReportPhotos, reportIncident);
+router.get("/support/tickets/track/:reference", trackSupportTicketPublic);
 router.get("/scan", optionalCustomerVerifyAuth, scanToken);
+router.post("/telemetry/route-transition", optionalAuth, captureRouteTransitionMetric);
 router.get("/health", healthCheck);
 
 // ==================== AUTH ====================
@@ -181,6 +201,11 @@ router.get("/dashboard/stats", authenticate, enforceTenantIsolation, getDashboar
 
 // ✅ Real-time events (SSE). Use EventSource with ?token=
 router.get("/events/dashboard", authenticateSSE, enforceTenantIsolation, dashboardEvents);
+
+// ==================== NOTIFICATIONS ====================
+router.get("/notifications", authenticate, listNotifications);
+router.post("/notifications/read-all", authenticate, requireCsrf, readAllNotifications);
+router.post("/notifications/:id/read", authenticate, requireCsrf, readNotification);
 
 // ==================== LICENSEES (SUPER ADMIN) ====================
 router.get("/licensees/export", authenticate, requirePlatformAdmin, exportLicenseesCsv);
@@ -333,6 +358,81 @@ router.get(
   requireAnyAdmin,
   enforceTenantIsolation,
   exportBatchAuditPackageController
+);
+router.get(
+  "/telemetry/route-transition/summary",
+  authenticate,
+  requireAnyAdmin,
+  enforceTenantIsolation,
+  getRouteTransitionSummary
+);
+
+// ==================== SUPPORT TICKETS ====================
+router.get("/support/tickets", authenticate, requireOpsUser, enforceTenantIsolation, listSupportTickets);
+router.get("/support/tickets/:id", authenticate, requireOpsUser, enforceTenantIsolation, getSupportTicket);
+router.patch(
+  "/support/tickets/:id",
+  authenticate,
+  requireAnyAdmin,
+  enforceTenantIsolation,
+  requireCsrf,
+  patchSupportTicket
+);
+router.post(
+  "/support/tickets/:id/messages",
+  authenticate,
+  requireOpsUser,
+  enforceTenantIsolation,
+  requireCsrf,
+  addSupportMessage
+);
+
+// ==================== GOVERNANCE ====================
+router.get("/governance/feature-flags", authenticate, requireAnyAdmin, enforceTenantIsolation, getFeatureFlags);
+router.post(
+  "/governance/feature-flags",
+  authenticate,
+  requireAnyAdmin,
+  enforceTenantIsolation,
+  requireCsrf,
+  upsertFeatureFlag
+);
+router.get(
+  "/governance/evidence-retention",
+  authenticate,
+  requireAnyAdmin,
+  enforceTenantIsolation,
+  getRetentionPolicyController
+);
+router.patch(
+  "/governance/evidence-retention",
+  authenticate,
+  requireAnyAdmin,
+  enforceTenantIsolation,
+  requireCsrf,
+  patchRetentionPolicyController
+);
+router.post(
+  "/governance/evidence-retention/run",
+  authenticate,
+  requireAnyAdmin,
+  enforceTenantIsolation,
+  requireCsrf,
+  runRetentionJobController
+);
+router.get(
+  "/governance/compliance/report",
+  authenticate,
+  requireAnyAdmin,
+  enforceTenantIsolation,
+  generateComplianceReportController
+);
+router.get(
+  "/audit/export/incidents/:id/bundle",
+  authenticate,
+  requireAnyAdmin,
+  enforceTenantIsolation,
+  exportIncidentEvidenceBundleController
 );
 
 // ==================== QR LOGS (ADMINS) ====================

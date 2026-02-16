@@ -12,6 +12,7 @@ vi.mock("@/lib/api-client", () => ({
     reportFraud: vi.fn(),
     submitIncidentReport: vi.fn(),
     submitProductFeedback: vi.fn(),
+    captureRouteTransition: vi.fn(() => Promise.resolve({ success: true })),
   },
 }));
 

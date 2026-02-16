@@ -9,6 +9,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import HelpAssistantWidget from "@/components/help/HelpAssistantWidget";
 import { getRoleHelpHome } from "@/help/contextual-help";
+import RouteMetricsTracker from "@/components/RouteMetricsTracker";
 
 const Login = lazy(() => import("@/pages/Login"));
 const AcceptInvite = lazy(() => import("@/pages/AcceptInvite"));
@@ -25,6 +26,8 @@ const AuditLogs = lazy(() => import("@/pages/AuditLogs"));
 const Incidents = lazy(() => import("@/pages/Incidents"));
 const IR = lazy(() => import("@/pages/IR"));
 const IRIncidentDetail = lazy(() => import("@/pages/IRIncidentDetail"));
+const SupportCenter = lazy(() => import("@/pages/SupportCenter"));
+const Governance = lazy(() => import("@/pages/Governance"));
 const Verify = lazy(() => import("@/pages/Verify"));
 const VerifyLanding = lazy(() => import("@/pages/VerifyLanding"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
@@ -359,6 +362,24 @@ function AppRoutes() {
         />
 
         <Route
+          path="/support"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin", "manufacturer"]}>
+              <SupportCenter />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/governance"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
+              <Governance />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
           path="/ir"
           element={
             <ProtectedRoute allowedRoles={["super_admin"]}>
@@ -406,6 +427,7 @@ export default function App() {
             }}
           >
             <AppRoutes />
+            <RouteMetricsTracker />
             <HelpAssistantWidget />
           </BrowserRouter>
         </TooltipProvider>

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { AlertTriangle, Ban, Loader2, Lock, SearchX, Shield, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Ban, Clock3, Loader2, Lock, SearchX, Shield, ShieldCheck, WifiOff } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,6 +50,25 @@ type VerifyPayload = {
   reasons?: string[];
   scanSummary?: ScanSummary;
   ownershipStatus?: OwnershipStatus;
+  verificationTimeline?: {
+    firstSeen?: string | null;
+    latestSeen?: string | null;
+    anomalyReason?: string | null;
+    visualSignal?: "stable" | "warning" | "critical";
+  } | null;
+  riskExplanation?: {
+    level?: "low" | "medium" | "elevated" | "high";
+    title?: string;
+    details?: string[];
+    recommendedAction?: string;
+  } | null;
+  verifyUxPolicy?: {
+    showTimelineCard?: boolean;
+    showRiskCards?: boolean;
+    allowOwnershipClaim?: boolean;
+    allowFraudReport?: boolean;
+    mobileCameraAssist?: boolean;
+  } | null;
   isBlocked?: boolean;
   isReady?: boolean;
   totalScans?: number;
@@ -96,6 +115,14 @@ type VerifyPayload = {
       website?: string | null;
     } | null;
   } | null;
+};
+
+const DEFAULT_VERIFY_POLICY = {
+  showTimelineCard: true,
+  showRiskCards: true,
+  allowOwnershipClaim: true,
+  allowFraudReport: true,
+  mobileCameraAssist: true,
 };
 
 const INCIDENT_TYPE_OPTIONS = [
@@ -262,6 +289,12 @@ const formatDateTime = (value: string | null | undefined) => {
   return dt.toLocaleString();
 };
 
+const toLabel = (value?: string | null) =>
+  String(value || "")
+    .toLowerCase()
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+
 const SkeletonBlock = ({ className }: { className?: string }) => (
   <div aria-hidden className={cn("animate-pulse rounded-md bg-slate-200", className)} />
 );
@@ -274,6 +307,9 @@ export default function Verify() {
   const [result, setResult] = useState<VerifyPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isOffline, setIsOffline] = useState<boolean>(() => !navigator.onLine);
+  const [retryAttempt, setRetryAttempt] = useState(0);
+  const [retryNotice, setRetryNotice] = useState<string>("");
 
   const [customerToken, setCustomerToken] = useState<string>("");
   const [customerEmail, setCustomerEmail] = useState<string>("");
@@ -290,6 +326,19 @@ export default function Verify() {
   const [reportOpen, setReportOpen] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [reportReference, setReportReference] = useState<string | null>(null);
+  const [reportSupportRef, setReportSupportRef] = useState<string | null>(null);
+  const [reportSupportStatus, setReportSupportStatus] = useState<string | null>(null);
+  const [reportSupportSla, setReportSupportSla] = useState<string | null>(null);
+  const [reportTamperSummary, setReportTamperSummary] = useState<string | null>(null);
+  const [trackReference, setTrackReference] = useState("");
+  const [trackEmail, setTrackEmail] = useState("");
+  const [trackingTicket, setTrackingTicket] = useState(false);
+  const [trackedTicket, setTrackedTicket] = useState<{
+    referenceCode?: string;
+    status?: string;
+    handoffStage?: string;
+    sla?: { dueAt?: string; isBreached?: boolean; remainingMinutes?: number } | null;
+  } | null>(null);
   const [reportType, setReportType] = useState<string>(INCIDENT_TYPE_OPTIONS[0].value);
   const [reportDescription, setReportDescription] = useState("");
   const [reportEmail, setReportEmail] = useState("");
@@ -314,6 +363,8 @@ export default function Verify() {
 
   const deviceId = useMemo(() => getOrCreateAnonDeviceId(), []);
   const inFlightRef = useRef(new Map<string, Promise<any>>());
+  const verifyStartedAtRef = useRef<number>(0);
+  const sentDroppedMetricRef = useRef(false);
 
   const displayedCode = result?.code || codeParam || "—";
   const classification = useMemo(() => inferClassification(result), [result]);
@@ -321,6 +372,33 @@ export default function Verify() {
   const reasons = useMemo(() => deriveReasons(result, classification), [classification, result]);
   const scanSummary = useMemo(() => deriveScanSummary(result), [result]);
   const ownershipStatus = result?.ownershipStatus || DEFAULT_OWNERSHIP_STATUS;
+  const verifyUxPolicy = { ...DEFAULT_VERIFY_POLICY, ...(result?.verifyUxPolicy || {}) };
+  const verificationTimeline = result?.verificationTimeline || {
+    firstSeen: scanSummary.firstVerifiedAt,
+    latestSeen: scanSummary.latestVerifiedAt,
+    anomalyReason:
+      classification === "SUSPICIOUS_DUPLICATE" || classification === "BLOCKED_BY_SECURITY" ? reasons[0] || null : null,
+    visualSignal:
+      classification === "FIRST_SCAN" || classification === "LEGIT_REPEAT"
+        ? "stable"
+        : classification === "SUSPICIOUS_DUPLICATE"
+          ? "warning"
+          : "critical",
+  };
+  const riskExplanation = result?.riskExplanation || {
+    level: classification === "SUSPICIOUS_DUPLICATE" ? "elevated" : classification === "BLOCKED_BY_SECURITY" ? "high" : "low",
+    title:
+      classification === "SUSPICIOUS_DUPLICATE"
+        ? "Duplicate risk indicators detected"
+        : classification === "BLOCKED_BY_SECURITY"
+          ? "Security controls blocked this code"
+          : "No high-risk anomaly detected",
+    details: reasons,
+    recommendedAction:
+      classification === "SUSPICIOUS_DUPLICATE" || classification === "BLOCKED_BY_SECURITY"
+        ? "Review purchase source and report suspicious activity."
+        : "Keep proof of purchase for future verification.",
+  };
 
   const googleOauthUrl = String(import.meta.env.VITE_GOOGLE_OAUTH_URL || "").trim();
   const showSkeleton = loading && !result && !error;
@@ -335,11 +413,16 @@ export default function Verify() {
 
     setLoading(true);
     setError(null);
+    setRetryAttempt(0);
+    setRetryNotice("");
+    sentDroppedMetricRef.current = false;
+    verifyStartedAtRef.current = typeof performance !== "undefined" ? performance.now() : Date.now();
 
     try {
-      let pending = inFlightRef.current.get(requestKey);
+      const runRequest = async () => {
+        let pending = inFlightRef.current.get(requestKey);
+        if (pending) return pending;
 
-      if (!pending) {
         pending = (async () => {
           const getGeo = () =>
             new Promise<{ lat?: number; lon?: number; acc?: number }>((resolve) => {
@@ -377,18 +460,75 @@ export default function Verify() {
         })();
 
         inFlightRef.current.set(requestKey, pending);
+        return pending;
+      };
+
+      const maxAttempts = 4;
+      let response: any = null;
+      let lastError = "";
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        if (!navigator.onLine) {
+          setIsOffline(true);
+          lastError = "You appear to be offline. Please reconnect and retry.";
+          break;
+        }
+
+        setRetryAttempt(attempt - 1);
+        response = await runRequest();
+        inFlightRef.current.delete(requestKey);
+        if (response?.success) break;
+
+        lastError = String(response?.error || "Verification failed");
+        const retryable = /network|timed out|timeout|unavailable|internal server error/i.test(lastError);
+        if (!retryable || attempt >= maxAttempts) break;
+
+        const waitMs = Math.min(1200 * 2 ** (attempt - 1), 5000);
+        setRetryNotice(`Poor network detected. Retrying (${attempt}/${maxAttempts - 1})...`);
+        await new Promise((resolve) => window.setTimeout(resolve, waitMs));
       }
 
-      const response = await pending;
-      inFlightRef.current.delete(requestKey);
-
-      if (!response.success) {
-        setError(response.error || "Verification failed");
+      if (!response?.success) {
+        setError(lastError || response?.error || "Verification failed");
         setResult(null);
+        const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+        const elapsed = Math.max(0, Math.round(now - verifyStartedAtRef.current));
+        apiClient
+          .captureRouteTransition({
+            routeFrom: "/verify",
+            routeTo: window.location.pathname,
+            source: "verify_request",
+            transitionMs: elapsed,
+            verifyCodePresent: true,
+            verifyResult: "ERROR",
+            dropped: false,
+            online: navigator.onLine,
+          })
+          .catch(() => {
+            // best effort telemetry
+          });
         return;
       }
 
       setResult((response.data as VerifyPayload) || null);
+      setRetryNotice("");
+      const finalClassification = inferClassification((response.data as VerifyPayload) || null);
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      const elapsed = Math.max(0, Math.round(now - verifyStartedAtRef.current));
+      apiClient
+        .captureRouteTransition({
+          routeFrom: "/verify",
+          routeTo: window.location.pathname,
+          source: "verify_request",
+          transitionMs: elapsed,
+          verifyCodePresent: true,
+          verifyResult: finalClassification,
+          dropped: false,
+          online: navigator.onLine,
+        })
+        .catch(() => {
+          // best effort telemetry
+        });
     } catch (err: any) {
       inFlightRef.current.delete(requestKey);
       setError(err?.message || "Verification failed");
@@ -416,6 +556,47 @@ export default function Verify() {
   }, [fetchVerification]);
 
   useEffect(() => {
+    const onOnline = () => {
+      setIsOffline(false);
+      setRetryNotice("");
+    };
+    const onOffline = () => {
+      setIsOffline(true);
+      setRetryNotice("You are offline. Verification will retry once connection is restored.");
+    };
+
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (!loading || sentDroppedMetricRef.current) return;
+      sentDroppedMetricRef.current = true;
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      const elapsed = Math.max(0, Math.round(now - verifyStartedAtRef.current));
+      apiClient
+        .captureRouteTransition({
+          routeFrom: "/verify",
+          routeTo: window.location.pathname,
+          source: "verify_request",
+          transitionMs: elapsed,
+          verifyCodePresent: true,
+          verifyResult: null,
+          dropped: true,
+          online: navigator.onLine,
+        })
+        .catch(() => {
+          // best effort telemetry
+        });
+    };
+  }, [loading]);
+
+  useEffect(() => {
     if (!loading) {
       setLoadingStage(0);
       return;
@@ -424,6 +605,14 @@ export default function Verify() {
     const timer = window.setTimeout(() => setLoadingStage(1), 1200);
     return () => window.clearTimeout(timer);
   }, [loading]);
+
+  useEffect(() => {
+    if (isOffline) return;
+    if (!error) return;
+    if (!/offline|network|timed out|timeout|unavailable/i.test(error)) return;
+    fetchVerification();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOffline]);
 
   const handleRequestOtp = async () => {
     const email = otpEmail.trim();
@@ -599,10 +788,53 @@ export default function Verify() {
         return;
       }
 
-      setReportReference((response.data as any)?.reportId || null);
+      const payload: any = response.data || {};
+      setReportReference(payload.reportId || null);
+      setReportSupportRef(payload.supportTicketRef || null);
+      setReportSupportStatus(payload.supportTicketStatus || null);
+      setReportTamperSummary(payload?.tamperChecks?.summary || null);
+      if (payload?.supportTicketSla?.dueAt) {
+        setReportSupportSla(new Date(payload.supportTicketSla.dueAt).toLocaleString());
+      } else {
+        setReportSupportSla(null);
+      }
+
+      if (payload.supportTicketRef) {
+        const tracking = await apiClient.trackSupportTicket(payload.supportTicketRef, reportEmail.trim() || undefined);
+        if (tracking.success) {
+          const trackData: any = tracking.data || {};
+          setReportSupportStatus(trackData.status || payload.supportTicketStatus || null);
+          if (trackData?.sla?.dueAt) {
+            setReportSupportSla(new Date(trackData.sla.dueAt).toLocaleString());
+          }
+        }
+      }
+
       toast({ title: "Report submitted", description: "Security team has received your report." });
     } finally {
       setReporting(false);
+    }
+  };
+
+  const handleTrackTicket = async () => {
+    const reference = trackReference.trim().toUpperCase();
+    if (!reference) {
+      toast({ title: "Reference required", description: "Enter your support ticket reference.", variant: "destructive" });
+      return;
+    }
+
+    setTrackingTicket(true);
+    try {
+      const response = await apiClient.trackSupportTicket(reference, trackEmail.trim() || undefined);
+      if (!response.success) {
+        setTrackedTicket(null);
+        toast({ title: "Tracking failed", description: response.error || "Could not find this support ticket.", variant: "destructive" });
+        return;
+      }
+
+      setTrackedTicket((response.data as any) || null);
+    } finally {
+      setTrackingTicket(false);
     }
   };
 
@@ -638,6 +870,16 @@ export default function Verify() {
               <SearchX className="mx-auto h-8 w-8 text-rose-900" />
               <p className="text-lg font-semibold text-slate-900">Verification service unavailable</p>
               <p className="text-sm text-slate-600">{error}</p>
+              <div className="flex items-center justify-center gap-2">
+                <Button variant="outline" onClick={fetchVerification} disabled={loading}>
+                  Retry now
+                </Button>
+                {isOffline ? (
+                  <Badge variant="outline" className="border-amber-300 text-amber-900">
+                    Offline
+                  </Badge>
+                ) : null}
+              </div>
             </CardContent>
           ) : (
             <CardContent className={cn("space-y-6 p-5 sm:p-6", !showSkeleton && "animate-fade-in")}>
@@ -701,6 +943,38 @@ export default function Verify() {
                 </>
               ) : (
                 <>
+                  {isOffline ? (
+                    <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                      <div className="flex items-start gap-2">
+                        <WifiOff className="mt-0.5 h-4 w-4" />
+                        <div>
+                          <p className="font-semibold">Offline mode detected</p>
+                          <p className="mt-1">Reconnect to continue secure verification checks.</p>
+                          <Button
+                            variant="outline"
+                            className={cn("mt-2 border-amber-300 bg-white text-amber-900 hover:bg-amber-100", motionButtonClass)}
+                            onClick={fetchVerification}
+                            disabled={loading}
+                          >
+                            Retry verification
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {retryNotice ? (
+                    <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-3 text-sm text-cyan-900">
+                      <div className="flex items-start gap-2">
+                        <Clock3 className="mt-0.5 h-4 w-4" />
+                        <div>
+                          <p className="font-semibold">{retryNotice}</p>
+                          {retryAttempt > 0 ? <p className="mt-1 text-xs text-cyan-800">Retry attempts: {retryAttempt}</p> : null}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
                   <section className="space-y-3">
                     <div
                       className={cn("rounded-xl p-5 sm:p-6", classMeta.bannerClass)}
@@ -735,6 +1009,30 @@ export default function Verify() {
                       </div>
                     </div>
 
+                    {verifyUxPolicy.showRiskCards ? (
+                      <div
+                        className={cn(
+                          "rounded-xl border p-4 shadow-sm",
+                          riskExplanation.level === "high"
+                            ? "border-rose-300 bg-rose-50"
+                            : riskExplanation.level === "elevated" || riskExplanation.level === "medium"
+                              ? "border-amber-300 bg-amber-50"
+                              : "border-emerald-200 bg-emerald-50"
+                        )}
+                      >
+                        <p className="text-xs uppercase tracking-wide text-slate-600">Risk explanation</p>
+                        <p className="mt-1 text-sm font-semibold text-slate-900">{riskExplanation.title}</p>
+                        {Array.isArray(riskExplanation.details) && riskExplanation.details.length ? (
+                          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-700">
+                            {riskExplanation.details.slice(0, 4).map((detail) => (
+                              <li key={detail}>{detail}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                        <p className="mt-2 text-xs text-slate-700">{riskExplanation.recommendedAction}</p>
+                      </div>
+                    ) : null}
+
                     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                       <p className="text-xs uppercase tracking-wide text-slate-500">Verified Code</p>
                       <p className="mt-1 font-mono text-xl font-semibold tracking-tight text-slate-900">{displayedCode}</p>
@@ -767,6 +1065,38 @@ export default function Verify() {
                         <p className="mt-1 text-xs text-slate-500">{scanSummary.latestVerifiedLocation || "Location unavailable"}</p>
                       </div>
                     </div>
+
+                    {verifyUxPolicy.showTimelineCard ? (
+                      <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                        <p className="text-xs uppercase tracking-wide text-slate-500">Verification timeline</p>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                            <p className="text-[11px] uppercase tracking-wide text-slate-500">First seen</p>
+                            <p className="text-sm font-medium text-slate-900">{formatDateTime(verificationTimeline.firstSeen)}</p>
+                          </div>
+                          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                            <p className="text-[11px] uppercase tracking-wide text-slate-500">Latest seen</p>
+                            <p className="text-sm font-medium text-slate-900">{formatDateTime(verificationTimeline.latestSeen)}</p>
+                          </div>
+                        </div>
+                        {verificationTimeline.anomalyReason ? (
+                          <div
+                            className={cn(
+                              "mt-3 rounded-md border px-3 py-2 text-xs",
+                              verificationTimeline.visualSignal === "critical"
+                                ? "border-rose-300 bg-rose-50 text-rose-900"
+                                : "border-amber-300 bg-amber-50 text-amber-900"
+                            )}
+                          >
+                            Anomaly reason: {verificationTimeline.anomalyReason}
+                          </div>
+                        ) : (
+                          <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+                            Timeline signals are consistent with normal verification usage.
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
 
                     <div className="mt-4 grid gap-3 lg:grid-cols-2">
                       <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
@@ -910,6 +1240,11 @@ export default function Verify() {
                             <p className="font-semibold">Already claimed by another account</p>
                             <p className="mt-1">Do not trust this product blindly. Submit a counterfeit report for investigation.</p>
                           </div>
+                        ) : !verifyUxPolicy.allowOwnershipClaim ? (
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                            <p className="font-semibold">Ownership claim disabled for this product policy</p>
+                            <p className="mt-1">Verification remains active, but claiming is currently restricted by tenant settings.</p>
+                          </div>
                         ) : (
                           <div className="flex flex-wrap items-center gap-3">
                             <Button
@@ -940,22 +1275,74 @@ export default function Verify() {
                   <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-sm font-semibold text-slate-900">Report</p>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={loading}
-                        onClick={() => {
-                          setReportReference(null);
-                          setReportOpen(true);
-                        }}
-                        className={cn("border-rose-300 text-rose-800 hover:bg-rose-50 hover:text-rose-900", motionButtonClass)}
-                      >
-                        Report suspected counterfeit
-                      </Button>
+                      {verifyUxPolicy.allowFraudReport ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={loading}
+                          onClick={() => {
+                            setReportReference(null);
+                            setReportSupportRef(null);
+                            setReportSupportStatus(null);
+                            setReportSupportSla(null);
+                            setReportTamperSummary(null);
+                            setReportOpen(true);
+                          }}
+                          className={cn("border-rose-300 text-rose-800 hover:bg-rose-50 hover:text-rose-900", motionButtonClass)}
+                        >
+                          Report suspected counterfeit
+                        </Button>
+                      ) : (
+                        <Badge variant="outline">Reporting managed by tenant policy</Badge>
+                      )}
                     </div>
                     <p className="mt-3 text-sm leading-relaxed text-slate-700">
-                      Reporting sends classification, reason summary, scan summary, and ownership status automatically to incident response.
+                      {verifyUxPolicy.allowFraudReport
+                        ? "Reporting sends classification, reason summary, scan summary, ownership status, and tamper checks automatically."
+                        : "Counterfeit reporting is currently handled through your product owner support channel."}
                     </p>
+
+                    <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Track existing support ticket</p>
+                      <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+                        <Input
+                          value={trackReference}
+                          onChange={(e) => setTrackReference(e.target.value)}
+                          placeholder="SUP-XXXXXXXXXX"
+                        />
+                        <Input
+                          value={trackEmail}
+                          onChange={(e) => setTrackEmail(e.target.value)}
+                          placeholder="Contact email (optional)"
+                        />
+                        <Button variant="outline" onClick={handleTrackTicket} disabled={trackingTicket || loading}>
+                          {trackingTicket ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Tracking
+                            </>
+                          ) : (
+                            "Track status"
+                          )}
+                        </Button>
+                      </div>
+
+                      {trackedTicket ? (
+                        <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-700">
+                          <p>
+                            Reference: <span className="font-mono font-semibold">{trackedTicket.referenceCode || trackReference}</span>
+                          </p>
+                          <p>Status: {toLabel(trackedTicket.status || "open")}</p>
+                          {trackedTicket.handoffStage ? <p>Workflow stage: {toLabel(trackedTicket.handoffStage)}</p> : null}
+                          {trackedTicket.sla?.dueAt ? (
+                            <p>
+                              SLA due: {new Date(trackedTicket.sla.dueAt).toLocaleString()}
+                              {trackedTicket.sla?.isBreached ? " (Breached)" : ""}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
                   </section>
 
                   <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1017,8 +1404,22 @@ export default function Verify() {
           </DialogHeader>
 
           {reportReference ? (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-              Report submitted successfully. Reference ID: <span className="font-mono font-semibold">{reportReference}</span>
+            <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+              <p>
+                Report submitted successfully. Reference ID: <span className="font-mono font-semibold">{reportReference}</span>
+              </p>
+              {reportSupportRef ? (
+                <div className="rounded-md border border-emerald-300 bg-white/80 p-3 text-xs text-emerald-950">
+                  <p>
+                    Support ticket: <span className="font-mono font-semibold">{reportSupportRef}</span>
+                  </p>
+                  {reportSupportStatus ? <p>Status: {toLabel(reportSupportStatus)}</p> : null}
+                  {reportSupportSla ? <p>SLA due by: {reportSupportSla}</p> : null}
+                </div>
+              ) : null}
+              {reportTamperSummary ? (
+                <p className="text-xs text-emerald-950">Attachment tamper checks: {reportTamperSummary}</p>
+              ) : null}
             </div>
           ) : (
             <div className="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
