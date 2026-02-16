@@ -4,6 +4,7 @@ import { ArrowLeft, Shield, ScanLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import { ComplianceStatements } from "@/components/help/ComplianceStatements";
 
 export function HelpShell({
   title,
@@ -61,6 +62,9 @@ export function HelpShell({
           {subtitle ? <p className="text-sm text-muted-foreground">{subtitle}</p> : null}
         </div>
         {children}
+        <div className="mt-10">
+          <ComplianceStatements />
+        </div>
       </main>
 
       <footer className="border-t bg-muted/30">
@@ -80,4 +84,3 @@ export function HelpShell({
     </div>
   );
 }
-

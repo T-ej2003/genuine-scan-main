@@ -53,3 +53,25 @@ This procedure applies to manufacturer accounts with assigned batches.
 - If token expires or download fails, create a new print job for remaining quantity.
 - If status does not update, refresh once and verify connectivity.
 - Escalate with batch ID, job ID, and timestamp when unresolved.
+
+## 7. Mandatory Compliance Statements
+### 7.1 UK GDPR & Data Protection notice
+`{{APP_NAME}}` processes personal data in accordance with UK GDPR and the Data Protection Act 2018. Data protection queries must be directed to `{{DPO_EMAIL}}` or `{{SUPER_ADMIN_EMAIL}}`.
+
+### 7.2 Security & Access Control statement
+The platform enforces role-based access control (Super Admin, Licensee, Manufacturer), encrypted HTTPS communication, secure password handling, and audit logging of critical actions.
+
+### 7.3 Incident Response & Fraud Reporting
+Controlled process: report intake -> review -> containment -> documentation -> resolution.
+
+### 7.4 QR Code Usage & Non-Duplication policy
+All QR codes are unique, traceable, and single-use where applicable. QR codes must not be duplicated, altered, or reused.
+
+### 7.5 Audit Logging notice
+Administrative actions, QR allocations, fraud reports, and login attempts are logged and retained for `{{RETENTION_DAYS}}` days.
+
+### 7.6 Acceptable Use clause
+Unauthorized access, reverse engineering, misuse of fraud reporting, or interference with system security is prohibited.
+
+### 7.7 Hosting & Disclaimer statement
+The platform is hosted via `{{HOSTING_PROVIDER}}` with reasonable security controls and is provided on a best-effort basis.

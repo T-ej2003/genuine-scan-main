@@ -2,7 +2,7 @@
 
 Version: 2.0  
 Audience: Super Admin, Licensee/Admin, Manufacturer, Customer (scanner/verify page)  
-Last Updated: 2026-02-15
+Last Updated: 2026-02-16
 
 ## 1. Purpose
 This manual explains how to operate AuthenticQR end-to-end:
@@ -286,6 +286,29 @@ Operational caveat:
 1. Manufacturer operation issue: contact Licensee Admin.
 2. Cross-tenant, account, or policy issue: escalate to Super Admin.
 3. Persistent API failures: collect timestamp, user ID/email, batch/job ID, and request path for investigation.
+
+## 13. Mandatory Compliance Statements
+
+### 13.1 UK GDPR & Data Protection notice
+`{{APP_NAME}}` processes personal data in accordance with UK GDPR and the Data Protection Act 2018. Data protection queries must be directed to `{{DPO_EMAIL}}` or `{{SUPER_ADMIN_EMAIL}}`.
+
+### 13.2 Security & Access Control statement
+The platform enforces role-based access control (Super Admin, Licensee, Manufacturer), encrypted HTTPS communication, secure password handling, and audit logging of critical actions.
+
+### 13.3 Incident Response & Fraud Reporting
+Controlled process: report intake -> review -> containment -> documentation -> resolution.
+
+### 13.4 QR Code Usage & Non-Duplication policy
+All QR codes are unique, traceable, and single-use where applicable. QR codes must not be duplicated, altered, or reused.
+
+### 13.5 Audit Logging notice
+Administrative actions, QR allocations, fraud reports, and login attempts are logged and retained for `{{RETENTION_DAYS}}` days.
+
+### 13.6 Acceptable Use clause
+Unauthorized access, reverse engineering, misuse of fraud reporting, or interference with system security is prohibited.
+
+### 13.7 Hosting & Disclaimer statement
+The platform is hosted via `{{HOSTING_PROVIDER}}` with reasonable security controls and is provided on a best-effort basis.
 
 ## Appendix A — Screenshots (reference)
 Screenshots used in the in-app Help Center live in `public/docs/`.
