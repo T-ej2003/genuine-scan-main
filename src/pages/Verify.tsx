@@ -1106,9 +1106,6 @@ export default function Verify() {
                         </p>
                         <div className="mt-3 space-y-1.5 text-xs text-slate-600">
                           <p>
-                            <span className="font-medium text-slate-700">Prefix:</span> {result?.licensee?.prefix || "Not provided"}
-                          </p>
-                          <p>
                             <span className="font-medium text-slate-700">Location:</span> {result?.licensee?.location || "Not provided"}
                           </p>
                           <p>

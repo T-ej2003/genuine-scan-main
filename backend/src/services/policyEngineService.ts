@@ -1,7 +1,8 @@
-import { AlertSeverity, PolicyAlert, PolicyAlertType, QRStatus, SecurityPolicy } from "@prisma/client";
+import { AlertSeverity, NotificationAudience, NotificationChannel, PolicyAlert, PolicyAlertType, QRStatus, SecurityPolicy } from "@prisma/client";
 import prisma from "../config/database";
 import { createAuditLog } from "./auditService";
 import { evaluatePolicyRulesForScan } from "./ir/policyRuleEngineService";
+import { createRoleNotifications } from "./notificationService";
 
 const ALERT_DEDUPE_WINDOW_MS = 15 * 60_000;
 
@@ -61,7 +62,7 @@ const createPolicyAlertIfFresh = async (input: CreatePolicyAlertInput): Promise<
 
   if (existing) return null;
 
-  return prisma.policyAlert.create({
+  const created = await prisma.policyAlert.create({
     data: {
       licenseeId: input.licenseeId,
       alertType: input.alertType,
@@ -74,6 +75,44 @@ const createPolicyAlertIfFresh = async (input: CreatePolicyAlertInput): Promise<
       details: input.details ?? null,
     },
   });
+
+  await Promise.all([
+    createRoleNotifications({
+      audience: NotificationAudience.SUPER_ADMIN,
+      type: "policy_alert_created",
+      title: "New policy alert",
+      body: created.message,
+      incidentId: created.incidentId || null,
+      data: {
+        alertId: created.id,
+        alertType: created.alertType,
+        severity: created.severity,
+        score: created.score,
+        licenseeId: created.licenseeId,
+        targetRoute: "/ir",
+      },
+      channels: [NotificationChannel.WEB],
+    }),
+    createRoleNotifications({
+      audience: NotificationAudience.LICENSEE_ADMIN,
+      licenseeId: created.licenseeId,
+      type: "policy_alert_created",
+      title: "Policy alert detected",
+      body: created.message,
+      incidentId: created.incidentId || null,
+      data: {
+        alertId: created.id,
+        alertType: created.alertType,
+        severity: created.severity,
+        score: created.score,
+        licenseeId: created.licenseeId,
+        targetRoute: "/ir",
+      },
+      channels: [NotificationChannel.WEB],
+    }),
+  ]);
+
+  return created;
 };
 
 export const getOrCreateSecurityPolicy = async (licenseeId: string): Promise<SecurityPolicy> => {

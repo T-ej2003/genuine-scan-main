@@ -124,6 +124,7 @@ import { dashboardEvents } from "../controllers/eventsController";
 import { healthCheck } from "../controllers/healthController";
 import { captureRouteTransitionMetric, getRouteTransitionSummary } from "../controllers/telemetryController";
 import { listNotifications, readAllNotifications, readNotification } from "../controllers/notificationController";
+import { notificationEvents } from "../controllers/notificationEventsController";
 import {
   addSupportMessage,
   getSupportTicket,
@@ -201,6 +202,7 @@ router.get("/dashboard/stats", authenticate, enforceTenantIsolation, getDashboar
 
 // ✅ Real-time events (SSE). Use EventSource with ?token=
 router.get("/events/dashboard", authenticateSSE, enforceTenantIsolation, dashboardEvents);
+router.get("/events/notifications", authenticateSSE, notificationEvents);
 
 // ==================== NOTIFICATIONS ====================
 router.get("/notifications", authenticate, listNotifications);

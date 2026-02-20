@@ -20,7 +20,7 @@ export const getRoleHelpHome = (role?: UserRole | null) => {
 export const getContextualHelpRoute = (pathname: string, role?: UserRole | null) => {
   if (starts(pathname, "/ir/incidents/")) return "/help/incident-actions";
   if (starts(pathname, "/ir")) return "/help/incident-response";
-  if (starts(pathname, "/incidents")) return role === "super_admin" ? "/help/incident-response" : "/help/licensee-admin";
+  if (starts(pathname, "/incidents")) return role === "super_admin" ? "/help/incidents" : "/help/licensee-admin";
   if (starts(pathname, "/licensees")) return "/help/super-admin";
   if (starts(pathname, "/qr-codes")) return "/help/super-admin";
   if (starts(pathname, "/qr-requests")) return role === "super_admin" ? "/help/super-admin" : "/help/licensee-admin";
@@ -35,8 +35,8 @@ export const getContextualHelpRoute = (pathname: string, role?: UserRole | null)
     if (role === "manufacturer") return "/help/manufacturer";
     return "/help/licensee-admin";
   }
-  if (starts(pathname, "/support")) return role === "super_admin" ? "/help/incident-response" : "/help/communications";
-  if (starts(pathname, "/governance")) return role === "super_admin" ? "/help/policy-alerts" : "/help/licensee-admin";
+  if (starts(pathname, "/support")) return role === "super_admin" ? "/help/support" : "/help/communications";
+  if (starts(pathname, "/governance")) return role === "super_admin" ? "/help/governance" : "/help/licensee-admin";
   if (starts(pathname, "/audit-logs")) return "/help/auth-overview";
   if (starts(pathname, "/account")) return "/help/setting-password";
   if (starts(pathname, "/verify") || starts(pathname, "/scan")) return "/help/customer";
@@ -99,6 +99,24 @@ export const getPageGuidance = (pathname: string, role?: UserRole | null): PageG
       summary: "Triage cases, apply containment, add evidence, and close with documented outcomes.",
       firstAction: "Open NEW or HIGH severity items first.",
       note: "Every major action is logged for audit traceability.",
+    };
+  }
+
+  if (starts(pathname, "/support")) {
+    return {
+      title: "Run support workflow",
+      summary: "Track ticket queue, SLA timers, and messages linked to incident lifecycles.",
+      firstAction: "Prioritize breached or high-priority tickets first.",
+      note: "Support workflow is Super Admin only.",
+    };
+  }
+
+  if (starts(pathname, "/governance")) {
+    return {
+      title: "Manage governance controls",
+      summary: "Configure tenant feature flags, retention lifecycle, compliance reporting, and telemetry review.",
+      firstAction: "Confirm tenant scope before applying policy changes.",
+      note: "Always run retention preview before apply mode.",
     };
   }
 

@@ -1,10 +1,11 @@
 import { Response } from "express";
 import { z } from "zod";
-import { QrAllocationRequestStatus, UserRole } from "@prisma/client";
+import { NotificationAudience, NotificationChannel, QrAllocationRequestStatus, UserRole } from "@prisma/client";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { createAuditLog } from "../services/auditService";
 import { allocateQrRange, getNextLicenseeQrNumber, lockLicenseeAllocation } from "../services/qrAllocationService";
+import { createRoleNotifications, createUserNotification } from "../services/notificationService";
 
 const createRequestSchema = z
   .object({
@@ -78,6 +79,38 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
       },
       ipAddress: req.ip,
     });
+
+    await Promise.all([
+      createRoleNotifications({
+        audience: NotificationAudience.SUPER_ADMIN,
+        type: "qr_request_created",
+        title: "New QR inventory request",
+        body: `Request ${created.id.slice(0, 8)} for ${created.quantity || 0} codes is pending review.`,
+        data: {
+          requestId: created.id,
+          licenseeId,
+          quantity: created.quantity,
+          status: created.status,
+          targetRoute: "/qr-requests",
+        },
+        channels: [NotificationChannel.WEB],
+      }),
+      createRoleNotifications({
+        audience: NotificationAudience.LICENSEE_ADMIN,
+        licenseeId,
+        type: "qr_request_created",
+        title: "QR inventory request submitted",
+        body: `Request ${created.id.slice(0, 8)} was submitted for ${created.quantity || 0} codes.`,
+        data: {
+          requestId: created.id,
+          licenseeId,
+          quantity: created.quantity,
+          status: created.status,
+          targetRoute: "/qr-requests",
+        },
+        channels: [NotificationChannel.WEB],
+      }),
+    ]);
 
     return res.status(201).json({ success: true, data: created });
   } catch (e: any) {
@@ -215,6 +248,53 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
       ipAddress: req.ip,
     });
 
+    await Promise.all([
+      createRoleNotifications({
+        audience: NotificationAudience.SUPER_ADMIN,
+        type: "qr_request_approved",
+        title: "QR request approved",
+        body: `Request ${requestRow.id.slice(0, 8)} approved for ${quantityRequested} codes.`,
+        data: {
+          requestId: requestRow.id,
+          licenseeId: requestRow.licenseeId,
+          quantity: quantityRequested,
+          status: "APPROVED",
+          targetRoute: "/qr-requests",
+        },
+        channels: [NotificationChannel.WEB],
+      }),
+      createRoleNotifications({
+        audience: NotificationAudience.LICENSEE_ADMIN,
+        licenseeId: requestRow.licenseeId,
+        type: "qr_request_approved",
+        title: "QR request approved",
+        body: `Request ${requestRow.id.slice(0, 8)} is approved and inventory has been allocated.`,
+        data: {
+          requestId: requestRow.id,
+          licenseeId: requestRow.licenseeId,
+          quantity: quantityRequested,
+          status: "APPROVED",
+          targetRoute: "/qr-requests",
+        },
+        channels: [NotificationChannel.WEB],
+      }),
+      createUserNotification({
+        userId: requestRow.requestedByUserId,
+        licenseeId: requestRow.licenseeId,
+        type: "qr_request_approved",
+        title: "Your QR request was approved",
+        body: `Request ${requestRow.id.slice(0, 8)} was approved for ${quantityRequested} codes.`,
+        data: {
+          requestId: requestRow.id,
+          licenseeId: requestRow.licenseeId,
+          quantity: quantityRequested,
+          status: "APPROVED",
+          targetRoute: "/qr-requests",
+        },
+        channel: NotificationChannel.WEB,
+      }),
+    ]);
+
     return res.json({ success: true, data: result.updated });
   } catch (e: any) {
     console.error("approveQrAllocationRequest error:", e);
@@ -265,6 +345,53 @@ export const rejectQrAllocationRequest = async (req: AuthRequest, res: Response)
       details: { decisionNote: parsed.data.decisionNote?.trim() || null },
       ipAddress: req.ip,
     });
+
+    await Promise.all([
+      createRoleNotifications({
+        audience: NotificationAudience.SUPER_ADMIN,
+        type: "qr_request_rejected",
+        title: "QR request rejected",
+        body: `Request ${id.slice(0, 8)} was rejected.`,
+        data: {
+          requestId: id,
+          licenseeId: requestRow.licenseeId,
+          status: "REJECTED",
+          decisionNote: parsed.data.decisionNote?.trim() || null,
+          targetRoute: "/qr-requests",
+        },
+        channels: [NotificationChannel.WEB],
+      }),
+      createRoleNotifications({
+        audience: NotificationAudience.LICENSEE_ADMIN,
+        licenseeId: requestRow.licenseeId,
+        type: "qr_request_rejected",
+        title: "QR request rejected",
+        body: `Request ${id.slice(0, 8)} was rejected. Review decision note and resubmit if needed.`,
+        data: {
+          requestId: id,
+          licenseeId: requestRow.licenseeId,
+          status: "REJECTED",
+          decisionNote: parsed.data.decisionNote?.trim() || null,
+          targetRoute: "/qr-requests",
+        },
+        channels: [NotificationChannel.WEB],
+      }),
+      createUserNotification({
+        userId: requestRow.requestedByUserId,
+        licenseeId: requestRow.licenseeId,
+        type: "qr_request_rejected",
+        title: "Your QR request was rejected",
+        body: `Request ${id.slice(0, 8)} was rejected. Review notes and update your request.`,
+        data: {
+          requestId: id,
+          licenseeId: requestRow.licenseeId,
+          status: "REJECTED",
+          decisionNote: parsed.data.decisionNote?.trim() || null,
+          targetRoute: "/qr-requests",
+        },
+        channel: NotificationChannel.WEB,
+      }),
+    ]);
 
     return res.json({ success: true, data: updated });
   } catch (e: any) {

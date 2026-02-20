@@ -1,5 +1,5 @@
 import { Response } from "express";
-import { AlertSeverity, PolicyAlertType, TraceEventType, UserRole } from "@prisma/client";
+import { AlertSeverity, NotificationAudience, NotificationChannel, PolicyAlertType, TraceEventType, UserRole } from "@prisma/client";
 import { z } from "zod";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
@@ -8,6 +8,7 @@ import { getBatchSlaAnalytics, getRiskAnalytics } from "../services/analyticsSer
 import { getOrCreateSecurityPolicy } from "../services/policyEngineService";
 import { createAuditLog } from "../services/auditService";
 import { buildImmutableBatchAuditPackage } from "../services/immutableAuditExportService";
+import { createRoleNotifications } from "../services/notificationService";
 
 const policyUpdateSchema = z
   .object({
@@ -338,6 +339,40 @@ export const acknowledgePolicyAlertController = async (req: AuthRequest, res: Re
       },
       ipAddress: req.ip,
     });
+
+    await Promise.all([
+      createRoleNotifications({
+        audience: NotificationAudience.SUPER_ADMIN,
+        type: "policy_alert_acknowledged",
+        title: "Policy alert acknowledged",
+        body: `Alert ${updated.id.slice(0, 8)} was acknowledged.`,
+        incidentId: updated.incidentId || null,
+        data: {
+          alertId: updated.id,
+          alertType: updated.alertType,
+          severity: updated.severity,
+          licenseeId: updated.licenseeId,
+          targetRoute: "/ir",
+        },
+        channels: [NotificationChannel.WEB],
+      }),
+      createRoleNotifications({
+        audience: NotificationAudience.LICENSEE_ADMIN,
+        licenseeId: updated.licenseeId,
+        type: "policy_alert_acknowledged",
+        title: "Policy alert acknowledged",
+        body: `Alert ${updated.id.slice(0, 8)} was acknowledged by admin review.`,
+        incidentId: updated.incidentId || null,
+        data: {
+          alertId: updated.id,
+          alertType: updated.alertType,
+          severity: updated.severity,
+          licenseeId: updated.licenseeId,
+          targetRoute: "/ir",
+        },
+        channels: [NotificationChannel.WEB],
+      }),
+    ]);
 
     return res.json({ success: true, data: updated });
   } catch (e) {

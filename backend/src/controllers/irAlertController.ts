@@ -1,10 +1,11 @@
 import { Response } from "express";
 import { z } from "zod";
-import { AlertSeverity, PolicyAlertType } from "@prisma/client";
+import { AlertSeverity, NotificationAudience, NotificationChannel, PolicyAlertType } from "@prisma/client";
 
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { createAuditLog } from "../services/auditService";
+import { createRoleNotifications } from "../services/notificationService";
 
 const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -116,10 +117,41 @@ export const patchIrAlert = async (req: AuthRequest, res: Response) => {
       ipAddress: req.ip,
     });
 
+    await Promise.all([
+      createRoleNotifications({
+        audience: NotificationAudience.SUPER_ADMIN,
+        type: "policy_alert_updated",
+        title: "Policy alert updated",
+        body: `Alert ${updated.id.slice(0, 8)} metadata was updated.`,
+        incidentId: updated.incidentId || null,
+        data: {
+          alertId: updated.id,
+          licenseeId: existing.licenseeId,
+          changedFields: Object.keys(parsed.data),
+          targetRoute: "/ir",
+        },
+        channels: [NotificationChannel.WEB],
+      }),
+      createRoleNotifications({
+        audience: NotificationAudience.LICENSEE_ADMIN,
+        licenseeId: existing.licenseeId,
+        type: "policy_alert_updated",
+        title: "Policy alert updated",
+        body: `Alert ${updated.id.slice(0, 8)} has new acknowledgement/incident linkage.`,
+        incidentId: updated.incidentId || null,
+        data: {
+          alertId: updated.id,
+          licenseeId: existing.licenseeId,
+          changedFields: Object.keys(parsed.data),
+          targetRoute: "/ir",
+        },
+        channels: [NotificationChannel.WEB],
+      }),
+    ]);
+
     return res.json({ success: true, data: updated });
   } catch (e) {
     console.error("patchIrAlert error:", e);
     return res.status(500).json({ success: false, error: "Failed to update alert" });
   }
 };
-

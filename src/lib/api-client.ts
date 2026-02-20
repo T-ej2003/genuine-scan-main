@@ -591,6 +591,53 @@ class ApiClient {
     return () => es.close();
   }
 
+  streamNotifications(
+    onSnapshot: (payload: { notifications: any[]; unread: number; total: number; reason?: string }) => void,
+    onError?: () => void,
+    onOpen?: () => void,
+    options?: { limit?: number }
+  ) {
+    const token = this.getToken();
+    const params = new URLSearchParams();
+    params.set("limit", String(options?.limit ?? 8));
+    if (token) params.set("token", token);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    const url = `${BASE_URL}/events/notifications${query}`;
+
+    let es: EventSource;
+    try {
+      es = new EventSource(url, { withCredentials: true });
+    } catch {
+      es = new EventSource(url);
+    }
+
+    es.addEventListener("notifications", (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data || "{}");
+        const notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
+        const unread = Number(payload.unread || 0);
+        const total = Number(payload.total || notifications.length);
+        onSnapshot({
+          notifications,
+          unread,
+          total,
+          reason: typeof payload.reason === "string" ? payload.reason : undefined,
+        });
+      } catch {
+        // ignore malformed snapshots
+      }
+    });
+
+    es.onerror = () => {
+      onError?.();
+    };
+    es.onopen = () => {
+      onOpen?.();
+    };
+
+    return () => es.close();
+  }
+
   // product batches removed
 
   // ==================== QR REQUESTS ====================
