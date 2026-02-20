@@ -26,6 +26,7 @@ export default function IncidentResponseHelp() {
               <li>Incidents lifecycle and severity/priority.</li>
               <li>Where alerts come from and how they map to incidents.</li>
               <li>How to assign and document a case with a timeline.</li>
+              <li>How Support and Governance workflows connect to incident response.</li>
             </ul>
           </CardContent>
         </Card>
@@ -90,6 +91,28 @@ export default function IncidentResponseHelp() {
         </section>
 
         <section className="space-y-3">
+          <h2 className="text-lg font-semibold text-foreground">Cross-page workflow</h2>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card>
+              <CardHeader className="space-y-1">
+                <CardTitle className="text-base">Support</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-muted-foreground">
+                Use the Support page to track SLA, ticket stage, and ticket communications linked to incident records.
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="space-y-1">
+                <CardTitle className="text-base">Governance</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-muted-foreground">
+                Use Governance for tenant policy flags, evidence retention, telemetry review, and compliance report generation.
+              </CardContent>
+            </Card>
+          </div>
+        </section>
+
+        <section className="space-y-3">
           <h2 className="text-lg font-semibold text-foreground">Screenshots</h2>
           <DocScreenshot
             filename="ir-dashboard.png"
@@ -132,4 +155,3 @@ export default function IncidentResponseHelp() {
     </HelpShell>
   );
 }
-

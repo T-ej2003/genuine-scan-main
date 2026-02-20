@@ -7,7 +7,7 @@ import { Separator } from "@/components/ui/separator";
 import { HelpShell } from "@/pages/help/HelpShell";
 import { ScreenshotChecklist, type ScreenshotNeed } from "@/components/help/ScreenshotChecklist";
 import { useAuth } from "@/contexts/AuthContext";
-import { Shield, Users, Factory, ScanLine, KeyRound, Siren, ClipboardList, Gavel, Mail } from "lucide-react";
+import { Shield, Users, Factory, ScanLine, KeyRound, Siren, ClipboardList, Gavel, Mail, CircleHelp, SlidersHorizontal } from "lucide-react";
 import type { UserRole } from "@/types";
 
 type ViewerRole = UserRole | "customer";
@@ -110,6 +110,14 @@ const ROLE_CARDS: HubCardConfig[] = [
 
 const INCIDENT_CARDS: HubCardConfig[] = [
   {
+    title: "Incidents",
+    description: "Queue-first incident triage, assignment, evidence, and closure quality checks.",
+    icon: ClipboardList,
+    href: "/help/incidents",
+    badge: "Super Admin",
+    roles: ["super_admin"],
+  },
+  {
     title: "Incident Response overview",
     description: "How to triage, contain, document, and resolve incidents.",
     icon: Siren,
@@ -120,7 +128,7 @@ const INCIDENT_CARDS: HubCardConfig[] = [
   {
     title: "Policy alerts",
     description: "How policy alerts are created, reviewed, and actioned.",
-    icon: ClipboardList,
+    icon: Shield,
     href: "/help/policy-alerts",
     badge: "Super Admin",
     roles: ["super_admin"],
@@ -138,6 +146,22 @@ const INCIDENT_CARDS: HubCardConfig[] = [
     description: "Customer and admin communication guidance with traceability.",
     icon: Mail,
     href: "/help/communications",
+    badge: "Super Admin",
+    roles: ["super_admin"],
+  },
+  {
+    title: "Support tickets",
+    description: "Support queue operations, SLA handling, and ticket updates linked to incidents.",
+    icon: CircleHelp,
+    href: "/help/support",
+    badge: "Super Admin",
+    roles: ["super_admin"],
+  },
+  {
+    title: "Governance & Reliability",
+    description: "Feature flags, retention lifecycle, compliance reporting, and route telemetry.",
+    icon: SlidersHorizontal,
+    href: "/help/governance",
     badge: "Super Admin",
     roles: ["super_admin"],
   },

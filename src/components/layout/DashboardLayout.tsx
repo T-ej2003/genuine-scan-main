@@ -59,6 +59,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationsLive, setNotificationsLive] = useState(false);
 
   const filteredNavItems = navItems.filter((item) => user && item.roles.includes(user.role));
   const contextualHelpRoute = getContextualHelpRoute(location.pathname, user?.role);
@@ -68,11 +69,18 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     setNotificationsLoading(true);
     try {
       const response = await apiClient.getNotifications({ limit: 8, offset: 0 });
-      if (!response.success) return;
+      if (!response.success) {
+        setNotifications([]);
+        setUnreadNotifications(0);
+        return;
+      }
       const payload: any = response.data || {};
       const rows = Array.isArray(payload.notifications) ? payload.notifications : [];
       setNotifications(rows);
       setUnreadNotifications(Number(payload.unread || 0));
+    } catch {
+      setNotifications([]);
+      setUnreadNotifications(0);
     } finally {
       setNotificationsLoading(false);
     }
@@ -87,9 +95,33 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     if (!user) return;
     const timer = window.setInterval(() => {
       loadNotifications();
-    }, 45_000);
+    }, 90_000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const stop = apiClient.streamNotifications(
+      (payload) => {
+        const rows = Array.isArray(payload.notifications) ? payload.notifications : [];
+        setNotifications(rows);
+        setUnreadNotifications(Number(payload.unread || 0));
+      },
+      () => {
+        setNotificationsLive(false);
+      },
+      () => {
+        setNotificationsLive(true);
+      },
+      { limit: 8 }
+    );
+
+    return () => {
+      setNotificationsLive(false);
+      stop();
+    };
   }, [user?.id]);
 
   const markNotificationRead = async (id: string) => {
@@ -100,10 +132,11 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
   const notificationTarget = (notification: any) => {
     const data = (notification?.data && typeof notification.data === "object" ? notification.data : {}) as Record<string, any>;
+    if (typeof data.targetRoute === "string" && data.targetRoute.trim()) return data.targetRoute.trim();
     if (data.ticketId) return `/support?ticketId=${encodeURIComponent(String(data.ticketId))}`;
     if (data.ticketReference) return `/support?reference=${encodeURIComponent(String(data.ticketReference))}`;
-    if (notification?.incidentId) return `/support?incidentId=${encodeURIComponent(String(notification.incidentId))}`;
-    return "/support";
+    if (notification?.incidentId) return `/incidents?incidentId=${encodeURIComponent(String(notification.incidentId))}`;
+    return "/dashboard";
   };
 
   const notificationItems = useMemo(() => notifications.slice(0, 8), [notifications]);
@@ -212,16 +245,19 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             <DropdownMenuContent align="end" className="w-[340px]">
               <div className="flex items-center justify-between px-3 py-2">
                 <p className="text-sm font-semibold">Notifications</p>
-                <Button
-                  variant="ghost"
-                  className="h-auto px-2 py-1 text-xs"
-                  onClick={async () => {
-                    await apiClient.markAllNotificationsRead();
-                    await loadNotifications();
-                  }}
-                >
-                  Mark all read
-                </Button>
+                <div className="flex items-center gap-2">
+                  <span className={cn("inline-block h-2 w-2 rounded-full", notificationsLive ? "bg-emerald-500" : "bg-slate-300")} />
+                  <Button
+                    variant="ghost"
+                    className="h-auto px-2 py-1 text-xs"
+                    onClick={async () => {
+                      await apiClient.markAllNotificationsRead();
+                      await loadNotifications();
+                    }}
+                  >
+                    Mark all read
+                  </Button>
+                </div>
               </div>
               <DropdownMenuSeparator />
               {notificationsLoading ? (

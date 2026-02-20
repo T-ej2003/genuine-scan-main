@@ -8,6 +8,35 @@ import prisma from "../config/database";
 import { sendIncidentEmail } from "./incidentEmailService";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
 
+export type NotificationRealtimeEvent = {
+  type: "created" | "read" | "read_all";
+  audience: NotificationAudience;
+  licenseeId?: string | null;
+  orgId?: string | null;
+  incidentId?: string | null;
+  userIds?: string[];
+  notificationId?: string;
+};
+
+type NotificationListener = (event: NotificationRealtimeEvent) => void;
+
+const listeners = new Set<NotificationListener>();
+
+export const onNotificationEvent = (cb: NotificationListener) => {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+};
+
+const emitNotificationEvent = (event: NotificationRealtimeEvent) => {
+  for (const cb of listeners) {
+    try {
+      cb(event);
+    } catch {
+      // ignore listener failures
+    }
+  }
+};
+
 const normalizeRole = (role: UserRole): NotificationAudience => {
   if (role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN) return NotificationAudience.SUPER_ADMIN;
   if (role === UserRole.LICENSEE_ADMIN || role === UserRole.ORG_ADMIN) return NotificationAudience.LICENSEE_ADMIN;
@@ -67,6 +96,8 @@ export const createRoleNotifications = async (params: {
 
     const created: any[] = [];
 
+    const targetedUserIds = users.map((u) => u.id);
+
     for (const channel of channels) {
       if (users.length > 0) {
         const rows = await prisma.notification.createMany({
@@ -102,6 +133,17 @@ export const createRoleNotifications = async (params: {
         created.push(row);
       }
 
+      if (channel === NotificationChannel.WEB) {
+        emitNotificationEvent({
+          type: "created",
+          audience: params.audience,
+          licenseeId: params.licenseeId || null,
+          orgId: params.orgId || null,
+          incidentId: params.incidentId || null,
+          userIds: targetedUserIds.length > 0 ? targetedUserIds : undefined,
+        });
+      }
+
       if (channel === NotificationChannel.EMAIL && users.length > 0 && params.incidentId) {
         for (const user of users) {
           await sendIncidentEmail({
@@ -125,6 +167,60 @@ export const createRoleNotifications = async (params: {
         "[notification] Notification table is unavailable. Skipping notification persistence."
       );
       return [] as any[];
+    }
+    throw error;
+  }
+};
+
+export const createUserNotification = async (params: {
+  userId: string;
+  title: string;
+  body: string;
+  type: string;
+  licenseeId?: string | null;
+  orgId?: string | null;
+  incidentId?: string | null;
+  data?: any;
+  channel?: NotificationChannel;
+}) => {
+  const channel = params.channel || NotificationChannel.WEB;
+
+  try {
+    const created = await prisma.notification.create({
+      data: {
+        userId: params.userId,
+        orgId: params.orgId || null,
+        licenseeId: params.licenseeId || null,
+        incidentId: params.incidentId || null,
+        audience: NotificationAudience.ALL,
+        channel,
+        type: params.type,
+        title: params.title,
+        body: params.body,
+        data: params.data || null,
+      },
+    });
+
+    if (channel === NotificationChannel.WEB) {
+      emitNotificationEvent({
+        type: "created",
+        audience: NotificationAudience.ALL,
+        licenseeId: params.licenseeId || null,
+        orgId: params.orgId || null,
+        incidentId: params.incidentId || null,
+        userIds: [params.userId],
+        notificationId: created.id,
+      });
+    }
+
+    return created;
+  } catch (error) {
+    if (isPrismaMissingTableError(error, ["notification"])) {
+      warnStorageUnavailableOnce(
+        "notification-create-user",
+        "[notification] Notification table is unavailable. Skipping direct user notification."
+      );
+      return null;
     }
     throw error;
   }
@@ -251,12 +347,22 @@ export const markNotificationRead = async (params: {
 
     if (!existing) return null;
 
-    return prisma.notification.update({
+    const updated = await prisma.notification.update({
       where: { id: existing.id },
       data: {
         readAt: existing.readAt || new Date(),
       },
     });
+
+    emitNotificationEvent({
+      type: "read",
+      audience: NotificationAudience.ALL,
+      licenseeId: params.licenseeId || null,
+      userIds: [params.userId],
+      notificationId: updated.id,
+    });
+
+    return updated;
   } catch (error) {
     if (isPrismaMissingTableError(error, ["notification"])) {
       warnStorageUnavailableOnce(
@@ -294,6 +400,13 @@ export const markAllNotificationsRead = async (params: {
     const result = await prisma.notification.updateMany({
       where,
       data: { readAt: new Date() },
+    });
+
+    emitNotificationEvent({
+      type: "read_all",
+      audience: NotificationAudience.ALL,
+      licenseeId: params.licenseeId || null,
+      userIds: [params.userId],
     });
 
     return result.count;

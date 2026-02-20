@@ -45,6 +45,9 @@ const HelpIncidentResponse = lazy(() => import("@/pages/help/IncidentResponse"))
 const HelpPolicyAlerts = lazy(() => import("@/pages/help/PolicyAlerts"));
 const HelpIncidentActions = lazy(() => import("@/pages/help/IncidentActions"));
 const HelpCommunications = lazy(() => import("@/pages/help/Communications"));
+const HelpSupport = lazy(() => import("@/pages/help/Support"));
+const HelpGovernance = lazy(() => import("@/pages/help/Governance"));
+const HelpIncidents = lazy(() => import("@/pages/help/Incidents"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -239,6 +242,30 @@ function AppRoutes() {
           element={
             <HelpRoleRoute allowedRoles={["super_admin"]} allowPublic={false}>
               <HelpCommunications />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/support"
+          element={
+            <HelpRoleRoute allowedRoles={["super_admin"]} allowPublic={false}>
+              <HelpSupport />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/governance"
+          element={
+            <HelpRoleRoute allowedRoles={["super_admin"]} allowPublic={false}>
+              <HelpGovernance />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/incidents"
+          element={
+            <HelpRoleRoute allowedRoles={["super_admin"]} allowPublic={false}>
+              <HelpIncidents />
             </HelpRoleRoute>
           }
         />
