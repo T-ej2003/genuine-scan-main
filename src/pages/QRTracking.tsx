@@ -185,6 +185,18 @@ export default function QRTracking() {
     });
   }, [summary, filters.batchName]);
 
+  const friendlyError = useMemo(() => {
+    const msg = String(error || "").toLowerCase();
+    if (!msg) return "";
+    if (msg.includes("internal server error") || msg.includes("http 500")) {
+      return "Tracking data is temporarily unavailable. Please refresh in a moment.";
+    }
+    if (msg.includes("network") || msg.includes("timeout") || msg.includes("offline")) {
+      return "Network connection issue while loading tracking data. Check connectivity and retry.";
+    }
+    return "We could not load tracking data. Please retry.";
+  }, [error]);
+
   const formatLocation = (log: ScanLogRow) => log.locationName || "Location unavailable";
 
   const blockedLogCount = logs.filter((l) => String(l.qrCode?.status || l.status || "").toUpperCase() === "BLOCKED").length;
@@ -221,8 +233,12 @@ export default function QRTracking() {
           <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
             <div className="flex items-center gap-2">
               <ShieldAlert className="h-4 w-4" />
-              {error}
+              {friendlyError}
             </div>
+            <details className="mt-2 text-xs text-red-700/80">
+              <summary className="cursor-pointer">Technical details</summary>
+              <p className="mt-1 break-all">{error}</p>
+            </details>
           </div>
         )}
 

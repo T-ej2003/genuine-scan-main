@@ -231,7 +231,14 @@ class ApiClient {
     return res;
   }
 
-  async inviteUser(payload: { email: string; role: string; name?: string; licenseeId?: string; manufacturerId?: string }) {
+  async inviteUser(payload: {
+    email: string;
+    role: string;
+    name?: string;
+    licenseeId?: string;
+    manufacturerId?: string;
+    allowExistingInvitedUser?: boolean;
+  }) {
     return this.request("/auth/invite", { method: "POST", body: JSON.stringify(payload) });
   }
 
@@ -256,7 +263,7 @@ class ApiClient {
       supportPhone?: string;
       isActive?: boolean;
     };
-    admin: { name: string; email: string; password: string };
+    admin: { name: string; email: string; password?: string; sendInvite?: boolean };
   }) {
     return this.request("/licensees", { method: "POST", body: JSON.stringify(payload) });
   }
@@ -279,6 +286,13 @@ class ApiClient {
 
   async deleteLicensee(id: string) {
     return this.request(`/licensees/${id}`, { method: "DELETE" });
+  }
+
+  async resendLicenseeAdminInvite(licenseeId: string, email?: string) {
+    return this.request(`/licensees/${encodeURIComponent(licenseeId)}/admin-invite/resend`, {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
   }
 
   async exportLicenseesCsv() {
@@ -764,7 +778,8 @@ class ApiClient {
     });
   }
 
-  async claimVerifiedProduct(code: string, customerToken: string) {
+  async claimVerifiedProduct(code: string, customerToken?: string) {
+    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
     return this.request<{
       claimResult: string;
       message?: string;
@@ -781,6 +796,23 @@ class ApiClient {
         canClaim: boolean;
       };
     }>(`/verify/${encodeURIComponent(code)}/claim`, {
+      method: "POST",
+      headers,
+    });
+  }
+
+  async linkDeviceClaimToUser(code: string, customerToken: string) {
+    return this.request<{
+      linkResult: string;
+      message?: string;
+      ownershipStatus?: {
+        isClaimed: boolean;
+        claimedAt: string | null;
+        isOwnedByRequester: boolean;
+        isClaimedByAnother: boolean;
+        canClaim: boolean;
+      };
+    }>(`/verify/${encodeURIComponent(code)}/link-claim`, {
       method: "POST",
       headers: { Authorization: `Bearer ${customerToken}` },
     });

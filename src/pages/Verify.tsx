@@ -28,6 +28,8 @@ type OwnershipStatus = {
   isOwnedByRequester: boolean;
   isClaimedByAnother: boolean;
   canClaim: boolean;
+  state?: "unclaimed" | "owned_by_you" | "owned_by_someone_else" | "claim_not_available";
+  matchMethod?: "user" | "device_token" | "ip_fallback" | null;
 };
 
 type ScanSummary = {
@@ -322,6 +324,8 @@ export default function Verify() {
   const [otpVerifying, setOtpVerifying] = useState(false);
 
   const [claiming, setClaiming] = useState(false);
+  const [linkingClaim, setLinkingClaim] = useState(false);
+  const [claimConfirmOpen, setClaimConfirmOpen] = useState(false);
 
   const [reportOpen, setReportOpen] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -373,6 +377,16 @@ export default function Verify() {
   const scanSummary = useMemo(() => deriveScanSummary(result), [result]);
   const ownershipStatus = result?.ownershipStatus || DEFAULT_OWNERSHIP_STATUS;
   const verifyUxPolicy = { ...DEFAULT_VERIFY_POLICY, ...(result?.verifyUxPolicy || {}) };
+  const showLinkClaim =
+    Boolean(customerToken) && ownershipStatus.isOwnedByRequester && ownershipStatus.matchMethod && ownershipStatus.matchMethod !== "user";
+  const claimUnavailableReason =
+    !verifyUxPolicy.allowOwnershipClaim
+      ? "Ownership claim is currently disabled by brand policy."
+      : classification === "BLOCKED_BY_SECURITY"
+        ? "Claiming is unavailable while this code is blocked by security."
+        : classification === "NOT_READY_FOR_CUSTOMER_USE"
+          ? "Claiming starts once the product is ready for customer use."
+          : "Claiming is currently unavailable.";
   const verificationTimeline = result?.verificationTimeline || {
     firstSeen: scanSummary.firstVerifiedAt,
     latestSeen: scanSummary.latestVerifiedAt,
@@ -703,11 +717,6 @@ export default function Verify() {
   };
 
   const handleClaimProduct = async () => {
-    if (!customerToken) {
-      toast({ title: "Sign in required", description: "Sign in with email OTP to claim product ownership.", variant: "destructive" });
-      return;
-    }
-
     if (!displayedCode || displayedCode === "—") {
       toast({ title: "Invalid code", description: "Cannot claim without a valid verification code.", variant: "destructive" });
       return;
@@ -715,7 +724,7 @@ export default function Verify() {
 
     setClaiming(true);
     try {
-      const response = await apiClient.claimVerifiedProduct(displayedCode, customerToken);
+      const response = await apiClient.claimVerifiedProduct(displayedCode, customerToken || undefined);
       if (!response.success || !response.data) {
         toast({ title: "Claim failed", description: response.error || "Could not claim this product.", variant: "destructive" });
         return;
@@ -729,8 +738,16 @@ export default function Verify() {
         });
       } else if (response.data.claimResult === "ALREADY_OWNED_BY_YOU") {
         toast({ title: "Already owned", description: "This product is already linked to your account." });
+      } else if (response.data.claimResult === "LINKED_TO_SIGNED_IN_ACCOUNT") {
+        toast({ title: "Ownership linked", description: "Your device claim is now linked to your signed-in account." });
       } else {
-        toast({ title: "Ownership claimed", description: "Product ownership is now linked to your account." });
+        toast({
+          title: "Ownership claimed",
+          description:
+            response.data.claimResult === "CLAIMED_DEVICE"
+              ? "Claim saved for this device/network. Sign in for portable protection."
+              : "Product ownership is now linked to your account.",
+        });
       }
 
       const nextOwnership = response.data.ownershipStatus || DEFAULT_OWNERSHIP_STATUS;
@@ -746,8 +763,36 @@ export default function Verify() {
             }
           : prev
       );
+      setClaimConfirmOpen(false);
     } finally {
       setClaiming(false);
+    }
+  };
+
+  const handleLinkClaimToAccount = async () => {
+    if (!customerToken || !displayedCode || displayedCode === "—") return;
+    setLinkingClaim(true);
+    try {
+      const response = await apiClient.linkDeviceClaimToUser(displayedCode, customerToken);
+      if (!response.success) {
+        toast({
+          title: "Link failed",
+          description: response.error || "Could not link this device claim.",
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({ title: "Linked to your account", description: "Ownership is now portable across your signed-in sessions." });
+      setResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              ownershipStatus: response.data?.ownershipStatus || prev.ownershipStatus,
+            }
+          : prev
+      );
+    } finally {
+      setLinkingClaim(false);
     }
   };
 
@@ -841,6 +886,29 @@ export default function Verify() {
   const supportEmail = result?.licensee?.supportEmail || "";
   const supportPhone = result?.licensee?.supportPhone || "";
   const supportWebsite = result?.licensee?.website || "";
+  const isReportDraftDirty =
+    reportDescription.trim().length > 0 ||
+    reportEmail.trim().length > 0 ||
+    reportPhotos.length > 0 ||
+    reportType !== INCIDENT_TYPE_OPTIONS[0].value;
+  const handleReportDialogOpenChange = (open: boolean) => {
+    if (!open && !reporting && !reportReference && isReportDraftDirty) {
+      const shouldDiscard = window.confirm("Discard this report draft?");
+      if (!shouldDiscard) return;
+    }
+    setReportOpen(open);
+  };
+  const friendlyVerifyError = (() => {
+    const msg = String(error || "").toLowerCase();
+    if (!msg) return "Verification service unavailable";
+    if (msg.includes("network") || msg.includes("offline") || msg.includes("timed out") || msg.includes("timeout")) {
+      return "Network connection is unstable. Reconnect and retry verification.";
+    }
+    if (msg.includes("internal server error") || msg.includes("service unavailable")) {
+      return "The secure registry is temporarily unavailable. Please retry in a moment.";
+    }
+    return "Verification is unavailable right now. Please retry.";
+  })();
 
   return (
     <div className="relative min-h-screen bg-[radial-gradient(circle_at_top,_#e8eef8_0%,_#f4f7fb_45%,_#f8fafc_100%)] px-4 py-8">
@@ -869,7 +937,7 @@ export default function Verify() {
             <CardContent className="space-y-3 py-12 text-center">
               <SearchX className="mx-auto h-8 w-8 text-rose-900" />
               <p className="text-lg font-semibold text-slate-900">Verification service unavailable</p>
-              <p className="text-sm text-slate-600">{error}</p>
+              <p className="text-sm text-slate-600">{friendlyVerifyError}</p>
               <div className="flex items-center justify-center gap-2">
                 <Button variant="outline" onClick={fetchVerification} disabled={loading}>
                   Retry now
@@ -880,6 +948,10 @@ export default function Verify() {
                   </Badge>
                 ) : null}
               </div>
+              <details className="mx-auto max-w-xl rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs text-slate-600">
+                <summary className="cursor-pointer font-medium text-slate-700">Technical details</summary>
+                <p className="mt-2 break-all">{error}</p>
+              </details>
             </CardContent>
           ) : (
             <CardContent className={cn("space-y-6 p-5 sm:p-6", !showSkeleton && "animate-fade-in")}>
@@ -1145,51 +1217,115 @@ export default function Verify() {
                       <p className="text-sm font-semibold text-slate-900">Ownership</p>
                       {customerToken ? <Badge variant="outline">Signed in for protection</Badge> : null}
                     </div>
+                    <div className="mt-3 space-y-4">
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                        <p className="font-medium">Claim ownership</p>
+                        <p className="mt-1">
+                          Claiming helps protect you from duplicates and supports faster help if something looks wrong.
+                        </p>
+                        <p className="mt-2 text-xs text-slate-600">
+                          Device claim uses a secure device cookie plus hashed network evidence. Raw IP is never shown.
+                        </p>
+                      </div>
 
-                    {!customerToken ? (
-                      <div className="mt-3 space-y-4">
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                          <p className="font-medium">Sign in for better protection</p>
-                          <p className="mt-1">Sign-in is optional. You can still verify without signing in.</p>
+                      {ownershipStatus.isOwnedByRequester ? (
+                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                          <p className="font-semibold">Owned by you</p>
+                          <p className="mt-1">Claimed at: {formatDateTime(ownershipStatus.claimedAt)}</p>
+                          {ownershipStatus.matchMethod && ownershipStatus.matchMethod !== "user" ? (
+                            <p className="mt-1 text-xs text-emerald-800">
+                              Current proof: {ownershipStatus.matchMethod === "device_token" ? "this device" : "network evidence"}.
+                            </p>
+                          ) : null}
                         </div>
-
-                        {googleOauthUrl ? (
-                          <Button asChild variant="outline" className={cn("w-full sm:w-auto", motionButtonClass)}>
-                            <a href={googleOauthUrl}>Continue with Google</a>
-                          </Button>
-                        ) : null}
-
-                        <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
-                          <div className="space-y-2">
-                            <Label>Email OTP sign-in</Label>
-                            <Input
-                              type="email"
-                              value={otpEmail}
-                              onChange={(e) => setOtpEmail(e.target.value)}
-                              placeholder="you@example.com"
-                              disabled={loading}
-                            />
-                          </div>
+                      ) : ownershipStatus.isClaimedByAnother ? (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          <p className="font-semibold">Already claimed</p>
+                          <p className="mt-1">This code is already claimed. If unexpected, submit a counterfeit report.</p>
+                        </div>
+                      ) : ownershipStatus.canClaim ? (
+                        <div className="flex flex-wrap items-center gap-2">
                           <Button
                             type="button"
-                            onClick={handleRequestOtp}
-                            disabled={loading || otpSending}
+                            onClick={() => setClaimConfirmOpen(true)}
+                            disabled={loading || claiming}
                             className={cn("bg-slate-900 text-white hover:bg-slate-800", motionButtonClass)}
                           >
-                            {otpSending ? (
+                            {claiming ? (
                               <>
                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Sending OTP
+                                Claiming
                               </>
                             ) : (
-                              "Send OTP"
+                              "Claim on this device"
                             )}
                           </Button>
+                          {googleOauthUrl && !customerToken ? (
+                            <Button asChild variant="outline" className={motionButtonClass} disabled={loading || claiming}>
+                              <a href={googleOauthUrl}>Sign in with Google for better protection</a>
+                            </Button>
+                          ) : null}
                         </div>
+                      ) : (
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                          <p className="font-semibold">Claim currently unavailable</p>
+                          <p className="mt-1">{claimUnavailableReason}</p>
+                        </div>
+                      )}
 
-                        {otpChallengeToken ? (
-                          <div className="space-y-3 rounded-lg border border-slate-200 p-3">
-                            <p className="text-sm text-slate-700">Enter 6-digit OTP sent to {otpMaskedEmail || "your email"}.</p>
+                      {showLinkClaim ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleLinkClaimToAccount}
+                          disabled={loading || linkingClaim}
+                          className={motionButtonClass}
+                        >
+                          {linkingClaim ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Linking
+                            </>
+                          ) : (
+                            "Link this device claim to your account"
+                          )}
+                        </Button>
+                      ) : null}
+
+                      {!customerToken ? (
+                        <div className="space-y-3 rounded-lg border border-slate-200 p-3">
+                          <p className="text-sm font-medium text-slate-900">Sign in for better protection (optional)</p>
+                          <p className="text-xs text-slate-600">
+                            Sign-in makes ownership portable across devices. Device-only claim may be less reliable if your network changes.
+                          </p>
+                          <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+                            <div className="space-y-2">
+                              <Label>Email OTP sign-in</Label>
+                              <Input
+                                type="email"
+                                value={otpEmail}
+                                onChange={(e) => setOtpEmail(e.target.value)}
+                                placeholder="you@example.com"
+                                disabled={loading || claiming}
+                              />
+                            </div>
+                            <Button
+                              type="button"
+                              onClick={handleRequestOtp}
+                              disabled={loading || claiming || otpSending}
+                              className={cn("bg-slate-900 text-white hover:bg-slate-800", motionButtonClass)}
+                            >
+                              {otpSending ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Sending OTP
+                                </>
+                              ) : (
+                                "Send OTP"
+                              )}
+                            </Button>
+                          </div>
+                          {otpChallengeToken ? (
                             <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
                               <div className="space-y-2">
                                 <Label>One-time code</Label>
@@ -1198,13 +1334,13 @@ export default function Verify() {
                                   onChange={(e) => setOtpCode(e.target.value)}
                                   maxLength={6}
                                   placeholder="123456"
-                                  disabled={loading}
+                                  disabled={loading || claiming}
                                 />
                               </div>
                               <Button
                                 type="button"
                                 onClick={handleVerifyOtp}
-                                disabled={loading || otpVerifying}
+                                disabled={loading || claiming || otpVerifying}
                                 className={cn("bg-slate-900 text-white hover:bg-slate-800", motionButtonClass)}
                               >
                                 {otpVerifying ? (
@@ -1217,56 +1353,22 @@ export default function Verify() {
                                 )}
                               </Button>
                             </div>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="mt-3 space-y-3">
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                          <p className="font-medium">Signed in as {customerEmail}</p>
-                          <p className="mt-1">Use this session to claim ownership and strengthen duplicate protection.</p>
+                          ) : null}
+                          {otpChallengeToken ? (
+                            <p className="text-xs text-slate-600">OTP sent to {otpMaskedEmail || "your email"}.</p>
+                          ) : null}
                         </div>
-
-                        {ownershipStatus.isOwnedByRequester ? (
-                          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-                            <p className="font-semibold">Owned by you</p>
-                            <p className="mt-1">Claimed at: {formatDateTime(ownershipStatus.claimedAt)}</p>
+                      ) : (
+                        <div className="flex flex-wrap items-center gap-3">
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                            Signed in as {customerEmail}
                           </div>
-                        ) : ownershipStatus.isClaimedByAnother ? (
-                          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                            <p className="font-semibold">Already claimed by another account</p>
-                            <p className="mt-1">Do not trust this product blindly. Submit a counterfeit report for investigation.</p>
-                          </div>
-                        ) : !verifyUxPolicy.allowOwnershipClaim ? (
-                          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                            <p className="font-semibold">Ownership claim disabled for this product policy</p>
-                            <p className="mt-1">Verification remains active, but claiming is currently restricted by tenant settings.</p>
-                          </div>
-                        ) : (
-                          <div className="flex flex-wrap items-center gap-3">
-                            <Button
-                              type="button"
-                              onClick={handleClaimProduct}
-                              disabled={loading || claiming}
-                              className={cn("bg-slate-900 text-white hover:bg-slate-800", motionButtonClass)}
-                            >
-                              {claiming ? (
-                                <>
-                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                  Claiming
-                                </>
-                              ) : (
-                                "Claim this product"
-                              )}
-                            </Button>
-                          </div>
-                        )}
-
-                        <Button type="button" variant="outline" onClick={handleSignOut} disabled={loading} className={motionButtonClass}>
-                          Sign out
-                        </Button>
-                      </div>
-                    )}
+                          <Button type="button" variant="outline" onClick={handleSignOut} disabled={loading} className={motionButtonClass}>
+                            Sign out
+                          </Button>
+                        </div>
+                      )}
+                    </div>
                   </section>
 
                   <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1276,7 +1378,7 @@ export default function Verify() {
                         <Button
                           type="button"
                           variant="outline"
-                          disabled={loading}
+                          disabled={loading || claiming}
                           onClick={() => {
                             setReportReference(null);
                             setReportSupportRef(null);
@@ -1391,7 +1493,44 @@ export default function Verify() {
         </Card>
       </div>
 
-      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+      <Dialog open={claimConfirmOpen} onOpenChange={setClaimConfirmOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Confirm device claim</DialogTitle>
+            <DialogDescription>
+              This will claim ownership on this device using secure device and network evidence.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+            <p>
+              This claim is tied to this device/network and may be weaker if your network changes. For stronger, portable ownership, sign in with Google or OTP and link the claim.
+            </p>
+            <p className="text-xs text-slate-600">Privacy: IP is hashed server-side and never displayed.</p>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setClaimConfirmOpen(false)} disabled={claiming}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleClaimProduct}
+              disabled={claiming || loading}
+              className="bg-slate-900 text-white hover:bg-slate-800"
+            >
+              {claiming ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Claiming
+                </>
+              ) : (
+                "Confirm claim"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={reportOpen} onOpenChange={handleReportDialogOpenChange}>
         <DialogContent className="sm:max-w-[640px]">
           <DialogHeader>
             <DialogTitle>Report suspected counterfeit</DialogTitle>

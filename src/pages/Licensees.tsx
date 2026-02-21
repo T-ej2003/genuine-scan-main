@@ -43,6 +43,8 @@ import {
   Download,
   UserPlus,
   QrCode,
+  Link2,
+  Send,
 } from "lucide-react";
 
 import {
@@ -86,6 +88,24 @@ type LicenseeRow = {
     totalCodes: number;
     createdAt: string;
   } | null;
+  adminOnboarding?: {
+    state?: "PENDING" | "ACTIVE" | "UNASSIGNED";
+    adminUser?: {
+      id: string;
+      name: string;
+      email: string;
+      role: string;
+      status?: string;
+      isActive?: boolean;
+      createdAt?: string;
+    } | null;
+    pendingInvite?: {
+      id: string;
+      email: string;
+      expiresAt?: string;
+      createdAt?: string;
+    } | null;
+  } | null;
 };
 
 type CreateLicenseeForm = {
@@ -104,6 +124,7 @@ type CreateLicenseeForm = {
   adminName: string;
   adminEmail: string;
   adminPassword: string;
+  adminSendInvite: boolean;
 
   // QR Range
   rangeStart: string;
@@ -189,6 +210,8 @@ export default function Licensees() {
   // Create Licensee dialog
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [latestInviteLink, setLatestInviteLink] = useState<string>("");
+  const [inviteActionLoadingId, setInviteActionLoadingId] = useState<string>("");
   const [createForm, setCreateForm] = useState<CreateLicenseeForm>({
     name: "",
     prefix: "A",
@@ -203,6 +226,7 @@ export default function Licensees() {
     adminName: "",
     adminEmail: "",
     adminPassword: "",
+    adminSendInvite: true,
 
     rangeStart: "1",
     rangeEnd: "150000",
@@ -213,6 +237,29 @@ export default function Licensees() {
     manufacturerEmail: "",
     manufacturerPassword: "",
   });
+  const isCreateFormDirty = useMemo(() => {
+    return (
+      createForm.name.trim() !== "" ||
+      createForm.prefix.trim().toUpperCase() !== "A" ||
+      createForm.description.trim() !== "" ||
+      createForm.brandName.trim() !== "" ||
+      createForm.location.trim() !== "" ||
+      createForm.website.trim() !== "" ||
+      createForm.supportEmail.trim() !== "" ||
+      createForm.supportPhone.trim() !== "" ||
+      createForm.adminName.trim() !== "" ||
+      createForm.adminEmail.trim() !== "" ||
+      createForm.adminPassword.trim() !== "" ||
+      createForm.adminSendInvite !== true ||
+      String(createForm.rangeStart).trim() !== "1" ||
+      String(createForm.rangeEnd).trim() !== "150000" ||
+      createForm.createManufacturerNow !== true ||
+      createForm.manufacturerAccessMode !== "invite" ||
+      createForm.manufacturerName.trim() !== "" ||
+      createForm.manufacturerEmail.trim() !== "" ||
+      createForm.manufacturerPassword.trim() !== ""
+    );
+  }, [createForm]);
 
   // Edit Licensee dialog
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -296,6 +343,63 @@ export default function Licensees() {
     }
   };
 
+  const copyInviteLink = async (inviteLink: string, toastTitle: string) => {
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      toast({ title: toastTitle, description: "Invite link copied to clipboard." });
+    } catch {
+      toast({
+        title: "Copy failed",
+        description: "Could not access clipboard. Copy the link manually from the dialog.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const resendAdminInvite = async (licensee: LicenseeRow, opts?: { copyOnly?: boolean }) => {
+    const adminEmail = licensee.adminOnboarding?.adminUser?.email || licensee.adminOnboarding?.pendingInvite?.email;
+    if (!adminEmail) {
+      toast({
+        title: "No admin email found",
+        description: "This licensee does not have an admin account to invite yet.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setInviteActionLoadingId(licensee.id);
+    const res = await apiClient.resendLicenseeAdminInvite(licensee.id, adminEmail);
+    setInviteActionLoadingId("");
+
+    if (!res.success) {
+      toast({
+        title: "Invite action failed",
+        description: res.error || "Could not generate invite link.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const data: any = res.data || {};
+    const inviteLink = String(data.inviteLink || "").trim();
+    if (inviteLink) {
+      setLatestInviteLink(inviteLink);
+      if (opts?.copyOnly) {
+        await copyInviteLink(inviteLink, "Invite link copied");
+      }
+    }
+
+    toast({
+      title: opts?.copyOnly ? "Invite link generated" : "Invite resent",
+      description:
+        data.emailDelivered === false
+          ? "Email provider not configured. Use the copied invite link to onboard manually."
+          : `Invite sent to ${adminEmail}.`,
+    });
+
+    await load();
+  };
+
   /* ===================== CREATE LICENSEE FLOW ===================== */
 
   const resetCreateForm = () => {
@@ -313,6 +417,7 @@ export default function Licensees() {
       adminName: "",
       adminEmail: "",
       adminPassword: "",
+      adminSendInvite: true,
 
       rangeStart: "1",
       rangeEnd: "150000",
@@ -323,6 +428,17 @@ export default function Licensees() {
       manufacturerEmail: "",
       manufacturerPassword: "",
     });
+  };
+
+  const handleCreateDialogOpenChange = (open: boolean) => {
+    if (!open && !creating && isCreateFormDirty) {
+      const shouldDiscard = window.confirm("Discard unsaved licensee setup changes?");
+      if (!shouldDiscard) return;
+    }
+    if (!open && !creating) {
+      resetCreateForm();
+    }
+    setIsCreateOpen(open);
   };
 
   const onCreateSubmit = async (e: React.FormEvent) => {
@@ -336,6 +452,7 @@ export default function Licensees() {
     const adminName = createForm.adminName.trim();
     const adminEmail = createForm.adminEmail.trim().toLowerCase();
     const adminPassword = createForm.adminPassword.trim();
+    const adminSendInvite = createForm.adminSendInvite;
 
     const rangeStart = toInt(createForm.rangeStart);
     const rangeEnd = toInt(createForm.rangeEnd);
@@ -354,11 +471,12 @@ export default function Licensees() {
       return;
     }
 
-    // Backend requires admin credentials for licensee creation
-    if (!adminName || !adminEmail || adminPassword.length < 6) {
+    if (!adminName || !adminEmail || (!adminSendInvite && adminPassword.length < 6)) {
       toast({
         title: "Admin details required",
-        description: "Admin Name, Email and Password (min 6 chars) are required.",
+        description: adminSendInvite
+          ? "Admin name and email are required for invite mode."
+          : "Admin name, email, and password (min 6 chars) are required.",
         variant: "destructive",
       });
       return;
@@ -408,6 +526,7 @@ export default function Licensees() {
     }
 
     setCreating(true);
+    setLatestInviteLink("");
 
     try {
       // 1) Create licensee WITH admin (exact backend format)
@@ -416,7 +535,7 @@ export default function Licensees() {
           value: 18,
           indeterminate: false,
           phaseLabel: "Tenant setup",
-          detail: "Creating licensee and admin account...",
+          detail: adminSendInvite ? "Creating licensee and secure invite..." : "Creating licensee and admin account...",
         });
       }
       const createRes = await apiClient.createLicenseeWithAdmin({
@@ -434,11 +553,15 @@ export default function Licensees() {
         admin: {
           name: adminName,
           email: adminEmail,
-          password: adminPassword,
+          password: adminSendInvite ? undefined : adminPassword,
+          sendInvite: adminSendInvite,
         },
       });
 
       if (!createRes.success) throw new Error(createRes.error || "Could not create licensee");
+
+      const inviteLink = String((createRes.data as any)?.adminInvite?.inviteLink || "").trim();
+      if (inviteLink) setLatestInviteLink(inviteLink);
 
       const licenseeId = (createRes.data as any)?.licensee?.id as string;
       if (!licenseeId) throw new Error("Licensee created, but licenseeId was not returned.");
@@ -492,8 +615,10 @@ export default function Licensees() {
       }
 
       toast({
-        title: "Created",
-        description: `Licensee ${name} (${prefix}) created. Range allocated: ${rangeEnd - rangeStart + 1}.`,
+        title: adminSendInvite ? "Licensee created + invite ready" : "Licensee created",
+        description: adminSendInvite
+          ? `Licensee ${name} created. Invite link generated for ${adminEmail}.`
+          : `Licensee ${name} (${prefix}) created. Range allocated: ${rangeEnd - rangeStart + 1}.`,
       });
 
       setIsCreateOpen(false);
@@ -834,6 +959,25 @@ export default function Licensees() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
+        {latestInviteLink ? (
+          <Card className="border-emerald-200 bg-emerald-50/60">
+            <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-emerald-900">Invite link generated</p>
+                <p className="text-xs text-emerald-800">Email delivery may be disabled locally. Use this link to onboard the admin securely.</p>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => copyInviteLink(latestInviteLink, "Invite link copied")}>
+                  Copy invite link
+                </Button>
+                <Button variant="ghost" onClick={() => setLatestInviteLink("")}>
+                  Dismiss
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
         {/* HEADER */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -851,7 +995,7 @@ export default function Licensees() {
               Export CSV
             </Button>
 
-            <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+            <Dialog open={isCreateOpen} onOpenChange={handleCreateDialogOpenChange}>
               <DialogTrigger asChild>
                 <Button>
                   <Plus className="mr-2 h-4 w-4" />
@@ -973,6 +1117,7 @@ export default function Licensees() {
                       <div className="space-y-2">
                         <Label>Admin Email</Label>
                         <Input
+                          type="email"
                           value={createForm.adminEmail}
                           onChange={(e) => setCreateForm((p) => ({ ...p, adminEmail: e.target.value }))}
                           placeholder="admin@licensee.com"
@@ -980,17 +1125,60 @@ export default function Licensees() {
                         />
                       </div>
 
-                      <div className="space-y-2 col-span-2">
-                        <Label>Admin Password</Label>
-                        <Input
-                          type="password"
-                          value={createForm.adminPassword}
-                          onChange={(e) => setCreateForm((p) => ({ ...p, adminPassword: e.target.value }))}
-                          placeholder="Min 6 chars"
-                          disabled={creating}
-                        />
+                      <div className="col-span-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <Label>Access setup</Label>
+                            <p className="text-xs text-muted-foreground">
+                              Invite mode is recommended and avoids sharing temporary passwords.
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant={createForm.adminSendInvite ? "default" : "secondary"}
+                            onClick={() => setCreateForm((p) => ({ ...p, adminSendInvite: !p.adminSendInvite }))}
+                            disabled={creating}
+                          >
+                            {createForm.adminSendInvite ? "Send invite link" : "Set password now"}
+                          </Button>
+                        </div>
                       </div>
+
+                      {!createForm.adminSendInvite ? (
+                        <div className="space-y-2 col-span-2">
+                          <Label>Admin Password</Label>
+                          <Input
+                            type="password"
+                            value={createForm.adminPassword}
+                            onChange={(e) => setCreateForm((p) => ({ ...p, adminPassword: e.target.value }))}
+                            placeholder="Min 6 chars"
+                            disabled={creating}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Use only for direct provisioning. Invite mode is safer for first login.
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="col-span-2 text-xs text-muted-foreground">
+                          We will email a one-time invite link so the admin can set password securely.
+                        </p>
+                      )}
                     </div>
+
+                    {latestInviteLink ? (
+                      <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3">
+                        <p className="text-sm font-medium text-emerald-900">Latest invite link ready</p>
+                        <p className="mt-1 text-xs text-emerald-800 break-all">{latestInviteLink}</p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="mt-2"
+                          onClick={() => copyInviteLink(latestInviteLink, "Invite link copied")}
+                        >
+                          Copy invite link
+                        </Button>
+                      </div>
+                    ) : null}
                   </div>
 
                   {/* QR range */}
@@ -1092,7 +1280,7 @@ export default function Licensees() {
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => setIsCreateOpen(false)}
+                      onClick={() => handleCreateDialogOpenChange(false)}
                       disabled={creating}
                     >
                       Cancel
@@ -1144,6 +1332,7 @@ export default function Licensees() {
                     <TableRow>
                       <TableHead>Licensee</TableHead>
                       <TableHead>Prefix</TableHead>
+                      <TableHead>Admin Access</TableHead>
                       <TableHead>Latest QR Range</TableHead>
                       <TableHead className="text-right">Users</TableHead>
                       <TableHead className="text-right">Batches</TableHead>
@@ -1162,6 +1351,9 @@ export default function Licensees() {
 
                       const latest = l.latestRange;
                       const latestRangeText = latest ? `${latest.startCode} → ${latest.endCode}` : "—";
+                      const onboarding = l.adminOnboarding || null;
+                      const onboardingState = onboarding?.state || "UNASSIGNED";
+                      const adminEmail = onboarding?.adminUser?.email || onboarding?.pendingInvite?.email || "—";
 
                       return (
                         <TableRow key={l.id}>
@@ -1181,6 +1373,24 @@ export default function Licensees() {
                             <Badge variant="outline" className="font-mono">
                               {l.prefix}
                             </Badge>
+                          </TableCell>
+
+                          <TableCell>
+                            <div className="space-y-1">
+                              <Badge
+                                variant="outline"
+                                className={
+                                  onboardingState === "PENDING"
+                                    ? "border-amber-200 bg-amber-50 text-amber-700"
+                                    : onboardingState === "ACTIVE"
+                                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                      : "border-slate-200 bg-slate-50 text-slate-700"
+                                }
+                              >
+                                {onboardingState}
+                              </Badge>
+                              <p className="max-w-[220px] truncate text-xs text-muted-foreground">{adminEmail}</p>
+                            </div>
                           </TableCell>
 
                           <TableCell className="font-mono text-xs">{latestRangeText}</TableCell>
@@ -1223,6 +1433,22 @@ export default function Licensees() {
                                   Edit
                                 </DropdownMenuItem>
 
+                                <DropdownMenuItem
+                                  disabled={inviteActionLoadingId === l.id}
+                                  onClick={() => resendAdminInvite(l)}
+                                >
+                                  <Send className="mr-2 h-4 w-4" />
+                                  Resend admin invite
+                                </DropdownMenuItem>
+
+                                <DropdownMenuItem
+                                  disabled={inviteActionLoadingId === l.id}
+                                  onClick={() => resendAdminInvite(l, { copyOnly: true })}
+                                >
+                                  <Link2 className="mr-2 h-4 w-4" />
+                                  Copy invite link
+                                </DropdownMenuItem>
+
                                 <DropdownMenuItem onClick={() => toggleActive(l)}>
                                   <Trash2 className="mr-2 h-4 w-4" />
                                   {l.isActive ? "Deactivate" : "Activate"}
@@ -1241,7 +1467,7 @@ export default function Licensees() {
 
                     {filtered.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center text-sm text-muted-foreground">
+                        <TableCell colSpan={10} className="text-center text-sm text-muted-foreground">
                           No licensees found.
                         </TableCell>
                       </TableRow>
