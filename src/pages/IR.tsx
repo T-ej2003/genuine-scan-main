@@ -145,6 +145,11 @@ export default function IR() {
       if (!res.success) {
         setIncidents([]);
         setIncidentsTotal(0);
+        toast({
+          title: "Could not load incidents",
+          description: res.error || "Please refresh and retry.",
+          variant: "destructive",
+        });
         return;
       }
       const payload: any = res.data || {};
@@ -168,6 +173,11 @@ export default function IR() {
       if (!res.success) {
         setAlerts([]);
         setAlertsTotal(0);
+        toast({
+          title: "Could not load alerts",
+          description: res.error || "Please refresh and retry.",
+          variant: "destructive",
+        });
         return;
       }
       const payload: any = res.data || {};
@@ -185,6 +195,11 @@ export default function IR() {
       if (!res.success) {
         setPolicies([]);
         setPoliciesTotal(0);
+        toast({
+          title: "Could not load policy rules",
+          description: res.error || "Please refresh and retry.",
+          variant: "destructive",
+        });
         return;
       }
       const payload: any = res.data || {};
@@ -996,4 +1011,3 @@ export default function IR() {
     </DashboardLayout>
   );
 }
-

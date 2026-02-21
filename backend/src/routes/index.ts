@@ -28,6 +28,7 @@ import {
   getLicensee,
   updateLicensee,
   deleteLicensee,
+  resendLicenseeAdminInvite,
   exportLicenseesCsv,
 } from "../controllers/licenseeController";
 
@@ -87,6 +88,7 @@ import {
   requestCustomerEmailOtp,
   verifyCustomerEmailOtp,
   claimProductOwnership,
+  linkDeviceClaimToCustomer,
 } from "../controllers/verifyController";
 import { scanToken } from "../controllers/scanController";
 import { createPrintJob, downloadPrintJobPack, confirmPrintJob } from "../controllers/printJobController";
@@ -172,6 +174,13 @@ const verifyOtpVerifyLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const verifyClaimLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 25,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ==================== PUBLIC ====================
 router.post("/auth/login", loginLimiter, login);
 router.post("/auth/accept-invite", loginLimiter, acceptInviteController);
@@ -180,7 +189,8 @@ router.post("/auth/reset-password", forgotPasswordLimiter, resetPassword);
 router.get("/verify/:code", optionalCustomerVerifyAuth, verifyQRCode);
 router.post("/verify/auth/email-otp/request", verifyOtpRequestLimiter, requestCustomerEmailOtp);
 router.post("/verify/auth/email-otp/verify", verifyOtpVerifyLimiter, verifyCustomerEmailOtp);
-router.post("/verify/:code/claim", requireCustomerVerifyAuth, claimProductOwnership);
+router.post("/verify/:code/claim", verifyClaimLimiter, optionalCustomerVerifyAuth, claimProductOwnership);
+router.post("/verify/:code/link-claim", verifyClaimLimiter, requireCustomerVerifyAuth, linkDeviceClaimToCustomer);
 router.post("/verify/report-fraud", uploadIncidentReportPhotos, reportFraud);
 router.post("/fraud-report", uploadIncidentReportPhotos, reportFraud);
 router.post("/verify/feedback", submitProductFeedback);
@@ -217,6 +227,7 @@ router.get("/licensees", authenticate, requirePlatformAdmin, getLicensees);
 router.get("/licensees/:id", authenticate, requirePlatformAdmin, getLicensee);
 router.patch("/licensees/:id", authenticate, requirePlatformAdmin, requireCsrf, updateLicensee);
 router.delete("/licensees/:id", authenticate, requirePlatformAdmin, requireCsrf, deleteLicensee);
+router.post("/licensees/:id/admin-invite/resend", authenticate, requirePlatformAdmin, requireCsrf, resendLicenseeAdminInvite);
 
 // ==================== USERS ====================
 // ✅ recommended: allow LICENSEE_ADMIN to create MANUFACTURER (controller already enforces)

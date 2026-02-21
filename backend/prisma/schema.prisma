@@ -467,10 +467,17 @@ model Ownership {
   id        String   @id @default(cuid())
   qrCodeId  String   @unique
   qrCode    QRCode   @relation(fields: [qrCodeId], references: [id])
-  userId    String
+  userId    String?
+  deviceTokenHash String?
+  ipHash    String?
+  userAgentHash String?
+  claimSource String @default("USER")
+  linkedAt DateTime?
   claimedAt DateTime @default(now())
 
   @@index([userId])
+  @@index([deviceTokenHash])
+  @@index([ipHash])
 }
 
 model QrScanLog {

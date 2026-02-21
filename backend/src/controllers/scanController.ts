@@ -41,7 +41,7 @@ const isQrReadyForCustomerUse = (status: QRStatus) => {
 };
 
 const buildOwnershipStatus = (params: {
-  ownership: { userId: string; claimedAt: Date } | null;
+  ownership: { userId: string | null; claimedAt: Date } | null;
   customerUserId?: string | null;
   isReady: boolean;
   isBlocked: boolean;
@@ -55,7 +55,7 @@ const buildOwnershipStatus = (params: {
       claimedAt: null,
       isOwnedByRequester: false,
       isClaimedByAnother: false,
-      canClaim: params.isReady && !params.isBlocked && Boolean(customerUserId),
+      canClaim: params.isReady && !params.isBlocked,
     };
   }
 

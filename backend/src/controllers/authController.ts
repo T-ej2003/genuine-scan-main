@@ -18,6 +18,7 @@ const inviteSchema = z.object({
   name: z.string().trim().min(2).max(120).optional(),
   licenseeId: z.string().uuid().optional(),
   manufacturerId: z.string().uuid().optional(),
+  allowExistingInvitedUser: z.boolean().optional(),
 });
 
 const acceptInviteSchema = z.object({
@@ -276,6 +277,7 @@ export const invite = async (req: Request, res: Response) => {
       name: parsed.data.name || null,
       licenseeId: parsed.data.licenseeId || null,
       manufacturerId: parsed.data.manufacturerId || null,
+      allowExistingInvitedUser: parsed.data.allowExistingInvitedUser || false,
       createdByUserId: actorUserId,
       ipHash,
       userAgent,

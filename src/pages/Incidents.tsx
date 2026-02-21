@@ -157,6 +157,11 @@ export default function Incidents() {
       });
       if (!res.success) {
         setIncidents([]);
+        toast({
+          title: "Could not load incidents",
+          description: res.error || "Please refresh and retry.",
+          variant: "destructive",
+        });
         return;
       }
       const payload: any = res.data;
@@ -173,6 +178,11 @@ export default function Incidents() {
     const res = await apiClient.getIncidentById(id);
     if (!res.success) {
       setDetail(null);
+      toast({
+        title: "Could not load incident detail",
+        description: res.error || "Select another incident or retry.",
+        variant: "destructive",
+      });
       return;
     }
     const d = (res.data || null) as IncidentDetail | null;
