@@ -118,6 +118,15 @@ const readableDetailEntries = (details: unknown): Array<{ label: string; value: 
   return entries;
 };
 
+type EmailDeliverySummary = {
+  delivered: boolean;
+  providerMessageId?: string | null;
+  attemptedFrom?: string | null;
+  usedFrom?: string | null;
+  replyTo?: string | null;
+  error?: string | null;
+};
+
 export default function IRIncidentDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -145,6 +154,7 @@ export default function IRIncidentDetail() {
   const [emailBody, setEmailBody] = useState("");
   const [emailRecipient, setEmailRecipient] = useState<"reporter" | "org_admin">("reporter");
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [lastEmailDelivery, setLastEmailDelivery] = useState<EmailDeliverySummary | null>(null);
 
   const [uploading, setUploading] = useState(false);
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
@@ -168,6 +178,7 @@ export default function IRIncidentDetail() {
       }
       const data: any = res.data;
       setIncident(data);
+      setLastEmailDelivery(null);
       setPatch({
         status: data.status || "NEW",
         severity: data.severity || "MEDIUM",
@@ -258,11 +269,23 @@ export default function IRIncidentDetail() {
         template: "ir_manual",
         senderMode: "system",
       });
+      const delivery = (res.data || {}) as any;
+      setLastEmailDelivery({
+        delivered: Boolean(delivery?.delivered ?? res.success),
+        providerMessageId: delivery?.providerMessageId || null,
+        attemptedFrom: delivery?.attemptedFrom || null,
+        usedFrom: delivery?.usedFrom || null,
+        replyTo: delivery?.replyTo || null,
+        error: delivery?.error || (res.success ? null : res.error || "Email delivery failed"),
+      });
       if (!res.success) {
         toast({ title: "Send failed", description: res.error || "Could not send email.", variant: "destructive" });
         return;
       }
-      toast({ title: "Email queued", description: "Message added to the incident timeline." });
+      toast({
+        title: "Email sent",
+        description: `Delivered via ${delivery?.usedFrom || delivery?.attemptedFrom || "configured SMTP sender"}.`,
+      });
       await load();
     } finally {
       setSendingEmail(false);
@@ -645,11 +668,35 @@ export default function IRIncidentDetail() {
                     <Textarea value={emailBody} onChange={(e) => setEmailBody(e.target.value)} rows={4} />
                   </div>
 
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                    Sender mode: <span className="font-medium text-slate-800">System (superadmin mailbox)</span>
+                    <div>Configure backend `SUPER_ADMIN_EMAIL=administration@mscqr.com` and valid SMTP credentials for live delivery.</div>
+                  </div>
+
                   <div className="flex justify-end">
                     <Button type="button" onClick={sendEmail} disabled={sendingEmail}>
                       {sendingEmail ? "Sending..." : "Send email"}
                     </Button>
                   </div>
+
+                  {lastEmailDelivery ? (
+                    <div
+                      className={`rounded-md border px-3 py-2 text-xs ${
+                        lastEmailDelivery.delivered
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                          : "border-red-200 bg-red-50 text-red-800"
+                      }`}
+                    >
+                      <div className="font-medium">
+                        {lastEmailDelivery.delivered ? "Live delivery confirmed" : "Delivery failed"}
+                      </div>
+                      <div>
+                        Used from: {lastEmailDelivery.usedFrom || "—"} | Reply-to: {lastEmailDelivery.replyTo || "—"}
+                      </div>
+                      <div>Message ID: {lastEmailDelivery.providerMessageId || "—"}</div>
+                      {!lastEmailDelivery.delivered && lastEmailDelivery.error ? <div>Error: {lastEmailDelivery.error}</div> : null}
+                    </div>
+                  ) : null}
 
                   {commRows.length === 0 ? (
                     <div className="rounded-lg border p-4 text-sm text-muted-foreground">No messages yet.</div>

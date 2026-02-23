@@ -21,6 +21,7 @@ const inviteSchema = zod_1.z.object({
     name: zod_1.z.string().trim().min(2).max(120).optional(),
     licenseeId: zod_1.z.string().uuid().optional(),
     manufacturerId: zod_1.z.string().uuid().optional(),
+    allowExistingInvitedUser: zod_1.z.boolean().optional(),
 });
 const acceptInviteSchema = zod_1.z.object({
     token: zod_1.z.string().trim().min(10),
@@ -242,6 +243,7 @@ const invite = async (req, res) => {
             name: parsed.data.name || null,
             licenseeId: parsed.data.licenseeId || null,
             manufacturerId: parsed.data.manufacturerId || null,
+            allowExistingInvitedUser: parsed.data.allowExistingInvitedUser || false,
             createdByUserId: actorUserId,
             ipHash,
             userAgent,

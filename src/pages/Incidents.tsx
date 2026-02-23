@@ -62,6 +62,16 @@ type IncidentDetail = IncidentRow & {
   resolutionOutcome?: string | null;
 };
 
+type IncidentEmailDeliveryInfo = {
+  delivered: boolean;
+  providerMessageId?: string | null;
+  attemptedFrom?: string | null;
+  usedFrom?: string | null;
+  replyTo?: string | null;
+  senderMode?: "actor" | "system";
+  error?: string | null;
+};
+
 const STATUS_TONE: Record<string, string> = {
   NEW: "border-red-200 bg-red-50 text-red-700",
   TRIAGED: "border-amber-200 bg-amber-50 text-amber-700",
@@ -133,12 +143,16 @@ export default function Incidents() {
   const [newNote, setNewNote] = useState("");
   const [customerMessage, setCustomerMessage] = useState("");
   const [customerSubject, setCustomerSubject] = useState("Update on your incident report");
+  const [customerSenderMode, setCustomerSenderMode] = useState<"actor" | "system">("actor");
+  const [sendingCustomerEmail, setSendingCustomerEmail] = useState(false);
+  const [lastCustomerEmailDelivery, setLastCustomerEmailDelivery] = useState<IncidentEmailDeliveryInfo | null>(null);
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
 
   const selectedIncident = useMemo(
     () => incidents.find((i) => i.id === selectedId) || null,
     [incidents, selectedId]
   );
+  const canUseSystemIncidentSender = user?.role === "super_admin";
 
   const loadIncidents = async () => {
     setLoading(true);
@@ -188,6 +202,7 @@ export default function Incidents() {
     const d = (res.data || null) as IncidentDetail | null;
     setDetail(d);
     if (d) {
+      setLastCustomerEmailDelivery(null);
       setUpdatePayload({
         status: d.status || "",
         assignedToUserId: d.assignedToUserId || "unassigned",
@@ -213,6 +228,10 @@ export default function Incidents() {
     loadDetail(selectedId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
+
+  useEffect(() => {
+    setCustomerSenderMode(user?.role === "super_admin" ? "system" : "actor");
+  }, [user?.role]);
 
   useEffect(() => {
     apiClient.getUsers().then((res) => {
@@ -305,8 +324,29 @@ export default function Incidents() {
 
   const sendCustomerUpdate = async () => {
     if (!detail) return;
+    const subject = customerSubject.trim();
+    const message = customerMessage.trim();
+
+    if (subject.length < 3 || message.length < 3) {
+      toast({
+        title: "Missing message",
+        description: "Subject and message are required.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!detail.customerEmail || !detail.consentToContact) {
+      toast({
+        title: "Customer email unavailable",
+        description: "Customer email updates require consent and a valid customer email address.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const senderEmail = String(user?.email || "").trim();
-    if (!senderEmail) {
+    if (customerSenderMode === "actor" && !senderEmail) {
       toast({
         title: "Missing sender email",
         description: "Update your account email before sending incident emails.",
@@ -315,20 +355,40 @@ export default function Incidents() {
       return;
     }
 
-    const res = await apiClient.sendIncidentEmail(detail.id, {
-      subject: customerSubject.trim(),
-      message: customerMessage.trim(),
-    });
-    if (!res.success) {
-      toast({
-        title: "Email failed",
-        description: res.error || "Could not send update.",
-        variant: "destructive",
+    setSendingCustomerEmail(true);
+    try {
+      const res = await apiClient.sendIncidentEmail(detail.id, {
+        subject,
+        message,
+        senderMode: canUseSystemIncidentSender ? customerSenderMode : "actor",
       });
-      return;
+
+      const deliveryRaw = (res.data || {}) as any;
+      setLastCustomerEmailDelivery({
+        delivered: Boolean(deliveryRaw?.delivered ?? res.success),
+        providerMessageId: deliveryRaw?.providerMessageId || null,
+        attemptedFrom: deliveryRaw?.attemptedFrom || null,
+        usedFrom: deliveryRaw?.usedFrom || null,
+        replyTo: deliveryRaw?.replyTo || null,
+        senderMode: (deliveryRaw?.senderMode as "actor" | "system" | undefined) || customerSenderMode,
+        error: deliveryRaw?.error || (res.success ? null : res.error || "Email delivery failed"),
+      });
+
+      if (!res.success) {
+        toast({
+          title: "Email failed",
+          description: res.error || "Could not send update.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const fromLabel = deliveryRaw?.usedFrom || deliveryRaw?.attemptedFrom || "configured SMTP sender";
+      toast({ title: "Customer update sent", description: `Email delivered via ${fromLabel}.` });
+      await loadDetail(detail.id);
+    } finally {
+      setSendingCustomerEmail(false);
     }
-    toast({ title: "Customer update sent", description: "Email communication logged." });
-    await loadDetail(detail.id);
   };
 
   const uploadEvidence = async () => {
@@ -696,14 +756,74 @@ export default function Incidents() {
 
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <p className="mb-2 text-sm font-semibold">Customer update</p>
-                    <p className="mb-2 text-xs text-slate-500">From: {user?.email || "No sender email configured"}</p>
+                    <div className="mb-2 space-y-1 text-xs text-slate-500">
+                      <p>To: {detail.customerEmail || "No customer email on file"}</p>
+                      <p>Consent: {detail.consentToContact ? "Yes" : "No"}</p>
+                      {canUseSystemIncidentSender ? (
+                        <div className="max-w-xs">
+                          <Label className="mb-1 block text-xs font-medium text-slate-600">Sender mode</Label>
+                          <Select
+                            value={customerSenderMode}
+                            onValueChange={(value) => setCustomerSenderMode(value as "actor" | "system")}
+                          >
+                            <SelectTrigger className="h-8 bg-white text-xs">
+                              <SelectValue placeholder="Sender mode" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="system">System sender (superadmin mailbox)</SelectItem>
+                              <SelectItem value="actor">My profile email</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ) : null}
+                      <p>
+                        From preview:{" "}
+                        {customerSenderMode === "system"
+                          ? "Superadmin system mailbox (server `SUPER_ADMIN_EMAIL` / SMTP sender)"
+                          : user?.email || "No sender email configured"}
+                      </p>
+                    </div>
                     <div className="space-y-2">
                       <Input value={customerSubject} onChange={(e) => setCustomerSubject(e.target.value)} placeholder="Email subject" />
                       <Textarea rows={3} value={customerMessage} onChange={(e) => setCustomerMessage(e.target.value)} placeholder="Write update message..." />
-                      <Button onClick={sendCustomerUpdate} className="bg-cyan-700 text-white hover:bg-cyan-800">
+                      <Button
+                        onClick={sendCustomerUpdate}
+                        disabled={
+                          sendingCustomerEmail ||
+                          !detail.customerEmail ||
+                          !detail.consentToContact ||
+                          customerSubject.trim().length < 3 ||
+                          customerMessage.trim().length < 3
+                        }
+                        className="bg-cyan-700 text-white hover:bg-cyan-800"
+                      >
                         <Mail className="mr-2 h-4 w-4" />
-                        Send update to customer
+                        {sendingCustomerEmail ? "Sending..." : "Send update to customer"}
                       </Button>
+                      {lastCustomerEmailDelivery ? (
+                        <div
+                          className={`rounded-md border px-3 py-2 text-xs ${
+                            lastCustomerEmailDelivery.delivered
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                              : "border-red-200 bg-red-50 text-red-800"
+                          }`}
+                        >
+                          <p className="font-medium">
+                            {lastCustomerEmailDelivery.delivered ? "Live delivery confirmed" : "Delivery failed"}
+                          </p>
+                          <p>
+                            Sender mode: {lastCustomerEmailDelivery.senderMode || customerSenderMode} | Used from:{" "}
+                            {lastCustomerEmailDelivery.usedFrom || "—"}
+                          </p>
+                          <p>
+                            Reply-to: {lastCustomerEmailDelivery.replyTo || "—"} | Message ID:{" "}
+                            {lastCustomerEmailDelivery.providerMessageId || "—"}
+                          </p>
+                          {!lastCustomerEmailDelivery.delivered && lastCustomerEmailDelivery.error ? (
+                            <p>Error: {lastCustomerEmailDelivery.error}</p>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
 

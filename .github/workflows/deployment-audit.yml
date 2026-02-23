@@ -1,0 +1,117 @@
+name: Deployment Audit
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write
+  id-token: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare artifacts
+        run: mkdir -p audit-artifacts
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+          build-mode: none
+
+      - name: Analyze with CodeQL
+        uses: github/codeql-action/analyze@v3
+
+      - name: OSV dependency scan
+        uses: google/osv-scanner-action@v1.7.3
+        with:
+          scan-args: -r . --format json --output audit-artifacts/osv-results.json
+
+      - name: Gitleaks secrets scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --redact --report-format sarif --report-path audit-artifacts/gitleaks.sarif
+
+      - name: Detect IaC files
+        id: iac-detect
+        run: |
+          if find . \( -name '*.tf' -o -name '*.tf.json' -o -name '*.tfvars' -o -name 'docker-compose.yml' -o -path '*/k8s/*.yml' -o -path '*/k8s/*.yaml' -o -path '*/helm/Chart.yaml' \) -print -quit | grep -q .; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trivy IaC scan
+        if: steps.iac-detect.outputs.found == 'true'
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: sarif
+          output: audit-artifacts/iac-trivy.sarif
+
+      - name: Detect Dockerfile
+        id: docker-detect
+        run: |
+          if [ -f Dockerfile ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "dockerfile=Dockerfile" >> "$GITHUB_OUTPUT"
+            echo "context=." >> "$GITHUB_OUTPUT"
+          elif [ -f backend/Dockerfile ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "dockerfile=backend/Dockerfile" >> "$GITHUB_OUTPUT"
+            echo "context=backend" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build container for scan
+        if: steps.docker-detect.outputs.found == 'true'
+        run: |
+          docker build -t deployment-audit:latest -f "${{ steps.docker-detect.outputs.dockerfile }}" "${{ steps.docker-detect.outputs.context }}"
+
+      - name: Trivy container scan
+        if: steps.docker-detect.outputs.found == 'true'
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          image-ref: deployment-audit:latest
+          format: sarif
+          output: audit-artifacts/container-trivy.sarif
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: audit-artifacts/sbom.spdx.json
+
+      - name: Attest SBOM provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: audit-artifacts/sbom.spdx.json
+
+      - name: Upload audit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-audit-artifacts
+          path: audit-artifacts
+          if-no-files-found: warn

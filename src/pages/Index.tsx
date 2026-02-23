@@ -9,9 +9,7 @@ export default function Index() {
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
-              <Shield className="w-6 h-6 text-primary-foreground" />
-            </div>
+            <img src="/brand/authenticqr-mark.svg" alt="AuthenticQR logo" className="w-10 h-10 rounded-lg" />
             <span className="text-xl font-bold text-foreground">AuthenticQR</span>
           </div>
           <div className="flex items-center gap-4">
@@ -128,9 +126,7 @@ export default function Index() {
       <footer className="py-8 border-t border-border">
         <div className="container mx-auto px-4 flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <Shield className="w-4 h-4 text-primary-foreground" />
-            </div>
+            <img src="/brand/authenticqr-mark.svg" alt="AuthenticQR logo" className="w-8 h-8 rounded-lg" />
             <span className="font-semibold text-foreground">AuthenticQR</span>
           </div>
           <p className="text-sm text-muted-foreground">© 2026 AuthenticQR. All rights reserved.</p>
@@ -174,4 +170,3 @@ function StepCard({ number, title, description }: { number: number; title: strin
     </div>
   );
 }
-

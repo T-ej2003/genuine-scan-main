@@ -11,6 +11,8 @@ const auditService_1 = require("../services/auditService");
 const incidentService_1 = require("../services/incidentService");
 const incidentEmailService_1 = require("../services/incidentEmailService");
 const incidentActionsService_1 = require("../services/ir/incidentActionsService");
+const supportWorkflowService_1 = require("../services/supportWorkflowService");
+const notificationService_1 = require("../services/notificationService");
 const paginationSchema = zod_1.z.object({
     limit: zod_1.z.coerce.number().int().min(1).max(200).default(50),
     offset: zod_1.z.coerce.number().int().min(0).default(0),
@@ -221,6 +223,20 @@ const createIrIncident = async (req, res) => {
             details: { qrCodeValue: normalizedCode, incidentType: created.incidentType, severity, priority },
             ipAddress: req.ip,
         });
+        await (0, supportWorkflowService_1.ensureIncidentWorkflowArtifacts)({
+            incidentId: created.id,
+            actorUserId: req.user.userId,
+            actorType: client_1.IncidentActorType.ADMIN,
+            emitEvents: false,
+        });
+        await (0, notificationService_1.notifyIncidentLifecycle)({
+            incidentId: created.id,
+            licenseeId,
+            type: "ir_incident_created",
+            title: `IR incident ${created.id.slice(0, 8)} created`,
+            body: `Incident ${created.id} created with priority ${priority} and severity ${severity}.`,
+            data: { priority, severity, status: created.status },
+        });
         return res.status(201).json({ success: true, data: created });
     }
     catch (e) {
@@ -381,6 +397,20 @@ const patchIrIncident = async (req, res) => {
             entityId: id,
             details: { changedFields },
             ipAddress: req.ip,
+        });
+        await (0, supportWorkflowService_1.ensureIncidentWorkflowArtifacts)({
+            incidentId: id,
+            actorUserId: req.user.userId,
+            actorType: client_1.IncidentActorType.ADMIN,
+            emitEvents: false,
+        });
+        await (0, notificationService_1.notifyIncidentLifecycle)({
+            incidentId: id,
+            licenseeId: existing.licenseeId || null,
+            type: "ir_incident_updated",
+            title: `IR incident ${id.slice(0, 8)} updated`,
+            body: `Fields updated: ${changedFields.join(", ") || "none"}.`,
+            data: { changedFields },
         });
         return res.json({ success: true, data: updated });
     }

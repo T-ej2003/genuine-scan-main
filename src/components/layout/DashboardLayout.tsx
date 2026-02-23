@@ -177,7 +177,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       >
         <div className="flex h-full flex-col">
           <div className="flex h-16 items-center gap-2 px-6 border-b border-sidebar-border">
-            <Shield className="h-8 w-8 text-sidebar-primary" />
+            <img src="/brand/authenticqr-mark.svg" alt="AuthenticQR logo" className="h-8 w-8" />
             <span className="font-bold text-lg">AuthenticQR</span>
           </div>
 

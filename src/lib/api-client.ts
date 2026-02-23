@@ -1036,7 +1036,10 @@ class ApiClient {
     });
   }
 
-  async sendIncidentEmail(id: string, payload: { subject: string; message: string }) {
+  async sendIncidentEmail(
+    id: string,
+    payload: { subject: string; message: string; senderMode?: "actor" | "system" }
+  ) {
     const normalizeDelivery = <T extends ApiResponse<any>>(resp: T): T => {
       if (!resp.success) return resp;
       const delivered = (resp.data as any)?.delivered;
