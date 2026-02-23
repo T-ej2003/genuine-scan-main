@@ -7,23 +7,63 @@ const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const path_1 = __importDefault(require("path"));
+const cookie_parser_1 = __importDefault(require("cookie-parser"));
+const package_json_1 = __importDefault(require("../package.json"));
 const routes_1 = __importDefault(require("./routes"));
 const database_1 = __importDefault(require("./config/database"));
+const logger_1 = require("./utils/logger");
 dotenv_1.default.config();
 dotenv_1.default.config({ path: path_1.default.resolve(__dirname, "../.env") });
 const missingRequiredEnv = ["DATABASE_URL", "JWT_SECRET"].filter((k) => !process.env[k]);
 if (missingRequiredEnv.length > 0) {
-    console.error(`Missing required environment variables: ${missingRequiredEnv.join(", ")}`);
+    logger_1.logger.error(`Missing required environment variables: ${missingRequiredEnv.join(", ")}`);
     process.exit(1);
 }
 const smtpConfigured = Boolean((process.env.SMTP_USER || process.env.SMTP_USERNAME || process.env.EMAIL_USER || process.env.MAIL_USER) &&
     (process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.EMAIL_PASS || process.env.MAIL_PASS || process.env.MAIL_PASSWORD));
 if (!smtpConfigured) {
-    console.warn("⚠️ SMTP is not configured. Incident/customer emails will fail until SMTP_USER/SMTP_PASS (or EMAIL_/MAIL_ aliases) are set.");
+    logger_1.logger.warn("⚠️ SMTP is not configured. Incident/customer emails will fail until SMTP_USER/SMTP_PASS (or EMAIL_/MAIL_ aliases) are set.");
+}
+const isPlaceholderValue = (value) => {
+    const v = String(value || "").trim().toLowerCase();
+    if (!v)
+        return false;
+    return (v.includes("your_rds_postgres_url_here") ||
+        v.includes("your_strong_secret_here") ||
+        v.includes("your_namecheap_private_email_password") ||
+        v.includes("changeme") ||
+        v.includes("replace_me"));
+};
+if (process.env.NODE_ENV === "production") {
+    const placeholderEnv = [
+        "DATABASE_URL",
+        "JWT_SECRET",
+        "SMTP_PASS",
+        "SUPER_ADMIN_EMAIL",
+        "PUBLIC_SCAN_WEB_BASE_URL",
+        "PUBLIC_VERIFY_WEB_BASE_URL",
+        "PUBLIC_ADMIN_WEB_BASE_URL",
+    ].filter((key) => isPlaceholderValue(process.env[key]));
+    if (placeholderEnv.length > 0) {
+        logger_1.logger.error(`Refusing to start: placeholder values detected in ${placeholderEnv.join(", ")}`);
+        process.exit(1);
+    }
+    if (String(process.env.COOKIE_SECURE || "").trim().toLowerCase() !== "true") {
+        logger_1.logger.warn("COOKIE_SECURE is not 'true' in production. Session cookie security may be weaker than intended.");
+    }
 }
 const app = (0, express_1.default)();
 app.disable("etag");
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 4000;
+const APP_NAME = package_json_1.default.name;
+const APP_VERSION = package_json_1.default.version;
+const GIT_SHA = process.env.GIT_SHA ||
+    process.env.GITHUB_SHA ||
+    process.env.COMMIT_SHA ||
+    process.env.RENDER_GIT_COMMIT ||
+    process.env.VERCEL_GIT_COMMIT_SHA ||
+    "unknown";
 // ✅ Allow multiple dev frontends (WEB APP 1 on 8081, landing on 8080, default Vite on 5173)
 const allowedOrigins = new Set([
     "http://localhost:5173",
@@ -49,11 +89,27 @@ app.use((0, cors_1.default)({
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Device-Fp", "Cache-Control", "Pragma"],
+    allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "X-Device-Fp",
+        "X-CSRF-Token",
+        "X-Captcha-Token",
+        "Cache-Control",
+        "Pragma",
+    ],
 }));
 app.use(express_1.default.json({ limit: "1mb" }));
+app.use((0, cookie_parser_1.default)());
+const healthPayload = () => ({ status: "ok", timestamp: new Date().toISOString() });
 app.get("/health", (_req, res) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString() });
+    res.json(healthPayload());
+});
+app.get("/healthz", (_req, res) => {
+    res.json(healthPayload());
+});
+app.get("/version", (_req, res) => {
+    res.json({ name: APP_NAME, version: APP_VERSION, gitSha: GIT_SHA });
 });
 app.get("/health/db", async (_req, res) => {
     try {
@@ -83,7 +139,7 @@ app.use("/api", (_req, res, next) => {
 });
 app.use("/api", routes_1.default);
 app.use((err, _req, res, _next) => {
-    console.error("Unhandled error:", err);
+    logger_1.logger.error("Unhandled error:", { error: err?.message || err });
     res.status(500).json({
         success: false,
         error: process.env.NODE_ENV === "development" ? err.message : "Internal server error",
@@ -92,9 +148,56 @@ app.use((err, _req, res, _next) => {
 app.use((_req, res) => {
     res.status(404).json({ success: false, error: "Endpoint not found" });
 });
-app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
-    console.log(`📚 API available at http://localhost:${PORT}/api`);
-    console.log(`🔍 Health check at http://localhost:${PORT}/health`);
+const server = app.listen(PORT, () => {
+    logger_1.logger.info(`🚀 Server running on http://localhost:${PORT}`);
+    logger_1.logger.info(`📚 API available at http://localhost:${PORT}/api`);
+    logger_1.logger.info(`🔍 Health check at http://localhost:${PORT}/health`);
+});
+server.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+        logger_1.logger.error(`Port ${PORT} is already in use. Stop the existing process or set a different PORT in backend/.env.`);
+        process.exit(1);
+    }
+    logger_1.logger.error("Server failed to start", { error: err?.message || err });
+    process.exit(1);
+});
+let shuttingDown = false;
+const shutdown = async (signal) => {
+    if (shuttingDown)
+        return;
+    shuttingDown = true;
+    logger_1.logger.info(`Received ${signal}; shutting down gracefully...`);
+    const forceExit = setTimeout(() => {
+        logger_1.logger.error("Forced shutdown after timeout");
+        process.exit(1);
+    }, 10000);
+    forceExit.unref?.();
+    try {
+        await new Promise((resolve, reject) => {
+            server.close((err) => (err ? reject(err) : resolve()));
+        });
+        await database_1.default.$disconnect();
+        clearTimeout(forceExit);
+        logger_1.logger.info("Shutdown complete");
+        process.exit(0);
+    }
+    catch (error) {
+        clearTimeout(forceExit);
+        logger_1.logger.error("Graceful shutdown failed", { error: error?.message || error });
+        process.exit(1);
+    }
+};
+process.on("SIGTERM", () => {
+    void shutdown("SIGTERM");
+});
+process.on("SIGINT", () => {
+    void shutdown("SIGINT");
+});
+process.on("unhandledRejection", (reason) => {
+    logger_1.logger.error("Unhandled promise rejection", { error: reason instanceof Error ? reason.message : String(reason) });
+});
+process.on("uncaughtException", (error) => {
+    logger_1.logger.error("Uncaught exception", { error: error?.message || String(error) });
+    void shutdown("uncaughtException");
 });
 //# sourceMappingURL=index.js.map

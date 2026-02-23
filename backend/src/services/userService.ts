@@ -1,6 +1,6 @@
-import bcrypt from "bcryptjs";
 import prisma from "../config/database";
 import { UserRole } from "@prisma/client";
+import { hashPassword } from "./auth/passwordService";
 
 export async function createUser(params: {
   email: string;
@@ -9,7 +9,17 @@ export async function createUser(params: {
   role: UserRole;
   licenseeId?: string | null;
 }) {
-  const passwordHash = await bcrypt.hash(params.password, 12);
+  const passwordHash = await hashPassword(params.password);
+
+  const licenseeId = params.licenseeId ?? null;
+  const orgId = licenseeId
+    ? (
+        await prisma.licensee.findUnique({
+          where: { id: licenseeId },
+          select: { orgId: true },
+        })
+      )?.orgId ?? null
+    : null;
 
   return prisma.user.create({
     data: {
@@ -17,10 +27,10 @@ export async function createUser(params: {
       passwordHash,
       name: params.name,
       role: params.role,
-      licenseeId: params.licenseeId ?? null,
+      licenseeId,
+      orgId,
       isActive: true,
       deletedAt: null,
     },
   });
 }
-

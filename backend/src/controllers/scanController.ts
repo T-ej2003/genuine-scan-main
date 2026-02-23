@@ -8,6 +8,7 @@ import { evaluateScanAndEnforcePolicy } from "../services/policyEngineService";
 import { createHash } from "crypto";
 import { reverseGeocode } from "../services/locationService";
 import { getScanInsight } from "../services/scanInsightService";
+import { CustomerVerifyRequest } from "../middleware/customerVerifyAuth";
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = Number(process.env.SCAN_RATE_LIMIT_PER_MIN || "60");
@@ -35,7 +36,72 @@ const deviceFingerprint = (req: Request) => {
   return createHash("sha256").update(raw).digest("hex");
 };
 
-export const scanToken = async (req: Request, res: Response) => {
+const isQrReadyForCustomerUse = (status: QRStatus) => {
+  return status === QRStatus.PRINTED || status === QRStatus.REDEEMED || status === QRStatus.SCANNED;
+};
+
+const buildOwnershipStatus = (params: {
+  ownership: { userId: string | null; claimedAt: Date } | null;
+  customerUserId?: string | null;
+  isReady: boolean;
+  isBlocked: boolean;
+}) => {
+  const ownership = params.ownership;
+  const customerUserId = String(params.customerUserId || "").trim();
+
+  if (!ownership) {
+    return {
+      isClaimed: false,
+      claimedAt: null,
+      isOwnedByRequester: false,
+      isClaimedByAnother: false,
+      canClaim: params.isReady && !params.isBlocked,
+    };
+  }
+
+  const isOwnedByRequester = Boolean(customerUserId) && ownership.userId === customerUserId;
+
+  return {
+    isClaimed: true,
+    claimedAt: ownership.claimedAt.toISOString(),
+    isOwnedByRequester,
+    isClaimedByAnother: !isOwnedByRequester,
+    canClaim: false,
+  };
+};
+
+const deriveDuplicateReasons = (params: {
+  scanCount: number;
+  scanSignals?: {
+    distinctDeviceCount24h?: number;
+    recentScanCount10m?: number;
+    distinctCountryCount24h?: number;
+  } | null;
+  policy?: any;
+}) => {
+  const reasons: string[] = [];
+  const scanSignals = params.scanSignals || null;
+  const policy = params.policy || null;
+  const triggered = policy?.triggered || {};
+  const alerts = Array.isArray(policy?.alerts) ? policy.alerts : [];
+
+  if (Number(scanSignals?.distinctDeviceCount24h ?? 0) > 1) reasons.push("Multiple devices scanned this code recently.");
+  if (Number(scanSignals?.recentScanCount10m ?? 0) >= 3) reasons.push("A short burst of scans was detected.");
+  if (Number(scanSignals?.distinctCountryCount24h ?? 0) > 1) reasons.push("Recent scans came from different countries.");
+  if (params.scanCount >= 4 || triggered.multiScan) reasons.push("High repeat-scan volume was detected.");
+  if (triggered.geoDrift) reasons.push("Scan geography drift exceeded policy threshold.");
+  if (triggered.velocitySpike) reasons.push("Scan velocity exceeded policy threshold.");
+
+  for (const alert of alerts) {
+    const message = String(alert?.message || "").trim();
+    if (!message) continue;
+    if (!reasons.includes(message)) reasons.push(message);
+  }
+
+  return reasons.slice(0, 6);
+};
+
+export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
   try {
     const ipKey = String(req.ip || "unknown");
     if (hitRateLimit(ipKey)) {
@@ -99,6 +165,8 @@ export const scanToken = async (req: Request, res: Response) => {
             website: true,
             supportEmail: true,
             supportPhone: true,
+            suspendedAt: true,
+            suspendedReason: true,
           },
         },
         batch: {
@@ -106,7 +174,15 @@ export const scanToken = async (req: Request, res: Response) => {
             id: true,
             name: true,
             printedAt: true,
+            suspendedAt: true,
+            suspendedReason: true,
             manufacturer: { select: { id: true, name: true, email: true, location: true, website: true } },
+          },
+        },
+        ownership: {
+          select: {
+            userId: true,
+            claimedAt: true,
           },
         },
       },
@@ -278,18 +354,38 @@ export const scanToken = async (req: Request, res: Response) => {
     const finalStatus =
       policy.autoBlockedQr || policy.autoBlockedBatch ? QRStatus.BLOCKED : updated.status;
     const effectiveOutcome = finalStatus === QRStatus.BLOCKED ? "BLOCKED" : decision.outcome;
-    const scanInsight = await getScanInsight(updated.id);
+    const scanInsight = await getScanInsight(updated.id, fp || null);
+    const customerUserId = req.customer?.userId || null;
+
+    const containment = {
+      qrUnderInvestigation: updated.underInvestigationAt
+        ? { at: new Date(updated.underInvestigationAt).toISOString(), reason: updated.underInvestigationReason || null }
+        : null,
+      batchSuspended: updated.batch?.suspendedAt
+        ? { at: new Date(updated.batch.suspendedAt).toISOString(), reason: updated.batch.suspendedReason || null }
+        : null,
+      orgSuspended: updated.licensee?.suspendedAt
+        ? { at: new Date(updated.licensee.suspendedAt).toISOString(), reason: updated.licensee.suspendedReason || null }
+        : null,
+    };
+
+    const hasContainment =
+      Boolean(containment.qrUnderInvestigation) ||
+      Boolean(containment.batchSuspended) ||
+      Boolean(containment.orgSuspended);
 
     const warningMessage =
       effectiveOutcome === "ALREADY_REDEEMED"
         ? `Already verified before. First verification was at ${scanInsight.firstScanAt || updated.redeemedAt?.toISOString?.() || "unknown time"}.`
-        : effectiveOutcome === "SUSPICIOUS"
+      : effectiveOutcome === "SUSPICIOUS"
         ? "This code was generated but not confirmed as printed. Treat with suspicion."
-        : effectiveOutcome === "BLOCKED"
+      : effectiveOutcome === "BLOCKED"
         ? policy.autoBlockedQr || policy.autoBlockedBatch
           ? "This code has been auto-blocked by security policy due to anomaly detection."
           : "This code has been blocked due to fraud or recall."
-        : null;
+      : hasContainment
+        ? "This product is currently under investigation. Please review details and contact support if needed."
+      : null;
 
     const message =
       effectiveOutcome === "VALID"
@@ -302,15 +398,74 @@ export const scanToken = async (req: Request, res: Response) => {
         ? "Blocked code."
         : "This code is not active.";
 
+    const isBlocked = finalStatus === QRStatus.BLOCKED;
+    const isReady = isQrReadyForCustomerUse(finalStatus);
+    const totalScans = Number(updated.scanCount ?? 0);
+    const firstVerifiedAt = scanInsight.firstScanAt || (updated.scannedAt ? new Date(updated.scannedAt).toISOString() : null);
+    const latestVerifiedAt =
+      scanInsight.latestScanAt ||
+      scanInsight.firstScanAt ||
+      (updated.scannedAt ? new Date(updated.scannedAt).toISOString() : null);
+
+    const ownership = await prisma.ownership.findUnique({
+      where: { qrCodeId: updated.id },
+      select: {
+        userId: true,
+        claimedAt: true,
+      },
+    });
+
+    const ownershipStatus = buildOwnershipStatus({
+      ownership,
+      customerUserId,
+      isReady,
+      isBlocked,
+    });
+
+    const duplicateReasons = deriveDuplicateReasons({
+      scanCount: totalScans,
+      scanSignals: scanInsight.signals,
+      policy,
+    });
+
+    let classification: "FIRST_SCAN" | "LEGIT_REPEAT" | "SUSPICIOUS_DUPLICATE" | "BLOCKED_BY_SECURITY" | "NOT_READY_FOR_CUSTOMER_USE";
+    let reasons: string[];
+
+    if (isBlocked) {
+      classification = "BLOCKED_BY_SECURITY";
+      reasons = ["Code is blocked by security policy or containment controls."];
+    } else if (!isReady) {
+      classification = "NOT_READY_FOR_CUSTOMER_USE";
+      reasons = ["Code lifecycle is not ready for customer verification."];
+    } else if (decision.allowRedeem) {
+      classification = "FIRST_SCAN";
+      reasons = ["First successful customer verification recorded."];
+    } else if (duplicateReasons.length) {
+      classification = "SUSPICIOUS_DUPLICATE";
+      reasons = duplicateReasons;
+    } else {
+      classification = "LEGIT_REPEAT";
+      reasons = ["Repeat verification pattern matches normal customer behavior."];
+    }
+
+    if (ownershipStatus.isClaimedByAnother && customerUserId && !isBlocked) {
+      classification = "SUSPICIOUS_DUPLICATE";
+      if (!reasons.includes("Ownership is already claimed by another account.")) {
+        reasons = ["Ownership is already claimed by another account.", ...reasons];
+      }
+    }
+
     return res.json({
       success: true,
       data: {
-        isAuthentic: effectiveOutcome === "VALID",
+        // Consumers may re-verify the same product; treat repeat scans as authentic unless blocked.
+        isAuthentic: effectiveOutcome === "VALID" || effectiveOutcome === "ALREADY_REDEEMED",
         scanOutcome: effectiveOutcome,
         message,
         warningMessage,
         code: updated.code,
         status: finalStatus,
+        containment,
         licensee: updated.licensee
           ? {
               id: updated.licensee.id,
@@ -341,6 +496,22 @@ export const scanToken = async (req: Request, res: Response) => {
         latestScanLocation: scanInsight.latestScanLocation,
         previousScanAt: scanInsight.previousScanAt,
         previousScanLocation: scanInsight.previousScanLocation,
+        scanSignals: scanInsight.signals,
+        classification,
+        reasons,
+        scanSummary: {
+          totalScans,
+          firstVerifiedAt,
+          latestVerifiedAt,
+          firstVerifiedLocation: scanInsight.firstScanLocation || null,
+          latestVerifiedLocation: scanInsight.latestScanLocation || null,
+        },
+        ownershipStatus,
+        isBlocked,
+        isReady,
+        totalScans,
+        firstVerifiedAt,
+        latestVerifiedAt,
         policy,
       },
     });

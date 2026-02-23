@@ -1,149 +1,97 @@
 # Authentic QR Backend
 
-A Node.js + Express + TypeScript backend with PostgreSQL and Prisma ORM for the Authentic QR Licensee Platform.
+Backend API for Genuine Scan / Authentic QR.
 
-## Prerequisites
+This file is deployment-focused. For product features and UI workflows, see `/README.md`.
 
-- Node.js 18+ 
-- PostgreSQL 14+
-- npm or yarn
+## Runtime profile
 
-## Quick Start
+- Framework: Express + TypeScript
+- Database: PostgreSQL via Prisma
+- Default API port: `4000`
+- Base API path: `/api`
+- Health endpoints:
+  - `GET /health`
+  - `GET /healthz`
+  - `GET /health/db`
+  - `GET /version`
 
-### 1. Install dependencies
+## Local setup
+
+1. Install packages
 
 ```bash
 cd backend
 npm install
 ```
 
-### 2. Configure environment
+2. Create env file
 
 ```bash
 cp .env.example .env
-# Edit .env with your database credentials
 ```
 
-### 3. Setup database
+3. Set required values in `.env`
+
+- `DATABASE_URL`
+- `JWT_SECRET`
+
+4. Generate Prisma client and run migrations
 
 ```bash
-# Generate Prisma client
 npm run prisma:generate
-
-# Run migrations
 npm run prisma:migrate
-
-# Seed with demo data
-npm run prisma:seed
 ```
 
-### 4. Start the server
+5. Run backend
 
 ```bash
-# Development mode (with hot reload)
 npm run dev
+```
 
-# Production mode
+## Production build
+
+```bash
 npm run build
-npm start
+npm run start
 ```
 
-Server runs at `http://localhost:3001`
+## Docker
 
-## API Endpoints
+`backend/Dockerfile` builds and runs the service on port `4000`.
 
-### Public
+Important:
+- Keep `PORT=4000` inside container unless all upstream proxy paths are updated.
+- Ensure env secrets are provided at runtime (not baked into image).
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/auth/login` | User login |
-| GET | `/api/verify/:code` | Public QR verification |
+## Deployment validation checklist
 
-### Authenticated
+Run before release:
 
-| Method | Endpoint | Role | Description |
-|--------|----------|------|-------------|
-| GET | `/api/auth/me` | Any | Get current user |
-
-### Super Admin
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/licensees` | Create licensee |
-| GET | `/api/licensees` | List all licensees |
-| GET | `/api/licensees/:id` | Get licensee details |
-| PATCH | `/api/licensees/:id` | Update licensee |
-| POST | `/api/qr/ranges/allocate` | Allocate QR range |
-| POST | `/api/users` | Create user |
-| GET | `/api/audit/logs` | View audit logs |
-
-### Licensee Admin
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/qr/batches` | Create batch |
-| GET | `/api/qr/batches` | List batches |
-| POST | `/api/qr/batches/:id/assign-manufacturer` | Assign manufacturer |
-| GET | `/api/qr/codes` | List QR codes |
-| GET | `/api/qr/stats` | Get QR statistics |
-| GET | `/api/manufacturers` | List manufacturers |
-
-### Manufacturer
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/qr/:code/mark-printed` | Mark batch as printed |
-| GET | `/api/qr/batches` | View assigned batches |
-
-## Demo Credentials
-
-| Role | Email | Password |
-|------|-------|----------|
-| Super Admin | admin@authenticqr.com | admin123 |
-| Licensee Admin | admin@acme.com | licensee123 |
-| Licensee Admin | admin@beta.com | licensee123 |
-| Manufacturer | factory1@acme.com | manufacturer123 |
-
-## QR Status Lifecycle
-
-```
-DORMANT → ACTIVE → ALLOCATED → PRINTED → SCANNED
-                                  ↑
-                           (locked - no reversal)
+```bash
+npm run build
+npm test
+npm run prisma:migrate status
 ```
 
-## Architecture
+Then verify:
 
-```
-backend/
-├── prisma/
-│   ├── schema.prisma    # Database schema
-│   └── seed.ts          # Demo data seeder
-├── src/
-│   ├── config/          # Database configuration
-│   ├── controllers/     # Route handlers
-│   ├── middleware/      # Auth, RBAC, tenant isolation
-│   ├── routes/          # API route definitions
-│   ├── services/        # Business logic
-│   ├── types/           # TypeScript definitions
-│   └── index.ts         # Server entry point
-└── .env.example         # Environment template
-```
+- `GET /healthz` returns `{"status":"ok", ...}`
+- `GET /health/db` returns database reachable
+- `GET /version` returns app name, version, git sha
 
-## Docker Deployment
+## Critical migration note
 
-```dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-RUN npm run prisma:generate
-RUN npm run build
-EXPOSE 3001
-CMD ["npm", "start"]
-```
+As of `2026-02-21`, migration reproducibility from a clean shadow database fails at:
 
-## License
+- `backend/prisma/migrations/20260213120000_add_incident_response/migration.sql`
 
-MIT
+Reason:
+- The migration alters table `QrScanLog`, but that table is not created in earlier migration history.
+
+Action required before production promotion to new environments:
+- Fix migration chain (or create a safe baseline/squash migration) and re-run:
+  - `npm run prisma:migrate status`
+  - `npx prisma migrate reset` (in non-production validation DB)
+
+Without this fix, greenfield deployments can fail during migration.

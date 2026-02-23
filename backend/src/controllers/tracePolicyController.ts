@@ -1,5 +1,5 @@
 import { Response } from "express";
-import { AlertSeverity, PolicyAlertType, TraceEventType, UserRole } from "@prisma/client";
+import { AlertSeverity, NotificationAudience, NotificationChannel, PolicyAlertType, TraceEventType, UserRole } from "@prisma/client";
 import { z } from "zod";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
@@ -8,6 +8,7 @@ import { getBatchSlaAnalytics, getRiskAnalytics } from "../services/analyticsSer
 import { getOrCreateSecurityPolicy } from "../services/policyEngineService";
 import { createAuditLog } from "../services/auditService";
 import { buildImmutableBatchAuditPackage } from "../services/immutableAuditExportService";
+import { createRoleNotifications } from "../services/notificationService";
 
 const policyUpdateSchema = z
   .object({
@@ -53,7 +54,7 @@ const asOptionalBool = (value: unknown): boolean | undefined => {
 
 const resolveScopedLicenseeId = (req: AuthRequest): string | undefined => {
   if (!req.user) return undefined;
-  if (req.user.role === UserRole.SUPER_ADMIN) {
+  if (req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN) {
     return asOptionalString(req.query.licenseeId) || undefined;
   }
   return req.user.licenseeId || undefined;
@@ -61,7 +62,7 @@ const resolveScopedLicenseeId = (req: AuthRequest): string | undefined => {
 
 const requirePolicyLicenseeId = (req: AuthRequest, bodyLicenseeId?: string) => {
   if (!req.user) return null;
-  if (req.user.role === UserRole.SUPER_ADMIN) {
+  if (req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN) {
     return bodyLicenseeId || asOptionalString(req.query.licenseeId) || undefined;
   }
   return req.user.licenseeId || undefined;
@@ -86,7 +87,11 @@ export const getTraceTimelineController = async (req: AuthRequest, res: Response
     }
 
     let manufacturerId = asOptionalString(req.query.manufacturerId);
-    if (req.user.role === UserRole.MANUFACTURER) {
+    if (
+      req.user.role === UserRole.MANUFACTURER ||
+      req.user.role === UserRole.MANUFACTURER_ADMIN ||
+      req.user.role === UserRole.MANUFACTURER_USER
+    ) {
       manufacturerId = req.user.userId;
     }
 
@@ -335,6 +340,40 @@ export const acknowledgePolicyAlertController = async (req: AuthRequest, res: Re
       ipAddress: req.ip,
     });
 
+    await Promise.all([
+      createRoleNotifications({
+        audience: NotificationAudience.SUPER_ADMIN,
+        type: "policy_alert_acknowledged",
+        title: "Policy alert acknowledged",
+        body: `Alert ${updated.id.slice(0, 8)} was acknowledged.`,
+        incidentId: updated.incidentId || null,
+        data: {
+          alertId: updated.id,
+          alertType: updated.alertType,
+          severity: updated.severity,
+          licenseeId: updated.licenseeId,
+          targetRoute: "/ir",
+        },
+        channels: [NotificationChannel.WEB],
+      }),
+      createRoleNotifications({
+        audience: NotificationAudience.LICENSEE_ADMIN,
+        licenseeId: updated.licenseeId,
+        type: "policy_alert_acknowledged",
+        title: "Policy alert acknowledged",
+        body: `Alert ${updated.id.slice(0, 8)} was acknowledged by admin review.`,
+        incidentId: updated.incidentId || null,
+        data: {
+          alertId: updated.id,
+          alertType: updated.alertType,
+          severity: updated.severity,
+          licenseeId: updated.licenseeId,
+          targetRoute: "/ir",
+        },
+        channels: [NotificationChannel.WEB],
+      }),
+    ]);
+
     return res.json({ success: true, data: updated });
   } catch (e) {
     console.error("acknowledgePolicyAlertController error:", e);
@@ -354,7 +393,11 @@ export const exportBatchAuditPackageController = async (req: AuthRequest, res: R
     });
     if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
 
-    if (req.user.role !== UserRole.SUPER_ADMIN && req.user.licenseeId !== batch.licenseeId) {
+    if (
+      req.user.role !== UserRole.SUPER_ADMIN &&
+      req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
+      req.user.licenseeId !== batch.licenseeId
+    ) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 

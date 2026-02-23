@@ -11,6 +11,12 @@ const crypto_1 = require("crypto");
 const qrTokenService_1 = require("../services/qrTokenService");
 const auditService_1 = require("../services/auditService");
 const qrZipStreamService_1 = require("../services/qrZipStreamService");
+const MANUFACTURER_ROLES = [
+    client_1.UserRole.MANUFACTURER,
+    client_1.UserRole.MANUFACTURER_ADMIN,
+    client_1.UserRole.MANUFACTURER_USER,
+];
+const isManufacturerRole = (role) => Boolean(role && MANUFACTURER_ROLES.includes(role));
 const createPrintJobSchema = zod_1.z.object({
     batchId: zod_1.z.string().uuid(),
     quantity: zod_1.z.number().int().positive().max(200000),
@@ -33,7 +39,8 @@ const INLINE_PRINT_JOB_TOKENS_LIMIT = (() => {
 })();
 const createPrintJob = async (req, res) => {
     try {
-        if (!req.user || req.user.role !== client_1.UserRole.MANUFACTURER) {
+        if (!req.user ||
+            !isManufacturerRole(req.user.role)) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
         const parsed = createPrintJobSchema.safeParse(req.body);
@@ -162,7 +169,8 @@ const createPrintJob = async (req, res) => {
 exports.createPrintJob = createPrintJob;
 const downloadPrintJobPack = async (req, res) => {
     try {
-        if (!req.user || req.user.role !== client_1.UserRole.MANUFACTURER) {
+        if (!req.user ||
+            !isManufacturerRole(req.user.role)) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
         const jobId = String(req.params.id || "");
@@ -289,7 +297,8 @@ const downloadPrintJobPack = async (req, res) => {
 exports.downloadPrintJobPack = downloadPrintJobPack;
 const confirmPrintJob = async (req, res) => {
     try {
-        if (!req.user || req.user.role !== client_1.UserRole.MANUFACTURER) {
+        if (!req.user ||
+            !isManufacturerRole(req.user.role)) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
         const parsed = confirmSchema.safeParse(req.body || {});

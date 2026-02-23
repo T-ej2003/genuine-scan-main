@@ -1,14 +1,18 @@
 import prisma from "../config/database";
 import { createTraceEventFromAuditLog } from "./traceEventService";
+import { hashIp, normalizeUserAgent } from "../utils/security";
 
 export interface AuditLogInput {
   userId?: string;
+  orgId?: string;
   licenseeId?: string;
   action: string;
   entityType: string;
   entityId?: string;
   details?: any;
   ipAddress?: string;
+  ipHash?: string;
+  userAgent?: string;
 }
 
 type Listener = (log: any) => void;
@@ -25,7 +29,20 @@ const emitAuditLog = (log: any) => {
 };
 
 export const createAuditLog = async (data: AuditLogInput) => {
-  const log = await prisma.auditLog.create({ data });
+  const storeRawIp = ["1", "true", "yes", "on"].includes(String(process.env.AUDIT_LOG_STORE_RAW_IP || "").trim().toLowerCase());
+  const resolvedOrgId = data.orgId ?? data.licenseeId;
+  const resolvedIpHash = data.ipHash ?? hashIp(data.ipAddress);
+  const resolvedUserAgent = normalizeUserAgent(data.userAgent);
+
+  const log = await prisma.auditLog.create({
+    data: {
+      ...data,
+      orgId: resolvedOrgId,
+      ipHash: resolvedIpHash || undefined,
+      userAgent: resolvedUserAgent || undefined,
+      ipAddress: storeRawIp ? data.ipAddress : undefined,
+    } as any,
+  });
   try {
     await createTraceEventFromAuditLog({
       id: log.id,

@@ -1,12 +1,13 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Shield, Loader2, AlertCircle } from "lucide-react";
+import { Loader2, AlertCircle } from "lucide-react";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -29,7 +30,7 @@ export default function Login() {
       <div className="w-full max-w-md animate-fade-in">
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-3 text-white mb-4">
-            <Shield className="h-12 w-12 text-primary" />
+            <img src="/brand/authenticqr-mark.svg" alt="AuthenticQR logo" className="h-12 w-12" />
             <span className="text-3xl font-bold">AuthenticQR</span>
           </div>
           <p className="text-slate-400">Secure QR Authentication Platform</p>
@@ -88,6 +89,12 @@ export default function Login() {
                   "Sign in"
                 )}
               </Button>
+
+              <div className="flex items-center justify-between text-sm">
+                <Link to="/forgot-password" className="text-muted-foreground hover:text-foreground underline-offset-4 hover:underline">
+                  Forgot password?
+                </Link>
+              </div>
             </form>
           </CardContent>
         </Card>
@@ -95,4 +102,3 @@ export default function Login() {
     </div>
   );
 }
-

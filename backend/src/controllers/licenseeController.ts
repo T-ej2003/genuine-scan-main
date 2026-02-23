@@ -1,11 +1,14 @@
 //backend/src/controllers/licenseeController.ts
 import { Response } from "express";
 import { z } from "zod";
-import bcrypt from "bcryptjs";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { UserRole } from "@prisma/client";
 import { createAuditLog } from "../services/auditService";
+import { randomUUID } from "crypto";
+import { hashPassword } from "../services/auth/passwordService";
+import { createInvite } from "../services/auth/inviteService";
+import { hashIp, normalizeUserAgent } from "../utils/security";
 
 const prefixSchema = z
   .string()
@@ -18,7 +21,8 @@ const prefixSchema = z
 const adminSchema = z.object({
   name: z.string().trim().min(2, "Admin name must be at least 2 characters"),
   email: z.string().trim().email("Invalid admin email").transform((s) => s.toLowerCase()),
-  password: z.string().min(6, "Admin password must be at least 6 characters"),
+  password: z.string().min(6, "Admin password must be at least 6 characters").optional(),
+  sendInvite: z.boolean().optional(),
 });
 
 // Format A (legacy)
@@ -78,7 +82,7 @@ const escapeCsv = (v: any) => {
 
 export const createLicensee = async (req: AuthRequest, res: Response) => {
   try {
-    if (req.user?.role !== UserRole.SUPER_ADMIN) {
+    if (req.user?.role !== UserRole.SUPER_ADMIN && req.user?.role !== UserRole.PLATFORM_SUPER_ADMIN) {
       return res.status(403).json({ success: false, error: "Insufficient permissions" });
     }
 
@@ -107,14 +111,36 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
     }
 
     const email = adminPayload.email.toLowerCase();
+    const sendInvite = Boolean(adminPayload.sendInvite);
+    const adminPassword = String(adminPayload.password || "").trim();
+
+    if (!sendInvite && adminPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: "Admin password must be at least 6 characters when invite mode is disabled.",
+      });
+    }
+
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
       return res.status(409).json({ success: false, error: "Admin email already in use" });
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      const id = randomUUID();
+
+      await tx.organization.create({
+        data: {
+          id,
+          name: licenseePayload.name,
+          isActive: licenseePayload.isActive ?? true,
+        },
+      });
+
       const lic = await tx.licensee.create({
         data: {
+          id,
+          orgId: id,
           name: licenseePayload.name,
           prefix,
           description: licenseePayload.description?.trim() ? licenseePayload.description.trim() : null,
@@ -129,43 +155,78 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
         },
       });
 
-      const passwordHash = await bcrypt.hash(adminPayload.password, 12);
-
-      const adminUser = await tx.user.create({
-        data: {
-          email,
-          name: adminPayload.name,
-          passwordHash,
-          role: UserRole.LICENSEE_ADMIN,
-          licenseeId: lic.id,
-          isActive: true,
-          deletedAt: null,
-        },
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true,
-          licenseeId: true,
-          isActive: true,
-          createdAt: true,
-        },
-      });
+      const adminUser = sendInvite
+        ? null
+        : await tx.user.create({
+            data: {
+              email,
+              name: adminPayload.name,
+              passwordHash: await hashPassword(adminPassword),
+              role: UserRole.LICENSEE_ADMIN,
+              licenseeId: lic.id,
+              orgId: lic.orgId,
+              status: "ACTIVE",
+              isActive: true,
+              deletedAt: null,
+            },
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              role: true,
+              licenseeId: true,
+              isActive: true,
+              status: true,
+              createdAt: true,
+            },
+          });
 
       await createAuditLog({
         userId: req.user!.userId,
         licenseeId: lic.id,
-        action: "CREATE_LICENSEE_WITH_ADMIN",
+        orgId: lic.orgId,
+        action: sendInvite ? "CREATE_LICENSEE_WITH_ADMIN_INVITE" : "CREATE_LICENSEE_WITH_ADMIN",
         entityType: "Licensee",
         entityId: lic.id,
-        details: { licenseeName: lic.name, prefix: lic.prefix, adminEmail: adminUser.email },
+        details: {
+          licenseeName: lic.name,
+          prefix: lic.prefix,
+          adminEmail: email,
+          sendInvite,
+        },
         ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
       });
 
       return { licensee: lic, adminUser };
     });
 
-    return res.status(201).json({ success: true, data: result });
+    let adminInvite: any = null;
+    let warning: string | null = null;
+    if (sendInvite) {
+      try {
+        adminInvite = await createInvite({
+          email,
+          name: adminPayload.name,
+          role: UserRole.LICENSEE_ADMIN,
+          licenseeId: result.licensee.id,
+          allowExistingInvitedUser: true,
+          createdByUserId: req.user!.userId,
+          ipHash: hashIp(req.ip),
+          userAgent: normalizeUserAgent(req.get("user-agent")),
+        });
+      } catch (inviteError: any) {
+        warning = inviteError?.message || "Licensee created, but invite generation failed.";
+      }
+    }
+
+    const out = {
+      ...result,
+      adminInvite,
+      warning,
+    };
+
+    return res.status(201).json({ success: true, data: out });
   } catch (e: any) {
     console.error("createLicensee error:", e);
     return res.status(500).json({ success: false, error: e?.message || "Internal server error" });
@@ -174,6 +235,7 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
 
 export const getLicensees = async (_req: AuthRequest, res: Response) => {
   try {
+    const now = new Date();
     const licensees = await prisma.licensee.findMany({
       orderBy: { createdAt: "desc" },
       include: {
@@ -183,14 +245,64 @@ export const getLicensees = async (_req: AuthRequest, res: Response) => {
           take: 1,
           select: { id: true, startCode: true, endCode: true, totalCodes: true, createdAt: true },
         },
+        users: {
+          where: {
+            role: { in: [UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN] },
+            deletedAt: null,
+          },
+          orderBy: { createdAt: "asc" },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            status: true,
+            isActive: true,
+            createdAt: true,
+          },
+          take: 5,
+        },
+        invites: {
+          where: {
+            role: { in: [UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN] },
+            usedAt: null,
+            expiresAt: { gt: now },
+          },
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            email: true,
+            expiresAt: true,
+            createdAt: true,
+          },
+          take: 1,
+        },
       },
     });
 
-    const data = licensees.map((l) => ({
-      ...l,
-      latestRange: l.qrRanges?.[0] ?? null,
-      qrRanges: undefined,
-    }));
+    const data = licensees.map((l) => {
+      const primaryAdmin = l.users?.[0] || null;
+      const pendingInvite = l.invites?.[0] || null;
+      return {
+        ...l,
+        latestRange: l.qrRanges?.[0] ?? null,
+        adminOnboarding: {
+          state: pendingInvite ? "PENDING" : primaryAdmin ? "ACTIVE" : "UNASSIGNED",
+          adminUser: primaryAdmin,
+          pendingInvite: pendingInvite
+            ? {
+                id: pendingInvite.id,
+                email: pendingInvite.email,
+                expiresAt: pendingInvite.expiresAt,
+                createdAt: pendingInvite.createdAt,
+              }
+            : null,
+        },
+        qrRanges: undefined,
+        users: undefined,
+        invites: undefined,
+      };
+    });
 
     return res.json({ success: true, data });
   } catch (e) {
@@ -308,6 +420,107 @@ export const deleteLicensee = async (req: AuthRequest, res: Response) => {
   } catch (e: any) {
     console.error("deleteLicensee error:", e);
     return res.status(500).json({ success: false, error: e.message || "Internal server error" });
+  }
+};
+
+const resendInviteSchema = z.object({
+  email: z.string().trim().email().optional(),
+});
+
+export const resendLicenseeAdminInvite = async (req: AuthRequest, res: Response) => {
+  try {
+    if (req.user?.role !== UserRole.SUPER_ADMIN && req.user?.role !== UserRole.PLATFORM_SUPER_ADMIN) {
+      return res.status(403).json({ success: false, error: "Insufficient permissions" });
+    }
+
+    const { id } = req.params;
+    const parsed = resendInviteSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+    }
+
+    const licensee = await prisma.licensee.findUnique({
+      where: { id },
+      select: { id: true, name: true, orgId: true, isActive: true },
+    });
+    if (!licensee) return res.status(404).json({ success: false, error: "Licensee not found" });
+    if (!licensee.isActive) return res.status(409).json({ success: false, error: "Licensee is inactive" });
+
+    const requestedEmail = String(parsed.data.email || "").trim().toLowerCase();
+    const existingAdmin =
+      (await prisma.user.findFirst({
+        where: {
+          licenseeId: id,
+          role: { in: [UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN] },
+          status: "INVITED",
+          ...(requestedEmail ? { email: requestedEmail } : {}),
+        },
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          status: true,
+        },
+      })) ||
+      (await prisma.user.findFirst({
+        where: {
+          licenseeId: id,
+          role: { in: [UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN] },
+          ...(requestedEmail ? { email: requestedEmail } : {}),
+        },
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          status: true,
+        },
+      }));
+
+    if (!existingAdmin) {
+      return res.status(404).json({
+        success: false,
+        error: "No licensee admin user found. Create one first.",
+      });
+    }
+
+    const invite = await createInvite({
+      email: existingAdmin.email,
+      name: existingAdmin.name || undefined,
+      role: existingAdmin.role,
+      licenseeId: id,
+      allowExistingInvitedUser: true,
+      createdByUserId: req.user!.userId,
+      ipHash: hashIp(req.ip),
+      userAgent: normalizeUserAgent(req.get("user-agent")),
+    });
+
+    await createAuditLog({
+      userId: req.user!.userId,
+      licenseeId: id,
+      orgId: licensee.orgId,
+      action: "RESEND_LICENSEE_ADMIN_INVITE",
+      entityType: "Invite",
+      entityId: invite.inviteId,
+      details: {
+        licenseeName: licensee.name,
+        adminEmail: existingAdmin.email,
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent"),
+    });
+
+    return res.json({
+      success: true,
+      data: invite,
+    });
+  } catch (e: any) {
+    const msg = String(e?.message || "Failed to resend invite");
+    const isConflict = /already active|different|disabled|not required/i.test(msg);
+    return res.status(isConflict ? 409 : 500).json({ success: false, error: msg });
   }
 };
 

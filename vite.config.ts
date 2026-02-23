@@ -24,26 +24,7 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (!id.includes("node_modules")) return undefined;
-          if (id.includes("react") || id.includes("@tanstack") || id.includes("react-router")) {
-            return "react-vendor";
-          }
-          if (id.includes("@radix-ui") || id.includes("lucide-react")) {
-            return "ui-vendor";
-          }
-          if (id.includes("recharts")) {
-            return "charts-vendor";
-          }
-          if (id.includes("qrcode") || id.includes("jszip")) {
-            return "qr-vendor";
-          }
-          return "vendor";
-        },
-      },
-    },
-  },
+  // Keep production chunking on Vite defaults.
+  // The previous manual chunk strategy created cross-chunk cycles
+  // (e.g. vendor <-> react-vendor) which caused React to be undefined at runtime.
 }));

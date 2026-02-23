@@ -21,10 +21,12 @@ async function computeDashboard(req) {
     const qrWhere = {};
     const batchWhere = {};
     const manufacturersWhere = {
-        role: client_1.UserRole.MANUFACTURER,
+        role: { in: [client_1.UserRole.MANUFACTURER, client_1.UserRole.MANUFACTURER_ADMIN, client_1.UserRole.MANUFACTURER_USER] },
         isActive: true,
     };
-    if (role === client_1.UserRole.MANUFACTURER) {
+    if (role === client_1.UserRole.MANUFACTURER ||
+        role === client_1.UserRole.MANUFACTURER_ADMIN ||
+        role === client_1.UserRole.MANUFACTURER_USER) {
         batchWhere.manufacturerId = userId;
         qrWhere.batch = { manufacturerId: userId };
         manufacturersWhere.id = userId;
@@ -38,7 +40,7 @@ async function computeDashboard(req) {
         database_1.default.qRCode.count({ where: qrWhere }),
         database_1.default.batch.count({ where: batchWhere }),
         database_1.default.user.count({ where: manufacturersWhere }),
-        role === client_1.UserRole.SUPER_ADMIN
+        role === client_1.UserRole.SUPER_ADMIN || role === client_1.UserRole.PLATFORM_SUPER_ADMIN
             ? database_1.default.licensee.count({ where: { isActive: true } })
             : scopedLicenseeId
                 ? database_1.default.licensee.count({ where: { id: scopedLicenseeId, isActive: true } })
@@ -90,7 +92,7 @@ const dashboardEvents = async (req, res) => {
         const off = (0, auditService_1.onAuditLog)(async (log) => {
             try {
                 // Tenant filter
-                if (role !== client_1.UserRole.SUPER_ADMIN) {
+                if (role !== client_1.UserRole.SUPER_ADMIN && role !== client_1.UserRole.PLATFORM_SUPER_ADMIN) {
                     if (!scopedLicenseeId)
                         return;
                     if (log.licenseeId !== scopedLicenseeId)
