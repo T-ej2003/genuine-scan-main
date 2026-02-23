@@ -12,6 +12,8 @@ const database_1 = __importDefault(require("../config/database"));
 const captchaService_1 = require("../services/captchaService");
 const incidentRateLimitService_1 = require("../services/incidentRateLimitService");
 const incidentService_1 = require("../services/incidentService");
+const tamperEvidenceService_1 = require("../services/tamperEvidenceService");
+const supportWorkflowService_1 = require("../services/supportWorkflowService");
 const incidentEmailService_1 = require("../services/incidentEmailService");
 const auditService_1 = require("../services/auditService");
 const incidentUpload_1 = require("../middleware/incidentUpload");
@@ -60,6 +62,7 @@ const incidentNoteSchema = zod_1.z.object({
 const notifyCustomerSchema = zod_1.z.object({
     subject: zod_1.z.string().trim().min(3).max(200),
     message: zod_1.z.string().trim().min(3).max(5000),
+    senderMode: zod_1.z.enum(["actor", "system"]).optional(),
 });
 const parseBoolean = (value) => {
     if (typeof value === "boolean")
@@ -178,6 +181,33 @@ const reportIncident = async (req, res) => {
             userAgent: req.get("user-agent"),
             deviceFingerprint: String(req.headers["x-device-fp"] || ""),
         }, uploadedRecords);
+        const evidenceRows = await database_1.default.incidentEvidence.findMany({
+            where: { incidentId: incident.id },
+            select: {
+                id: true,
+                incidentId: true,
+                storageKey: true,
+                fileType: true,
+            },
+        });
+        const tamperFindings = await (0, tamperEvidenceService_1.runTamperEvidenceChecks)(evidenceRows);
+        const tamperSummary = (0, tamperEvidenceService_1.summarizeTamperFindings)(tamperFindings);
+        if (tamperSummary.hasWarnings) {
+            const nextTags = Array.from(new Set([...(incident.tags || []), "tamper_check_warning"]));
+            await database_1.default.incident.update({
+                where: { id: incident.id },
+                data: { tags: nextTags },
+            });
+        }
+        const supportTicket = await database_1.default.supportTicket.findUnique({
+            where: { incidentId: incident.id },
+            select: {
+                id: true,
+                referenceCode: true,
+                status: true,
+                slaDueAt: true,
+            },
+        });
         const superadminEmails = await (0, incidentEmailService_1.getSuperadminAlertEmails)();
         const alertSubject = `[Incident][${incident.severity}] New fraud report ${incident.id}`;
         const alertBody = incidentSummaryText(incident);
@@ -196,7 +226,9 @@ const reportIncident = async (req, res) => {
             const subject = `We received your report (${incident.id})`;
             const body = `Thanks for contacting AuthenticQR support.\n\n` +
                 `Reference ID: ${incident.id}\n` +
+                `Support Ticket: ${supportTicket?.referenceCode || "Pending assignment"}\n` +
                 `Current status: ${(0, incidentService_1.toHumanIncidentStatus)(incident.status)}\n` +
+                `Workflow: intake -> review -> containment -> documentation -> resolution.\n` +
                 `What next: Our team will review your report and update you if needed.\n\n` +
                 `For your privacy, we only use your contact details for this incident workflow.`;
             await (0, incidentEmailService_1.sendIncidentEmail)({
@@ -214,8 +246,16 @@ const reportIncident = async (req, res) => {
             data: {
                 incidentId: incident.id,
                 reference: incident.id,
+                supportTicketRef: supportTicket?.referenceCode || null,
+                supportTicketStatus: supportTicket?.status || null,
+                supportTicketSla: supportTicket ? (0, supportWorkflowService_1.ticketSlaSnapshot)(supportTicket.slaDueAt) : null,
                 status: incident.status,
                 severity: incident.severity,
+                tamperChecks: {
+                    summary: tamperSummary.summary,
+                    highestRisk: tamperSummary.highestRisk,
+                    hasWarnings: tamperSummary.hasWarnings,
+                },
             },
         });
     }
@@ -399,6 +439,12 @@ const patchIncident = async (req, res) => {
                 assignedToUserId: updated.assignedToUserId,
             },
         });
+        await (0, supportWorkflowService_1.ensureIncidentWorkflowArtifacts)({
+            incidentId: updated.id,
+            actorUserId: req.user.userId,
+            actorType: client_1.IncidentActorType.ADMIN,
+            emitEvents: false,
+        });
         return res.json({ success: true, data: updated });
     }
     catch (error) {
@@ -475,6 +521,14 @@ const addIncidentEvidence = async (req, res) => {
                 uploadedByUserId: req.user.userId,
             },
         });
+        const tamperFindings = await (0, tamperEvidenceService_1.runTamperEvidenceChecks)([
+            {
+                id: evidence.id,
+                incidentId: incident.id,
+                storageKey: evidence.storageKey,
+                fileType: evidence.fileType,
+            },
+        ]);
         await (0, incidentService_1.recordIncidentEvent)({
             incidentId: incident.id,
             actorType: client_1.IncidentActorType.ADMIN,
@@ -497,7 +551,13 @@ const addIncidentEvidence = async (req, res) => {
                 fileType: evidence.fileType,
             },
         });
-        return res.status(201).json({ success: true, data: evidence });
+        return res.status(201).json({
+            success: true,
+            data: {
+                ...evidence,
+                tamperChecks: tamperFindings[0] || null,
+            },
+        });
     }
     catch (error) {
         console.error("addIncidentEvidence error:", error);
@@ -534,6 +594,8 @@ const notifyIncidentCustomer = async (req, res) => {
                 error: "Customer has not provided consent/email for incident updates",
             });
         }
+        const isSuperadminSender = req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN;
+        const senderMode = parsed.data.senderMode === "system" && isSuperadminSender ? "system" : "actor";
         const mail = await (0, incidentEmailService_1.sendIncidentEmail)({
             incidentId: incident.id,
             licenseeId: incident.licenseeId || null,
@@ -547,7 +609,7 @@ const notifyIncidentCustomer = async (req, res) => {
                 role: req.user.role,
                 email: req.user.email,
             },
-            senderMode: "actor",
+            senderMode,
             template: "customer_update",
         });
         if (!mail.delivered) {
@@ -560,6 +622,7 @@ const notifyIncidentCustomer = async (req, res) => {
                     attemptedFrom: mail.attemptedFrom || null,
                     usedFrom: mail.usedFrom || null,
                     replyTo: mail.replyTo || null,
+                    senderMode,
                 },
             });
         }
@@ -572,6 +635,7 @@ const notifyIncidentCustomer = async (req, res) => {
                 attemptedFrom: mail.attemptedFrom || null,
                 usedFrom: mail.usedFrom || null,
                 replyTo: mail.replyTo || null,
+                senderMode,
             },
         });
     }

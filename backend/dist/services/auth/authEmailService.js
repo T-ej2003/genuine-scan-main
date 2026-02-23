@@ -28,6 +28,8 @@ const getFirstEnv = (...keys) => {
     }
     return "";
 };
+const getMailFromDisplayName = () => String(getFirstEnv("MAIL_FROM_NAME", "EMAIL_FROM_NAME", "APP_NAME") || "MSCQR").trim() || "MSCQR";
+const getPreferredSuperadminEmailFromEnv = () => normalizeEmail(getFirstEnv("SUPER_ADMIN_EMAIL", "PLATFORM_SUPERADMIN_EMAIL", "SUPERADMIN_FROM_EMAIL", "EMAIL_FROM", "MAIL_FROM"));
 const inferHostFromUserEmail = (userEmail) => {
     const domain = String(userEmail.split("@")[1] || "").toLowerCase().trim();
     if (!domain)
@@ -97,7 +99,7 @@ const getTransporter = () => {
     });
     return { transporter, smtpUser: normalizeEmail(config.user), configError: null };
 };
-const formatFromAddress = (email) => `"AuthenticQR" <${email}>`;
+const formatFromAddress = (email) => `"${getMailFromDisplayName()}" <${email}>`;
 const isFromRejectedError = (error) => {
     const message = String(error?.message || "").toLowerCase();
     const response = String(error?.response || "").toLowerCase();
@@ -123,6 +125,9 @@ const isFromRejectedError = (error) => {
         haystack.includes("unauthorized"));
 };
 const getPrimarySuperadminEmail = async () => {
+    const fromEnv = getPreferredSuperadminEmailFromEnv();
+    if (fromEnv)
+        return fromEnv;
     const primary = await database_1.default.user.findFirst({
         where: {
             // accept both legacy and new role names

@@ -4,6 +4,7 @@ export declare const createInvite: (input: {
     name?: string | null;
     licenseeId?: string | null;
     manufacturerId?: string | null;
+    allowExistingInvitedUser?: boolean;
     createdByUserId: string;
     ipHash: string | null;
     userAgent: string | null;
@@ -12,6 +13,18 @@ export declare const createInvite: (input: {
     expiresAt: Date;
     email: string;
     role: import(".prisma/client").$Enums.UserRole;
+    inviteLink: string;
+    emailDelivered: boolean;
+    deliveryError: string | null;
+    user: {
+        id: string;
+        email: string;
+        name: string;
+        role: import(".prisma/client").$Enums.UserRole;
+        licenseeId: string | null;
+        orgId: string | null;
+        status: import(".prisma/client").$Enums.UserStatus;
+    };
     csrfToken: string;
 }>;
 export declare const acceptInvite: (input: {

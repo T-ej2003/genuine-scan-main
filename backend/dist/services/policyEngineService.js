@@ -8,6 +8,7 @@ const client_1 = require("@prisma/client");
 const database_1 = __importDefault(require("../config/database"));
 const auditService_1 = require("./auditService");
 const policyRuleEngineService_1 = require("./ir/policyRuleEngineService");
+const notificationService_1 = require("./notificationService");
 const ALERT_DEDUPE_WINDOW_MS = 15 * 60_000;
 const EARTH_RADIUS_KM = 6371;
 const toRadians = (deg) => (deg * Math.PI) / 180;
@@ -48,7 +49,7 @@ const createPolicyAlertIfFresh = async (input) => {
     });
     if (existing)
         return null;
-    return database_1.default.policyAlert.create({
+    const created = await database_1.default.policyAlert.create({
         data: {
             licenseeId: input.licenseeId,
             alertType: input.alertType,
@@ -61,6 +62,42 @@ const createPolicyAlertIfFresh = async (input) => {
             details: input.details ?? null,
         },
     });
+    await Promise.all([
+        (0, notificationService_1.createRoleNotifications)({
+            audience: client_1.NotificationAudience.SUPER_ADMIN,
+            type: "policy_alert_created",
+            title: "New policy alert",
+            body: created.message,
+            incidentId: created.incidentId || null,
+            data: {
+                alertId: created.id,
+                alertType: created.alertType,
+                severity: created.severity,
+                score: created.score,
+                licenseeId: created.licenseeId,
+                targetRoute: "/ir",
+            },
+            channels: [client_1.NotificationChannel.WEB],
+        }),
+        (0, notificationService_1.createRoleNotifications)({
+            audience: client_1.NotificationAudience.LICENSEE_ADMIN,
+            licenseeId: created.licenseeId,
+            type: "policy_alert_created",
+            title: "Policy alert detected",
+            body: created.message,
+            incidentId: created.incidentId || null,
+            data: {
+                alertId: created.id,
+                alertType: created.alertType,
+                severity: created.severity,
+                score: created.score,
+                licenseeId: created.licenseeId,
+                targetRoute: "/ir",
+            },
+            channels: [client_1.NotificationChannel.WEB],
+        }),
+    ]);
+    return created;
 };
 const getOrCreateSecurityPolicy = async (licenseeId) => {
     return database_1.default.securityPolicy.upsert({

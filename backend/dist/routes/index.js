@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const auth_1 = require("../middleware/auth");
+const customerVerifyAuth_1 = require("../middleware/customerVerifyAuth");
 const tenantIsolation_1 = require("../middleware/tenantIsolation");
 const rbac_1 = require("../middleware/rbac");
 const csrf_1 = require("../middleware/csrf");
@@ -28,6 +29,11 @@ const irAlertController_1 = require("../controllers/irAlertController");
 const dashboardController_1 = require("../controllers/dashboardController");
 const eventsController_1 = require("../controllers/eventsController");
 const healthController_1 = require("../controllers/healthController");
+const telemetryController_1 = require("../controllers/telemetryController");
+const notificationController_1 = require("../controllers/notificationController");
+const notificationEventsController_1 = require("../controllers/notificationEventsController");
+const supportController_1 = require("../controllers/supportController");
+const governanceController_1 = require("../controllers/governanceController");
 const router = (0, express_1.Router)();
 const loginLimiter = (0, express_rate_limit_1.default)({
     windowMs: 15 * 60 * 1000,
@@ -41,16 +47,41 @@ const forgotPasswordLimiter = (0, express_rate_limit_1.default)({
     standardHeaders: true,
     legacyHeaders: false,
 });
+const verifyOtpRequestLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+const verifyOtpVerifyLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 15 * 60 * 1000,
+    max: 40,
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+const verifyClaimLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 10 * 60 * 1000,
+    max: 25,
+    standardHeaders: true,
+    legacyHeaders: false,
+});
 // ==================== PUBLIC ====================
 router.post("/auth/login", loginLimiter, authController_1.login);
 router.post("/auth/accept-invite", loginLimiter, authController_1.acceptInviteController);
 router.post("/auth/forgot-password", forgotPasswordLimiter, authController_1.forgotPassword);
 router.post("/auth/reset-password", forgotPasswordLimiter, authController_1.resetPassword);
-router.get("/verify/:code", verifyController_1.verifyQRCode);
-router.post("/verify/report-fraud", verifyController_1.reportFraud);
+router.get("/verify/:code", customerVerifyAuth_1.optionalCustomerVerifyAuth, verifyController_1.verifyQRCode);
+router.post("/verify/auth/email-otp/request", verifyOtpRequestLimiter, verifyController_1.requestCustomerEmailOtp);
+router.post("/verify/auth/email-otp/verify", verifyOtpVerifyLimiter, verifyController_1.verifyCustomerEmailOtp);
+router.post("/verify/:code/claim", verifyClaimLimiter, customerVerifyAuth_1.optionalCustomerVerifyAuth, verifyController_1.claimProductOwnership);
+router.post("/verify/:code/link-claim", verifyClaimLimiter, customerVerifyAuth_1.requireCustomerVerifyAuth, verifyController_1.linkDeviceClaimToCustomer);
+router.post("/verify/report-fraud", incidentController_1.uploadIncidentReportPhotos, verifyController_1.reportFraud);
+router.post("/fraud-report", incidentController_1.uploadIncidentReportPhotos, verifyController_1.reportFraud);
 router.post("/verify/feedback", verifyController_1.submitProductFeedback);
 router.post("/incidents/report", incidentController_1.uploadIncidentReportPhotos, incidentController_1.reportIncident);
-router.get("/scan", scanController_1.scanToken);
+router.get("/support/tickets/track/:reference", supportController_1.trackSupportTicketPublic);
+router.get("/scan", customerVerifyAuth_1.optionalCustomerVerifyAuth, scanController_1.scanToken);
+router.post("/telemetry/route-transition", auth_1.optionalAuth, telemetryController_1.captureRouteTransitionMetric);
 router.get("/health", healthController_1.healthCheck);
 // ==================== AUTH ====================
 router.get("/auth/me", auth_1.authenticate, authController_1.me);
@@ -62,6 +93,11 @@ router.post("/auth/invite", auth_1.authenticate, rbac_1.requireAnyAdmin, csrf_1.
 router.get("/dashboard/stats", auth_1.authenticate, tenantIsolation_1.enforceTenantIsolation, dashboardController_1.getDashboardStats);
 // ✅ Real-time events (SSE). Use EventSource with ?token=
 router.get("/events/dashboard", auth_1.authenticateSSE, tenantIsolation_1.enforceTenantIsolation, eventsController_1.dashboardEvents);
+router.get("/events/notifications", auth_1.authenticateSSE, notificationEventsController_1.notificationEvents);
+// ==================== NOTIFICATIONS ====================
+router.get("/notifications", auth_1.authenticate, notificationController_1.listNotifications);
+router.post("/notifications/read-all", auth_1.authenticate, csrf_1.requireCsrf, notificationController_1.readAllNotifications);
+router.post("/notifications/:id/read", auth_1.authenticate, csrf_1.requireCsrf, notificationController_1.readNotification);
 // ==================== LICENSEES (SUPER ADMIN) ====================
 router.get("/licensees/export", auth_1.authenticate, rbac_1.requirePlatformAdmin, licenseeController_1.exportLicenseesCsv);
 router.post("/licensees", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, licenseeController_1.createLicensee);
@@ -69,6 +105,7 @@ router.get("/licensees", auth_1.authenticate, rbac_1.requirePlatformAdmin, licen
 router.get("/licensees/:id", auth_1.authenticate, rbac_1.requirePlatformAdmin, licenseeController_1.getLicensee);
 router.patch("/licensees/:id", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, licenseeController_1.updateLicensee);
 router.delete("/licensees/:id", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, licenseeController_1.deleteLicensee);
+router.post("/licensees/:id/admin-invite/resend", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, licenseeController_1.resendLicenseeAdminInvite);
 // ==================== USERS ====================
 // ✅ recommended: allow LICENSEE_ADMIN to create MANUFACTURER (controller already enforces)
 router.post("/users", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, userController_1.createUser);
@@ -121,6 +158,20 @@ router.patch("/policy/config", auth_1.authenticate, rbac_1.requireAnyAdmin, tena
 router.get("/policy/alerts", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, tracePolicyController_1.getPolicyAlertsController);
 router.post("/policy/alerts/:id/ack", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, tracePolicyController_1.acknowledgePolicyAlertController);
 router.get("/audit/export/batches/:id/package", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, tracePolicyController_1.exportBatchAuditPackageController);
+router.get("/telemetry/route-transition/summary", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, telemetryController_1.getRouteTransitionSummary);
+// ==================== SUPPORT TICKETS ====================
+router.get("/support/tickets", auth_1.authenticate, rbac_1.requirePlatformAdmin, supportController_1.listSupportTickets);
+router.get("/support/tickets/:id", auth_1.authenticate, rbac_1.requirePlatformAdmin, supportController_1.getSupportTicket);
+router.patch("/support/tickets/:id", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, supportController_1.patchSupportTicket);
+router.post("/support/tickets/:id/messages", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, supportController_1.addSupportMessage);
+// ==================== GOVERNANCE ====================
+router.get("/governance/feature-flags", auth_1.authenticate, rbac_1.requirePlatformAdmin, governanceController_1.getFeatureFlags);
+router.post("/governance/feature-flags", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, governanceController_1.upsertFeatureFlag);
+router.get("/governance/evidence-retention", auth_1.authenticate, rbac_1.requirePlatformAdmin, governanceController_1.getRetentionPolicyController);
+router.patch("/governance/evidence-retention", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, governanceController_1.patchRetentionPolicyController);
+router.post("/governance/evidence-retention/run", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, governanceController_1.runRetentionJobController);
+router.get("/governance/compliance/report", auth_1.authenticate, rbac_1.requirePlatformAdmin, governanceController_1.generateComplianceReportController);
+router.get("/audit/export/incidents/:id/bundle", auth_1.authenticate, rbac_1.requirePlatformAdmin, governanceController_1.exportIncidentEvidenceBundleController);
 // ==================== QR LOGS (ADMINS) ====================
 router.get("/admin/qr/scan-logs", auth_1.authenticate, rbac_1.requireOpsUser, tenantIsolation_1.enforceTenantIsolation, qrLogController_1.getScanLogs);
 router.get("/admin/qr/batch-summary", auth_1.authenticate, rbac_1.requireOpsUser, tenantIsolation_1.enforceTenantIsolation, qrLogController_1.getBatchSummary);

@@ -77,6 +77,7 @@ const incidentNoteSchema = z.object({
 const notifyCustomerSchema = z.object({
   subject: z.string().trim().min(3).max(200),
   message: z.string().trim().min(3).max(5000),
+  senderMode: z.enum(["actor", "system"]).optional(),
 });
 
 const parseBoolean = (value: unknown) => {
@@ -641,6 +642,10 @@ export const notifyIncidentCustomer = async (req: AuthRequest, res: Response) =>
       });
     }
 
+    const isSuperadminSender =
+      req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN;
+    const senderMode = parsed.data.senderMode === "system" && isSuperadminSender ? "system" : "actor";
+
     const mail = await sendIncidentEmail({
       incidentId: incident.id,
       licenseeId: incident.licenseeId || null,
@@ -655,7 +660,7 @@ export const notifyIncidentCustomer = async (req: AuthRequest, res: Response) =>
         role: req.user.role,
         email: req.user.email,
       },
-      senderMode: "actor",
+      senderMode,
       template: "customer_update",
     });
 
@@ -669,6 +674,7 @@ export const notifyIncidentCustomer = async (req: AuthRequest, res: Response) =>
           attemptedFrom: mail.attemptedFrom || null,
           usedFrom: mail.usedFrom || null,
           replyTo: mail.replyTo || null,
+          senderMode,
         },
       });
     }
@@ -682,6 +688,7 @@ export const notifyIncidentCustomer = async (req: AuthRequest, res: Response) =>
         attemptedFrom: mail.attemptedFrom || null,
         usedFrom: mail.usedFrom || null,
         replyTo: mail.replyTo || null,
+        senderMode,
       },
     });
   } catch (error) {

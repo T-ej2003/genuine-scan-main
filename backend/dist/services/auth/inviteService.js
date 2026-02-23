@@ -92,25 +92,78 @@ const createInvite = async (input) => {
     const inviteOrgId = isPlatformRole ? await getOrCreatePlatformOrgId() : org.orgId;
     const now = new Date();
     const expiresAt = addHours(now, 24);
+    const allowExistingInvitedUser = Boolean(input.allowExistingInvitedUser);
     const rawToken = (0, security_1.randomOpaqueToken)(32);
     const tokenHash = (0, security_1.hashToken)(rawToken);
     const userName = String(input.name || "").trim() || defaultNameForEmail(email);
     const result = await database_1.default.$transaction(async (tx) => {
-        const existing = await tx.user.findUnique({ where: { email }, select: { id: true } });
-        if (existing)
-            throw new Error("User with this email already exists");
-        const createdUser = await tx.user.create({
-            data: {
-                email,
-                name: userName,
-                role,
-                orgId: org.orgId,
-                licenseeId: isPlatformRole ? null : licenseeId,
-                status: client_1.UserStatus.INVITED,
+        const existing = await tx.user.findUnique({
+            where: { email },
+            select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                licenseeId: true,
+                orgId: true,
+                status: true,
                 isActive: true,
-                passwordHash: null,
+                deletedAt: true,
+                passwordHash: true,
             },
-            select: { id: true, email: true, name: true, role: true, licenseeId: true, orgId: true, status: true },
+        });
+        let createdUser;
+        if (existing) {
+            if (!allowExistingInvitedUser)
+                throw new Error("User with this email already exists");
+            if (existing.deletedAt || !existing.isActive)
+                throw new Error("User account is disabled");
+            if (existing.role !== role)
+                throw new Error("Existing user role does not match invite role");
+            if ((existing.licenseeId || null) !== (isPlatformRole ? null : licenseeId || null)) {
+                throw new Error("Existing user belongs to a different licensee");
+            }
+            if ((existing.orgId || null) !== (org.orgId || null)) {
+                throw new Error("Existing user belongs to a different organization");
+            }
+            const existingStatus = String(existing.status || "").toUpperCase();
+            if (existingStatus !== client_1.UserStatus.INVITED || existing.passwordHash) {
+                throw new Error("User is already active. Invite is not required.");
+            }
+            createdUser = {
+                id: existing.id,
+                email: existing.email,
+                name: existing.name,
+                role: existing.role,
+                licenseeId: existing.licenseeId,
+                orgId: existing.orgId,
+                status: existing.status,
+            };
+        }
+        else {
+            createdUser = await tx.user.create({
+                data: {
+                    email,
+                    name: userName,
+                    role,
+                    orgId: org.orgId,
+                    licenseeId: isPlatformRole ? null : licenseeId,
+                    status: client_1.UserStatus.INVITED,
+                    isActive: true,
+                    passwordHash: null,
+                },
+                select: { id: true, email: true, name: true, role: true, licenseeId: true, orgId: true, status: true },
+            });
+        }
+        await tx.invite.updateMany({
+            where: {
+                email,
+                role,
+                licenseeId: isPlatformRole ? null : licenseeId,
+                usedAt: null,
+                expiresAt: { gt: now },
+            },
+            data: { usedAt: now },
         });
         const invite = await tx.invite.create({
             data: {
@@ -125,7 +178,7 @@ const createInvite = async (input) => {
             },
             select: { id: true, email: true, role: true, expiresAt: true },
         });
-        return { createdUser, invite };
+        return { createdUser: createdUser, invite };
     });
     // Send email outside the transaction (delivery should not block DB state).
     const baseUrl = resolveWebAppBaseUrl();
@@ -135,7 +188,7 @@ const createInvite = async (input) => {
         `To set your password and activate your account, open this link (expires in 24 hours):\n` +
         `${acceptUrl}\n\n` +
         `If you were not expecting this email, you can ignore it.`;
-    await (0, authEmailService_1.sendAuthEmail)({
+    const delivery = await (0, authEmailService_1.sendAuthEmail)({
         toAddress: email,
         subject,
         text,
@@ -153,7 +206,14 @@ const createInvite = async (input) => {
         action: "AUTH_INVITE_CREATED",
         entityType: "Invite",
         entityId: result.invite.id,
-        details: { email, role: result.invite.role, expiresAt: result.invite.expiresAt, manufacturerId },
+        details: {
+            email,
+            role: result.invite.role,
+            expiresAt: result.invite.expiresAt,
+            manufacturerId,
+            emailDelivered: delivery.delivered,
+            emailError: delivery.error || null,
+        },
         ipHash: input.ipHash || undefined,
         userAgent: input.userAgent || undefined,
     });
@@ -162,6 +222,18 @@ const createInvite = async (input) => {
         expiresAt: result.invite.expiresAt,
         email: result.invite.email,
         role: result.invite.role,
+        inviteLink: acceptUrl,
+        emailDelivered: delivery.delivered,
+        deliveryError: delivery.error || null,
+        user: {
+            id: result.createdUser.id,
+            email: result.createdUser.email,
+            name: result.createdUser.name,
+            role: result.createdUser.role,
+            licenseeId: result.createdUser.licenseeId,
+            orgId: result.createdUser.orgId,
+            status: result.createdUser.status,
+        },
         csrfToken: (0, tokenService_1.newCsrfToken)(),
     };
 };

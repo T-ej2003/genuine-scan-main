@@ -30,6 +30,8 @@ const getFirstEnv = (...keys) => {
     }
     return "";
 };
+const getMailFromDisplayName = () => String(getFirstEnv("MAIL_FROM_NAME", "EMAIL_FROM_NAME", "APP_NAME") || "MSCQR").trim() || "MSCQR";
+const getPreferredSuperadminEmailFromEnv = () => normalizeEmail(getFirstEnv("SUPER_ADMIN_EMAIL", "PLATFORM_SUPERADMIN_EMAIL", "SUPERADMIN_FROM_EMAIL", "EMAIL_FROM", "MAIL_FROM"));
 const inferHostFromUserEmail = (userEmail) => {
     const domain = String(userEmail.split("@")[1] || "").toLowerCase().trim();
     if (!domain)
@@ -131,7 +133,7 @@ const getTransporter = () => {
     };
 };
 const preview = (body) => body.slice(0, 500);
-const formatFromAddress = (email) => `"AuthenticQR" <${email}>`;
+const formatFromAddress = (email) => `"${getMailFromDisplayName()}" <${email}>`;
 const isAdminRole = (role) => {
     const normalized = String(role || "").toUpperCase();
     return (normalized === client_1.UserRole.SUPER_ADMIN ||
@@ -211,6 +213,9 @@ const resolveActorUser = async (actorUser) => {
     };
 };
 const getPrimarySuperadminEmail = async () => {
+    const fromEnv = getPreferredSuperadminEmailFromEnv();
+    if (fromEnv)
+        return fromEnv;
     const primary = await database_1.default.user.findFirst({
         where: {
             role: { in: [client_1.UserRole.SUPER_ADMIN, client_1.UserRole.PLATFORM_SUPER_ADMIN] },
@@ -409,8 +414,12 @@ const getSuperadminAlertEmails = async () => {
         .split(",")
         .map((s) => s.trim().toLowerCase())
         .filter(Boolean);
-    if (fromEnv.length > 0)
-        return Array.from(new Set(fromEnv));
+    const explicitPrimary = getPreferredSuperadminEmailFromEnv();
+    if (fromEnv.length > 0) {
+        return Array.from(new Set([...(explicitPrimary ? [explicitPrimary] : []), ...fromEnv]));
+    }
+    if (explicitPrimary)
+        return [explicitPrimary];
     const users = await database_1.default.user.findMany({
         where: {
             role: { in: [client_1.UserRole.SUPER_ADMIN, client_1.UserRole.PLATFORM_SUPER_ADMIN] },

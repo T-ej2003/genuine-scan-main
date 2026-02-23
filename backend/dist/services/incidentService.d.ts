@@ -52,9 +52,9 @@ export declare const recordIncidentEvent: (input: {
     id: string;
     createdAt: Date;
     eventType: import(".prisma/client").$Enums.IncidentEventType;
+    incidentId: string;
     actorType: import(".prisma/client").$Enums.IncidentActorType;
     eventPayload: import("@prisma/client/runtime/library").JsonValue | null;
-    incidentId: string;
     actorUserId: string | null;
 }>;
 export declare const createIncidentFromReport: (payload: IncidentReportInput, actor: IncidentActor, uploads?: Array<{
@@ -76,31 +76,31 @@ export declare const createIncidentFromReport: (payload: IncidentReportInput, ac
     locationCountry: string | null;
     locationRegion: string | null;
     locationCity: string | null;
-    incidentType: import(".prisma/client").$Enums.IncidentType;
-    preferredContactMethod: import(".prisma/client").$Enums.IncidentContactMethod;
-    customerPhone: string | null;
-    customerEmail: string | null;
-    locationLat: number | null;
-    locationLng: number | null;
     qrCodeValue: string;
+    scanEventId: string | null;
     reportedBy: import(".prisma/client").$Enums.IncidentReportedBy;
     customerName: string | null;
+    customerEmail: string | null;
+    customerPhone: string | null;
     customerCountry: string | null;
+    preferredContactMethod: import(".prisma/client").$Enums.IncidentContactMethod;
     consentToContact: boolean;
+    incidentType: import(".prisma/client").$Enums.IncidentType;
     severity: import(".prisma/client").$Enums.IncidentSeverity;
     severityOverridden: boolean;
     photos: string[];
     purchasePlace: string | null;
     purchaseDate: Date | null;
     productBatchNo: string | null;
+    locationLat: number | null;
+    locationLng: number | null;
     deviceFingerprintHash: string | null;
+    assignedToUserId: string | null;
     slaDueAt: Date | null;
     tags: string[];
     internalNotes: string | null;
     resolutionSummary: string | null;
     resolutionOutcome: import(".prisma/client").$Enums.IncidentResolutionOutcome | null;
-    scanEventId: string | null;
-    assignedToUserId: string | null;
 }>;
 export declare const getIncidentByIdScoped: (incidentId: string, actor: {
     role: UserRole;
@@ -116,11 +116,43 @@ export declare const getIncidentByIdScoped: (incidentId: string, actor: {
         id: string;
         createdAt: Date;
         eventType: import(".prisma/client").$Enums.IncidentEventType;
+        incidentId: string;
         actorType: import(".prisma/client").$Enums.IncidentActorType;
         eventPayload: import("@prisma/client/runtime/library").JsonValue | null;
-        incidentId: string;
         actorUserId: string | null;
     })[];
+    supportTicket: ({
+        messages: ({
+            actorUser: {
+                id: string;
+                email: string;
+                name: string;
+            } | null;
+        } & {
+            id: string;
+            createdAt: Date;
+            message: string;
+            actorType: import(".prisma/client").$Enums.IncidentActorType;
+            actorUserId: string | null;
+            isInternal: boolean;
+            ticketId: string;
+        })[];
+    } & {
+        id: string;
+        licenseeId: string | null;
+        status: import(".prisma/client").$Enums.SupportTicketStatus;
+        createdAt: Date;
+        updatedAt: Date;
+        subject: string;
+        priority: import(".prisma/client").$Enums.IncidentPriority;
+        incidentId: string;
+        customerEmail: string | null;
+        assignedToUserId: string | null;
+        slaDueAt: Date | null;
+        referenceCode: string;
+        firstResponseAt: Date | null;
+        resolvedAt: Date | null;
+    }) | null;
     assignedToUser: {
         id: string;
         email: string;
@@ -135,12 +167,12 @@ export declare const getIncidentByIdScoped: (incidentId: string, actor: {
         attemptedFrom: string | null;
         usedFrom: string | null;
         providerMessageId: string | null;
-        incidentId: string;
         direction: import(".prisma/client").$Enums.IncidentCommDirection;
         channel: import(".prisma/client").$Enums.IncidentCommChannel;
         toAddress: string;
         bodyPreview: string;
         errorMessage: string | null;
+        incidentId: string;
     }[];
     evidence: {
         id: string;
@@ -152,6 +184,20 @@ export declare const getIncidentByIdScoped: (incidentId: string, actor: {
         uploadedByUserId: string | null;
         uploadedBy: import(".prisma/client").$Enums.IncidentActorType;
     }[];
+    handoff: {
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        incidentId: string;
+        reviewAt: Date | null;
+        containmentAt: Date | null;
+        documentationAt: Date | null;
+        resolutionAt: Date | null;
+        completedAt: Date | null;
+        slaDueAt: Date;
+        currentStage: import(".prisma/client").$Enums.IncidentHandoffStage;
+        intakeAt: Date;
+    } | null;
 } & {
     id: string;
     licenseeId: string | null;
@@ -167,31 +213,31 @@ export declare const getIncidentByIdScoped: (incidentId: string, actor: {
     locationCountry: string | null;
     locationRegion: string | null;
     locationCity: string | null;
-    incidentType: import(".prisma/client").$Enums.IncidentType;
-    preferredContactMethod: import(".prisma/client").$Enums.IncidentContactMethod;
-    customerPhone: string | null;
-    customerEmail: string | null;
-    locationLat: number | null;
-    locationLng: number | null;
     qrCodeValue: string;
+    scanEventId: string | null;
     reportedBy: import(".prisma/client").$Enums.IncidentReportedBy;
     customerName: string | null;
+    customerEmail: string | null;
+    customerPhone: string | null;
     customerCountry: string | null;
+    preferredContactMethod: import(".prisma/client").$Enums.IncidentContactMethod;
     consentToContact: boolean;
+    incidentType: import(".prisma/client").$Enums.IncidentType;
     severity: import(".prisma/client").$Enums.IncidentSeverity;
     severityOverridden: boolean;
     photos: string[];
     purchasePlace: string | null;
     purchaseDate: Date | null;
     productBatchNo: string | null;
+    locationLat: number | null;
+    locationLng: number | null;
     deviceFingerprintHash: string | null;
+    assignedToUserId: string | null;
     slaDueAt: Date | null;
     tags: string[];
     internalNotes: string | null;
     resolutionSummary: string | null;
     resolutionOutcome: import(".prisma/client").$Enums.IncidentResolutionOutcome | null;
-    scanEventId: string | null;
-    assignedToUserId: string | null;
 }) | null>;
 export declare const listIncidentsScoped: (input: {
     role: UserRole;
@@ -210,6 +256,12 @@ export declare const listIncidentsScoped: (input: {
     };
 }) => Promise<{
     rows: ({
+        supportTicket: {
+            id: string;
+            status: import(".prisma/client").$Enums.SupportTicketStatus;
+            slaDueAt: Date | null;
+            referenceCode: string;
+        } | null;
         assignedToUser: {
             id: string;
             email: string;
@@ -225,6 +277,20 @@ export declare const listIncidentsScoped: (input: {
             uploadedByUserId: string | null;
             uploadedBy: import(".prisma/client").$Enums.IncidentActorType;
         }[];
+        handoff: {
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            incidentId: string;
+            reviewAt: Date | null;
+            containmentAt: Date | null;
+            documentationAt: Date | null;
+            resolutionAt: Date | null;
+            completedAt: Date | null;
+            slaDueAt: Date;
+            currentStage: import(".prisma/client").$Enums.IncidentHandoffStage;
+            intakeAt: Date;
+        } | null;
     } & {
         id: string;
         licenseeId: string | null;
@@ -240,31 +306,31 @@ export declare const listIncidentsScoped: (input: {
         locationCountry: string | null;
         locationRegion: string | null;
         locationCity: string | null;
-        incidentType: import(".prisma/client").$Enums.IncidentType;
-        preferredContactMethod: import(".prisma/client").$Enums.IncidentContactMethod;
-        customerPhone: string | null;
-        customerEmail: string | null;
-        locationLat: number | null;
-        locationLng: number | null;
         qrCodeValue: string;
+        scanEventId: string | null;
         reportedBy: import(".prisma/client").$Enums.IncidentReportedBy;
         customerName: string | null;
+        customerEmail: string | null;
+        customerPhone: string | null;
         customerCountry: string | null;
+        preferredContactMethod: import(".prisma/client").$Enums.IncidentContactMethod;
         consentToContact: boolean;
+        incidentType: import(".prisma/client").$Enums.IncidentType;
         severity: import(".prisma/client").$Enums.IncidentSeverity;
         severityOverridden: boolean;
         photos: string[];
         purchasePlace: string | null;
         purchaseDate: Date | null;
         productBatchNo: string | null;
+        locationLat: number | null;
+        locationLng: number | null;
         deviceFingerprintHash: string | null;
+        assignedToUserId: string | null;
         slaDueAt: Date | null;
         tags: string[];
         internalNotes: string | null;
         resolutionSummary: string | null;
         resolutionOutcome: import(".prisma/client").$Enums.IncidentResolutionOutcome | null;
-        scanEventId: string | null;
-        assignedToUserId: string | null;
     })[];
     total: number;
 }>;

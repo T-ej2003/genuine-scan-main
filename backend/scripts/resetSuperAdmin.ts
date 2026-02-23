@@ -2,8 +2,8 @@ import prisma from "../src/config/database";
 import bcrypt from "bcryptjs";
 
 async function main() {
-  const email = "admin@mcs.local";
-  const newPassword = "Admin@1234";
+  const email = String(process.env.SUPER_ADMIN_EMAIL || "administration@mscqr.com").trim().toLowerCase();
+  const newPassword = String(process.env.SUPER_ADMIN_RESET_PASSWORD || "Admin@1234");
 
   const hash = await bcrypt.hash(newPassword, 10);
 
@@ -28,4 +28,3 @@ async function main() {
 main()
   .catch(console.error)
   .finally(async () => prisma.$disconnect());
-

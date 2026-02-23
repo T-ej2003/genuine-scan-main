@@ -23,6 +23,20 @@ const getFirstEnv = (...keys: string[]) => {
   return "";
 };
 
+const getMailFromDisplayName = () =>
+  String(getFirstEnv("MAIL_FROM_NAME", "EMAIL_FROM_NAME", "APP_NAME") || "MSCQR").trim() || "MSCQR";
+
+const getPreferredSuperadminEmailFromEnv = () =>
+  normalizeEmail(
+    getFirstEnv(
+      "SUPER_ADMIN_EMAIL",
+      "PLATFORM_SUPERADMIN_EMAIL",
+      "SUPERADMIN_FROM_EMAIL",
+      "EMAIL_FROM",
+      "MAIL_FROM"
+    )
+  );
+
 type ResolvedSmtpConfig = {
   host: string;
   user: string;
@@ -113,7 +127,7 @@ const getTransporter = () => {
   return { transporter, smtpUser: normalizeEmail(config.user), configError: null as string | null };
 };
 
-const formatFromAddress = (email: string) => `"AuthenticQR" <${email}>`;
+const formatFromAddress = (email: string) => `"${getMailFromDisplayName()}" <${email}>`;
 
 const isFromRejectedError = (error: any) => {
   const message = String(error?.message || "").toLowerCase();
@@ -147,6 +161,9 @@ const isFromRejectedError = (error: any) => {
 };
 
 const getPrimarySuperadminEmail = async () => {
+  const fromEnv = getPreferredSuperadminEmailFromEnv();
+  if (fromEnv) return fromEnv;
+
   const primary = await prisma.user.findFirst({
     where: {
       // accept both legacy and new role names

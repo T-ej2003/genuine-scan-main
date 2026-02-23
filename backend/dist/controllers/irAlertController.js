@@ -8,6 +8,7 @@ const zod_1 = require("zod");
 const client_1 = require("@prisma/client");
 const database_1 = __importDefault(require("../config/database"));
 const auditService_1 = require("../services/auditService");
+const notificationService_1 = require("../services/notificationService");
 const paginationSchema = zod_1.z.object({
     limit: zod_1.z.coerce.number().int().min(1).max(200).default(50),
     offset: zod_1.z.coerce.number().int().min(0).default(0),
@@ -121,6 +122,37 @@ const patchIrAlert = async (req, res) => {
             details: { changedFields: Object.keys(parsed.data) },
             ipAddress: req.ip,
         });
+        await Promise.all([
+            (0, notificationService_1.createRoleNotifications)({
+                audience: client_1.NotificationAudience.SUPER_ADMIN,
+                type: "policy_alert_updated",
+                title: "Policy alert updated",
+                body: `Alert ${updated.id.slice(0, 8)} metadata was updated.`,
+                incidentId: updated.incidentId || null,
+                data: {
+                    alertId: updated.id,
+                    licenseeId: existing.licenseeId,
+                    changedFields: Object.keys(parsed.data),
+                    targetRoute: "/ir",
+                },
+                channels: [client_1.NotificationChannel.WEB],
+            }),
+            (0, notificationService_1.createRoleNotifications)({
+                audience: client_1.NotificationAudience.LICENSEE_ADMIN,
+                licenseeId: existing.licenseeId,
+                type: "policy_alert_updated",
+                title: "Policy alert updated",
+                body: `Alert ${updated.id.slice(0, 8)} has new acknowledgement/incident linkage.`,
+                incidentId: updated.incidentId || null,
+                data: {
+                    alertId: updated.id,
+                    licenseeId: existing.licenseeId,
+                    changedFields: Object.keys(parsed.data),
+                    targetRoute: "/ir",
+                },
+                channels: [client_1.NotificationChannel.WEB],
+            }),
+        ]);
         return res.json({ success: true, data: updated });
     }
     catch (e) {

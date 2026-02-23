@@ -12,6 +12,7 @@ const analyticsService_1 = require("../services/analyticsService");
 const policyEngineService_1 = require("../services/policyEngineService");
 const auditService_1 = require("../services/auditService");
 const immutableAuditExportService_1 = require("../services/immutableAuditExportService");
+const notificationService_1 = require("../services/notificationService");
 const policyUpdateSchema = zod_1.z
     .object({
     licenseeId: zod_1.z.string().uuid().optional(),
@@ -329,6 +330,39 @@ const acknowledgePolicyAlertController = async (req, res) => {
             },
             ipAddress: req.ip,
         });
+        await Promise.all([
+            (0, notificationService_1.createRoleNotifications)({
+                audience: client_1.NotificationAudience.SUPER_ADMIN,
+                type: "policy_alert_acknowledged",
+                title: "Policy alert acknowledged",
+                body: `Alert ${updated.id.slice(0, 8)} was acknowledged.`,
+                incidentId: updated.incidentId || null,
+                data: {
+                    alertId: updated.id,
+                    alertType: updated.alertType,
+                    severity: updated.severity,
+                    licenseeId: updated.licenseeId,
+                    targetRoute: "/ir",
+                },
+                channels: [client_1.NotificationChannel.WEB],
+            }),
+            (0, notificationService_1.createRoleNotifications)({
+                audience: client_1.NotificationAudience.LICENSEE_ADMIN,
+                licenseeId: updated.licenseeId,
+                type: "policy_alert_acknowledged",
+                title: "Policy alert acknowledged",
+                body: `Alert ${updated.id.slice(0, 8)} was acknowledged by admin review.`,
+                incidentId: updated.incidentId || null,
+                data: {
+                    alertId: updated.id,
+                    alertType: updated.alertType,
+                    severity: updated.severity,
+                    licenseeId: updated.licenseeId,
+                    targetRoute: "/ir",
+                },
+                channels: [client_1.NotificationChannel.WEB],
+            }),
+        ]);
         return res.json({ success: true, data: updated });
     }
     catch (e) {
