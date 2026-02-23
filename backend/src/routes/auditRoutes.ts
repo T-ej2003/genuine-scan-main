@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { authenticate, authenticateSSE } from "../middleware/auth";
-import { requireAnyAdmin, requireSuperAdmin } from "../middleware/rbac";
+import { requireAnyAdmin, requirePlatformAdmin } from "../middleware/rbac";
 import { enforceTenantIsolation } from "../middleware/tenantIsolation";
 import { getLogs, streamLogs, exportLogsCsv, getFraudReports, respondToFraudReport } from "../controllers/auditController";
+import { requireCsrf } from "../middleware/csrf";
 
 const router = Router();
 
@@ -33,7 +34,7 @@ router.get(
 router.get(
   "/fraud-reports",
   authenticate,
-  requireSuperAdmin,
+  requirePlatformAdmin,
   enforceTenantIsolation,
   getFraudReports
 );
@@ -41,8 +42,9 @@ router.get(
 router.post(
   "/fraud-reports/:id/respond",
   authenticate,
-  requireSuperAdmin,
+  requirePlatformAdmin,
   enforceTenantIsolation,
+  requireCsrf,
   respondToFraudReport
 );
 

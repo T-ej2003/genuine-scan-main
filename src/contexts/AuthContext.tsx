@@ -13,13 +13,11 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const STORAGE_USER_KEY = "auth_user";
-
 const normalizeRole = (role: any): User["role"] => {
   const r = String(role || "").trim().toUpperCase();
-  if (r === "SUPER_ADMIN") return "super_admin";
-  if (r === "LICENSEE_ADMIN") return "licensee_admin";
-  if (r === "MANUFACTURER") return "manufacturer";
+  if (r === "SUPER_ADMIN" || r === "PLATFORM_SUPER_ADMIN") return "super_admin";
+  if (r === "LICENSEE_ADMIN" || r === "ORG_ADMIN") return "licensee_admin";
+  if (r === "MANUFACTURER" || r === "MANUFACTURER_ADMIN" || r === "MANUFACTURER_USER") return "manufacturer";
   // safest (least privilege)
   return "manufacturer";
 };
@@ -38,23 +36,12 @@ function normalizeUser(u: any): User {
   };
 }
 
-function readCachedUser(): User | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_USER_KEY);
-    if (!raw) return null;
-    return normalizeUser(JSON.parse(raw));
-  } catch {
-    return null;
-  }
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => readCachedUser());
+  const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const clearSession = () => {
     setUser(null);
-    localStorage.removeItem(STORAGE_USER_KEY);
     apiClient.logout();
   };
 
@@ -65,16 +52,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const fixed = normalizeUser(u);
     setUser(fixed);
-    localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(fixed));
   };
 
   const refresh = async () => {
-    const token = apiClient.getToken();
-    if (!token) {
-      clearSession();
-      return;
-    }
-
     const res = await apiClient.getCurrentUser(); // GET /auth/me
     if (!res.success || !res.data) {
       clearSession();
@@ -117,7 +97,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const logout = () => clearSession();
+  const logout = () => {
+    apiClient.logoutSession().finally(() => clearSession());
+  };
 
   const value = useMemo<AuthContextType>(
     () => ({

@@ -19,20 +19,22 @@ export type DownloadProgress = {
 type RequestOptions = RequestInit & {
   skipJson?: boolean;
   timeoutMs?: number;
+  skipAuthRefresh?: boolean;
 };
 
 class ApiClient {
   private token: string | null = null;
   private readonly getCache = new Map<string, unknown>();
+  private refreshInFlight: Promise<ApiResponse<{ token: string; user: any }>> | null = null;
 
   constructor() {
-    this.token = localStorage.getItem("auth_token");
+    // Access tokens are stored in HttpOnly cookies (server-managed).
+    // We keep an in-memory access token only for legacy/SSE flows.
+    this.token = null;
   }
 
   setToken(token: string | null) {
     this.token = token;
-    if (token) localStorage.setItem("auth_token", token);
-    else localStorage.removeItem("auth_token");
   }
 
   getToken(): string | null {
@@ -48,13 +50,43 @@ class ApiClient {
     window.dispatchEvent(new Event("auth:logout"));
   }
 
+  private readCookie(name: string) {
+    try {
+      const match = document.cookie
+        .split(";")
+        .map((c) => c.trim())
+        .find((c) => c.startsWith(`${name}=`));
+      if (!match) return "";
+      return decodeURIComponent(match.split("=").slice(1).join("="));
+    } catch {
+      return "";
+    }
+  }
+
+  private isAuthRefreshEndpoint(endpoint: string) {
+    return endpoint === "/auth/login" || endpoint === "/auth/refresh" || endpoint === "/auth/logout" || endpoint === "/auth/accept-invite";
+  }
+
+  private async refreshOnce() {
+    if (this.refreshInFlight) return this.refreshInFlight;
+    this.refreshInFlight = this.request<{ token: string; user: any }>("/auth/refresh", {
+      method: "POST",
+      skipAuthRefresh: true,
+    }).finally(() => {
+      this.refreshInFlight = null;
+    });
+    const res = await this.refreshInFlight;
+    if (res.success && res.data?.token) this.setToken(res.data.token);
+    return res;
+  }
+
   private async request<T>(endpoint: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
     const headers: Record<string, string> = {
       ...(options.headers as Record<string, string>),
     };
 
     const method = String(options.method || "GET").toUpperCase();
-    const cacheKey = `${this.token || "anon"}:${endpoint}`;
+    const cacheKey = `${this.token || "cookie"}:${endpoint}`;
 
     const hasBody = options.body !== undefined && options.body !== null;
     const isForm = typeof FormData !== "undefined" && options.body instanceof FormData;
@@ -62,7 +94,17 @@ class ApiClient {
     if (!options.skipJson && hasBody && !isForm) {
       headers["Content-Type"] = "application/json";
     }
-    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+    const hasAuthorizationHeader = Object.keys(headers).some((key) => key.toLowerCase() === "authorization");
+    if (this.token && !hasAuthorizationHeader) headers["Authorization"] = `Bearer ${this.token}`;
+
+    // Double-submit CSRF: server sets `aq_csrf` cookie; client mirrors it in header.
+    const isStateChanging = !["GET", "HEAD", "OPTIONS"].includes(method);
+    if (isStateChanging) {
+      const csrf = this.readCookie("aq_csrf");
+      if (csrf && !headers["x-csrf-token"] && !headers["X-CSRF-Token"]) {
+        headers["x-csrf-token"] = csrf;
+      }
+    }
 
     const controller = new AbortController();
     const timeoutMs = options.timeoutMs ?? 20_000;
@@ -83,15 +125,33 @@ class ApiClient {
         return { success: false, error: "Stale cache miss (HTTP 304)" };
       }
 
-      if (res.status === 401) {
-        this.logout();
-        this.emitLogout();
-      }
-
       const contentType = res.headers.get("content-type") || "";
       const isJson = contentType.includes("application/json");
 
       const payload: any = isJson ? await res.json().catch(() => null) : await res.text().catch(() => "");
+
+      if (res.status === 401 && !options.skipAuthRefresh && !this.isAuthRefreshEndpoint(endpoint)) {
+        const msg =
+          (payload && typeof payload === "object" && (payload.error || payload.message)) ||
+          (typeof payload === "string" && payload) ||
+          "Not authenticated";
+
+        // No in-memory token and no CSRF cookie means we almost certainly have no session
+        // to refresh (common on a fresh /login page load).
+        if (!this.token && !this.readCookie("aq_csrf")) {
+          return { success: false, error: msg };
+        }
+
+        // Attempt to rotate refresh token and retry once (cookie-based sessions).
+        const refreshed = await this.refreshOnce();
+        if (refreshed.success) {
+          return this.request<T>(endpoint, { ...options, skipAuthRefresh: true });
+        }
+
+        this.logout();
+        this.emitLogout();
+        return { success: false, error: msg };
+      }
 
       if (!res.ok) {
         const msg =
@@ -142,6 +202,46 @@ class ApiClient {
     return this.request("/auth/me");
   }
 
+  async refreshSession() {
+    const res = await this.request<{ token: string; user: any }>("/auth/refresh", { method: "POST" });
+    if (res.success && res.data?.token) this.setToken(res.data.token);
+    return res;
+  }
+
+  async logoutSession() {
+    const res = await this.request("/auth/logout", { method: "POST" });
+    this.logout();
+    return res;
+  }
+
+  async forgotPassword(email: string) {
+    return this.request("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) });
+  }
+
+  async resetPassword(token: string, password: string) {
+    return this.request("/auth/reset-password", { method: "POST", body: JSON.stringify({ token, password }) });
+  }
+
+  async acceptInvite(payload: { token: string; password: string; name?: string }) {
+    const res = await this.request<{ token: string; user: any }>("/auth/accept-invite", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    if (res.success && res.data?.token) this.setToken(res.data.token);
+    return res;
+  }
+
+  async inviteUser(payload: {
+    email: string;
+    role: string;
+    name?: string;
+    licenseeId?: string;
+    manufacturerId?: string;
+    allowExistingInvitedUser?: boolean;
+  }) {
+    return this.request("/auth/invite", { method: "POST", body: JSON.stringify(payload) });
+  }
+
   // ==================== LICENSEES ====================
   async getLicensees() {
     return this.request<any[]>("/licensees");
@@ -163,7 +263,7 @@ class ApiClient {
       supportPhone?: string;
       isActive?: boolean;
     };
-    admin: { name: string; email: string; password: string };
+    admin: { name: string; email: string; password?: string; sendInvite?: boolean };
   }) {
     return this.request("/licensees", { method: "POST", body: JSON.stringify(payload) });
   }
@@ -186,6 +286,13 @@ class ApiClient {
 
   async deleteLicensee(id: string) {
     return this.request(`/licensees/${id}`, { method: "DELETE" });
+  }
+
+  async resendLicenseeAdminInvite(licenseeId: string, email?: string) {
+    return this.request(`/licensees/${encodeURIComponent(licenseeId)}/admin-invite/resend`, {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
   }
 
   async exportLicenseesCsv() {
@@ -470,14 +577,78 @@ class ApiClient {
     });
   }
 
-  streamAuditLogs(onMessage: (log: any) => void) {
+  streamAuditLogs(onMessage: (log: any) => void, onError?: () => void) {
     const token = this.getToken();
-    if (!token) throw new Error("No auth token");
+    const query = token ? `?token=${encodeURIComponent(token)}` : "";
+    const url = `${BASE_URL}/audit/stream${query}`;
 
-    const url = `${BASE_URL}/audit/stream?token=${encodeURIComponent(token)}`;
-    const es = new EventSource(url);
+    let es: EventSource;
+    try {
+      es = new EventSource(url, { withCredentials: true });
+    } catch {
+      es = new EventSource(url);
+    }
 
-    es.addEventListener("audit", (e: MessageEvent) => onMessage(JSON.parse(e.data)));
+    es.addEventListener("audit", (e: MessageEvent) => {
+      try {
+        onMessage(JSON.parse(e.data));
+      } catch {
+        // Ignore malformed events.
+      }
+    });
+
+    es.onerror = () => {
+      onError?.();
+      es.close();
+    };
+
+    return () => es.close();
+  }
+
+  streamNotifications(
+    onSnapshot: (payload: { notifications: any[]; unread: number; total: number; reason?: string }) => void,
+    onError?: () => void,
+    onOpen?: () => void,
+    options?: { limit?: number }
+  ) {
+    const token = this.getToken();
+    const params = new URLSearchParams();
+    params.set("limit", String(options?.limit ?? 8));
+    if (token) params.set("token", token);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    const url = `${BASE_URL}/events/notifications${query}`;
+
+    let es: EventSource;
+    try {
+      es = new EventSource(url, { withCredentials: true });
+    } catch {
+      es = new EventSource(url);
+    }
+
+    es.addEventListener("notifications", (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data || "{}");
+        const notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
+        const unread = Number(payload.unread || 0);
+        const total = Number(payload.total || notifications.length);
+        onSnapshot({
+          notifications,
+          unread,
+          total,
+          reason: typeof payload.reason === "string" ? payload.reason : undefined,
+        });
+      } catch {
+        // ignore malformed snapshots
+      }
+    });
+
+    es.onerror = () => {
+      onError?.();
+    };
+    es.onopen = () => {
+      onOpen?.();
+    };
+
     return () => es.close();
   }
 
@@ -528,7 +699,10 @@ class ApiClient {
 
   // ==================== PUBLIC VERIFY ====================
   // Public endpoint, no auth required. Still works if token exists.
-  async verifyQRCode(code: string, opts?: { device?: string; lat?: number; lon?: number; acc?: number }) {
+  async verifyQRCode(
+    code: string,
+    opts?: { device?: string; lat?: number; lon?: number; acc?: number; customerToken?: string }
+  ) {
     const c = String(code || "").trim();
     const params = new URLSearchParams();
     if (opts?.device) params.append("device", opts.device);
@@ -536,7 +710,8 @@ class ApiClient {
     if (opts?.lon != null) params.append("lon", String(opts.lon));
     if (opts?.acc != null) params.append("acc", String(opts.acc));
     const query = params.toString() ? `?${params.toString()}` : "";
-    return this.request(`/verify/${encodeURIComponent(c)}${query}`, { method: "GET" });
+    const headers = opts?.customerToken ? { Authorization: `Bearer ${opts.customerToken}` } : undefined;
+    return this.request(`/verify/${encodeURIComponent(c)}${query}`, { method: "GET", headers });
   }
 
   async reportFraud(payload: {
@@ -548,7 +723,7 @@ class ApiClient {
     observedOutcome?: string;
     pageUrl?: string;
   }) {
-    return this.request(`/verify/report-fraud`, { method: "POST", body: JSON.stringify(payload) });
+    return this.request(`/fraud-report`, { method: "POST", body: JSON.stringify(payload) });
   }
 
   async submitProductFeedback(payload: {
@@ -563,7 +738,10 @@ class ApiClient {
     return this.request(`/verify/feedback`, { method: "POST", body: JSON.stringify(payload) });
   }
 
-  async scanToken(token: string, opts?: { device?: string; lat?: number; lon?: number; acc?: number }) {
+  async scanToken(
+    token: string,
+    opts?: { device?: string; lat?: number; lon?: number; acc?: number; customerToken?: string }
+  ) {
     const params = new URLSearchParams();
     params.append("t", token);
     if (opts?.device) params.append("device", opts.device);
@@ -571,7 +749,85 @@ class ApiClient {
     if (opts?.lon != null) params.append("lon", String(opts.lon));
     if (opts?.acc != null) params.append("acc", String(opts.acc));
     const query = params.toString() ? `?${params.toString()}` : "";
-    return this.request(`/scan${query}`, { method: "GET" });
+    const headers = opts?.customerToken ? { Authorization: `Bearer ${opts.customerToken}` } : undefined;
+    return this.request(`/scan${query}`, { method: "GET", headers });
+  }
+
+  async requestVerifyEmailOtp(email: string) {
+    return this.request<{
+      challengeToken: string;
+      expiresAt: string;
+      maskedEmail: string;
+    }>(`/verify/auth/email-otp/request`, {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async verifyEmailOtp(challengeToken: string, otp: string) {
+    return this.request<{
+      token: string;
+      customer: {
+        userId: string;
+        email: string;
+        maskedEmail: string;
+      };
+    }>(`/verify/auth/email-otp/verify`, {
+      method: "POST",
+      body: JSON.stringify({ challengeToken, otp }),
+    });
+  }
+
+  async claimVerifiedProduct(code: string, customerToken?: string) {
+    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
+    return this.request<{
+      claimResult: string;
+      message?: string;
+      conflict?: boolean;
+      classification?: string;
+      reasons?: string[];
+      warningMessage?: string;
+      claimTimestamp?: string | null;
+      ownershipStatus?: {
+        isClaimed: boolean;
+        claimedAt: string | null;
+        isOwnedByRequester: boolean;
+        isClaimedByAnother: boolean;
+        canClaim: boolean;
+      };
+    }>(`/verify/${encodeURIComponent(code)}/claim`, {
+      method: "POST",
+      headers,
+    });
+  }
+
+  async linkDeviceClaimToUser(code: string, customerToken: string) {
+    return this.request<{
+      linkResult: string;
+      message?: string;
+      ownershipStatus?: {
+        isClaimed: boolean;
+        claimedAt: string | null;
+        isOwnedByRequester: boolean;
+        isClaimedByAnother: boolean;
+        canClaim: boolean;
+      };
+    }>(`/verify/${encodeURIComponent(code)}/link-claim`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${customerToken}` },
+    });
+  }
+
+  async submitFraudReport(formData: FormData, customerToken?: string) {
+    const headers: Record<string, string> = {};
+    if (customerToken) headers["Authorization"] = `Bearer ${customerToken}`;
+    return this.request(`/fraud-report`, {
+      method: "POST",
+      body: formData,
+      headers,
+      skipJson: true,
+      timeoutMs: 45_000,
+    });
   }
 
   async getScanLogs(options?: {
@@ -780,7 +1036,10 @@ class ApiClient {
     });
   }
 
-  async sendIncidentEmail(id: string, payload: { subject: string; message: string }) {
+  async sendIncidentEmail(
+    id: string,
+    payload: { subject: string; message: string; senderMode?: "actor" | "system" }
+  ) {
     const normalizeDelivery = <T extends ApiResponse<any>>(resp: T): T => {
       if (!resp.success) return resp;
       const delivered = (resp.data as any)?.delivered;
@@ -851,6 +1110,347 @@ class ApiClient {
 
   async requestIncidentPdfExport(id: string) {
     return this.request(`/incidents/${encodeURIComponent(id)}/export-pdf`);
+  }
+
+  // ==================== IR (PLATFORM SUPERADMIN) ====================
+  async getIrIncidents(options?: {
+    status?: string;
+    severity?: string;
+    priority?: string;
+    licenseeId?: string;
+    manufacturerId?: string;
+    qr?: string;
+    search?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    assignedTo?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const params = new URLSearchParams();
+    if (options?.status) params.append("status", options.status);
+    if (options?.severity) params.append("severity", options.severity);
+    if (options?.priority) params.append("priority", options.priority);
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.manufacturerId) params.append("manufacturerId", options.manufacturerId);
+    if (options?.qr) params.append("qr", options.qr);
+    if (options?.search) params.append("search", options.search);
+    if (options?.dateFrom) params.append("date_from", options.dateFrom);
+    if (options?.dateTo) params.append("date_to", options.dateTo);
+    if (options?.assignedTo) params.append("assigned_to", options.assignedTo);
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/ir/incidents${query}`);
+  }
+
+  async createIrIncident(payload: {
+    qrCodeValue: string;
+    incidentType: "COUNTERFEIT_SUSPECTED" | "DUPLICATE_SCAN" | "TAMPERED_LABEL" | "WRONG_PRODUCT" | "OTHER";
+    description: string;
+    severity?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+    priority?: "P1" | "P2" | "P3" | "P4";
+    licenseeId?: string;
+    tags?: string[];
+  }) {
+    return this.request(`/ir/incidents`, { method: "POST", body: JSON.stringify(payload) });
+  }
+
+  async getIrIncidentById(id: string) {
+    return this.request(`/ir/incidents/${encodeURIComponent(id)}`);
+  }
+
+  async patchIrIncident(
+    id: string,
+    payload: Partial<{
+      status: string;
+      severity: string;
+      priority: string;
+      assignedToUserId: string | null;
+      internalNotes: string | null;
+      tags: string[];
+      resolutionSummary: string | null;
+      resolutionOutcome: "CONFIRMED_FRAUD" | "NOT_FRAUD" | "INCONCLUSIVE" | null;
+    }>
+  ) {
+    return this.request(`/ir/incidents/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async addIrIncidentNote(id: string, note: string) {
+    return this.request(`/ir/incidents/${encodeURIComponent(id)}/events`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    });
+  }
+
+  async applyIrIncidentAction(
+    id: string,
+    payload: {
+      action:
+        | "FLAG_QR_UNDER_INVESTIGATION"
+        | "UNFLAG_QR_UNDER_INVESTIGATION"
+        | "SUSPEND_BATCH"
+        | "REINSTATE_BATCH"
+        | "SUSPEND_ORG"
+        | "REINSTATE_ORG"
+        | "SUSPEND_MANUFACTURER_USERS"
+        | "REINSTATE_MANUFACTURER_USERS";
+      reason: string;
+      qrCodeId?: string;
+      batchId?: string;
+      licenseeId?: string;
+      manufacturerUserIds?: string[];
+    }
+  ) {
+    return this.request(`/ir/incidents/${encodeURIComponent(id)}/actions`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async sendIrIncidentCommunication(
+    id: string,
+    payload: {
+      recipient?: "reporter" | "org_admin";
+      toAddress?: string;
+      subject: string;
+      message: string;
+      template?: string;
+      senderMode?: "actor" | "system";
+    }
+  ) {
+    return this.request(`/ir/incidents/${encodeURIComponent(id)}/communications`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async uploadIrIncidentAttachment(id: string, file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return this.request(`/ir/incidents/${encodeURIComponent(id)}/attachments`, {
+      method: "POST",
+      body: form,
+      skipJson: true,
+      timeoutMs: 45_000,
+    });
+  }
+
+  async getIrPolicies(options?: { licenseeId?: string; ruleType?: string; isActive?: boolean; limit?: number; offset?: number }) {
+    const params = new URLSearchParams();
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.ruleType) params.append("ruleType", options.ruleType);
+    if (options?.isActive != null) params.append("isActive", String(options.isActive));
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/ir/policies${query}`);
+  }
+
+  async createIrPolicy(payload: {
+    name: string;
+    description?: string;
+    ruleType: "DISTINCT_DEVICES" | "MULTI_COUNTRY" | "BURST_SCANS" | "TOO_MANY_REPORTS";
+    isActive?: boolean;
+    threshold: number;
+    windowMinutes: number;
+    severity?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+    autoCreateIncident?: boolean;
+    incidentSeverity?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+    incidentPriority?: "P1" | "P2" | "P3" | "P4";
+    licenseeId?: string;
+    manufacturerId?: string;
+    actionConfig?: any;
+  }) {
+    return this.request(`/ir/policies`, { method: "POST", body: JSON.stringify(payload) });
+  }
+
+  async patchIrPolicy(id: string, payload: any) {
+    return this.request(`/ir/policies/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) });
+  }
+
+  async getIrAlerts(options?: {
+    licenseeId?: string;
+    alertType?: string;
+    severity?: string;
+    acknowledged?: boolean;
+    policyRuleId?: string;
+    qrCodeId?: string;
+    batchId?: string;
+    manufacturerId?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const params = new URLSearchParams();
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.alertType) params.append("alertType", options.alertType);
+    if (options?.severity) params.append("severity", options.severity);
+    if (options?.acknowledged != null) params.append("acknowledged", String(options.acknowledged));
+    if (options?.policyRuleId) params.append("policyRuleId", options.policyRuleId);
+    if (options?.qrCodeId) params.append("qrCodeId", options.qrCodeId);
+    if (options?.batchId) params.append("batchId", options.batchId);
+    if (options?.manufacturerId) params.append("manufacturerId", options.manufacturerId);
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/ir/alerts${query}`);
+  }
+
+  async patchIrAlert(id: string, payload: { acknowledged?: boolean; incidentId?: string | null }) {
+    return this.request(`/ir/alerts/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) });
+  }
+
+  // ==================== NOTIFICATIONS ====================
+  async getNotifications(options?: { unreadOnly?: boolean; limit?: number; offset?: number }) {
+    const params = new URLSearchParams();
+    if (options?.unreadOnly != null) params.append("unreadOnly", String(options.unreadOnly));
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/notifications${query}`);
+  }
+
+  async markNotificationRead(id: string) {
+    return this.request(`/notifications/${encodeURIComponent(id)}/read`, { method: "POST" });
+  }
+
+  async markAllNotificationsRead() {
+    return this.request(`/notifications/read-all`, { method: "POST" });
+  }
+
+  // ==================== SUPPORT TICKETS ====================
+  async getSupportTickets(options?: {
+    status?: "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
+    priority?: "P1" | "P2" | "P3" | "P4";
+    licenseeId?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const params = new URLSearchParams();
+    if (options?.status) params.append("status", options.status);
+    if (options?.priority) params.append("priority", options.priority);
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.search) params.append("search", options.search);
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/support/tickets${query}`);
+  }
+
+  async getSupportTicket(id: string) {
+    return this.request(`/support/tickets/${encodeURIComponent(id)}`);
+  }
+
+  async patchSupportTicket(
+    id: string,
+    payload: Partial<{
+      status: "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
+      assignedToUserId: string | null;
+    }>
+  ) {
+    return this.request(`/support/tickets/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async addSupportTicketMessage(id: string, payload: { message: string; isInternal?: boolean }) {
+    return this.request(`/support/tickets/${encodeURIComponent(id)}/messages`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async trackSupportTicket(reference: string, email?: string) {
+    const query = email ? `?email=${encodeURIComponent(email)}` : "";
+    return this.request(`/support/tickets/track/${encodeURIComponent(reference)}${query}`);
+  }
+
+  // ==================== GOVERNANCE ====================
+  async getGovernanceFeatureFlags(licenseeId?: string) {
+    const query = licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : "";
+    return this.request(`/governance/feature-flags${query}`);
+  }
+
+  async upsertGovernanceFeatureFlag(payload: {
+    licenseeId?: string;
+    key: string;
+    enabled: boolean;
+    config?: any;
+  }) {
+    return this.request(`/governance/feature-flags`, { method: "POST", body: JSON.stringify(payload) });
+  }
+
+  async getEvidenceRetentionPolicy(licenseeId?: string) {
+    const query = licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : "";
+    return this.request(`/governance/evidence-retention${query}`);
+  }
+
+  async patchEvidenceRetentionPolicy(payload: {
+    licenseeId?: string;
+    retentionDays?: number;
+    purgeEnabled?: boolean;
+    exportBeforePurge?: boolean;
+    legalHoldTags?: string[];
+  }) {
+    return this.request(`/governance/evidence-retention`, { method: "PATCH", body: JSON.stringify(payload) });
+  }
+
+  async runEvidenceRetentionJob(payload: { licenseeId?: string; mode: "PREVIEW" | "APPLY" }) {
+    return this.request(`/governance/evidence-retention/run`, { method: "POST", body: JSON.stringify(payload) });
+  }
+
+  async getComplianceReport(options?: { licenseeId?: string; from?: string; to?: string }) {
+    const params = new URLSearchParams();
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.from) params.append("from", options.from);
+    if (options?.to) params.append("to", options.to);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/governance/compliance/report${query}`);
+  }
+
+  async exportIncidentEvidenceBundle(id: string) {
+    const headers: Record<string, string> = {};
+    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+    const resp = await fetch(`${BASE_URL}/audit/export/incidents/${encodeURIComponent(id)}/bundle`, {
+      headers,
+      credentials: "include",
+    });
+    if (!resp.ok) throw new Error(`Export failed: HTTP ${resp.status}`);
+    return resp.blob();
+  }
+
+  // ==================== TELEMETRY ====================
+  async captureRouteTransition(payload: {
+    routeFrom?: string | null;
+    routeTo: string;
+    source?: string;
+    transitionMs: number;
+    verifyCodePresent?: boolean;
+    verifyResult?: string | null;
+    dropped?: boolean;
+    deviceType?: string;
+    networkType?: string;
+    online?: boolean;
+  }) {
+    return this.request(`/telemetry/route-transition`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 8000,
+    });
+  }
+
+  async getRouteTransitionSummary(options?: { licenseeId?: string; from?: string; to?: string }) {
+    const params = new URLSearchParams();
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.from) params.append("from", options.from);
+    if (options?.to) params.append("to", options.to);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/telemetry/route-transition/summary${query}`);
   }
 }
 

@@ -11,6 +11,17 @@ enum UserRole {
   SUPER_ADMIN
   LICENSEE_ADMIN
   MANUFACTURER
+  // New RBAC roles (preferred). Legacy roles remain for backward compatibility.
+  PLATFORM_SUPER_ADMIN
+  ORG_ADMIN
+  MANUFACTURER_ADMIN
+  MANUFACTURER_USER
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  DISABLED
 }
 
 enum QRStatus {
@@ -51,6 +62,7 @@ enum PolicyAlertType {
   STUCK_BATCH
   AUTO_BLOCK_QR
   AUTO_BLOCK_BATCH
+  POLICY_RULE
 }
 
 enum AlertSeverity {
@@ -58,6 +70,13 @@ enum AlertSeverity {
   MEDIUM
   HIGH
   CRITICAL
+}
+
+enum PolicyRuleType {
+  DISTINCT_DEVICES
+  MULTI_COUNTRY
+  BURST_SCANS
+  TOO_MANY_REPORTS
 }
 
 enum IncidentReportedBy {
@@ -91,13 +110,25 @@ enum IncidentSeverity {
 enum IncidentStatus {
   NEW
   TRIAGED
+  TRIAGE
   INVESTIGATING
+  CONTAINMENT
+  ERADICATION
+  RECOVERY
   AWAITING_CUSTOMER
   AWAITING_LICENSEE
   MITIGATED
   RESOLVED
   CLOSED
+  REOPENED
   REJECTED_SPAM
+}
+
+enum IncidentPriority {
+  P1
+  P2
+  P3
+  P4
 }
 
 enum IncidentResolutionOutcome {
@@ -138,20 +169,66 @@ enum IncidentCommStatus {
   FAILED
 }
 
+enum IncidentHandoffStage {
+  INTAKE
+  REVIEW
+  CONTAINMENT
+  DOCUMENTATION
+  RESOLUTION
+  COMPLETE
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_CUSTOMER
+  RESOLVED
+  CLOSED
+}
+
+enum NotificationChannel {
+  WEB
+  EMAIL
+}
+
+enum NotificationAudience {
+  SUPER_ADMIN
+  LICENSEE_ADMIN
+  MANUFACTURER
+  ALL
+}
+
+enum EvidenceRetentionJobStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  PREVIEW
+}
+
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
-  passwordHash String
+  passwordHash String?
   name         String
   role         UserRole
   location     String?
   website      String?
 
+  orgId        String?
+  organization Organization? @relation(fields: [orgId], references: [id])
+
   licenseeId String?
   licensee   Licensee? @relation(fields: [licenseeId], references: [id])
 
+  status   UserStatus @default(ACTIVE)
   isActive  Boolean   @default(true)
+  disabledAt DateTime?
+  disabledReason String?
   deletedAt DateTime?
+
+  failedLoginAttempts Int @default(0)
+  lockedUntil DateTime?
+  lastLoginAt DateTime?
 
   assignedBatches        Batch[]        @relation("ManufacturerBatches")
 
@@ -171,17 +248,56 @@ model User {
   assignedIncidents Incident[] @relation("IncidentAssignedTo")
   incidentEvents IncidentEvent[] @relation("IncidentActorUser")
   incidentEvidence IncidentEvidence[] @relation("IncidentEvidenceUploadedBy")
+  supportTicketsAssigned SupportTicket[] @relation("SupportTicketAssignedTo")
+  supportTicketMessages SupportTicketMessage[] @relation("SupportTicketMessageAuthor")
+  notifications Notification[] @relation("UserNotifications")
+  tenantFeatureFlagsUpdated TenantFeatureFlag[] @relation("TenantFeatureFlagUpdatedBy")
+  evidenceRetentionPoliciesUpdated EvidenceRetentionPolicy[] @relation("EvidenceRetentionPolicyUpdatedBy")
+  evidenceRetentionJobsStarted EvidenceRetentionJob[] @relation("EvidenceRetentionJobStartedBy")
+  routeTransitionMetrics RouteTransitionMetric[] @relation("RouteTransitionMetricUser")
+
+  invitesCreated Invite[] @relation("InviteCreatedBy")
+  invitesAccepted Invite[] @relation("InviteAcceptedBy")
+  passwordResets PasswordReset[]
+  refreshTokens RefreshToken[]
+  policyRulesCreated PolicyRule[] @relation("PolicyRuleCreatedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([orgId])
   @@index([licenseeId])
   @@index([role])
+  @@index([isActive])
+  @@index([status])
+  @@index([lockedUntil])
+}
+
+model Organization {
+  id       String @id @default(uuid())
+  name     String
+  isActive Boolean @default(true)
+
+  licensee Licensee?
+  users    User[]
+  invites  Invite[]
+  passwordResets PasswordReset[]
+  refreshTokens  RefreshToken[]
+  auditLogs AuditLog[]
+  policyRules PolicyRule[]
+  notifications Notification[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([isActive])
 }
 
 model Licensee {
   id          String  @id @default(uuid())
+  orgId       String  @unique
+  organization Organization @relation(fields: [orgId], references: [id])
+
   name        String
   prefix      String  @unique
   description String?
@@ -191,6 +307,8 @@ model Licensee {
   supportEmail String?
   supportPhone String?
   isActive    Boolean @default(true)
+  suspendedAt DateTime?
+  suspendedReason String?
 
   users          User[]
   qrRanges       QRRange[]
@@ -201,13 +319,22 @@ model Licensee {
   qrScanLogs           QrScanLog[]
   traceEvents          TraceEvent[]
   securityPolicies     SecurityPolicy[]
+  policyRules          PolicyRule[]
   policyAlerts         PolicyAlert[]
   incidents            Incident[]
+  invites              Invite[]
+  notifications        Notification[]
+  tenantFeatureFlags   TenantFeatureFlag[]
+  supportTickets       SupportTicket[]
+  evidenceRetentionPolicy EvidenceRetentionPolicy?
+  evidenceRetentionJobs EvidenceRetentionJob[]
+  routeTransitionMetrics RouteTransitionMetric[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([isActive])
+  @@index([orgId])
 }
 
 model QRRange {
@@ -240,6 +367,8 @@ model Batch {
   endCode    String
   totalCodes Int
   printedAt  DateTime?
+  suspendedAt DateTime?
+  suspendedReason String?
   printPackDownloadedAt DateTime?
   printPackDownloadedByUserId String?
   printPackDownloadedByUser   User? @relation("BatchPrintPackDownloadedBy", fields: [printPackDownloadedByUserId], references: [id])
@@ -258,6 +387,7 @@ model Batch {
   @@index([manufacturerId])
   @@index([printedAt])
   @@index([printPackDownloadedAt])
+  @@index([suspendedAt])
 }
 
 model PrintJob {
@@ -308,6 +438,8 @@ model QRCode {
   lastScanUserAgent String?
   lastScanDevice String?
   blockedAt DateTime?
+  underInvestigationAt DateTime?
+  underInvestigationReason String?
   tokenNonce String?
   tokenIssuedAt DateTime?
   tokenExpiresAt DateTime?
@@ -318,6 +450,7 @@ model QRCode {
   traceEvents TraceEvent[]
   policyAlerts PolicyAlert[]
   incidents Incident[]
+  ownership Ownership?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -327,6 +460,24 @@ model QRCode {
   @@index([status])
   @@index([printJobId])
   @@index([tokenHash])
+  @@index([underInvestigationAt])
+}
+
+model Ownership {
+  id        String   @id @default(cuid())
+  qrCodeId  String   @unique
+  qrCode    QRCode   @relation(fields: [qrCodeId], references: [id])
+  userId    String?
+  deviceTokenHash String?
+  ipHash    String?
+  userAgentHash String?
+  claimSource String @default("USER")
+  linkedAt DateTime?
+  claimedAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([deviceTokenHash])
+  @@index([ipHash])
 }
 
 model QrScanLog {
@@ -386,18 +537,104 @@ model BatchPrintPackToken {
 model AuditLog {
   id         String   @id @default(uuid())
   userId     String?
+  orgId      String?
+  organization Organization? @relation(fields: [orgId], references: [id])
   licenseeId String?
   action     String
   entityType String
   entityId   String?
   details    Json?
   ipAddress  String?
+  ipHash     String?
+  userAgent  String?
   createdAt  DateTime @default(now())
 
   @@index([userId])
+  @@index([orgId])
   @@index([licenseeId])
   @@index([entityType])
   @@index([createdAt])
+}
+
+model Invite {
+  id     String @id @default(uuid())
+  orgId  String
+  organization Organization @relation(fields: [orgId], references: [id])
+
+  licenseeId String?
+  licensee   Licensee? @relation(fields: [licenseeId], references: [id])
+
+  email   String
+  role    UserRole
+  manufacturerId String?
+
+  tokenHash String @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdByUserId String?
+  createdByUser   User? @relation("InviteCreatedBy", fields: [createdByUserId], references: [id])
+
+  acceptedByUserId String?
+  acceptedByUser   User? @relation("InviteAcceptedBy", fields: [acceptedByUserId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([orgId])
+  @@index([licenseeId])
+  @@index([expiresAt])
+  @@index([usedAt])
+}
+
+model PasswordReset {
+  id String @id @default(uuid())
+
+  orgId String?
+  organization Organization? @relation(fields: [orgId], references: [id])
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash String @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  createdIpHash String?
+  userAgentHash String?
+
+  @@index([userId])
+  @@index([orgId])
+  @@index([expiresAt])
+  @@index([usedAt])
+}
+
+model RefreshToken {
+  id String @id @default(uuid())
+
+  orgId String?
+  organization Organization? @relation(fields: [orgId], references: [id])
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash String @unique
+  expiresAt DateTime
+
+  createdAt DateTime @default(now())
+  createdIpHash String?
+  createdUserAgent String?
+
+  lastUsedAt DateTime?
+  revokedAt DateTime?
+  revokedReason String?
+  replacedByTokenHash String?
+
+  @@index([userId])
+  @@index([orgId])
+  @@index([expiresAt])
+  @@index([revokedAt])
 }
 
 model QrAllocationRequest {
@@ -505,6 +742,46 @@ model SecurityPolicy {
   @@index([licenseeId])
 }
 
+model PolicyRule {
+  id String @id @default(uuid())
+
+  orgId String?
+  organization Organization? @relation(fields: [orgId], references: [id])
+
+  licenseeId String?
+  licensee Licensee? @relation(fields: [licenseeId], references: [id])
+
+  manufacturerId String?
+  createdByUserId String?
+  createdByUser   User? @relation("PolicyRuleCreatedBy", fields: [createdByUserId], references: [id])
+
+  name String
+  description String?
+  ruleType PolicyRuleType
+  isActive Boolean @default(true)
+
+  threshold Int
+  windowMinutes Int
+
+  severity AlertSeverity @default(MEDIUM)
+  autoCreateIncident Boolean @default(false)
+  incidentSeverity IncidentSeverity?
+  incidentPriority IncidentPriority?
+
+  actionConfig Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  alerts PolicyAlert[]
+
+  @@index([orgId])
+  @@index([licenseeId])
+  @@index([manufacturerId])
+  @@index([isActive])
+  @@index([ruleType])
+}
+
 model PolicyAlert {
   id         String         @id @default(uuid())
   licenseeId String
@@ -514,6 +791,12 @@ model PolicyAlert {
   severity   AlertSeverity @default(MEDIUM)
   message    String
   score      Int @default(0)
+
+  policyRuleId String?
+  policyRule   PolicyRule? @relation(fields: [policyRuleId], references: [id])
+
+  incidentId String?
+  incident   Incident? @relation(fields: [incidentId], references: [id])
 
   batchId String?
   batch   Batch? @relation(fields: [batchId], references: [id])
@@ -534,6 +817,8 @@ model PolicyAlert {
   @@index([licenseeId])
   @@index([alertType])
   @@index([severity])
+  @@index([policyRuleId])
+  @@index([incidentId])
   @@index([batchId])
   @@index([manufacturerId])
   @@index([qrCodeId])
@@ -582,6 +867,7 @@ model Incident {
   deviceFingerprintHash String?
 
   status IncidentStatus @default(NEW)
+  priority IncidentPriority @default(P3)
   assignedToUserId String?
   assignedToUser User? @relation("IncidentAssignedTo", fields: [assignedToUserId], references: [id])
   slaDueAt DateTime?
@@ -596,6 +882,12 @@ model Incident {
   events IncidentEvent[]
   communications IncidentCommunication[]
   evidence IncidentEvidence[]
+  handoff IncidentHandoff?
+  supportTicket SupportTicket?
+  evidenceFingerprints IncidentEvidenceFingerprint[]
+  notifications Notification[]
+
+  policyAlerts PolicyAlert[]
 
   @@index([qrCodeId])
   @@index([qrCodeValue])
@@ -603,6 +895,7 @@ model Incident {
   @@index([licenseeId])
   @@index([status])
   @@index([severity])
+  @@index([priority])
   @@index([createdAt])
   @@index([assignedToUserId])
 }
@@ -664,8 +957,236 @@ model IncidentEvidence {
   uploadedByUser User? @relation("IncidentEvidenceUploadedBy", fields: [uploadedByUserId], references: [id])
   uploadedBy IncidentActorType @default(CUSTOMER)
   createdAt DateTime @default(now())
+  fingerprint IncidentEvidenceFingerprint?
 
   @@index([incidentId])
   @@index([uploadedByUserId])
   @@index([createdAt])
+}
+
+model IncidentHandoff {
+  id String @id @default(uuid())
+
+  incidentId String @unique
+  incident Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  currentStage IncidentHandoffStage @default(INTAKE)
+  intakeAt DateTime @default(now())
+  reviewAt DateTime?
+  containmentAt DateTime?
+  documentationAt DateTime?
+  resolutionAt DateTime?
+  completedAt DateTime?
+  slaDueAt DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([currentStage])
+  @@index([slaDueAt])
+}
+
+model SupportTicket {
+  id String @id @default(uuid())
+
+  incidentId String @unique
+  incident Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  referenceCode String @unique
+
+  licenseeId String?
+  licensee Licensee? @relation(fields: [licenseeId], references: [id])
+
+  customerEmail String?
+  subject String
+  status SupportTicketStatus @default(OPEN)
+  priority IncidentPriority @default(P3)
+
+  assignedToUserId String?
+  assignedToUser User? @relation("SupportTicketAssignedTo", fields: [assignedToUserId], references: [id])
+
+  slaDueAt DateTime?
+  firstResponseAt DateTime?
+  resolvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages SupportTicketMessage[]
+
+  @@index([licenseeId])
+  @@index([status])
+  @@index([priority])
+  @@index([assignedToUserId])
+  @@index([createdAt])
+}
+
+model SupportTicketMessage {
+  id String @id @default(uuid())
+
+  ticketId String
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  actorType IncidentActorType @default(CUSTOMER)
+  actorUserId String?
+  actorUser User? @relation("SupportTicketMessageAuthor", fields: [actorUserId], references: [id])
+
+  message String
+  isInternal Boolean @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([ticketId])
+  @@index([actorUserId])
+  @@index([createdAt])
+}
+
+model Notification {
+  id String @id @default(uuid())
+
+  userId String?
+  user User? @relation("UserNotifications", fields: [userId], references: [id])
+
+  orgId String?
+  organization Organization? @relation(fields: [orgId], references: [id])
+
+  licenseeId String?
+  licensee Licensee? @relation(fields: [licenseeId], references: [id])
+
+  incidentId String?
+  incident Incident? @relation(fields: [incidentId], references: [id], onDelete: SetNull)
+
+  audience NotificationAudience @default(ALL)
+  channel NotificationChannel @default(WEB)
+  type String
+  title String
+  body String
+  data Json?
+
+  readAt DateTime?
+  emailedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, readAt])
+  @@index([licenseeId, createdAt])
+  @@index([orgId, createdAt])
+  @@index([incidentId])
+  @@index([channel, createdAt])
+}
+
+model TenantFeatureFlag {
+  id String @id @default(uuid())
+
+  licenseeId String
+  licensee Licensee @relation(fields: [licenseeId], references: [id], onDelete: Cascade)
+
+  key String
+  enabled Boolean @default(false)
+  config Json?
+
+  updatedByUserId String?
+  updatedByUser User? @relation("TenantFeatureFlagUpdatedBy", fields: [updatedByUserId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([licenseeId, key])
+  @@index([key])
+  @@index([updatedByUserId])
+}
+
+model EvidenceRetentionPolicy {
+  id String @id @default(uuid())
+
+  licenseeId String @unique
+  licensee Licensee @relation(fields: [licenseeId], references: [id], onDelete: Cascade)
+
+  retentionDays Int @default(180)
+  purgeEnabled Boolean @default(false)
+  exportBeforePurge Boolean @default(true)
+  legalHoldTags String[]
+
+  updatedByUserId String?
+  updatedByUser User? @relation("EvidenceRetentionPolicyUpdatedBy", fields: [updatedByUserId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedByUserId])
+}
+
+model EvidenceRetentionJob {
+  id String @id @default(uuid())
+
+  licenseeId String?
+  licensee Licensee? @relation(fields: [licenseeId], references: [id], onDelete: SetNull)
+
+  status EvidenceRetentionJobStatus @default(PREVIEW)
+  mode String
+  cutoffAt DateTime
+  recordsEvaluated Int @default(0)
+  recordsPurged Int @default(0)
+  recordsExported Int @default(0)
+  summary Json?
+
+  startedByUserId String?
+  startedByUser User? @relation("EvidenceRetentionJobStartedBy", fields: [startedByUserId], references: [id])
+
+  startedAt DateTime @default(now())
+  finishedAt DateTime?
+
+  @@index([licenseeId, startedAt])
+  @@index([status])
+  @@index([startedByUserId])
+}
+
+model IncidentEvidenceFingerprint {
+  id String @id @default(uuid())
+
+  incidentEvidenceId String @unique
+  incidentEvidence IncidentEvidence @relation(fields: [incidentEvidenceId], references: [id], onDelete: Cascade)
+
+  incidentId String
+  incident Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  sha256 String
+  fileSize Int
+  mimeType String
+  ext String?
+
+  duplicateCount Int @default(0)
+  seenInOtherIncidents Int @default(0)
+  riskScore Int @default(0)
+  checks Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([incidentId])
+  @@index([sha256])
+}
+
+model RouteTransitionMetric {
+  id String @id @default(uuid())
+
+  userId String?
+  user User? @relation("RouteTransitionMetricUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  licenseeId String?
+  licensee Licensee? @relation(fields: [licenseeId], references: [id], onDelete: SetNull)
+
+  routeFrom String?
+  routeTo String
+  source String?
+  role UserRole?
+  deviceType String?
+  networkType String?
+  online Boolean @default(true)
+  transitionMs Int
+  verifyCodePresent Boolean @default(false)
+  verifyResult String?
+  dropped Boolean @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([routeTo, createdAt])
+  @@index([licenseeId, createdAt])
+  @@index([role, createdAt])
 }

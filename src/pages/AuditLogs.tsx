@@ -259,13 +259,23 @@ export default function AuditLogs() {
 
   useEffect(() => {
     if (!live) return;
-    const stop = apiClient.streamAuditLogs((log) => {
-      if (isSuperAdmin && licenseeFilter !== "all" && log.licenseeId !== licenseeFilter) return;
-      setLogs((prev) => [log, ...prev].slice(0, 200));
-      if (isSuperAdmin && (log.action === "CUSTOMER_FRAUD_REPORT" || log.action === "CUSTOMER_FRAUD_REPORT_RESPONSE")) {
-        loadFraudReports({ silent: true });
+    const stop = apiClient.streamAuditLogs(
+      (log) => {
+        if (isSuperAdmin && licenseeFilter !== "all" && log.licenseeId !== licenseeFilter) return;
+        setLogs((prev) => [log, ...prev].slice(0, 200));
+        if (isSuperAdmin && (log.action === "CUSTOMER_FRAUD_REPORT" || log.action === "CUSTOMER_FRAUD_REPORT_RESPONSE")) {
+          loadFraudReports({ silent: true });
+        }
+      },
+      () => {
+        setLive(false);
+        toast({
+          title: "Live audit stream unavailable",
+          description: "Realtime updates were paused. Use Refresh to reload latest logs.",
+          variant: "destructive",
+        });
       }
-    });
+    );
     return stop;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, licenseeFilter, isSuperAdmin, fraudStatusFilter]);

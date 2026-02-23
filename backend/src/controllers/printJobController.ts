@@ -8,6 +8,15 @@ import { buildScanUrl, hashToken, randomNonce, signQrPayload } from "../services
 import { createAuditLog } from "../services/auditService";
 import { resolveQrZipProfile, streamQrZipToResponse } from "../services/qrZipStreamService";
 
+const MANUFACTURER_ROLES: UserRole[] = [
+  UserRole.MANUFACTURER,
+  UserRole.MANUFACTURER_ADMIN,
+  UserRole.MANUFACTURER_USER,
+];
+
+const isManufacturerRole = (role?: UserRole | null) =>
+  Boolean(role && MANUFACTURER_ROLES.includes(role));
+
 const createPrintJobSchema = z.object({
   batchId: z.string().uuid(),
   quantity: z.number().int().positive().max(200000),
@@ -35,7 +44,10 @@ const INLINE_PRINT_JOB_TOKENS_LIMIT = (() => {
 
 export const createPrintJob = async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user || req.user.role !== UserRole.MANUFACTURER) {
+    if (
+      !req.user ||
+      !isManufacturerRole(req.user.role)
+    ) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
@@ -181,7 +193,10 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
 
 export const downloadPrintJobPack = async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user || req.user.role !== UserRole.MANUFACTURER) {
+    if (
+      !req.user ||
+      !isManufacturerRole(req.user.role)
+    ) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
@@ -320,7 +335,10 @@ export const downloadPrintJobPack = async (req: AuthRequest, res: Response) => {
 
 export const confirmPrintJob = async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user || req.user.role !== UserRole.MANUFACTURER) {
+    if (
+      !req.user ||
+      !isManufacturerRole(req.user.role)
+    ) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 

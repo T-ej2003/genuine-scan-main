@@ -62,6 +62,20 @@ const getFirstEnv = (...keys: string[]) => {
   return "";
 };
 
+const getMailFromDisplayName = () =>
+  String(getFirstEnv("MAIL_FROM_NAME", "EMAIL_FROM_NAME", "APP_NAME") || "MSCQR").trim() || "MSCQR";
+
+const getPreferredSuperadminEmailFromEnv = () =>
+  normalizeEmail(
+    getFirstEnv(
+      "SUPER_ADMIN_EMAIL",
+      "PLATFORM_SUPERADMIN_EMAIL",
+      "SUPERADMIN_FROM_EMAIL",
+      "EMAIL_FROM",
+      "MAIL_FROM"
+    )
+  );
+
 type ResolvedSmtpConfig = {
   host: string;
   user: string;
@@ -190,11 +204,16 @@ const getTransporter = () => {
 
 const preview = (body: string) => body.slice(0, 500);
 
-const formatFromAddress = (email: string) => `"AuthenticQR" <${email}>`;
+const formatFromAddress = (email: string) => `"${getMailFromDisplayName()}" <${email}>`;
 
 const isAdminRole = (role?: UserRole | string | null) => {
   const normalized = String(role || "").toUpperCase();
-  return normalized === UserRole.SUPER_ADMIN || normalized === UserRole.LICENSEE_ADMIN;
+  return (
+    normalized === UserRole.SUPER_ADMIN ||
+    normalized === UserRole.PLATFORM_SUPER_ADMIN ||
+    normalized === UserRole.LICENSEE_ADMIN ||
+    normalized === UserRole.ORG_ADMIN
+  );
 };
 
 const isFromRejectedError = (error: any) => {
@@ -284,9 +303,12 @@ const resolveActorUser = async (actorUser?: IncidentEmailActorUser | null) => {
 };
 
 const getPrimarySuperadminEmail = async () => {
+  const fromEnv = getPreferredSuperadminEmailFromEnv();
+  if (fromEnv) return fromEnv;
+
   const primary = await prisma.user.findFirst({
     where: {
-      role: UserRole.SUPER_ADMIN,
+      role: { in: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN] },
       isActive: true,
       deletedAt: null,
     },
@@ -504,11 +526,17 @@ export const getSuperadminAlertEmails = async (): Promise<string[]> => {
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
 
-  if (fromEnv.length > 0) return Array.from(new Set(fromEnv));
+  const explicitPrimary = getPreferredSuperadminEmailFromEnv();
+
+  if (fromEnv.length > 0) {
+    return Array.from(new Set([...(explicitPrimary ? [explicitPrimary] : []), ...fromEnv]));
+  }
+
+  if (explicitPrimary) return [explicitPrimary];
 
   const users = await prisma.user.findMany({
     where: {
-      role: UserRole.SUPER_ADMIN,
+      role: { in: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN] },
       isActive: true,
       deletedAt: null,
     },

@@ -12,6 +12,9 @@ import prisma from "../config/database";
 import { createAuditLog } from "./auditService";
 import { deviceFingerprintFromRequest, sha256Hash } from "./securityHashService";
 import { reverseGeocode } from "./locationService";
+import { evaluatePolicyRulesForIncidentVolume } from "./ir/policyRuleEngineService";
+import { ensureIncidentWorkflowArtifacts } from "./supportWorkflowService";
+import { notifyIncidentLifecycle } from "./notificationService";
 
 type IncidentReportInput = {
   qrCodeValue: string;
@@ -128,7 +131,10 @@ export const normalizeCustomerContact = (input: {
 };
 
 export const isIncidentAdminRole = (role: UserRole) =>
-  role === UserRole.SUPER_ADMIN || role === UserRole.LICENSEE_ADMIN;
+  role === UserRole.SUPER_ADMIN ||
+  role === UserRole.PLATFORM_SUPER_ADMIN ||
+  role === UserRole.LICENSEE_ADMIN ||
+  role === UserRole.ORG_ADMIN;
 
 const computeSpamSignal = async (input: { email?: string | null; phone?: string | null }) => {
   const maxPerHour = Number(process.env.INCIDENT_SPAM_MAX_PER_HOUR || "5");
@@ -363,12 +369,47 @@ export const createIncidentFromReport = async (
     },
   });
 
+  // IR volume rules - best effort and never block incident creation.
+  try {
+    await evaluatePolicyRulesForIncidentVolume({
+      incidentId: incident.id,
+      licenseeId: incident.licenseeId || null,
+    });
+  } catch (e) {
+    console.error("evaluatePolicyRulesForIncidentVolume failed:", e);
+  }
+
+  // Workflow artifacts and role-aware notifications are best-effort.
+  try {
+    await ensureIncidentWorkflowArtifacts({
+      incidentId: incident.id,
+      actorUserId: actor.actorUserId || null,
+      actorType: actor.actorType,
+      emitEvents: false,
+    });
+
+    await notifyIncidentLifecycle({
+      incidentId: incident.id,
+      licenseeId: incident.licenseeId || null,
+      type: "incident_created",
+      title: `New incident ${incident.id.slice(0, 8)}`,
+      body: `Incident ${incident.id} has entered intake with severity ${incident.severity}.`,
+      data: {
+        severity: incident.severity,
+        status: incident.status,
+        qrCodeValue: incident.qrCodeValue,
+      },
+    });
+  } catch (e) {
+    console.error("Incident workflow/notification setup failed:", e);
+  }
+
   return incident;
 };
 
 export const getIncidentByIdScoped = async (incidentId: string, actor: { role: UserRole; licenseeId?: string | null }) => {
   const where: any = { id: incidentId };
-  if (actor.role !== UserRole.SUPER_ADMIN) {
+  if (actor.role !== UserRole.SUPER_ADMIN && actor.role !== UserRole.PLATFORM_SUPER_ADMIN) {
     where.licenseeId = actor.licenseeId || "__none__";
   }
 
@@ -376,6 +417,18 @@ export const getIncidentByIdScoped = async (incidentId: string, actor: { role: U
     where,
     include: {
       assignedToUser: { select: { id: true, name: true, email: true } },
+      handoff: true,
+      supportTicket: {
+        include: {
+          messages: {
+            orderBy: { createdAt: "desc" },
+            take: 50,
+            include: {
+              actorUser: { select: { id: true, name: true, email: true } },
+            },
+          },
+        },
+      },
       events: {
         orderBy: { createdAt: "asc" },
         include: { actorUser: { select: { id: true, name: true, email: true } } },
@@ -403,7 +456,7 @@ export const listIncidentsScoped = async (input: {
   };
 }) => {
   const where: any = {};
-  if (input.role !== UserRole.SUPER_ADMIN) {
+  if (input.role !== UserRole.SUPER_ADMIN && input.role !== UserRole.PLATFORM_SUPER_ADMIN) {
     where.licenseeId = input.actorLicenseeId || "__none__";
   } else if (input.filters.licenseeId) {
     where.licenseeId = input.filters.licenseeId;
@@ -438,6 +491,15 @@ export const listIncidentsScoped = async (input: {
       skip: input.filters.offset,
       include: {
         assignedToUser: { select: { id: true, name: true, email: true } },
+        handoff: true,
+        supportTicket: {
+          select: {
+            id: true,
+            referenceCode: true,
+            status: true,
+            slaDueAt: true,
+          },
+        },
         evidence: {
           orderBy: { createdAt: "desc" },
           take: 3,
@@ -464,12 +526,17 @@ export const sanitizeIncidentStatus = (value?: string | null): IncidentStatus | 
   if (!normalized) return null;
   if (normalized === "NEW") return IncidentStatus.NEW;
   if (normalized === "TRIAGED") return IncidentStatus.TRIAGED;
+  if (normalized === "TRIAGE") return IncidentStatus.TRIAGE;
   if (normalized === "INVESTIGATING") return IncidentStatus.INVESTIGATING;
+  if (normalized === "CONTAINMENT") return IncidentStatus.CONTAINMENT;
+  if (normalized === "ERADICATION") return IncidentStatus.ERADICATION;
+  if (normalized === "RECOVERY") return IncidentStatus.RECOVERY;
   if (normalized === "AWAITING_CUSTOMER") return IncidentStatus.AWAITING_CUSTOMER;
   if (normalized === "AWAITING_LICENSEE") return IncidentStatus.AWAITING_LICENSEE;
   if (normalized === "MITIGATED") return IncidentStatus.MITIGATED;
   if (normalized === "RESOLVED") return IncidentStatus.RESOLVED;
   if (normalized === "CLOSED") return IncidentStatus.CLOSED;
+  if (normalized === "REOPENED") return IncidentStatus.REOPENED;
   if (normalized === "REJECTED_SPAM") return IncidentStatus.REJECTED_SPAM;
   return null;
 };
@@ -509,12 +576,17 @@ export const toHumanIncidentStatus = (status: IncidentStatus) => {
   const map: Record<IncidentStatus, string> = {
     NEW: "New",
     TRIAGED: "Triaged",
+    TRIAGE: "Triage",
     INVESTIGATING: "Investigating",
+    CONTAINMENT: "Containment",
+    ERADICATION: "Eradication",
+    RECOVERY: "Recovery",
     AWAITING_CUSTOMER: "Awaiting customer",
     AWAITING_LICENSEE: "Awaiting licensee",
     MITIGATED: "Mitigated",
     RESOLVED: "Resolved",
     CLOSED: "Closed",
+    REOPENED: "Reopened",
     REJECTED_SPAM: "Rejected as spam",
   };
   return map[status] || status;

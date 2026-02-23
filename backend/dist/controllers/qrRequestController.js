@@ -9,6 +9,7 @@ const client_1 = require("@prisma/client");
 const database_1 = __importDefault(require("../config/database"));
 const auditService_1 = require("../services/auditService");
 const qrAllocationService_1 = require("../services/qrAllocationService");
+const notificationService_1 = require("../services/notificationService");
 const createRequestSchema = zod_1.z
     .object({
     quantity: zod_1.z.number().int().positive().max(5_000_000),
@@ -32,14 +33,17 @@ const createQrAllocationRequest = async (req, res) => {
         const auth = ensureAuth(req);
         if (!auth)
             return res.status(401).json({ success: false, error: "Not authenticated" });
-        if (auth.role !== client_1.UserRole.LICENSEE_ADMIN && auth.role !== client_1.UserRole.SUPER_ADMIN) {
+        if (auth.role !== client_1.UserRole.LICENSEE_ADMIN &&
+            auth.role !== client_1.UserRole.ORG_ADMIN &&
+            auth.role !== client_1.UserRole.SUPER_ADMIN &&
+            auth.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
         const parsed = createRequestSchema.safeParse(req.body);
         if (!parsed.success) {
             return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
         }
-        const licenseeId = auth.role === client_1.UserRole.SUPER_ADMIN
+        const licenseeId = auth.role === client_1.UserRole.SUPER_ADMIN || auth.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
             ? req.body?.licenseeId
             : req.user?.licenseeId;
         if (!licenseeId) {
@@ -67,6 +71,37 @@ const createQrAllocationRequest = async (req, res) => {
             },
             ipAddress: req.ip,
         });
+        await Promise.all([
+            (0, notificationService_1.createRoleNotifications)({
+                audience: client_1.NotificationAudience.SUPER_ADMIN,
+                type: "qr_request_created",
+                title: "New QR inventory request",
+                body: `Request ${created.id.slice(0, 8)} for ${created.quantity || 0} codes is pending review.`,
+                data: {
+                    requestId: created.id,
+                    licenseeId,
+                    quantity: created.quantity,
+                    status: created.status,
+                    targetRoute: "/qr-requests",
+                },
+                channels: [client_1.NotificationChannel.WEB],
+            }),
+            (0, notificationService_1.createRoleNotifications)({
+                audience: client_1.NotificationAudience.LICENSEE_ADMIN,
+                licenseeId,
+                type: "qr_request_created",
+                title: "QR inventory request submitted",
+                body: `Request ${created.id.slice(0, 8)} was submitted for ${created.quantity || 0} codes.`,
+                data: {
+                    requestId: created.id,
+                    licenseeId,
+                    quantity: created.quantity,
+                    status: created.status,
+                    targetRoute: "/qr-requests",
+                },
+                channels: [client_1.NotificationChannel.WEB],
+            }),
+        ]);
         return res.status(201).json({ success: true, data: created });
     }
     catch (e) {
@@ -80,7 +115,10 @@ const getQrAllocationRequests = async (req, res) => {
         const auth = ensureAuth(req);
         if (!auth)
             return res.status(401).json({ success: false, error: "Not authenticated" });
-        if (auth.role !== client_1.UserRole.LICENSEE_ADMIN && auth.role !== client_1.UserRole.SUPER_ADMIN) {
+        if (auth.role !== client_1.UserRole.LICENSEE_ADMIN &&
+            auth.role !== client_1.UserRole.ORG_ADMIN &&
+            auth.role !== client_1.UserRole.SUPER_ADMIN &&
+            auth.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
         const status = req.query.status || undefined;
@@ -88,7 +126,7 @@ const getQrAllocationRequests = async (req, res) => {
         const where = {};
         if (status)
             where.status = status;
-        if (auth.role === client_1.UserRole.SUPER_ADMIN) {
+        if (auth.role === client_1.UserRole.SUPER_ADMIN || auth.role === client_1.UserRole.PLATFORM_SUPER_ADMIN) {
             if (qLicenseeId)
                 where.licenseeId = qLicenseeId;
         }
@@ -121,7 +159,7 @@ const approveQrAllocationRequest = async (req, res) => {
         const auth = ensureAuth(req);
         if (!auth)
             return res.status(401).json({ success: false, error: "Not authenticated" });
-        if (auth.role !== client_1.UserRole.SUPER_ADMIN) {
+        if (auth.role !== client_1.UserRole.SUPER_ADMIN && auth.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
         const parsed = approveSchema.safeParse(req.body);
@@ -190,6 +228,52 @@ const approveQrAllocationRequest = async (req, res) => {
             },
             ipAddress: req.ip,
         });
+        await Promise.all([
+            (0, notificationService_1.createRoleNotifications)({
+                audience: client_1.NotificationAudience.SUPER_ADMIN,
+                type: "qr_request_approved",
+                title: "QR request approved",
+                body: `Request ${requestRow.id.slice(0, 8)} approved for ${quantityRequested} codes.`,
+                data: {
+                    requestId: requestRow.id,
+                    licenseeId: requestRow.licenseeId,
+                    quantity: quantityRequested,
+                    status: "APPROVED",
+                    targetRoute: "/qr-requests",
+                },
+                channels: [client_1.NotificationChannel.WEB],
+            }),
+            (0, notificationService_1.createRoleNotifications)({
+                audience: client_1.NotificationAudience.LICENSEE_ADMIN,
+                licenseeId: requestRow.licenseeId,
+                type: "qr_request_approved",
+                title: "QR request approved",
+                body: `Request ${requestRow.id.slice(0, 8)} is approved and inventory has been allocated.`,
+                data: {
+                    requestId: requestRow.id,
+                    licenseeId: requestRow.licenseeId,
+                    quantity: quantityRequested,
+                    status: "APPROVED",
+                    targetRoute: "/qr-requests",
+                },
+                channels: [client_1.NotificationChannel.WEB],
+            }),
+            (0, notificationService_1.createUserNotification)({
+                userId: requestRow.requestedByUserId,
+                licenseeId: requestRow.licenseeId,
+                type: "qr_request_approved",
+                title: "Your QR request was approved",
+                body: `Request ${requestRow.id.slice(0, 8)} was approved for ${quantityRequested} codes.`,
+                data: {
+                    requestId: requestRow.id,
+                    licenseeId: requestRow.licenseeId,
+                    quantity: quantityRequested,
+                    status: "APPROVED",
+                    targetRoute: "/qr-requests",
+                },
+                channel: client_1.NotificationChannel.WEB,
+            }),
+        ]);
         return res.json({ success: true, data: result.updated });
     }
     catch (e) {
@@ -207,7 +291,7 @@ const rejectQrAllocationRequest = async (req, res) => {
         const auth = ensureAuth(req);
         if (!auth)
             return res.status(401).json({ success: false, error: "Not authenticated" });
-        if (auth.role !== client_1.UserRole.SUPER_ADMIN) {
+        if (auth.role !== client_1.UserRole.SUPER_ADMIN && auth.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
         const parsed = rejectSchema.safeParse(req.body || {});
@@ -239,6 +323,52 @@ const rejectQrAllocationRequest = async (req, res) => {
             details: { decisionNote: parsed.data.decisionNote?.trim() || null },
             ipAddress: req.ip,
         });
+        await Promise.all([
+            (0, notificationService_1.createRoleNotifications)({
+                audience: client_1.NotificationAudience.SUPER_ADMIN,
+                type: "qr_request_rejected",
+                title: "QR request rejected",
+                body: `Request ${id.slice(0, 8)} was rejected.`,
+                data: {
+                    requestId: id,
+                    licenseeId: requestRow.licenseeId,
+                    status: "REJECTED",
+                    decisionNote: parsed.data.decisionNote?.trim() || null,
+                    targetRoute: "/qr-requests",
+                },
+                channels: [client_1.NotificationChannel.WEB],
+            }),
+            (0, notificationService_1.createRoleNotifications)({
+                audience: client_1.NotificationAudience.LICENSEE_ADMIN,
+                licenseeId: requestRow.licenseeId,
+                type: "qr_request_rejected",
+                title: "QR request rejected",
+                body: `Request ${id.slice(0, 8)} was rejected. Review decision note and resubmit if needed.`,
+                data: {
+                    requestId: id,
+                    licenseeId: requestRow.licenseeId,
+                    status: "REJECTED",
+                    decisionNote: parsed.data.decisionNote?.trim() || null,
+                    targetRoute: "/qr-requests",
+                },
+                channels: [client_1.NotificationChannel.WEB],
+            }),
+            (0, notificationService_1.createUserNotification)({
+                userId: requestRow.requestedByUserId,
+                licenseeId: requestRow.licenseeId,
+                type: "qr_request_rejected",
+                title: "Your QR request was rejected",
+                body: `Request ${id.slice(0, 8)} was rejected. Review notes and update your request.`,
+                data: {
+                    requestId: id,
+                    licenseeId: requestRow.licenseeId,
+                    status: "REJECTED",
+                    decisionNote: parsed.data.decisionNote?.trim() || null,
+                    targetRoute: "/qr-requests",
+                },
+                channel: client_1.NotificationChannel.WEB,
+            }),
+        ]);
         return res.json({ success: true, data: updated });
     }
     catch (e) {

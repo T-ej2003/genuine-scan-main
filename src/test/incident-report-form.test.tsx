@@ -11,8 +11,11 @@ vi.mock("@/lib/api-client", () => ({
     verifyQRCode: vi.fn(),
     scanToken: vi.fn(),
     submitIncidentReport: vi.fn(),
+    submitFraudReport: vi.fn(),
     submitProductFeedback: vi.fn(),
     reportFraud: vi.fn(),
+    captureRouteTransition: vi.fn(() => Promise.resolve({ success: true })),
+    trackSupportTicket: vi.fn(),
   },
 }));
 
@@ -49,9 +52,9 @@ describe("Incident report form", () => {
       </React.StrictMode>
     );
 
-    expect(await screen.findByText("Previously Redeemed")).toBeTruthy();
-    fireEvent.click(screen.getByText("Report Fraud"));
+    expect(await screen.findByText("Report suspected counterfeit")).toBeTruthy();
+    fireEvent.click(screen.getByText("Report suspected counterfeit"));
     fireEvent.click(screen.getByText("Submit report"));
-    expect(vi.mocked(apiClient.submitIncidentReport)).toHaveBeenCalledTimes(0);
+    expect(vi.mocked(apiClient.submitFraudReport)).toHaveBeenCalledTimes(0);
   });
 });

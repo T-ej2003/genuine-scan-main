@@ -23,9 +23,12 @@ export declare const recordScan: (code: string, meta?: {
             name: string;
             location: string | null;
             website: string | null;
+            orgId: string;
             isActive: boolean;
             createdAt: Date;
             updatedAt: Date;
+            suspendedAt: Date | null;
+            suspendedReason: string | null;
             prefix: string;
             description: string | null;
             brandName: string | null;
@@ -51,18 +54,20 @@ export declare const recordScan: (code: string, meta?: {
             endCode: string;
             totalCodes: number;
             printedAt: Date | null;
+            suspendedAt: Date | null;
+            suspendedReason: string | null;
             printPackDownloadedAt: Date | null;
             printPackDownloadedByUserId: string | null;
         }) | null;
     } & {
         id: string;
         licenseeId: string;
+        status: import(".prisma/client").$Enums.QRStatus;
         createdAt: Date;
         updatedAt: Date;
         batchId: string | null;
         printedAt: Date | null;
         code: string;
-        status: import(".prisma/client").$Enums.QRStatus;
         scannedAt: Date | null;
         scanCount: number;
         printedByUserId: string | null;
@@ -72,6 +77,8 @@ export declare const recordScan: (code: string, meta?: {
         lastScanUserAgent: string | null;
         lastScanDevice: string | null;
         blockedAt: Date | null;
+        underInvestigationAt: Date | null;
+        underInvestigationReason: string | null;
         tokenNonce: string | null;
         tokenIssuedAt: Date | null;
         tokenExpiresAt: Date | null;

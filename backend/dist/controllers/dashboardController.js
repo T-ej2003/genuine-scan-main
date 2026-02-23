@@ -15,7 +15,9 @@ const getDashboardStats = async (req, res) => {
             return res.status(401).json({ success: false, error: "Not authenticated" });
         }
         // SUPER_ADMIN can optionally scope by ?licenseeId=
-        const scopeLicenseeId = role === client_1.UserRole.SUPER_ADMIN ? (req.query.licenseeId || null) : licenseeId;
+        const scopeLicenseeId = role === client_1.UserRole.SUPER_ADMIN || role === client_1.UserRole.PLATFORM_SUPER_ADMIN
+            ? (req.query.licenseeId || null)
+            : licenseeId;
         const qrWhere = {};
         const batchWhere = {};
         // Manufacturers count:
@@ -23,8 +25,13 @@ const getDashboardStats = async (req, res) => {
         // - SUPER_ADMIN (scoped): manufacturers inside that licensee
         // - LICENSEE_ADMIN: manufacturers in own licensee
         // - MANUFACTURER: only self (personal scope)
-        const mfgWhere = { role: client_1.UserRole.MANUFACTURER, isActive: true };
-        if (role === client_1.UserRole.MANUFACTURER) {
+        const mfgWhere = {
+            role: { in: [client_1.UserRole.MANUFACTURER, client_1.UserRole.MANUFACTURER_ADMIN, client_1.UserRole.MANUFACTURER_USER] },
+            isActive: true,
+        };
+        if (role === client_1.UserRole.MANUFACTURER ||
+            role === client_1.UserRole.MANUFACTURER_ADMIN ||
+            role === client_1.UserRole.MANUFACTURER_USER) {
             batchWhere.manufacturerId = userId;
             qrWhere.batch = { manufacturerId: userId };
             mfgWhere.id = userId;
@@ -36,7 +43,7 @@ const getDashboardStats = async (req, res) => {
         }
         const [totalQRCodes, activeLicensees, manufacturers, totalBatches,] = await Promise.all([
             database_1.default.qRCode.count({ where: qrWhere }),
-            role === client_1.UserRole.SUPER_ADMIN
+            role === client_1.UserRole.SUPER_ADMIN || role === client_1.UserRole.PLATFORM_SUPER_ADMIN
                 ? database_1.default.licensee.count({ where: { ...(scopeLicenseeId ? { id: scopeLicenseeId } : {}), isActive: true } })
                 : scopeLicenseeId
                     ? database_1.default.licensee.count({ where: { id: scopeLicenseeId, isActive: true } })

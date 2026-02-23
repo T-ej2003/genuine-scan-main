@@ -7,8 +7,14 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import HelpAssistantWidget from "@/components/help/HelpAssistantWidget";
+import { getRoleHelpHome } from "@/help/contextual-help";
+import RouteMetricsTracker from "@/components/RouteMetricsTracker";
 
 const Login = lazy(() => import("@/pages/Login"));
+const AcceptInvite = lazy(() => import("@/pages/AcceptInvite"));
+const ForgotPassword = lazy(() => import("@/pages/ForgotPassword"));
+const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Licensees = lazy(() => import("@/pages/Licensees"));
 const QRCodes = lazy(() => import("@/pages/QRCodes"));
@@ -18,10 +24,30 @@ const QRTracking = lazy(() => import("@/pages/QRTracking"));
 const Manufacturers = lazy(() => import("@/pages/Manufacturers"));
 const AuditLogs = lazy(() => import("@/pages/AuditLogs"));
 const Incidents = lazy(() => import("@/pages/Incidents"));
+const IR = lazy(() => import("@/pages/IR"));
+const IRIncidentDetail = lazy(() => import("@/pages/IRIncidentDetail"));
+const SupportCenter = lazy(() => import("@/pages/SupportCenter"));
+const Governance = lazy(() => import("@/pages/Governance"));
 const Verify = lazy(() => import("@/pages/Verify"));
 const VerifyLanding = lazy(() => import("@/pages/VerifyLanding"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 const AccountSettings = lazy(() => import("@/pages/AccountSettings"));
+const HelpHub = lazy(() => import("@/pages/help/HelpHub"));
+const HelpAuthOverview = lazy(() => import("@/pages/help/AuthOverview"));
+const HelpGettingAccess = lazy(() => import("@/pages/help/GettingAccess"));
+const HelpSettingPassword = lazy(() => import("@/pages/help/SettingPassword"));
+const HelpRolesPermissions = lazy(() => import("@/pages/help/RolesPermissions"));
+const HelpSuperAdmin = lazy(() => import("@/pages/help/SuperAdmin"));
+const HelpLicenseeAdmin = lazy(() => import("@/pages/help/LicenseeAdmin"));
+const HelpManufacturer = lazy(() => import("@/pages/help/Manufacturer"));
+const HelpCustomer = lazy(() => import("@/pages/help/Customer"));
+const HelpIncidentResponse = lazy(() => import("@/pages/help/IncidentResponse"));
+const HelpPolicyAlerts = lazy(() => import("@/pages/help/PolicyAlerts"));
+const HelpIncidentActions = lazy(() => import("@/pages/help/IncidentActions"));
+const HelpCommunications = lazy(() => import("@/pages/help/Communications"));
+const HelpSupport = lazy(() => import("@/pages/help/Support"));
+const HelpGovernance = lazy(() => import("@/pages/help/Governance"));
+const HelpIncidents = lazy(() => import("@/pages/help/Incidents"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -81,6 +107,33 @@ function RootRoute() {
   return <Navigate to={isAuthenticated ? "/dashboard" : "/verify"} replace />;
 }
 
+function HelpRoleRoute({
+  children,
+  allowedRoles,
+  allowPublic = true,
+}: {
+  children: React.ReactNode;
+  allowedRoles?: string[];
+  allowPublic?: boolean;
+}) {
+  const { user, isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) return <LoadingScreen />;
+
+  if (!isAuthenticated) {
+    if (allowPublic) return <>{children}</>;
+    return <Navigate to="/help/customer" replace />;
+  }
+
+  if (user?.role === "super_admin") return <>{children}</>;
+
+  if (allowedRoles && user && !allowedRoles.includes(user.role)) {
+    return <Navigate to={getRoleHelpHome(user.role)} replace />;
+  }
+
+  return <>{children}</>;
+}
+
 /* =========================
    Routes
 ========================= */
@@ -93,6 +146,129 @@ function AppRoutes() {
         <Route path="/verify" element={<VerifyLanding />} />
         <Route path="/verify/:code" element={<Verify />} />
         <Route path="/scan" element={<Verify />} />
+        <Route path="/help" element={<HelpHub />} />
+        <Route
+          path="/help/auth-overview"
+          element={
+            <HelpRoleRoute>
+              <HelpAuthOverview />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/getting-access"
+          element={
+            <HelpRoleRoute>
+              <HelpGettingAccess />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/setting-password"
+          element={
+            <HelpRoleRoute>
+              <HelpSettingPassword />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/roles-permissions"
+          element={
+            <HelpRoleRoute>
+              <HelpRolesPermissions />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/super-admin"
+          element={
+            <HelpRoleRoute allowedRoles={["super_admin"]} allowPublic={false}>
+              <HelpSuperAdmin />
+            </HelpRoleRoute>
+          }
+        />
+        <Route path="/help/superadmin" element={<Navigate to="/help/super-admin" replace />} />
+        <Route
+          path="/help/licensee-admin"
+          element={
+            <HelpRoleRoute allowedRoles={["licensee_admin"]} allowPublic={false}>
+              <HelpLicenseeAdmin />
+            </HelpRoleRoute>
+          }
+        />
+        <Route path="/help/licensee" element={<Navigate to="/help/licensee-admin" replace />} />
+        <Route
+          path="/help/manufacturer"
+          element={
+            <HelpRoleRoute allowedRoles={["manufacturer"]} allowPublic={false}>
+              <HelpManufacturer />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/customer"
+          element={
+            <HelpRoleRoute allowPublic={true}>
+              <HelpCustomer />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/incident-response"
+          element={
+            <HelpRoleRoute allowedRoles={["super_admin"]} allowPublic={false}>
+              <HelpIncidentResponse />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/policy-alerts"
+          element={
+            <HelpRoleRoute allowedRoles={["super_admin"]} allowPublic={false}>
+              <HelpPolicyAlerts />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/incident-actions"
+          element={
+            <HelpRoleRoute allowedRoles={["super_admin"]} allowPublic={false}>
+              <HelpIncidentActions />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/communications"
+          element={
+            <HelpRoleRoute allowedRoles={["super_admin"]} allowPublic={false}>
+              <HelpCommunications />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/support"
+          element={
+            <HelpRoleRoute allowedRoles={["super_admin"]} allowPublic={false}>
+              <HelpSupport />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/governance"
+          element={
+            <HelpRoleRoute allowedRoles={["super_admin"]} allowPublic={false}>
+              <HelpGovernance />
+            </HelpRoleRoute>
+          }
+        />
+        <Route
+          path="/help/incidents"
+          element={
+            <HelpRoleRoute allowedRoles={["super_admin"]} allowPublic={false}>
+              <HelpIncidents />
+            </HelpRoleRoute>
+          }
+        />
 
         {/* Auth */}
         <Route
@@ -100,6 +276,30 @@ function AppRoutes() {
           element={
             <AuthRoute>
               <Login />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/accept-invite"
+          element={
+            <AuthRoute>
+              <AcceptInvite />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/forgot-password"
+          element={
+            <AuthRoute>
+              <ForgotPassword />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/reset-password"
+          element={
+            <AuthRoute>
+              <ResetPassword />
             </AuthRoute>
           }
         />
@@ -182,8 +382,44 @@ function AppRoutes() {
         <Route
           path="/incidents"
           element={
-            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
+            <ProtectedRoute allowedRoles={["super_admin"]}>
               <Incidents />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/support"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin"]}>
+              <SupportCenter />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/governance"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin"]}>
+              <Governance />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/ir"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin"]}>
+              <IR />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/ir/incidents/:id"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin"]}>
+              <IRIncidentDetail />
             </ProtectedRoute>
           }
         />
@@ -218,6 +454,8 @@ export default function App() {
             }}
           >
             <AppRoutes />
+            <RouteMetricsTracker />
+            <HelpAssistantWidget />
           </BrowserRouter>
         </TooltipProvider>
       </AuthProvider>

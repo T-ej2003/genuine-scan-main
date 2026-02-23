@@ -1,1 +1,1 @@
-{"version":3,"file":"scanController.d.ts","sourceRoot":"","sources":["../../src/controllers/scanController.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,OAAO,EAAE,QAAQ,EAAE,MAAM,SAAS,CAAC;AAqC5C,eAAO,MAAM,SAAS,GAAU,KAAK,OAAO,EAAE,KAAK,QAAQ,gDA4T1D,CAAC"}
+{"version":3,"file":"scanController.d.ts","sourceRoot":"","sources":["../../src/controllers/scanController.ts"],"names":[],"mappings":"AAAA,OAAO,EAAW,QAAQ,EAAE,MAAM,SAAS,CAAC;AAU5C,OAAO,EAAE,qBAAqB,EAAE,MAAM,kCAAkC,CAAC;AA6FzE,eAAO,MAAM,SAAS,GAAU,KAAK,qBAAqB,EAAE,KAAK,QAAQ,gDAqaxE,CAAC"}

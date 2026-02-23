@@ -43,6 +43,8 @@ import {
   Download,
   UserPlus,
   QrCode,
+  Link2,
+  Send,
 } from "lucide-react";
 
 import {
@@ -86,6 +88,24 @@ type LicenseeRow = {
     totalCodes: number;
     createdAt: string;
   } | null;
+  adminOnboarding?: {
+    state?: "PENDING" | "ACTIVE" | "UNASSIGNED";
+    adminUser?: {
+      id: string;
+      name: string;
+      email: string;
+      role: string;
+      status?: string;
+      isActive?: boolean;
+      createdAt?: string;
+    } | null;
+    pendingInvite?: {
+      id: string;
+      email: string;
+      expiresAt?: string;
+      createdAt?: string;
+    } | null;
+  } | null;
 };
 
 type CreateLicenseeForm = {
@@ -104,6 +124,7 @@ type CreateLicenseeForm = {
   adminName: string;
   adminEmail: string;
   adminPassword: string;
+  adminSendInvite: boolean;
 
   // QR Range
   rangeStart: string;
@@ -111,6 +132,7 @@ type CreateLicenseeForm = {
 
   // Optional: create manufacturer now
   createManufacturerNow: boolean;
+  manufacturerAccessMode: "invite" | "password";
   manufacturerName: string;
   manufacturerEmail: string;
   manufacturerPassword: string;
@@ -188,6 +210,8 @@ export default function Licensees() {
   // Create Licensee dialog
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [latestInviteLink, setLatestInviteLink] = useState<string>("");
+  const [inviteActionLoadingId, setInviteActionLoadingId] = useState<string>("");
   const [createForm, setCreateForm] = useState<CreateLicenseeForm>({
     name: "",
     prefix: "A",
@@ -202,15 +226,40 @@ export default function Licensees() {
     adminName: "",
     adminEmail: "",
     adminPassword: "",
+    adminSendInvite: true,
 
     rangeStart: "1",
     rangeEnd: "150000",
 
     createManufacturerNow: true,
+    manufacturerAccessMode: "invite",
     manufacturerName: "",
     manufacturerEmail: "",
     manufacturerPassword: "",
   });
+  const isCreateFormDirty = useMemo(() => {
+    return (
+      createForm.name.trim() !== "" ||
+      createForm.prefix.trim().toUpperCase() !== "A" ||
+      createForm.description.trim() !== "" ||
+      createForm.brandName.trim() !== "" ||
+      createForm.location.trim() !== "" ||
+      createForm.website.trim() !== "" ||
+      createForm.supportEmail.trim() !== "" ||
+      createForm.supportPhone.trim() !== "" ||
+      createForm.adminName.trim() !== "" ||
+      createForm.adminEmail.trim() !== "" ||
+      createForm.adminPassword.trim() !== "" ||
+      createForm.adminSendInvite !== true ||
+      String(createForm.rangeStart).trim() !== "1" ||
+      String(createForm.rangeEnd).trim() !== "150000" ||
+      createForm.createManufacturerNow !== true ||
+      createForm.manufacturerAccessMode !== "invite" ||
+      createForm.manufacturerName.trim() !== "" ||
+      createForm.manufacturerEmail.trim() !== "" ||
+      createForm.manufacturerPassword.trim() !== ""
+    );
+  }, [createForm]);
 
   // Edit Licensee dialog
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -221,6 +270,7 @@ export default function Licensees() {
   const [isUserOpen, setIsUserOpen] = useState(false);
   const [creatingUser, setCreatingUser] = useState(false);
   const [userForm, setUserForm] = useState<CreateUserForm | null>(null);
+  const [userCreateMode, setUserCreateMode] = useState<"invite" | "password">("invite");
 
   // Allocate QR range dialog (existing licensee)
   const [rangeOpen, setRangeOpen] = useState(false);
@@ -293,6 +343,63 @@ export default function Licensees() {
     }
   };
 
+  const copyInviteLink = async (inviteLink: string, toastTitle: string) => {
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      toast({ title: toastTitle, description: "Invite link copied to clipboard." });
+    } catch {
+      toast({
+        title: "Copy failed",
+        description: "Could not access clipboard. Copy the link manually from the dialog.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const resendAdminInvite = async (licensee: LicenseeRow, opts?: { copyOnly?: boolean }) => {
+    const adminEmail = licensee.adminOnboarding?.adminUser?.email || licensee.adminOnboarding?.pendingInvite?.email;
+    if (!adminEmail) {
+      toast({
+        title: "No admin email found",
+        description: "This licensee does not have an admin account to invite yet.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setInviteActionLoadingId(licensee.id);
+    const res = await apiClient.resendLicenseeAdminInvite(licensee.id, adminEmail);
+    setInviteActionLoadingId("");
+
+    if (!res.success) {
+      toast({
+        title: "Invite action failed",
+        description: res.error || "Could not generate invite link.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const data: any = res.data || {};
+    const inviteLink = String(data.inviteLink || "").trim();
+    if (inviteLink) {
+      setLatestInviteLink(inviteLink);
+      if (opts?.copyOnly) {
+        await copyInviteLink(inviteLink, "Invite link copied");
+      }
+    }
+
+    toast({
+      title: opts?.copyOnly ? "Invite link generated" : "Invite resent",
+      description:
+        data.emailDelivered === false
+          ? "Email provider not configured. Use the copied invite link to onboard manually."
+          : `Invite sent to ${adminEmail}.`,
+    });
+
+    await load();
+  };
+
   /* ===================== CREATE LICENSEE FLOW ===================== */
 
   const resetCreateForm = () => {
@@ -310,15 +417,28 @@ export default function Licensees() {
       adminName: "",
       adminEmail: "",
       adminPassword: "",
+      adminSendInvite: true,
 
       rangeStart: "1",
       rangeEnd: "150000",
 
       createManufacturerNow: true,
+      manufacturerAccessMode: "invite",
       manufacturerName: "",
       manufacturerEmail: "",
       manufacturerPassword: "",
     });
+  };
+
+  const handleCreateDialogOpenChange = (open: boolean) => {
+    if (!open && !creating && isCreateFormDirty) {
+      const shouldDiscard = window.confirm("Discard unsaved licensee setup changes?");
+      if (!shouldDiscard) return;
+    }
+    if (!open && !creating) {
+      resetCreateForm();
+    }
+    setIsCreateOpen(open);
   };
 
   const onCreateSubmit = async (e: React.FormEvent) => {
@@ -332,6 +452,7 @@ export default function Licensees() {
     const adminName = createForm.adminName.trim();
     const adminEmail = createForm.adminEmail.trim().toLowerCase();
     const adminPassword = createForm.adminPassword.trim();
+    const adminSendInvite = createForm.adminSendInvite;
 
     const rangeStart = toInt(createForm.rangeStart);
     const rangeEnd = toInt(createForm.rangeEnd);
@@ -350,11 +471,12 @@ export default function Licensees() {
       return;
     }
 
-    // Backend requires admin credentials for licensee creation
-    if (!adminName || !adminEmail || adminPassword.length < 6) {
+    if (!adminName || !adminEmail || (!adminSendInvite && adminPassword.length < 6)) {
       toast({
         title: "Admin details required",
-        description: "Admin Name, Email and Password (min 6 chars) are required.",
+        description: adminSendInvite
+          ? "Admin name and email are required for invite mode."
+          : "Admin name, email, and password (min 6 chars) are required.",
         variant: "destructive",
       });
       return;
@@ -375,12 +497,16 @@ export default function Licensees() {
     const mfgName = createForm.manufacturerName.trim();
     const mfgEmail = createForm.manufacturerEmail.trim().toLowerCase();
     const mfgPass = createForm.manufacturerPassword.trim();
+    const mfgAccessMode = createForm.manufacturerAccessMode || "invite";
 
     if (wantMfg) {
-      if (!mfgName || !mfgEmail || mfgPass.length < 6) {
+      const needsPassword = mfgAccessMode === "password";
+      if (!mfgName || !mfgEmail || (needsPassword && mfgPass.length < 6)) {
         toast({
           title: "Manufacturer details missing",
-          description: "Provide Manufacturer Name, Email, and Password (min 6 chars).",
+          description: needsPassword
+            ? "Provide Manufacturer Name, Email, and Password (min 6 chars)."
+            : "Provide Manufacturer Name and Email.",
           variant: "destructive",
         });
         return;
@@ -400,6 +526,7 @@ export default function Licensees() {
     }
 
     setCreating(true);
+    setLatestInviteLink("");
 
     try {
       // 1) Create licensee WITH admin (exact backend format)
@@ -408,7 +535,7 @@ export default function Licensees() {
           value: 18,
           indeterminate: false,
           phaseLabel: "Tenant setup",
-          detail: "Creating licensee and admin account...",
+          detail: adminSendInvite ? "Creating licensee and secure invite..." : "Creating licensee and admin account...",
         });
       }
       const createRes = await apiClient.createLicenseeWithAdmin({
@@ -426,11 +553,15 @@ export default function Licensees() {
         admin: {
           name: adminName,
           email: adminEmail,
-          password: adminPassword,
+          password: adminSendInvite ? undefined : adminPassword,
+          sendInvite: adminSendInvite,
         },
       });
 
       if (!createRes.success) throw new Error(createRes.error || "Could not create licensee");
+
+      const inviteLink = String((createRes.data as any)?.adminInvite?.inviteLink || "").trim();
+      if (inviteLink) setLatestInviteLink(inviteLink);
 
       const licenseeId = (createRes.data as any)?.licensee?.id as string;
       if (!licenseeId) throw new Error("Licensee created, but licenseeId was not returned.");
@@ -445,13 +576,21 @@ export default function Licensees() {
             detail: "Creating manufacturer access user...",
           });
         }
-        const uRes = await apiClient.createUser({
-          name: mfgName,
-          email: mfgEmail,
-          password: mfgPass,
-          role: "MANUFACTURER",
-          licenseeId,
-        });
+        const uRes =
+          mfgAccessMode === "password"
+            ? await apiClient.createUser({
+                name: mfgName,
+                email: mfgEmail,
+                password: mfgPass,
+                role: "MANUFACTURER",
+                licenseeId,
+              })
+            : await apiClient.inviteUser({
+                name: mfgName,
+                email: mfgEmail,
+                role: "MANUFACTURER_USER",
+                licenseeId,
+              });
         if (!uRes.success) throw new Error(uRes.error || "Manufacturer create failed");
       }
 
@@ -476,8 +615,10 @@ export default function Licensees() {
       }
 
       toast({
-        title: "Created",
-        description: `Licensee ${name} (${prefix}) created. Range allocated: ${rangeEnd - rangeStart + 1}.`,
+        title: adminSendInvite ? "Licensee created + invite ready" : "Licensee created",
+        description: adminSendInvite
+          ? `Licensee ${name} created. Invite link generated for ${adminEmail}.`
+          : `Licensee ${name} (${prefix}) created. Range allocated: ${rangeEnd - rangeStart + 1}.`,
       });
 
       setIsCreateOpen(false);
@@ -616,6 +757,7 @@ export default function Licensees() {
   /* ===================== CREATE USER ===================== */
 
   const openCreateUser = (licenseeId: string) => {
+    setUserCreateMode("invite");
     setUserForm({
       licenseeId,
       name: "",
@@ -634,10 +776,13 @@ export default function Licensees() {
     const email = userForm.email.trim().toLowerCase();
     const password = userForm.password.trim();
 
-    if (!name || !email || password.length < 6 || !userForm.role || !userForm.licenseeId) {
+    const needsPassword = userCreateMode === "password";
+    if (!name || !email || (needsPassword && password.length < 6) || !userForm.role || !userForm.licenseeId) {
       toast({
         title: "Missing fields",
-        description: "Name, Email, Password (min 6), and Role are required.",
+        description: needsPassword
+          ? "Name, Email, Password (min 6), and Role are required."
+          : "Name, Email, and Role are required.",
         variant: "destructive",
       });
       return;
@@ -645,17 +790,25 @@ export default function Licensees() {
 
     setCreatingUser(true);
 
-    const res = await apiClient.createUser({
-      name,
-      email,
-      password,
-      role: userForm.role,
-      licenseeId: userForm.licenseeId,
-    });
+    const res =
+      userCreateMode === "password"
+        ? await apiClient.createUser({
+            name,
+            email,
+            password,
+            role: userForm.role,
+            licenseeId: userForm.licenseeId,
+          })
+        : await apiClient.inviteUser({
+            name,
+            email,
+            role: userForm.role === "LICENSEE_ADMIN" ? "ORG_ADMIN" : "MANUFACTURER_USER",
+            licenseeId: userForm.licenseeId,
+          });
 
     if (!res.success) {
       toast({
-        title: "Create user failed",
+        title: userCreateMode === "password" ? "Create user failed" : "Invite failed",
         description: res.error || "Could not create user",
         variant: "destructive",
       });
@@ -663,7 +816,13 @@ export default function Licensees() {
       return;
     }
 
-    toast({ title: "User created", description: `${userForm.role} created successfully.` });
+    toast({
+      title: userCreateMode === "password" ? "User created" : "Invite sent",
+      description:
+        userCreateMode === "password"
+          ? `${userForm.role} created successfully.`
+          : `Invite sent for ${userForm.role}.`,
+    });
     setCreatingUser(false);
     setIsUserOpen(false);
     setUserForm(null);
@@ -800,6 +959,25 @@ export default function Licensees() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
+        {latestInviteLink ? (
+          <Card className="border-emerald-200 bg-emerald-50/60">
+            <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-emerald-900">Invite link generated</p>
+                <p className="text-xs text-emerald-800">Email delivery may be disabled locally. Use this link to onboard the admin securely.</p>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => copyInviteLink(latestInviteLink, "Invite link copied")}>
+                  Copy invite link
+                </Button>
+                <Button variant="ghost" onClick={() => setLatestInviteLink("")}>
+                  Dismiss
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
         {/* HEADER */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -817,7 +995,7 @@ export default function Licensees() {
               Export CSV
             </Button>
 
-            <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+            <Dialog open={isCreateOpen} onOpenChange={handleCreateDialogOpenChange}>
               <DialogTrigger asChild>
                 <Button>
                   <Plus className="mr-2 h-4 w-4" />
@@ -939,6 +1117,7 @@ export default function Licensees() {
                       <div className="space-y-2">
                         <Label>Admin Email</Label>
                         <Input
+                          type="email"
                           value={createForm.adminEmail}
                           onChange={(e) => setCreateForm((p) => ({ ...p, adminEmail: e.target.value }))}
                           placeholder="admin@licensee.com"
@@ -946,17 +1125,60 @@ export default function Licensees() {
                         />
                       </div>
 
-                      <div className="space-y-2 col-span-2">
-                        <Label>Admin Password</Label>
-                        <Input
-                          type="password"
-                          value={createForm.adminPassword}
-                          onChange={(e) => setCreateForm((p) => ({ ...p, adminPassword: e.target.value }))}
-                          placeholder="Min 6 chars"
-                          disabled={creating}
-                        />
+                      <div className="col-span-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <Label>Access setup</Label>
+                            <p className="text-xs text-muted-foreground">
+                              Invite mode is recommended and avoids sharing temporary passwords.
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant={createForm.adminSendInvite ? "default" : "secondary"}
+                            onClick={() => setCreateForm((p) => ({ ...p, adminSendInvite: !p.adminSendInvite }))}
+                            disabled={creating}
+                          >
+                            {createForm.adminSendInvite ? "Send invite link" : "Set password now"}
+                          </Button>
+                        </div>
                       </div>
+
+                      {!createForm.adminSendInvite ? (
+                        <div className="space-y-2 col-span-2">
+                          <Label>Admin Password</Label>
+                          <Input
+                            type="password"
+                            value={createForm.adminPassword}
+                            onChange={(e) => setCreateForm((p) => ({ ...p, adminPassword: e.target.value }))}
+                            placeholder="Min 6 chars"
+                            disabled={creating}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Use only for direct provisioning. Invite mode is safer for first login.
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="col-span-2 text-xs text-muted-foreground">
+                          We will email a one-time invite link so the admin can set password securely.
+                        </p>
+                      )}
                     </div>
+
+                    {latestInviteLink ? (
+                      <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3">
+                        <p className="text-sm font-medium text-emerald-900">Latest invite link ready</p>
+                        <p className="mt-1 text-xs text-emerald-800 break-all">{latestInviteLink}</p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="mt-2"
+                          onClick={() => copyInviteLink(latestInviteLink, "Invite link copied")}
+                        >
+                          Copy invite link
+                        </Button>
+                      </div>
+                    ) : null}
                   </div>
 
                   {/* QR range */}
@@ -1019,15 +1241,37 @@ export default function Licensees() {
                         </div>
 
                         <div className="space-y-2 col-span-2">
-                          <Label>Manufacturer Password</Label>
-                          <Input
-                            type="password"
-                            value={createForm.manufacturerPassword}
-                            onChange={(e) => setCreateForm((p) => ({ ...p, manufacturerPassword: e.target.value }))}
-                            placeholder="Min 6 chars"
+                          <Label>Access</Label>
+                          <Select
+                            value={createForm.manufacturerAccessMode}
+                            onValueChange={(v) => setCreateForm((p) => ({ ...p, manufacturerAccessMode: v as any }))}
                             disabled={creating}
-                          />
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select access mode" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="invite">Send invite link (recommended)</SelectItem>
+                              <SelectItem value="password">Set password now (legacy)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-muted-foreground">
+                            Invite mode emails a one-time link to set the password (expires in 24 hours).
+                          </p>
                         </div>
+
+                        {createForm.manufacturerAccessMode === "password" ? (
+                          <div className="space-y-2 col-span-2">
+                            <Label>Manufacturer Password</Label>
+                            <Input
+                              type="password"
+                              value={createForm.manufacturerPassword}
+                              onChange={(e) => setCreateForm((p) => ({ ...p, manufacturerPassword: e.target.value }))}
+                              placeholder="Min 6 chars"
+                              disabled={creating}
+                            />
+                          </div>
+                        ) : null}
                       </div>
                     )}
                   </div>
@@ -1036,7 +1280,7 @@ export default function Licensees() {
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => setIsCreateOpen(false)}
+                      onClick={() => handleCreateDialogOpenChange(false)}
                       disabled={creating}
                     >
                       Cancel
@@ -1088,6 +1332,7 @@ export default function Licensees() {
                     <TableRow>
                       <TableHead>Licensee</TableHead>
                       <TableHead>Prefix</TableHead>
+                      <TableHead>Admin Access</TableHead>
                       <TableHead>Latest QR Range</TableHead>
                       <TableHead className="text-right">Users</TableHead>
                       <TableHead className="text-right">Batches</TableHead>
@@ -1106,6 +1351,9 @@ export default function Licensees() {
 
                       const latest = l.latestRange;
                       const latestRangeText = latest ? `${latest.startCode} → ${latest.endCode}` : "—";
+                      const onboarding = l.adminOnboarding || null;
+                      const onboardingState = onboarding?.state || "UNASSIGNED";
+                      const adminEmail = onboarding?.adminUser?.email || onboarding?.pendingInvite?.email || "—";
 
                       return (
                         <TableRow key={l.id}>
@@ -1125,6 +1373,24 @@ export default function Licensees() {
                             <Badge variant="outline" className="font-mono">
                               {l.prefix}
                             </Badge>
+                          </TableCell>
+
+                          <TableCell>
+                            <div className="space-y-1">
+                              <Badge
+                                variant="outline"
+                                className={
+                                  onboardingState === "PENDING"
+                                    ? "border-amber-200 bg-amber-50 text-amber-700"
+                                    : onboardingState === "ACTIVE"
+                                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                      : "border-slate-200 bg-slate-50 text-slate-700"
+                                }
+                              >
+                                {onboardingState}
+                              </Badge>
+                              <p className="max-w-[220px] truncate text-xs text-muted-foreground">{adminEmail}</p>
+                            </div>
                           </TableCell>
 
                           <TableCell className="font-mono text-xs">{latestRangeText}</TableCell>
@@ -1167,6 +1433,22 @@ export default function Licensees() {
                                   Edit
                                 </DropdownMenuItem>
 
+                                <DropdownMenuItem
+                                  disabled={inviteActionLoadingId === l.id}
+                                  onClick={() => resendAdminInvite(l)}
+                                >
+                                  <Send className="mr-2 h-4 w-4" />
+                                  Resend admin invite
+                                </DropdownMenuItem>
+
+                                <DropdownMenuItem
+                                  disabled={inviteActionLoadingId === l.id}
+                                  onClick={() => resendAdminInvite(l, { copyOnly: true })}
+                                >
+                                  <Link2 className="mr-2 h-4 w-4" />
+                                  Copy invite link
+                                </DropdownMenuItem>
+
                                 <DropdownMenuItem onClick={() => toggleActive(l)}>
                                   <Trash2 className="mr-2 h-4 w-4" />
                                   {l.isActive ? "Deactivate" : "Activate"}
@@ -1185,7 +1467,7 @@ export default function Licensees() {
 
                     {filtered.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center text-sm text-muted-foreground">
+                        <TableCell colSpan={10} className="text-center text-sm text-muted-foreground">
                           No licensees found.
                         </TableCell>
                       </TableRow>
@@ -1290,12 +1572,34 @@ export default function Licensees() {
         <Dialog open={isUserOpen} onOpenChange={setIsUserOpen}>
           <DialogContent className="sm:max-w-[520px] max-h-[85vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Create User</DialogTitle>
-              <DialogDescription>Create a LICENSEE_ADMIN or MANUFACTURER for this licensee.</DialogDescription>
+              <DialogTitle>Add user access</DialogTitle>
+              <DialogDescription>
+                Invite a user (recommended) or create with a password (legacy).
+              </DialogDescription>
             </DialogHeader>
 
             {userForm && (
               <form className="space-y-4 mt-4" onSubmit={submitCreateUser}>
+                <div className="space-y-2">
+                  <Label>Access</Label>
+                  <Select
+                    value={userCreateMode}
+                    onValueChange={(v) => setUserCreateMode(v as any)}
+                    disabled={creatingUser}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select access mode" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="invite">Send invite link (recommended)</SelectItem>
+                      <SelectItem value="password">Set password now (legacy)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Invite mode emails a one-time link to set the password (expires in 24 hours).
+                  </p>
+                </div>
+
                 <div className="space-y-2">
                   <Label>Name</Label>
                   <Input
@@ -1316,16 +1620,18 @@ export default function Licensees() {
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Password</Label>
-                  <Input
-                    type="password"
-                    value={userForm.password}
-                    onChange={(e) => setUserForm((p) => (p ? { ...p, password: e.target.value } : p))}
-                    placeholder="Min 6 chars"
-                    disabled={creatingUser}
-                  />
-                </div>
+                {userCreateMode === "password" ? (
+                  <div className="space-y-2">
+                    <Label>Password</Label>
+                    <Input
+                      type="password"
+                      value={userForm.password}
+                      onChange={(e) => setUserForm((p) => (p ? { ...p, password: e.target.value } : p))}
+                      placeholder="Min 6 chars"
+                      disabled={creatingUser}
+                    />
+                  </div>
+                ) : null}
 
                 <div className="space-y-2">
                   <Label>Role</Label>
@@ -1349,7 +1655,7 @@ export default function Licensees() {
                     Cancel
                   </Button>
                   <Button type="submit" disabled={creatingUser}>
-                    {creatingUser ? "Creating..." : "Create User"}
+                    {creatingUser ? "Working..." : userCreateMode === "password" ? "Create user" : "Send invite"}
                   </Button>
                 </div>
               </form>

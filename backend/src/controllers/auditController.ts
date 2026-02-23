@@ -41,12 +41,12 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
     const action = req.query.action as string | undefined;
 
     const licenseeId =
-      req.user.role === UserRole.SUPER_ADMIN
+      req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
         ? (req.query.licenseeId as string | undefined)
         : req.user.licenseeId ?? undefined;
 
     let userIds: string[] | undefined;
-    if (req.user.role !== UserRole.SUPER_ADMIN && licenseeId) {
+    if (req.user.role !== UserRole.SUPER_ADMIN && req.user.role !== UserRole.PLATFORM_SUPER_ADMIN && licenseeId) {
       const users = await prisma.user.findMany({
         where: { licenseeId },
         select: { id: true },
@@ -54,7 +54,12 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
       userIds = users.map((u) => u.id);
     }
 
-    if (req.user.role !== UserRole.SUPER_ADMIN && action && hiddenActionsForNonSuper.includes(action)) {
+    if (
+      req.user.role !== UserRole.SUPER_ADMIN &&
+      req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
+      action &&
+      hiddenActionsForNonSuper.includes(action)
+    ) {
       return res.json({ success: true, data: { logs: [], total: 0, limit, offset } });
     }
 
@@ -62,7 +67,10 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
       entityType,
       entityId,
       action,
-      excludeActions: req.user.role === UserRole.SUPER_ADMIN ? undefined : hiddenActionsForNonSuper,
+      excludeActions:
+        req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
+          ? undefined
+          : hiddenActionsForNonSuper,
       licenseeId,
       userIds,
       limit,
@@ -103,12 +111,12 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
     const action = req.query.action as string | undefined;
 
     const licenseeId =
-      req.user.role === UserRole.SUPER_ADMIN
+      req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
         ? (req.query.licenseeId as string | undefined)
         : req.user.licenseeId ?? undefined;
 
     let userIds: string[] | undefined;
-    if (req.user.role !== UserRole.SUPER_ADMIN && licenseeId) {
+    if (req.user.role !== UserRole.SUPER_ADMIN && req.user.role !== UserRole.PLATFORM_SUPER_ADMIN && licenseeId) {
       const users = await prisma.user.findMany({
         where: { licenseeId },
         select: { id: true },
@@ -116,7 +124,12 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
       userIds = users.map((u) => u.id);
     }
 
-    if (req.user.role !== UserRole.SUPER_ADMIN && action && hiddenActionsForNonSuper.includes(action)) {
+    if (
+      req.user.role !== UserRole.SUPER_ADMIN &&
+      req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
+      action &&
+      hiddenActionsForNonSuper.includes(action)
+    ) {
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", "attachment; filename=\"audit-logs.csv\"");
       return res.status(200).send("createdAt,action,entityType,entityId,userId,userName,userEmail,licenseeId,ipAddress,details\n");
@@ -126,7 +139,10 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
       entityType,
       entityId,
       action,
-      excludeActions: req.user.role === UserRole.SUPER_ADMIN ? undefined : hiddenActionsForNonSuper,
+      excludeActions:
+        req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
+          ? undefined
+          : hiddenActionsForNonSuper,
       licenseeId,
       userIds,
       limit,
@@ -205,7 +221,7 @@ export const streamLogs = async (req: AuthRequest, res: Response) => {
     res.write(`event: ping\ndata: {}\n\n`);
   }, 20000);
 
-  const isSuper = req.user.role === UserRole.SUPER_ADMIN;
+  const isSuper = req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN;
   const tenantId = req.user.licenseeId;
 
   const unsubscribe = onAuditLog((log) => {
@@ -226,7 +242,7 @@ export const getFraudReports = async (req: AuthRequest, res: Response) => {
     if (!req.user) {
       return res.status(401).json({ success: false, error: "Not authenticated" });
     }
-    if (req.user.role !== UserRole.SUPER_ADMIN) {
+    if (req.user.role !== UserRole.SUPER_ADMIN && req.user.role !== UserRole.PLATFORM_SUPER_ADMIN) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
@@ -330,7 +346,7 @@ export const respondToFraudReport = async (req: AuthRequest, res: Response) => {
     if (!req.user) {
       return res.status(401).json({ success: false, error: "Not authenticated" });
     }
-    if (req.user.role !== UserRole.SUPER_ADMIN) {
+    if (req.user.role !== UserRole.SUPER_ADMIN && req.user.role !== UserRole.PLATFORM_SUPER_ADMIN) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 

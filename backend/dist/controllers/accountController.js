@@ -5,9 +5,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.changeMyPassword = exports.updateMyProfile = void 0;
 const zod_1 = require("zod");
-const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const database_1 = __importDefault(require("../config/database"));
 const auditService_1 = require("../services/auditService");
+const passwordService_1 = require("../services/auth/passwordService");
 const updateProfileSchema = zod_1.z.object({
     name: zod_1.z.string().trim().min(2).max(80).optional(),
     email: zod_1.z.string().trim().email().optional(),
@@ -76,11 +76,14 @@ const changeMyPassword = async (req, res) => {
         });
         if (!user)
             return res.status(404).json({ success: false, error: "User not found" });
-        const ok = await bcryptjs_1.default.compare(parsed.data.currentPassword, user.passwordHash);
+        if (!user.passwordHash) {
+            return res.status(400).json({ success: false, error: "Account has no password set. Use password reset." });
+        }
+        const ok = await (0, passwordService_1.verifyPassword)(user.passwordHash, parsed.data.currentPassword);
         if (!ok) {
             return res.status(400).json({ success: false, error: "Current password is incorrect" });
         }
-        const passwordHash = await bcryptjs_1.default.hash(parsed.data.newPassword, 10);
+        const passwordHash = await (0, passwordService_1.hashPassword)(parsed.data.newPassword);
         await database_1.default.user.update({
             where: { id: userId },
             data: { passwordHash },
