@@ -8,7 +8,6 @@ import apiClient from "@/lib/api-client";
 import {
   LayoutDashboard,
   Building2,
-  QrCode,
   Factory,
   FileText,
   Settings,
@@ -39,7 +38,6 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["super_admin", "licensee_admin", "manufacturer"] },
   { label: "Licensees", href: "/licensees", icon: Building2, roles: ["super_admin"] },
-  { label: "QR Codes", href: "/qr-codes", icon: QrCode, roles: ["super_admin"] },
   { label: "QR Requests", href: "/qr-requests", icon: FileText, roles: ["super_admin", "licensee_admin"] },
   { label: "Batches", href: "/batches", icon: FileText, roles: ["super_admin", "licensee_admin", "manufacturer"] },
   { label: "Manufacturers", href: "/manufacturers", icon: Factory, roles: ["super_admin", "licensee_admin"] },

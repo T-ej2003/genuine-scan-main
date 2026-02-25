@@ -17,7 +17,6 @@ const ForgotPassword = lazy(() => import("@/pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Licensees = lazy(() => import("@/pages/Licensees"));
-const QRCodes = lazy(() => import("@/pages/QRCodes"));
 const QRRequests = lazy(() => import("@/pages/QRRequests"));
 const Batches = lazy(() => import("@/pages/Batches"));
 const QRTracking = lazy(() => import("@/pages/QRTracking"));
@@ -326,8 +325,8 @@ function AppRoutes() {
         <Route
           path="/qr-codes"
           element={
-            <ProtectedRoute allowedRoles={["super_admin"]}>
-              <QRCodes />
+            <ProtectedRoute>
+              <Navigate to="/qr-tracking" replace />
             </ProtectedRoute>
           }
         />
