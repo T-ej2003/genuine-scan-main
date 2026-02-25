@@ -34,3 +34,7 @@ backend/prisma.zip
 .env.*
 !.env.example
 databasefiles
+
+# TLS certbot state is mounted at runtime; exclude from image build contexts.
+# Prevents docker build context permission errors when certbot creates root-owned files.
+deploy/certbot
