@@ -10,6 +10,7 @@ permissions:
   contents: read
   security-events: write
   id-token: write
+  attestations: write
 
 jobs:
   audit:
@@ -18,6 +19,7 @@ jobs:
       contents: read
       security-events: write
       id-token: write
+      attestations: write
       actions: read
     steps:
       - name: Checkout
@@ -104,6 +106,7 @@ jobs:
           output-file: audit-artifacts/sbom.spdx.json
 
       - name: Attest SBOM provenance
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/attest-build-provenance@v1
         with:
           subject-path: audit-artifacts/sbom.spdx.json
