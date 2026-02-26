@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import apiClient from "@/lib/api-client";
+import { friendlyReferenceLabel, shortRawReference } from "@/lib/friendly-reference";
 import { useToast } from "@/hooks/use-toast";
 
 type LicenseeLite = { id: string; name: string; prefix: string };
@@ -523,7 +524,10 @@ export default function IR() {
                             className="cursor-pointer"
                             onClick={() => navigate(`/ir/incidents/${row.id}`)}
                           >
-                            <TableCell className="font-mono text-xs">{row.id.slice(0, 8)}</TableCell>
+                            <TableCell className="text-xs" title={row.id}>
+                              <div className="font-semibold">{friendlyReferenceLabel(row.id, "Case")}</div>
+                              <div className="font-mono text-[10px] text-muted-foreground">#{shortRawReference(row.id, 8)}</div>
+                            </TableCell>
                             <TableCell>
                               <Badge variant="outline" className={STATUS_TONE[row.status] || "border-slate-200 bg-slate-50 text-slate-700"}>
                                 {row.status}

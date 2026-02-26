@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { friendlyReferenceLabel, friendlyReferenceWords } from "@/lib/friendly-reference";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { getContextualHelpRoute } from "@/help/contextual-help";
@@ -44,6 +45,7 @@ interface NavItem {
 
 type DashboardNotification = {
   id: string;
+  type?: string | null;
   title?: string | null;
   body?: string | null;
   createdAt?: string | null;
@@ -307,6 +309,92 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     };
   };
 
+  const toHumanWords = (value?: string | null) =>
+    String(value || "")
+      .trim()
+      .replace(/_/g, " ")
+      .replace(/\s+/g, " ")
+      .toLowerCase()
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  const replaceOpaqueRefs = (text: string, notification: DashboardNotification) => {
+    const raw = String(text || "");
+    if (!raw) return raw;
+
+    const data =
+      notification?.data && typeof notification.data === "object"
+        ? (notification.data as Record<string, unknown>)
+        : ({} as Record<string, unknown>);
+
+    let out = raw;
+
+    const exactReplacements: Array<{ value?: unknown; label: string }> = [
+      { value: notification.incidentId, label: notification.incidentId ? friendlyReferenceLabel(String(notification.incidentId), "Case") : "Case" },
+      { value: data.ticketReference, label: data.ticketReference ? friendlyReferenceLabel(String(data.ticketReference), "Ticket") : "Ticket" },
+      { value: data.referenceCode, label: data.referenceCode ? friendlyReferenceLabel(String(data.referenceCode), "Ticket") : "Ticket" },
+      { value: data.requestId, label: "QR request" },
+      { value: data.batchId, label: "Batch" },
+      { value: data.printJobId, label: "Print job" },
+    ];
+
+    for (const entry of exactReplacements) {
+      const value = String(entry.value || "").trim();
+      if (!value) continue;
+      out = out.replace(new RegExp(escapeRegExp(value), "g"), entry.label);
+    }
+
+    out = out.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, (m) =>
+      friendlyReferenceLabel(m, "Case")
+    );
+
+    out = out.replace(/\b[0-9a-f]{8}\b/gi, (m) => `Ref ${friendlyReferenceWords(m, 2)}`);
+
+    out = out.replace(/\bAUTH_[A-Z0-9_]+\b/g, (m) => toHumanWords(m));
+    return out;
+  };
+
+  const notificationCopy = (notification: DashboardNotification) => {
+    const data =
+      notification?.data && typeof notification.data === "object"
+        ? (notification.data as Record<string, unknown>)
+        : ({} as Record<string, unknown>);
+    const type = String(notification.type || "").trim();
+
+    if (type === "manufacturer_batch_assigned") {
+      const batchName = String(data.batchName || "assigned batch").trim();
+      const qty = Number(data.quantity || 0);
+      return {
+        title: "New batch assigned",
+        body: `${batchName}${qty > 0 ? ` is ready for printing (${qty} codes).` : " is ready for printing."}`,
+      };
+    }
+    if (type === "manufacturer_print_job_created") {
+      const batchName = String(data.batchName || "batch").trim();
+      const qty = Number(data.quantity || 0);
+      return {
+        title: "Print job prepared",
+        body: `${batchName}${qty > 0 ? ` print package prepared for ${qty} codes.` : " print package is ready."}`,
+      };
+    }
+    if (type === "manufacturer_print_job_confirmed") {
+      const batchName = String(data.batchName || "batch").trim();
+      const qty = Number(data.printedCodes || 0);
+      return {
+        title: "Printing confirmed",
+        body: `${batchName}${qty > 0 ? ` confirmed with ${qty} printed codes.` : " printing was confirmed."}`,
+      };
+    }
+
+    const fallbackTitle = notification.title?.trim() || (type ? toHumanWords(type) : "Notification");
+    const fallbackBody = notification.body?.trim() || "Open to view details.";
+    return {
+      title: replaceOpaqueRefs(fallbackTitle, notification),
+      body: replaceOpaqueRefs(fallbackBody, notification),
+    };
+  };
+
   const handleLogout = () => {
     logout();
     navigate("/login");
@@ -538,6 +626,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                             const itemId = String(item.id);
                             const isClearingItem = clearingNotificationIdSet.has(itemId);
                             const tone = notificationToneClasses(item);
+                            const copy = notificationCopy(item);
 
                             return (
                               <div
@@ -572,7 +661,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                                   />
                                   <div className="flex w-full items-start justify-between gap-2 pl-2">
                                     <p className={cn("line-clamp-1 text-sm font-semibold tracking-tight", isUnread ? "text-foreground" : "text-foreground/90")}>
-                                      {item.title || "Notification"}
+                                      {copy.title}
                                     </p>
                                     <span
                                       className={cn(
@@ -586,7 +675,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                                     </span>
                                   </div>
 
-                                  <p className="line-clamp-2 pl-2 text-xs leading-5 text-muted-foreground">{item.body || "Open to view details."}</p>
+                                  <p className="line-clamp-2 pl-2 text-xs leading-5 text-muted-foreground">{copy.body}</p>
                                   <p className="pl-2 text-[11px] font-medium text-muted-foreground/90">{formatNotificationDate(item.createdAt)}</p>
                                 </DropdownMenuItem>
                               </div>

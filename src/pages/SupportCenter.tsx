@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import apiClient from "@/lib/api-client";
+import { friendlyReferenceLabel, shortRawReference } from "@/lib/friendly-reference";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -302,8 +303,13 @@ export default function SupportCenter() {
                           className={ticket.id === selectedId ? "cursor-pointer bg-cyan-50/70" : "cursor-pointer"}
                         >
                           <TableCell>
-                            <div className="font-mono text-xs font-semibold">{ticket.referenceCode}</div>
-                            <div className="text-xs text-slate-500">Incident {ticket.incidentId.slice(0, 8)}</div>
+                            <div className="text-xs font-semibold" title={ticket.referenceCode}>
+                              {friendlyReferenceLabel(ticket.referenceCode, "Ticket")}
+                            </div>
+                            <div className="font-mono text-[10px] text-slate-500">{ticket.referenceCode}</div>
+                            <div className="text-xs text-slate-500" title={ticket.incidentId}>
+                              {friendlyReferenceLabel(ticket.incidentId, "Case")} · #{shortRawReference(ticket.incidentId, 8)}
+                            </div>
                             <div className="line-clamp-1 text-xs text-slate-600">{ticket.subject}</div>
                           </TableCell>
                           <TableCell>
@@ -333,7 +339,7 @@ export default function SupportCenter() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between border-b bg-slate-50/70">
               <span className="font-semibold">Ticket Detail</span>
-              {selected ? <Badge variant="outline">{selected.referenceCode}</Badge> : null}
+              {selected ? <Badge variant="outline">{friendlyReferenceLabel(selected.referenceCode, "Ticket")}</Badge> : null}
             </CardHeader>
             <CardContent className="space-y-4 pt-4">
               {!detail ? (
@@ -344,7 +350,10 @@ export default function SupportCenter() {
                     <div className="grid gap-2 text-sm sm:grid-cols-2">
                       <div>
                         <span className="text-slate-500">Reference</span>
-                        <div className="font-mono font-semibold">{detail.referenceCode}</div>
+                        <div className="font-semibold" title={detail.referenceCode}>
+                          {friendlyReferenceLabel(detail.referenceCode, "Ticket")}
+                        </div>
+                        <div className="font-mono text-xs text-slate-500">{detail.referenceCode}</div>
                       </div>
                       <div>
                         <span className="text-slate-500">Incident status</span>

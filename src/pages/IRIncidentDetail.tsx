@@ -24,6 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import apiClient from "@/lib/api-client";
+import { friendlyReferenceLabel, shortRawReference } from "@/lib/friendly-reference";
 import { useToast } from "@/hooks/use-toast";
 
 const STATUS_TONE: Record<string, string> = {
@@ -392,7 +393,10 @@ export default function IRIncidentDetail() {
             </Button>
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-2xl font-bold tracking-tight">Incident {id.slice(0, 8)}</h1>
+                <h1 className="text-2xl font-bold tracking-tight" title={id}>
+                  {friendlyReferenceLabel(id, "Case")}
+                </h1>
+                <span className="font-mono text-xs text-muted-foreground">#{shortRawReference(id, 8)}</span>
                 {incident?.status ? (
                   <Badge variant="outline" className={STATUS_TONE[incident.status] || "border-slate-200 bg-slate-50 text-slate-700"}>
                     {incident.status}

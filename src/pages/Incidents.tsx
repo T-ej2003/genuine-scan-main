@@ -5,6 +5,7 @@ import { saveAs } from "file-saver";
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import apiClient from "@/lib/api-client";
+import { friendlyReferenceLabel, shortRawReference } from "@/lib/friendly-reference";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
@@ -213,7 +214,7 @@ export default function Incidents() {
         tags: Array.isArray((d as any).tags) ? (d as any).tags.join(", ") : "",
       });
       setCustomerMessage(
-        `Your report ${d.id} is now "${toLabel(d.status)}". We will continue to keep you informed if further action is needed.`
+        `Your report (${friendlyReferenceLabel(d.id, "Case")}) is now "${toLabel(d.status)}". We will continue to keep you informed if further action is needed.`
       );
     }
   };
@@ -559,7 +560,10 @@ export default function Incidents() {
                           className={item.id === selectedId ? "bg-cyan-50/60 cursor-pointer" : "cursor-pointer"}
                         >
                           <TableCell>
-                            <div className="font-mono text-xs font-semibold">{item.id.slice(0, 8)}</div>
+                            <div className="text-xs font-semibold" title={item.id}>
+                              {friendlyReferenceLabel(item.id, "Case")}
+                            </div>
+                            <div className="font-mono text-[10px] text-slate-500">#{shortRawReference(item.id, 8)}</div>
                             <div className="text-sm text-slate-700">{item.qrCodeValue}</div>
                             <div className="text-xs text-slate-500">{item.locationName || "Location unknown"}</div>
                           </TableCell>
@@ -602,7 +606,8 @@ export default function Incidents() {
                     <div className="grid gap-2 text-sm sm:grid-cols-2">
                       <div>
                         <span className="text-slate-500">Reference</span>
-                        <div className="font-mono font-semibold">{detail.id}</div>
+                        <div className="font-semibold" title={detail.id}>{friendlyReferenceLabel(detail.id, "Case")}</div>
+                        <div className="font-mono text-xs text-slate-500">{detail.id}</div>
                       </div>
                       <div>
                         <span className="text-slate-500">QR</span>
@@ -622,7 +627,14 @@ export default function Incidents() {
                       </div>
                       <div>
                         <span className="text-slate-500">Support ticket</span>
-                        <div className="font-mono">{detail.supportTicket?.referenceCode || "Pending"}</div>
+                        {detail.supportTicket?.referenceCode ? (
+                          <div>
+                            <div className="font-medium">{friendlyReferenceLabel(detail.supportTicket.referenceCode, "Ticket")}</div>
+                            <div className="font-mono text-xs text-slate-500">{detail.supportTicket.referenceCode}</div>
+                          </div>
+                        ) : (
+                          <div className="font-mono">Pending</div>
+                        )}
                       </div>
                     </div>
                     <p className="mt-3 text-sm text-slate-700">{detail.description}</p>

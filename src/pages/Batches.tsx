@@ -6,6 +6,7 @@ import { OperationProgressDialog } from "@/components/feedback/OperationProgress
 import { useAuth } from "@/contexts/AuthContext";
 import { useOperationProgress } from "@/hooks/useOperationProgress";
 import apiClient from "@/lib/api-client";
+import { friendlyReferenceLabel, shortRawReference } from "@/lib/friendly-reference";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -912,7 +913,9 @@ export default function Batches() {
                     {printing ? "Creating..." : "Create Print Job"}
                   </Button>
                   {printJobId && (
-                    <Badge variant="secondary">Job: {printJobId.slice(0, 8)}…</Badge>
+                    <Badge variant="secondary" title={printJobId}>
+                      {friendlyReferenceLabel(printJobId, "Job")} · #{shortRawReference(printJobId, 8)}
+                    </Badge>
                   )}
                 </div>
 
