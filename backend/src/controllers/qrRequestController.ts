@@ -10,6 +10,7 @@ import { createRoleNotifications, createUserNotification } from "../services/not
 const createRequestSchema = z
   .object({
     quantity: z.number().int().positive().max(5_000_000),
+    batchName: z.string().trim().min(2).max(120).optional(),
     note: z.string().trim().max(500).optional(),
   });
 
@@ -63,6 +64,7 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
         quantity: parsed.data.quantity,
         startNumber: null,
         endNumber: null,
+        batchName: parsed.data.batchName?.trim() || null,
         note: parsed.data.note?.trim() || null,
         status: QrAllocationRequestStatus.PENDING,
       },
@@ -76,6 +78,7 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
       entityId: created.id,
       details: {
         quantity: created.quantity,
+        batchName: created.batchName || null,
       },
       ipAddress: req.ip,
     });
@@ -90,6 +93,7 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
           requestId: created.id,
           licenseeId,
           quantity: created.quantity,
+          batchName: created.batchName || null,
           status: created.status,
           targetRoute: "/qr-requests",
         },
@@ -105,6 +109,7 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
           requestId: created.id,
           licenseeId,
           quantity: created.quantity,
+          batchName: created.batchName || null,
           status: created.status,
           targetRoute: "/qr-requests",
         },
@@ -213,6 +218,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
         source: "REQUEST_APPROVAL",
         requestId: requestRow.id,
         createReceivedBatch: true,
+        receivedBatchName: requestRow.batchName || null,
         tx,
       });
 
@@ -242,8 +248,10 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
         startNumber: result.startNumber,
         endNumber: result.endNumber,
         quantity: quantityRequested,
+        batchName: requestRow.batchName || null,
         rangeId: result.alloc.range.id,
         receivedBatchId: result.alloc.receivedBatch?.id || null,
+        receivedBatchName: result.alloc.receivedBatch?.name || null,
       },
       ipAddress: req.ip,
     });
@@ -258,6 +266,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
           requestId: requestRow.id,
           licenseeId: requestRow.licenseeId,
           quantity: quantityRequested,
+          batchName: requestRow.batchName || null,
           status: "APPROVED",
           targetRoute: "/qr-requests",
         },
@@ -273,6 +282,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
           requestId: requestRow.id,
           licenseeId: requestRow.licenseeId,
           quantity: quantityRequested,
+          batchName: requestRow.batchName || null,
           status: "APPROVED",
           targetRoute: "/qr-requests",
         },
@@ -288,6 +298,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
           requestId: requestRow.id,
           licenseeId: requestRow.licenseeId,
           quantity: quantityRequested,
+          batchName: requestRow.batchName || null,
           status: "APPROVED",
           targetRoute: "/qr-requests",
         },

@@ -657,6 +657,7 @@ class ApiClient {
   // ==================== QR REQUESTS ====================
   async createQrAllocationRequest(payload: {
     quantity: number;
+    batchName?: string;
     note?: string;
     licenseeId?: string;
   }) {
