@@ -3,7 +3,6 @@ import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { ThemeModeButton } from "@/components/theme/ThemeModeButton";
 import { getContextualHelpRoute } from "@/help/contextual-help";
 import apiClient from "@/lib/api-client";
 import {
@@ -633,8 +632,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
-
-          <ThemeModeButton className="mr-1" />
 
           <Button asChild variant="ghost" className="mr-1 gap-2">
             <Link to={contextualHelpRoute}>
