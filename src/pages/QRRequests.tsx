@@ -39,6 +39,7 @@ type RequestRow = {
   licenseeId: string;
   status: "PENDING" | "APPROVED" | "REJECTED";
   quantity?: number | null;
+  batchName?: string | null;
   note?: string | null;
   decisionNote?: string | null;
   createdAt: string;
@@ -66,6 +67,7 @@ export default function QRRequests() {
 
   // create request form (licensee admin)
   const [quantity, setQuantity] = useState<number>(1000);
+  const [batchName, setBatchName] = useState("");
   const [note, setNote] = useState("");
 
   // approve/reject dialog
@@ -131,6 +133,7 @@ export default function QRRequests() {
     try {
       const res = await apiClient.createQrAllocationRequest({
         quantity,
+        batchName: batchName.trim() || undefined,
         note: note.trim() || undefined,
       });
       if (!res.success) {
@@ -139,6 +142,7 @@ export default function QRRequests() {
       }
 
       toast({ title: "Requested", description: "Your request is now in the approval queue." });
+      setBatchName("");
       setNote("");
       await loadRequests();
     } finally {
@@ -269,6 +273,19 @@ export default function QRRequests() {
               </div>
 
               <div className="space-y-2 mt-3">
+                <Label>Batch name (optional)</Label>
+                <Input
+                  value={batchName}
+                  onChange={(e) => setBatchName(e.target.value)}
+                  maxLength={120}
+                  placeholder="Example: March Retail Rollout"
+                />
+                <div className="text-xs text-muted-foreground">
+                  Used as the received batch label after approval. Index allocation behavior stays automatic.
+                </div>
+              </div>
+
+              <div className="space-y-2 mt-3">
                 <Label>Note (optional)</Label>
                 <Input value={note} onChange={(e) => setNote(e.target.value)} />
               </div>
@@ -351,9 +368,10 @@ export default function QRRequests() {
                       <TableRow key={r.id}>
                         <TableCell>
                           <div className="space-y-1">
-                            <div className="font-medium">
-                              {`${requestQuantity(r)} codes`}
-                            </div>
+                            <div className="font-medium">{`${requestQuantity(r)} codes`}</div>
+                            {r.batchName && (
+                              <div className="text-xs text-muted-foreground">Batch: {r.batchName}</div>
+                            )}
                             {r.note && <div className="text-xs text-muted-foreground">{r.note}</div>}
                           </div>
                         </TableCell>
@@ -457,8 +475,15 @@ export default function QRRequests() {
               <div className="text-sm text-muted-foreground">No request selected.</div>
             ) : (
               <div className="space-y-4 mt-2">
-                <div className="text-sm text-muted-foreground">
-                  Request quantity: <span className="font-medium text-foreground">{requestQuantity(activeReq)}</span>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="text-sm text-muted-foreground">
+                    Request quantity:{" "}
+                    <span className="font-medium text-foreground">{requestQuantity(activeReq)}</span>
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    Batch name:{" "}
+                    <span className="font-medium text-foreground">{activeReq.batchName?.trim() || "—"}</span>
+                  </div>
                 </div>
 
                 <div className="space-y-2">

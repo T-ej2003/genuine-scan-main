@@ -3,6 +3,7 @@ import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { ThemeModeButton } from "@/components/theme/ThemeModeButton";
 import { getContextualHelpRoute } from "@/help/contextual-help";
 import apiClient from "@/lib/api-client";
 import {
@@ -399,10 +400,14 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="relative mr-1 rounded-full border-white/50 bg-white/65 dark:bg-white/5">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="relative mr-1 overflow-visible rounded-full border-white/50 bg-white/65 shadow-[0_12px_22px_-18px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-white/5"
+              >
                 <Bell className="h-4 w-4 text-muted-foreground" />
                 {unreadNotifications > 0 ? (
-                  <span className="absolute -right-0.5 -top-0.5 inline-flex min-h-4 min-w-4 items-center justify-center rounded-full border border-white/70 bg-emerald-500 px-1 text-[10px] font-semibold text-white shadow-[0_6px_14px_-8px_rgba(16,185,129,0.8)]">
+                  <span className="pointer-events-none absolute -right-1.5 -top-1.5 z-20 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full border-2 border-card bg-emerald-500 px-1.5 text-[10px] font-bold leading-none text-white shadow-[0_14px_20px_-14px_rgba(16,185,129,0.95),0_0_0_1px_rgba(16,185,129,0.25)] ring-1 ring-emerald-300/30 dark:border-slate-900">
                     {unreadNotifications > 9 ? "9+" : unreadNotifications}
                   </span>
                 ) : null}
@@ -628,6 +633,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
+
+          <ThemeModeButton className="mr-1" />
 
           <Button asChild variant="ghost" className="mr-1 gap-2">
             <Link to={contextualHelpRoute}>

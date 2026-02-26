@@ -648,6 +648,7 @@ model QrAllocationRequest {
   quantity    Int?
   startNumber Int?
   endNumber   Int?
+  batchName   String?
 
   status QrAllocationRequestStatus @default(PENDING)
   note   String?
