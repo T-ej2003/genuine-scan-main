@@ -7,6 +7,24 @@ import { Camera, Loader2, QrCode, ScanLine } from "lucide-react";
 import apiClient from "@/lib/api-client";
 import { useToast } from "@/hooks/use-toast";
 
+type NavigatorWithConnection = Navigator & {
+  connection?: {
+    effectiveType?: string;
+  };
+};
+
+type BarcodeScanResult = {
+  rawValue?: string | null;
+};
+
+type BarcodeDetectorCtor = new (options: { formats: string[] }) => {
+  detect: (image: ImageBitmapSource) => Promise<BarcodeScanResult[]>;
+};
+
+type WindowWithBarcodeDetector = Window & {
+  BarcodeDetector?: BarcodeDetectorCtor;
+};
+
 export default function VerifyLanding() {
   const [code, setCode] = useState("");
   const [isRedirecting, setIsRedirecting] = useState(false);
@@ -19,16 +37,23 @@ export default function VerifyLanding() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const cleaned = useMemo(() => code.trim(), [code]);
-  const cameraAssistSupported = typeof window !== "undefined" && typeof (window as any).BarcodeDetector !== "undefined";
+  const browserWindow = typeof window !== "undefined" ? (window as WindowWithBarcodeDetector) : undefined;
+  const navWithConnection = navigator as NavigatorWithConnection;
+  const cameraAssistSupported = typeof browserWindow?.BarcodeDetector !== "undefined";
 
   useEffect(() => {
+    const timers = timersRef.current;
     return () => {
-      for (const timer of timersRef.current) window.clearTimeout(timer);
+      for (const timer of timers) window.clearTimeout(timer);
+      timers.length = 0;
     };
   }, []);
 
   const go = () => {
     if (!cleaned || isRedirecting) return;
+
+    for (const timer of timersRef.current) window.clearTimeout(timer);
+    timersRef.current.length = 0;
 
     setIsRedirecting(true);
     setScanStage(0);
@@ -41,7 +66,7 @@ export default function VerifyLanding() {
         transitionMs: 1250,
         verifyCodePresent: true,
         deviceType: /mobile/i.test(navigator.userAgent) ? "mobile" : "desktop",
-        networkType: String((navigator as any).connection?.effectiveType || "unknown"),
+        networkType: String(navWithConnection.connection?.effectiveType || "unknown"),
         online: navigator.onLine,
       })
       .catch(() => {
@@ -66,7 +91,11 @@ export default function VerifyLanding() {
     setCameraDecoding(true);
     setCameraError("");
     try {
-      const Detector = (window as any).BarcodeDetector;
+      const Detector = browserWindow?.BarcodeDetector;
+      if (!Detector) {
+        setCameraError("Camera QR decode is not supported in this browser. Enter the code manually.");
+        return;
+      }
       const detector = new Detector({ formats: ["qr_code"] });
       const bitmap = await createImageBitmap(file);
       const [result] = await detector.detect(bitmap);
@@ -86,13 +115,13 @@ export default function VerifyLanding() {
           transitionMs: 400,
           verifyCodePresent: true,
           deviceType: /mobile/i.test(navigator.userAgent) ? "mobile" : "desktop",
-          networkType: String((navigator as any).connection?.effectiveType || "unknown"),
+          networkType: String(navWithConnection.connection?.effectiveType || "unknown"),
           online: navigator.onLine,
         })
         .catch(() => {
           // best effort telemetry
         });
-      window.setTimeout(() => {
+      const settleTimer = window.setTimeout(() => {
         setCode(rawValue);
         setCameraDecoding(false);
         setCameraError("");
@@ -101,8 +130,9 @@ export default function VerifyLanding() {
         const navTimer = window.setTimeout(() => navigate(`/verify/${encodeURIComponent(rawValue)}`), 200);
         timersRef.current.push(navTimer);
       }, 100);
-    } catch (error: any) {
-      setCameraError(error?.message || "Camera decode failed. Use manual entry if this continues.");
+      timersRef.current.push(settleTimer);
+    } catch (error: unknown) {
+      setCameraError(error instanceof Error ? error.message : "Camera decode failed. Use manual entry if this continues.");
     } finally {
       setCameraDecoding(false);
       if (fileInputRef.current) fileInputRef.current.value = "";

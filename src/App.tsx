@@ -29,6 +29,7 @@ const SupportCenter = lazy(() => import("@/pages/SupportCenter"));
 const Governance = lazy(() => import("@/pages/Governance"));
 const Verify = lazy(() => import("@/pages/Verify"));
 const VerifyLanding = lazy(() => import("@/pages/VerifyLanding"));
+const Index = lazy(() => import("@/pages/Index"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 const AccountSettings = lazy(() => import("@/pages/AccountSettings"));
 const HelpHub = lazy(() => import("@/pages/help/HelpHub"));
@@ -100,12 +101,6 @@ function AuthRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function RootRoute() {
-  const { isAuthenticated, isLoading } = useAuth();
-  if (isLoading) return <LoadingScreen />;
-  return <Navigate to={isAuthenticated ? "/dashboard" : "/verify"} replace />;
-}
-
 function HelpRoleRoute({
   children,
   allowedRoles,
@@ -141,7 +136,7 @@ function AppRoutes() {
     <Suspense fallback={<LoadingScreen />}>
       <Routes>
         {/* Public */}
-        <Route path="/" element={<RootRoute />} />
+        <Route path="/" element={<Index />} />
         <Route path="/verify" element={<VerifyLanding />} />
         <Route path="/verify/:code" element={<Verify />} />
         <Route path="/scan" element={<Verify />} />
