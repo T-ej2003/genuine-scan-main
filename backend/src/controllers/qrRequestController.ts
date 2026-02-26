@@ -88,7 +88,7 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
         audience: NotificationAudience.SUPER_ADMIN,
         type: "qr_request_created",
         title: "New QR inventory request",
-        body: `Request ${created.id.slice(0, 8)} for ${created.quantity || 0} codes is pending review.`,
+        body: `${created.quantity || 0} QR codes requested${created.batchName ? ` for batch "${created.batchName}"` : ""}. Pending review.`,
         data: {
           requestId: created.id,
           licenseeId,
@@ -104,7 +104,7 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
         licenseeId,
         type: "qr_request_created",
         title: "QR inventory request submitted",
-        body: `Request ${created.id.slice(0, 8)} was submitted for ${created.quantity || 0} codes.`,
+        body: `Your request for ${created.quantity || 0} QR codes is in review${created.batchName ? ` (${created.batchName})` : ""}.`,
         data: {
           requestId: created.id,
           licenseeId,
@@ -261,7 +261,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
         audience: NotificationAudience.SUPER_ADMIN,
         type: "qr_request_approved",
         title: "QR request approved",
-        body: `Request ${requestRow.id.slice(0, 8)} approved for ${quantityRequested} codes.`,
+        body: `${quantityRequested} QR codes approved${requestRow.batchName ? ` for "${requestRow.batchName}"` : ""}.`,
         data: {
           requestId: requestRow.id,
           licenseeId: requestRow.licenseeId,
@@ -277,7 +277,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
         licenseeId: requestRow.licenseeId,
         type: "qr_request_approved",
         title: "QR request approved",
-        body: `Request ${requestRow.id.slice(0, 8)} is approved and inventory has been allocated.`,
+        body: `Inventory was allocated for ${quantityRequested} QR codes${requestRow.batchName ? ` (${requestRow.batchName})` : ""}.`,
         data: {
           requestId: requestRow.id,
           licenseeId: requestRow.licenseeId,
@@ -293,7 +293,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
         licenseeId: requestRow.licenseeId,
         type: "qr_request_approved",
         title: "Your QR request was approved",
-        body: `Request ${requestRow.id.slice(0, 8)} was approved for ${quantityRequested} codes.`,
+        body: `${quantityRequested} QR codes were approved${requestRow.batchName ? ` for "${requestRow.batchName}"` : ""}.`,
         data: {
           requestId: requestRow.id,
           licenseeId: requestRow.licenseeId,
@@ -362,7 +362,7 @@ export const rejectQrAllocationRequest = async (req: AuthRequest, res: Response)
         audience: NotificationAudience.SUPER_ADMIN,
         type: "qr_request_rejected",
         title: "QR request rejected",
-        body: `Request ${id.slice(0, 8)} was rejected.`,
+        body: `A QR inventory request was rejected.`,
         data: {
           requestId: id,
           licenseeId: requestRow.licenseeId,
@@ -377,7 +377,7 @@ export const rejectQrAllocationRequest = async (req: AuthRequest, res: Response)
         licenseeId: requestRow.licenseeId,
         type: "qr_request_rejected",
         title: "QR request rejected",
-        body: `Request ${id.slice(0, 8)} was rejected. Review decision note and resubmit if needed.`,
+        body: "A QR inventory request was rejected. Review the decision note and resubmit if needed.",
         data: {
           requestId: id,
           licenseeId: requestRow.licenseeId,
@@ -392,7 +392,7 @@ export const rejectQrAllocationRequest = async (req: AuthRequest, res: Response)
         licenseeId: requestRow.licenseeId,
         type: "qr_request_rejected",
         title: "Your QR request was rejected",
-        body: `Request ${id.slice(0, 8)} was rejected. Review notes and update your request.`,
+        body: "Your QR inventory request was rejected. Review notes and resubmit when ready.",
         data: {
           requestId: id,
           licenseeId: requestRow.licenseeId,

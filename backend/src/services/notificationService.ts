@@ -229,24 +229,75 @@ export const createUserNotification = async (params: {
 export const notifyIncidentLifecycle = async (params: {
   incidentId: string;
   licenseeId?: string | null;
+  manufacturerOrgId?: string | null;
   title: string;
   body: string;
   type: string;
   data?: any;
 }) => {
-  const audiences: NotificationAudience[] = [NotificationAudience.SUPER_ADMIN];
-  if (params.licenseeId) audiences.push(NotificationAudience.LICENSEE_ADMIN);
+  let manufacturerOrgId = params.manufacturerOrgId || null;
+  if (!manufacturerOrgId && params.incidentId) {
+    const incidentScope = await prisma.incident.findUnique({
+      where: { id: params.incidentId },
+      select: {
+        qrCode: {
+          select: {
+            batch: {
+              select: {
+                manufacturer: { select: { orgId: true } },
+              },
+            },
+          },
+        },
+        scanEvent: {
+          select: {
+            batch: {
+              select: {
+                manufacturer: { select: { orgId: true } },
+              },
+            },
+          },
+        },
+      },
+    });
 
-  for (const audience of audiences) {
+    manufacturerOrgId =
+      incidentScope?.qrCode?.batch?.manufacturer?.orgId ||
+      incidentScope?.scanEvent?.batch?.manufacturer?.orgId ||
+      null;
+  }
+
+  const targets: Array<{ audience: NotificationAudience; licenseeId?: string | null; orgId?: string | null; channels?: NotificationChannel[] }> = [
+    { audience: NotificationAudience.SUPER_ADMIN, licenseeId: null, orgId: null, channels: [NotificationChannel.WEB, NotificationChannel.EMAIL] },
+  ];
+  if (params.licenseeId) {
+    targets.push({
+      audience: NotificationAudience.LICENSEE_ADMIN,
+      licenseeId: params.licenseeId || null,
+      orgId: null,
+      channels: [NotificationChannel.WEB, NotificationChannel.EMAIL],
+    });
+  }
+  if (manufacturerOrgId) {
+    targets.push({
+      audience: NotificationAudience.MANUFACTURER,
+      licenseeId: null,
+      orgId: manufacturerOrgId,
+      channels: [NotificationChannel.WEB],
+    });
+  }
+
+  for (const target of targets) {
     await createRoleNotifications({
-      audience,
+      audience: target.audience,
       title: params.title,
       body: params.body,
       type: params.type,
-      licenseeId: audience === NotificationAudience.LICENSEE_ADMIN ? params.licenseeId || null : null,
+      licenseeId: target.licenseeId ?? null,
+      orgId: target.orgId ?? null,
       incidentId: params.incidentId,
       data: params.data,
-      channels: [NotificationChannel.WEB, NotificationChannel.EMAIL],
+      channels: target.channels || [NotificationChannel.WEB],
     });
   }
 };
@@ -255,24 +306,39 @@ export const listNotificationsForUser = async (params: {
   userId: string;
   role: UserRole;
   licenseeId?: string | null;
+  orgId?: string | null;
   limit: number;
   offset: number;
   unreadOnly?: boolean;
 }) => {
   const audience = normalizeRole(params.role);
 
-  const scopedOr: any[] = [
-    { userId: params.userId },
-    {
-      userId: null,
-      audience: { in: [NotificationAudience.ALL, audience] },
-      ...(params.role === UserRole.SUPER_ADMIN || params.role === UserRole.PLATFORM_SUPER_ADMIN
-        ? {}
-        : {
-            OR: [{ licenseeId: params.licenseeId || "__none__" }, { licenseeId: null }],
-          }),
-    },
-  ];
+  const scopedBroadcast: any = {
+    userId: null,
+    channel: NotificationChannel.WEB,
+    audience: { in: [NotificationAudience.ALL, audience] },
+  };
+
+  if (params.role !== UserRole.SUPER_ADMIN && params.role !== UserRole.PLATFORM_SUPER_ADMIN) {
+    const tenantFilters: any[] = [];
+    if (params.licenseeId) {
+      tenantFilters.push({ OR: [{ licenseeId: params.licenseeId }, { licenseeId: null }] });
+    } else if (audience !== NotificationAudience.MANUFACTURER) {
+      tenantFilters.push({ licenseeId: null });
+    }
+
+    if (audience === NotificationAudience.MANUFACTURER) {
+      if (params.orgId) {
+        tenantFilters.push({ OR: [{ orgId: params.orgId }, { orgId: null }] });
+      } else {
+        tenantFilters.push({ orgId: null });
+      }
+    }
+
+    if (tenantFilters.length) scopedBroadcast.AND = tenantFilters;
+  }
+
+  const scopedOr: any[] = [{ userId: params.userId, channel: NotificationChannel.WEB }, scopedBroadcast];
 
   const where: any = {
     OR: scopedOr,
@@ -326,21 +392,38 @@ export const markNotificationRead = async (params: {
   userId: string;
   role: UserRole;
   licenseeId?: string | null;
+  orgId?: string | null;
 }) => {
   const audience = normalizeRole(params.role);
   try {
+    const sharedScope: any = {
+      userId: null,
+      channel: NotificationChannel.WEB,
+      audience: { in: [NotificationAudience.ALL, audience] },
+    };
+    if (params.role !== UserRole.SUPER_ADMIN && params.role !== UserRole.PLATFORM_SUPER_ADMIN) {
+      const tenantFilters: any[] = [];
+      if (params.licenseeId) {
+        tenantFilters.push({ OR: [{ licenseeId: params.licenseeId }, { licenseeId: null }] });
+      } else if (audience !== NotificationAudience.MANUFACTURER) {
+        tenantFilters.push({ licenseeId: null });
+      }
+      if (audience === NotificationAudience.MANUFACTURER) {
+        if (params.orgId) {
+          tenantFilters.push({ OR: [{ orgId: params.orgId }, { orgId: null }] });
+        } else {
+          tenantFilters.push({ orgId: null });
+        }
+      }
+      if (tenantFilters.length) sharedScope.AND = tenantFilters;
+    }
+
     const existing = await prisma.notification.findFirst({
       where: {
         id: params.notificationId,
         OR: [
-          { userId: params.userId },
-          {
-            userId: null,
-            audience: { in: [NotificationAudience.ALL, audience] },
-            ...(params.role === UserRole.SUPER_ADMIN || params.role === UserRole.PLATFORM_SUPER_ADMIN
-              ? {}
-              : { OR: [{ licenseeId: params.licenseeId || "__none__" }, { licenseeId: null }] }),
-          },
+          { userId: params.userId, channel: NotificationChannel.WEB },
+          sharedScope,
         ],
       },
     });
@@ -379,20 +462,37 @@ export const markAllNotificationsRead = async (params: {
   userId: string;
   role: UserRole;
   licenseeId?: string | null;
+  orgId?: string | null;
 }) => {
   const audience = normalizeRole(params.role);
+
+  const sharedScope: any = {
+    userId: null,
+    channel: NotificationChannel.WEB,
+    audience: { in: [NotificationAudience.ALL, audience] },
+  };
+  if (params.role !== UserRole.SUPER_ADMIN && params.role !== UserRole.PLATFORM_SUPER_ADMIN) {
+    const tenantFilters: any[] = [];
+    if (params.licenseeId) {
+      tenantFilters.push({ OR: [{ licenseeId: params.licenseeId }, { licenseeId: null }] });
+    } else if (audience !== NotificationAudience.MANUFACTURER) {
+      tenantFilters.push({ licenseeId: null });
+    }
+    if (audience === NotificationAudience.MANUFACTURER) {
+      if (params.orgId) {
+        tenantFilters.push({ OR: [{ orgId: params.orgId }, { orgId: null }] });
+      } else {
+        tenantFilters.push({ orgId: null });
+      }
+    }
+    if (tenantFilters.length) sharedScope.AND = tenantFilters;
+  }
 
   const where: any = {
     readAt: null,
     OR: [
-      { userId: params.userId },
-      {
-        userId: null,
-        audience: { in: [NotificationAudience.ALL, audience] },
-        ...(params.role === UserRole.SUPER_ADMIN || params.role === UserRole.PLATFORM_SUPER_ADMIN
-          ? {}
-          : { OR: [{ licenseeId: params.licenseeId || "__none__" }, { licenseeId: null }] }),
-      },
+      { userId: params.userId, channel: NotificationChannel.WEB },
+      sharedScope,
     ],
   };
 

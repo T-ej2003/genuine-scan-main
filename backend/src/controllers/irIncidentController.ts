@@ -251,9 +251,9 @@ export const createIrIncident = async (req: AuthRequest, res: Response) => {
       incidentId: created.id,
       licenseeId,
       type: "ir_incident_created",
-      title: `IR incident ${created.id.slice(0, 8)} created`,
-      body: `Incident ${created.id} created with priority ${priority} and severity ${severity}.`,
-      data: { priority, severity, status: created.status },
+      title: "IR incident created",
+      body: `A new incident was created with priority ${priority} and severity ${severity}.`,
+      data: { priority, severity, status: created.status, incidentType: created.incidentType, qrCodeValue: created.qrCodeValue },
     });
 
     return res.status(201).json({ success: true, data: created });
@@ -431,8 +431,10 @@ export const patchIrIncident = async (req: AuthRequest, res: Response) => {
       incidentId: id,
       licenseeId: existing.licenseeId || null,
       type: "ir_incident_updated",
-      title: `IR incident ${id.slice(0, 8)} updated`,
-      body: `Fields updated: ${changedFields.join(", ") || "none"}.`,
+      title: "IR incident updated",
+      body: changedFields.length
+        ? `Updated: ${changedFields.map((f) => String(f).replace(/_/g, " ")).join(", ")}.`
+        : "Incident details were updated.",
       data: { changedFields },
     });
 

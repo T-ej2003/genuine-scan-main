@@ -10,6 +10,7 @@ import { allocateQrRange, getNextLicenseeQrNumber, lockLicenseeAllocation } from
 import { createHash, randomBytes } from "crypto";
 import { hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
 import { resolveQrZipProfile, streamQrZipToResponse } from "../services/qrZipStreamService";
+import { createUserNotification } from "../services/notificationService";
 
 /* ===================== SCHEMAS ===================== */
 
@@ -744,6 +745,24 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
       },
       ipAddress: req.ip,
     });
+
+    try {
+      await createUserNotification({
+        userId: manufacturer.id,
+        licenseeId: batch.licenseeId,
+        type: "manufacturer_batch_assigned",
+        title: "New batch assigned",
+        body: `${result.newBatchName} is ready for printing (${result.allocated} codes).`,
+        data: {
+          batchId: result.newBatchId,
+          batchName: result.newBatchName,
+          quantity: result.allocated,
+          targetRoute: "/batches",
+        },
+      });
+    } catch (notifyError) {
+      console.error("assignManufacturer notification error:", notifyError);
+    }
 
     return res.json({ success: true, data: result });
   } catch (e) {

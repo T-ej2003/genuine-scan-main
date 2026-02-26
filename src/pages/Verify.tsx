@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/api-client";
 import { getOrCreateAnonDeviceId } from "@/lib/anon-device";
+import { friendlyReferenceLabel } from "@/lib/friendly-reference";
 import { cn } from "@/lib/utils";
 
 type VerificationClassification =
@@ -1429,8 +1430,12 @@ export default function Verify() {
                       {trackedTicket ? (
                         <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-700">
                           <p>
-                            Reference: <span className="font-mono font-semibold">{trackedTicket.referenceCode || trackReference}</span>
+                            Reference:{" "}
+                            <span className="font-semibold">
+                              {friendlyReferenceLabel(trackedTicket.referenceCode || trackReference, "Ticket")}
+                            </span>
                           </p>
+                          <p className="font-mono text-[11px] text-slate-500">{trackedTicket.referenceCode || trackReference}</p>
                           <p>Status: {toLabel(trackedTicket.status || "open")}</p>
                           {trackedTicket.handoffStage ? <p>Workflow stage: {toLabel(trackedTicket.handoffStage)}</p> : null}
                           {trackedTicket.sla?.dueAt ? (
@@ -1542,13 +1547,16 @@ export default function Verify() {
           {reportReference ? (
             <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
               <p>
-                Report submitted successfully. Reference ID: <span className="font-mono font-semibold">{reportReference}</span>
+                Report submitted successfully. Case reference:{" "}
+                <span className="font-semibold">{friendlyReferenceLabel(reportReference, "Case")}</span>
               </p>
+              <p className="font-mono text-xs text-emerald-950">{reportReference}</p>
               {reportSupportRef ? (
                 <div className="rounded-md border border-emerald-300 bg-white/80 p-3 text-xs text-emerald-950">
                   <p>
-                    Support ticket: <span className="font-mono font-semibold">{reportSupportRef}</span>
+                    Support ticket: <span className="font-semibold">{friendlyReferenceLabel(reportSupportRef, "Ticket")}</span>
                   </p>
+                  <p className="font-mono text-[11px]">{reportSupportRef}</p>
                   {reportSupportStatus ? <p>Status: {toLabel(reportSupportStatus)}</p> : null}
                   {reportSupportSla ? <p>SLA due by: {reportSupportSla}</p> : null}
                 </div>

@@ -33,6 +33,7 @@ export const listNotifications = async (req: AuthRequest, res: Response) => {
       userId: req.user.userId,
       role: req.user.role,
       licenseeId: req.user.licenseeId,
+      orgId: req.user.orgId,
       limit,
       offset,
       unreadOnly,
@@ -64,6 +65,7 @@ export const readNotification = async (req: AuthRequest, res: Response) => {
       userId: req.user.userId,
       role: req.user.role,
       licenseeId: req.user.licenseeId,
+      orgId: req.user.orgId,
     });
 
     if (!updated) return res.status(404).json({ success: false, error: "Notification not found" });
@@ -82,6 +84,7 @@ export const readAllNotifications = async (req: AuthRequest, res: Response) => {
       userId: req.user.userId,
       role: req.user.role,
       licenseeId: req.user.licenseeId,
+      orgId: req.user.orgId,
     });
 
     return res.json({

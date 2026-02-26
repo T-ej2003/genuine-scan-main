@@ -7,6 +7,7 @@ import { randomBytes, createHash } from "crypto";
 import { buildScanUrl, hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
 import { createAuditLog } from "../services/auditService";
 import { resolveQrZipProfile, streamQrZipToResponse } from "../services/qrZipStreamService";
+import { createUserNotification } from "../services/notificationService";
 
 const MANUFACTURER_ROLES: UserRole[] = [
   UserRole.MANUFACTURER,
@@ -170,6 +171,25 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
       ipAddress: req.ip,
     });
 
+    try {
+      await createUserNotification({
+        userId: req.user.userId,
+        licenseeId: batch.licenseeId,
+        type: "manufacturer_print_job_created",
+        title: "Print job prepared",
+        body: `Print package is ready for ${batch.name} (${quantity} codes).`,
+        data: {
+          printJobId: job.id,
+          batchId: batch.id,
+          batchName: batch.name,
+          quantity,
+          targetRoute: "/batches",
+        },
+      });
+    } catch (notifyError) {
+      console.error("createPrintJob notification error:", notifyError);
+    }
+
     return res.status(201).json({
       success: true,
       data: {
@@ -269,6 +289,25 @@ export const downloadPrintJobPack = async (req: AuthRequest, res: Response) => {
       ipAddress: req.ip,
     });
 
+    try {
+      await createUserNotification({
+        userId: req.user.userId,
+        licenseeId: job.batch.licenseeId,
+        type: "manufacturer_print_job_confirmed",
+        title: "Printing confirmed",
+        body: `Printing confirmed for ${job.batch.name} (${confirmed.printed} codes).`,
+        data: {
+          printJobId: job.id,
+          batchId: job.batch.id,
+          batchName: job.batch.name,
+          printedCodes: confirmed.printed,
+          targetRoute: "/batches",
+        },
+      });
+    } catch (notifyError) {
+      console.error("downloadPrintJobPack notification error:", notifyError);
+    }
+
     const fileName = `print-job-${job.id}.zip`;
     const entries = (async function* () {
       let cursorCode: string | undefined;
@@ -352,7 +391,7 @@ export const confirmPrintJob = async (req: AuthRequest, res: Response) => {
 
     const job = await prisma.printJob.findFirst({
       where: { id: jobId, manufacturerId: req.user.userId },
-      include: { batch: { select: { id: true, licenseeId: true } } },
+      include: { batch: { select: { id: true, name: true, licenseeId: true } } },
     });
     if (!job) return res.status(404).json({ success: false, error: "Print job not found" });
     if (job.status === "CONFIRMED") {
@@ -408,6 +447,25 @@ export const confirmPrintJob = async (req: AuthRequest, res: Response) => {
       details: { printedCodes: result.updatedCodes.count },
       ipAddress: req.ip,
     });
+
+    try {
+      await createUserNotification({
+        userId: req.user.userId,
+        licenseeId: job.batch.licenseeId,
+        type: "manufacturer_print_job_confirmed",
+        title: "Printing confirmed",
+        body: `Printing confirmed for ${job.batch.name} (${result.updatedCodes.count} codes).`,
+        data: {
+          printJobId: job.id,
+          batchId: job.batch.id,
+          batchName: job.batch.name,
+          printedCodes: result.updatedCodes.count,
+          targetRoute: "/batches",
+        },
+      });
+    } catch (notifyError) {
+      console.error("confirmPrintJob notification error:", notifyError);
+    }
 
     return res.json({
       success: true,

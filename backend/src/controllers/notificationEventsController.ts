@@ -33,8 +33,20 @@ const shouldDeliver = (event: NotificationRealtimeEvent, user: NonNullable<AuthR
 
   if (!isPlatform(user.role)) {
     const userLicenseeId = user.licenseeId || null;
+    const userOrgId = user.orgId || null;
+    const userAudience = audienceForRole(user.role);
+
+    if (event.orgId) {
+      if (!userOrgId || event.orgId !== userOrgId) return false;
+    }
+
     if (event.licenseeId && userLicenseeId && event.licenseeId !== userLicenseeId) return false;
-    if (event.licenseeId && !userLicenseeId) return false;
+    if (event.licenseeId && !userLicenseeId) {
+      // Manufacturer users can be scoped by org only (legacy rows may still carry licenseeId).
+      if (!(userAudience === NotificationAudience.MANUFACTURER && event.orgId && userOrgId && event.orgId === userOrgId)) {
+        return false;
+      }
+    }
   }
 
   return true;
@@ -56,6 +68,7 @@ export const notificationEvents = async (req: AuthRequest, res: Response) => {
         userId: req.user!.userId,
         role: req.user!.role,
         licenseeId: req.user!.licenseeId,
+        orgId: req.user!.orgId,
         limit,
         offset: 0,
       });
