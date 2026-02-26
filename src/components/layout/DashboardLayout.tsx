@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
@@ -14,11 +14,17 @@ import {
   LogOut,
   Menu,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Shield,
   ScanEye,
   ShieldAlert,
   CircleHelp,
   Bell,
+  Sparkles,
+  SlidersHorizontal,
+  Trash2,
+  Inbox,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -27,6 +33,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Slider } from "@/components/ui/slider";
 
 interface NavItem {
   label: string;
@@ -34,6 +41,20 @@ interface NavItem {
   icon: React.ElementType;
   roles: string[];
 }
+
+type DashboardNotification = {
+  id: string;
+  title?: string | null;
+  body?: string | null;
+  createdAt?: string | null;
+  readAt?: string | null;
+  data?: unknown;
+  incidentId?: string | null;
+};
+
+const NOTIFICATION_FETCH_LIMIT = 24;
+const NOTIFICATION_WINDOW_SIZE = 4;
+const NOTIFICATION_CLEAR_ANIMATION_MS = 260;
 
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["super_admin", "licensee_admin", "manufacturer"] },
@@ -54,28 +75,44 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<DashboardNotification[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [notificationsLive, setNotificationsLive] = useState(false);
+  const [dismissedNotificationIds, setDismissedNotificationIds] = useState<string[]>([]);
+  const [clearingNotificationIds, setClearingNotificationIds] = useState<string[]>([]);
+  const [clearingNotifications, setClearingNotifications] = useState(false);
+  const [notificationWindowStart, setNotificationWindowStart] = useState(0);
+  const [notificationMotionSeed, setNotificationMotionSeed] = useState(0);
+  const clearNotificationsTimerRef = useRef<number | null>(null);
 
   const filteredNavItems = navItems.filter((item) => user && item.roles.includes(user.role));
   const contextualHelpRoute = getContextualHelpRoute(location.pathname, user?.role);
+
+  const applyNotificationSnapshot = (rows: DashboardNotification[], unread: number) => {
+    setNotifications(rows);
+    setUnreadNotifications(Number.isFinite(unread) ? unread : 0);
+
+    const rowIds = new Set(rows.map((row) => String(row?.id || "")).filter(Boolean));
+    setDismissedNotificationIds((prev) => prev.filter((id) => rowIds.has(id)));
+  };
 
   const loadNotifications = async () => {
     if (!user) return;
     setNotificationsLoading(true);
     try {
-      const response = await apiClient.getNotifications({ limit: 8, offset: 0 });
+      const response = await apiClient.getNotifications({ limit: NOTIFICATION_FETCH_LIMIT, offset: 0 });
       if (!response.success) {
         setNotifications([]);
         setUnreadNotifications(0);
         return;
       }
-      const payload: any = response.data || {};
+      const payload = (response.data && typeof response.data === "object" ? response.data : {}) as {
+        notifications?: DashboardNotification[];
+        unread?: number;
+      };
       const rows = Array.isArray(payload.notifications) ? payload.notifications : [];
-      setNotifications(rows);
-      setUnreadNotifications(Number(payload.unread || 0));
+      applyNotificationSnapshot(rows, Number(payload.unread || 0));
     } catch {
       setNotifications([]);
       setUnreadNotifications(0);
@@ -100,12 +137,15 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!user) return;
+    if (clearNotificationsTimerRef.current) {
+      window.clearTimeout(clearNotificationsTimerRef.current);
+      clearNotificationsTimerRef.current = null;
+    }
 
     const stop = apiClient.streamNotifications(
       (payload) => {
         const rows = Array.isArray(payload.notifications) ? payload.notifications : [];
-        setNotifications(rows);
-        setUnreadNotifications(Number(payload.unread || 0));
+        applyNotificationSnapshot(rows, Number(payload.unread || 0));
       },
       () => {
         setNotificationsLive(false);
@@ -113,13 +153,14 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       () => {
         setNotificationsLive(true);
       },
-      { limit: 8 }
+      { limit: NOTIFICATION_FETCH_LIMIT }
     );
 
     return () => {
       setNotificationsLive(false);
       stop();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
   const markNotificationRead = async (id: string) => {
@@ -128,8 +169,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     await loadNotifications();
   };
 
-  const notificationTarget = (notification: any) => {
-    const data = (notification?.data && typeof notification.data === "object" ? notification.data : {}) as Record<string, any>;
+  const notificationTarget = (notification: DashboardNotification) => {
+    const data = (notification?.data && typeof notification.data === "object" ? notification.data : {}) as Record<string, unknown>;
     if (typeof data.targetRoute === "string" && data.targetRoute.trim()) return data.targetRoute.trim();
     if (data.ticketId) return `/support?ticketId=${encodeURIComponent(String(data.ticketId))}`;
     if (data.ticketReference) return `/support?reference=${encodeURIComponent(String(data.ticketReference))}`;
@@ -137,7 +178,134 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     return "/dashboard";
   };
 
-  const notificationItems = useMemo(() => notifications.slice(0, 8), [notifications]);
+  const dismissedNotificationIdSet = useMemo(() => new Set(dismissedNotificationIds), [dismissedNotificationIds]);
+  const clearingNotificationIdSet = useMemo(() => new Set(clearingNotificationIds), [clearingNotificationIds]);
+
+  const visibleNotifications = useMemo(
+    () => notifications.filter((item) => item?.id && !dismissedNotificationIdSet.has(String(item.id))),
+    [notifications, dismissedNotificationIdSet]
+  );
+
+  const notificationTimelineMax = Math.max(0, visibleNotifications.length - NOTIFICATION_WINDOW_SIZE);
+
+  useEffect(() => {
+    setNotificationWindowStart((prev) => Math.min(prev, notificationTimelineMax));
+  }, [notificationTimelineMax]);
+
+  useEffect(() => {
+    setNotificationMotionSeed((prev) => prev + 1);
+  }, [notificationWindowStart, visibleNotifications.length]);
+
+  useEffect(() => {
+    return () => {
+      if (clearNotificationsTimerRef.current) {
+        window.clearTimeout(clearNotificationsTimerRef.current);
+      }
+    };
+  }, []);
+
+  const notificationItems = useMemo(
+    () => visibleNotifications.slice(notificationWindowStart, notificationWindowStart + NOTIFICATION_WINDOW_SIZE),
+    [visibleNotifications, notificationWindowStart]
+  );
+
+  const handleMarkAllNotificationsRead = async () => {
+    if (notifications.length === 0 && unreadNotifications === 0) return;
+
+    const readAt = new Date().toISOString();
+    setNotifications((prev) => prev.map((item) => ({ ...item, readAt: item.readAt || readAt })));
+    setUnreadNotifications(0);
+
+    try {
+      await apiClient.markAllNotificationsRead();
+    } catch {
+      await loadNotifications();
+    }
+  };
+
+  const handleClearNotifications = async () => {
+    if (notificationsLoading || clearingNotifications || visibleNotifications.length === 0) return;
+
+    const idsToClear = visibleNotifications.map((item) => String(item.id)).filter(Boolean);
+    if (idsToClear.length === 0) return;
+
+    const unreadBeingCleared = visibleNotifications.reduce((count, item) => count + (!item.readAt ? 1 : 0), 0);
+    const readAt = new Date().toISOString();
+
+    setClearingNotifications(true);
+    setClearingNotificationIds(idsToClear);
+    setNotifications((prev) =>
+      prev.map((item) => (idsToClear.includes(String(item.id)) ? { ...item, readAt: item.readAt || readAt } : item))
+    );
+    setUnreadNotifications((prev) => Math.max(0, prev - unreadBeingCleared));
+
+    if (clearNotificationsTimerRef.current) {
+      window.clearTimeout(clearNotificationsTimerRef.current);
+    }
+
+    clearNotificationsTimerRef.current = window.setTimeout(() => {
+      setDismissedNotificationIds((prev) => Array.from(new Set([...prev, ...idsToClear])).slice(-300));
+      setClearingNotificationIds([]);
+      setClearingNotifications(false);
+      clearNotificationsTimerRef.current = null;
+    }, NOTIFICATION_CLEAR_ANIMATION_MS);
+
+    try {
+      await apiClient.markAllNotificationsRead();
+    } catch {
+      // Local clear is non-destructive UI state; keep it smooth even if network sync fails.
+    }
+  };
+
+  const stepNotificationTimeline = (direction: "newer" | "older") => {
+    setNotificationWindowStart((prev) => {
+      if (direction === "newer") return Math.max(0, prev - 1);
+      return Math.min(notificationTimelineMax, prev + 1);
+    });
+  };
+
+  const canMoveTimelineToNewer = notificationWindowStart > 0;
+  const canMoveTimelineToOlder = notificationWindowStart < notificationTimelineMax;
+  const hasVisibleNotifications = visibleNotifications.length > 0;
+  const notificationPanelCleared = notifications.length > 0 && visibleNotifications.length === 0;
+  const canClearNotifications = hasVisibleNotifications && !notificationsLoading && !clearingNotifications;
+  const timelineVisibleStart = hasVisibleNotifications ? notificationWindowStart + 1 : 0;
+  const timelineVisibleEnd = hasVisibleNotifications ? notificationWindowStart + notificationItems.length : 0;
+
+  const formatNotificationDate = (value?: string | null) => {
+    if (!value) return "Time unavailable";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Time unavailable";
+    return date.toLocaleString();
+  };
+
+  const isNotificationUnread = (notification: DashboardNotification) => !notification.readAt;
+
+  const notificationToneClasses = (notification: DashboardNotification) => {
+    const text = `${notification.title || ""} ${notification.body || ""}`.toLowerCase();
+    if (text.includes("incident")) {
+      return {
+        accent: "bg-amber-400/90",
+        border: "border-amber-300/35",
+        glow: "shadow-[0_0_0_1px_rgba(251,191,36,0.12)_inset]",
+        chip: "bg-amber-400/15 text-amber-900 dark:text-amber-200 border-amber-300/30",
+      };
+    }
+    if (text.includes("request")) {
+      return {
+        accent: "bg-sky-400/90",
+        border: "border-sky-300/35",
+        glow: "shadow-[0_0_0_1px_rgba(56,189,248,0.12)_inset]",
+        chip: "bg-sky-400/15 text-sky-900 dark:text-sky-200 border-sky-300/30",
+      };
+    }
+    return {
+      accent: "bg-emerald-400/90",
+      border: "border-emerald-300/35",
+      glow: "shadow-[0_0_0_1px_rgba(16,185,129,0.12)_inset]",
+      chip: "bg-emerald-400/15 text-emerald-900 dark:text-emerald-200 border-emerald-300/30",
+    };
+  };
 
   const handleLogout = () => {
     logout();
@@ -231,53 +399,233 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="relative mr-1">
+              <Button variant="ghost" size="icon" className="relative mr-1 rounded-full border-white/50 bg-white/65 dark:bg-white/5">
                 <Bell className="h-4 w-4 text-muted-foreground" />
                 {unreadNotifications > 0 ? (
-                  <span className="absolute -right-0.5 -top-0.5 inline-flex min-h-4 min-w-4 items-center justify-center rounded-full bg-emerald-600 px-1 text-[10px] font-semibold text-white">
+                  <span className="absolute -right-0.5 -top-0.5 inline-flex min-h-4 min-w-4 items-center justify-center rounded-full border border-white/70 bg-emerald-500 px-1 text-[10px] font-semibold text-white shadow-[0_6px_14px_-8px_rgba(16,185,129,0.8)]">
                     {unreadNotifications > 9 ? "9+" : unreadNotifications}
                   </span>
                 ) : null}
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-[340px]">
-              <div className="flex items-center justify-between px-3 py-2">
-                <p className="text-sm font-semibold">Notifications</p>
-                <div className="flex items-center gap-2">
-                  <span className={cn("inline-block h-2 w-2 rounded-full", notificationsLive ? "bg-emerald-500" : "bg-slate-300")} />
-                  <Button
-                    variant="ghost"
-                    className="h-auto px-2 py-1 text-xs"
-                    onClick={async () => {
-                      await apiClient.markAllNotificationsRead();
-                      await loadNotifications();
-                    }}
-                  >
-                    Mark all read
-                  </Button>
+            <DropdownMenuContent
+              align="end"
+              sideOffset={10}
+              className="w-[92vw] max-w-[27rem] rounded-2xl border border-white/35 bg-white/78 p-0 text-foreground shadow-[0_26px_60px_-28px_rgba(2,6,23,0.48),0_18px_28px_-22px_rgba(15,23,42,0.35)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/78"
+            >
+              <div className="relative overflow-hidden rounded-2xl">
+                <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[linear-gradient(180deg,rgba(16,185,129,0.12),rgba(59,130,246,0.04),transparent)]" />
+
+                <div className="relative border-b border-white/25 px-4 py-3 dark:border-white/10">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-base font-semibold tracking-tight">Notifications</p>
+                        <span className="inline-flex h-6 items-center rounded-full border border-white/40 bg-white/45 px-2 text-[11px] font-medium text-foreground/80 dark:border-white/10 dark:bg-white/5 dark:text-foreground/70">
+                          {visibleNotifications.length}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-white/35 bg-white/45 px-2 py-0.5 dark:border-white/10 dark:bg-white/5">
+                          <span
+                            className={cn(
+                              "inline-block h-2 w-2 rounded-full transition-colors",
+                              notificationsLive ? "bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.12)]" : "bg-slate-300"
+                            )}
+                          />
+                          {notificationsLive ? "Live feed active" : "Polling mode"}
+                        </span>
+                        {hasVisibleNotifications ? (
+                          <span className="rounded-full border border-white/25 bg-white/35 px-2 py-0.5 dark:border-white/10 dark:bg-white/5">
+                            Showing {timelineVisibleStart}-{timelineVisibleEnd} of {visibleNotifications.length}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-full px-3 text-[11px]"
+                      disabled={notificationsLoading || unreadNotifications === 0}
+                      onClick={handleMarkAllNotificationsRead}
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      Mark all read
+                    </Button>
+                  </div>
+
+                  <div className="mt-3 rounded-xl border border-white/25 bg-white/40 p-3 dark:border-white/10 dark:bg-white/5">
+                    <div className="mb-2 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
+                      <div className="inline-flex items-center gap-1.5">
+                        <SlidersHorizontal className="h-3.5 w-3.5" />
+                        Recent
+                      </div>
+                      <span className="text-foreground/80 dark:text-foreground/70">
+                        {hasVisibleNotifications ? `${timelineVisibleStart}-${timelineVisibleEnd}` : "0"}
+                      </span>
+                      <span>Older</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 rounded-full"
+                        disabled={!canMoveTimelineToNewer || notificationsLoading || clearingNotifications}
+                        onClick={() => stepNotificationTimeline("newer")}
+                        aria-label="Move toward most recent notifications"
+                      >
+                        <ChevronLeft className="h-3.5 w-3.5" />
+                      </Button>
+                      <Slider
+                        value={[notificationWindowStart]}
+                        min={0}
+                        max={Math.max(notificationTimelineMax, 1)}
+                        step={1}
+                        disabled={notificationTimelineMax === 0 || notificationsLoading || clearingNotifications}
+                        onValueChange={(value) => {
+                          const next = Math.max(0, Math.min(notificationTimelineMax, Number(value?.[0] ?? 0)));
+                          setNotificationWindowStart(next);
+                        }}
+                        className="flex-1"
+                        aria-label="Notification timeline from recent to older"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 rounded-full"
+                        disabled={!canMoveTimelineToOlder || notificationsLoading || clearingNotifications}
+                        onClick={() => stepNotificationTimeline("older")}
+                        aria-label="Move toward older notifications"
+                      >
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="relative p-3 pt-2">
+                  <div className="relative rounded-2xl border border-white/25 bg-white/38 p-2 shadow-[0_10px_24px_-20px_rgba(15,23,42,0.35)] dark:border-white/10 dark:bg-white/5">
+                    <div className="pointer-events-none absolute inset-x-4 top-0 h-10 bg-gradient-to-b from-white/35 to-transparent dark:from-white/5" />
+
+                    <div className="relative min-h-[18.5rem] pb-16">
+                      {notificationsLoading ? (
+                        <div className="space-y-2 p-1">
+                          {Array.from({ length: 4 }).map((_, index) => (
+                            <div
+                              key={`notification-skeleton-${index}`}
+                              className="rounded-xl border border-white/20 bg-white/55 p-3 dark:border-white/10 dark:bg-white/5"
+                            >
+                              <div className="h-4 w-2/3 animate-pulse rounded bg-slate-200/80 dark:bg-slate-700/70" />
+                              <div className="mt-2 h-3 w-full animate-pulse rounded bg-slate-200/70 dark:bg-slate-700/60" />
+                              <div className="mt-1 h-3 w-5/6 animate-pulse rounded bg-slate-200/60 dark:bg-slate-700/50" />
+                              <div className="mt-2 h-3 w-1/3 animate-pulse rounded bg-slate-200/60 dark:bg-slate-700/50" />
+                            </div>
+                          ))}
+                        </div>
+                      ) : hasVisibleNotifications ? (
+                        <div
+                          key={`${notificationMotionSeed}-${notificationWindowStart}-${visibleNotifications.length}`}
+                          className="space-y-2 p-1 animate-in fade-in-0 slide-in-from-bottom-1 duration-200"
+                        >
+                          {notificationItems.map((item, index) => {
+                            const isUnread = isNotificationUnread(item);
+                            const itemId = String(item.id);
+                            const isClearingItem = clearingNotificationIdSet.has(itemId);
+                            const tone = notificationToneClasses(item);
+
+                            return (
+                              <div
+                                key={itemId}
+                                className={cn(
+                                  "overflow-hidden transition-[max-height,opacity,transform,margin] duration-300 ease-out",
+                                  isClearingItem ? "max-h-0 opacity-0 -translate-y-2" : "max-h-56 opacity-100 translate-y-0"
+                                )}
+                                style={{ transitionDelay: isClearingItem ? `${index * 24}ms` : undefined }}
+                              >
+                                <DropdownMenuItem
+                                  disabled={isClearingItem || clearingNotifications}
+                                  onClick={async () => {
+                                    await markNotificationRead(item.id);
+                                    navigate(notificationTarget(item));
+                                  }}
+                                  className={cn(
+                                    "group relative flex cursor-pointer flex-col items-start gap-1.5 rounded-xl border px-3 py-3 pr-10 transition-all duration-200 ease-out focus-visible:ring-1 focus-visible:ring-emerald-300/60",
+                                    tone.border,
+                                    tone.glow,
+                                    isUnread
+                                      ? "bg-white/80 hover:bg-white/95 dark:bg-slate-900/70 dark:hover:bg-slate-900/90"
+                                      : "bg-white/55 hover:bg-white/75 dark:bg-slate-900/45 dark:hover:bg-slate-900/70"
+                                  )}
+                                >
+                                  <span
+                                    className={cn(
+                                      "absolute inset-y-2 left-0 w-1 rounded-r-full transition-opacity",
+                                      tone.accent,
+                                      isUnread ? "opacity-100" : "opacity-35"
+                                    )}
+                                  />
+                                  <div className="flex w-full items-start justify-between gap-2 pl-2">
+                                    <p className={cn("line-clamp-1 text-sm font-semibold tracking-tight", isUnread ? "text-foreground" : "text-foreground/90")}>
+                                      {item.title || "Notification"}
+                                    </p>
+                                    <span
+                                      className={cn(
+                                        "inline-flex h-5 shrink-0 items-center rounded-full border px-1.5 text-[10px] font-semibold uppercase tracking-wide",
+                                        isUnread
+                                          ? tone.chip
+                                          : "border-white/30 bg-white/40 text-muted-foreground dark:border-white/10 dark:bg-white/5"
+                                      )}
+                                    >
+                                      {isUnread ? "New" : "Read"}
+                                    </span>
+                                  </div>
+
+                                  <p className="line-clamp-2 pl-2 text-xs leading-5 text-muted-foreground">{item.body || "Open to view details."}</p>
+                                  <p className="pl-2 text-[11px] font-medium text-muted-foreground/90">{formatNotificationDate(item.createdAt)}</p>
+                                </DropdownMenuItem>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="flex min-h-[18.5rem] items-center justify-center p-3 animate-in fade-in-0 slide-in-from-bottom-1 duration-200">
+                          <div className="w-full rounded-2xl border border-dashed border-white/30 bg-white/50 px-4 py-8 text-center dark:border-white/10 dark:bg-white/5">
+                            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/40 bg-white/70 text-emerald-600 shadow-[0_10px_24px_-18px_rgba(16,185,129,0.55)] dark:border-white/10 dark:bg-white/5 dark:text-emerald-300">
+                              <Inbox className="h-5 w-5" />
+                            </div>
+                            <p className="text-sm font-semibold tracking-tight">
+                              {notificationPanelCleared ? "Notifications cleared" : "No notifications right now"}
+                            </p>
+                            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                              {notificationPanelCleared
+                                ? "New alerts will appear here automatically as activity happens."
+                                : "Your latest alerts, policy events, and incident updates will appear here."}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 rounded-b-2xl bg-gradient-to-t from-white/75 via-white/40 to-transparent dark:from-slate-950/70 dark:via-slate-950/30" />
+
+                    <div className="absolute bottom-3 right-3 flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-10 rounded-full border-white/45 bg-white/75 px-3.5 text-xs font-semibold shadow-[0_16px_24px_-16px_rgba(15,23,42,0.5)] dark:border-white/15 dark:bg-slate-900/70"
+                        disabled={!canClearNotifications}
+                        onClick={handleClearNotifications}
+                        aria-label="Clear notifications from the panel"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        {clearingNotifications ? "Clearing..." : "Clear notifications"}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <DropdownMenuSeparator />
-              {notificationsLoading ? (
-                <div className="px-3 py-6 text-center text-xs text-muted-foreground">Loading notifications...</div>
-              ) : notificationItems.length === 0 ? (
-                <div className="px-3 py-6 text-center text-xs text-muted-foreground">No notifications</div>
-              ) : (
-                notificationItems.map((item) => (
-                  <DropdownMenuItem
-                    key={item.id}
-                    onClick={async () => {
-                      await markNotificationRead(item.id);
-                      navigate(notificationTarget(item));
-                    }}
-                    className="flex cursor-pointer flex-col items-start gap-1 py-2"
-                  >
-                    <p className="line-clamp-1 text-sm font-medium">{item.title}</p>
-                    <p className="line-clamp-2 text-xs text-muted-foreground">{item.body}</p>
-                    <p className="text-[11px] text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</p>
-                  </DropdownMenuItem>
-                ))
-              )}
             </DropdownMenuContent>
           </DropdownMenu>
 
