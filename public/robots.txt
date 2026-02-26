@@ -1,8 +1,14 @@
 User-agent: Googlebot
 Allow: /
+Disallow: /verify
+Disallow: /verify/
+Disallow: /scan
 
 User-agent: Bingbot
 Allow: /
+Disallow: /verify
+Disallow: /verify/
+Disallow: /scan
 
 User-agent: Twitterbot
 Allow: /
@@ -12,3 +18,8 @@ Allow: /
 
 User-agent: *
 Allow: /
+Disallow: /verify
+Disallow: /verify/
+Disallow: /scan
+
+Sitemap: https://www.mscqr.com/sitemap.xml
