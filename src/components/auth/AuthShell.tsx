@@ -1,6 +1,5 @@
 import { ReactNode } from "react";
 import { BadgeCheck, Fingerprint, ShieldCheck, Sparkles } from "lucide-react";
-import { ThemeModeButton } from "@/components/theme/ThemeModeButton";
 
 type AuthShellProps = {
   title: string;
@@ -36,10 +35,6 @@ export function AuthShell({ title, description, sideTitle, sideDescription, chil
         <div className="absolute right-[-6rem] top-24 h-80 w-80 rounded-full bg-amber-400/12 blur-3xl dark:bg-amber-400/15" />
         <div className="absolute bottom-[-8rem] left-1/3 h-80 w-80 rounded-full bg-cyan-400/8 blur-3xl dark:bg-cyan-400/10" />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(15,23,42,0.06),transparent_40%)] dark:bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_40%)]" />
-      </div>
-
-      <div className="absolute right-4 top-4 z-20 sm:right-6 sm:top-6 lg:right-10 lg:top-8">
-        <ThemeModeButton compact />
       </div>
 
       <div className="relative mx-auto flex min-h-screen w-full max-w-7xl items-center p-4 sm:p-6 lg:p-10">
