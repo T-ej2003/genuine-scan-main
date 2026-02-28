@@ -1,4 +1,5 @@
 import prisma from "../config/database";
+import { Prisma } from "@prisma/client";
 import { createTraceEventFromAuditLog } from "./traceEventService";
 import { hashIp, normalizeUserAgent } from "../utils/security";
 
@@ -28,21 +29,51 @@ const emitAuditLog = (log: any) => {
   for (const cb of listeners) cb(log);
 };
 
+const resolveOrgId = async (input: { orgId?: string; licenseeId?: string }) => {
+  const explicitOrgId = String(input.orgId || "").trim();
+  if (explicitOrgId) return explicitOrgId;
+
+  const licenseeId = String(input.licenseeId || "").trim();
+  if (!licenseeId) return undefined;
+
+  const licensee = await prisma.licensee.findUnique({
+    where: { id: licenseeId },
+    select: { orgId: true },
+  });
+  const derived = String(licensee?.orgId || "").trim();
+  return derived || undefined;
+};
+
 export const createAuditLog = async (data: AuditLogInput) => {
   const storeRawIp = ["1", "true", "yes", "on"].includes(String(process.env.AUDIT_LOG_STORE_RAW_IP || "").trim().toLowerCase());
-  const resolvedOrgId = data.orgId ?? data.licenseeId;
+  const resolvedOrgId = await resolveOrgId({ orgId: data.orgId, licenseeId: data.licenseeId });
   const resolvedIpHash = data.ipHash ?? hashIp(data.ipAddress);
   const resolvedUserAgent = normalizeUserAgent(data.userAgent);
 
-  const log = await prisma.auditLog.create({
-    data: {
-      ...data,
-      orgId: resolvedOrgId,
-      ipHash: resolvedIpHash || undefined,
-      userAgent: resolvedUserAgent || undefined,
-      ipAddress: storeRawIp ? data.ipAddress : undefined,
-    } as any,
-  });
+  const payload = {
+    ...data,
+    orgId: resolvedOrgId,
+    ipHash: resolvedIpHash || undefined,
+    userAgent: resolvedUserAgent || undefined,
+    ipAddress: storeRawIp ? data.ipAddress : undefined,
+  } as any;
+
+  let log;
+  try {
+    log = await prisma.auditLog.create({ data: payload });
+  } catch (error) {
+    // Graceful fallback: never let audit FK inconsistency break business requests.
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2003" &&
+      String(error.message || "").includes("AuditLog_orgId_fkey")
+    ) {
+      const retryPayload = { ...payload, orgId: undefined };
+      log = await prisma.auditLog.create({ data: retryPayload });
+    } else {
+      throw error;
+    }
+  }
   try {
     await createTraceEventFromAuditLog({
       id: log.id,
