@@ -235,8 +235,7 @@ const inferClassification = (result: VerifyPayload | null): VerificationClassifi
   const duplicateSignals =
     Number(result?.scanSignals?.distinctDeviceCount24h ?? 0) > 1 ||
     Number(result?.scanSignals?.recentScanCount10m ?? 0) >= 3 ||
-    Number(result?.scanSignals?.distinctCountryCount24h ?? 0) > 1 ||
-    Number(result?.scanCount ?? 0) >= 4;
+    Number(result?.scanSignals?.distinctCountryCount24h ?? 0) > 1;
 
   if (Boolean(result?.isAuthentic) && duplicateSignals) return "SUSPICIOUS_DUPLICATE";
   if (Boolean(result?.isAuthentic)) return "LEGIT_REPEAT";
@@ -264,7 +263,6 @@ const deriveReasons = (result: VerifyPayload | null, classification: Verificatio
     if (Number(result?.scanSignals?.distinctDeviceCount24h ?? 0) > 1) reasons.push("Multiple devices scanned this code recently.");
     if (Number(result?.scanSignals?.recentScanCount10m ?? 0) >= 3) reasons.push("High short-window scan burst detected.");
     if (Number(result?.scanSignals?.distinctCountryCount24h ?? 0) > 1) reasons.push("Recent scans came from multiple countries.");
-    if (Number(result?.scanCount ?? 0) >= 4) reasons.push("High repeat scan count detected.");
     return reasons.length ? reasons : ["Unusual scan pattern requires caution."];
   }
 
