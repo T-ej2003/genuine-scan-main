@@ -1103,6 +1103,7 @@ export default function Licensees() {
                     <div className="space-y-2">
                       <Label>Support Email</Label>
                       <Input
+                        type="email"
                         value={createForm.supportEmail}
                         onChange={(e) => setCreateForm((p) => ({ ...p, supportEmail: e.target.value }))}
                         placeholder="support@brand.example"
@@ -1255,6 +1256,7 @@ export default function Licensees() {
                         <div className="space-y-2">
                           <Label>Manufacturer Email</Label>
                           <Input
+                            type="email"
                             value={createForm.manufacturerEmail}
                             onChange={(e) => setCreateForm((p) => ({ ...p, manufacturerEmail: e.target.value }))}
                             placeholder="factory@acme.com"
@@ -1552,6 +1554,7 @@ export default function Licensees() {
                   <div className="space-y-2">
                     <Label>Support Email</Label>
                     <Input
+                      type="email"
                       value={editForm.supportEmail}
                       onChange={(e) => setEditForm((p) => (p ? { ...p, supportEmail: e.target.value } : p))}
                     />
@@ -1635,6 +1638,7 @@ export default function Licensees() {
                 <div className="space-y-2">
                   <Label>Email</Label>
                   <Input
+                    type="email"
                     value={userForm.email}
                     onChange={(e) => setUserForm((p) => (p ? { ...p, email: e.target.value } : p))}
                     placeholder="email@example.com"
