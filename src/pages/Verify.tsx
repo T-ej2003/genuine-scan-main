@@ -10,11 +10,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/api-client";
 import { getOrCreateAnonDeviceId } from "@/lib/anon-device";
 import { friendlyReferenceLabel } from "@/lib/friendly-reference";
 import { cn } from "@/lib/utils";
+import { PremiumScanLoader } from "@/components/premium/PremiumScanLoader";
+import { PREMIUM_PALETTE } from "@/components/premium/palette";
+import {
+  VerificationConfidenceMeter,
+  deriveVerificationConfidence,
+} from "@/components/premium/VerificationConfidenceMeter";
+import { VerifiedAuthenticStamp } from "@/components/premium/VerifiedAuthenticStamp";
+import { PremiumSectionAccordion } from "@/components/premium/PremiumSectionAccordion";
 
 type VerificationClassification =
   | "FIRST_SCAN"
@@ -299,7 +308,7 @@ const toLabel = (value?: string | null) =>
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
 const SkeletonBlock = ({ className }: { className?: string }) => (
-  <div aria-hidden className={cn("animate-pulse rounded-md bg-slate-200", className)} />
+  <div aria-hidden className={cn("premium-shimmer rounded-md bg-[#bccad6]/45", className)} />
 );
 
 export default function Verify() {
@@ -380,6 +389,26 @@ export default function Verify() {
   const verifyUxPolicy = { ...DEFAULT_VERIFY_POLICY, ...(result?.verifyUxPolicy || {}) };
   const showLinkClaim =
     Boolean(customerToken) && ownershipStatus.isOwnedByRequester && ownershipStatus.matchMethod && ownershipStatus.matchMethod !== "user";
+  const showAuthenticStamp = classification === "FIRST_SCAN" || classification === "LEGIT_REPEAT";
+  const confidenceScore = useMemo(
+    () =>
+      deriveVerificationConfidence({
+        classification,
+        totalScans: scanSummary.totalScans,
+        distinctDeviceCount24h: result?.scanSignals?.distinctDeviceCount24h,
+        recentScanCount10m: result?.scanSignals?.recentScanCount10m,
+        distinctCountryCount24h: result?.scanSignals?.distinctCountryCount24h,
+        warningMessage: result?.warningMessage || null,
+      }),
+    [
+      classification,
+      scanSummary.totalScans,
+      result?.scanSignals?.distinctDeviceCount24h,
+      result?.scanSignals?.recentScanCount10m,
+      result?.scanSignals?.distinctCountryCount24h,
+      result?.warningMessage,
+    ]
+  );
   const claimUnavailableReason =
     !verifyUxPolicy.allowOwnershipClaim
       ? "Ownership claim is currently disabled by brand policy."
@@ -912,7 +941,13 @@ export default function Verify() {
   })();
 
   return (
-    <div className="relative min-h-screen bg-[radial-gradient(circle_at_top,_#e8eef8_0%,_#f4f7fb_45%,_#f8fafc_100%)] px-4 py-8">
+    <div
+      className="relative min-h-screen px-4 py-8"
+      style={{
+        background:
+          "radial-gradient(circle at 8% 8%, rgba(141,157,182,0.34), transparent 40%), radial-gradient(circle at 88% 14%, rgba(241,227,221,0.78), transparent 42%), linear-gradient(160deg, #f7fafd 0%, #eef3f9 46%, #f1e3dd 100%)",
+      }}
+    >
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {loading
           ? loadingStage === 0
@@ -933,7 +968,11 @@ export default function Verify() {
           </Button>
         </div>
 
-        <Card className="relative border-slate-300/80 shadow-[0_10px_30px_rgba(15,23,42,0.08)]" aria-busy={loading}>
+        <Card
+          className="relative overflow-hidden border shadow-[0_20px_44px_rgba(102,114,146,0.18)] premium-surface-in"
+          style={{ borderColor: `${PREMIUM_PALETTE.steel}77` }}
+          aria-busy={loading}
+        >
           {error ? (
             <CardContent className="space-y-3 py-12 text-center">
               <SearchX className="mx-auto h-8 w-8 text-rose-900" />
@@ -997,7 +1036,7 @@ export default function Verify() {
                     </div>
                   </section>
 
-                  <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <section className="rounded-xl border border-[#8d9db668] bg-white/95 p-4 shadow-sm premium-surface-in">
                     <SkeletonBlock className="h-4 w-32" />
                     <SkeletonBlock className="mt-4 h-20 w-full" />
                   </section>
@@ -1050,26 +1089,42 @@ export default function Verify() {
 
                   <section className="space-y-3">
                     <div
-                      className={cn("rounded-xl p-5 sm:p-6", classMeta.bannerClass)}
+                      className={cn("rounded-2xl p-5 shadow-[0_18px_34px_rgba(102,114,146,0.2)] sm:p-6", classMeta.bannerClass)}
                       role="status"
                       aria-live="polite"
                       aria-atomic="true"
                     >
-                      <div className="flex items-start gap-4">
-                        <div className="mt-0.5 rounded-lg bg-white/15 p-2.5 ring-1 ring-white/25">{classMeta.icon}</div>
-                        <div className="min-w-0 flex-1">
-                          <h1 className="mt-1 text-2xl font-semibold tracking-tight">{classMeta.title}</h1>
-                          <p className="mt-2 text-sm leading-relaxed text-white/90">{classMeta.subtitle}</p>
-                          <p className="mt-2 text-sm leading-relaxed text-white/90">{result?.message || "Verification completed."}</p>
-                          {result?.warningMessage ? <p className="mt-2 text-sm leading-relaxed text-white/90">{result.warningMessage}</p> : null}
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="flex min-w-0 gap-4">
+                          <div className="mt-0.5 rounded-xl bg-white/15 p-2.5 ring-1 ring-white/25">{classMeta.icon}</div>
+                          <div className="min-w-0">
+                            <h1 className="mt-1 text-2xl font-semibold tracking-tight">{classMeta.title}</h1>
+                            <p className="mt-2 text-sm leading-relaxed text-white/90">{classMeta.subtitle}</p>
+                            <p className="mt-2 text-sm leading-relaxed text-white/90">{result?.message || "Verification completed."}</p>
+                            {result?.warningMessage ? (
+                              <p className="mt-2 text-sm leading-relaxed text-white/90">{result.warningMessage}</p>
+                            ) : null}
+                            {showAuthenticStamp ? <VerifiedAuthenticStamp className="mt-3" /> : null}
+                          </div>
                         </div>
-                        <Badge className={cn("h-fit text-[11px] font-semibold uppercase tracking-wide", classMeta.badgeClass)}>
-                          {classMeta.badge}
-                        </Badge>
+                        <div className="flex items-start gap-2 sm:gap-3">
+                          <Badge className={cn("h-fit text-[11px] font-semibold uppercase tracking-wide", classMeta.badgeClass)}>
+                            {classMeta.badge}
+                          </Badge>
+                          <VerificationConfidenceMeter
+                            classification={classification}
+                            totalScans={scanSummary.totalScans}
+                            distinctDeviceCount24h={result?.scanSignals?.distinctDeviceCount24h}
+                            recentScanCount10m={result?.scanSignals?.recentScanCount10m}
+                            distinctCountryCount24h={result?.scanSignals?.distinctCountryCount24h}
+                            warningMessage={result?.warningMessage || null}
+                            className="w-[182px]"
+                          />
+                        </div>
                       </div>
                     </div>
 
-                    <div className="rounded-lg border border-slate-200/90 bg-white px-3 py-2 shadow-sm">
+                    <div className="rounded-xl border border-[#8d9db65e] bg-white/90 px-3 py-2 shadow-sm premium-surface-in">
                       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
                         <span className="inline-flex items-center gap-1.5">
                           <Lock className="h-3.5 w-3.5 text-slate-700" />
@@ -1079,45 +1134,66 @@ export default function Verify() {
                         <span>Scan securely recorded for fraud prevention</span>
                         <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" />
                         <span className="font-medium text-slate-700">Secured by {APP_NAME}</span>
+                        <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" />
+                        <span className="font-medium text-slate-700">Confidence {confidenceScore}%</span>
                       </div>
                     </div>
 
-                    {verifyUxPolicy.showRiskCards ? (
-                      <div
-                        className={cn(
-                          "rounded-xl border p-4 shadow-sm",
-                          riskExplanation.level === "high"
-                            ? "border-rose-300 bg-rose-50"
-                            : riskExplanation.level === "elevated" || riskExplanation.level === "medium"
-                              ? "border-amber-300 bg-amber-50"
-                              : "border-emerald-200 bg-emerald-50"
-                        )}
-                      >
-                        <p className="text-xs uppercase tracking-wide text-slate-600">Risk explanation</p>
-                        <p className="mt-1 text-sm font-semibold text-slate-900">{riskExplanation.title}</p>
-                        {Array.isArray(riskExplanation.details) && riskExplanation.details.length ? (
-                          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-700">
-                            {riskExplanation.details.slice(0, 4).map((detail) => (
-                              <li key={detail}>{detail}</li>
-                            ))}
-                          </ul>
-                        ) : null}
-                        <p className="mt-2 text-xs text-slate-700">{riskExplanation.recommendedAction}</p>
-                      </div>
-                    ) : null}
-
-                    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Verified Code</p>
-                      <p className="mt-1 font-mono text-xl font-semibold tracking-tight text-slate-900">{displayedCode}</p>
-                      <div className="mt-4 space-y-1.5">
-                        <p className="text-xs uppercase tracking-wide text-slate-500">Reasons</p>
-                        <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-slate-700">
-                          {reasons.map((reason) => (
-                            <li key={reason}>{reason}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
+                    <PremiumSectionAccordion
+                      defaultOpen={["risk-signals"]}
+                      items={[
+                        {
+                          value: "risk-signals",
+                          title: "Risk Signals",
+                          subtitle: "Model-derived explanation from current verification evidence",
+                          content: verifyUxPolicy.showRiskCards ? (
+                            <div
+                              className={cn(
+                                "rounded-xl border p-4 shadow-sm",
+                                riskExplanation.level === "high"
+                                  ? "border-rose-300 bg-rose-50"
+                                  : riskExplanation.level === "elevated" || riskExplanation.level === "medium"
+                                    ? "border-amber-300 bg-amber-50"
+                                    : "border-emerald-200 bg-emerald-50"
+                              )}
+                            >
+                              <p className="text-xs uppercase tracking-wide text-slate-600">Risk explanation</p>
+                              <p className="mt-1 text-sm font-semibold text-slate-900">{riskExplanation.title}</p>
+                              {Array.isArray(riskExplanation.details) && riskExplanation.details.length ? (
+                                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-700">
+                                  {riskExplanation.details.slice(0, 4).map((detail) => (
+                                    <li key={detail}>{detail}</li>
+                                  ))}
+                                </ul>
+                              ) : null}
+                              <p className="mt-2 text-xs text-slate-700">{riskExplanation.recommendedAction}</p>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-slate-600">Risk card display is disabled by policy for this verification.</p>
+                          ),
+                        },
+                        {
+                          value: "verification-reasons",
+                          title: "Verification Reasons",
+                          subtitle: "Human-readable summary mapped from scan signals",
+                          badge: <Badge className="border-[#8d9db65e] bg-[#bccad638] text-[#4f5b75]">{classMeta.badge}</Badge>,
+                          content: (
+                            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                              <p className="text-xs uppercase tracking-wide text-slate-500">Verified Code</p>
+                              <p className="mt-1 font-mono text-xl font-semibold tracking-tight text-slate-900">{displayedCode}</p>
+                              <div className="mt-4 space-y-1.5">
+                                <p className="text-xs uppercase tracking-wide text-slate-500">Reasons</p>
+                                <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-slate-700">
+                                  {reasons.map((reason) => (
+                                    <li key={reason}>{reason}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </div>
+                          ),
+                        },
+                      ]}
+                    />
                   </section>
 
                   <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -1139,78 +1215,96 @@ export default function Verify() {
                       </div>
                     </div>
 
-                    {verifyUxPolicy.showTimelineCard ? (
-                      <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                        <p className="text-xs uppercase tracking-wide text-slate-500">Verification timeline</p>
-                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-                            <p className="text-[11px] uppercase tracking-wide text-slate-500">First seen</p>
-                            <p className="text-sm font-medium text-slate-900">{formatDateTime(verificationTimeline.firstSeen)}</p>
-                          </div>
-                          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-                            <p className="text-[11px] uppercase tracking-wide text-slate-500">Latest seen</p>
-                            <p className="text-sm font-medium text-slate-900">{formatDateTime(verificationTimeline.latestSeen)}</p>
-                          </div>
-                        </div>
-                        {verificationTimeline.anomalyReason ? (
-                          <div
-                            className={cn(
-                              "mt-3 rounded-md border px-3 py-2 text-xs",
-                              verificationTimeline.visualSignal === "critical"
-                                ? "border-rose-300 bg-rose-50 text-rose-900"
-                                : "border-amber-300 bg-amber-50 text-amber-900"
-                            )}
-                          >
-                            Anomaly reason: {verificationTimeline.anomalyReason}
-                          </div>
-                        ) : (
-                          <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
-                            Timeline signals are consistent with normal verification usage.
-                          </div>
-                        )}
-                      </div>
-                    ) : null}
+                    <PremiumSectionAccordion
+                      className="mt-4"
+                      defaultOpen={verifyUxPolicy.showTimelineCard ? ["timeline"] : ["supply-chain"]}
+                      items={[
+                        {
+                          value: "timeline",
+                          title: "Verification Timeline",
+                          subtitle: "First and latest verified observations",
+                          content: verifyUxPolicy.showTimelineCard ? (
+                            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                                  <p className="text-[11px] uppercase tracking-wide text-slate-500">First seen</p>
+                                  <p className="text-sm font-medium text-slate-900">{formatDateTime(verificationTimeline.firstSeen)}</p>
+                                </div>
+                                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                                  <p className="text-[11px] uppercase tracking-wide text-slate-500">Latest seen</p>
+                                  <p className="text-sm font-medium text-slate-900">{formatDateTime(verificationTimeline.latestSeen)}</p>
+                                </div>
+                              </div>
+                              {verificationTimeline.anomalyReason ? (
+                                <div
+                                  className={cn(
+                                    "mt-3 rounded-md border px-3 py-2 text-xs",
+                                    verificationTimeline.visualSignal === "critical"
+                                      ? "border-rose-300 bg-rose-50 text-rose-900"
+                                      : "border-amber-300 bg-amber-50 text-amber-900"
+                                  )}
+                                >
+                                  Anomaly reason: {verificationTimeline.anomalyReason}
+                                </div>
+                              ) : (
+                                <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+                                  Timeline signals are consistent with normal verification usage.
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-slate-600">Timeline display is disabled by policy for this verification.</p>
+                          ),
+                        },
+                        {
+                          value: "supply-chain",
+                          title: "Supply Chain Details",
+                          subtitle: "Brand and manufacturer metadata from the secure registry",
+                          content: (
+                            <div className="grid gap-3 lg:grid-cols-2">
+                              <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
+                                <p className="text-xs uppercase tracking-wide text-slate-500">Brand owner</p>
+                                <p className="mt-1 text-sm font-semibold text-slate-900">
+                                  {result?.licensee?.brandName || result?.licensee?.name || "Not provided"}
+                                </p>
+                                <div className="mt-3 space-y-1.5 text-xs text-slate-600">
+                                  <p>
+                                    <span className="font-medium text-slate-700">Location:</span> {result?.licensee?.location || "Not provided"}
+                                  </p>
+                                  <p>
+                                    <span className="font-medium text-slate-700">Support email:</span> {result?.licensee?.supportEmail || "Not provided"}
+                                  </p>
+                                  <p>
+                                    <span className="font-medium text-slate-700">Support phone:</span> {result?.licensee?.supportPhone || "Not provided"}
+                                  </p>
+                                  <p>
+                                    <span className="font-medium text-slate-700">Website:</span> {result?.licensee?.website || "Not provided"}
+                                  </p>
+                                </div>
+                              </div>
 
-                    <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
-                        <p className="text-xs uppercase tracking-wide text-slate-500">Brand owner</p>
-                        <p className="mt-1 text-sm font-semibold text-slate-900">
-                          {result?.licensee?.brandName || result?.licensee?.name || "Not provided"}
-                        </p>
-                        <div className="mt-3 space-y-1.5 text-xs text-slate-600">
-                          <p>
-                            <span className="font-medium text-slate-700">Location:</span> {result?.licensee?.location || "Not provided"}
-                          </p>
-                          <p>
-                            <span className="font-medium text-slate-700">Support email:</span> {result?.licensee?.supportEmail || "Not provided"}
-                          </p>
-                          <p>
-                            <span className="font-medium text-slate-700">Support phone:</span> {result?.licensee?.supportPhone || "Not provided"}
-                          </p>
-                          <p>
-                            <span className="font-medium text-slate-700">Website:</span> {result?.licensee?.website || "Not provided"}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
-                        <p className="text-xs uppercase tracking-wide text-slate-500">Manufacturer</p>
-                        <p className="mt-1 text-sm font-semibold text-slate-900">
-                          {result?.batch?.manufacturer?.name || "Not provided"}
-                        </p>
-                        <div className="mt-3 space-y-1.5 text-xs text-slate-600">
-                          <p>
-                            <span className="font-medium text-slate-700">Email:</span> {result?.batch?.manufacturer?.email || "Not provided"}
-                          </p>
-                          <p>
-                            <span className="font-medium text-slate-700">Location:</span> {result?.batch?.manufacturer?.location || "Not provided"}
-                          </p>
-                          <p>
-                            <span className="font-medium text-slate-700">Website:</span> {result?.batch?.manufacturer?.website || "Not provided"}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
+                              <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
+                                <p className="text-xs uppercase tracking-wide text-slate-500">Manufacturer</p>
+                                <p className="mt-1 text-sm font-semibold text-slate-900">
+                                  {result?.batch?.manufacturer?.name || "Not provided"}
+                                </p>
+                                <div className="mt-3 space-y-1.5 text-xs text-slate-600">
+                                  <p>
+                                    <span className="font-medium text-slate-700">Email:</span> {result?.batch?.manufacturer?.email || "Not provided"}
+                                  </p>
+                                  <p>
+                                    <span className="font-medium text-slate-700">Location:</span> {result?.batch?.manufacturer?.location || "Not provided"}
+                                  </p>
+                                  <p>
+                                    <span className="font-medium text-slate-700">Website:</span> {result?.batch?.manufacturer?.website || "Not provided"}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          ),
+                        },
+                      ]}
+                    />
                   </section>
 
                   <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1390,7 +1484,7 @@ export default function Verify() {
                           }}
                           className={cn("border-rose-300 text-rose-800 hover:bg-rose-50 hover:text-rose-900", motionButtonClass)}
                         >
-                          Report suspected counterfeit
+                          Open incident drawer
                         </Button>
                       ) : (
                         <Badge variant="outline">Reporting managed by tenant policy</Badge>
@@ -1475,24 +1569,8 @@ export default function Verify() {
           )}
 
           {loading ? (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/25 backdrop-blur-[2px]">
-              <div
-                className="mx-4 w-full max-w-sm rounded-xl border border-slate-200 bg-white/95 p-5 text-center shadow-xl"
-                role="status"
-                aria-live="polite"
-                aria-atomic="true"
-              >
-                <Loader2 className="mx-auto h-6 w-6 animate-spin text-slate-800" />
-                <div className="relative mt-3 h-5 text-sm font-medium text-slate-900">
-                  <p className={cn("absolute inset-0 transition-opacity duration-500", loadingStage === 0 ? "opacity-100" : "opacity-0")}>
-                    Securely verifying QR code...
-                  </p>
-                  <p className={cn("absolute inset-0 transition-opacity duration-500", loadingStage === 1 ? "opacity-100" : "opacity-0")}>
-                    Checking secure registry...
-                  </p>
-                </div>
-                <p className="mt-2 text-xs text-slate-600">Please keep this page open.</p>
-              </div>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#66729242] backdrop-blur-[4px]">
+              <PremiumScanLoader />
             </div>
           ) : null}
         </Card>
@@ -1535,112 +1613,119 @@ export default function Verify() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={reportOpen} onOpenChange={handleReportDialogOpenChange}>
-        <DialogContent className="sm:max-w-[640px]">
-          <DialogHeader>
-            <DialogTitle>Report suspected counterfeit</DialogTitle>
-            <DialogDescription>
-              Provide investigation details. Verification metadata will be attached automatically.
-            </DialogDescription>
-          </DialogHeader>
+      <Sheet open={reportOpen} onOpenChange={handleReportDialogOpenChange}>
+        <SheetContent
+          side="right"
+          className="w-full border-l-[#8d9db65f] bg-[linear-gradient(165deg,#fff_0%,#f9fbfd_36%,#f1e3dd_100%)] p-0 sm:max-w-[640px]"
+        >
+          <div className="flex h-full flex-col">
+            <SheetHeader className="border-b border-[#8d9db63f] bg-white/70 px-6 py-5 text-left">
+              <SheetTitle className="text-[#4f5b75]">Report Suspected Counterfeit</SheetTitle>
+              <SheetDescription>
+                Provide investigation details. Verification metadata will be attached automatically.
+              </SheetDescription>
+            </SheetHeader>
 
-          {reportReference ? (
-            <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-              <p>
-                Report submitted successfully. Case reference:{" "}
-                <span className="font-semibold">{friendlyReferenceLabel(reportReference, "Case")}</span>
-              </p>
-              <p className="font-mono text-xs text-emerald-950">{reportReference}</p>
-              {reportSupportRef ? (
-                <div className="rounded-md border border-emerald-300 bg-white/80 p-3 text-xs text-emerald-950">
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              {reportReference ? (
+                <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
                   <p>
-                    Support ticket: <span className="font-semibold">{friendlyReferenceLabel(reportSupportRef, "Ticket")}</span>
+                    Report submitted successfully. Case reference:{" "}
+                    <span className="font-semibold">{friendlyReferenceLabel(reportReference, "Case")}</span>
                   </p>
-                  <p className="font-mono text-[11px]">{reportSupportRef}</p>
-                  {reportSupportStatus ? <p>Status: {toLabel(reportSupportStatus)}</p> : null}
-                  {reportSupportSla ? <p>SLA due by: {reportSupportSla}</p> : null}
+                  <p className="font-mono text-xs text-emerald-950">{reportReference}</p>
+                  {reportSupportRef ? (
+                    <div className="rounded-md border border-emerald-300 bg-white/80 p-3 text-xs text-emerald-950">
+                      <p>
+                        Support ticket: <span className="font-semibold">{friendlyReferenceLabel(reportSupportRef, "Ticket")}</span>
+                      </p>
+                      <p className="font-mono text-[11px]">{reportSupportRef}</p>
+                      {reportSupportStatus ? <p>Status: {toLabel(reportSupportStatus)}</p> : null}
+                      {reportSupportSla ? <p>SLA due by: {reportSupportSla}</p> : null}
+                    </div>
+                  ) : null}
+                  {reportTamperSummary ? (
+                    <p className="text-xs text-emerald-950">Attachment tamper checks: {reportTamperSummary}</p>
+                  ) : null}
                 </div>
-              ) : null}
-              {reportTamperSummary ? (
-                <p className="text-xs text-emerald-950">Attachment tamper checks: {reportTamperSummary}</p>
-              ) : null}
+              ) : (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Issue type</Label>
+                    <Select value={reportType} onValueChange={setReportType}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select issue type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {INCIDENT_TYPE_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Description</Label>
+                    <Textarea
+                      value={reportDescription}
+                      onChange={(e) => setReportDescription(e.target.value)}
+                      placeholder="Describe what looked suspicious."
+                      rows={4}
+                      maxLength={2000}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Email (optional)</Label>
+                    <Input
+                      type="email"
+                      value={reportEmail}
+                      onChange={(e) => setReportEmail(e.target.value)}
+                      placeholder="you@example.com"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Attachment (optional)</Label>
+                    <Input
+                      type="file"
+                      multiple
+                      accept="image/png,image/jpeg,image/jpg,image/webp"
+                      onChange={(e) => setReportPhotos(Array.from(e.target.files || []))}
+                    />
+                    <p className="text-xs text-slate-500">Up to 4 images can be uploaded.</p>
+                  </div>
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
-              <div className="space-y-2">
-                <Label>Issue type</Label>
-                <Select value={reportType} onValueChange={setReportType}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select issue type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {INCIDENT_TYPE_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
 
-              <div className="space-y-2">
-                <Label>Description</Label>
-                <Textarea
-                  value={reportDescription}
-                  onChange={(e) => setReportDescription(e.target.value)}
-                  placeholder="Describe what looked suspicious."
-                  rows={4}
-                  maxLength={2000}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Email (optional)</Label>
-                <Input
-                  type="email"
-                  value={reportEmail}
-                  onChange={(e) => setReportEmail(e.target.value)}
-                  placeholder="you@example.com"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Attachment (optional)</Label>
-                <Input
-                  type="file"
-                  multiple
-                  accept="image/png,image/jpeg,image/jpg,image/webp"
-                  onChange={(e) => setReportPhotos(Array.from(e.target.files || []))}
-                />
-                <p className="text-xs text-slate-500">Up to 4 images can be uploaded.</p>
-              </div>
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setReportOpen(false)} disabled={loading || reporting}>
-              {reportReference ? "Close" : "Cancel"}
-            </Button>
-            {!reportReference ? (
-              <Button
-                type="button"
-                onClick={handleSubmitReport}
-                disabled={loading || reporting}
-                className={cn("bg-rose-900 text-white hover:bg-rose-950", motionButtonClass)}
-              >
-                {reporting ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Submitting
-                  </>
-                ) : (
-                  "Submit report"
-                )}
+            <SheetFooter className="border-t border-[#8d9db63f] bg-white/75 px-6 py-4">
+              <Button type="button" variant="outline" onClick={() => setReportOpen(false)} disabled={loading || reporting}>
+                {reportReference ? "Close" : "Cancel"}
               </Button>
-            ) : null}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              {!reportReference ? (
+                <Button
+                  type="button"
+                  onClick={handleSubmitReport}
+                  disabled={loading || reporting}
+                  className={cn("bg-rose-900 text-white hover:bg-rose-950", motionButtonClass)}
+                >
+                  {reporting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Submitting
+                    </>
+                  ) : (
+                    "Submit report"
+                  )}
+                </Button>
+              ) : null}
+            </SheetFooter>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

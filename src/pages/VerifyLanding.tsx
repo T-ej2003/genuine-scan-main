@@ -3,9 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Camera, Loader2, QrCode, ScanLine } from "lucide-react";
+import { Camera, Loader2, QrCode } from "lucide-react";
 import apiClient from "@/lib/api-client";
 import { useToast } from "@/hooks/use-toast";
+import { PremiumScanLoader } from "@/components/premium/PremiumScanLoader";
+import { PREMIUM_PALETTE } from "@/components/premium/palette";
 
 type NavigatorWithConnection = Navigator & {
   connection?: {
@@ -140,19 +142,25 @@ export default function VerifyLanding() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[radial-gradient(circle_at_top,_#e8eef8_0%,_#f4f7fb_45%,_#f8fafc_100%)] p-4">
+    <div
+      className="min-h-screen flex items-center justify-center p-4"
+      style={{
+        background:
+          "radial-gradient(circle at 10% 10%, rgba(141,157,182,0.34), transparent 40%), radial-gradient(circle at 90% 20%, rgba(241,227,221,0.72), transparent 38%), linear-gradient(155deg, #f6f9fc 0%, #eef4f9 45%, #f1e3dd 100%)",
+      }}
+    >
       {isRedirecting ? (
-        <div className="fixed top-4 left-1/2 z-40 w-[92%] max-w-md -translate-x-1/2 rounded-full border border-slate-300 bg-white/95 px-4 py-2 shadow-lg backdrop-blur">
-          <div className="flex items-center justify-center gap-2 text-sm font-medium text-slate-900">
-            <ScanLine className="h-4 w-4 text-slate-700" />
-            <span>{scanStage === 0 ? "Scanning QR..." : "Opening secure verification..."}</span>
-          </div>
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#66729230] backdrop-blur-[3px]">
+          <PremiumScanLoader compact />
         </div>
       ) : null}
 
-      <Card className="relative w-full max-w-md border-slate-300/80 shadow-[0_10px_30px_rgba(15,23,42,0.08)]">
+      <Card
+        className="relative w-full max-w-md overflow-hidden border shadow-[0_20px_40px_rgba(102,114,146,0.2)] premium-surface-in"
+        style={{ borderColor: `${PREMIUM_PALETTE.steel}88` }}
+      >
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle className="flex items-center gap-2 text-[#4f5b75]">
             <QrCode className="h-5 w-5" /> Verify a Product
           </CardTitle>
           <CardDescription>Paste a QR code value (or scan to open the verify URL directly).</CardDescription>
@@ -167,11 +175,15 @@ export default function VerifyLanding() {
               if (e.key === "Enter") go();
             }}
           />
-          <Button className="w-full bg-slate-900 text-white hover:bg-slate-800" onClick={go} disabled={!cleaned || isRedirecting}>
+          <Button
+            className="w-full bg-[#667292] text-white hover:bg-[#5a6482]"
+            onClick={go}
+            disabled={!cleaned || isRedirecting}
+          >
             {isRedirecting ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Scanning QR...
+                <span className="sr-only">{scanStage === 0 ? "Scanning QR" : "Preparing verification"}</span>
               </>
             ) : (
               "Verify"
@@ -217,22 +229,8 @@ export default function VerifyLanding() {
         </CardContent>
 
         {isRedirecting ? (
-          <div className="absolute inset-0 z-30 flex items-center justify-center rounded-xl bg-white/85 backdrop-blur-[1px]">
-            <div className="w-[90%] max-w-xs rounded-xl border border-slate-200 bg-white p-4 text-center shadow-lg">
-              <Loader2 className="mx-auto h-5 w-5 animate-spin text-slate-800" />
-              <p className="mt-2 text-sm font-medium text-slate-900">
-                {scanStage === 0 ? "Scanning QR..." : "Preparing secure verification..."}
-              </p>
-              <div className="mt-3 grid grid-cols-12 gap-1">
-                {Array.from({ length: 12 }).map((_, idx) => (
-                  <span
-                    key={idx}
-                    className="h-7 rounded-sm bg-slate-300/70 animate-pulse"
-                    style={{ animationDelay: `${idx * 90}ms` }}
-                  />
-                ))}
-              </div>
-            </div>
+          <div className="absolute inset-0 z-30 flex items-center justify-center rounded-xl bg-white/82 backdrop-blur-[2px]">
+            <PremiumScanLoader compact />
           </div>
         ) : null}
       </Card>
