@@ -7,6 +7,7 @@ import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { createAuditLog } from "../services/auditService";
 import { hashPassword } from "../services/auth/passwordService";
+import { isValidEmailAddress, normalizeEmailAddress } from "../utils/email";
 
 /**
  * Notes:
@@ -21,8 +22,16 @@ import { hashPassword } from "../services/auth/passwordService";
  * - Your current routes file shows SUPER_ADMIN only; controller still supports safe tenant checks.
  */
 
+const normalizedEmailSchema = z
+  .string()
+  .trim()
+  .min(3, "Invalid email")
+  .max(320, "Invalid email")
+  .refine((value) => isValidEmailAddress(value), "Invalid email")
+  .transform((value) => normalizeEmailAddress(value) as string);
+
 const createUserSchema = z.object({
-  email: z.string().email(),
+  email: normalizedEmailSchema,
   password: z.string().min(6),
   name: z.string().min(2),
   role: z.enum([
@@ -39,7 +48,7 @@ const createUserSchema = z.object({
 
 const updateUserSchema = z.object({
   name: z.string().min(2).optional(),
-  email: z.string().email().optional(),
+  email: normalizedEmailSchema.optional(),
   password: z.string().min(6).optional(),
   isActive: z.boolean().optional(),
   licenseeId: z.string().uuid().optional(), // SUPER_ADMIN only
@@ -122,7 +131,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const email = parsed.data.email.trim().toLowerCase();
+    const email = parsed.data.email;
     const name = parsed.data.name.trim();
     const password = parsed.data.password.trim();
     const role = parsed.data.role as UserRole;

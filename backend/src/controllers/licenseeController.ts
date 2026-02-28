@@ -19,6 +19,20 @@ const prefixSchema = z
   .transform((s) => s.toUpperCase())
   .refine((s) => /^[A-Z0-9]+$/.test(s), "Prefix must be A–Z / 0–9 only");
 
+const optionalEmailSchema = (label: string) =>
+  z
+    .union([
+      z.literal(""),
+      z
+        .string()
+        .trim()
+        .min(3, `Invalid ${label}`)
+        .max(320, `Invalid ${label}`)
+        .refine((value) => isValidEmailAddress(value), `Invalid ${label}`)
+        .transform((value) => normalizeEmailAddress(value) as string),
+    ])
+    .optional();
+
 const adminSchema = z.object({
   name: z.string().trim().min(2, "Admin name must be at least 2 characters"),
   email: z
@@ -40,7 +54,7 @@ const createLicenseeLegacy = z.object({
   brandName: z.string().trim().max(120).optional().or(z.literal("")),
   location: z.string().trim().max(200).optional().or(z.literal("")),
   website: z.string().trim().max(200).optional().or(z.literal("")),
-  supportEmail: z.string().trim().email().optional().or(z.literal("")),
+  supportEmail: optionalEmailSchema("support email"),
   supportPhone: z.string().trim().max(40).optional().or(z.literal("")),
   isActive: z.boolean().optional(),
   admin: adminSchema.optional(),
@@ -55,7 +69,7 @@ const createLicenseeWithAdmin = z.object({
     brandName: z.string().trim().max(120).optional().or(z.literal("")),
     location: z.string().trim().max(200).optional().or(z.literal("")),
     website: z.string().trim().max(200).optional().or(z.literal("")),
-    supportEmail: z.string().trim().email().optional().or(z.literal("")),
+    supportEmail: optionalEmailSchema("support email"),
     supportPhone: z.string().trim().max(40).optional().or(z.literal("")),
     isActive: z.boolean().optional(),
   }),
@@ -70,7 +84,7 @@ const updateLicenseeSchema = z.object({
   brandName: z.string().trim().max(120).optional().or(z.literal("")),
   location: z.string().trim().max(200).optional().or(z.literal("")),
   website: z.string().trim().max(200).optional().or(z.literal("")),
-  supportEmail: z.string().trim().email().optional().or(z.literal("")),
+  supportEmail: optionalEmailSchema("support email"),
   supportPhone: z.string().trim().max(40).optional().or(z.literal("")),
   isActive: z.boolean().optional(),
 });
@@ -95,7 +109,13 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
 
     const parsed = createLicenseeSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      const first = parsed.error.errors[0];
+      const fieldPath = first?.path?.join(".") || "";
+      const errorMessage =
+        fieldPath.endsWith("supportEmail")
+          ? "Invalid support email. Use a valid address like user@chester.ac.uk."
+          : first?.message || "Invalid input";
+      return res.status(400).json({ success: false, error: errorMessage });
     }
 
     const payload = parsed.data;
