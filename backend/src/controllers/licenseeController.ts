@@ -188,24 +188,24 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
             },
           });
 
-      await createAuditLog({
-        userId: req.user!.userId,
-        licenseeId: lic.id,
-        orgId: lic.orgId,
-        action: sendInvite ? "CREATE_LICENSEE_WITH_ADMIN_INVITE" : "CREATE_LICENSEE_WITH_ADMIN",
-        entityType: "Licensee",
-        entityId: lic.id,
-        details: {
-          licenseeName: lic.name,
-          prefix: lic.prefix,
-          adminEmail: email,
-          sendInvite,
-        },
-        ipAddress: req.ip,
-        userAgent: req.get("user-agent"),
-      });
-
       return { licensee: lic, adminUser };
+    });
+
+    await createAuditLog({
+      userId: req.user!.userId,
+      licenseeId: result.licensee.id,
+      orgId: result.licensee.orgId,
+      action: sendInvite ? "CREATE_LICENSEE_WITH_ADMIN_INVITE" : "CREATE_LICENSEE_WITH_ADMIN",
+      entityType: "Licensee",
+      entityId: result.licensee.id,
+      details: {
+        licenseeName: result.licensee.name,
+        prefix: result.licensee.prefix,
+        adminEmail: email,
+        sendInvite,
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent"),
     });
 
     let adminInvite: any = null;
