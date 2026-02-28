@@ -39,10 +39,15 @@ jobs:
       - name: Analyze with CodeQL
         uses: github/codeql-action/analyze@v3
 
-      - name: OSV dependency scan
-        uses: google/osv-scanner-action@v1
-        with:
-          scan-args: -r . --format json --output audit-artifacts/osv-results.json
+      - name: Install OSV Scanner
+        run: |
+          curl -L 
+          https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64 -o osv-scanner
+          chmod +x osv-scanner
+      
+      - name: Run OSV Scanner
+        run: |
+         ./osv-scanner --recursive .
 
       - name: Gitleaks secrets scan
         uses: gitleaks/gitleaks-action@v2
