@@ -76,20 +76,19 @@ export const allocateQrRange = async (params: AllocateQrRangeParams) => {
     },
   });
 
-  const codes: Prisma.QRCodeCreateManyInput[] = [];
-  for (let i = startNumber; i <= endNumber; i++) {
-    codes.push({
-      code: generateQRCode(licensee.prefix, i),
-      licenseeId,
-      status: QRStatus.DORMANT,
-      tokenNonce: randomNonce(),
-    });
-  }
-
   const batchSize = 1000;
   let created = 0;
-  for (let i = 0; i < codes.length; i += batchSize) {
-    const chunk = codes.slice(i, i + batchSize);
+  for (let cursor = startNumber; cursor <= endNumber; cursor += batchSize) {
+    const chunkEnd = Math.min(cursor + batchSize - 1, endNumber);
+    const chunk: Prisma.QRCodeCreateManyInput[] = [];
+    for (let i = cursor; i <= chunkEnd; i += 1) {
+      chunk.push({
+        code: generateQRCode(licensee.prefix, i),
+        licenseeId,
+        status: QRStatus.DORMANT,
+        tokenNonce: randomNonce(),
+      });
+    }
     const result = await db.qRCode.createMany({ data: chunk });
     created += result.count;
   }

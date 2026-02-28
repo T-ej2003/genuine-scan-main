@@ -116,6 +116,14 @@ const escapeCsv = (v: any) => {
 const isBatchBusyError = (msg: string) =>
   msg.includes("BATCH_BUSY") || msg.toLowerCase().includes("concurrency issue");
 
+const parsePositiveIntEnv = (name: string, fallback: number) => {
+  const raw = Number(String(process.env[name] || "").trim());
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
+};
+
+const ALLOCATION_TX_TIMEOUT_MS = parsePositiveIntEnv("ALLOCATION_TX_TIMEOUT_MS", 120000);
+const ALLOCATION_TX_MAX_WAIT_MS = parsePositiveIntEnv("ALLOCATION_TX_MAX_WAIT_MS", 15000);
+
 /* ===================== QR RANGE (SUPER ADMIN route) ===================== */
 
 export const allocateQRRange = async (req: AuthRequest, res: Response) => {
@@ -130,19 +138,25 @@ export const allocateQRRange = async (req: AuthRequest, res: Response) => {
 
     const { licenseeId, startNumber, endNumber, receivedBatchName } = parsed.data;
 
-    const result = await prisma.$transaction(async (tx) => {
-      await lockLicenseeAllocation(tx, licenseeId);
-      return allocateQrRange({
-        licenseeId,
-        startNumber,
-        endNumber,
-        createdByUserId: auth.userId,
-        source: "ADMIN_TOPUP",
-        createReceivedBatch: true,
-        receivedBatchName: receivedBatchName || null,
-        tx,
-      });
-    });
+    const result = await prisma.$transaction(
+      async (tx) => {
+        await lockLicenseeAllocation(tx, licenseeId);
+        return allocateQrRange({
+          licenseeId,
+          startNumber,
+          endNumber,
+          createdByUserId: auth.userId,
+          source: "ADMIN_TOPUP",
+          createReceivedBatch: true,
+          receivedBatchName: receivedBatchName || null,
+          tx,
+        });
+      },
+      {
+        maxWait: ALLOCATION_TX_MAX_WAIT_MS,
+        timeout: ALLOCATION_TX_TIMEOUT_MS,
+      }
+    );
 
     await createAuditLog({
       userId: auth.userId,
@@ -199,31 +213,37 @@ export const allocateQRRangeForLicensee = async (req: AuthRequest, res: Response
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      await lockLicenseeAllocation(tx, licenseeId);
+    const result = await prisma.$transaction(
+      async (tx) => {
+        await lockLicenseeAllocation(tx, licenseeId);
 
-      const startNumber =
-        parsed.data.quantity != null
-          ? await getNextLicenseeQrNumber(tx, licenseeId)
-          : (parsed.data.startNumber as number);
-      const endNumber =
-        parsed.data.quantity != null
-          ? startNumber + parsed.data.quantity - 1
-          : (parsed.data.endNumber as number);
+        const startNumber =
+          parsed.data.quantity != null
+            ? await getNextLicenseeQrNumber(tx, licenseeId)
+            : (parsed.data.startNumber as number);
+        const endNumber =
+          parsed.data.quantity != null
+            ? startNumber + parsed.data.quantity - 1
+            : (parsed.data.endNumber as number);
 
-      const allocation = await allocateQrRange({
-        licenseeId,
-        startNumber,
-        endNumber,
-        createdByUserId: auth.userId,
-        source: "ADMIN_TOPUP",
-        createReceivedBatch: true,
-        receivedBatchName: parsed.data.receivedBatchName || null,
-        tx,
-      });
+        const allocation = await allocateQrRange({
+          licenseeId,
+          startNumber,
+          endNumber,
+          createdByUserId: auth.userId,
+          source: "ADMIN_TOPUP",
+          createReceivedBatch: true,
+          receivedBatchName: parsed.data.receivedBatchName || null,
+          tx,
+        });
 
-      return { allocation, startNumber, endNumber };
-    });
+        return { allocation, startNumber, endNumber };
+      },
+      {
+        maxWait: ALLOCATION_TX_MAX_WAIT_MS,
+        timeout: ALLOCATION_TX_TIMEOUT_MS,
+      }
+    );
 
     await createAuditLog({
       userId: auth.userId,
@@ -991,23 +1011,29 @@ export const generateQRCodes = async (req: AuthRequest, res: Response) => {
 
     const { licenseeId, quantity } = parsed.data;
 
-    const result = await prisma.$transaction(async (tx) => {
-      await lockLicenseeAllocation(tx, licenseeId);
-      const startNumber = await getNextLicenseeQrNumber(tx, licenseeId);
-      const endNumber = startNumber + quantity - 1;
+    const result = await prisma.$transaction(
+      async (tx) => {
+        await lockLicenseeAllocation(tx, licenseeId);
+        const startNumber = await getNextLicenseeQrNumber(tx, licenseeId);
+        const endNumber = startNumber + quantity - 1;
 
-      const allocation = await allocateQrRange({
-        licenseeId,
-        startNumber,
-        endNumber,
-        createdByUserId: req.user?.userId,
-        source: "ADMIN_GENERATE",
-        createReceivedBatch: true,
-        tx,
-      });
+        const allocation = await allocateQrRange({
+          licenseeId,
+          startNumber,
+          endNumber,
+          createdByUserId: req.user?.userId,
+          source: "ADMIN_GENERATE",
+          createReceivedBatch: true,
+          tx,
+        });
 
-      return { allocation, startNumber, endNumber };
-    });
+        return { allocation, startNumber, endNumber };
+      },
+      {
+        maxWait: ALLOCATION_TX_MAX_WAIT_MS,
+        timeout: ALLOCATION_TX_TIMEOUT_MS,
+      }
+    );
 
     const rows = await prisma.qRCode.findMany({
       where: { licenseeId, code: { gte: result.allocation.startCode, lte: result.allocation.endCode } },
