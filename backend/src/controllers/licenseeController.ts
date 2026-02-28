@@ -9,6 +9,7 @@ import { randomUUID } from "crypto";
 import { hashPassword } from "../services/auth/passwordService";
 import { createInvite } from "../services/auth/inviteService";
 import { hashIp, normalizeUserAgent } from "../utils/security";
+import { isValidEmailAddress, normalizeEmailAddress } from "../utils/email";
 
 const prefixSchema = z
   .string()
@@ -20,7 +21,13 @@ const prefixSchema = z
 
 const adminSchema = z.object({
   name: z.string().trim().min(2, "Admin name must be at least 2 characters"),
-  email: z.string().trim().email("Invalid admin email").transform((s) => s.toLowerCase()),
+  email: z
+    .string()
+    .trim()
+    .min(3, "Invalid admin email")
+    .max(320, "Invalid admin email")
+    .refine((value) => isValidEmailAddress(value), "Invalid admin email")
+    .transform((value) => normalizeEmailAddress(value) as string),
   password: z.string().min(6, "Admin password must be at least 6 characters").optional(),
   sendInvite: z.boolean().optional(),
 });
@@ -424,7 +431,14 @@ export const deleteLicensee = async (req: AuthRequest, res: Response) => {
 };
 
 const resendInviteSchema = z.object({
-  email: z.string().trim().email().optional(),
+  email: z
+    .string()
+    .trim()
+    .min(3, "Invalid email")
+    .max(320, "Invalid email")
+    .refine((value) => isValidEmailAddress(value), "Invalid email")
+    .transform((value) => normalizeEmailAddress(value) as string)
+    .optional(),
 });
 
 export const resendLicenseeAdminInvite = async (req: AuthRequest, res: Response) => {

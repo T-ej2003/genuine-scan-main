@@ -6,6 +6,7 @@ import { ACCESS_TOKEN_COOKIE, CSRF_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE, getAccess
 import { acceptInvite, createInvite } from "../services/auth/inviteService";
 import { loginWithPassword, logoutSession, refreshSession } from "../services/auth/authService";
 import { requestPasswordReset, resetPasswordWithToken } from "../services/auth/passwordResetService";
+import { isValidEmailAddress, normalizeEmailAddress } from "../utils/email";
 
 const loginSchema = z.object({
   email: z.string().email("Invalid email format"),
@@ -13,7 +14,13 @@ const loginSchema = z.object({
 });
 
 const inviteSchema = z.object({
-  email: z.string().trim().email(),
+  email: z
+    .string()
+    .trim()
+    .min(3)
+    .max(320)
+    .refine((value) => isValidEmailAddress(value), "Invalid email format")
+    .transform((value) => normalizeEmailAddress(value) as string),
   role: z.string().trim().min(2),
   name: z.string().trim().min(2).max(120).optional(),
   licenseeId: z.string().uuid().optional(),
@@ -284,6 +291,7 @@ export const invite = async (req: Request, res: Response) => {
     });
     return res.status(201).json({ success: true, data: out });
   } catch (e: any) {
+    console.error("Invite error:", e);
     return res.status(400).json({ success: false, error: e?.message || "Invite failed" });
   }
 };

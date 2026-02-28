@@ -5,6 +5,7 @@ import { newCsrfToken } from "./tokenService";
 import { hashToken, randomOpaqueToken } from "../../utils/security";
 import { sendAuthEmail } from "./authEmailService";
 import { createAuditLog } from "../auditService";
+import { normalizeEmailAddress } from "../../utils/email";
 
 const addHours = (d: Date, hours: number) => new Date(d.getTime() + hours * 60 * 60 * 1000);
 
@@ -75,8 +76,8 @@ export const createInvite = async (input: {
   ipHash: string | null;
   userAgent: string | null;
 }) => {
-  const email = String(input.email || "").trim().toLowerCase();
-  if (!email) throw new Error("Email is required");
+  const email = normalizeEmailAddress(input.email);
+  if (!email) throw new Error("Invalid email address");
 
   const role = normalizeRole(input.role);
 
@@ -238,6 +239,10 @@ export const createInvite = async (input: {
       manufacturerId,
       emailDelivered: delivery.delivered,
       emailError: delivery.error || null,
+      emailProviderMessageId: delivery.providerMessageId || null,
+      emailProviderResponse: delivery.providerResponse || null,
+      emailAcceptedRecipients: delivery.acceptedRecipients || [],
+      emailRejectedRecipients: delivery.rejectedRecipients || [],
     },
     ipHash: input.ipHash || undefined,
     userAgent: input.userAgent || undefined,
@@ -251,6 +256,10 @@ export const createInvite = async (input: {
     inviteLink: acceptUrl,
     emailDelivered: delivery.delivered,
     deliveryError: delivery.error || null,
+    providerMessageId: delivery.providerMessageId || null,
+    providerResponse: delivery.providerResponse || null,
+    acceptedRecipients: delivery.acceptedRecipients || [],
+    rejectedRecipients: delivery.rejectedRecipients || [],
     user: {
       id: result.createdUser.id,
       email: result.createdUser.email,

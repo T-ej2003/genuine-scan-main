@@ -390,11 +390,21 @@ export default function Licensees() {
     }
 
     toast({
-      title: opts?.copyOnly ? "Invite link generated" : "Invite resent",
+      title:
+        data.emailDelivered === false
+          ? opts?.copyOnly
+            ? "Invite link generated"
+            : "Invite created, email not delivered"
+          : opts?.copyOnly
+            ? "Invite link generated"
+            : "Invite resent",
       description:
         data.emailDelivered === false
-          ? "Email provider not configured. Use the copied invite link to onboard manually."
+          ? data.deliveryError
+            ? `Invite link is ready, but email delivery failed: ${String(data.deliveryError)}`
+            : "Invite link is ready, but email delivery failed. Use the copied invite link to onboard manually."
           : `Invite sent to ${adminEmail}.`,
+      variant: data.emailDelivered === false ? "destructive" : undefined,
     });
 
     await load();
@@ -560,7 +570,10 @@ export default function Licensees() {
 
       if (!createRes.success) throw new Error(createRes.error || "Could not create licensee");
 
-      const inviteLink = String((createRes.data as any)?.adminInvite?.inviteLink || "").trim();
+      const adminInvite = (createRes.data as any)?.adminInvite;
+      const inviteLink = String(adminInvite?.inviteLink || "").trim();
+      const inviteDeliveryError = String(adminInvite?.deliveryError || (createRes.data as any)?.warning || "").trim();
+      const inviteDelivered = Boolean(adminInvite && adminInvite.emailDelivered !== false);
       if (inviteLink) setLatestInviteLink(inviteLink);
 
       const licenseeId = (createRes.data as any)?.licensee?.id as string;
@@ -615,10 +628,19 @@ export default function Licensees() {
       }
 
       toast({
-        title: adminSendInvite ? "Licensee created + invite ready" : "Licensee created",
+        title: adminSendInvite
+          ? inviteDelivered
+            ? "Licensee created + invite sent"
+            : "Licensee created + invite link ready"
+          : "Licensee created",
         description: adminSendInvite
-          ? `Licensee ${name} created. Invite link generated for ${adminEmail}.`
+          ? inviteDelivered
+            ? `Licensee ${name} created. Invite sent to ${adminEmail}.`
+            : inviteDeliveryError
+              ? `Licensee ${name} created. Invite link generated, but email delivery failed: ${inviteDeliveryError}`
+              : `Licensee ${name} created. Invite link generated for manual onboarding.`
           : `Licensee ${name} (${prefix}) created. Range allocated: ${rangeEnd - rangeStart + 1}.`,
+        variant: adminSendInvite && !inviteDelivered ? "destructive" : undefined,
       });
 
       setIsCreateOpen(false);
