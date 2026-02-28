@@ -7,7 +7,7 @@
     "dev": "prisma generate && tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "npm run build && node tests/qrService.test.js && node tests/scanSecurity.test.js && node tests/incidentMvp.test.js",
+    "test": "npm run build && node tests/qrService.test.js && node tests/scanSecurity.test.js && node tests/duplicateRiskEngine.test.js && node tests/incidentMvp.test.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:push": "prisma db push",

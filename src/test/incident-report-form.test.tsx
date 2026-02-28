@@ -52,8 +52,8 @@ describe("Incident report form", () => {
       </React.StrictMode>
     );
 
-    expect(await screen.findByText("Report suspected counterfeit")).toBeTruthy();
-    fireEvent.click(screen.getByText("Report suspected counterfeit"));
+    expect(await screen.findByText("Open incident drawer")).toBeTruthy();
+    fireEvent.click(screen.getByText("Open incident drawer"));
     fireEvent.click(screen.getByText("Submit report"));
     expect(vi.mocked(apiClient.submitFraudReport)).toHaveBeenCalledTimes(0);
   });

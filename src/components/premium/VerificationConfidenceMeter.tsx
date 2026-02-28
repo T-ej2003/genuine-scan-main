@@ -32,7 +32,7 @@ export const deriveVerificationConfidence = (input: ConfidenceSignalInput) => {
   let score = byClass[input.classification];
 
   if (input.classification === "LEGIT_REPEAT") {
-    score -= Math.min(10, Math.max(0, (input.totalScans || 0) - 1) * 2);
+    score -= Math.min(4, Math.max(0, (input.totalScans || 0) - 1));
   }
 
   score -= Math.min(16, Number(input.distinctDeviceCount24h || 0) * 3);

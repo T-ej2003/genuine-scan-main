@@ -20,6 +20,7 @@ import { getScanInsight } from "../services/scanInsightService";
 import { resolveVerifyUxPolicy } from "../services/governanceService";
 import { runTamperEvidenceChecks, summarizeTamperFindings } from "../services/tamperEvidenceService";
 import { ticketSlaSnapshot } from "../services/supportWorkflowService";
+import { assessDuplicateRisk } from "../services/duplicateRiskService";
 import { hashIp, hashToken, normalizeUserAgent, randomOpaqueToken } from "../utils/security";
 
 type VerifyClassification =
@@ -234,49 +235,6 @@ const buildContainment = (qrCode: any) => ({
     : null,
 });
 
-const deriveDuplicateReasons = (params: {
-  scanCount: number;
-  scanSignals?: {
-    distinctDeviceCount24h?: number;
-    recentScanCount10m?: number;
-    distinctCountryCount24h?: number;
-  } | null;
-  policy?: any;
-}) => {
-  const reasons: string[] = [];
-  const scanSignals = params.scanSignals || null;
-  const policy = params.policy || null;
-  const triggered = policy?.triggered || {};
-  const alerts = Array.isArray(policy?.alerts) ? policy.alerts : [];
-
-  if (Number(scanSignals?.distinctDeviceCount24h ?? 0) > 1) {
-    reasons.push("Multiple devices scanned this code recently.");
-  }
-  if (Number(scanSignals?.recentScanCount10m ?? 0) >= 3) {
-    reasons.push("A short burst of scans was detected.");
-  }
-  if (Number(scanSignals?.distinctCountryCount24h ?? 0) > 1) {
-    reasons.push("Recent scans came from different countries.");
-  }
-  if (params.scanCount >= 4 || triggered.multiScan) {
-    reasons.push("High repeat-scan volume was detected.");
-  }
-  if (triggered.geoDrift) {
-    reasons.push("Scan geography drift exceeded policy threshold.");
-  }
-  if (triggered.velocitySpike) {
-    reasons.push("Scan velocity exceeded policy threshold.");
-  }
-
-  for (const alert of alerts) {
-    const message = String(alert?.message || "").trim();
-    if (!message) continue;
-    if (!reasons.includes(message)) reasons.push(message);
-  }
-
-  return reasons.slice(0, 6);
-};
-
 const buildScanSummary = (params: {
   scanCount: number;
   scannedAt?: Date | null;
@@ -417,7 +375,8 @@ const buildOwnershipStatus = (params: {
     isClaimed: true,
     claimedAt: ownership.claimedAt.toISOString(),
     isOwnedByRequester,
-    isClaimedByAnother: !isOwnedByRequester,
+    // Avoid false conflicts for anonymous users: only hard-conflict when identity evidence exists.
+    isClaimedByAnother: !isOwnedByRequester && (Boolean(customerUserId) || Boolean(deviceTokenHash)),
     canClaim: false,
     state: isOwnedByRequester ? "owned_by_you" : "owned_by_someone_else",
     matchMethod,
@@ -567,14 +526,17 @@ const buildFraudVerificationSnapshot = async (normalizedCode: string) => {
     };
   }
 
-  const duplicateReasons = deriveDuplicateReasons({
+  const duplicateRisk = assessDuplicateRisk({
     scanCount: scanSummary.totalScans,
     scanSignals: scanInsight.signals,
+    ownershipStatus,
+    latestScanAt: scanInsight.latestScanAt,
+    previousScanAt: scanInsight.previousScanAt,
   });
 
   return {
-    classification: duplicateReasons.length ? ("SUSPICIOUS_DUPLICATE" as VerifyClassification) : ("LEGIT_REPEAT" as VerifyClassification),
-    reasons: duplicateReasons.length ? duplicateReasons : ["Repeat scans match expected customer re-verification behavior."],
+    classification: duplicateRisk.classification as VerifyClassification,
+    reasons: duplicateRisk.reasons,
     scanSummary,
     ownershipStatus,
   };
@@ -796,6 +758,8 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
           totalScans: 0,
           firstVerifiedAt: null,
           latestVerifiedAt: null,
+          riskScore: 70,
+          riskSignals: null,
         },
       });
     }
@@ -880,6 +844,8 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
           totalScans: baseScanSummary.totalScans,
           firstVerifiedAt: baseScanSummary.firstVerifiedAt,
           latestVerifiedAt: baseScanSummary.latestVerifiedAt,
+          riskScore: 100,
+          riskSignals: null,
         },
       });
     }
@@ -922,6 +888,8 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
           totalScans: baseScanSummary.totalScans,
           firstVerifiedAt: baseScanSummary.firstVerifiedAt,
           latestVerifiedAt: baseScanSummary.latestVerifiedAt,
+          riskScore: 70,
+          riskSignals: null,
         },
       });
     }
@@ -1009,14 +977,20 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       allowClaim: verifyUxPolicy.allowOwnershipClaim,
     });
 
-    const duplicateReasons = deriveDuplicateReasons({
+    const duplicateRisk = assessDuplicateRisk({
       scanCount: postScanSummary.totalScans,
       scanSignals: postScanInsight.signals,
       policy,
+      ownershipStatus,
+      customerUserId,
+      latestScanAt: postScanInsight.latestScanAt,
+      previousScanAt: postScanInsight.previousScanAt,
     });
 
     let classification: VerifyClassification;
     let reasons: string[];
+    let riskScore = duplicateRisk.riskScore;
+    let riskSignals: Record<string, any> | null = duplicateRisk.signals;
 
     if (isBlocked) {
       classification = "BLOCKED_BY_SECURITY";
@@ -1026,15 +1000,16 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
           : "This code is blocked by security controls.",
         ...buildSecurityContainmentReasons(runtimeContainment),
       ];
+      riskScore = 100;
+      riskSignals = null;
     } else if (isFirstScan) {
       classification = "FIRST_SCAN";
       reasons = ["First successful customer verification recorded."];
-    } else if (duplicateReasons.length > 0) {
-      classification = "SUSPICIOUS_DUPLICATE";
-      reasons = duplicateReasons;
+      riskScore = 4;
+      riskSignals = null;
     } else {
-      classification = "LEGIT_REPEAT";
-      reasons = ["Repeat verification pattern matches normal customer behavior."];
+      classification = duplicateRisk.classification;
+      reasons = duplicateRisk.reasons;
     }
 
     if (ownershipStatus.isClaimedByAnother && !isBlocked) {
@@ -1042,6 +1017,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       if (!reasons.includes("Ownership is already claimed by another account.")) {
         reasons.unshift("Ownership is already claimed by another account.");
       }
+      riskScore = Math.max(riskScore, 70);
     }
 
     const verificationTimeline = buildVerificationTimeline({
@@ -1098,6 +1074,8 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
         totalScans: postScanSummary.totalScans,
         firstVerifiedAt: postScanSummary.firstVerifiedAt,
         latestVerifiedAt: postScanSummary.latestVerifiedAt,
+        riskScore,
+        riskSignals,
 
         warningMessage,
         policy,
