@@ -7,6 +7,14 @@ import { createAuditLog } from "../services/auditService";
 import { allocateQrRange, getNextLicenseeQrNumber, lockLicenseeAllocation } from "../services/qrAllocationService";
 import { createRoleNotifications, createUserNotification } from "../services/notificationService";
 
+const parsePositiveIntEnv = (name: string, fallback: number) => {
+  const raw = Number(String(process.env[name] || "").trim());
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
+};
+
+const ALLOCATION_TX_TIMEOUT_MS = parsePositiveIntEnv("ALLOCATION_TX_TIMEOUT_MS", 120000);
+const ALLOCATION_TX_MAX_WAIT_MS = parsePositiveIntEnv("ALLOCATION_TX_MAX_WAIT_MS", 15000);
+
 const createRequestSchema = z
   .object({
     quantity: z.number().int().positive().max(5_000_000),
@@ -205,38 +213,44 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
       return res.status(400).json({ success: false, error: "Request quantity is missing or invalid." });
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      await lockLicenseeAllocation(tx, requestRow.licenseeId);
-      const startNumber = await getNextLicenseeQrNumber(tx, requestRow.licenseeId);
-      const endNumber = startNumber + quantityRequested - 1;
+    const result = await prisma.$transaction(
+      async (tx) => {
+        await lockLicenseeAllocation(tx, requestRow.licenseeId);
+        const startNumber = await getNextLicenseeQrNumber(tx, requestRow.licenseeId);
+        const endNumber = startNumber + quantityRequested - 1;
 
-      const alloc = await allocateQrRange({
-        licenseeId: requestRow.licenseeId,
-        startNumber,
-        endNumber,
-        createdByUserId: auth.userId,
-        source: "REQUEST_APPROVAL",
-        requestId: requestRow.id,
-        createReceivedBatch: true,
-        receivedBatchName: requestRow.batchName || null,
-        tx,
-      });
-
-      const updated = await tx.qrAllocationRequest.update({
-        where: { id: requestRow.id },
-        data: {
-          status: QrAllocationRequestStatus.APPROVED,
-          approvedByUserId: auth.userId,
-          approvedAt: new Date(),
-          decisionNote: parsed.data.decisionNote?.trim() || null,
+        const alloc = await allocateQrRange({
+          licenseeId: requestRow.licenseeId,
           startNumber,
           endNumber,
-          quantity: quantityRequested,
-        },
-      });
+          createdByUserId: auth.userId,
+          source: "REQUEST_APPROVAL",
+          requestId: requestRow.id,
+          createReceivedBatch: true,
+          receivedBatchName: requestRow.batchName || null,
+          tx,
+        });
 
-      return { alloc, updated, startNumber, endNumber };
-    });
+        const updated = await tx.qrAllocationRequest.update({
+          where: { id: requestRow.id },
+          data: {
+            status: QrAllocationRequestStatus.APPROVED,
+            approvedByUserId: auth.userId,
+            approvedAt: new Date(),
+            decisionNote: parsed.data.decisionNote?.trim() || null,
+            startNumber,
+            endNumber,
+            quantity: quantityRequested,
+          },
+        });
+
+        return { alloc, updated, startNumber, endNumber };
+      },
+      {
+        maxWait: ALLOCATION_TX_MAX_WAIT_MS,
+        timeout: ALLOCATION_TX_TIMEOUT_MS,
+      }
+    );
 
     await createAuditLog({
       userId: auth.userId,
