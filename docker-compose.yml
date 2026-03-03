@@ -19,7 +19,7 @@ services:
           "CMD",
           "node",
           "-e",
-          "require('http').get('http://127.0.0.1:4000/healthz', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));",
+          "require('http').get('http://127.0.0.1:4000/health/db', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));",
         ]
       interval: 15s
       timeout: 5s

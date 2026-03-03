@@ -205,6 +205,25 @@ enum EvidenceRetentionJobStatus {
   PREVIEW
 }
 
+enum AuthRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum SecurityEventDeliveryStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+enum CompliancePackJobStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
@@ -254,12 +273,16 @@ model User {
   tenantFeatureFlagsUpdated TenantFeatureFlag[] @relation("TenantFeatureFlagUpdatedBy")
   evidenceRetentionPoliciesUpdated EvidenceRetentionPolicy[] @relation("EvidenceRetentionPolicyUpdatedBy")
   evidenceRetentionJobsStarted EvidenceRetentionJob[] @relation("EvidenceRetentionJobStartedBy")
+  compliancePackJobsStarted CompliancePackJob[] @relation("CompliancePackJobStartedBy")
   routeTransitionMetrics RouteTransitionMetric[] @relation("RouteTransitionMetricUser")
 
   invitesCreated Invite[] @relation("InviteCreatedBy")
   invitesAccepted Invite[] @relation("InviteAcceptedBy")
   passwordResets PasswordReset[]
   refreshTokens RefreshToken[]
+  adminMfaCredential AdminMfaCredential?
+  authMfaChallenges AuthMfaChallenge[]
+  authSessionRiskSignals AuthSessionRiskSignal[]
   policyRulesCreated PolicyRule[] @relation("PolicyRuleCreatedBy")
 
   createdAt DateTime @default(now())
@@ -328,6 +351,7 @@ model Licensee {
   supportTickets       SupportTicket[]
   evidenceRetentionPolicy EvidenceRetentionPolicy?
   evidenceRetentionJobs EvidenceRetentionJob[]
+  compliancePackJobs CompliancePackJob[]
   routeTransitionMetrics RouteTransitionMetric[]
 
   createdAt DateTime @default(now())
@@ -635,6 +659,117 @@ model RefreshToken {
   @@index([orgId])
   @@index([expiresAt])
   @@index([revokedAt])
+}
+
+model AdminMfaCredential {
+  id String @id @default(uuid())
+
+  userId String @unique
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  secretCiphertext String
+  secretIv String
+  secretTag String
+  backupCodesHash String[]
+  isEnabled Boolean @default(false)
+  verifiedAt DateTime?
+  lastUsedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isEnabled])
+  @@index([verifiedAt])
+}
+
+model AuthMfaChallenge {
+  id String @id @default(uuid())
+
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  ticketHash String @unique
+  riskScore Int @default(0)
+  riskLevel AuthRiskLevel @default(LOW)
+  reasons String[]
+  createdIpHash String?
+  createdUserAgentHash String?
+
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  consumedAt DateTime?
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+  @@index([consumedAt])
+}
+
+model AuthSessionRiskSignal {
+  id String @id @default(uuid())
+
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  riskScore Int
+  riskLevel AuthRiskLevel
+  reasons String[]
+  ipHash String?
+  userAgentHash String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([riskLevel, createdAt])
+}
+
+model SecurityEventOutbox {
+  id String @id @default(uuid())
+
+  eventType String
+  payload Json
+  status SecurityEventDeliveryStatus @default(QUEUED)
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now())
+  lastError String?
+  sentAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([createdAt])
+}
+
+model CompliancePackJob {
+  id String @id @default(uuid())
+
+  licenseeId String?
+  licensee Licensee? @relation(fields: [licenseeId], references: [id], onDelete: SetNull)
+
+  status CompliancePackJobStatus @default(RUNNING)
+  triggerType String
+  periodFrom DateTime?
+  periodTo DateTime?
+
+  fileName String?
+  storageKey String?
+  integrityHash String?
+  signatureAlgorithm String?
+  summary Json?
+  errorMessage String?
+
+  startedByUserId String?
+  startedByUser User? @relation("CompliancePackJobStartedBy", fields: [startedByUserId], references: [id], onDelete: SetNull)
+
+  startedAt DateTime @default(now())
+  finishedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([licenseeId, startedAt])
+  @@index([status, startedAt])
+  @@index([triggerType, startedAt])
+  @@index([startedByUserId])
 }
 
 model QrAllocationRequest {

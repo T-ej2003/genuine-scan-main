@@ -19,6 +19,7 @@ import { sendIncidentEmail } from "../services/incidentEmailService";
 import { applyContainmentAction, type IrContainmentAction } from "../services/ir/incidentActionsService";
 import { ensureIncidentWorkflowArtifacts } from "../services/supportWorkflowService";
 import { notifyIncidentLifecycle } from "../services/notificationService";
+import { runIncidentAutoContainment } from "../services/soarService";
 
 const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -255,6 +256,17 @@ export const createIrIncident = async (req: AuthRequest, res: Response) => {
       body: `A new incident was created with priority ${priority} and severity ${severity}.`,
       data: { priority, severity, status: created.status, incidentType: created.incidentType, qrCodeValue: created.qrCodeValue },
     });
+
+    try {
+      await runIncidentAutoContainment({
+        incidentId: created.id,
+        trigger: "IR_CREATE",
+        actorUserId: req.user.userId,
+        ipAddress: req.ip,
+      });
+    } catch (autoContainmentError) {
+      console.error("runIncidentAutoContainment(ir_create) error:", autoContainmentError);
+    }
 
     return res.status(201).json({ success: true, data: created });
   } catch (e) {

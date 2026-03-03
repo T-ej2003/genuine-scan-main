@@ -28,7 +28,7 @@ const isManufacturerRole = (role: UserRole) => MANUFACTURER_ROLES.includes(role)
 
 export const applyContainmentAction = async (input: {
   incidentId: string;
-  actorUserId: string;
+  actorUserId?: string | null;
   action: IrContainmentAction;
   reason: string;
   qrCodeId?: string | null;
@@ -38,6 +38,7 @@ export const applyContainmentAction = async (input: {
   ipAddress?: string | null;
 }) => {
   const now = new Date();
+  const actorType = input.actorUserId ? IncidentActorType.ADMIN : IncidentActorType.SYSTEM;
 
   const incident = await prisma.incident.findUnique({
     where: { id: input.incidentId },
@@ -109,7 +110,7 @@ export const applyContainmentAction = async (input: {
     });
 
     await createAuditLog({
-      userId: input.actorUserId,
+      userId: input.actorUserId || undefined,
       licenseeId: resolvedLicenseeId || undefined,
       action: "IR_FLAG_QR_UNDER_INVESTIGATION",
       entityType: "QRCode",
@@ -130,7 +131,7 @@ export const applyContainmentAction = async (input: {
     });
 
     await createAuditLog({
-      userId: input.actorUserId,
+      userId: input.actorUserId || undefined,
       licenseeId: resolvedLicenseeId || undefined,
       action: "IR_UNFLAG_QR_UNDER_INVESTIGATION",
       entityType: "QRCode",
@@ -148,7 +149,7 @@ export const applyContainmentAction = async (input: {
     });
 
     await createAuditLog({
-      userId: input.actorUserId,
+      userId: input.actorUserId || undefined,
       licenseeId: resolvedLicenseeId || undefined,
       action: "IR_SUSPEND_BATCH",
       entityType: "Batch",
@@ -166,7 +167,7 @@ export const applyContainmentAction = async (input: {
     });
 
     await createAuditLog({
-      userId: input.actorUserId,
+      userId: input.actorUserId || undefined,
       licenseeId: resolvedLicenseeId || undefined,
       action: "IR_REINSTATE_BATCH",
       entityType: "Batch",
@@ -193,7 +194,7 @@ export const applyContainmentAction = async (input: {
     });
 
     await createAuditLog({
-      userId: input.actorUserId,
+      userId: input.actorUserId || undefined,
       licenseeId: resolvedLicenseeId,
       action: "IR_SUSPEND_ORG",
       entityType: "Licensee",
@@ -211,7 +212,7 @@ export const applyContainmentAction = async (input: {
     });
 
     await createAuditLog({
-      userId: input.actorUserId,
+      userId: input.actorUserId || undefined,
       licenseeId: resolvedLicenseeId,
       action: "IR_REINSTATE_ORG",
       entityType: "Licensee",
@@ -260,7 +261,7 @@ export const applyContainmentAction = async (input: {
       });
 
       await createAuditLog({
-        userId: input.actorUserId,
+        userId: input.actorUserId || undefined,
         licenseeId: resolvedLicenseeId || undefined,
         action: "IR_SUSPEND_MANUFACTURER_USERS",
         entityType: "User",
@@ -282,7 +283,7 @@ export const applyContainmentAction = async (input: {
       });
 
       await createAuditLog({
-        userId: input.actorUserId,
+        userId: input.actorUserId || undefined,
         licenseeId: resolvedLicenseeId || undefined,
         action: "IR_REINSTATE_MANUFACTURER_USERS",
         entityType: "User",
@@ -297,8 +298,8 @@ export const applyContainmentAction = async (input: {
 
   await recordIncidentEvent({
     incidentId: incident.id,
-    actorType: IncidentActorType.ADMIN,
-    actorUserId: input.actorUserId,
+    actorType,
+    actorUserId: input.actorUserId || null,
     eventType: IncidentEventType.UPDATED_FIELDS,
     eventPayload: actionDetails,
   });
@@ -309,4 +310,3 @@ export const applyContainmentAction = async (input: {
     details: actionDetails,
   };
 };
-

@@ -14,6 +14,7 @@ import {
 } from "../services/governanceService";
 import { createAuditLog } from "../services/auditService";
 import prisma from "../config/database";
+import { listCompliancePackJobs, loadCompliancePackJobBuffer, runCompliancePackJob } from "../services/compliancePackService";
 
 const flagUpdateSchema = z.object({
   licenseeId: z.string().uuid().optional(),
@@ -33,6 +34,12 @@ const retentionPatchSchema = z.object({
 const retentionRunSchema = z.object({
   licenseeId: z.string().uuid().optional(),
   mode: z.enum(["PREVIEW", "APPLY"]).default("PREVIEW"),
+});
+
+const compliancePackRunSchema = z.object({
+  licenseeId: z.string().uuid().optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
 });
 
 const resolveLicenseeScope = (req: AuthRequest, value?: string) => {
@@ -276,5 +283,119 @@ export const generateComplianceReportController = async (req: AuthRequest, res: 
   } catch (error) {
     console.error("generateComplianceReportController error:", error);
     return res.status(500).json({ success: false, error: "Failed to generate compliance report" });
+  }
+};
+
+export const runCompliancePackController = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+
+    const parsed = compliancePackRunSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid payload" });
+    }
+
+    const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
+    const from = toDate(parsed.data.from || req.query.from);
+    const to = toDate(parsed.data.to || req.query.to);
+
+    const out = await runCompliancePackJob({
+      triggerType: "MANUAL",
+      actor: {
+        userId: req.user.userId,
+        role: req.user.role,
+        licenseeId: req.user.licenseeId,
+      },
+      licenseeId,
+      from,
+      to,
+    });
+
+    return res.status(201).json({ success: true, data: out.job });
+  } catch (error) {
+    console.error("runCompliancePackController error:", error);
+    return res.status(500).json({ success: false, error: "Failed to generate compliance pack" });
+  }
+};
+
+export const listCompliancePackJobsController = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+
+    const limit = Math.min(Math.max(Number(req.query.limit || 20), 1), 200);
+    const offset = Math.max(Number(req.query.offset || 0), 0);
+    const licenseeId = resolveLicenseeScope(req);
+
+    const result = await listCompliancePackJobs({
+      licenseeId,
+      limit,
+      offset,
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        jobs: result.jobs,
+        total: result.total,
+        limit,
+        offset,
+      },
+    });
+  } catch (error) {
+    console.error("listCompliancePackJobsController error:", error);
+    return res.status(500).json({ success: false, error: "Failed to list compliance pack jobs" });
+  }
+};
+
+export const downloadCompliancePackJobController = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ success: false, error: "Compliance pack job ID is required" });
+
+    const row = await prisma.compliancePackJob.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        licenseeId: true,
+        fileName: true,
+        storageKey: true,
+        status: true,
+      },
+    });
+    if (!row) return res.status(404).json({ success: false, error: "Compliance pack job not found" });
+
+    if (
+      req.user.role !== UserRole.SUPER_ADMIN &&
+      req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
+      req.user.licenseeId !== row.licenseeId
+    ) {
+      return res.status(403).json({ success: false, error: "Access denied" });
+    }
+    if (row.status !== "COMPLETED" || !row.storageKey || !row.fileName) {
+      return res.status(409).json({ success: false, error: "Compliance pack is not ready" });
+    }
+
+    const buffer = loadCompliancePackJobBuffer(row.storageKey);
+    if (!buffer) {
+      return res.status(404).json({ success: false, error: "Compliance pack file not found" });
+    }
+
+    await createAuditLog({
+      userId: req.user.userId,
+      licenseeId: row.licenseeId || undefined,
+      action: "COMPLIANCE_PACK_DOWNLOADED",
+      entityType: "CompliancePackJob",
+      entityId: row.id,
+      ipAddress: req.ip,
+    });
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename=\"${row.fileName}\"`);
+    return res.status(200).send(buffer);
+  } catch (error) {
+    console.error("downloadCompliancePackJobController error:", error);
+    return res.status(500).json({ success: false, error: "Failed to download compliance pack" });
   }
 };

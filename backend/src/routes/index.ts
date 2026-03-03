@@ -13,7 +13,12 @@ import { requireCsrf } from "../middleware/csrf";
 import rateLimit from "express-rate-limit";
 
 import {
+  beginMfaSetupController,
+  completeMfaLoginController,
+  confirmMfaSetupController,
+  disableMfaController,
   login,
+  getMfaStatusController,
   me,
   refresh,
   logout,
@@ -136,11 +141,14 @@ import {
   trackSupportTicketPublic,
 } from "../controllers/supportController";
 import {
+  downloadCompliancePackJobController,
   exportIncidentEvidenceBundleController,
   generateComplianceReportController,
   getFeatureFlags,
   getRetentionPolicyController,
+  listCompliancePackJobsController,
   patchRetentionPolicyController,
+  runCompliancePackController,
   runRetentionJobController,
   upsertFeatureFlag,
 } from "../controllers/governanceController";
@@ -240,6 +248,11 @@ router.get("/auth/me", authenticate, me);
 router.post("/auth/refresh", requireCsrf, refresh);
 router.post("/auth/logout", authenticate, requireCsrf, logout);
 router.post("/auth/invite", authenticate, requireAnyAdmin, requireCsrf, invite);
+router.get("/auth/mfa/status", authenticate, requireAnyAdmin, getMfaStatusController);
+router.post("/auth/mfa/setup", authenticate, requireAnyAdmin, requireCsrf, beginMfaSetupController);
+router.post("/auth/mfa/enable", authenticate, requireAnyAdmin, requireCsrf, confirmMfaSetupController);
+router.post("/auth/mfa/disable", authenticate, requireAnyAdmin, requireCsrf, disableMfaController);
+router.post("/auth/mfa/complete", loginLimiter, completeMfaLoginController);
 
 // ==================== DASHBOARD ====================
 // ✅ Correct stats endpoint used by UI cards + chart + activity
@@ -468,6 +481,25 @@ router.get(
   authenticate,
   requirePlatformAdmin,
   generateComplianceReportController
+);
+router.post(
+  "/governance/compliance/pack/run",
+  authenticate,
+  requirePlatformAdmin,
+  requireCsrf,
+  runCompliancePackController
+);
+router.get(
+  "/governance/compliance/pack/jobs",
+  authenticate,
+  requirePlatformAdmin,
+  listCompliancePackJobsController
+);
+router.get(
+  "/governance/compliance/pack/jobs/:id/download",
+  authenticate,
+  requirePlatformAdmin,
+  downloadCompliancePackJobController
 );
 router.get(
   "/audit/export/incidents/:id/bundle",

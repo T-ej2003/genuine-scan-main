@@ -189,13 +189,62 @@ class ApiClient {
 
   // ==================== AUTH ====================
   async login(email: string, password: string) {
-    const res = await this.request<{ token: string; user: any }>("/auth/login", {
+    const res = await this.request<{
+      token?: string;
+      user?: any;
+      mfaRequired?: boolean;
+      mfaTicket?: string;
+      mfaExpiresAt?: string;
+      riskScore?: number;
+      riskLevel?: string;
+      reasons?: string[];
+    }>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
 
     if (res.success && res.data?.token) this.setToken(res.data.token);
     return res;
+  }
+
+  async completeMfaLogin(ticket: string, code: string) {
+    const res = await this.request<{ token: string; user: any; mfaCompleted: boolean }>("/auth/mfa/complete", {
+      method: "POST",
+      body: JSON.stringify({ ticket, code }),
+    });
+    if (res.success && res.data?.token) this.setToken(res.data.token);
+    return res;
+  }
+
+  async getMfaStatus() {
+    return this.request<{
+      enrolled: boolean;
+      enabled: boolean;
+      verifiedAt: string | null;
+      lastUsedAt: string | null;
+      backupCodesRemaining: number;
+      createdAt: string | null;
+      updatedAt: string | null;
+    }>("/auth/mfa/status");
+  }
+
+  async beginMfaSetup() {
+    return this.request<{
+      secret: string;
+      otpauthUri: string;
+      backupCodes: string[];
+    }>("/auth/mfa/setup", { method: "POST" });
+  }
+
+  async confirmMfaSetup(code: string) {
+    return this.request<{ enabled: boolean }>("/auth/mfa/enable", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    });
+  }
+
+  async disableMfa() {
+    return this.request<{ enabled: boolean }>("/auth/mfa/disable", { method: "POST" });
   }
 
   async getCurrentUser() {
@@ -1121,7 +1170,14 @@ class ApiClient {
   }
 
   async requestIncidentPdfExport(id: string) {
-    return this.request(`/incidents/${encodeURIComponent(id)}/export-pdf`);
+    const headers: Record<string, string> = {};
+    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+    const resp = await fetch(`${BASE_URL}/incidents/${encodeURIComponent(id)}/export-pdf`, {
+      headers,
+      credentials: "include",
+    });
+    if (!resp.ok) throw new Error(`Export failed: HTTP ${resp.status}`);
+    return resp.blob();
   }
 
   // ==================== IR (PLATFORM SUPERADMIN) ====================
@@ -1423,6 +1479,32 @@ class ApiClient {
     if (options?.to) params.append("to", options.to);
     const query = params.toString() ? `?${params.toString()}` : "";
     return this.request(`/governance/compliance/report${query}`);
+  }
+
+  async runCompliancePack(payload?: { licenseeId?: string; from?: string; to?: string }) {
+    return this.request(`/governance/compliance/pack/run`, {
+      method: "POST",
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
+  async getCompliancePackJobs(options?: { limit?: number; offset?: number }) {
+    const params = new URLSearchParams();
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/governance/compliance/pack/jobs${query}`);
+  }
+
+  async downloadCompliancePackJob(id: string) {
+    const headers: Record<string, string> = {};
+    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+    const resp = await fetch(`${BASE_URL}/governance/compliance/pack/jobs/${encodeURIComponent(id)}/download`, {
+      headers,
+      credentials: "include",
+    });
+    if (!resp.ok) throw new Error(`Download failed: HTTP ${resp.status}`);
+    return resp.blob();
   }
 
   async exportIncidentEvidenceBundle(id: string) {

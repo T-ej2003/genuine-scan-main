@@ -4,6 +4,8 @@ import { verifyPassword, hashPassword, shouldRehashPassword } from "./passwordSe
 import { signAccessToken, newCsrfToken, newRefreshToken } from "./tokenService";
 import { createRefreshToken, rotateRefreshToken, revokeAllUserRefreshTokens, revokeRefreshTokenByRaw } from "./refreshTokenService";
 import { createAuditLog } from "../auditService";
+import { assessAuthSessionRisk } from "./sessionRiskService";
+import { createAdminMfaChallenge, getAdminMfaStatus } from "./mfaService";
 
 const parseIntEnv = (key: string, fallback: number) => {
   const raw = String(process.env[key] || "").trim();
@@ -109,12 +111,26 @@ export const issueSessionForUser = async (input: {
   };
 };
 
+type SessionIssueResult = Awaited<ReturnType<typeof issueSessionForUser>>;
+
+export type PasswordLoginResult =
+  | (SessionIssueResult & { mfaRequired?: false })
+  | {
+      mfaRequired: true;
+      mfaTicket: string;
+      mfaExpiresAt: string;
+      riskScore: number;
+      riskLevel: string;
+      reasons: string[];
+    };
+
 export const loginWithPassword = async (input: {
   email: string;
   password: string;
   ipHash: string | null;
   userAgent: string | null;
-}) => {
+  allowMfaChallenge?: boolean;
+}): Promise<PasswordLoginResult> => {
   const email = String(input.email || "").trim().toLowerCase();
   const password = String(input.password || "");
 
@@ -205,6 +221,80 @@ export const loginWithPassword = async (input: {
     },
   });
 
+  const risk = await assessAuthSessionRisk({
+    userId: user.id,
+    role: user.role,
+    ipHash: input.ipHash,
+    userAgent: input.userAgent,
+    failedLoginAttempts: user.failedLoginAttempts || 0,
+  });
+
+  const mfaStatus = await getAdminMfaStatus(user.id).catch(() => ({
+    enrolled: false,
+    enabled: false,
+    verifiedAt: null,
+    lastUsedAt: null,
+    backupCodesRemaining: 0,
+    createdAt: null,
+    updatedAt: null,
+  }));
+
+  const allowMfaChallenge = input.allowMfaChallenge !== false;
+  if (mfaStatus.enabled && allowMfaChallenge) {
+    const challenge = await createAdminMfaChallenge({
+      userId: user.id,
+      riskScore: risk.score,
+      riskLevel: risk.riskLevel,
+      reasons: risk.reasons,
+      ipHash: input.ipHash,
+      userAgent: input.userAgent,
+    });
+
+    await createAuditLog({
+      userId: user.id,
+      licenseeId: user.licenseeId || undefined,
+      orgId: user.orgId || undefined,
+      action: "AUTH_MFA_CHALLENGE_ISSUED",
+      entityType: "User",
+      entityId: user.id,
+      details: {
+        riskScore: risk.score,
+        riskLevel: risk.riskLevel,
+        reasons: risk.reasons,
+      },
+      ipHash: input.ipHash || undefined,
+      userAgent: input.userAgent || undefined,
+    } as any);
+
+    return {
+      mfaRequired: true,
+      mfaTicket: challenge.ticket,
+      mfaExpiresAt: challenge.expiresAt.toISOString(),
+      riskScore: risk.score,
+      riskLevel: risk.riskLevel,
+      reasons: risk.reasons,
+    };
+  }
+
+  if (risk.shouldBlock && isPlatformSuperAdminRole(user.role)) {
+    await createAuditLog({
+      userId: user.id,
+      licenseeId: user.licenseeId || undefined,
+      orgId: user.orgId || undefined,
+      action: "AUTH_LOGIN_BLOCKED_RISK",
+      entityType: "User",
+      entityId: user.id,
+      details: {
+        riskScore: risk.score,
+        riskLevel: risk.riskLevel,
+        reasons: risk.reasons,
+      },
+      ipHash: input.ipHash || undefined,
+      userAgent: input.userAgent || undefined,
+    } as any);
+    throw new Error("High-risk login blocked. Try from a trusted network or contact administrator.");
+  }
+
   const session = await issueSessionForUser({
     userId: user.id,
     ipHash: input.ipHash,
@@ -217,12 +307,17 @@ export const loginWithPassword = async (input: {
     licenseeId: user.licenseeId || undefined,
     orgId: user.orgId || undefined,
     action: "AUTH_LOGIN_SUCCESS",
-    entityType: "User",
-    entityId: user.id,
-    details: { role: user.role },
-    ipHash: input.ipHash || undefined,
-    userAgent: input.userAgent || undefined,
-  } as any);
+      entityType: "User",
+      entityId: user.id,
+      details: {
+        role: user.role,
+        riskScore: risk.score,
+        riskLevel: risk.riskLevel,
+        mfaEnabled: mfaStatus.enabled,
+      },
+      ipHash: input.ipHash || undefined,
+      userAgent: input.userAgent || undefined,
+    } as any);
 
   return session;
 };

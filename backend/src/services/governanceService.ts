@@ -17,6 +17,17 @@ type VerifyUxPolicy = {
   mobileCameraAssist: boolean;
 };
 
+type ComplianceControlStatus = "EFFECTIVE" | "MONITOR" | "ATTENTION";
+
+type ComplianceControl = {
+  controlId: string;
+  framework: "SOC2" | "ISO27001";
+  title: string;
+  status: ComplianceControlStatus;
+  evidenceRefs: string[];
+  note: string;
+};
+
 const VERIFY_POLICY_DEFAULTS: VerifyUxPolicy = {
   showTimelineCard: true,
   showRiskCards: true,
@@ -32,6 +43,94 @@ const VERIFY_POLICY_FLAG_MAP: Array<{ key: string; field: keyof VerifyUxPolicy }
   { key: "verify_allow_fraud_report", field: "allowFraudReport" },
   { key: "verify_mobile_camera_assist", field: "mobileCameraAssist" },
 ];
+
+const buildComplianceControls = (params: {
+  reportGeneratedAt: string;
+  resolvedIncidents: number;
+  totalIncidents: number;
+  breachedIncidents: number;
+  failedLoginAttempts: number;
+  totalAuditEvents: number;
+  retentionDays: number;
+}) => {
+  const resolutionRatio =
+    params.totalIncidents > 0 ? params.resolvedIncidents / Math.max(1, params.totalIncidents) : 1;
+  const controls: ComplianceControl[] = [
+    {
+      controlId: "SOC2-CC7.2",
+      framework: "SOC2",
+      title: "Security event detection and response",
+      status: params.breachedIncidents > 5 ? "ATTENTION" : "EFFECTIVE",
+      evidenceRefs: [
+        "metrics.incidents.slaBreachedOpen",
+        "metrics.incidents.total",
+        "metrics.incidents.resolved",
+      ],
+      note:
+        params.breachedIncidents > 5
+          ? "Open SLA breaches are elevated and require tighter response playbooks."
+          : "Incident response SLAs are within expected operating range.",
+    },
+    {
+      controlId: "SOC2-CC6.1",
+      framework: "SOC2",
+      title: "Logical access and authentication controls",
+      status: params.failedLoginAttempts >= 20 ? "ATTENTION" : params.failedLoginAttempts >= 5 ? "MONITOR" : "EFFECTIVE",
+      evidenceRefs: ["metrics.failedLogins", "compliance.securityAccess"],
+      note:
+        params.failedLoginAttempts >= 20
+          ? "Failed login activity is high; investigate brute-force or credential-stuffing risk."
+          : "Authentication telemetry is within expected range.",
+    },
+    {
+      controlId: "ISO27001-A.5.23",
+      framework: "ISO27001",
+      title: "Information security for cloud services and logging",
+      status: params.totalAuditEvents > 0 ? "EFFECTIVE" : "ATTENTION",
+      evidenceRefs: ["metrics.auditEvents", "scope.licenseeId", "generatedAt"],
+      note:
+        params.totalAuditEvents > 0
+          ? "Audit telemetry is being generated and retained."
+          : "No audit activity observed for selected scope.",
+    },
+    {
+      controlId: "ISO27001-A.8.10",
+      framework: "ISO27001",
+      title: "Information retention and deletion",
+      status: params.retentionDays >= 180 ? "EFFECTIVE" : "MONITOR",
+      evidenceRefs: ["compliance.auditRetentionDays", "metrics.retention"],
+      note:
+        params.retentionDays >= 180
+          ? "Retention baseline meets long-horizon forensic needs."
+          : "Retention window is shorter than enterprise-recommended baseline.",
+    },
+    {
+      controlId: "SOC2-CC3.2",
+      framework: "SOC2",
+      title: "Monitoring control effectiveness",
+      status: resolutionRatio >= 0.7 ? "EFFECTIVE" : "MONITOR",
+      evidenceRefs: ["metrics.incidents.total", "metrics.incidents.resolved", "generatedAt"],
+      note:
+        resolutionRatio >= 0.7
+          ? "Incident closure rate indicates controls are operating effectively."
+          : "Resolution rate should improve; prioritize investigative throughput.",
+    },
+  ];
+
+  const summary = controls.reduce(
+    (acc, row) => {
+      acc[row.status] = (acc[row.status] || 0) + 1;
+      return acc;
+    },
+    { EFFECTIVE: 0, MONITOR: 0, ATTENTION: 0 } as Record<ComplianceControlStatus, number>
+  );
+
+  return {
+    controls,
+    summary,
+    generatedAt: params.reportGeneratedAt,
+  };
+};
 
 export const resolveVerifyUxPolicy = async (licenseeId?: string | null): Promise<VerifyUxPolicy> => {
   if (!licenseeId) return { ...VERIFY_POLICY_DEFAULTS };
@@ -573,6 +672,19 @@ export const generateComplianceReport = async (params: {
         : null,
     },
   };
+
+  const controlMap = buildComplianceControls({
+    reportGeneratedAt: report.generatedAt,
+    resolvedIncidents,
+    totalIncidents,
+    breachedIncidents,
+    failedLoginAttempts,
+    totalAuditEvents,
+    retentionDays: Number(process.env.RETENTION_DAYS || retentionPolicy?.retentionDays || 180),
+  });
+
+  (report as any).controls = controlMap.controls;
+  (report as any).controlSummary = controlMap.summary;
 
   await createAuditLog({
     userId: params.actor.userId,
