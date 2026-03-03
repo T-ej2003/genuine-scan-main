@@ -5,37 +5,13 @@ import { createAuditLog } from "../services/auditService";
 import { evaluateScanPolicy } from "../services/scanPolicy";
 import { hashToken, verifyQrToken } from "../services/qrTokenService";
 import { evaluateScanAndEnforcePolicy } from "../services/policyEngineService";
-import { createHash } from "crypto";
 import { reverseGeocode } from "../services/locationService";
 import { getScanInsight } from "../services/scanInsightService";
 import { CustomerVerifyRequest } from "../middleware/customerVerifyAuth";
 import { assessDuplicateRisk } from "../services/duplicateRiskService";
+import { deriveRequestDeviceFingerprint } from "../utils/requestFingerprint";
 
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX = Number(process.env.SCAN_RATE_LIMIT_PER_MIN || "60");
-
-const rateLimitState = new Map<string, { count: number; resetAt: number }>();
-
-const hitRateLimit = (key: string) => {
-  const now = Date.now();
-  const entry = rateLimitState.get(key);
-  if (!entry || entry.resetAt <= now) {
-    rateLimitState.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-    return false;
-  }
-  entry.count += 1;
-  return entry.count > RATE_LIMIT_MAX;
-};
-
-const deviceFingerprint = (req: Request) => {
-  const raw =
-    String(req.get("x-device-fp") || "") +
-    "|" +
-    String(req.get("user-agent") || "") +
-    "|" +
-    String(req.ip || "");
-  return createHash("sha256").update(raw).digest("hex");
-};
+const deviceFingerprint = (req: Request) => deriveRequestDeviceFingerprint(req);
 
 const isQrReadyForCustomerUse = (status: QRStatus) => {
   return status === QRStatus.PRINTED || status === QRStatus.REDEEMED || status === QRStatus.SCANNED;
@@ -74,14 +50,6 @@ const buildOwnershipStatus = (params: {
 
 export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
   try {
-    const ipKey = String(req.ip || "unknown");
-    if (hitRateLimit(ipKey)) {
-      return res.status(429).json({
-        success: false,
-        error: "Rate limit exceeded. Please try again later.",
-      });
-    }
-
     const token = String(req.query.t || "").trim();
     if (!token) {
       return res.status(400).json({ success: false, error: "Missing token" });

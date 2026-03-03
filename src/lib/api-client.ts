@@ -338,6 +338,17 @@ class ApiClient {
     return this.request(`/qr/codes${query}`);
   }
 
+  async generateSignedQrLinks(codes: string[]) {
+    return this.request<{
+      issuedAt: string;
+      expiresAt: string;
+      links: Array<{ code: string; scanUrl: string; expiresAt: string }>;
+    }>("/qr/codes/signed-links", {
+      method: "POST",
+      body: JSON.stringify({ codes }),
+    });
+  }
+
   async getQRStats(licenseeId?: string) {
     const query = licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : "";
     return this.request(`/qr/stats${query}`);

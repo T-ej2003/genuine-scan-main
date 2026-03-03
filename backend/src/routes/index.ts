@@ -44,6 +44,7 @@ import {
   adminAllocateBatch,
   // ⚠️ keep controller functions but we will restrict routes for licensee admin:
   getQRCodes,
+  generateSignedScanLinks,
   exportQRCodesCsv,
   allocateQRRangeForLicensee,
   generateQRCodes,
@@ -146,6 +147,12 @@ import {
 
 const router = Router();
 
+const parsePositiveIntEnv = (key: string, fallback: number, min = 1, max = 100_000) => {
+  const raw = Number(String(process.env[key] || "").trim());
+  if (!Number.isFinite(raw)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(raw)));
+};
+
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 25,
@@ -181,22 +188,50 @@ const verifyClaimLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const verifyCodeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: parsePositiveIntEnv("PUBLIC_VERIFY_RATE_LIMIT_PER_MIN", 45, 5, 500),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const scanLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: parsePositiveIntEnv("SCAN_RATE_LIMIT_PER_MIN", 60, 5, 500),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const verifyReportLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: parsePositiveIntEnv("VERIFY_REPORT_RATE_LIMIT_PER_15MIN", 20, 3, 300),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const verifyFeedbackLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: parsePositiveIntEnv("VERIFY_FEEDBACK_RATE_LIMIT_PER_15MIN", 30, 5, 500),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ==================== PUBLIC ====================
 router.post("/auth/login", loginLimiter, login);
 router.post("/auth/accept-invite", loginLimiter, acceptInviteController);
 router.post("/auth/forgot-password", forgotPasswordLimiter, forgotPassword);
 router.post("/auth/reset-password", forgotPasswordLimiter, resetPassword);
-router.get("/verify/:code", optionalCustomerVerifyAuth, verifyQRCode);
+router.get("/verify/:code", verifyCodeLimiter, optionalCustomerVerifyAuth, verifyQRCode);
 router.post("/verify/auth/email-otp/request", verifyOtpRequestLimiter, requestCustomerEmailOtp);
 router.post("/verify/auth/email-otp/verify", verifyOtpVerifyLimiter, verifyCustomerEmailOtp);
 router.post("/verify/:code/claim", verifyClaimLimiter, optionalCustomerVerifyAuth, claimProductOwnership);
 router.post("/verify/:code/link-claim", verifyClaimLimiter, requireCustomerVerifyAuth, linkDeviceClaimToCustomer);
-router.post("/verify/report-fraud", uploadIncidentReportPhotos, reportFraud);
-router.post("/fraud-report", uploadIncidentReportPhotos, reportFraud);
-router.post("/verify/feedback", submitProductFeedback);
-router.post("/incidents/report", uploadIncidentReportPhotos, reportIncident);
+router.post("/verify/report-fraud", verifyReportLimiter, uploadIncidentReportPhotos, reportFraud);
+router.post("/fraud-report", verifyReportLimiter, uploadIncidentReportPhotos, reportFraud);
+router.post("/verify/feedback", verifyFeedbackLimiter, submitProductFeedback);
+router.post("/incidents/report", verifyReportLimiter, uploadIncidentReportPhotos, reportIncident);
 router.get("/support/tickets/track/:reference", trackSupportTicketPublic);
-router.get("/scan", optionalCustomerVerifyAuth, scanToken);
+router.get("/scan", scanLimiter, optionalCustomerVerifyAuth, scanToken);
 router.post("/telemetry/route-transition", optionalAuth, captureRouteTransitionMetric);
 router.get("/health", healthCheck);
 
@@ -281,7 +316,7 @@ router.post(
 );
 
 // ==================== BATCHES ====================
-router.post("/qr/batches", authenticate, requireLicenseeAdmin, enforceTenantIsolation, createBatch);
+router.post("/qr/batches", authenticate, requireLicenseeAdmin, enforceTenantIsolation, requireCsrf, createBatch);
 router.get("/qr/batches", authenticate, enforceTenantIsolation, getBatches);
 
 router.post(
@@ -300,12 +335,13 @@ router.post("/qr/batches/admin-allocate", authenticate, requirePlatformAdmin, re
 // raw QR list/export should be SUPER_ADMIN only
 router.get("/qr/codes/export", authenticate, requirePlatformAdmin, exportQRCodesCsv);
 router.get("/qr/codes", authenticate, requirePlatformAdmin, getQRCodes);
+router.post("/qr/codes/signed-links", authenticate, requirePlatformAdmin, requireCsrf, generateSignedScanLinks);
 
 // Stats is still allowed (needed for dashboard chart)
 router.get("/qr/stats", authenticate, enforceTenantIsolation, getStats);
 
 // delete endpoints (admins)
-router.delete("/qr/batches/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, deleteBatch);
+router.delete("/qr/batches/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, deleteBatch);
 router.post("/qr/batches/bulk-delete", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, bulkDeleteBatches);
 router.delete("/qr/codes", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, bulkDeleteQRCodes);
 
@@ -355,7 +391,7 @@ router.get("/trace/timeline", authenticate, enforceTenantIsolation, getTraceTime
 router.get("/analytics/batch-sla", authenticate, requireAnyAdmin, enforceTenantIsolation, getBatchSlaAnalyticsController);
 router.get("/analytics/risk-scores", authenticate, requireAnyAdmin, enforceTenantIsolation, getRiskAnalyticsController);
 router.get("/policy/config", authenticate, requireAnyAdmin, enforceTenantIsolation, getPolicyConfigController);
-router.patch("/policy/config", authenticate, requireAnyAdmin, enforceTenantIsolation, updatePolicyConfigController);
+router.patch("/policy/config", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, updatePolicyConfigController);
 router.get("/policy/alerts", authenticate, requireAnyAdmin, enforceTenantIsolation, getPolicyAlertsController);
 router.post(
   "/policy/alerts/:id/ack",
@@ -454,8 +490,8 @@ router.get(
   serveIncidentEvidenceFile
 );
 router.get("/incidents/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, getIncident);
-router.patch("/incidents/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, patchIncident);
-router.post("/incidents/:id/events", authenticate, requireAnyAdmin, enforceTenantIsolation, addIncidentEventNote);
+router.patch("/incidents/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, patchIncident);
+router.post("/incidents/:id/events", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, addIncidentEventNote);
 router.post(
   "/incidents/:id/evidence",
   authenticate,
@@ -524,7 +560,6 @@ router.post("/admin/qrs/:id/block", authenticate, requirePlatformAdmin, requireC
 router.post("/admin/batches/:id/block", authenticate, requirePlatformAdmin, requireCsrf, blockBatch);
 
 // ==================== ACCOUNT ====================
-router.patch("/account/profile", authenticate, updateMyProfile);
 router.patch("/account/profile", authenticate, requireCsrf, updateMyProfile);
 router.patch("/account/password", authenticate, requireCsrf, changeMyPassword);
 

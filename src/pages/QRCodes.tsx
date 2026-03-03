@@ -108,29 +108,8 @@ export default function QRCodes() {
   const [stats, setStats] = useState<{ total: number; byStatus: Record<string, number> } | null>(null);
 
   const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [uiError, setUiError] = useState<string | null>(null);
-
-  // --- URL settings used for PNG generation ---
-  const [publicBaseUrl, setPublicBaseUrl] = useState<string>(() => {
-    try {
-      return localStorage.getItem("qr_public_base_url") || "https://auth.mcs.example";
-    } catch {
-      return "https://auth.mcs.example";
-    }
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("qr_public_base_url", publicBaseUrl);
-    } catch {
-      // ignore
-    }
-  }, [publicBaseUrl]);
-
-  const buildPublicQrUrl = (code: string) => {
-    const base = String(publicBaseUrl || "").trim().replace(/\/+$/, "");
-    return `${base}/verify/${encodeURIComponent(code)}`;
-  };
 
   const filteredLicenseeId =
     user?.role === "super_admin"
@@ -272,16 +251,53 @@ export default function QRCodes() {
     }
   };
 
+  const getSignedScanLinks = async (codes: string[]) => {
+    const normalized = Array.from(
+      new Set(
+        codes
+          .map((code) => String(code || "").trim().toUpperCase())
+          .filter(Boolean)
+      )
+    );
+
+    if (!normalized.length) {
+      throw new Error("No QR codes selected.");
+    }
+
+    const response = await apiClient.generateSignedQrLinks(normalized);
+    if (!response.success || !response.data?.links?.length) {
+      throw new Error(response.error || "Failed to generate signed scan links");
+    }
+
+    const map = new Map<string, string>();
+    for (const link of response.data.links) {
+      if (link?.code && link?.scanUrl) {
+        map.set(String(link.code).toUpperCase(), link.scanUrl);
+      }
+    }
+    return map;
+  };
+
   // png helpers
-  const qrPngDataUrl = async (code: string) => {
-    const urlInsideQr = buildPublicQrUrl(code);
+  const qrPngDataUrl = async (urlInsideQr: string) => {
     return QRCode.toDataURL(urlInsideQr, { width: 768, margin: 2, errorCorrectionLevel: "M" });
   };
 
   const downloadSinglePng = async (code: string) => {
-    const dataUrl = await qrPngDataUrl(code);
-    const blob = await (await fetch(dataUrl)).blob();
-    saveAs(blob, `${code}.png`);
+    try {
+      setUiError(null);
+      setDownloading(true);
+      const links = await getSignedScanLinks([code]);
+      const signedUrl = links.get(String(code).trim().toUpperCase());
+      if (!signedUrl) throw new Error("Signed scan URL is unavailable for this code.");
+      const dataUrl = await qrPngDataUrl(signedUrl);
+      const blob = await (await fetch(dataUrl)).blob();
+      saveAs(blob, `${code}.png`);
+    } catch (e: any) {
+      setUiError(e?.message || "Failed to download PNG");
+    } finally {
+      setDownloading(false);
+    }
   };
 
   const downloadZipSelected = async () => {
@@ -291,16 +307,26 @@ export default function QRCodes() {
       return;
     }
 
-    setUiError(null);
-    const zip = new JSZip();
-    for (const code of codes) {
-      const dataUrl = await qrPngDataUrl(code);
-      const blob = await (await fetch(dataUrl)).blob();
-      zip.file(`${code}.png`, blob);
-    }
+    try {
+      setUiError(null);
+      setDownloading(true);
+      const signedLinks = await getSignedScanLinks(codes);
+      const zip = new JSZip();
+      for (const code of codes) {
+        const signedUrl = signedLinks.get(String(code).trim().toUpperCase());
+        if (!signedUrl) throw new Error(`Signed scan URL missing for code ${code}`);
+        const dataUrl = await qrPngDataUrl(signedUrl);
+        const blob = await (await fetch(dataUrl)).blob();
+        zip.file(`${code}.png`, blob);
+      }
 
-    const out = await zip.generateAsync({ type: "blob" });
-    saveAs(out, `qr-png.zip`);
+      const out = await zip.generateAsync({ type: "blob" });
+      saveAs(out, `qr-png.zip`);
+    } catch (e: any) {
+      setUiError(e?.message || "Failed to download PNG ZIP");
+    } finally {
+      setDownloading(false);
+    }
   };
 
   const deleteSelectedQRCodes = async () => {
@@ -344,7 +370,7 @@ export default function QRCodes() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold">QR Codes</h1>
-            <p className="text-muted-foreground">View, export and generate PNG QR codes</p>
+            <p className="text-muted-foreground">View inventory, export reports, and generate signed PNG QR codes</p>
           </div>
 
           <div className="flex gap-2 flex-wrap">
@@ -352,24 +378,24 @@ export default function QRCodes() {
               <Button
                 variant="destructive"
                 onClick={deleteSelectedQRCodes}
-                disabled={loading || selectedCount === 0}
+                disabled={loading || downloading || selectedCount === 0}
               >
                 Delete selected ({selectedCount})
               </Button>
             )}
 
-            <Button variant="outline" onClick={refreshAll} disabled={loading}>
+            <Button variant="outline" onClick={refreshAll} disabled={loading || downloading}>
               Refresh
             </Button>
 
-            <Button variant="outline" onClick={handleExportCsv} disabled={loading}>
+            <Button variant="outline" onClick={handleExportCsv} disabled={loading || downloading}>
               <Download className="mr-2 h-4 w-4" />
               Export CSV
             </Button>
 
-            <Button variant="outline" onClick={downloadZipSelected} disabled={loading}>
+            <Button variant="outline" onClick={downloadZipSelected} disabled={loading || downloading}>
               <Download className="mr-2 h-4 w-4" />
-              Download PNG ZIP{selectedCount ? ` (${selectedCount})` : ""}
+              {downloading ? "Generating signed PNGs..." : `Download PNG ZIP${selectedCount ? ` (${selectedCount})` : ""}`}
             </Button>
           </div>
         </div>
@@ -379,25 +405,6 @@ export default function QRCodes() {
             {uiError}
           </div>
         )}
-
-        {/* Settings */}
-        <Card>
-          <CardHeader className="pb-2">
-            <div className="font-semibold">QR link settings (URL inside QR)</div>
-            <div className="text-sm text-muted-foreground">Stored locally in your browser.</div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid gap-3 md:grid-cols-1">
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Public base URL</div>
-                <Input value={publicBaseUrl} onChange={(e) => setPublicBaseUrl(e.target.value)} />
-                <div className="text-xs text-muted-foreground font-mono">
-                  Example: {buildPublicQrUrl("A0000000001")}
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
 
         {/* Stats */}
         <div className="grid gap-4 md:grid-cols-4">
@@ -556,8 +563,8 @@ export default function QRCodes() {
                               </div>
                               <span className="font-mono font-medium">{qr.code}</span>
                             </div>
-                            <div className="mt-1 text-xs text-muted-foreground font-mono">
-                              {buildPublicQrUrl(qr.code)}
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              Signed scan URL is generated server-side at download time.
                             </div>
                           </TableCell>
 
@@ -592,7 +599,12 @@ export default function QRCodes() {
                           </TableCell>
 
                           <TableCell className="text-right">
-                            <Button size="sm" variant="outline" onClick={() => downloadSinglePng(qr.code)}>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => downloadSinglePng(qr.code)}
+                              disabled={loading || downloading}
+                            >
                               Download
                             </Button>
                           </TableCell>
