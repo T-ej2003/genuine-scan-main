@@ -38,6 +38,9 @@ export default function Governance() {
 
   const [compliance, setCompliance] = useState<any | null>(null);
   const [complianceLoading, setComplianceLoading] = useState(false);
+  const [compliancePackLoading, setCompliancePackLoading] = useState(false);
+  const [complianceJobsLoading, setComplianceJobsLoading] = useState(false);
+  const [complianceJobs, setComplianceJobs] = useState<any[]>([]);
 
   const [telemetry, setTelemetry] = useState<any | null>(null);
   const [telemetryLoading, setTelemetryLoading] = useState(false);
@@ -248,6 +251,48 @@ export default function Governance() {
     }
   };
 
+  const runCompliancePack = async () => {
+    const licenseeId = resolveLicenseeId();
+    setCompliancePackLoading(true);
+    try {
+      const response = await apiClient.runCompliancePack({
+        licenseeId: licenseeId || undefined,
+      });
+      if (!response.success) {
+        toast({ title: "Compliance pack failed", description: response.error || "Could not generate compliance pack.", variant: "destructive" });
+        return;
+      }
+      toast({ title: "Compliance pack generated", description: "Signed evidence pack created successfully." });
+      await loadCompliancePackJobs();
+    } finally {
+      setCompliancePackLoading(false);
+    }
+  };
+
+  const loadCompliancePackJobs = async () => {
+    setComplianceJobsLoading(true);
+    try {
+      const response = await apiClient.getCompliancePackJobs({ limit: 20, offset: 0 });
+      if (!response.success) {
+        toast({ title: "Compliance pack jobs failed", description: response.error || "Could not load compliance pack jobs.", variant: "destructive" });
+        return;
+      }
+      const payload: any = response.data || {};
+      setComplianceJobs(Array.isArray(payload.jobs) ? payload.jobs : []);
+    } finally {
+      setComplianceJobsLoading(false);
+    }
+  };
+
+  const downloadCompliancePack = async (jobId: string) => {
+    try {
+      const blob = await apiClient.downloadCompliancePackJob(jobId);
+      saveAs(blob, `compliance-pack-${jobId}.zip`);
+    } catch (error: any) {
+      toast({ title: "Download failed", description: error?.message || "Could not download compliance pack.", variant: "destructive" });
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -437,6 +482,15 @@ export default function Governance() {
                       {(compliance.compliance?.incidentResponse?.workflow || []).join(" -> ")}
                     </p>
                   </div>
+
+                  {compliance.controlSummary ? (
+                    <div className="rounded-lg border border-slate-200 bg-white p-3">
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Control Effectiveness Summary</p>
+                      <p className="mt-1 text-sm text-slate-700">
+                        Effective: {compliance.controlSummary.EFFECTIVE || 0} | Monitor: {compliance.controlSummary.MONITOR || 0} | Attention: {compliance.controlSummary.ATTENTION || 0}
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <p className="text-sm text-slate-500">Run the compliance generator to view UK GDPR, retention, and incident workflow controls.</p>
@@ -486,6 +540,46 @@ export default function Governance() {
             </CardContent>
           </Card>
         </div>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between border-b bg-slate-50/70">
+            <p className="text-sm font-semibold">Signed compliance evidence packs</p>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={loadCompliancePackJobs} disabled={complianceJobsLoading}>
+                {complianceJobsLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Load jobs
+              </Button>
+              <Button variant="outline" onClick={runCompliancePack} disabled={compliancePackLoading}>
+                {compliancePackLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Generate signed pack
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-2 pt-4 text-sm text-slate-700">
+            {complianceJobs.length === 0 ? (
+              <p className="text-sm text-slate-500">No compliance pack jobs yet. Generate one to create auditable signed evidence.</p>
+            ) : (
+              complianceJobs.map((job) => (
+                <div key={job.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-3">
+                  <div>
+                    <p className="font-medium text-slate-900">{job.id}</p>
+                    <p className="text-xs text-slate-600">
+                      {job.status} • {new Date(job.startedAt).toLocaleString()} • Trigger {job.triggerType}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    disabled={job.status !== "COMPLETED"}
+                    onClick={() => downloadCompliancePack(job.id)}
+                  >
+                    <FileDown className="mr-2 h-4 w-4" />
+                    Download
+                  </Button>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader className="border-b bg-slate-50/70">

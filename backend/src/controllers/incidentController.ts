@@ -28,6 +28,8 @@ import { ensureIncidentWorkflowArtifacts, ticketSlaSnapshot } from "../services/
 import { getSuperadminAlertEmails, sendIncidentEmail } from "../services/incidentEmailService";
 import { createAuditLog } from "../services/auditService";
 import { incidentEvidenceUpload, incidentReportUpload, resolveUploadPath } from "../middleware/incidentUpload";
+import { buildIncidentPdfBuffer } from "../services/incidentPdfService";
+import { runIncidentAutoContainment } from "../services/soarService";
 
 const publicIncidentSchema = z.object({
   qrCodeValue: z.string().trim().min(2).max(128),
@@ -276,6 +278,17 @@ export const reportIncident = async (req: Request, res: Response) => {
       });
     }
 
+    try {
+      await runIncidentAutoContainment({
+        incidentId: incident.id,
+        trigger: "PUBLIC_REPORT",
+        actorUserId: null,
+        ipAddress: req.ip,
+      });
+    } catch (autoContainmentError) {
+      console.error("runIncidentAutoContainment(public) error:", autoContainmentError);
+    }
+
     return res.status(201).json({
       success: true,
       data: {
@@ -488,6 +501,19 @@ export const patchIncident = async (req: AuthRequest, res: Response) => {
       actorType: IncidentActorType.ADMIN,
       emitEvents: false,
     });
+
+    if (changedFields.includes("severity") || changedFields.includes("status")) {
+      try {
+        await runIncidentAutoContainment({
+          incidentId: updated.id,
+          trigger: "INCIDENT_UPDATE",
+          actorUserId: req.user.userId,
+          ipAddress: req.ip,
+        });
+      } catch (autoContainmentError) {
+        console.error("runIncidentAutoContainment(update) error:", autoContainmentError);
+      }
+    }
 
     return res.json({ success: true, data: updated });
   } catch (error) {
@@ -709,12 +735,15 @@ export const exportIncidentPdfHook = async (req: AuthRequest, res: Response) => 
     });
     if (!incident) return res.status(404).json({ success: false, error: "Incident not found" });
 
+    const pdfBuffer = await buildIncidentPdfBuffer(incident);
+    const fileName = `incident-${incident.id}.pdf`;
+
     await recordIncidentEvent({
       incidentId: incident.id,
       actorType: IncidentActorType.ADMIN,
       actorUserId: req.user.userId,
       eventType: IncidentEventType.EXPORTED,
-      eventPayload: { format: "pdf", status: "not_implemented" },
+      eventPayload: { format: "pdf", status: "exported" },
     });
 
     await createAuditLog({
@@ -723,16 +752,15 @@ export const exportIncidentPdfHook = async (req: AuthRequest, res: Response) => 
       action: "INCIDENT_EXPORT_REQUESTED",
       entityType: "Incident",
       entityId: incident.id,
-      details: { format: "pdf", status: "not_implemented" },
+      details: { format: "pdf", status: "exported", bytes: pdfBuffer.length },
     });
 
-    return res.status(501).json({
-      success: false,
-      error: "Incident PDF export is not implemented yet. Hook is ready for future integration.",
-    });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename=\"${fileName}\"`);
+    return res.status(200).send(pdfBuffer);
   } catch (error) {
     console.error("exportIncidentPdfHook error:", error);
-    return res.status(500).json({ success: false, error: "Failed to process export hook" });
+    return res.status(500).json({ success: false, error: "Failed to export incident PDF" });
   }
 };
 

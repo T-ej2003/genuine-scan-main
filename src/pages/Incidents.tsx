@@ -148,6 +148,7 @@ export default function Incidents() {
   const [sendingCustomerEmail, setSendingCustomerEmail] = useState(false);
   const [lastCustomerEmailDelivery, setLastCustomerEmailDelivery] = useState<IncidentEmailDeliveryInfo | null>(null);
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const selectedIncident = useMemo(
     () => incidents.find((i) => i.id === selectedId) || null,
@@ -418,6 +419,23 @@ export default function Incidents() {
         description: error?.message || "Could not download file.",
         variant: "destructive",
       });
+    }
+  };
+
+  const exportIncidentPdf = async () => {
+    if (!detail) return;
+    setExportingPdf(true);
+    try {
+      const blob = await apiClient.requestIncidentPdfExport(detail.id);
+      saveAs(blob, `incident-${detail.id}.pdf`);
+    } catch (error: any) {
+      toast({
+        title: "PDF export failed",
+        description: error?.message || "Could not export incident PDF.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingPdf(false);
     }
   };
 
@@ -757,6 +775,10 @@ export default function Incidents() {
                     <Button onClick={saveUpdates} disabled={saving} className="bg-slate-900 text-white hover:bg-slate-800">
                       {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
                       Save updates
+                    </Button>
+                    <Button variant="outline" onClick={exportIncidentPdf} disabled={exportingPdf}>
+                      {exportingPdf ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
+                      Export PDF
                     </Button>
                     <Button variant="outline" onClick={() => applyQuickStatus("RESOLVED")} disabled={saving}>
                       Mark resolved

@@ -13,7 +13,41 @@ permissions:
   attestations: write
 
 jobs:
+  quality-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend regression tests
+        run: npm run test
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Install backend dependencies
+        run: cd backend && npm ci
+
+      - name: Generate Prisma client
+        run: cd backend && npm run prisma:generate
+
+      - name: Run backend regression tests
+        run: cd backend && npm test
+
   audit:
+    needs: quality-gates
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -41,13 +75,11 @@ jobs:
 
       - name: Install OSV Scanner
         run: |
-          curl -L 
-          https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64 -o osv-scanner
+          curl -sSfL https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64 -o osv-scanner
           chmod +x osv-scanner
-      
+
       - name: Run OSV Scanner
-        run: |
-         ./osv-scanner --recursive .
+        run: ./osv-scanner --recursive .
 
       - name: Gitleaks secrets scan
         uses: gitleaks/gitleaks-action@v2
@@ -91,8 +123,7 @@ jobs:
 
       - name: Build container for scan
         if: steps.docker-detect.outputs.found == 'true'
-        run: |
-          docker build -t deployment-audit:latest -f "${{ steps.docker-detect.outputs.dockerfile }}" "${{ steps.docker-detect.outputs.context }}"
+        run: docker build -t deployment-audit:latest -f "${{ steps.docker-detect.outputs.dockerfile }}" "${{ steps.docker-detect.outputs.context }}"
 
       - name: Trivy container scan
         if: steps.docker-detect.outputs.found == 'true'

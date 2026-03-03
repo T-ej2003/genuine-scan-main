@@ -12,8 +12,11 @@ import { Loader2, AlertCircle } from "lucide-react";
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [mfaTicket, setMfaTicket] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaRiskLevel, setMfaRiskLevel] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const { login, isLoading } = useAuth();
+  const { login, completeMfaLogin, isLoading } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -21,8 +24,32 @@ export default function Login() {
     setError("");
 
     const result = await login(email.trim().toLowerCase(), password);
-    if (result.success) navigate("/dashboard");
-    else setError(result.error || "Login failed");
+    if (result.success) {
+      navigate("/dashboard");
+      return;
+    }
+
+    if (result.mfaRequired && result.mfaTicket) {
+      setMfaTicket(result.mfaTicket);
+      setMfaRiskLevel(result.riskLevel || null);
+      setMfaCode("");
+      return;
+    }
+
+    setError(result.error || "Login failed");
+  };
+
+  const handleMfaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    if (!mfaTicket) return;
+
+    const result = await completeMfaLogin(mfaTicket, mfaCode.trim());
+    if (result.success) {
+      navigate("/dashboard");
+      return;
+    }
+    setError(result.error || "MFA verification failed");
   };
 
   return (
@@ -32,7 +59,7 @@ export default function Login() {
       sideTitle="Control secure QR inventory and approvals from one console."
       sideDescription="Designed for super admins, licensee admins, and manufacturers with role-safe access, audit visibility, and operational continuity."
     >
-      <form onSubmit={handleSubmit} className="space-y-5">
+      <form onSubmit={mfaTicket ? handleMfaSubmit : handleSubmit} className="space-y-5">
         {error && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
@@ -40,6 +67,27 @@ export default function Login() {
           </Alert>
         )}
 
+        {mfaTicket ? (
+          <div className="space-y-2">
+            <Label htmlFor="mfaCode">MFA code</Label>
+            <Input
+              id="mfaCode"
+              type="text"
+              autoComplete="one-time-code"
+              placeholder="6-digit code or backup code"
+              value={mfaCode}
+              onChange={(e) => setMfaCode(e.target.value)}
+              required
+              disabled={isLoading}
+              className="h-11"
+            />
+            <p className="text-xs text-slate-500">
+              {mfaRiskLevel ? `Risk level: ${mfaRiskLevel}. ` : ""}
+              Complete second-factor verification to continue.
+            </p>
+          </div>
+        ) : (
+          <>
         <div className="space-y-2">
           <Label htmlFor="email">Email</Label>
           <Input
@@ -77,21 +125,41 @@ export default function Login() {
             className="h-11"
           />
         </div>
+          </>
+        )}
 
         <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 px-4 py-3 text-xs text-emerald-900">
-          Password reset is available directly from the sign-in form and uses the existing secure email token flow.
+          {mfaTicket
+            ? "Use your authenticator app code or a one-time backup code."
+            : "Password reset is available directly from the sign-in form and uses the existing secure email token flow."}
         </div>
 
         <Button type="submit" className="h-11 w-full bg-slate-900 text-white hover:bg-slate-800" disabled={isLoading}>
           {isLoading ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Signing in...
+              {mfaTicket ? "Verifying..." : "Signing in..."}
             </>
           ) : (
-            "Sign in"
+            mfaTicket ? "Verify MFA" : "Sign in"
           )}
         </Button>
+
+        {mfaTicket ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11 w-full"
+            onClick={() => {
+              setMfaTicket("");
+              setMfaCode("");
+              setMfaRiskLevel(null);
+              setError("");
+            }}
+          >
+            Use different account
+          </Button>
+        ) : null}
       </form>
     </AuthShell>
   );

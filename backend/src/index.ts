@@ -7,6 +7,8 @@ import packageJson from "../package.json";
 import routes from "./routes";
 import prisma from "./config/database";
 import { logger } from "./utils/logger";
+import { startSecurityEventOutboxWorker, stopSecurityEventOutboxWorker } from "./services/siemOutboxService";
+import { startCompliancePackScheduler, stopCompliancePackScheduler } from "./services/compliancePackService";
 
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -211,6 +213,8 @@ const server = app.listen(PORT, () => {
   logger.info(`🚀 Server running on http://localhost:${PORT}`);
   logger.info(`📚 API available at http://localhost:${PORT}/api`);
   logger.info(`🔍 Health check at http://localhost:${PORT}/health`);
+  startSecurityEventOutboxWorker();
+  startCompliancePackScheduler();
 });
 
 server.on("error", (err: NodeJS.ErrnoException) => {
@@ -239,6 +243,8 @@ const shutdown = async (signal: string) => {
     await new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));
     });
+    stopSecurityEventOutboxWorker();
+    stopCompliancePackScheduler();
     await prisma.$disconnect();
     clearTimeout(forceExit);
     logger.info("Shutdown complete");

@@ -2,6 +2,7 @@ import prisma from "../config/database";
 import { Prisma } from "@prisma/client";
 import { createTraceEventFromAuditLog } from "./traceEventService";
 import { hashIp, normalizeUserAgent } from "../utils/security";
+import { queueSecurityEvent } from "./siemOutboxService";
 
 export interface AuditLogInput {
   userId?: string;
@@ -90,6 +91,17 @@ export const createAuditLog = async (data: AuditLogInput) => {
     console.error("createTraceEventFromAuditLog failed:", e);
   }
   emitAuditLog(log);
+  await queueSecurityEvent("AUDIT_LOG", {
+    id: log.id,
+    action: log.action,
+    entityType: log.entityType,
+    entityId: log.entityId,
+    userId: log.userId,
+    orgId: log.orgId,
+    licenseeId: log.licenseeId,
+    details: log.details ?? null,
+    createdAt: log.createdAt instanceof Date ? log.createdAt.toISOString() : String(log.createdAt || ""),
+  });
   return log;
 };
 
