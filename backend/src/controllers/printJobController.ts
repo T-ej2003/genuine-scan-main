@@ -4,7 +4,7 @@ import { AuthRequest } from "../middleware/auth";
 import prisma from "../config/database";
 import { Prisma, QRStatus, UserRole } from "@prisma/client";
 import { randomBytes, createHash } from "crypto";
-import { buildScanUrl, hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
+import { buildScanUrl, getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
 import { createAuditLog } from "../services/auditService";
 import { resolveQrZipProfile, streamQrZipToResponse } from "../services/qrZipStreamService";
 import { createUserNotification } from "../services/notificationService";
@@ -32,15 +32,10 @@ const confirmSchema = z.object({
 const hashLockToken = (raw: string) =>
   createHash("sha256").update(raw).digest("hex");
 
-const getTokenExp = () => {
-  const days = Number(process.env.QR_TOKEN_EXP_DAYS || "3650");
-  return Date.now() + Math.max(days, 30) * 24 * 60 * 60 * 1000;
-};
-
 const INLINE_PRINT_JOB_TOKENS_LIMIT = (() => {
-  const raw = Number(process.env.PRINT_JOB_INLINE_TOKENS_LIMIT || "2500");
-  if (!Number.isFinite(raw)) return 2500;
-  return Math.max(0, Math.min(20_000, Math.floor(raw)));
+  const raw = Number(process.env.PRINT_JOB_INLINE_TOKENS_LIMIT || "0");
+  if (!Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.min(5_000, Math.floor(raw)));
 })();
 
 export const createPrintJob = async (req: AuthRequest, res: Response) => {
@@ -93,7 +88,7 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
     const printLockToken = randomBytes(24).toString("base64url");
     const printLockTokenHash = hashLockToken(printLockToken);
     const now = new Date();
-    const expAt = new Date(getTokenExp());
+    const expAt = getQrTokenExpiryDate(now);
 
     const tokens: { qrId: string; token: string }[] = [];
     const prepared = candidates.map((qr) => {

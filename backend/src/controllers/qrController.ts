@@ -8,7 +8,7 @@ import { createAuditLog } from "../services/auditService";
 import { generateQRCode, markBatchAsPrinted, buildVerifyUrl, getQRStats } from "../services/qrService";
 import { allocateQrRange, getNextLicenseeQrNumber, lockLicenseeAllocation } from "../services/qrAllocationService";
 import { createHash, randomBytes } from "crypto";
-import { hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
+import { buildScanUrl, getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
 import { resolveQrZipProfile, streamQrZipToResponse } from "../services/qrZipStreamService";
 import { createUserNotification } from "../services/notificationService";
 
@@ -76,6 +76,10 @@ const bulkDeleteBatchesSchema = z.object({
 const generateQRCodesSchema = z.object({
   licenseeId: z.string().uuid(),
   quantity: z.number().int().positive().max(200000),
+});
+
+const generateSignedLinksSchema = z.object({
+  codes: z.array(z.string().trim().min(2).max(128)).min(1).max(2000),
 });
 
 const blockQRSschema = z.object({
@@ -1042,7 +1046,7 @@ export const generateQRCodes = async (req: AuthRequest, res: Response) => {
     });
 
     const now = new Date();
-    const expAt = new Date(now.getTime() + 3650 * 24 * 60 * 60 * 1000);
+    const expAt = getQrTokenExpiryDate(now);
 
     const tokens: { qrId: string; token: string }[] = [];
     for (const qr of rows) {
@@ -1320,6 +1324,143 @@ export const getQRCodes = async (req: AuthRequest, res: Response) => {
   }
 };
 
+const canIssueNewSignedLink = (status: QRStatus) =>
+  status === QRStatus.DORMANT ||
+  status === QRStatus.ACTIVE ||
+  status === QRStatus.ALLOCATED ||
+  status === QRStatus.ACTIVATED;
+
+export const generateSignedScanLinks = async (req: AuthRequest, res: Response) => {
+  try {
+    const role = req.user?.role;
+    const userId = req.user?.userId;
+    if (!role || !userId) return res.status(401).json({ success: false, error: "Not authenticated" });
+    if (role !== UserRole.SUPER_ADMIN && role !== UserRole.PLATFORM_SUPER_ADMIN) {
+      return res.status(403).json({ success: false, error: "Access denied" });
+    }
+
+    const parsed = generateSignedLinksSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+    }
+
+    const requestedCodes = Array.from(
+      new Set(
+        parsed.data.codes
+          .map((code) => String(code || "").trim().toUpperCase())
+          .filter(Boolean)
+      )
+    );
+
+    const qrRows = await prisma.qRCode.findMany({
+      where: { code: { in: requestedCodes } },
+      select: {
+        id: true,
+        code: true,
+        status: true,
+        licenseeId: true,
+        batchId: true,
+        batch: {
+          select: {
+            manufacturerId: true,
+          },
+        },
+      },
+    });
+
+    const byCode = new Map(qrRows.map((row) => [row.code, row]));
+    const missingCodes = requestedCodes.filter((code) => !byCode.has(code));
+    if (missingCodes.length > 0) {
+      return res.status(404).json({
+        success: false,
+        error: `Some codes were not found: ${missingCodes.slice(0, 20).join(", ")}`,
+      });
+    }
+
+    const ineligible = qrRows
+      .filter((row) => !canIssueNewSignedLink(row.status))
+      .map((row) => `${row.code} (${row.status})`);
+    if (ineligible.length > 0) {
+      return res.status(409).json({
+        success: false,
+        error:
+          "Signed link generation is allowed only for unprinted lifecycle stages (DORMANT/ACTIVE/ALLOCATED/ACTIVATED). " +
+          `Blocked entries: ${ineligible.slice(0, 20).join(", ")}`,
+      });
+    }
+
+    const now = new Date();
+    const expAt = getQrTokenExpiryDate(now);
+    const links: Array<{ code: string; scanUrl: string; expiresAt: string }> = [];
+
+    await prisma.$transaction(async (tx) => {
+      for (const code of requestedCodes) {
+        const qr = byCode.get(code)!;
+        const nonce = randomNonce();
+        const payload = {
+          qr_id: qr.id,
+          batch_id: qr.batchId ?? null,
+          licensee_id: qr.licenseeId,
+          manufacturer_id: qr.batch?.manufacturerId ?? null,
+          iat: Math.floor(now.getTime() / 1000),
+          exp: Math.floor(expAt.getTime() / 1000),
+          nonce,
+        };
+        const token = signQrPayload(payload);
+        const tokenHash = hashToken(token);
+        const scanUrl = buildScanUrl(token);
+
+        const updated = await tx.qRCode.updateMany({
+          where: {
+            id: qr.id,
+            status: {
+              in: [QRStatus.DORMANT, QRStatus.ACTIVE, QRStatus.ALLOCATED, QRStatus.ACTIVATED],
+            },
+          },
+          data: {
+            tokenNonce: nonce,
+            tokenIssuedAt: now,
+            tokenExpiresAt: expAt,
+            tokenHash,
+          },
+        });
+        if (updated.count !== 1) {
+          throw new Error(`Code ${code} changed state during signed-link generation. Please retry.`);
+        }
+
+        links.push({
+          code,
+          scanUrl,
+          expiresAt: expAt.toISOString(),
+        });
+      }
+    });
+
+    await createAuditLog({
+      userId,
+      action: "GENERATED_SIGNED_LINKS",
+      entityType: "QRCode",
+      details: {
+        count: links.length,
+        codes: links.slice(0, 50).map((item) => item.code),
+      },
+      ipAddress: req.ip,
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        issuedAt: now.toISOString(),
+        expiresAt: expAt.toISOString(),
+        links,
+      },
+    });
+  } catch (e: any) {
+    console.error("generateSignedScanLinks error:", e);
+    return res.status(500).json({ success: false, error: e?.message || "Internal server error" });
+  }
+};
+
 export const getStats = async (req: AuthRequest, res: Response) => {
   try {
     const role = req.user?.role;
@@ -1406,7 +1547,7 @@ export const exportQRCodesCsv = async (req: AuthRequest, res: Response) => {
 
     const header = [
       "code",
-      "verifyUrl",
+      "scanUrlPolicy",
       "status",
       "licenseeName",
       "licenseePrefix",
@@ -1428,7 +1569,7 @@ export const exportQRCodesCsv = async (req: AuthRequest, res: Response) => {
         .map((r) =>
           [
             r.code,
-            buildVerifyUrl(r.code),
+            "SIGNED_SCAN_URL_REQUIRED",
             r.status,
             r.licensee?.name ?? "",
             r.licensee?.prefix ?? "",

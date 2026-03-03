@@ -21,7 +21,10 @@ import { resolveVerifyUxPolicy } from "../services/governanceService";
 import { runTamperEvidenceChecks, summarizeTamperFindings } from "../services/tamperEvidenceService";
 import { ticketSlaSnapshot } from "../services/supportWorkflowService";
 import { assessDuplicateRisk } from "../services/duplicateRiskService";
+import { verifyCaptchaToken } from "../services/captchaService";
+import { enforceIncidentRateLimit } from "../services/incidentRateLimitService";
 import { hashIp, hashToken, normalizeUserAgent, randomOpaqueToken } from "../utils/security";
+import { deriveRequestDeviceFingerprint } from "../utils/requestFingerprint";
 
 type VerifyClassification =
   | "FIRST_SCAN"
@@ -160,6 +163,8 @@ const mapBatch = (batch: any) =>
     : null;
 
 const normalizeCode = (value: string) => String(value || "").trim().toUpperCase();
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const parseBoolean = (value: unknown, fallback = false) => {
   if (typeof value === "boolean") return value;
@@ -340,7 +345,6 @@ const buildOwnershipStatus = (params: {
   const ownership = params.ownership;
   const customerUserId = String(params.customerUserId || "").trim();
   const deviceTokenHash = String(params.deviceTokenHash || "").trim();
-  const ipHashValue = String(params.ipHash || "").trim();
   const allowClaim = params.allowClaim !== false;
 
   const claimUnavailable = !params.isReady || params.isBlocked || !allowClaim;
@@ -366,9 +370,6 @@ const buildOwnershipStatus = (params: {
   } else if (deviceTokenHash && ownership.deviceTokenHash && ownership.deviceTokenHash === deviceTokenHash) {
     isOwnedByRequester = true;
     matchMethod = "device_token";
-  } else if (!deviceTokenHash && ipHashValue && ownership.ipHash && ownership.ipHash === ipHashValue) {
-    isOwnedByRequester = true;
-    matchMethod = "ip_fallback";
   }
 
   return {
@@ -708,6 +709,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
     });
 
     if (!qrCode) {
+      await delay(150 + Math.floor(Math.random() * 150));
       const reasons = ["Code not found in registry."];
       const emptySummary: ScanSummary = {
         totalScans: 0,
@@ -767,11 +769,12 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
     const verifyUxPolicy = await resolveVerifyUxPolicy(qrCode.licenseeId || null);
 
     const customerUserId = req.customer?.userId || null;
+    const requestDeviceFingerprint = deriveRequestDeviceFingerprint(req);
     const deviceClaimToken = getDeviceClaimTokenFromRequest(req);
     const deviceTokenHash = deviceClaimToken ? hashToken(deviceClaimToken) : null;
     const requesterIpHash = hashIp(req.ip);
     const containment = buildContainment(qrCode);
-    const scanInsight = await getScanInsight(qrCode.id, (req.query.device as string | undefined) || null);
+    const scanInsight = await getScanInsight(qrCode.id, requestDeviceFingerprint);
     const baseScanSummary = buildScanSummary({
       scanCount: Number(qrCode.scanCount || 0),
       scannedAt: qrCode.scannedAt,
@@ -906,7 +909,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
     const { isFirstScan, qrCode: updated } = await recordScan(normalizedCode, {
       ipAddress: req.ip,
       userAgent: req.get("user-agent") || null,
-      device: (req.query.device as string | undefined) || null,
+      device: requestDeviceFingerprint,
       latitude,
       longitude,
       accuracy,
@@ -943,7 +946,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
     const isReady = isQrReadyForCustomerUse(finalStatus);
 
     const firstScanTime = updated.scannedAt ? new Date(updated.scannedAt) : null;
-    const postScanInsight = await getScanInsight(updated.id, (req.query.device as string | undefined) || null);
+    const postScanInsight = await getScanInsight(updated.id, requestDeviceFingerprint);
     const postScanSummary = buildScanSummary({
       scanCount: Number(updated.scanCount || 0),
       scannedAt: firstScanTime,
@@ -1494,6 +1497,29 @@ export const reportFraud = async (req: Request, res: Response) => {
 
     const payload = parsed.data;
     const normalizedCode = normalizeCode(payload.code || payload.qrCodeValue || "");
+    const fingerprint = deriveRequestDeviceFingerprint(req, { allowClientHint: false });
+    const rateLimit = enforceIncidentRateLimit({
+      ip: req.ip,
+      qrCode: normalizedCode,
+      deviceFp: fingerprint,
+    });
+    if (rateLimit.blocked) {
+      res.setHeader("Retry-After", String(rateLimit.retryAfterSec));
+      return res.status(429).json({
+        success: false,
+        error: "Too many reports submitted. Please try again later.",
+      });
+    }
+
+    const captchaToken = String(req.headers["x-captcha-token"] || req.body?.captchaToken || "").trim();
+    const captcha = await verifyCaptchaToken(captchaToken, req.ip);
+    if (!captcha.ok) {
+      return res.status(400).json({
+        success: false,
+        error: captcha.reason || "Captcha verification failed",
+      });
+    }
+
     const incidentType = inferIncidentType({
       reason: payload.reason,
       incidentType: payload.incidentType,
@@ -1632,6 +1658,18 @@ export const submitProductFeedback = async (req: Request, res: Response) => {
 
     const payload = parsed.data;
     const normalizedCode = payload.code.toUpperCase();
+    const feedbackRate = enforceIncidentRateLimit({
+      ip: req.ip,
+      qrCode: normalizedCode,
+      deviceFp: deriveRequestDeviceFingerprint(req, { allowClientHint: false }),
+    });
+    if (feedbackRate.blocked) {
+      res.setHeader("Retry-After", String(feedbackRate.retryAfterSec));
+      return res.status(429).json({
+        success: false,
+        error: "Too many feedback attempts. Please try again later.",
+      });
+    }
 
     const qrCode = await prisma.qRCode.findUnique({
       where: { code: normalizedCode },

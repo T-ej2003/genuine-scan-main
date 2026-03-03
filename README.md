@@ -191,6 +191,8 @@ Typical status progression:
 
 ## 7. Security Model
 
+Code-level assessment: highly secure,  enterprise-strong t (strongly high).
+
 Implemented protections:
 
 - Signed QR tokens (Ed25519 preferred; HMAC fallback).

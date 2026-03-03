@@ -21,6 +21,14 @@ export type QrTokenPayload = {
 
 type SignMode = "ed25519" | "hmac";
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+const parseQrTokenExpiryDays = () => {
+  const raw = Number(String(process.env.QR_TOKEN_EXP_DAYS || "").trim() || "365");
+  if (!Number.isFinite(raw)) return 365;
+  return Math.max(30, Math.min(365, Math.floor(raw)));
+};
+
 const toBase64Url = (buf: Buffer) =>
   buf
     .toString("base64")
@@ -85,6 +93,9 @@ export const randomNonce = () => randomBytes(16).toString("base64url");
 
 export const hashToken = (token: string) =>
   createHash("sha256").update(token).digest("hex");
+
+export const getQrTokenExpiryDate = (issuedAt: Date = new Date()) =>
+  new Date(issuedAt.getTime() + parseQrTokenExpiryDays() * MS_PER_DAY);
 
 export const signQrPayload = (payload: QrTokenPayload): string => {
   const sanitized: Record<string, any> = {};
