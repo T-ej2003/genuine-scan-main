@@ -434,6 +434,7 @@ model PrintJob {
   createdAt   DateTime @default(now())
 
   qrCodes QRCode[]
+  renderTokens PrintRenderToken[]
 
   @@index([batchId])
   @@index([manufacturerId])
@@ -473,6 +474,7 @@ model QRCode {
 
   printJobId String?
   printJob   PrintJob? @relation(fields: [printJobId], references: [id])
+  renderTokens PrintRenderToken[]
   traceEvents TraceEvent[]
   policyAlerts PolicyAlert[]
   incidents Incident[]
@@ -487,6 +489,26 @@ model QRCode {
   @@index([printJobId])
   @@index([tokenHash])
   @@index([underInvestigationAt])
+}
+
+model PrintRenderToken {
+  id String @id @default(uuid())
+
+  tokenHash String @unique
+  printJobId String
+  printJob PrintJob @relation(fields: [printJobId], references: [id], onDelete: Cascade)
+
+  qrCodeId String
+  qrCode QRCode @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+
+  expiresAt DateTime
+  usedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([printJobId, createdAt])
+  @@index([qrCodeId, createdAt])
+  @@index([expiresAt])
+  @@index([usedAt])
 }
 
 model Ownership {

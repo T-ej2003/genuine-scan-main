@@ -102,7 +102,7 @@ const roleScopedIntro = (activeRole: HelpKbRole) => {
     return "Licensee/Admin mode: ask about inventory requests, batches, manufacturers, tracking, and account access.";
   }
   if (activeRole === "manufacturer") {
-    return "Manufacturer mode: ask about assigned batches, print jobs, print pack download, and status updates.";
+    return "Manufacturer mode: ask about assigned batches, direct-print jobs, one-time render tokens, and status updates.";
   }
   return "Customer mode: ask about verification results, repeat scans, ownership claim, and counterfeit reporting.";
 };
@@ -280,7 +280,7 @@ export default function HelpAssistantWidget() {
     if (activeRole === "manufacturer") {
       return [
         "How do I create a print job?",
-        "How do I download print pack ZIP?",
+        "How do I request one-time direct-print tokens?",
         "Why is a batch not visible to me?",
         "When does printed status update?",
       ];

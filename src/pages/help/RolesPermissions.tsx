@@ -75,7 +75,7 @@ export default function RolesPermissions() {
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  Operates production: create print jobs, download secure print packs, and update print status for assigned batches only.
+                  Operates production: create direct-print jobs, request one-time render tokens via print agent, and update print status for assigned batches only.
                 </p>
                 <p className="text-xs">
                   Backend roles: <span className="font-mono">MANUFACTURER</span>, <span className="font-mono">MANUFACTURER_ADMIN</span>, or <span className="font-mono">MANUFACTURER_USER</span>.
@@ -140,4 +140,3 @@ export default function RolesPermissions() {
     </HelpShell>
   );
 }
-

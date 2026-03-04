@@ -54,6 +54,17 @@ export const requireAnyAdmin = requireRole(
   UserRole.LICENSEE_ADMIN,
   UserRole.ORG_ADMIN
 );
+
+export const requireAuditViewer = requireRole(
+  UserRole.SUPER_ADMIN,
+  UserRole.PLATFORM_SUPER_ADMIN,
+  UserRole.LICENSEE_ADMIN,
+  UserRole.ORG_ADMIN,
+  UserRole.MANUFACTURER,
+  UserRole.MANUFACTURER_ADMIN,
+  UserRole.MANUFACTURER_USER
+);
+
 export const requireOpsUser = requireRole(
   UserRole.SUPER_ADMIN,
   UserRole.PLATFORM_SUPER_ADMIN,

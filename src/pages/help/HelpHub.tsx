@@ -32,7 +32,7 @@ const SCREENSHOTS: ScreenshotNeed[] = [
   { filename: "licensee-assign-batch.png", whereToCapture: "Batches page with Assign Manufacturer dialog open.", usedIn: "Licensee/Admin" },
   { filename: "licensee-create-manufacturer.png", whereToCapture: "Manufacturers page with Add Manufacturer modal open (Invite mode shown).", usedIn: "Licensee/Admin" },
   { filename: "manufacturer-create-print-job.png", whereToCapture: "Manufacturer Batches page with Create Print Job dialog open.", usedIn: "Manufacturer" },
-  { filename: "manufacturer-download-print-pack.png", whereToCapture: "Create Print Job dialog showing Download ZIP action.", usedIn: "Manufacturer" },
+  { filename: "manufacturer-download-print-pack.png", whereToCapture: "Create Print Job dialog showing one-time direct-print token issuance.", usedIn: "Manufacturer" },
   { filename: "manufacturer-print-status.png", whereToCapture: "Manufacturer Batches list showing Printed status updated.", usedIn: "Manufacturer" },
   { filename: "customer-first-verification.png", whereToCapture: "Public verify page showing Verified Authentic (first scan).", usedIn: "Customer" },
   { filename: "customer-verified-again.png", whereToCapture: "Public verify page showing Verified Again (repeat scan).", usedIn: "Customer" },

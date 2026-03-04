@@ -180,6 +180,8 @@ router.delete("/qr/codes", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIs
 // ==================== MANUFACTURER PRINT JOBS ====================
 router.post("/manufacturer/print-jobs", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, printJobController_1.createPrintJob);
 router.get("/manufacturer/print-jobs/:id/pack", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, printJobController_1.downloadPrintJobPack);
+router.post("/manufacturer/print-jobs/:id/direct-print/tokens", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, printJobController_1.issueDirectPrintTokens);
+router.post("/manufacturer/print-jobs/:id/direct-print/resolve", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, printJobController_1.resolveDirectPrintToken);
 router.post("/manufacturer/print-jobs/:id/confirm", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, printJobController_1.confirmPrintJob);
 // ==================== QR REQUESTS ====================
 router.post("/qr/requests", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, qrRequestController_1.createQrAllocationRequest);

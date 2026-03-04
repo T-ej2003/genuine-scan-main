@@ -367,7 +367,7 @@ function AppRoutes() {
         <Route
           path="/audit-logs"
           element={
-            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
+            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin", "manufacturer"]}>
               <AuditLogs />
             </ProtectedRoute>
           }

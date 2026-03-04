@@ -88,9 +88,6 @@ type TraceEventRow = {
 };
 
 const LARGE_ALLOCATION_THRESHOLD = 25_000;
-const LARGE_DOWNLOAD_THRESHOLD = 10_000;
-const bytesToMb = (value: number) => `${(value / (1024 * 1024)).toFixed(value >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
-
 export default function Batches() {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -120,7 +117,7 @@ export default function Batches() {
   const [renameBatch, setRenameBatch] = useState<BatchRow | null>(null);
   const [renameValue, setRenameValue] = useState("");
 
-  // print pack dialog
+  // direct-print dialog
   const [printOpen, setPrintOpen] = useState(false);
   const [printBatch, setPrintBatch] = useState<BatchRow | null>(null);
   const [printing, setPrinting] = useState(false);
@@ -129,6 +126,11 @@ export default function Batches() {
   const [printJobId, setPrintJobId] = useState<string>("");
   const [printLockToken, setPrintLockToken] = useState<string>("");
   const [printJobTokensCount, setPrintJobTokensCount] = useState<number>(0);
+  const [directTokenBatchSize, setDirectTokenBatchSize] = useState<string>("1");
+  const [directRemainingToPrint, setDirectRemainingToPrint] = useState<number | null>(null);
+  const [directPrintTokens, setDirectPrintTokens] = useState<
+    Array<{ qrId: string; code: string; renderToken: string; expiresAt: string }>
+  >([]);
   const [exportingBatchId, setExportingBatchId] = useState<string | null>(null);
 
   // allocation history
@@ -368,6 +370,9 @@ export default function Batches() {
     setPrintJobId("");
     setPrintLockToken("");
     setPrintJobTokensCount(0);
+    setDirectTokenBatchSize("1");
+    setDirectRemainingToPrint(null);
+    setDirectPrintTokens([]);
     setPrintOpen(true);
   };
 
@@ -406,65 +411,54 @@ export default function Batches() {
       setPrintJobId(data.printJobId || "");
       setPrintLockToken(data.printLockToken || "");
       setPrintJobTokensCount(
-        typeof data.tokenCount === "number" ? data.tokenCount : Array.isArray(data.tokens) ? data.tokens.length : 0
+        typeof data.tokenCount === "number" ? data.tokenCount : 0
       );
-      toast({ title: "Print job created", description: "Download your QR pack. Printing will auto-confirm on download." });
+      setDirectRemainingToPrint(typeof data.tokenCount === "number" ? data.tokenCount : null);
+      setDirectPrintTokens([]);
+      toast({
+        title: "Direct-print job created",
+        description: "Use authenticated print-agent calls to request one-time short-lived render tokens.",
+      });
     } finally {
       setPrinting(false);
     }
   };
 
-  const downloadPrintPack = async () => {
+  const requestDirectPrintTokens = async () => {
     if (!printJobId || !printLockToken) return;
-    const showLargeDownloadProgress = (printJobTokensCount || 0) >= LARGE_DOWNLOAD_THRESHOLD || printJobTokensCount === 0;
-    if (showLargeDownloadProgress) {
-      progress.start({
-        title: "Preparing secure download",
-        description: "Generating PNGs, compressing ZIP, and streaming to your browser.",
-        phaseLabel: "Download",
-        detail:
-          printJobTokensCount > 0
-            ? `Preparing approximately ${printJobTokensCount.toLocaleString()} QR files.`
-            : "Preparing QR package...",
-        mode: "simulated",
-        initialValue: 8,
-      });
-    }
+    const count = Math.max(1, Math.min(100, Number.parseInt(directTokenBatchSize, 10) || 1));
 
     setPrinting(true);
     try {
-      const blob = await apiClient.downloadPrintJobPack(printJobId, printLockToken, (snapshot) => {
-        if (!showLargeDownloadProgress) return;
-        const hasKnownTotal = snapshot.totalBytes != null && snapshot.totalBytes > 0;
-        const progressValue = hasKnownTotal
-          ? Math.max(8, Math.min(98, snapshot.percent || 0))
-          : Math.max(12, Math.min(94, 12 + Math.floor(snapshot.loadedBytes / (1024 * 1024 * 20))));
-        const speedMbps = snapshot.elapsedMs > 0 ? (snapshot.loadedBytes * 8) / (snapshot.elapsedMs / 1000) / 1_000_000 : 0;
-
-        progress.update({
-          value: progressValue,
-          indeterminate: !hasKnownTotal,
-          detail: hasKnownTotal
-            ? `Downloaded ${bytesToMb(snapshot.loadedBytes)} of ${bytesToMb(snapshot.totalBytes!)}`
-            : `Downloaded ${bytesToMb(snapshot.loadedBytes)} (estimating total size...)`,
-          speedLabel: speedMbps > 0 ? `${speedMbps.toFixed(1)} Mbps` : "",
-          phaseLabel: "Downloading",
+      const res = await apiClient.requestDirectPrintTokens(printJobId, printLockToken, count);
+      if (!res.success) {
+        toast({
+          title: "Token request failed",
+          description: res.error || "Could not issue direct-print tokens.",
+          variant: "destructive",
         });
-      });
-      if (showLargeDownloadProgress) {
-        await progress.complete("Download complete. Saving ZIP to your device.");
+        return;
       }
-      saveAs(blob, `print-job-${printJobId}.zip`);
-      toast({ title: "Downloaded", description: "Print pack downloaded and confirmed." });
-      setPrintOpen(false);
-      setPrintBatch(null);
-      setPrintJobId("");
-      setPrintLockToken("");
-      setPrintJobTokensCount(0);
-      await fetchBatches();
-    } catch (e: any) {
-      if (showLargeDownloadProgress) progress.close();
-      toast({ title: "Download failed", description: e?.message || "Error", variant: "destructive" });
+      const data: any = res.data || {};
+      const items = Array.isArray(data.items) ? data.items : [];
+      setDirectPrintTokens(items);
+      if (typeof data.remainingToPrint === "number") {
+        setDirectRemainingToPrint(data.remainingToPrint);
+      }
+
+      if (items.length === 0) {
+        toast({
+          title: data.jobConfirmed ? "Job confirmed" : "No active tokens",
+          description: data.jobConfirmed
+            ? "All QR codes in this direct-print job are completed."
+            : "No unprinted QR codes are currently available for this job.",
+        });
+      } else {
+        toast({
+          title: "Direct-print tokens issued",
+          description: `${items.length} one-time render token(s) generated.`,
+        });
+      }
     } finally {
       setPrinting(false);
     }
@@ -586,7 +580,7 @@ export default function Batches() {
             <h1 className="text-3xl font-bold">Batches</h1>
             <p className="text-muted-foreground">
               {isManufacturer
-                ? "Your assigned QR batches (create print jobs, download pack, then confirm printing)"
+                ? "Your assigned QR batches (create direct-print jobs, issue one-time render tokens, then confirm printing)"
                 : "Manage received QR batches (assign by quantity / delete / review printing)"}
             </p>
           </div>
@@ -736,7 +730,7 @@ export default function Batches() {
                           </TableCell>
 
                           <TableCell>
-                            {/* Manufacturer: print pack download (one-time) */}
+                            {/* Manufacturer: direct-print controls */}
                             {isManufacturer ? (
                               <div className="flex flex-wrap gap-2">
                                 <Button
@@ -937,12 +931,23 @@ export default function Batches() {
         </Dialog>
 
         {/* Print Job Dialog */}
-        <Dialog open={printOpen} onOpenChange={(v) => { setPrintOpen(v); if (!v) setPrintBatch(null); }}>
+        <Dialog
+          open={printOpen}
+          onOpenChange={(v) => {
+            setPrintOpen(v);
+            if (!v) {
+              setPrintBatch(null);
+              setDirectPrintTokens([]);
+              setDirectRemainingToPrint(null);
+            }
+          }}
+        >
           <DialogContent className="sm:max-w-[640px] max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Create Print Job</DialogTitle>
               <DialogDescription>
-                Select quantity, generate signed QR tokens, download the pack. Printing is auto-confirmed after download.
+                Select quantity, create a direct-print job, and issue one-time short-lived render tokens for your authenticated
+                print agent.
               </DialogDescription>
             </DialogHeader>
 
@@ -987,17 +992,57 @@ export default function Batches() {
                     <div className="text-xs text-muted-foreground">Print Lock Token</div>
                     <div className="font-mono text-xs break-all">{printLockToken}</div>
                     <div className="text-xs text-muted-foreground">
-                      Tokens generated: {printJobTokensCount}
+                      Secured QRs in this job: {printJobTokensCount}
                     </div>
+                    {directRemainingToPrint != null && (
+                      <div className="text-xs text-muted-foreground">Remaining to print: {directRemainingToPrint}</div>
+                    )}
+                  </div>
+                )}
+
+                {printJobId && printLockToken && (
+                  <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm space-y-3">
+                    <div className="font-medium text-emerald-900">Direct-print pipeline active</div>
+                    <div className="text-xs text-emerald-900">
+                      ZIP/PNG distribution is disabled for manufacturer security hardening. Use authenticated print-agent calls
+                      to request one-time render tokens per QR.
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Tokens per request</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={100}
+                          value={directTokenBatchSize}
+                          onChange={(e) => setDirectTokenBatchSize(e.target.value)}
+                        />
+                      </div>
+                      <Button variant="outline" onClick={requestDirectPrintTokens} disabled={printing || !printJobId}>
+                        Issue one-time tokens
+                      </Button>
+                    </div>
+
+                    {directPrintTokens.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="text-xs font-medium">Issued Token Set</div>
+                        <div className="max-h-48 overflow-auto rounded-md border bg-background p-2 space-y-2">
+                          {directPrintTokens.map((item) => (
+                            <div key={item.qrId} className="rounded border p-2">
+                              <div className="text-xs text-muted-foreground">{item.code}</div>
+                              <div className="font-mono text-[11px] break-all">{item.renderToken}</div>
+                              <div className="text-[11px] text-muted-foreground">Expires: {item.expiresAt}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
                 <div className="flex justify-end gap-3 pt-2">
                   <Button variant="outline" onClick={() => setPrintOpen(false)} disabled={printing}>
                     Close
-                  </Button>
-                  <Button onClick={downloadPrintPack} disabled={printing || !printJobId}>
-                    {printing ? "Generating..." : "Download ZIP"}
                   </Button>
                 </div>
               </div>

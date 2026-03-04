@@ -98,7 +98,13 @@ import {
   linkDeviceClaimToCustomer,
 } from "../controllers/verifyController";
 import { scanToken } from "../controllers/scanController";
-import { createPrintJob, downloadPrintJobPack, confirmPrintJob } from "../controllers/printJobController";
+import {
+  createPrintJob,
+  downloadPrintJobPack,
+  confirmPrintJob,
+  issueDirectPrintTokens,
+  resolveDirectPrintToken,
+} from "../controllers/printJobController";
 import auditRoutes from "./auditRoutes";
 import { updateMyProfile, changeMyPassword } from "../controllers/accountController";
 import {
@@ -388,6 +394,22 @@ router.get(
   requireManufacturer,
   enforceTenantIsolation,
   downloadPrintJobPack
+);
+router.post(
+  "/manufacturer/print-jobs/:id/direct-print/tokens",
+  authenticate,
+  requireManufacturer,
+  enforceTenantIsolation,
+  requireCsrf,
+  issueDirectPrintTokens
+);
+router.post(
+  "/manufacturer/print-jobs/:id/direct-print/resolve",
+  authenticate,
+  requireManufacturer,
+  enforceTenantIsolation,
+  requireCsrf,
+  resolveDirectPrintToken
 );
 router.post(
   "/manufacturer/print-jobs/:id/confirm",

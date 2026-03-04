@@ -315,7 +315,7 @@ export default function Dashboard() {
     user?.role,
   ]);
 
-  const canViewAudit = user?.role === "super_admin" || user?.role === "licensee_admin";
+  const canViewAudit = user?.role === "super_admin" || user?.role === "licensee_admin" || user?.role === "manufacturer";
 
   if (loading) return <div className="p-6">Loading…</div>;
 

@@ -121,7 +121,7 @@ High-level flow:
 
 1. Super Admin allocates QR inventory to a licensee.
 2. Licensee Admin creates/assigns batches to manufacturers.
-3. Manufacturer creates print jobs and downloads print packs.
+3. Manufacturer creates direct-print jobs and issues one-time render tokens via authenticated print agent.
 4. Customer scans signed token (`/scan?t=...`) or verifies by code (`/verify/:code`).
 5. System logs events, computes risk/SLA metrics, applies policy controls, and supports immutable audit export.
 
@@ -447,7 +447,9 @@ Optional:
 - `PUBLIC_VERIFY_WEB_BASE_URL`
 - `SCAN_RATE_LIMIT_PER_MIN` (default `60`)
 - `QR_TOKEN_EXP_DAYS` (default `3650`)
-- `PRINT_JOB_INLINE_TOKENS_LIMIT` (default `2500`; max inline tokens returned from print-job creation response)
+- `PRINT_JOB_LOCK_TTL_MINUTES` (default `45`; validity window for direct-print job lock token)
+- `DIRECT_PRINT_TOKEN_TTL_SECONDS` (default `90`; one-time render token lifespan)
+- `DIRECT_PRINT_MAX_BATCH` (default `250`; max one-time render tokens per issuance call)
 - `QR_ZIP_HIGH_VOLUME_THRESHOLD` (default `100000`)
 - `QR_ZIP_ULTRA_VOLUME_THRESHOLD` (default `1000000`)
 - `QR_ZIP_STANDARD_LEVEL` (default `6`)
@@ -539,8 +541,8 @@ Manufacturer:
 
 1. View assigned batches.
 2. Create print job with quantity/range.
-3. Download print pack (ZIP + QR PNGs + manifest).
-4. Confirm print (or auto-confirm via download flow).
+3. Issue one-time short-lived direct-print render tokens.
+4. Confirm print (or auto-confirm when all direct-print tokens are consumed).
 5. Track scans for own batches.
 
 Consumer/public:

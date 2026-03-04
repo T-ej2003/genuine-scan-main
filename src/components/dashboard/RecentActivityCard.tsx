@@ -21,6 +21,8 @@ const actionIcons: Record<string, React.ElementType> = {
   ASSIGN_PRODUCT_BATCH_MANUFACTURER: UserPlus,
   CONFIRM_PRINT: Printer,
   DOWNLOAD_PRINT_PACK: Printer,
+  DIRECT_PRINT_TOKEN_ISSUED: Printer,
+  PRINTED: Printer,
 };
 
 const actionLabels: Record<string, string> = {
@@ -32,6 +34,8 @@ const actionLabels: Record<string, string> = {
   ASSIGN_PRODUCT_BATCH_MANUFACTURER: "Assigned manufacturer",
   CONFIRM_PRINT: "Confirmed print",
   DOWNLOAD_PRINT_PACK: "Downloaded print pack",
+  DIRECT_PRINT_TOKEN_ISSUED: "Issued direct-print token",
+  PRINTED: "Printed",
 };
 
 const formatDetails = (details: any) => {

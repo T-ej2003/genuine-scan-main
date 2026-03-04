@@ -502,6 +502,42 @@ class ApiClient {
     return this.request("/manufacturer/print-jobs", { method: "POST", body: JSON.stringify(payload) });
   }
 
+  async requestDirectPrintTokens(jobId: string, printLockToken: string, count = 1) {
+    return this.request<{
+      printJobId: string;
+      lockExpiresAt?: string;
+      directPrintTokenExpiresAt?: string;
+      remainingToPrint: number;
+      items: Array<{
+        qrId: string;
+        code: string;
+        renderToken: string;
+        expiresAt: string;
+      }>;
+    }>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/direct-print/tokens`, {
+      method: "POST",
+      body: JSON.stringify({ printLockToken, count }),
+    });
+  }
+
+  async resolveDirectPrintToken(jobId: string, payload: { printLockToken: string; renderToken: string }) {
+    return this.request<{
+      printJobId: string;
+      qrId: string;
+      code: string;
+      renderResolvedAt: string;
+      remainingToPrint: number;
+      jobConfirmed: boolean;
+      confirmedAt: string | null;
+      scanToken: string;
+      scanUrl: string;
+    }>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/direct-print/resolve`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // Legacy download API is intentionally disabled on server for manufacturer direct-print hardening.
   async downloadPrintJobPack(jobId: string, printLockToken: string, onProgress?: (progress: DownloadProgress) => void) {
     const headers: Record<string, string> = {};
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
