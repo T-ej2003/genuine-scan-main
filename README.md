@@ -142,7 +142,7 @@ Frontend route access (`src/App.tsx`):
 - `/batches`: super admin, licensee admin, manufacturer
 - `/manufacturers`: super admin, licensee admin
 - `/qr-tracking`: super admin, licensee admin, manufacturer
-- `/audit-logs`: super admin, licensee admin
+- `/audit-logs`: super admin, licensee admin, manufacturer
 - `/account`: all authenticated roles
 - `/verify`, `/verify/:code`, `/scan`: public
 
@@ -152,6 +152,7 @@ RBAC middleware (`backend/src/middleware/rbac.ts`):
 - `requireLicenseeAdmin`
 - `requireManufacturer`
 - `requireAnyAdmin`
+- `requireAuditViewer`
 - `requireOpsUser` (super admin, licensee admin, manufacturer)
 
 Tenant isolation (`backend/src/middleware/tenantIsolation.ts`):
@@ -185,7 +186,7 @@ Typical status progression:
 1. `DORMANT` after allocation/generation.
 2. `ALLOCATED` when attached to a batch.
 3. `ACTIVATED` when a print job reserves and signs tokens.
-4. `PRINTED` when job is confirmed/downloaded.
+4. `PRINTED` when direct-print render is resolved/confirmed.
 5. `REDEEMED` on first successful scan.
 6. `BLOCKED` by admin action or policy engine.
 
@@ -363,8 +364,10 @@ QR inventory and batches:
 Manufacturer print jobs:
 
 - `POST /manufacturer/print-jobs`
-- `GET /manufacturer/print-jobs/:id/pack?token=...`
+- `POST /manufacturer/print-jobs/:id/direct-print/tokens`
+- `POST /manufacturer/print-jobs/:id/direct-print/resolve`
 - `POST /manufacturer/print-jobs/:id/confirm`
+- `GET /manufacturer/print-jobs/:id/pack?token=...` (disabled by design; returns `410`)
 
 QR requests:
 
@@ -707,9 +710,15 @@ If you are onboarding and want the fastest deep understanding, read these in ord
 9. `src/lib/api-client.ts` (frontend API contract)
 10. `docs/USER_MANUAL.md` (operator SOP)
 
-## 19. Connectivity and QR ZIP Download Speed Guide
+## 19. Connectivity and Export Throughput Notes
 
-The print-pack ZIP endpoints are optimized for high volumes using:
+Manufacturer printing uses secure direct-print only:
+
+- One-time short-lived render tokens.
+- Authenticated print lock token.
+- No downloadable manufacturer ZIP/PNG print packs.
+
+Admin bulk export ZIP endpoints remain optimized for high volumes using:
 
 - Streamed ZIP output (no giant in-memory ZIP buffer before sending).
 - Chunked DB reads (`code` cursor pagination).
@@ -719,7 +728,7 @@ The print-pack ZIP endpoints are optimized for high volumes using:
   - `high`: >= `100000` QRs (default 640px PNG, zip level 8)
   - `ultra`: >= `1000000` QRs (default 512px PNG, zip level 9)
 
-### Download speed expectations
+### Admin export speed expectations
 
 Approximate transfer formula:
 
