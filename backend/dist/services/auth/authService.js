@@ -10,6 +10,8 @@ const passwordService_1 = require("./passwordService");
 const tokenService_1 = require("./tokenService");
 const refreshTokenService_1 = require("./refreshTokenService");
 const auditService_1 = require("../auditService");
+const sessionRiskService_1 = require("./sessionRiskService");
+const mfaService_1 = require("./mfaService");
 const parseIntEnv = (key, fallback) => {
     const raw = String(process.env[key] || "").trim();
     const n = Number(raw);
@@ -162,6 +164,74 @@ const loginWithPassword = async (input) => {
             lastLoginAt: now,
         },
     });
+    const risk = await (0, sessionRiskService_1.assessAuthSessionRisk)({
+        userId: user.id,
+        role: user.role,
+        ipHash: input.ipHash,
+        userAgent: input.userAgent,
+        failedLoginAttempts: user.failedLoginAttempts || 0,
+    });
+    const mfaStatus = await (0, mfaService_1.getAdminMfaStatus)(user.id).catch(() => ({
+        enrolled: false,
+        enabled: false,
+        verifiedAt: null,
+        lastUsedAt: null,
+        backupCodesRemaining: 0,
+        createdAt: null,
+        updatedAt: null,
+    }));
+    const allowMfaChallenge = input.allowMfaChallenge !== false;
+    if (mfaStatus.enabled && allowMfaChallenge) {
+        const challenge = await (0, mfaService_1.createAdminMfaChallenge)({
+            userId: user.id,
+            riskScore: risk.score,
+            riskLevel: risk.riskLevel,
+            reasons: risk.reasons,
+            ipHash: input.ipHash,
+            userAgent: input.userAgent,
+        });
+        await (0, auditService_1.createAuditLog)({
+            userId: user.id,
+            licenseeId: user.licenseeId || undefined,
+            orgId: user.orgId || undefined,
+            action: "AUTH_MFA_CHALLENGE_ISSUED",
+            entityType: "User",
+            entityId: user.id,
+            details: {
+                riskScore: risk.score,
+                riskLevel: risk.riskLevel,
+                reasons: risk.reasons,
+            },
+            ipHash: input.ipHash || undefined,
+            userAgent: input.userAgent || undefined,
+        });
+        return {
+            mfaRequired: true,
+            mfaTicket: challenge.ticket,
+            mfaExpiresAt: challenge.expiresAt.toISOString(),
+            riskScore: risk.score,
+            riskLevel: risk.riskLevel,
+            reasons: risk.reasons,
+        };
+    }
+    if (risk.shouldBlock && (0, exports.isPlatformSuperAdminRole)(user.role)) {
+        await (0, auditService_1.createAuditLog)({
+            userId: user.id,
+            licenseeId: user.licenseeId || undefined,
+            orgId: user.orgId || undefined,
+            action: "AUTH_LOGIN_BLOCKED_RISK",
+            entityType: "User",
+            entityId: user.id,
+            details: {
+                riskScore: risk.score,
+                riskLevel: risk.riskLevel,
+                reasons: risk.reasons,
+            },
+            ipHash: input.ipHash || undefined,
+            userAgent: input.userAgent || undefined,
+        });
+        throw new Error("High-risk login blocked. Try from a trusted network or contact administrator.");
+    }
     const session = await (0, exports.issueSessionForUser)({
         userId: user.id,
         ipHash: input.ipHash,
@@ -175,7 +245,12 @@ const loginWithPassword = async (input) => {
         action: "AUTH_LOGIN_SUCCESS",
         entityType: "User",
         entityId: user.id,
-        details: { role: user.role },
+        details: {
+            role: user.role,
+            riskScore: risk.score,
+            riskLevel: risk.riskLevel,
+            mfaEnabled: mfaStatus.enabled,
+        },
         ipHash: input.ipHash || undefined,
         userAgent: input.userAgent || undefined,
     });

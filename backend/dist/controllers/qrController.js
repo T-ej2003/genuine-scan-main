@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.exportQRCodesCsv = exports.getStats = exports.getQRCodes = exports.getBatches = exports.blockBatch = exports.blockQRCode = exports.generateQRCodes = exports.downloadBatchPrintPack = exports.createBatchPrintToken = exports.confirmBatchPrint = exports.markPrinted = exports.assignManufacturer = exports.bulkDeleteBatches = exports.deleteBatch = exports.adminAllocateBatch = exports.createBatch = exports.bulkDeleteQRCodes = exports.allocateQRRangeForLicensee = exports.allocateQRRange = void 0;
+exports.exportQRCodesCsv = exports.getStats = exports.generateSignedScanLinks = exports.getQRCodes = exports.getBatches = exports.blockBatch = exports.blockQRCode = exports.generateQRCodes = exports.downloadBatchPrintPack = exports.createBatchPrintToken = exports.confirmBatchPrint = exports.markPrinted = exports.renameBatch = exports.assignManufacturer = exports.bulkDeleteBatches = exports.deleteBatch = exports.adminAllocateBatch = exports.createBatch = exports.bulkDeleteQRCodes = exports.allocateQRRangeForLicensee = exports.allocateQRRange = void 0;
 const zod_1 = require("zod");
 const client_1 = require("@prisma/client");
 const database_1 = __importDefault(require("../config/database"));
@@ -13,6 +13,7 @@ const qrAllocationService_1 = require("../services/qrAllocationService");
 const crypto_1 = require("crypto");
 const qrTokenService_1 = require("../services/qrTokenService");
 const qrZipStreamService_1 = require("../services/qrZipStreamService");
+const notificationService_1 = require("../services/notificationService");
 /* ===================== SCHEMAS ===================== */
 const allocateRangeSchema = zod_1.z
     .object({
@@ -56,6 +57,9 @@ const assignManufacturerSchema = zod_1.z.object({
     quantity: zod_1.z.number().int().positive().max(500000),
     name: zod_1.z.string().trim().min(2).max(120).optional(),
 });
+const renameBatchSchema = zod_1.z.object({
+    name: zod_1.z.string().trim().min(2).max(120),
+});
 const bulkDeleteQRCodesSchema = zod_1.z
     .object({
     ids: zod_1.z.array(zod_1.z.string().uuid()).optional(),
@@ -70,6 +74,9 @@ const bulkDeleteBatchesSchema = zod_1.z.object({
 const generateQRCodesSchema = zod_1.z.object({
     licenseeId: zod_1.z.string().uuid(),
     quantity: zod_1.z.number().int().positive().max(200000),
+});
+const generateSignedLinksSchema = zod_1.z.object({
+    codes: zod_1.z.array(zod_1.z.string().trim().min(2).max(128)).min(1).max(2000),
 });
 const blockQRSschema = zod_1.z.object({
     reason: zod_1.z.string().trim().max(500).optional(),
@@ -102,6 +109,12 @@ const escapeCsv = (v) => {
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 const isBatchBusyError = (msg) => msg.includes("BATCH_BUSY") || msg.toLowerCase().includes("concurrency issue");
+const parsePositiveIntEnv = (name, fallback) => {
+    const raw = Number(String(process.env[name] || "").trim());
+    return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
+};
+const ALLOCATION_TX_TIMEOUT_MS = parsePositiveIntEnv("ALLOCATION_TX_TIMEOUT_MS", 120000);
+const ALLOCATION_TX_MAX_WAIT_MS = parsePositiveIntEnv("ALLOCATION_TX_MAX_WAIT_MS", 15000);
 /* ===================== QR RANGE (SUPER ADMIN route) ===================== */
 const allocateQRRange = async (req, res) => {
     try {
@@ -125,6 +138,9 @@ const allocateQRRange = async (req, res) => {
                 receivedBatchName: receivedBatchName || null,
                 tx,
             });
+        }, {
+            maxWait: ALLOCATION_TX_MAX_WAIT_MS,
+            timeout: ALLOCATION_TX_TIMEOUT_MS,
         });
         await (0, auditService_1.createAuditLog)({
             userId: auth.userId,
@@ -197,6 +213,9 @@ const allocateQRRangeForLicensee = async (req, res) => {
                 tx,
             });
             return { allocation, startNumber, endNumber };
+        }, {
+            maxWait: ALLOCATION_TX_MAX_WAIT_MS,
+            timeout: ALLOCATION_TX_TIMEOUT_MS,
         });
         await (0, auditService_1.createAuditLog)({
             userId: auth.userId,
@@ -662,6 +681,24 @@ const assignManufacturer = async (req, res) => {
             },
             ipAddress: req.ip,
         });
+        try {
+            await (0, notificationService_1.createUserNotification)({
+                userId: manufacturer.id,
+                licenseeId: batch.licenseeId,
+                type: "manufacturer_batch_assigned",
+                title: "New batch assigned",
+                body: `${result.newBatchName} is ready for printing (${result.allocated} codes).`,
+                data: {
+                    batchId: result.newBatchId,
+                    batchName: result.newBatchName,
+                    quantity: result.allocated,
+                    targetRoute: "/batches",
+                },
+            });
+        }
+        catch (notifyError) {
+            console.error("assignManufacturer notification error:", notifyError);
+        }
         return res.json({ success: true, data: result });
     }
     catch (e) {
@@ -674,6 +711,59 @@ const assignManufacturer = async (req, res) => {
     }
 };
 exports.assignManufacturer = assignManufacturer;
+const renameBatch = async (req, res) => {
+    try {
+        const auth = ensureAuth(req);
+        if (!auth)
+            return res.status(401).json({ success: false, error: "Not authenticated" });
+        if (auth.role === client_1.UserRole.MANUFACTURER ||
+            auth.role === client_1.UserRole.MANUFACTURER_ADMIN ||
+            auth.role === client_1.UserRole.MANUFACTURER_USER) {
+            return res.status(403).json({ success: false, error: "Manufacturers cannot rename batches" });
+        }
+        const parsed = renameBatchSchema.safeParse(req.body || {});
+        if (!parsed.success) {
+            return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+        }
+        const batchId = String(req.params.id || "").trim();
+        if (!batchId)
+            return res.status(400).json({ success: false, error: "Missing batch id" });
+        const existing = await database_1.default.batch.findUnique({
+            where: { id: batchId },
+            select: { id: true, name: true, licenseeId: true },
+        });
+        if (!existing)
+            return res.status(404).json({ success: false, error: "Batch not found" });
+        if (auth.role === client_1.UserRole.LICENSEE_ADMIN || auth.role === client_1.UserRole.ORG_ADMIN) {
+            if (!req.user?.licenseeId || req.user.licenseeId !== existing.licenseeId) {
+                return res.status(403).json({ success: false, error: "Access denied" });
+            }
+        }
+        const nextName = parsed.data.name.trim();
+        if (nextName === existing.name) {
+            return res.json({ success: true, data: existing });
+        }
+        const updated = await database_1.default.batch.update({
+            where: { id: existing.id },
+            data: { name: nextName },
+        });
+        await (0, auditService_1.createAuditLog)({
+            userId: auth.userId,
+            licenseeId: existing.licenseeId,
+            action: "RENAME_BATCH",
+            entityType: "Batch",
+            entityId: existing.id,
+            details: { from: existing.name, to: nextName },
+            ipAddress: req.ip,
+        });
+        return res.json({ success: true, data: updated });
+    }
+    catch (e) {
+        console.error("renameBatch error:", e);
+        return res.status(500).json({ success: false, error: e?.message || "Internal server error" });
+    }
+};
+exports.renameBatch = renameBatch;
 /* ===================== PRINT ===================== */
 const markPrinted = async (req, res) => {
     try {
@@ -885,6 +975,9 @@ const generateQRCodes = async (req, res) => {
                 tx,
             });
             return { allocation, startNumber, endNumber };
+        }, {
+            maxWait: ALLOCATION_TX_MAX_WAIT_MS,
+            timeout: ALLOCATION_TX_TIMEOUT_MS,
         });
         const rows = await database_1.default.qRCode.findMany({
             where: { licenseeId, code: { gte: result.allocation.startCode, lte: result.allocation.endCode } },
@@ -892,7 +985,7 @@ const generateQRCodes = async (req, res) => {
             orderBy: { code: "asc" },
         });
         const now = new Date();
-        const expAt = new Date(now.getTime() + 3650 * 24 * 60 * 60 * 1000);
+        const expAt = (0, qrTokenService_1.getQrTokenExpiryDate)(now);
         const tokens = [];
         for (const qr of rows) {
             const nonce = qr.tokenNonce || (0, qrTokenService_1.randomNonce)();
@@ -1142,6 +1235,127 @@ const getQRCodes = async (req, res) => {
     }
 };
 exports.getQRCodes = getQRCodes;
+const canIssueNewSignedLink = (status) => status === client_1.QRStatus.DORMANT ||
+    status === client_1.QRStatus.ACTIVE ||
+    status === client_1.QRStatus.ALLOCATED ||
+    status === client_1.QRStatus.ACTIVATED;
+const generateSignedScanLinks = async (req, res) => {
+    try {
+        const role = req.user?.role;
+        const userId = req.user?.userId;
+        if (!role || !userId)
+            return res.status(401).json({ success: false, error: "Not authenticated" });
+        if (role !== client_1.UserRole.SUPER_ADMIN && role !== client_1.UserRole.PLATFORM_SUPER_ADMIN) {
+            return res.status(403).json({ success: false, error: "Access denied" });
+        }
+        const parsed = generateSignedLinksSchema.safeParse(req.body || {});
+        if (!parsed.success) {
+            return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+        }
+        const requestedCodes = Array.from(new Set(parsed.data.codes
+            .map((code) => String(code || "").trim().toUpperCase())
+            .filter(Boolean)));
+        const qrRows = await database_1.default.qRCode.findMany({
+            where: { code: { in: requestedCodes } },
+            select: {
+                id: true,
+                code: true,
+                status: true,
+                licenseeId: true,
+                batchId: true,
+                batch: {
+                    select: {
+                        manufacturerId: true,
+                    },
+                },
+            },
+        });
+        const byCode = new Map(qrRows.map((row) => [row.code, row]));
+        const missingCodes = requestedCodes.filter((code) => !byCode.has(code));
+        if (missingCodes.length > 0) {
+            return res.status(404).json({
+                success: false,
+                error: `Some codes were not found: ${missingCodes.slice(0, 20).join(", ")}`,
+            });
+        }
+        const ineligible = qrRows
+            .filter((row) => !canIssueNewSignedLink(row.status))
+            .map((row) => `${row.code} (${row.status})`);
+        if (ineligible.length > 0) {
+            return res.status(409).json({
+                success: false,
+                error: "Signed link generation is allowed only for unprinted lifecycle stages (DORMANT/ACTIVE/ALLOCATED/ACTIVATED). " +
+                    `Blocked entries: ${ineligible.slice(0, 20).join(", ")}`,
+            });
+        }
+        const now = new Date();
+        const expAt = (0, qrTokenService_1.getQrTokenExpiryDate)(now);
+        const links = [];
+        await database_1.default.$transaction(async (tx) => {
+            for (const code of requestedCodes) {
+                const qr = byCode.get(code);
+                const nonce = (0, qrTokenService_1.randomNonce)();
+                const payload = {
+                    qr_id: qr.id,
+                    batch_id: qr.batchId ?? null,
+                    licensee_id: qr.licenseeId,
+                    manufacturer_id: qr.batch?.manufacturerId ?? null,
+                    iat: Math.floor(now.getTime() / 1000),
+                    exp: Math.floor(expAt.getTime() / 1000),
+                    nonce,
+                };
+                const token = (0, qrTokenService_1.signQrPayload)(payload);
+                const tokenHash = (0, qrTokenService_1.hashToken)(token);
+                const scanUrl = (0, qrTokenService_1.buildScanUrl)(token);
+                const updated = await tx.qRCode.updateMany({
+                    where: {
+                        id: qr.id,
+                        status: {
+                            in: [client_1.QRStatus.DORMANT, client_1.QRStatus.ACTIVE, client_1.QRStatus.ALLOCATED, client_1.QRStatus.ACTIVATED],
+                        },
+                    },
+                    data: {
+                        tokenNonce: nonce,
+                        tokenIssuedAt: now,
+                        tokenExpiresAt: expAt,
+                        tokenHash,
+                    },
+                });
+                if (updated.count !== 1) {
+                    throw new Error(`Code ${code} changed state during signed-link generation. Please retry.`);
+                }
+                links.push({
+                    code,
+                    scanUrl,
+                    expiresAt: expAt.toISOString(),
+                });
+            }
+        });
+        await (0, auditService_1.createAuditLog)({
+            userId,
+            action: "GENERATED_SIGNED_LINKS",
+            entityType: "QRCode",
+            details: {
+                count: links.length,
+                codes: links.slice(0, 50).map((item) => item.code),
+            },
+            ipAddress: req.ip,
+        });
+        return res.json({
+            success: true,
+            data: {
+                issuedAt: now.toISOString(),
+                expiresAt: expAt.toISOString(),
+                links,
+            },
+        });
+    }
+    catch (e) {
+        console.error("generateSignedScanLinks error:", e);
+        return res.status(500).json({ success: false, error: e?.message || "Internal server error" });
+    }
+};
+exports.generateSignedScanLinks = generateSignedScanLinks;
 const getStats = async (req, res) => {
     try {
         const role = req.user?.role;
@@ -1217,7 +1431,7 @@ const exportQRCodesCsv = async (req, res) => {
         });
         const header = [
             "code",
-            "verifyUrl",
+            "scanUrlPolicy",
             "status",
             "licenseeName",
             "licenseePrefix",
@@ -1236,7 +1450,7 @@ const exportQRCodesCsv = async (req, res) => {
             rows
                 .map((r) => [
                 r.code,
-                (0, qrService_1.buildVerifyUrl)(r.code),
+                "SIGNED_SCAN_URL_REQUIRED",
                 r.status,
                 r.licensee?.name ?? "",
                 r.licensee?.prefix ?? "",

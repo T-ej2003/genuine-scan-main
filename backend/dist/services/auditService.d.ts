@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 export interface AuditLogInput {
     userId?: string;
     orgId?: string;
@@ -18,7 +19,7 @@ export declare const createAuditLog: (data: AuditLogInput) => Promise<{
     licenseeId: string | null;
     createdAt: Date;
     userId: string | null;
-    details: import("@prisma/client/runtime/library").JsonValue | null;
+    details: Prisma.JsonValue | null;
     action: string;
     entityType: string;
     entityId: string | null;
@@ -43,7 +44,7 @@ export declare const getAuditLogs: (opts: {
         licenseeId: string | null;
         createdAt: Date;
         userId: string | null;
-        details: import("@prisma/client/runtime/library").JsonValue | null;
+        details: Prisma.JsonValue | null;
         action: string;
         entityType: string;
         entityId: string | null;

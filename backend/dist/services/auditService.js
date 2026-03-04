@@ -5,8 +5,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getAuditLogs = exports.createAuditLog = exports.onAuditLog = void 0;
 const database_1 = __importDefault(require("../config/database"));
+const client_1 = require("@prisma/client");
 const traceEventService_1 = require("./traceEventService");
 const security_1 = require("../utils/security");
+const siemOutboxService_1 = require("./siemOutboxService");
 const listeners = new Set();
 const onAuditLog = (cb) => {
     listeners.add(cb);
@@ -17,20 +19,48 @@ const emitAuditLog = (log) => {
     for (const cb of listeners)
         cb(log);
 };
+const resolveOrgId = async (input) => {
+    const explicitOrgId = String(input.orgId || "").trim();
+    if (explicitOrgId)
+        return explicitOrgId;
+    const licenseeId = String(input.licenseeId || "").trim();
+    if (!licenseeId)
+        return undefined;
+    const licensee = await database_1.default.licensee.findUnique({
+        where: { id: licenseeId },
+        select: { orgId: true },
+    });
+    const derived = String(licensee?.orgId || "").trim();
+    return derived || undefined;
+};
 const createAuditLog = async (data) => {
     const storeRawIp = ["1", "true", "yes", "on"].includes(String(process.env.AUDIT_LOG_STORE_RAW_IP || "").trim().toLowerCase());
-    const resolvedOrgId = data.orgId ?? data.licenseeId;
+    const resolvedOrgId = await resolveOrgId({ orgId: data.orgId, licenseeId: data.licenseeId });
     const resolvedIpHash = data.ipHash ?? (0, security_1.hashIp)(data.ipAddress);
     const resolvedUserAgent = (0, security_1.normalizeUserAgent)(data.userAgent);
-    const log = await database_1.default.auditLog.create({
-        data: {
-            ...data,
-            orgId: resolvedOrgId,
-            ipHash: resolvedIpHash || undefined,
-            userAgent: resolvedUserAgent || undefined,
-            ipAddress: storeRawIp ? data.ipAddress : undefined,
-        },
-    });
+    const payload = {
+        ...data,
+        orgId: resolvedOrgId,
+        ipHash: resolvedIpHash || undefined,
+        userAgent: resolvedUserAgent || undefined,
+        ipAddress: storeRawIp ? data.ipAddress : undefined,
+    };
+    let log;
+    try {
+        log = await database_1.default.auditLog.create({ data: payload });
+    }
+    catch (error) {
+        // Graceful fallback: never let audit FK inconsistency break business requests.
+        if (error instanceof client_1.Prisma.PrismaClientKnownRequestError &&
+            error.code === "P2003" &&
+            String(error.message || "").includes("AuditLog_orgId_fkey")) {
+            const retryPayload = { ...payload, orgId: undefined };
+            log = await database_1.default.auditLog.create({ data: retryPayload });
+        }
+        else {
+            throw error;
+        }
+    }
     try {
         await (0, traceEventService_1.createTraceEventFromAuditLog)({
             id: log.id,
@@ -48,6 +78,17 @@ const createAuditLog = async (data) => {
         console.error("createTraceEventFromAuditLog failed:", e);
     }
     emitAuditLog(log);
+    await (0, siemOutboxService_1.queueSecurityEvent)("AUDIT_LOG", {
+        id: log.id,
+        action: log.action,
+        entityType: log.entityType,
+        entityId: log.entityId,
+        userId: log.userId,
+        orgId: log.orgId,
+        licenseeId: log.licenseeId,
+        details: log.details ?? null,
+        createdAt: log.createdAt instanceof Date ? log.createdAt.toISOString() : String(log.createdAt || ""),
+    });
     return log;
 };
 exports.createAuditLog = createAuditLog;

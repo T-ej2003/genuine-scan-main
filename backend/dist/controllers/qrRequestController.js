@@ -10,9 +10,16 @@ const database_1 = __importDefault(require("../config/database"));
 const auditService_1 = require("../services/auditService");
 const qrAllocationService_1 = require("../services/qrAllocationService");
 const notificationService_1 = require("../services/notificationService");
+const parsePositiveIntEnv = (name, fallback) => {
+    const raw = Number(String(process.env[name] || "").trim());
+    return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
+};
+const ALLOCATION_TX_TIMEOUT_MS = parsePositiveIntEnv("ALLOCATION_TX_TIMEOUT_MS", 120000);
+const ALLOCATION_TX_MAX_WAIT_MS = parsePositiveIntEnv("ALLOCATION_TX_MAX_WAIT_MS", 15000);
 const createRequestSchema = zod_1.z
     .object({
     quantity: zod_1.z.number().int().positive().max(5_000_000),
+    batchName: zod_1.z.string().trim().min(2).max(120),
     note: zod_1.z.string().trim().max(500).optional(),
 });
 const approveSchema = zod_1.z.object({
@@ -56,6 +63,7 @@ const createQrAllocationRequest = async (req, res) => {
                 quantity: parsed.data.quantity,
                 startNumber: null,
                 endNumber: null,
+                batchName: parsed.data.batchName.trim(),
                 note: parsed.data.note?.trim() || null,
                 status: client_1.QrAllocationRequestStatus.PENDING,
             },
@@ -68,6 +76,7 @@ const createQrAllocationRequest = async (req, res) => {
             entityId: created.id,
             details: {
                 quantity: created.quantity,
+                batchName: created.batchName || null,
             },
             ipAddress: req.ip,
         });
@@ -76,11 +85,12 @@ const createQrAllocationRequest = async (req, res) => {
                 audience: client_1.NotificationAudience.SUPER_ADMIN,
                 type: "qr_request_created",
                 title: "New QR inventory request",
-                body: `Request ${created.id.slice(0, 8)} for ${created.quantity || 0} codes is pending review.`,
+                body: `${created.quantity || 0} QR codes requested${created.batchName ? ` for batch "${created.batchName}"` : ""}. Pending review.`,
                 data: {
                     requestId: created.id,
                     licenseeId,
                     quantity: created.quantity,
+                    batchName: created.batchName || null,
                     status: created.status,
                     targetRoute: "/qr-requests",
                 },
@@ -91,11 +101,12 @@ const createQrAllocationRequest = async (req, res) => {
                 licenseeId,
                 type: "qr_request_created",
                 title: "QR inventory request submitted",
-                body: `Request ${created.id.slice(0, 8)} was submitted for ${created.quantity || 0} codes.`,
+                body: `Your request for ${created.quantity || 0} QR codes is in review${created.batchName ? ` (${created.batchName})` : ""}.`,
                 data: {
                     requestId: created.id,
                     licenseeId,
                     quantity: created.quantity,
+                    batchName: created.batchName || null,
                     status: created.status,
                     targetRoute: "/qr-requests",
                 },
@@ -197,6 +208,7 @@ const approveQrAllocationRequest = async (req, res) => {
                 source: "REQUEST_APPROVAL",
                 requestId: requestRow.id,
                 createReceivedBatch: true,
+                receivedBatchName: requestRow.batchName || null,
                 tx,
             });
             const updated = await tx.qrAllocationRequest.update({
@@ -212,6 +224,9 @@ const approveQrAllocationRequest = async (req, res) => {
                 },
             });
             return { alloc, updated, startNumber, endNumber };
+        }, {
+            maxWait: ALLOCATION_TX_MAX_WAIT_MS,
+            timeout: ALLOCATION_TX_TIMEOUT_MS,
         });
         await (0, auditService_1.createAuditLog)({
             userId: auth.userId,
@@ -223,8 +238,10 @@ const approveQrAllocationRequest = async (req, res) => {
                 startNumber: result.startNumber,
                 endNumber: result.endNumber,
                 quantity: quantityRequested,
+                batchName: requestRow.batchName || null,
                 rangeId: result.alloc.range.id,
                 receivedBatchId: result.alloc.receivedBatch?.id || null,
+                receivedBatchName: result.alloc.receivedBatch?.name || null,
             },
             ipAddress: req.ip,
         });
@@ -233,11 +250,12 @@ const approveQrAllocationRequest = async (req, res) => {
                 audience: client_1.NotificationAudience.SUPER_ADMIN,
                 type: "qr_request_approved",
                 title: "QR request approved",
-                body: `Request ${requestRow.id.slice(0, 8)} approved for ${quantityRequested} codes.`,
+                body: `${quantityRequested} QR codes approved${requestRow.batchName ? ` for "${requestRow.batchName}"` : ""}.`,
                 data: {
                     requestId: requestRow.id,
                     licenseeId: requestRow.licenseeId,
                     quantity: quantityRequested,
+                    batchName: requestRow.batchName || null,
                     status: "APPROVED",
                     targetRoute: "/qr-requests",
                 },
@@ -248,11 +266,12 @@ const approveQrAllocationRequest = async (req, res) => {
                 licenseeId: requestRow.licenseeId,
                 type: "qr_request_approved",
                 title: "QR request approved",
-                body: `Request ${requestRow.id.slice(0, 8)} is approved and inventory has been allocated.`,
+                body: `Inventory was allocated for ${quantityRequested} QR codes${requestRow.batchName ? ` (${requestRow.batchName})` : ""}.`,
                 data: {
                     requestId: requestRow.id,
                     licenseeId: requestRow.licenseeId,
                     quantity: quantityRequested,
+                    batchName: requestRow.batchName || null,
                     status: "APPROVED",
                     targetRoute: "/qr-requests",
                 },
@@ -263,11 +282,12 @@ const approveQrAllocationRequest = async (req, res) => {
                 licenseeId: requestRow.licenseeId,
                 type: "qr_request_approved",
                 title: "Your QR request was approved",
-                body: `Request ${requestRow.id.slice(0, 8)} was approved for ${quantityRequested} codes.`,
+                body: `${quantityRequested} QR codes were approved${requestRow.batchName ? ` for "${requestRow.batchName}"` : ""}.`,
                 data: {
                     requestId: requestRow.id,
                     licenseeId: requestRow.licenseeId,
                     quantity: quantityRequested,
+                    batchName: requestRow.batchName || null,
                     status: "APPROVED",
                     targetRoute: "/qr-requests",
                 },
@@ -328,7 +348,7 @@ const rejectQrAllocationRequest = async (req, res) => {
                 audience: client_1.NotificationAudience.SUPER_ADMIN,
                 type: "qr_request_rejected",
                 title: "QR request rejected",
-                body: `Request ${id.slice(0, 8)} was rejected.`,
+                body: `A QR inventory request was rejected.`,
                 data: {
                     requestId: id,
                     licenseeId: requestRow.licenseeId,
@@ -343,7 +363,7 @@ const rejectQrAllocationRequest = async (req, res) => {
                 licenseeId: requestRow.licenseeId,
                 type: "qr_request_rejected",
                 title: "QR request rejected",
-                body: `Request ${id.slice(0, 8)} was rejected. Review decision note and resubmit if needed.`,
+                body: "A QR inventory request was rejected. Review the decision note and resubmit if needed.",
                 data: {
                     requestId: id,
                     licenseeId: requestRow.licenseeId,
@@ -358,7 +378,7 @@ const rejectQrAllocationRequest = async (req, res) => {
                 licenseeId: requestRow.licenseeId,
                 type: "qr_request_rejected",
                 title: "Your QR request was rejected",
-                body: `Request ${id.slice(0, 8)} was rejected. Review notes and update your request.`,
+                body: "Your QR inventory request was rejected. Review notes and resubmit when ready.",
                 data: {
                     requestId: id,
                     licenseeId: requestRow.licenseeId,

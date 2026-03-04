@@ -41,6 +41,7 @@ import {
   allocateQRRange,
   createBatch,
   assignManufacturer,
+  renameBatch,
   getBatches,
   getStats,
   deleteBatch,
@@ -140,6 +141,12 @@ import {
   patchSupportTicket,
   trackSupportTicketPublic,
 } from "../controllers/supportController";
+import {
+  createSupportIssueReport,
+  listSupportIssueReports,
+  serveSupportIssueScreenshot,
+} from "../controllers/supportIssueController";
+import { supportIssueUpload } from "../middleware/supportIssueUpload";
 import {
   downloadCompliancePackJobController,
   exportIncidentEvidenceBundleController,
@@ -340,6 +347,14 @@ router.post(
   requireCsrf,
   assignManufacturer
 );
+router.patch(
+  "/qr/batches/:id/rename",
+  authenticate,
+  requireAnyAdmin,
+  enforceTenantIsolation,
+  requireCsrf,
+  renameBatch
+);
 
 // Super admin bulk allocation helper
 router.post("/qr/batches/admin-allocate", authenticate, requirePlatformAdmin, requireCsrf, adminAllocateBatch);
@@ -445,6 +460,23 @@ router.post(
   requirePlatformAdmin,
   requireCsrf,
   addSupportMessage
+);
+router.get("/support/reports", authenticate, requireOpsUser, enforceTenantIsolation, listSupportIssueReports);
+router.post(
+  "/support/reports",
+  authenticate,
+  requireOpsUser,
+  enforceTenantIsolation,
+  requireCsrf,
+  supportIssueUpload.single("screenshot"),
+  createSupportIssueReport
+);
+router.get(
+  "/support/reports/files/:fileName",
+  authenticate,
+  requireOpsUser,
+  enforceTenantIsolation,
+  serveSupportIssueScreenshot
 );
 
 // ==================== GOVERNANCE ====================

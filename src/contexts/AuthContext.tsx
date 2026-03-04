@@ -91,7 +91,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string) => {
-    setIsLoading(true);
     try {
       const result = await apiClient.login(email, password);
       if (result.success && result.data?.mfaRequired) {
@@ -111,13 +110,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: false, error: result.error || "Invalid email or password" };
     } catch (e: any) {
       return { success: false, error: e?.message || "Login failed" };
-    } finally {
-      setIsLoading(false);
     }
   };
 
   const completeMfaLogin = async (ticket: string, code: string) => {
-    setIsLoading(true);
     try {
       const result = await apiClient.completeMfaLogin(ticket, code);
       if (result.success && result.data?.user) {
@@ -127,8 +123,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: false, error: result.error || "MFA verification failed" };
     } catch (e: any) {
       return { success: false, error: e?.message || "MFA verification failed" };
-    } finally {
-      setIsLoading(false);
     }
   };
 

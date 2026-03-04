@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { formatDistanceToNowStrict } from "date-fns";
-import { Loader2, MessageSquareText, RefreshCw, ShieldCheck, TimerReset } from "lucide-react";
+import { Bug, Loader2, MessageSquareText, RefreshCw, ShieldCheck, TimerReset } from "lucide-react";
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +43,20 @@ type SupportTicket = {
   } | null;
 };
 
+type SupportIssueReport = {
+  id: string;
+  title: string;
+  description?: string | null;
+  status: string;
+  sourcePath?: string | null;
+  pageUrl?: string | null;
+  autoDetected?: boolean;
+  screenshotPath?: string | null;
+  createdAt: string;
+  reporterUser?: { id: string; name?: string | null; email?: string | null; role?: string | null } | null;
+  licensee?: { id: string; name: string; prefix: string } | null;
+};
+
 const STATUS_TONE: Record<string, string> = {
   OPEN: "border-slate-300 bg-slate-100 text-slate-700",
   IN_PROGRESS: "border-cyan-200 bg-cyan-50 text-cyan-800",
@@ -71,6 +85,7 @@ export default function SupportCenter() {
 
   const [loading, setLoading] = useState(false);
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [issueReports, setIssueReports] = useState<SupportIssueReport[]>([]);
   const [total, setTotal] = useState(0);
   const [selectedId, setSelectedId] = useState("");
   const [detail, setDetail] = useState<any | null>(null);
@@ -95,12 +110,15 @@ export default function SupportCenter() {
   const loadTickets = async () => {
     setLoading(true);
     try {
-      const response = await apiClient.getSupportTickets({
-        status: filters.status !== "all" ? (filters.status as any) : undefined,
-        priority: filters.priority !== "all" ? (filters.priority as any) : undefined,
-        search: filters.search.trim() || undefined,
-        limit: 120,
-      });
+      const [response, reportsResponse] = await Promise.all([
+        apiClient.getSupportTickets({
+          status: filters.status !== "all" ? (filters.status as any) : undefined,
+          priority: filters.priority !== "all" ? (filters.priority as any) : undefined,
+          search: filters.search.trim() || undefined,
+          limit: 120,
+        }),
+        apiClient.getSupportIssueReports({ limit: 60 }),
+      ]);
 
       if (!response.success) {
         toast({ title: "Support load failed", description: response.error || "Could not load support tickets.", variant: "destructive" });
@@ -121,6 +139,14 @@ export default function SupportCenter() {
 
       if (!selectedId && rows[0]?.id) {
         setSelectedId(rows[0].id);
+      }
+
+      if (reportsResponse.success) {
+        const reportsPayload: any = reportsResponse.data || {};
+        const reportsRows = Array.isArray(reportsPayload.reports) ? reportsPayload.reports : [];
+        setIssueReports(reportsRows as SupportIssueReport[]);
+      } else {
+        setIssueReports([]);
       }
     } finally {
       setLoading(false);
@@ -271,6 +297,57 @@ export default function SupportCenter() {
               </Button>
             </div>
           </CardHeader>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between border-b bg-slate-50/70">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Bug className="h-4 w-4 text-amber-600" />
+              Incoming User Issue Reports
+            </div>
+            <Badge variant="outline">{issueReports.length}</Badge>
+          </CardHeader>
+          <CardContent className="pt-4">
+            {issueReports.length === 0 ? (
+              <div className="text-sm text-slate-500">No user issue reports submitted yet.</div>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2">
+                {issueReports.slice(0, 8).map((report) => (
+                  <div key={report.id} className="rounded-xl border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold leading-5">{report.title}</p>
+                        <p className="text-xs text-slate-500">
+                          {report.reporterUser?.name || report.reporterUser?.email || "Unknown user"}
+                          {report.licensee?.name ? ` · ${report.licensee.name}` : ""}
+                        </p>
+                      </div>
+                      <Badge variant={report.autoDetected ? "default" : "outline"}>
+                        {report.autoDetected ? "Auto-captured" : "Manual"}
+                      </Badge>
+                    </div>
+                    {report.description ? (
+                      <p className="mt-2 line-clamp-2 text-xs text-slate-600">{report.description}</p>
+                    ) : null}
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                      <span>{formatDistanceToNowStrict(new Date(report.createdAt), { addSuffix: true })}</span>
+                      {report.sourcePath ? <span>Path: {report.sourcePath}</span> : null}
+                    </div>
+                    {report.screenshotPath ? (
+                      <a
+                        className="mt-3 inline-flex text-xs font-medium text-cyan-700 hover:underline"
+                        href={apiClient.getSupportIssueScreenshotUrl(report.screenshotPath)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open screenshot
+                      </a>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
         </Card>
 
         <div className="grid gap-6 xl:grid-cols-[1.1fr,1fr]">

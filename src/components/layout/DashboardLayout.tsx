@@ -35,6 +35,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Slider } from "@/components/ui/slider";
+import { SupportIssueLauncher } from "@/components/support/SupportIssueLauncher";
 
 interface NavItem {
   label: string;
@@ -431,8 +432,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       >
         <div className="flex h-full flex-col">
           <div className="flex h-16 items-center gap-2 px-6 border-b border-sidebar-border">
-            <img src="/brand/authenticqr-mark.svg" alt="AuthenticQR logo" className="h-8 w-8" />
-            <span className="font-bold text-lg">AuthenticQR</span>
+            <img src="/brand/authenticqr-mark.svg" alt="MSCQR logo" className="h-8 w-8" />
+            <span className="font-bold text-lg">MSCQR</span>
           </div>
 
           <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
@@ -721,6 +722,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
+
+          <SupportIssueLauncher />
 
           <Button asChild variant="ghost" className="mr-1 gap-2">
             <Link to={contextualHelpRoute}>

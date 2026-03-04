@@ -98,6 +98,7 @@ export const getTraceTimelineController = async (req: AuthRequest, res: Response
     await backfillTraceEventsFromAuditLogs({
       licenseeId,
       limit: 2500,
+      force: Boolean(asOptionalString(req.query.batchId) || asOptionalString(req.query.qrCodeId)),
     });
 
     const result = await getTraceTimeline({

@@ -16,6 +16,7 @@ const MANUFACTURER_ROLES = [
 const isManufacturerRole = (role) => MANUFACTURER_ROLES.includes(role);
 const applyContainmentAction = async (input) => {
     const now = new Date();
+    const actorType = input.actorUserId ? client_1.IncidentActorType.ADMIN : client_1.IncidentActorType.SYSTEM;
     const incident = await database_1.default.incident.findUnique({
         where: { id: input.incidentId },
         select: {
@@ -79,7 +80,7 @@ const applyContainmentAction = async (input) => {
             },
         });
         await (0, auditService_1.createAuditLog)({
-            userId: input.actorUserId,
+            userId: input.actorUserId || undefined,
             licenseeId: resolvedLicenseeId || undefined,
             action: "IR_FLAG_QR_UNDER_INVESTIGATION",
             entityType: "QRCode",
@@ -99,7 +100,7 @@ const applyContainmentAction = async (input) => {
             },
         });
         await (0, auditService_1.createAuditLog)({
-            userId: input.actorUserId,
+            userId: input.actorUserId || undefined,
             licenseeId: resolvedLicenseeId || undefined,
             action: "IR_UNFLAG_QR_UNDER_INVESTIGATION",
             entityType: "QRCode",
@@ -116,7 +117,7 @@ const applyContainmentAction = async (input) => {
             data: { suspendedAt: now, suspendedReason: input.reason },
         });
         await (0, auditService_1.createAuditLog)({
-            userId: input.actorUserId,
+            userId: input.actorUserId || undefined,
             licenseeId: resolvedLicenseeId || undefined,
             action: "IR_SUSPEND_BATCH",
             entityType: "Batch",
@@ -133,7 +134,7 @@ const applyContainmentAction = async (input) => {
             data: { suspendedAt: null, suspendedReason: null },
         });
         await (0, auditService_1.createAuditLog)({
-            userId: input.actorUserId,
+            userId: input.actorUserId || undefined,
             licenseeId: resolvedLicenseeId || undefined,
             action: "IR_REINSTATE_BATCH",
             entityType: "Batch",
@@ -158,7 +159,7 @@ const applyContainmentAction = async (input) => {
             data: { revokedAt: now, revokedReason: `Licensee suspended by incident ${incident.id}` },
         });
         await (0, auditService_1.createAuditLog)({
-            userId: input.actorUserId,
+            userId: input.actorUserId || undefined,
             licenseeId: resolvedLicenseeId,
             action: "IR_SUSPEND_ORG",
             entityType: "Licensee",
@@ -175,7 +176,7 @@ const applyContainmentAction = async (input) => {
             data: { suspendedAt: null, suspendedReason: null },
         });
         await (0, auditService_1.createAuditLog)({
-            userId: input.actorUserId,
+            userId: input.actorUserId || undefined,
             licenseeId: resolvedLicenseeId,
             action: "IR_REINSTATE_ORG",
             entityType: "Licensee",
@@ -216,7 +217,7 @@ const applyContainmentAction = async (input) => {
                 data: { revokedAt: now, revokedReason: `User suspended by incident ${incident.id}` },
             });
             await (0, auditService_1.createAuditLog)({
-                userId: input.actorUserId,
+                userId: input.actorUserId || undefined,
                 licenseeId: resolvedLicenseeId || undefined,
                 action: "IR_SUSPEND_MANUFACTURER_USERS",
                 entityType: "User",
@@ -238,7 +239,7 @@ const applyContainmentAction = async (input) => {
                 },
             });
             await (0, auditService_1.createAuditLog)({
-                userId: input.actorUserId,
+                userId: input.actorUserId || undefined,
                 licenseeId: resolvedLicenseeId || undefined,
                 action: "IR_REINSTATE_MANUFACTURER_USERS",
                 entityType: "User",
@@ -251,8 +252,8 @@ const applyContainmentAction = async (input) => {
     }
     await (0, incidentService_1.recordIncidentEvent)({
         incidentId: incident.id,
-        actorType: client_1.IncidentActorType.ADMIN,
-        actorUserId: input.actorUserId,
+        actorType,
+        actorUserId: input.actorUserId || null,
         eventType: client_1.IncidentEventType.UPDATED_FIELDS,
         eventPayload: actionDetails,
     });

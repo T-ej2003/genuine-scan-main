@@ -52,19 +52,19 @@ const allocateQrRange = async (params) => {
             totalCodes,
         },
     });
-    const codes = [];
-    for (let i = startNumber; i <= endNumber; i++) {
-        codes.push({
-            code: (0, qrService_1.generateQRCode)(licensee.prefix, i),
-            licenseeId,
-            status: client_1.QRStatus.DORMANT,
-            tokenNonce: (0, qrTokenService_1.randomNonce)(),
-        });
-    }
     const batchSize = 1000;
     let created = 0;
-    for (let i = 0; i < codes.length; i += batchSize) {
-        const chunk = codes.slice(i, i + batchSize);
+    for (let cursor = startNumber; cursor <= endNumber; cursor += batchSize) {
+        const chunkEnd = Math.min(cursor + batchSize - 1, endNumber);
+        const chunk = [];
+        for (let i = cursor; i <= chunkEnd; i += 1) {
+            chunk.push({
+                code: (0, qrService_1.generateQRCode)(licensee.prefix, i),
+                licenseeId,
+                status: client_1.QRStatus.DORMANT,
+                tokenNonce: (0, qrTokenService_1.randomNonce)(),
+            });
+        }
         const result = await db.qRCode.createMany({ data: chunk });
         created += result.count;
     }

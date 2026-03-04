@@ -9,6 +9,7 @@ export type QrTokenPayload = {
 };
 export declare const randomNonce: () => string;
 export declare const hashToken: (token: string) => string;
+export declare const getQrTokenExpiryDate: (issuedAt?: Date) => Date;
 export declare const signQrPayload: (payload: QrTokenPayload) => string;
 export declare const verifyQrToken: (token: string) => {
     payload: QrTokenPayload;

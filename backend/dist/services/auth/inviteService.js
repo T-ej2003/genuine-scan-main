@@ -11,6 +11,7 @@ const tokenService_1 = require("./tokenService");
 const security_1 = require("../../utils/security");
 const authEmailService_1 = require("./authEmailService");
 const auditService_1 = require("../auditService");
+const email_1 = require("../../utils/email");
 const addHours = (d, hours) => new Date(d.getTime() + hours * 60 * 60 * 1000);
 const inferOrgIdForLicensee = async (licenseeId) => {
     const licensee = await database_1.default.licensee.findUnique({
@@ -75,9 +76,9 @@ const getOrCreatePlatformOrgId = async () => {
     return created.id;
 };
 const createInvite = async (input) => {
-    const email = String(input.email || "").trim().toLowerCase();
+    const email = (0, email_1.normalizeEmailAddress)(input.email);
     if (!email)
-        throw new Error("Email is required");
+        throw new Error("Invalid email address");
     const role = normalizeRole(input.role);
     const isPlatformRole = role === client_1.UserRole.SUPER_ADMIN || role === client_1.UserRole.PLATFORM_SUPER_ADMIN;
     const licenseeId = input.licenseeId ? String(input.licenseeId).trim() : null;
@@ -213,6 +214,10 @@ const createInvite = async (input) => {
             manufacturerId,
             emailDelivered: delivery.delivered,
             emailError: delivery.error || null,
+            emailProviderMessageId: delivery.providerMessageId || null,
+            emailProviderResponse: delivery.providerResponse || null,
+            emailAcceptedRecipients: delivery.acceptedRecipients || [],
+            emailRejectedRecipients: delivery.rejectedRecipients || [],
         },
         ipHash: input.ipHash || undefined,
         userAgent: input.userAgent || undefined,
@@ -225,6 +230,10 @@ const createInvite = async (input) => {
         inviteLink: acceptUrl,
         emailDelivered: delivery.delivered,
         deliveryError: delivery.error || null,
+        providerMessageId: delivery.providerMessageId || null,
+        providerResponse: delivery.providerResponse || null,
+        acceptedRecipients: delivery.acceptedRecipients || [],
+        rejectedRecipients: delivery.rejectedRecipients || [],
         user: {
             id: result.createdUser.id,
             email: result.createdUser.email,

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.acceptInviteController = exports.invite = exports.resetPassword = exports.forgotPassword = exports.logout = exports.refresh = exports.me = exports.login = void 0;
+exports.acceptInviteController = exports.invite = exports.resetPassword = exports.forgotPassword = exports.logout = exports.refresh = exports.me = exports.completeMfaLoginController = exports.disableMfaController = exports.confirmMfaSetupController = exports.beginMfaSetupController = exports.getMfaStatusController = exports.login = void 0;
 const zod_1 = require("zod");
 const database_1 = __importDefault(require("../config/database"));
 const security_1 = require("../utils/security");
@@ -11,12 +11,20 @@ const tokenService_1 = require("../services/auth/tokenService");
 const inviteService_1 = require("../services/auth/inviteService");
 const authService_1 = require("../services/auth/authService");
 const passwordResetService_1 = require("../services/auth/passwordResetService");
+const email_1 = require("../utils/email");
+const mfaService_1 = require("../services/auth/mfaService");
 const loginSchema = zod_1.z.object({
     email: zod_1.z.string().email("Invalid email format"),
     password: zod_1.z.string().min(6, "Password must be at least 6 characters"),
 });
 const inviteSchema = zod_1.z.object({
-    email: zod_1.z.string().trim().email(),
+    email: zod_1.z
+        .string()
+        .trim()
+        .min(3)
+        .max(320)
+        .refine((value) => (0, email_1.isValidEmailAddress)(value), "Invalid email format")
+        .transform((value) => (0, email_1.normalizeEmailAddress)(value)),
     role: zod_1.z.string().trim().min(2),
     name: zod_1.z.string().trim().min(2).max(120).optional(),
     licenseeId: zod_1.z.string().uuid().optional(),
@@ -35,6 +43,13 @@ const resetPasswordSchema = zod_1.z.object({
     token: zod_1.z.string().trim().min(10),
     password: zod_1.z.string().min(8).max(200),
 });
+const mfaCodeSchema = zod_1.z.object({
+    code: zod_1.z.string().trim().min(6).max(20),
+});
+const mfaCompleteSchema = zod_1.z.object({
+    ticket: zod_1.z.string().trim().min(10),
+    code: zod_1.z.string().trim().min(6).max(20),
+});
 const normalizeAuthError = (error) => {
     const raw = error instanceof Error ? error.message : String(error || "Unknown error");
     const lower = raw.toLowerCase();
@@ -43,6 +58,9 @@ const normalizeAuthError = (error) => {
     }
     if (lower.includes("temporarily locked")) {
         return { status: 423, error: "Account temporarily locked. Try again later." };
+    }
+    if (lower.includes("high-risk login blocked")) {
+        return { status: 403, error: "High-risk login blocked. Try from a trusted network or contact administrator." };
     }
     if (lower.includes("account is disabled")) {
         return { status: 403, error: "Account is disabled. Contact administrator." };
@@ -102,6 +120,19 @@ const login = async (req, res) => {
             ipHash,
             userAgent,
         });
+        if ("mfaRequired" in session && session.mfaRequired) {
+            return res.json({
+                success: true,
+                data: {
+                    mfaRequired: true,
+                    mfaTicket: session.mfaTicket,
+                    mfaExpiresAt: session.mfaExpiresAt,
+                    riskScore: session.riskScore,
+                    riskLevel: session.riskLevel,
+                    reasons: session.reasons,
+                },
+            });
+        }
         const accessTtlMs = (0, tokenService_1.getAccessTokenTtlMinutes)() * 60 * 1000;
         const refreshTtlMs = (0, tokenService_1.getRefreshTokenTtlDays)() * 24 * 60 * 60 * 1000;
         res.cookie(tokenService_1.ACCESS_TOKEN_COOKIE, session.accessToken, { ...authCookieOptions(), maxAge: accessTtlMs });
@@ -117,6 +148,125 @@ const login = async (req, res) => {
     }
 };
 exports.login = login;
+const getMfaStatusController = async (req, res) => {
+    try {
+        const authReq = req;
+        const userId = authReq.user?.userId;
+        if (!userId)
+            return res.status(401).json({ success: false, error: "Not authenticated" });
+        const data = await (0, mfaService_1.getAdminMfaStatus)(userId);
+        return res.json({ success: true, data });
+    }
+    catch (error) {
+        console.error("getMfaStatusController error:", error);
+        return res.status(500).json({ success: false, error: "Failed to load MFA status" });
+    }
+};
+exports.getMfaStatusController = getMfaStatusController;
+const beginMfaSetupController = async (req, res) => {
+    try {
+        const authReq = req;
+        const userId = authReq.user?.userId;
+        const email = authReq.user?.email;
+        if (!userId || !email)
+            return res.status(401).json({ success: false, error: "Not authenticated" });
+        const data = await (0, mfaService_1.beginAdminMfaSetup)({ userId, email });
+        return res.status(201).json({ success: true, data });
+    }
+    catch (error) {
+        console.error("beginMfaSetupController error:", error);
+        return res.status(500).json({ success: false, error: "Failed to initialize MFA setup" });
+    }
+};
+exports.beginMfaSetupController = beginMfaSetupController;
+const confirmMfaSetupController = async (req, res) => {
+    try {
+        const authReq = req;
+        const userId = authReq.user?.userId;
+        if (!userId)
+            return res.status(401).json({ success: false, error: "Not authenticated" });
+        const parsed = mfaCodeSchema.safeParse(req.body || {});
+        if (!parsed.success) {
+            return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid code" });
+        }
+        const data = await (0, mfaService_1.confirmAdminMfaSetup)({ userId, code: parsed.data.code });
+        return res.json({ success: true, data });
+    }
+    catch (error) {
+        const message = String(error?.message || "");
+        if (message.includes("INVALID_MFA_CODE")) {
+            return res.status(400).json({ success: false, error: "Invalid MFA code" });
+        }
+        if (message.includes("MFA_SETUP_NOT_STARTED")) {
+            return res.status(400).json({ success: false, error: "MFA setup has not been started" });
+        }
+        console.error("confirmMfaSetupController error:", error);
+        return res.status(500).json({ success: false, error: "Failed to enable MFA" });
+    }
+};
+exports.confirmMfaSetupController = confirmMfaSetupController;
+const disableMfaController = async (req, res) => {
+    try {
+        const authReq = req;
+        const userId = authReq.user?.userId;
+        if (!userId)
+            return res.status(401).json({ success: false, error: "Not authenticated" });
+        const data = await (0, mfaService_1.disableAdminMfa)(userId);
+        return res.json({ success: true, data });
+    }
+    catch (error) {
+        console.error("disableMfaController error:", error);
+        return res.status(500).json({ success: false, error: "Failed to disable MFA" });
+    }
+};
+exports.disableMfaController = disableMfaController;
+const completeMfaLoginController = async (req, res) => {
+    try {
+        const parsed = mfaCompleteSchema.safeParse(req.body || {});
+        if (!parsed.success) {
+            return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+        }
+        const ipHash = (0, security_1.hashIp)(req.ip);
+        const userAgent = (0, security_1.normalizeUserAgent)(req.get("user-agent"));
+        const completed = await (0, mfaService_1.completeAdminMfaChallenge)({
+            ticket: parsed.data.ticket,
+            code: parsed.data.code,
+            ipHash,
+            userAgent,
+        });
+        const session = await (0, authService_1.issueSessionForUser)({
+            userId: completed.userId,
+            ipHash,
+            userAgent,
+        });
+        const accessTtlMs = (0, tokenService_1.getAccessTokenTtlMinutes)() * 60 * 1000;
+        const refreshTtlMs = (0, tokenService_1.getRefreshTokenTtlDays)() * 24 * 60 * 60 * 1000;
+        res.cookie(tokenService_1.ACCESS_TOKEN_COOKIE, session.accessToken, { ...authCookieOptions(), maxAge: accessTtlMs });
+        res.cookie(tokenService_1.REFRESH_TOKEN_COOKIE, session.refreshToken, { ...authCookieOptions(), maxAge: refreshTtlMs });
+        res.cookie(tokenService_1.CSRF_TOKEN_COOKIE, session.csrfToken, { ...csrfCookieOptions(), maxAge: refreshTtlMs });
+        return res.json({
+            success: true,
+            data: {
+                token: session.accessToken,
+                user: session.user,
+                mfaCompleted: true,
+                riskScore: completed.riskScore,
+                riskLevel: completed.riskLevel,
+            },
+        });
+    }
+    catch (error) {
+        const message = String(error?.message || "");
+        if (message.includes("MFA_CHALLENGE_NOT_FOUND") ||
+            message.includes("INVALID_MFA_CODE") ||
+            message.includes("MFA_NOT_ENABLED")) {
+            return res.status(401).json({ success: false, error: "MFA verification failed" });
+        }
+        console.error("completeMfaLoginController error:", error);
+        return res.status(500).json({ success: false, error: "Failed to complete MFA login" });
+    }
+};
+exports.completeMfaLoginController = completeMfaLoginController;
 const me = async (req, res) => {
     try {
         const authReq = req;
@@ -251,6 +401,7 @@ const invite = async (req, res) => {
         return res.status(201).json({ success: true, data: out });
     }
     catch (e) {
+        console.error("Invite error:", e);
         return res.status(400).json({ success: false, error: e?.message || "Invite failed" });
     }
 };
@@ -277,7 +428,21 @@ const acceptInviteController = async (req, res) => {
             password: parsed.data.password,
             ipHash,
             userAgent,
+            allowMfaChallenge: false,
         });
+        if ("mfaRequired" in session && session.mfaRequired) {
+            return res.status(202).json({
+                success: true,
+                data: {
+                    mfaRequired: true,
+                    mfaTicket: session.mfaTicket,
+                    mfaExpiresAt: session.mfaExpiresAt,
+                    riskScore: session.riskScore,
+                    riskLevel: session.riskLevel,
+                    reasons: session.reasons,
+                },
+            });
+        }
         res.cookie(tokenService_1.ACCESS_TOKEN_COOKIE, session.accessToken, { ...authCookieOptions(), maxAge: accessTtlMs });
         res.cookie(tokenService_1.REFRESH_TOKEN_COOKIE, session.refreshToken, { ...authCookieOptions(), maxAge: refreshTtlMs });
         res.cookie(tokenService_1.CSRF_TOKEN_COOKIE, session.csrfToken, { ...csrfCookieOptions(), maxAge: refreshTtlMs });

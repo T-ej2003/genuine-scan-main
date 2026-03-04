@@ -167,11 +167,12 @@ export const createTraceEventFromAuditLog = async (log: {
 export const backfillTraceEventsFromAuditLogs = async (opts?: {
   licenseeId?: string;
   limit?: number;
+  force?: boolean;
 }) => {
   const key = opts?.licenseeId || "__ALL__";
   const nowMs = Date.now();
   const last = backfillState.get(key) || 0;
-  if (nowMs - last < BACKFILL_COOLDOWN_MS) return;
+  if (!opts?.force && nowMs - last < BACKFILL_COOLDOWN_MS) return;
   backfillState.set(key, nowMs);
 
   const limit = Math.max(100, Math.min(opts?.limit ?? 2000, 10000));

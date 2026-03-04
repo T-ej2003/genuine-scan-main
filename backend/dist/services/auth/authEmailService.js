@@ -8,6 +8,7 @@ const nodemailer_1 = __importDefault(require("nodemailer"));
 const database_1 = __importDefault(require("../../config/database"));
 const auditService_1 = require("../auditService");
 const client_1 = require("@prisma/client");
+const email_1 = require("../../utils/email");
 const parseBool = (value, fallback = false) => {
     const normalized = String(value ?? "").trim().toLowerCase();
     if (["1", "true", "yes", "on"].includes(normalized))
@@ -29,7 +30,8 @@ const getFirstEnv = (...keys) => {
     return "";
 };
 const getMailFromDisplayName = () => String(getFirstEnv("MAIL_FROM_NAME", "EMAIL_FROM_NAME", "APP_NAME") || "MSCQR").trim() || "MSCQR";
-const getPreferredSuperadminEmailFromEnv = () => normalizeEmail(getFirstEnv("SUPER_ADMIN_EMAIL", "PLATFORM_SUPERADMIN_EMAIL", "SUPERADMIN_FROM_EMAIL", "EMAIL_FROM", "MAIL_FROM"));
+const getPreferredSuperadminEmailFromEnv = () => (0, email_1.normalizeEmailAddress)(getFirstEnv("SUPER_ADMIN_EMAIL", "PLATFORM_SUPERADMIN_EMAIL", "SUPERADMIN_FROM_EMAIL", "EMAIL_FROM", "MAIL_FROM"));
+const getAuthFromEmailFromEnv = () => (0, email_1.normalizeEmailAddress)(getFirstEnv("AUTH_EMAIL_FROM", "EMAIL_FROM", "MAIL_FROM"));
 const inferHostFromUserEmail = (userEmail) => {
     const domain = String(userEmail.split("@")[1] || "").toLowerCase().trim();
     if (!domain)
@@ -100,6 +102,20 @@ const getTransporter = () => {
     return { transporter, smtpUser: normalizeEmail(config.user), configError: null };
 };
 const formatFromAddress = (email) => `"${getMailFromDisplayName()}" <${email}>`;
+const summarizeMailError = (error) => {
+    const message = String(error?.message || "Email delivery failed").trim();
+    const code = String(error?.code || "").trim();
+    const responseCode = Number(error?.responseCode || 0);
+    const response = String(error?.response || "").trim();
+    const parts = [message];
+    if (code)
+        parts.push(`code=${code}`);
+    if (responseCode)
+        parts.push(`smtp=${responseCode}`);
+    if (response)
+        parts.push(`response=${response}`);
+    return parts.join(" | ");
+};
 const isFromRejectedError = (error) => {
     const message = String(error?.message || "").toLowerCase();
     const response = String(error?.response || "").toLowerCase();
@@ -144,13 +160,18 @@ const sendAuthEmail = async (input) => {
     const trState = getTransporter();
     const tr = trState.transporter;
     const smtpUser = trState.smtpUser;
-    const toAddress = normalizeEmail(input.toAddress);
+    const toAddress = (0, email_1.normalizeEmailAddress)(input.toAddress);
     const primarySuperadminEmail = await getPrimarySuperadminEmail();
-    const attemptedFrom = primarySuperadminEmail || smtpUser;
-    const usedFrom = smtpUser || attemptedFrom;
-    const replyTo = primarySuperadminEmail || null;
+    const configuredFrom = getAuthFromEmailFromEnv();
+    const smtpUserEmail = (0, email_1.normalizeEmailAddress)(smtpUser);
+    const attemptedFrom = primarySuperadminEmail || configuredFrom || smtpUserEmail;
+    const usedFrom = smtpUserEmail || configuredFrom || attemptedFrom;
+    const replyTo = primarySuperadminEmail || configuredFrom || null;
     let delivered = false;
     let providerMessageId = null;
+    let providerResponse = null;
+    let acceptedRecipients = [];
+    let rejectedRecipients = [];
     let errorMessage = null;
     let fallbackUsed = false;
     try {
@@ -170,17 +191,30 @@ const sendAuthEmail = async (input) => {
         if (replyTo)
             firstOpts.replyTo = replyTo;
         const info = await tr.sendMail(firstOpts);
-        delivered = true;
         providerMessageId = info?.messageId ? String(info.messageId) : null;
+        providerResponse = info?.response ? String(info.response) : null;
+        acceptedRecipients = Array.isArray(info?.accepted)
+            ? info.accepted.map((v) => String(v || "").trim()).filter(Boolean)
+            : [];
+        rejectedRecipients = Array.isArray(info?.rejected)
+            ? info.rejected.map((v) => String(v || "").trim()).filter(Boolean)
+            : [];
+        delivered = acceptedRecipients.length > 0 || rejectedRecipients.length === 0;
+        if (!delivered) {
+            errorMessage = "SMTP provider rejected recipient";
+        }
     }
     catch (error) {
         // If the superadmin email was used as From somewhere, retry with smtpUser.
-        const shouldRetryWithSmtpSender = Boolean(smtpUser) && Boolean(usedFrom) && normalizeEmail(usedFrom) !== smtpUser && isFromRejectedError(error);
+        const shouldRetryWithSmtpSender = Boolean(smtpUserEmail) &&
+            Boolean(usedFrom) &&
+            normalizeEmail(usedFrom) !== smtpUserEmail &&
+            isFromRejectedError(error);
         if (shouldRetryWithSmtpSender) {
             fallbackUsed = true;
             try {
                 const retryOpts = {
-                    from: formatFromAddress(smtpUser),
+                    from: formatFromAddress(smtpUserEmail),
                     to: toAddress || String(input.toAddress || "").trim(),
                     subject: input.subject,
                     text: input.text,
@@ -189,16 +223,53 @@ const sendAuthEmail = async (input) => {
                 if (replyTo)
                     retryOpts.replyTo = replyTo;
                 const info = await tr.sendMail(retryOpts);
-                delivered = true;
                 providerMessageId = info?.messageId ? String(info.messageId) : null;
+                providerResponse = info?.response ? String(info.response) : null;
+                acceptedRecipients = Array.isArray(info?.accepted)
+                    ? info.accepted.map((v) => String(v || "").trim()).filter(Boolean)
+                    : [];
+                rejectedRecipients = Array.isArray(info?.rejected)
+                    ? info.rejected.map((v) => String(v || "").trim()).filter(Boolean)
+                    : [];
+                delivered = acceptedRecipients.length > 0 || rejectedRecipients.length === 0;
+                if (!delivered) {
+                    errorMessage = "SMTP provider rejected recipient";
+                }
             }
             catch (retryError) {
-                errorMessage = retryError?.message || error?.message || "Email delivery failed";
+                errorMessage = summarizeMailError(retryError || error);
             }
         }
         else {
-            errorMessage = error?.message || "Email delivery failed";
+            errorMessage = summarizeMailError(error);
         }
+    }
+    if (delivered) {
+        console.info("AUTH_EMAIL delivered", {
+            template: input.template,
+            toAddress,
+            usedFrom,
+            replyTo,
+            providerMessageId,
+            providerResponse,
+            acceptedRecipients,
+            rejectedRecipients,
+            fallbackUsed,
+        });
+    }
+    else {
+        console.error("AUTH_EMAIL failed", {
+            template: input.template,
+            toAddress: toAddress || String(input.toAddress || "").trim(),
+            usedFrom,
+            replyTo,
+            providerMessageId,
+            providerResponse,
+            acceptedRecipients,
+            rejectedRecipients,
+            error: errorMessage,
+            fallbackUsed,
+        });
     }
     try {
         await (0, auditService_1.createAuditLog)({
@@ -217,6 +288,9 @@ const sendAuthEmail = async (input) => {
                 replyTo,
                 delivered,
                 providerMessageId,
+                providerResponse,
+                acceptedRecipients,
+                rejectedRecipients,
                 error: errorMessage,
                 fallbackUsed,
             },
@@ -228,7 +302,17 @@ const sendAuthEmail = async (input) => {
         // Don't fail auth flows because audit email logging failed.
         console.error("AUTH_EMAIL audit log failed:", e);
     }
-    return { delivered, error: errorMessage, attemptedFrom, usedFrom, replyTo, providerMessageId };
+    return {
+        delivered,
+        error: errorMessage,
+        attemptedFrom,
+        usedFrom,
+        replyTo,
+        providerMessageId,
+        providerResponse,
+        acceptedRecipients,
+        rejectedRecipients,
+    };
 };
 exports.sendAuthEmail = sendAuthEmail;
 //# sourceMappingURL=authEmailService.js.map

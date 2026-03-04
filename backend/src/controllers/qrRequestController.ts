@@ -18,7 +18,7 @@ const ALLOCATION_TX_MAX_WAIT_MS = parsePositiveIntEnv("ALLOCATION_TX_MAX_WAIT_MS
 const createRequestSchema = z
   .object({
     quantity: z.number().int().positive().max(5_000_000),
-    batchName: z.string().trim().min(2).max(120).optional(),
+    batchName: z.string().trim().min(2).max(120),
     note: z.string().trim().max(500).optional(),
   });
 
@@ -72,7 +72,7 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
         quantity: parsed.data.quantity,
         startNumber: null,
         endNumber: null,
-        batchName: parsed.data.batchName?.trim() || null,
+        batchName: parsed.data.batchName.trim(),
         note: parsed.data.note?.trim() || null,
         status: QrAllocationRequestStatus.PENDING,
       },

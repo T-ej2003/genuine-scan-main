@@ -31,13 +31,6 @@ import {
 } from "@/components/ui/dialog";
 
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -50,7 +43,7 @@ import { useToast } from "@/hooks/use-toast";
 import { onMutationEvent } from "@/lib/mutation-events";
 
 import { format } from "date-fns";
-import { Search, Trash2, RefreshCw, MoreHorizontal, Download, UserCog, Activity } from "lucide-react";
+import { Search, Trash2, RefreshCw, Download, UserCog, Activity, PencilLine } from "lucide-react";
 
 import { saveAs } from "file-saver";
 
@@ -122,7 +115,10 @@ export default function Batches() {
   const [assignBatch, setAssignBatch] = useState<BatchRow | null>(null);
   const [assignManufacturerId, setAssignManufacturerId] = useState<string>("");
   const [assignQuantity, setAssignQuantity] = useState<string>("");
-  const [assignBatchName, setAssignBatchName] = useState<string>("");
+
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameBatch, setRenameBatch] = useState<BatchRow | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   // print pack dialog
   const [printOpen, setPrintOpen] = useState(false);
@@ -140,6 +136,7 @@ export default function Batches() {
   const [historyBatch, setHistoryBatch] = useState<BatchRow | null>(null);
   const [historyLogs, setHistoryLogs] = useState<TraceEventRow[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyLastUpdatedAt, setHistoryLastUpdatedAt] = useState<Date | null>(null);
 
   const fetchBatches = async () => {
     setLoading(true);
@@ -252,8 +249,38 @@ export default function Batches() {
     setAssignBatch(b);
     setAssignManufacturerId(b.manufacturer?.id || "");
     setAssignQuantity("");
-    setAssignBatchName("");
     setAssignOpen(true);
+  };
+
+  const openRename = (b: BatchRow) => {
+    setRenameBatch(b);
+    setRenameValue(b.name || "");
+    setRenameOpen(true);
+  };
+
+  const submitRename = async () => {
+    if (!renameBatch) return;
+    const nextName = renameValue.trim();
+    if (nextName.length < 2) {
+      toast({ title: "Batch name too short", description: "Enter at least 2 characters.", variant: "destructive" });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await apiClient.renameBatch(renameBatch.id, nextName);
+      if (!res.success) {
+        toast({ title: "Rename failed", description: res.error || "Error", variant: "destructive" });
+        return;
+      }
+      toast({ title: "Batch renamed", description: `Updated to "${nextName}".` });
+      setRenameOpen(false);
+      setRenameBatch(null);
+      setRenameValue("");
+      await fetchBatches();
+    } finally {
+      setLoading(false);
+    }
   };
 
   const submitAssign = async () => {
@@ -294,7 +321,6 @@ export default function Batches() {
         batchId: assignBatch.id,
         manufacturerId: assignManufacturerId,
         quantity: qty,
-        name: assignBatchName.trim() || undefined,
       });
 
       if (!res.success) {
@@ -312,7 +338,7 @@ export default function Batches() {
       }
 
       const data: any = res.data || {};
-      const createdName = data.newBatchName || assignBatchName.trim() || "Auto";
+      const createdName = data.newBatchName || "Auto";
       if (showLargeAllocationProgress) {
         await progress.complete(
           `Allocated ${qty.toLocaleString()} codes. Child batch ${data.newBatchId || "(id pending)"} is ready for print.`
@@ -326,7 +352,6 @@ export default function Batches() {
       setAssignBatch(null);
       setAssignManufacturerId("");
       setAssignQuantity("");
-      setAssignBatchName("");
       await fetchBatches();
     } catch (e: any) {
       if (showLargeAllocationProgress) progress.close();
@@ -445,12 +470,12 @@ export default function Batches() {
     }
   };
 
-  const openHistory = async (b: BatchRow) => {
-    setHistoryBatch(b);
-    setHistoryOpen(true);
-    setHistoryLoading(true);
+  const fetchHistory = async (batch: BatchRow, opts?: { silent?: boolean }) => {
+    if (!opts?.silent) {
+      setHistoryLoading(true);
+    }
     try {
-      const traceRes = await apiClient.getTraceTimeline({ batchId: b.id, limit: 100 });
+      const traceRes = await apiClient.getTraceTimeline({ batchId: batch.id, limit: 100 });
       if (traceRes.success) {
         const payload: any = traceRes.data;
         const list = Array.isArray(payload)
@@ -461,6 +486,7 @@ export default function Batches() {
           ? payload.logs
           : [];
         setHistoryLogs((list as TraceEventRow[]) || []);
+        setHistoryLastUpdatedAt(new Date());
       } else {
         setHistoryLogs([]);
       }
@@ -468,6 +494,20 @@ export default function Batches() {
       setHistoryLoading(false);
     }
   };
+
+  const openHistory = async (b: BatchRow) => {
+    setHistoryBatch(b);
+    setHistoryOpen(true);
+    await fetchHistory(b);
+  };
+
+  useEffect(() => {
+    if (!historyOpen || !historyBatch) return;
+    const timer = window.setInterval(() => {
+      fetchHistory(historyBatch, { silent: true });
+    }, 8_000);
+    return () => window.clearInterval(timer);
+  }, [historyOpen, historyBatch]);
 
   const eventBadgeClass = (eventType?: string) => {
     if (eventType === "COMMISSIONED") return "bg-sky-500/10 text-sky-700";
@@ -603,32 +643,29 @@ export default function Batches() {
 
           <CardContent>
             <div className="rounded-md border">
-              <Table>
+              <Table className="table-fixed">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Batch</TableHead>
-                    <TableHead>Licensee</TableHead>
-                  <TableHead>Range</TableHead>
-                  <TableHead>Total</TableHead>
-                  <TableHead>Remaining</TableHead>
-                  <TableHead>Assigned QR</TableHead>
-                  <TableHead>Manufacturer</TableHead>
-                  <TableHead>Printed</TableHead>
-                  <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead>Range</TableHead>
+                    <TableHead>Availability</TableHead>
+                    <TableHead>Manufacturer</TableHead>
+                    <TableHead>Printed</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead>Controls</TableHead>
                   </TableRow>
                 </TableHeader>
 
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={10} className="text-muted-foreground">
+                      <TableCell colSpan={7} className="text-muted-foreground">
                         Loading...
                       </TableCell>
                     </TableRow>
                   ) : filtered.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={10} className="text-muted-foreground">
+                      <TableCell colSpan={7} className="text-muted-foreground">
                         No batches found.
                       </TableCell>
                     </TableRow>
@@ -641,37 +678,31 @@ export default function Batches() {
                         <TableRow key={b.id}>
                           <TableCell>
                             <div className="space-y-1">
-                              <div className="font-medium">{b.name}</div>
-                              <div className="text-[11px] text-muted-foreground font-mono">{b.id}</div>
+                              <div className="font-medium break-words">{b.name}</div>
+                              <div className="text-[11px] text-muted-foreground font-mono break-all">{b.id}</div>
+                              {b.licensee?.name ? (
+                                <div className="text-xs text-muted-foreground">
+                                  {b.licensee.name} ({b.licensee.prefix})
+                                </div>
+                              ) : (
+                                <div className="text-xs text-muted-foreground">{b.licenseeId}</div>
+                              )}
+                              <div className="flex items-center gap-2 text-xs">
+                                <Badge variant={assignedCount > 0 ? "default" : "secondary"}>{assignedCount} assigned</Badge>
+                                <Badge variant={b.totalCodes > 0 ? "outline" : "secondary"}>{b.totalCodes} total</Badge>
+                              </div>
                             </div>
                           </TableCell>
 
-                          <TableCell>
-                            {b.licensee?.name ? (
-                              <div className="space-y-1">
-                                <div>{b.licensee.name}</div>
-                                <div className="text-xs text-muted-foreground">
-                                  Prefix: {b.licensee.prefix}
-                                </div>
-                              </div>
-                            ) : (
-                              <span className="text-muted-foreground">{b.licenseeId}</span>
-                            )}
-                          </TableCell>
-
                           <TableCell className="font-mono text-xs">
-                            <div>{b.startCode}</div>
-                            <div>{b.endCode}</div>
+                            <div className="break-all">{b.startCode}</div>
+                            <div className="break-all">{b.endCode}</div>
                           </TableCell>
-
-                          <TableCell>{b.totalCodes}</TableCell>
 
                           <TableCell>
                             <div className="space-y-1">
-                              <Badge variant={b.availableCodes ? "default" : "secondary"}>
-                                {b.availableCodes ?? 0}
-                              </Badge>
-                              <div className="text-[11px] text-muted-foreground font-mono">
+                              <Badge variant={b.availableCodes ? "default" : "secondary"}>{b.availableCodes ?? 0} remaining</Badge>
+                              <div className="text-[11px] text-muted-foreground font-mono break-all">
                                 {b.remainingStartCode && b.remainingEndCode
                                   ? `${b.remainingStartCode} → ${b.remainingEndCode}`
                                   : "—"}
@@ -680,17 +711,13 @@ export default function Batches() {
                           </TableCell>
 
                           <TableCell>
-                            <Badge variant={assignedCount > 0 ? "default" : "secondary"}>{assignedCount}</Badge>
-                          </TableCell>
-
-                          <TableCell>
                             {b.manufacturer ? (
                               <div className="space-y-1">
                                 <div>{b.manufacturer.name}</div>
-                                <div className="text-xs text-muted-foreground">{b.manufacturer.email}</div>
+                                <div className="text-xs text-muted-foreground break-all">{b.manufacturer.email}</div>
                               </div>
                             ) : (
-                              <span className="text-muted-foreground">—</span>
+                              <span className="text-muted-foreground">Unassigned</span>
                             )}
                           </TableCell>
 
@@ -708,10 +735,10 @@ export default function Batches() {
                             {b.createdAt ? format(new Date(b.createdAt), "MMM d, yyyy") : "—"}
                           </TableCell>
 
-                          <TableCell className="text-right">
+                          <TableCell>
                             {/* Manufacturer: print pack download (one-time) */}
                             {isManufacturer ? (
-                              <div className="flex justify-end gap-2">
+                              <div className="flex flex-wrap gap-2">
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -723,40 +750,40 @@ export default function Batches() {
                                 </Button>
                               </div>
                             ) : (
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button variant="outline" size="sm">
-                                    <MoreHorizontal className="mr-2 h-4 w-4" />
-                                    Actions
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuItem onClick={() => openHistory(b)}>
+                              <div className="rounded-lg border bg-muted/20 p-2">
+                                <div className="mb-2 text-[11px] font-medium text-muted-foreground">Control Panel</div>
+                                <div className="flex flex-wrap gap-2">
+                                  <Button size="sm" variant="outline" onClick={() => openHistory(b)}>
                                     <Activity className="mr-2 h-4 w-4" />
-                                    View history
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
+                                    History
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => openRename(b)} disabled={!!b.printedAt}>
+                                    <PencilLine className="mr-2 h-4 w-4" />
+                                    Rename
+                                  </Button>
+                                  {canAssignManufacturer && (
+                                    <Button size="sm" variant="outline" onClick={() => openAssign(b)} disabled={!!b.manufacturer || !!b.printedAt}>
+                                      <UserCog className="mr-2 h-4 w-4" />
+                                      Assign
+                                    </Button>
+                                  )}
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
                                     onClick={() => downloadAuditPackage(b)}
                                     disabled={exportingBatchId === b.id}
                                   >
                                     <Download className="mr-2 h-4 w-4" />
-                                    {exportingBatchId === b.id ? "Preparing package..." : "Download audit package"}
-                                  </DropdownMenuItem>
-                                  {canAssignManufacturer && (
-                                    <DropdownMenuItem onClick={() => openAssign(b)} disabled={!!b.manufacturer || !!b.printedAt}>
-                                      <UserCog className="mr-2 h-4 w-4" />
-                                      Assign manufacturer
-                                    </DropdownMenuItem>
-                                  )}
-
+                                    {exportingBatchId === b.id ? "Preparing..." : "Audit"}
+                                  </Button>
                                   {canDelete && (
-                                    <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(b)}>
+                                    <Button size="sm" variant="outline" className="text-destructive" onClick={() => handleDelete(b)}>
                                       <Trash2 className="mr-2 h-4 w-4" />
                                       Delete
-                                    </DropdownMenuItem>
+                                    </Button>
                                   )}
-                                </DropdownMenuContent>
-                              </DropdownMenu>
+                                </div>
+                              </div>
                             )}
                           </TableCell>
                         </TableRow>
@@ -782,7 +809,6 @@ export default function Batches() {
               setAssignBatch(null);
               setAssignManufacturerId("");
               setAssignQuantity("");
-              setAssignBatchName("");
             }
           }}
         >
@@ -848,23 +874,60 @@ export default function Batches() {
                   )}
                 </div>
 
-                <div className="space-y-2">
-                  <Label>New Child Batch Name (optional)</Label>
-                  <Input
-                    value={assignBatchName}
-                    onChange={(e) => setAssignBatchName(e.target.value)}
-                    placeholder="e.g. Factory-A PO-1234"
-                  />
-                  <div className="text-xs text-muted-foreground">
-                    If empty, a default name is generated automatically.
-                  </div>
-                </div>
-
                 <div className="flex justify-end gap-3 pt-2">
                   <Button variant="outline" onClick={() => setAssignOpen(false)} disabled={loading}>
                     Cancel
                   </Button>
                   <Button onClick={submitAssign} disabled={loading}>
+                    Save
+                  </Button>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Rename Batch Dialog */}
+        <Dialog
+          open={renameOpen}
+          onOpenChange={(v) => {
+            setRenameOpen(v);
+            if (!v) {
+              setRenameBatch(null);
+              setRenameValue("");
+            }
+          }}
+        >
+          <DialogContent className="sm:max-w-[520px]">
+            <DialogHeader>
+              <DialogTitle>Rename Batch</DialogTitle>
+              <DialogDescription>Update the batch label for easier operations tracking.</DialogDescription>
+            </DialogHeader>
+
+            {!renameBatch ? (
+              <div className="text-sm text-muted-foreground">No batch selected.</div>
+            ) : (
+              <div className="space-y-4 mt-2">
+                <div className="rounded-md border p-3 text-sm">
+                  <div className="font-medium">{renameBatch.name}</div>
+                  <div className="text-muted-foreground font-mono text-xs">{renameBatch.id}</div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Batch name</Label>
+                  <Input
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    maxLength={120}
+                    placeholder="Enter batch name"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2">
+                  <Button variant="outline" onClick={() => setRenameOpen(false)} disabled={loading}>
+                    Cancel
+                  </Button>
+                  <Button onClick={submitRename} disabled={loading}>
                     Save
                   </Button>
                 </div>
@@ -943,7 +1006,17 @@ export default function Batches() {
         </Dialog>
 
         {/* Allocation History Dialog */}
-        <Dialog open={historyOpen} onOpenChange={(v) => { setHistoryOpen(v); if (!v) { setHistoryBatch(null); setHistoryLogs([]); } }}>
+        <Dialog
+          open={historyOpen}
+          onOpenChange={(v) => {
+            setHistoryOpen(v);
+            if (!v) {
+              setHistoryBatch(null);
+              setHistoryLogs([]);
+              setHistoryLastUpdatedAt(null);
+            }
+          }}
+        >
           <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Batch History</DialogTitle>
@@ -951,6 +1024,27 @@ export default function Batches() {
                 {historyBatch ? historyBatch.name : "Selected batch"} — lifecycle timeline (COMMISSIONED → ASSIGNED → PRINTED → REDEEMED/BLOCKED)
               </DialogDescription>
             </DialogHeader>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2 text-xs">
+              <div className="flex items-center gap-2">
+                <Badge className="bg-emerald-500/10 text-emerald-700">Live</Badge>
+                <span className="text-muted-foreground">
+                  {historyLastUpdatedAt ? `Updated ${format(historyLastUpdatedAt, "PPp")}` : "Waiting for first snapshot..."}
+                </span>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  if (!historyBatch) return;
+                  fetchHistory(historyBatch);
+                }}
+                disabled={!historyBatch || historyLoading}
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Refresh now
+              </Button>
+            </div>
 
             {historyLoading ? (
               <div className="text-sm text-muted-foreground">Loading history…</div>

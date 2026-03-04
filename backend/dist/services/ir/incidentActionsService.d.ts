@@ -1,7 +1,7 @@
 export type IrContainmentAction = "FLAG_QR_UNDER_INVESTIGATION" | "UNFLAG_QR_UNDER_INVESTIGATION" | "SUSPEND_BATCH" | "REINSTATE_BATCH" | "SUSPEND_ORG" | "REINSTATE_ORG" | "SUSPEND_MANUFACTURER_USERS" | "REINSTATE_MANUFACTURER_USERS";
 export declare const applyContainmentAction: (input: {
     incidentId: string;
-    actorUserId: string;
+    actorUserId?: string | null;
     action: IrContainmentAction;
     reason: string;
     qrCodeId?: string | null;

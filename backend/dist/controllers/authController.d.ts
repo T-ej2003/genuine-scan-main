@@ -1,5 +1,10 @@
 import { Request, Response } from "express";
 export declare const login: (req: Request, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const getMfaStatusController: (req: Request, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const beginMfaSetupController: (req: Request, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const confirmMfaSetupController: (req: Request, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const disableMfaController: (req: Request, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const completeMfaLoginController: (req: Request, res: Response) => Promise<Response<any, Record<string, any>>>;
 export declare const me: (req: Request, res: Response) => Promise<Response<any, Record<string, any>>>;
 export declare const refresh: (req: Request, res: Response) => Promise<Response<any, Record<string, any>>>;
 export declare const logout: (req: Request, res: Response) => Promise<Response<any, Record<string, any>>>;

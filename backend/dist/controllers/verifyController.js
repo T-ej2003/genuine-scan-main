@@ -18,7 +18,11 @@ const scanInsightService_1 = require("../services/scanInsightService");
 const governanceService_1 = require("../services/governanceService");
 const tamperEvidenceService_1 = require("../services/tamperEvidenceService");
 const supportWorkflowService_1 = require("../services/supportWorkflowService");
+const duplicateRiskService_1 = require("../services/duplicateRiskService");
+const captchaService_1 = require("../services/captchaService");
+const incidentRateLimitService_1 = require("../services/incidentRateLimitService");
 const security_1 = require("../utils/security");
+const requestFingerprint_1 = require("../utils/requestFingerprint");
 const INCIDENT_TYPES = ["counterfeit_suspected", "duplicate_scan", "tampered_label", "wrong_product", "other"];
 const reportFraudSchema = zod_1.z
     .object({
@@ -108,6 +112,7 @@ const mapBatch = (batch) => batch
     }
     : null;
 const normalizeCode = (value) => String(value || "").trim().toUpperCase();
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const parseBoolean = (value, fallback = false) => {
     if (typeof value === "boolean")
         return value;
@@ -180,39 +185,6 @@ const buildContainment = (qrCode) => ({
         }
         : null,
 });
-const deriveDuplicateReasons = (params) => {
-    const reasons = [];
-    const scanSignals = params.scanSignals || null;
-    const policy = params.policy || null;
-    const triggered = policy?.triggered || {};
-    const alerts = Array.isArray(policy?.alerts) ? policy.alerts : [];
-    if (Number(scanSignals?.distinctDeviceCount24h ?? 0) > 1) {
-        reasons.push("Multiple devices scanned this code recently.");
-    }
-    if (Number(scanSignals?.recentScanCount10m ?? 0) >= 3) {
-        reasons.push("A short burst of scans was detected.");
-    }
-    if (Number(scanSignals?.distinctCountryCount24h ?? 0) > 1) {
-        reasons.push("Recent scans came from different countries.");
-    }
-    if (params.scanCount >= 4 || triggered.multiScan) {
-        reasons.push("High repeat-scan volume was detected.");
-    }
-    if (triggered.geoDrift) {
-        reasons.push("Scan geography drift exceeded policy threshold.");
-    }
-    if (triggered.velocitySpike) {
-        reasons.push("Scan velocity exceeded policy threshold.");
-    }
-    for (const alert of alerts) {
-        const message = String(alert?.message || "").trim();
-        if (!message)
-            continue;
-        if (!reasons.includes(message))
-            reasons.push(message);
-    }
-    return reasons.slice(0, 6);
-};
 const buildScanSummary = (params) => {
     const firstVerifiedAt = params.scanInsight?.firstScanAt ||
         (params.scannedAt && Number.isFinite(params.scannedAt.getTime()) ? params.scannedAt.toISOString() : null);
@@ -280,7 +252,6 @@ const buildOwnershipStatus = (params) => {
     const ownership = params.ownership;
     const customerUserId = String(params.customerUserId || "").trim();
     const deviceTokenHash = String(params.deviceTokenHash || "").trim();
-    const ipHashValue = String(params.ipHash || "").trim();
     const allowClaim = params.allowClaim !== false;
     const claimUnavailable = !params.isReady || params.isBlocked || !allowClaim;
     if (!ownership) {
@@ -304,15 +275,12 @@ const buildOwnershipStatus = (params) => {
         isOwnedByRequester = true;
         matchMethod = "device_token";
     }
-    else if (!deviceTokenHash && ipHashValue && ownership.ipHash && ownership.ipHash === ipHashValue) {
-        isOwnedByRequester = true;
-        matchMethod = "ip_fallback";
-    }
     return {
         isClaimed: true,
         claimedAt: ownership.claimedAt.toISOString(),
         isOwnedByRequester,
-        isClaimedByAnother: !isOwnedByRequester,
+        // Avoid false conflicts for anonymous users: only hard-conflict when identity evidence exists.
+        isClaimedByAnother: !isOwnedByRequester && (Boolean(customerUserId) || Boolean(deviceTokenHash)),
         canClaim: false,
         state: isOwnedByRequester ? "owned_by_you" : "owned_by_someone_else",
         matchMethod,
@@ -451,13 +419,16 @@ const buildFraudVerificationSnapshot = async (normalizedCode) => {
             ownershipStatus,
         };
     }
-    const duplicateReasons = deriveDuplicateReasons({
+    const duplicateRisk = (0, duplicateRiskService_1.assessDuplicateRisk)({
         scanCount: scanSummary.totalScans,
         scanSignals: scanInsight.signals,
+        ownershipStatus,
+        latestScanAt: scanInsight.latestScanAt,
+        previousScanAt: scanInsight.previousScanAt,
     });
     return {
-        classification: duplicateReasons.length ? "SUSPICIOUS_DUPLICATE" : "LEGIT_REPEAT",
-        reasons: duplicateReasons.length ? duplicateReasons : ["Repeat scans match expected customer re-verification behavior."],
+        classification: duplicateRisk.classification,
+        reasons: duplicateRisk.reasons,
         scanSummary,
         ownershipStatus,
     };
@@ -614,6 +585,7 @@ const verifyQRCode = async (req, res) => {
             },
         });
         if (!qrCode) {
+            await delay(150 + Math.floor(Math.random() * 150));
             const reasons = ["Code not found in registry."];
             const emptySummary = {
                 totalScans: 0,
@@ -663,16 +635,19 @@ const verifyQRCode = async (req, res) => {
                     totalScans: 0,
                     firstVerifiedAt: null,
                     latestVerifiedAt: null,
+                    riskScore: 70,
+                    riskSignals: null,
                 },
             });
         }
         const verifyUxPolicy = await (0, governanceService_1.resolveVerifyUxPolicy)(qrCode.licenseeId || null);
         const customerUserId = req.customer?.userId || null;
+        const requestDeviceFingerprint = (0, requestFingerprint_1.deriveRequestDeviceFingerprint)(req);
         const deviceClaimToken = getDeviceClaimTokenFromRequest(req);
         const deviceTokenHash = deviceClaimToken ? (0, security_1.hashToken)(deviceClaimToken) : null;
         const requesterIpHash = (0, security_1.hashIp)(req.ip);
         const containment = buildContainment(qrCode);
-        const scanInsight = await (0, scanInsightService_1.getScanInsight)(qrCode.id, req.query.device || null);
+        const scanInsight = await (0, scanInsightService_1.getScanInsight)(qrCode.id, requestDeviceFingerprint);
         const baseScanSummary = buildScanSummary({
             scanCount: Number(qrCode.scanCount || 0),
             scannedAt: qrCode.scannedAt,
@@ -741,6 +716,8 @@ const verifyQRCode = async (req, res) => {
                     totalScans: baseScanSummary.totalScans,
                     firstVerifiedAt: baseScanSummary.firstVerifiedAt,
                     latestVerifiedAt: baseScanSummary.latestVerifiedAt,
+                    riskScore: 100,
+                    riskSignals: null,
                 },
             });
         }
@@ -780,6 +757,8 @@ const verifyQRCode = async (req, res) => {
                     totalScans: baseScanSummary.totalScans,
                     firstVerifiedAt: baseScanSummary.firstVerifiedAt,
                     latestVerifiedAt: baseScanSummary.latestVerifiedAt,
+                    riskScore: 70,
+                    riskSignals: null,
                 },
             });
         }
@@ -793,7 +772,7 @@ const verifyQRCode = async (req, res) => {
         const { isFirstScan, qrCode: updated } = await (0, qrService_1.recordScan)(normalizedCode, {
             ipAddress: req.ip,
             userAgent: req.get("user-agent") || null,
-            device: req.query.device || null,
+            device: requestDeviceFingerprint,
             latitude,
             longitude,
             accuracy,
@@ -826,7 +805,7 @@ const verifyQRCode = async (req, res) => {
         const isBlocked = blockedByPolicy || finalStatus === client_1.QRStatus.BLOCKED;
         const isReady = isQrReadyForCustomerUse(finalStatus);
         const firstScanTime = updated.scannedAt ? new Date(updated.scannedAt) : null;
-        const postScanInsight = await (0, scanInsightService_1.getScanInsight)(updated.id, req.query.device || null);
+        const postScanInsight = await (0, scanInsightService_1.getScanInsight)(updated.id, requestDeviceFingerprint);
         const postScanSummary = buildScanSummary({
             scanCount: Number(updated.scanCount || 0),
             scannedAt: firstScanTime,
@@ -853,13 +832,19 @@ const verifyQRCode = async (req, res) => {
             isBlocked,
             allowClaim: verifyUxPolicy.allowOwnershipClaim,
         });
-        const duplicateReasons = deriveDuplicateReasons({
+        const duplicateRisk = (0, duplicateRiskService_1.assessDuplicateRisk)({
             scanCount: postScanSummary.totalScans,
             scanSignals: postScanInsight.signals,
             policy,
+            ownershipStatus,
+            customerUserId,
+            latestScanAt: postScanInsight.latestScanAt,
+            previousScanAt: postScanInsight.previousScanAt,
         });
         let classification;
         let reasons;
+        let riskScore = duplicateRisk.riskScore;
+        let riskSignals = duplicateRisk.signals;
         if (isBlocked) {
             classification = "BLOCKED_BY_SECURITY";
             reasons = [
@@ -868,24 +853,25 @@ const verifyQRCode = async (req, res) => {
                     : "This code is blocked by security controls.",
                 ...buildSecurityContainmentReasons(runtimeContainment),
             ];
+            riskScore = 100;
+            riskSignals = null;
         }
         else if (isFirstScan) {
             classification = "FIRST_SCAN";
             reasons = ["First successful customer verification recorded."];
-        }
-        else if (duplicateReasons.length > 0) {
-            classification = "SUSPICIOUS_DUPLICATE";
-            reasons = duplicateReasons;
+            riskScore = 4;
+            riskSignals = null;
         }
         else {
-            classification = "LEGIT_REPEAT";
-            reasons = ["Repeat verification pattern matches normal customer behavior."];
+            classification = duplicateRisk.classification;
+            reasons = duplicateRisk.reasons;
         }
         if (ownershipStatus.isClaimedByAnother && !isBlocked) {
             classification = "SUSPICIOUS_DUPLICATE";
             if (!reasons.includes("Ownership is already claimed by another account.")) {
                 reasons.unshift("Ownership is already claimed by another account.");
             }
+            riskScore = Math.max(riskScore, 70);
         }
         const verificationTimeline = buildVerificationTimeline({
             scanSummary: postScanSummary,
@@ -936,6 +922,8 @@ const verifyQRCode = async (req, res) => {
                 totalScans: postScanSummary.totalScans,
                 firstVerifiedAt: postScanSummary.firstVerifiedAt,
                 latestVerifiedAt: postScanSummary.latestVerifiedAt,
+                riskScore,
+                riskSignals,
                 warningMessage,
                 policy,
             },
@@ -1328,6 +1316,27 @@ const reportFraud = async (req, res) => {
         }
         const payload = parsed.data;
         const normalizedCode = normalizeCode(payload.code || payload.qrCodeValue || "");
+        const fingerprint = (0, requestFingerprint_1.deriveRequestDeviceFingerprint)(req, { allowClientHint: false });
+        const rateLimit = (0, incidentRateLimitService_1.enforceIncidentRateLimit)({
+            ip: req.ip,
+            qrCode: normalizedCode,
+            deviceFp: fingerprint,
+        });
+        if (rateLimit.blocked) {
+            res.setHeader("Retry-After", String(rateLimit.retryAfterSec));
+            return res.status(429).json({
+                success: false,
+                error: "Too many reports submitted. Please try again later.",
+            });
+        }
+        const captchaToken = String(req.headers["x-captcha-token"] || req.body?.captchaToken || "").trim();
+        const captcha = await (0, captchaService_1.verifyCaptchaToken)(captchaToken, req.ip);
+        if (!captcha.ok) {
+            return res.status(400).json({
+                success: false,
+                error: captcha.reason || "Captcha verification failed",
+            });
+        }
         const incidentType = inferIncidentType({
             reason: payload.reason,
             incidentType: payload.incidentType,
@@ -1447,6 +1456,18 @@ const submitProductFeedback = async (req, res) => {
         }
         const payload = parsed.data;
         const normalizedCode = payload.code.toUpperCase();
+        const feedbackRate = (0, incidentRateLimitService_1.enforceIncidentRateLimit)({
+            ip: req.ip,
+            qrCode: normalizedCode,
+            deviceFp: (0, requestFingerprint_1.deriveRequestDeviceFingerprint)(req, { allowClientHint: false }),
+        });
+        if (feedbackRate.blocked) {
+            res.setHeader("Retry-After", String(feedbackRate.retryAfterSec));
+            return res.status(429).json({
+                success: false,
+                error: "Too many feedback attempts. Please try again later.",
+            });
+        }
         const qrCode = await database_1.default.qRCode.findUnique({
             where: { code: normalizedCode },
             select: {

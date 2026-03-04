@@ -303,12 +303,13 @@ const createIncidentFromReport = async (payload, actor, uploads) => {
             incidentId: incident.id,
             licenseeId: incident.licenseeId || null,
             type: "incident_created",
-            title: `New incident ${incident.id.slice(0, 8)}`,
-            body: `Incident ${incident.id} has entered intake with severity ${incident.severity}.`,
+            title: "New incident reported",
+            body: `A ${(0, exports.toHumanIncidentType)(incident.incidentType).toLowerCase()} case entered intake (severity ${(0, exports.toHumanIncidentSeverity)(incident.severity)}).`,
             data: {
                 severity: incident.severity,
                 status: incident.status,
                 qrCodeValue: incident.qrCodeValue,
+                incidentType: incident.incidentType,
             },
         });
     }
