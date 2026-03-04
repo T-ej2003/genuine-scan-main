@@ -30,7 +30,7 @@ class ApiClient {
 
   constructor() {
     // Access tokens are stored in HttpOnly cookies (server-managed).
-    // We keep an in-memory access token only for legacy/SSE flows.
+    // We keep an in-memory access token for SSE compatibility flows.
     this.token = null;
   }
 
