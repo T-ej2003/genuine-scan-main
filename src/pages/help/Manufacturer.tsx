@@ -11,7 +11,7 @@ export default function ManufacturerHelp() {
   return (
     <HelpShell
       title="Manufacturer (factory user)"
-      subtitle="Production execution: assigned batches, print jobs, and secure print pack handling."
+      subtitle="Production execution: assigned batches, direct-print jobs, and one-time token handling."
     >
       <div className="space-y-6">
         <Card>
@@ -25,7 +25,7 @@ export default function ManufacturerHelp() {
             <ul className="list-disc pl-5">
               <li>View batches assigned to your manufacturer account only.</li>
               <li>Create print jobs for approved quantities.</li>
-              <li>Download secure print packs (ZIP) for printing.</li>
+              <li>Request one-time short-lived render tokens via authenticated print agent.</li>
               <li>Confirm print status via the batch status indicators.</li>
             </ul>
           </CardContent>
@@ -33,9 +33,10 @@ export default function ManufacturerHelp() {
 
         <Alert>
           <FileArchive className="h-4 w-4" />
-          <AlertTitle>Keep print packs secure</AlertTitle>
+          <AlertTitle>Direct-print security mode</AlertTitle>
           <AlertDescription>
-            Print packs contain signed QR tokens intended for controlled printing. Store ZIPs in your secure production environment and do not share publicly.
+            ZIP/PNG distribution is disabled. Industrial printers must request one-time short-lived server render tokens
+            for each QR just-in-time.
           </AlertDescription>
         </Alert>
 
@@ -63,14 +64,14 @@ export default function ManufacturerHelp() {
               <CardHeader className="space-y-1">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Download className="h-4 w-4 text-primary" />
-                  Download the print pack
+                  Request direct-print tokens
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">
-                  <li>After job creation, select <Badge variant="outline">Download ZIP</Badge>.</li>
-                  <li>Save the ZIP and print labels for the selected quantity.</li>
-                  <li>Return to Batches and confirm the status is updated.</li>
+                  <li>After job creation, issue one-time render tokens.</li>
+                  <li>Your print agent resolves each token and renders QR just-in-time.</li>
+                  <li>Printed status updates as tokens are consumed and job confirms on completion.</li>
                 </ol>
               </CardContent>
             </Card>
@@ -78,7 +79,7 @@ export default function ManufacturerHelp() {
 
           <Card>
             <CardHeader className="space-y-1">
-              <CardTitle className="text-base">What to expect after download</CardTitle>
+              <CardTitle className="text-base">What to expect after direct-print</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-muted-foreground">
               <ul className="list-disc pl-5">
@@ -101,8 +102,8 @@ export default function ManufacturerHelp() {
             />
             <DocScreenshot
               filename="manufacturer-download-print-pack.png"
-              alt="Download print pack"
-              caption="Print job: download secure ZIP."
+              alt="Issue direct-print tokens"
+              caption="Print job: issue one-time render tokens."
             />
             <DocScreenshot
               filename="manufacturer-print-status.png"
@@ -118,7 +119,7 @@ export default function ManufacturerHelp() {
               },
               {
                 filename: "manufacturer-download-print-pack.png",
-                whereToCapture: "Create Print Job dialog showing Download ZIP action.",
+                whereToCapture: "Create Print Job dialog showing one-time direct-print token issuance.",
               },
               {
                 filename: "manufacturer-print-status.png",
@@ -141,10 +142,10 @@ export default function ManufacturerHelp() {
             </Card>
             <Card>
               <CardHeader className="space-y-1">
-                <CardTitle className="text-base">Download blocked</CardTitle>
+                <CardTitle className="text-base">Direct-print token expired</CardTitle>
               </CardHeader>
               <CardContent className="text-sm text-muted-foreground">
-                If a download token has expired or was already used, generate a new print job for the remaining quantity.
+                Request a new one-time token set. If lock token has expired, create a fresh print job for remaining quantity.
               </CardContent>
             </Card>
           </div>
@@ -153,4 +154,3 @@ export default function ManufacturerHelp() {
     </HelpShell>
   );
 }
-

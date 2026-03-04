@@ -142,10 +142,17 @@ export default function AuditLogs() {
         : null;
 
     switch (actionCode) {
+      case "DIRECT_PRINT_TOKEN_ISSUED":
+        return `Issued ${d.issuedCount || d.count || "secure"} direct-print token(s)${d.expiresAt ? ` (expires ${d.expiresAt})` : ""}.`;
       case "VERIFY_FAILED":
         return `Verification failed${d.reason ? `: ${d.reason}` : "."}`;
       case "VERIFY_SUCCESS":
         return `Verification succeeded${d.isFirstScan ? " (first scan)" : ""}${d.scanCount != null ? `; scan count ${d.scanCount}` : ""}.`;
+      case "PRINTED":
+        if (String(d.mode || "").toUpperCase() === "DIRECT_PRINT") {
+          return `Secure direct-print rendered${d.code ? ` for ${d.code}` : ""}${d.remainingToPrint != null ? `; ${d.remainingToPrint} remaining` : ""}.`;
+        }
+        return `Print completed${d.printedCodes != null ? ` (${d.printedCodes} codes)` : ""}.`;
       case "CUSTOMER_FRAUD_REPORT":
         return `Fraud report for ${d.code || "—"}${d.reason ? ` (${d.reason})` : ""}.`;
       case "CUSTOMER_FRAUD_REPORT_RESPONSE":

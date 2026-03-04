@@ -8,6 +8,7 @@ export declare const requirePlatformAdmin: (req: AuthRequest, res: Response, nex
 export declare const requireLicenseeAdmin: (req: AuthRequest, res: Response, next: NextFunction) => void | Response<any, Record<string, any>>;
 export declare const requireManufacturer: (req: AuthRequest, res: Response, next: NextFunction) => void | Response<any, Record<string, any>>;
 export declare const requireAnyAdmin: (req: AuthRequest, res: Response, next: NextFunction) => void | Response<any, Record<string, any>>;
+export declare const requireAuditViewer: (req: AuthRequest, res: Response, next: NextFunction) => void | Response<any, Record<string, any>>;
 export declare const requireOpsUser: (req: AuthRequest, res: Response, next: NextFunction) => void | Response<any, Record<string, any>>;
 export declare const requirePermission: (perm: Permission) => (req: AuthRequest, res: Response, next: NextFunction) => void | Response<any, Record<string, any>>;
 //# sourceMappingURL=rbac.d.ts.map

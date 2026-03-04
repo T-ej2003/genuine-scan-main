@@ -70,7 +70,7 @@ const navItems: NavItem[] = [
   { label: "IR Center", href: "/ir", icon: Shield, roles: ["super_admin"] },
   { label: "Incidents", href: "/incidents", icon: ShieldAlert, roles: ["super_admin"] },
   { label: "Governance", href: "/governance", icon: Shield, roles: ["super_admin"] },
-  { label: "Audit Logs", href: "/audit-logs", icon: FileText, roles: ["super_admin", "licensee_admin"] },
+  { label: "Audit Logs", href: "/audit-logs", icon: FileText, roles: ["super_admin", "licensee_admin", "manufacturer"] },
 ];
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -375,8 +375,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       const batchName = String(data.batchName || "batch").trim();
       const qty = Number(data.quantity || 0);
       return {
-        title: "Print job prepared",
-        body: `${batchName}${qty > 0 ? ` print package prepared for ${qty} codes.` : " print package is ready."}`,
+        title: "Direct-print job prepared",
+        body: `${batchName}${qty > 0 ? ` ready for secure direct-print (${qty} codes).` : " ready for secure direct-print."}`,
       };
     }
     if (type === "manufacturer_print_job_confirmed") {
