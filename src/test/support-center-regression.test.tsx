@@ -19,6 +19,8 @@ vi.mock("@/components/layout/DashboardLayout", () => ({
 vi.mock("@/lib/api-client", () => ({
   default: {
     getSupportTickets: vi.fn(),
+    getSupportIssueReports: vi.fn(),
+    getSupportIssueScreenshotUrl: vi.fn(),
     getSupportTicket: vi.fn(),
     getUsers: vi.fn(),
     patchSupportTicket: vi.fn(),
@@ -48,6 +50,8 @@ describe("SupportCenter regression", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(apiClient.getSupportTickets).mockResolvedValue({ success: true, data: { tickets: [ticket], total: 1 } } as any);
+    vi.mocked(apiClient.getSupportIssueReports).mockResolvedValue({ success: true, data: { reports: [], total: 0 } } as any);
+    vi.mocked(apiClient.getSupportIssueScreenshotUrl).mockImplementation((name: string) => `/api/support/reports/files/${name}`);
     vi.mocked(apiClient.getSupportTicket).mockResolvedValue({ success: true, data: detail } as any);
     vi.mocked(apiClient.getUsers).mockResolvedValue({
       success: true,

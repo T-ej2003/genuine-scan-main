@@ -16,5 +16,8 @@ export declare const sendAuthEmail: (input: {
     usedFrom?: string | null;
     replyTo?: string | null;
     providerMessageId?: string | null;
+    providerResponse?: string | null;
+    acceptedRecipients?: string[];
+    rejectedRecipients?: string[];
 }>;
 //# sourceMappingURL=authEmailService.d.ts.map

@@ -128,12 +128,16 @@ export default function QRRequests() {
       toast({ title: "Invalid quantity", variant: "destructive" });
       return;
     }
+    if (!batchName.trim() || batchName.trim().length < 2) {
+      toast({ title: "Enter batch name", description: "Batch name is required.", variant: "destructive" });
+      return;
+    }
 
     setLoading(true);
     try {
       const res = await apiClient.createQrAllocationRequest({
         quantity,
-        batchName: batchName.trim() || undefined,
+        batchName: batchName.trim(),
         note: note.trim() || undefined,
       });
       if (!res.success) {
@@ -273,7 +277,7 @@ export default function QRRequests() {
               </div>
 
               <div className="space-y-2 mt-3">
-                <Label>Batch name (optional)</Label>
+                <Label>Batch name</Label>
                 <Input
                   value={batchName}
                   onChange={(e) => setBatchName(e.target.value)}
@@ -281,7 +285,7 @@ export default function QRRequests() {
                   placeholder="Example: March Retail Rollout"
                 />
                 <div className="text-xs text-muted-foreground">
-                  Used as the received batch label after approval. Index allocation behavior stays automatic.
+                  This becomes the received batch label after approval.
                 </div>
               </div>
 

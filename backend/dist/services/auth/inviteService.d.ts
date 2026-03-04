@@ -16,6 +16,10 @@ export declare const createInvite: (input: {
     inviteLink: string;
     emailDelivered: boolean;
     deliveryError: string | null;
+    providerMessageId: string | null;
+    providerResponse: string | null;
+    acceptedRecipients: string[];
+    rejectedRecipients: string[];
     user: {
         id: string;
         email: string;

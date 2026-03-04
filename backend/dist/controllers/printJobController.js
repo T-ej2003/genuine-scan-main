@@ -11,6 +11,7 @@ const crypto_1 = require("crypto");
 const qrTokenService_1 = require("../services/qrTokenService");
 const auditService_1 = require("../services/auditService");
 const qrZipStreamService_1 = require("../services/qrZipStreamService");
+const notificationService_1 = require("../services/notificationService");
 const MANUFACTURER_ROLES = [
     client_1.UserRole.MANUFACTURER,
     client_1.UserRole.MANUFACTURER_ADMIN,
@@ -27,15 +28,11 @@ const confirmSchema = zod_1.z.object({
     printLockToken: zod_1.z.string().min(10),
 });
 const hashLockToken = (raw) => (0, crypto_1.createHash)("sha256").update(raw).digest("hex");
-const getTokenExp = () => {
-    const days = Number(process.env.QR_TOKEN_EXP_DAYS || "3650");
-    return Date.now() + Math.max(days, 30) * 24 * 60 * 60 * 1000;
-};
 const INLINE_PRINT_JOB_TOKENS_LIMIT = (() => {
-    const raw = Number(process.env.PRINT_JOB_INLINE_TOKENS_LIMIT || "2500");
+    const raw = Number(process.env.PRINT_JOB_INLINE_TOKENS_LIMIT || "0");
     if (!Number.isFinite(raw))
-        return 2500;
-    return Math.max(0, Math.min(20_000, Math.floor(raw)));
+        return 0;
+    return Math.max(0, Math.min(5_000, Math.floor(raw)));
 })();
 const createPrintJob = async (req, res) => {
     try {
@@ -77,7 +74,7 @@ const createPrintJob = async (req, res) => {
         const printLockToken = (0, crypto_1.randomBytes)(24).toString("base64url");
         const printLockTokenHash = hashLockToken(printLockToken);
         const now = new Date();
-        const expAt = new Date(getTokenExp());
+        const expAt = (0, qrTokenService_1.getQrTokenExpiryDate)(now);
         const tokens = [];
         const prepared = candidates.map((qr) => {
             const nonce = (0, qrTokenService_1.randomNonce)();
@@ -145,6 +142,25 @@ const createPrintJob = async (req, res) => {
             },
             ipAddress: req.ip,
         });
+        try {
+            await (0, notificationService_1.createUserNotification)({
+                userId: req.user.userId,
+                licenseeId: batch.licenseeId,
+                type: "manufacturer_print_job_created",
+                title: "Print job prepared",
+                body: `Print package is ready for ${batch.name} (${quantity} codes).`,
+                data: {
+                    printJobId: job.id,
+                    batchId: batch.id,
+                    batchName: batch.name,
+                    quantity,
+                    targetRoute: "/batches",
+                },
+            });
+        }
+        catch (notifyError) {
+            console.error("createPrintJob notification error:", notifyError);
+        }
         return res.status(201).json({
             success: true,
             data: {
@@ -233,6 +249,25 @@ const downloadPrintJobPack = async (req, res) => {
             details: { printedCodes: confirmed.printed },
             ipAddress: req.ip,
         });
+        try {
+            await (0, notificationService_1.createUserNotification)({
+                userId: req.user.userId,
+                licenseeId: job.batch.licenseeId,
+                type: "manufacturer_print_job_confirmed",
+                title: "Printing confirmed",
+                body: `Printing confirmed for ${job.batch.name} (${confirmed.printed} codes).`,
+                data: {
+                    printJobId: job.id,
+                    batchId: job.batch.id,
+                    batchName: job.batch.name,
+                    printedCodes: confirmed.printed,
+                    targetRoute: "/batches",
+                },
+            });
+        }
+        catch (notifyError) {
+            console.error("downloadPrintJobPack notification error:", notifyError);
+        }
         const fileName = `print-job-${job.id}.zip`;
         const entries = (async function* () {
             let cursorCode;
@@ -310,7 +345,7 @@ const confirmPrintJob = async (req, res) => {
             return res.status(400).json({ success: false, error: "Missing print job id" });
         const job = await database_1.default.printJob.findFirst({
             where: { id: jobId, manufacturerId: req.user.userId },
-            include: { batch: { select: { id: true, licenseeId: true } } },
+            include: { batch: { select: { id: true, name: true, licenseeId: true } } },
         });
         if (!job)
             return res.status(404).json({ success: false, error: "Print job not found" });
@@ -360,6 +395,25 @@ const confirmPrintJob = async (req, res) => {
             details: { printedCodes: result.updatedCodes.count },
             ipAddress: req.ip,
         });
+        try {
+            await (0, notificationService_1.createUserNotification)({
+                userId: req.user.userId,
+                licenseeId: job.batch.licenseeId,
+                type: "manufacturer_print_job_confirmed",
+                title: "Printing confirmed",
+                body: `Printing confirmed for ${job.batch.name} (${result.updatedCodes.count} codes).`,
+                data: {
+                    printJobId: job.id,
+                    batchId: job.batch.id,
+                    batchName: job.batch.name,
+                    printedCodes: result.updatedCodes.count,
+                    targetRoute: "/batches",
+                },
+            });
+        }
+        catch (notifyError) {
+            console.error("confirmPrintJob notification error:", notifyError);
+        }
         return res.json({
             success: true,
             data: {

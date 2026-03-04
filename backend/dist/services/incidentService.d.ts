@@ -69,8 +69,8 @@ export declare const createIncidentFromReport: (payload: IncidentReportInput, ac
     updatedAt: Date;
     qrCodeId: string | null;
     ipHash: string | null;
-    priority: import(".prisma/client").$Enums.IncidentPriority;
     description: string;
+    priority: import(".prisma/client").$Enums.IncidentPriority;
     userAgentHash: string | null;
     locationName: string | null;
     locationCountry: string | null;
@@ -189,12 +189,12 @@ export declare const getIncidentByIdScoped: (incidentId: string, actor: {
         createdAt: Date;
         updatedAt: Date;
         incidentId: string;
+        slaDueAt: Date;
         reviewAt: Date | null;
         containmentAt: Date | null;
         documentationAt: Date | null;
         resolutionAt: Date | null;
         completedAt: Date | null;
-        slaDueAt: Date;
         currentStage: import(".prisma/client").$Enums.IncidentHandoffStage;
         intakeAt: Date;
     } | null;
@@ -206,8 +206,8 @@ export declare const getIncidentByIdScoped: (incidentId: string, actor: {
     updatedAt: Date;
     qrCodeId: string | null;
     ipHash: string | null;
-    priority: import(".prisma/client").$Enums.IncidentPriority;
     description: string;
+    priority: import(".prisma/client").$Enums.IncidentPriority;
     userAgentHash: string | null;
     locationName: string | null;
     locationCountry: string | null;
@@ -282,12 +282,12 @@ export declare const listIncidentsScoped: (input: {
             createdAt: Date;
             updatedAt: Date;
             incidentId: string;
+            slaDueAt: Date;
             reviewAt: Date | null;
             containmentAt: Date | null;
             documentationAt: Date | null;
             resolutionAt: Date | null;
             completedAt: Date | null;
-            slaDueAt: Date;
             currentStage: import(".prisma/client").$Enums.IncidentHandoffStage;
             intakeAt: Date;
         } | null;
@@ -299,8 +299,8 @@ export declare const listIncidentsScoped: (input: {
         updatedAt: Date;
         qrCodeId: string | null;
         ipHash: string | null;
-        priority: import(".prisma/client").$Enums.IncidentPriority;
         description: string;
+        priority: import(".prisma/client").$Enums.IncidentPriority;
         userAgentHash: string | null;
         locationName: string | null;
         locationCountry: string | null;

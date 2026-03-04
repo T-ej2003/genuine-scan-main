@@ -1,4 +1,5 @@
 import { emitMutationEvent } from "@/lib/mutation-events";
+import { recordSupportNetworkLog, reportSupportRuntimeIssue } from "@/lib/support-diagnostics";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "/api";
 
@@ -109,6 +110,23 @@ class ApiClient {
     const controller = new AbortController();
     const timeoutMs = options.timeoutMs ?? 20_000;
     const t = window.setTimeout(() => controller.abort(), timeoutMs);
+    const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+
+    const elapsedMs = () => {
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      return Math.max(1, Math.round(now - startedAt));
+    };
+
+    const pushNetworkLog = (entry: { status: number | null; ok: boolean; error?: string }) => {
+      recordSupportNetworkLog({
+        method,
+        endpoint,
+        status: entry.status,
+        ok: entry.ok,
+        durationMs: elapsedMs(),
+        error: entry.error,
+      });
+    };
 
     try {
       const res = await fetch(`${BASE_URL}${endpoint}`, {
@@ -120,6 +138,7 @@ class ApiClient {
       });
 
       if (res.status === 304 && method === "GET") {
+        pushNetworkLog({ status: res.status, ok: true });
         const cached = this.getCache.get(cacheKey);
         if (cached !== undefined) return { success: true, data: cached as T };
         return { success: false, error: "Stale cache miss (HTTP 304)" };
@@ -139,6 +158,7 @@ class ApiClient {
         // No in-memory token and no CSRF cookie means we almost certainly have no session
         // to refresh (common on a fresh /login page load).
         if (!this.token && !this.readCookie("aq_csrf")) {
+          pushNetworkLog({ status: res.status, ok: false, error: msg });
           return { success: false, error: msg };
         }
 
@@ -150,6 +170,7 @@ class ApiClient {
 
         this.logout();
         this.emitLogout();
+        pushNetworkLog({ status: res.status, ok: false, error: msg });
         return { success: false, error: msg };
       }
 
@@ -158,8 +179,17 @@ class ApiClient {
           (payload && typeof payload === "object" && (payload.error || payload.message)) ||
           (typeof payload === "string" && payload) ||
           `HTTP ${res.status}`;
+        pushNetworkLog({ status: res.status, ok: false, error: msg });
+        if (res.status >= 500) {
+          reportSupportRuntimeIssue({
+            source: "network",
+            message: `Server error (${res.status}) on ${method} ${endpoint}`,
+          });
+        }
         return { success: false, error: msg };
       }
+
+      pushNetworkLog({ status: res.status, ok: true });
 
       if (payload && typeof payload === "object" && "success" in payload) {
         if (method === "GET" && payload.success) {
@@ -181,6 +211,12 @@ class ApiClient {
       return { success: true, data: payload as T };
     } catch (err: any) {
       const isAbort = err?.name === "AbortError";
+      const msg = isAbort ? "Request timed out" : "Network error - is the backend running?";
+      pushNetworkLog({ status: null, ok: false, error: msg });
+      reportSupportRuntimeIssue({
+        source: "network",
+        message: `${method} ${endpoint}: ${msg}`,
+      });
       return { success: false, error: isAbort ? "Request timed out" : "Network error - is the backend running?" };
     } finally {
       window.clearTimeout(t);
@@ -454,6 +490,13 @@ class ApiClient {
     });
   }
 
+  async renameBatch(batchId: string, name: string) {
+    return this.request(`/qr/batches/${encodeURIComponent(batchId)}/rename`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    });
+  }
+
   // ==================== PRINT JOBS (MANUFACTURER) ====================
   async createPrintJob(payload: { batchId: string; quantity: number; rangeStart?: string; rangeEnd?: string }) {
     return this.request("/manufacturer/print-jobs", { method: "POST", body: JSON.stringify(payload) });
@@ -717,7 +760,7 @@ class ApiClient {
   // ==================== QR REQUESTS ====================
   async createQrAllocationRequest(payload: {
     quantity: number;
-    batchName?: string;
+    batchName: string;
     note?: string;
     licenseeId?: string;
   }) {
@@ -1436,6 +1479,28 @@ class ApiClient {
   async trackSupportTicket(reference: string, email?: string) {
     const query = email ? `?email=${encodeURIComponent(email)}` : "";
     return this.request(`/support/tickets/track/${encodeURIComponent(reference)}${query}`);
+  }
+
+  async createSupportIssueReport(formData: FormData) {
+    return this.request(`/support/reports`, {
+      method: "POST",
+      body: formData,
+      skipJson: true,
+      timeoutMs: 45_000,
+    });
+  }
+
+  async getSupportIssueReports(options?: { limit?: number; offset?: number; licenseeId?: string }) {
+    const params = new URLSearchParams();
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/support/reports${query}`);
+  }
+
+  getSupportIssueScreenshotUrl(fileName: string) {
+    return `${BASE_URL}/support/reports/files/${encodeURIComponent(fileName)}`;
   }
 
   // ==================== GOVERNANCE ====================

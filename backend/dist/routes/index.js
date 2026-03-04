@@ -33,8 +33,16 @@ const telemetryController_1 = require("../controllers/telemetryController");
 const notificationController_1 = require("../controllers/notificationController");
 const notificationEventsController_1 = require("../controllers/notificationEventsController");
 const supportController_1 = require("../controllers/supportController");
+const supportIssueController_1 = require("../controllers/supportIssueController");
+const supportIssueUpload_1 = require("../middleware/supportIssueUpload");
 const governanceController_1 = require("../controllers/governanceController");
 const router = (0, express_1.Router)();
+const parsePositiveIntEnv = (key, fallback, min = 1, max = 100_000) => {
+    const raw = Number(String(process.env[key] || "").trim());
+    if (!Number.isFinite(raw))
+        return fallback;
+    return Math.min(max, Math.max(min, Math.floor(raw)));
+};
 const loginLimiter = (0, express_rate_limit_1.default)({
     windowMs: 15 * 60 * 1000,
     max: 25,
@@ -65,22 +73,46 @@ const verifyClaimLimiter = (0, express_rate_limit_1.default)({
     standardHeaders: true,
     legacyHeaders: false,
 });
+const verifyCodeLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 60 * 1000,
+    max: parsePositiveIntEnv("PUBLIC_VERIFY_RATE_LIMIT_PER_MIN", 45, 5, 500),
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+const scanLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 60 * 1000,
+    max: parsePositiveIntEnv("SCAN_RATE_LIMIT_PER_MIN", 60, 5, 500),
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+const verifyReportLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 15 * 60 * 1000,
+    max: parsePositiveIntEnv("VERIFY_REPORT_RATE_LIMIT_PER_15MIN", 20, 3, 300),
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+const verifyFeedbackLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 15 * 60 * 1000,
+    max: parsePositiveIntEnv("VERIFY_FEEDBACK_RATE_LIMIT_PER_15MIN", 30, 5, 500),
+    standardHeaders: true,
+    legacyHeaders: false,
+});
 // ==================== PUBLIC ====================
 router.post("/auth/login", loginLimiter, authController_1.login);
 router.post("/auth/accept-invite", loginLimiter, authController_1.acceptInviteController);
 router.post("/auth/forgot-password", forgotPasswordLimiter, authController_1.forgotPassword);
 router.post("/auth/reset-password", forgotPasswordLimiter, authController_1.resetPassword);
-router.get("/verify/:code", customerVerifyAuth_1.optionalCustomerVerifyAuth, verifyController_1.verifyQRCode);
+router.get("/verify/:code", verifyCodeLimiter, customerVerifyAuth_1.optionalCustomerVerifyAuth, verifyController_1.verifyQRCode);
 router.post("/verify/auth/email-otp/request", verifyOtpRequestLimiter, verifyController_1.requestCustomerEmailOtp);
 router.post("/verify/auth/email-otp/verify", verifyOtpVerifyLimiter, verifyController_1.verifyCustomerEmailOtp);
 router.post("/verify/:code/claim", verifyClaimLimiter, customerVerifyAuth_1.optionalCustomerVerifyAuth, verifyController_1.claimProductOwnership);
 router.post("/verify/:code/link-claim", verifyClaimLimiter, customerVerifyAuth_1.requireCustomerVerifyAuth, verifyController_1.linkDeviceClaimToCustomer);
-router.post("/verify/report-fraud", incidentController_1.uploadIncidentReportPhotos, verifyController_1.reportFraud);
-router.post("/fraud-report", incidentController_1.uploadIncidentReportPhotos, verifyController_1.reportFraud);
-router.post("/verify/feedback", verifyController_1.submitProductFeedback);
-router.post("/incidents/report", incidentController_1.uploadIncidentReportPhotos, incidentController_1.reportIncident);
+router.post("/verify/report-fraud", verifyReportLimiter, incidentController_1.uploadIncidentReportPhotos, verifyController_1.reportFraud);
+router.post("/fraud-report", verifyReportLimiter, incidentController_1.uploadIncidentReportPhotos, verifyController_1.reportFraud);
+router.post("/verify/feedback", verifyFeedbackLimiter, verifyController_1.submitProductFeedback);
+router.post("/incidents/report", verifyReportLimiter, incidentController_1.uploadIncidentReportPhotos, incidentController_1.reportIncident);
 router.get("/support/tickets/track/:reference", supportController_1.trackSupportTicketPublic);
-router.get("/scan", customerVerifyAuth_1.optionalCustomerVerifyAuth, scanController_1.scanToken);
+router.get("/scan", scanLimiter, customerVerifyAuth_1.optionalCustomerVerifyAuth, scanController_1.scanToken);
 router.post("/telemetry/route-transition", auth_1.optionalAuth, telemetryController_1.captureRouteTransitionMetric);
 router.get("/health", healthController_1.healthCheck);
 // ==================== AUTH ====================
@@ -88,6 +120,11 @@ router.get("/auth/me", auth_1.authenticate, authController_1.me);
 router.post("/auth/refresh", csrf_1.requireCsrf, authController_1.refresh);
 router.post("/auth/logout", auth_1.authenticate, csrf_1.requireCsrf, authController_1.logout);
 router.post("/auth/invite", auth_1.authenticate, rbac_1.requireAnyAdmin, csrf_1.requireCsrf, authController_1.invite);
+router.get("/auth/mfa/status", auth_1.authenticate, rbac_1.requireAnyAdmin, authController_1.getMfaStatusController);
+router.post("/auth/mfa/setup", auth_1.authenticate, rbac_1.requireAnyAdmin, csrf_1.requireCsrf, authController_1.beginMfaSetupController);
+router.post("/auth/mfa/enable", auth_1.authenticate, rbac_1.requireAnyAdmin, csrf_1.requireCsrf, authController_1.confirmMfaSetupController);
+router.post("/auth/mfa/disable", auth_1.authenticate, rbac_1.requireAnyAdmin, csrf_1.requireCsrf, authController_1.disableMfaController);
+router.post("/auth/mfa/complete", loginLimiter, authController_1.completeMfaLoginController);
 // ==================== DASHBOARD ====================
 // ✅ Correct stats endpoint used by UI cards + chart + activity
 router.get("/dashboard/stats", auth_1.authenticate, tenantIsolation_1.enforceTenantIsolation, dashboardController_1.getDashboardStats);
@@ -123,19 +160,21 @@ router.post("/qr/generate", auth_1.authenticate, rbac_1.requirePlatformAdmin, cs
 // Super admin allocate range to existing licensee
 router.post("/admin/licensees/:licenseeId/qr-allocate-range", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, qrController_1.allocateQRRangeForLicensee);
 // ==================== BATCHES ====================
-router.post("/qr/batches", auth_1.authenticate, rbac_1.requireLicenseeAdmin, tenantIsolation_1.enforceTenantIsolation, qrController_1.createBatch);
+router.post("/qr/batches", auth_1.authenticate, rbac_1.requireLicenseeAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, qrController_1.createBatch);
 router.get("/qr/batches", auth_1.authenticate, tenantIsolation_1.enforceTenantIsolation, qrController_1.getBatches);
 router.post("/qr/batches/:id/assign-manufacturer", auth_1.authenticate, rbac_1.requireLicenseeAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, qrController_1.assignManufacturer);
+router.patch("/qr/batches/:id/rename", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, qrController_1.renameBatch);
 // Super admin bulk allocation helper
 router.post("/qr/batches/admin-allocate", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, qrController_1.adminAllocateBatch);
 // ✅ IMPORTANT: remove QR Codes page for LICENSEE_ADMIN
 // raw QR list/export should be SUPER_ADMIN only
 router.get("/qr/codes/export", auth_1.authenticate, rbac_1.requirePlatformAdmin, qrController_1.exportQRCodesCsv);
 router.get("/qr/codes", auth_1.authenticate, rbac_1.requirePlatformAdmin, qrController_1.getQRCodes);
+router.post("/qr/codes/signed-links", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, qrController_1.generateSignedScanLinks);
 // Stats is still allowed (needed for dashboard chart)
 router.get("/qr/stats", auth_1.authenticate, tenantIsolation_1.enforceTenantIsolation, qrController_1.getStats);
 // delete endpoints (admins)
-router.delete("/qr/batches/:id", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, qrController_1.deleteBatch);
+router.delete("/qr/batches/:id", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, qrController_1.deleteBatch);
 router.post("/qr/batches/bulk-delete", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, qrController_1.bulkDeleteBatches);
 router.delete("/qr/codes", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, qrController_1.bulkDeleteQRCodes);
 // ==================== MANUFACTURER PRINT JOBS ====================
@@ -154,7 +193,7 @@ router.get("/trace/timeline", auth_1.authenticate, tenantIsolation_1.enforceTena
 router.get("/analytics/batch-sla", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, tracePolicyController_1.getBatchSlaAnalyticsController);
 router.get("/analytics/risk-scores", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, tracePolicyController_1.getRiskAnalyticsController);
 router.get("/policy/config", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, tracePolicyController_1.getPolicyConfigController);
-router.patch("/policy/config", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, tracePolicyController_1.updatePolicyConfigController);
+router.patch("/policy/config", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, tracePolicyController_1.updatePolicyConfigController);
 router.get("/policy/alerts", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, tracePolicyController_1.getPolicyAlertsController);
 router.post("/policy/alerts/:id/ack", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, tracePolicyController_1.acknowledgePolicyAlertController);
 router.get("/audit/export/batches/:id/package", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, tracePolicyController_1.exportBatchAuditPackageController);
@@ -164,6 +203,9 @@ router.get("/support/tickets", auth_1.authenticate, rbac_1.requirePlatformAdmin,
 router.get("/support/tickets/:id", auth_1.authenticate, rbac_1.requirePlatformAdmin, supportController_1.getSupportTicket);
 router.patch("/support/tickets/:id", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, supportController_1.patchSupportTicket);
 router.post("/support/tickets/:id/messages", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, supportController_1.addSupportMessage);
+router.get("/support/reports", auth_1.authenticate, rbac_1.requireOpsUser, tenantIsolation_1.enforceTenantIsolation, supportIssueController_1.listSupportIssueReports);
+router.post("/support/reports", auth_1.authenticate, rbac_1.requireOpsUser, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, supportIssueUpload_1.supportIssueUpload.single("screenshot"), supportIssueController_1.createSupportIssueReport);
+router.get("/support/reports/files/:fileName", auth_1.authenticate, rbac_1.requireOpsUser, tenantIsolation_1.enforceTenantIsolation, supportIssueController_1.serveSupportIssueScreenshot);
 // ==================== GOVERNANCE ====================
 router.get("/governance/feature-flags", auth_1.authenticate, rbac_1.requirePlatformAdmin, governanceController_1.getFeatureFlags);
 router.post("/governance/feature-flags", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, governanceController_1.upsertFeatureFlag);
@@ -171,6 +213,9 @@ router.get("/governance/evidence-retention", auth_1.authenticate, rbac_1.require
 router.patch("/governance/evidence-retention", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, governanceController_1.patchRetentionPolicyController);
 router.post("/governance/evidence-retention/run", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, governanceController_1.runRetentionJobController);
 router.get("/governance/compliance/report", auth_1.authenticate, rbac_1.requirePlatformAdmin, governanceController_1.generateComplianceReportController);
+router.post("/governance/compliance/pack/run", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, governanceController_1.runCompliancePackController);
+router.get("/governance/compliance/pack/jobs", auth_1.authenticate, rbac_1.requirePlatformAdmin, governanceController_1.listCompliancePackJobsController);
+router.get("/governance/compliance/pack/jobs/:id/download", auth_1.authenticate, rbac_1.requirePlatformAdmin, governanceController_1.downloadCompliancePackJobController);
 router.get("/audit/export/incidents/:id/bundle", auth_1.authenticate, rbac_1.requirePlatformAdmin, governanceController_1.exportIncidentEvidenceBundleController);
 // ==================== QR LOGS (ADMINS) ====================
 router.get("/admin/qr/scan-logs", auth_1.authenticate, rbac_1.requireOpsUser, tenantIsolation_1.enforceTenantIsolation, qrLogController_1.getScanLogs);
@@ -179,8 +224,8 @@ router.get("/admin/qr/batch-summary", auth_1.authenticate, rbac_1.requireOpsUser
 router.get("/incidents", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, incidentController_1.listIncidents);
 router.get("/incidents/evidence-files/:fileName", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, incidentController_1.serveIncidentEvidenceFile);
 router.get("/incidents/:id", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, incidentController_1.getIncident);
-router.patch("/incidents/:id", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, incidentController_1.patchIncident);
-router.post("/incidents/:id/events", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, incidentController_1.addIncidentEventNote);
+router.patch("/incidents/:id", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, incidentController_1.patchIncident);
+router.post("/incidents/:id/events", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, incidentController_1.addIncidentEventNote);
 router.post("/incidents/:id/evidence", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, incidentController_1.uploadIncidentEvidence, incidentController_1.addIncidentEvidence);
 router.post("/incidents/:id/email", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, incidentController_1.notifyIncidentCustomer);
 router.post("/incidents/:id/notify-customer", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, incidentController_1.notifyIncidentCustomer);
@@ -203,7 +248,6 @@ router.patch("/ir/alerts/:id", auth_1.authenticate, rbac_1.requirePlatformAdmin,
 router.post("/admin/qrs/:id/block", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, qrController_1.blockQRCode);
 router.post("/admin/batches/:id/block", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, qrController_1.blockBatch);
 // ==================== ACCOUNT ====================
-router.patch("/account/profile", auth_1.authenticate, accountController_1.updateMyProfile);
 router.patch("/account/profile", auth_1.authenticate, csrf_1.requireCsrf, accountController_1.updateMyProfile);
 router.patch("/account/password", auth_1.authenticate, csrf_1.requireCsrf, accountController_1.changeMyPassword);
 exports.default = router;

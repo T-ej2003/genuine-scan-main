@@ -39,30 +39,24 @@ export declare const issueSessionForUser: (input: {
         } | null;
     };
 }>;
+type SessionIssueResult = Awaited<ReturnType<typeof issueSessionForUser>>;
+export type PasswordLoginResult = (SessionIssueResult & {
+    mfaRequired?: false;
+}) | {
+    mfaRequired: true;
+    mfaTicket: string;
+    mfaExpiresAt: string;
+    riskScore: number;
+    riskLevel: string;
+    reasons: string[];
+};
 export declare const loginWithPassword: (input: {
     email: string;
     password: string;
     ipHash: string | null;
     userAgent: string | null;
-}) => Promise<{
-    accessToken: string;
-    refreshToken: string;
-    refreshTokenExpiresAt: Date;
-    csrfToken: string;
-    user: {
-        id: string;
-        email: string;
-        name: string;
-        role: import(".prisma/client").$Enums.UserRole;
-        licenseeId: string | null;
-        orgId: string | null;
-        licensee: {
-            id: string;
-            name: string;
-            prefix: string;
-        } | null;
-    };
-}>;
+    allowMfaChallenge?: boolean;
+}) => Promise<PasswordLoginResult>;
 export declare const refreshSession: (input: {
     rawRefreshToken: string;
     ipHash: string | null;
@@ -106,4 +100,5 @@ export declare const disableUserSessions: (input: {
     userId: string;
     reason: string;
 }) => Promise<void>;
+export {};
 //# sourceMappingURL=authService.d.ts.map

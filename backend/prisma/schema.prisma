@@ -269,6 +269,7 @@ model User {
   incidentEvidence IncidentEvidence[] @relation("IncidentEvidenceUploadedBy")
   supportTicketsAssigned SupportTicket[] @relation("SupportTicketAssignedTo")
   supportTicketMessages SupportTicketMessage[] @relation("SupportTicketMessageAuthor")
+  supportIssueReportsSubmitted SupportIssueReport[] @relation("SupportIssueReportSubmittedBy")
   notifications Notification[] @relation("UserNotifications")
   tenantFeatureFlagsUpdated TenantFeatureFlag[] @relation("TenantFeatureFlagUpdatedBy")
   evidenceRetentionPoliciesUpdated EvidenceRetentionPolicy[] @relation("EvidenceRetentionPolicyUpdatedBy")
@@ -349,6 +350,7 @@ model Licensee {
   notifications        Notification[]
   tenantFeatureFlags   TenantFeatureFlag[]
   supportTickets       SupportTicket[]
+  supportIssueReports  SupportIssueReport[]
   evidenceRetentionPolicy EvidenceRetentionPolicy?
   evidenceRetentionJobs EvidenceRetentionJob[]
   compliancePackJobs CompliancePackJob[]
@@ -1174,6 +1176,37 @@ model SupportTicketMessage {
   @@index([ticketId])
   @@index([actorUserId])
   @@index([createdAt])
+}
+
+model SupportIssueReport {
+  id String @id @default(uuid())
+
+  reporterUserId String?
+  reporterUser User? @relation("SupportIssueReportSubmittedBy", fields: [reporterUserId], references: [id], onDelete: SetNull)
+  reporterRole UserRole?
+
+  licenseeId String?
+  licensee Licensee? @relation(fields: [licenseeId], references: [id], onDelete: SetNull)
+
+  title String
+  description String?
+  status String @default("OPEN")
+  sourcePath String?
+  pageUrl String?
+  autoDetected Boolean @default(false)
+
+  screenshotPath String?
+  screenshotMime String?
+  screenshotSize Int?
+
+  diagnostics Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([licenseeId, createdAt])
+  @@index([reporterUserId, createdAt])
+  @@index([status])
 }
 
 model Notification {

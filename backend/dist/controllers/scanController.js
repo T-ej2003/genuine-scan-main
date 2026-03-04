@@ -10,30 +10,11 @@ const auditService_1 = require("../services/auditService");
 const scanPolicy_1 = require("../services/scanPolicy");
 const qrTokenService_1 = require("../services/qrTokenService");
 const policyEngineService_1 = require("../services/policyEngineService");
-const crypto_1 = require("crypto");
 const locationService_1 = require("../services/locationService");
 const scanInsightService_1 = require("../services/scanInsightService");
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX = Number(process.env.SCAN_RATE_LIMIT_PER_MIN || "60");
-const rateLimitState = new Map();
-const hitRateLimit = (key) => {
-    const now = Date.now();
-    const entry = rateLimitState.get(key);
-    if (!entry || entry.resetAt <= now) {
-        rateLimitState.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-        return false;
-    }
-    entry.count += 1;
-    return entry.count > RATE_LIMIT_MAX;
-};
-const deviceFingerprint = (req) => {
-    const raw = String(req.get("x-device-fp") || "") +
-        "|" +
-        String(req.get("user-agent") || "") +
-        "|" +
-        String(req.ip || "");
-    return (0, crypto_1.createHash)("sha256").update(raw).digest("hex");
-};
+const duplicateRiskService_1 = require("../services/duplicateRiskService");
+const requestFingerprint_1 = require("../utils/requestFingerprint");
+const deviceFingerprint = (req) => (0, requestFingerprint_1.deriveRequestDeviceFingerprint)(req);
 const isQrReadyForCustomerUse = (status) => {
     return status === client_1.QRStatus.PRINTED || status === client_1.QRStatus.REDEEMED || status === client_1.QRStatus.SCANNED;
 };
@@ -50,50 +31,17 @@ const buildOwnershipStatus = (params) => {
         };
     }
     const isOwnedByRequester = Boolean(customerUserId) && ownership.userId === customerUserId;
+    const isClaimedByAnother = Boolean(customerUserId) && !isOwnedByRequester;
     return {
         isClaimed: true,
         claimedAt: ownership.claimedAt.toISOString(),
         isOwnedByRequester,
-        isClaimedByAnother: !isOwnedByRequester,
+        isClaimedByAnother,
         canClaim: false,
     };
 };
-const deriveDuplicateReasons = (params) => {
-    const reasons = [];
-    const scanSignals = params.scanSignals || null;
-    const policy = params.policy || null;
-    const triggered = policy?.triggered || {};
-    const alerts = Array.isArray(policy?.alerts) ? policy.alerts : [];
-    if (Number(scanSignals?.distinctDeviceCount24h ?? 0) > 1)
-        reasons.push("Multiple devices scanned this code recently.");
-    if (Number(scanSignals?.recentScanCount10m ?? 0) >= 3)
-        reasons.push("A short burst of scans was detected.");
-    if (Number(scanSignals?.distinctCountryCount24h ?? 0) > 1)
-        reasons.push("Recent scans came from different countries.");
-    if (params.scanCount >= 4 || triggered.multiScan)
-        reasons.push("High repeat-scan volume was detected.");
-    if (triggered.geoDrift)
-        reasons.push("Scan geography drift exceeded policy threshold.");
-    if (triggered.velocitySpike)
-        reasons.push("Scan velocity exceeded policy threshold.");
-    for (const alert of alerts) {
-        const message = String(alert?.message || "").trim();
-        if (!message)
-            continue;
-        if (!reasons.includes(message))
-            reasons.push(message);
-    }
-    return reasons.slice(0, 6);
-};
 const scanToken = async (req, res) => {
     try {
-        const ipKey = String(req.ip || "unknown");
-        if (hitRateLimit(ipKey)) {
-            return res.status(429).json({
-                success: false,
-                error: "Rate limit exceeded. Please try again later.",
-            });
-        }
         const token = String(req.query.t || "").trim();
         if (!token) {
             return res.status(400).json({ success: false, error: "Missing token" });
@@ -376,38 +324,45 @@ const scanToken = async (req, res) => {
             isReady,
             isBlocked,
         });
-        const duplicateReasons = deriveDuplicateReasons({
+        const duplicateRisk = (0, duplicateRiskService_1.assessDuplicateRisk)({
             scanCount: totalScans,
             scanSignals: scanInsight.signals,
             policy,
+            ownershipStatus,
+            customerUserId,
+            latestScanAt: scanInsight.latestScanAt,
+            previousScanAt: scanInsight.previousScanAt,
         });
         let classification;
         let reasons;
+        let riskScore = 0;
+        let riskSignals = duplicateRisk.signals;
         if (isBlocked) {
             classification = "BLOCKED_BY_SECURITY";
             reasons = ["Code is blocked by security policy or containment controls."];
+            riskScore = 100;
         }
         else if (!isReady) {
             classification = "NOT_READY_FOR_CUSTOMER_USE";
             reasons = ["Code lifecycle is not ready for customer verification."];
+            riskScore = 70;
         }
         else if (decision.allowRedeem) {
             classification = "FIRST_SCAN";
             reasons = ["First successful customer verification recorded."];
-        }
-        else if (duplicateReasons.length) {
-            classification = "SUSPICIOUS_DUPLICATE";
-            reasons = duplicateReasons;
+            riskScore = 4;
         }
         else {
-            classification = "LEGIT_REPEAT";
-            reasons = ["Repeat verification pattern matches normal customer behavior."];
+            classification = duplicateRisk.classification;
+            reasons = duplicateRisk.reasons;
+            riskScore = duplicateRisk.riskScore;
         }
         if (ownershipStatus.isClaimedByAnother && customerUserId && !isBlocked) {
             classification = "SUSPICIOUS_DUPLICATE";
             if (!reasons.includes("Ownership is already claimed by another account.")) {
                 reasons = ["Ownership is already claimed by another account.", ...reasons];
             }
+            riskScore = Math.max(riskScore, 70);
         }
         return res.json({
             success: true,
@@ -453,6 +408,8 @@ const scanToken = async (req, res) => {
                 scanSignals: scanInsight.signals,
                 classification,
                 reasons,
+                riskScore,
+                riskSignals,
                 scanSummary: {
                     totalScans,
                     firstVerifiedAt,

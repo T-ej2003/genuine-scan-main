@@ -1,7 +1,14 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.buildScanUrl = exports.verifyQrToken = exports.signQrPayload = exports.hashToken = exports.randomNonce = void 0;
+exports.buildScanUrl = exports.verifyQrToken = exports.signQrPayload = exports.getQrTokenExpiryDate = exports.hashToken = exports.randomNonce = void 0;
 const crypto_1 = require("crypto");
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const parseQrTokenExpiryDays = () => {
+    const raw = Number(String(process.env.QR_TOKEN_EXP_DAYS || "").trim() || "365");
+    if (!Number.isFinite(raw))
+        return 365;
+    return Math.max(30, Math.min(365, Math.floor(raw)));
+};
 const toBase64Url = (buf) => buf
     .toString("base64")
     .replace(/\+/g, "-")
@@ -59,6 +66,8 @@ const randomNonce = () => (0, crypto_1.randomBytes)(16).toString("base64url");
 exports.randomNonce = randomNonce;
 const hashToken = (token) => (0, crypto_1.createHash)("sha256").update(token).digest("hex");
 exports.hashToken = hashToken;
+const getQrTokenExpiryDate = (issuedAt = new Date()) => new Date(issuedAt.getTime() + parseQrTokenExpiryDays() * MS_PER_DAY);
+exports.getQrTokenExpiryDate = getQrTokenExpiryDate;
 const signQrPayload = (payload) => {
     const sanitized = {};
     for (const [k, v] of Object.entries(payload)) {

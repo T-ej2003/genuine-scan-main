@@ -50,6 +50,7 @@ export declare const createTraceEventFromAuditLog: (log: {
 export declare const backfillTraceEventsFromAuditLogs: (opts?: {
     licenseeId?: string;
     limit?: number;
+    force?: boolean;
 }) => Promise<void>;
 export declare const getTraceTimeline: (opts: {
     licenseeId?: string;

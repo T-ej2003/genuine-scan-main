@@ -12,6 +12,7 @@ const crypto_1 = require("crypto");
 const passwordService_1 = require("../services/auth/passwordService");
 const inviteService_1 = require("../services/auth/inviteService");
 const security_1 = require("../utils/security");
+const email_1 = require("../utils/email");
 const prefixSchema = zod_1.z
     .string()
     .trim()
@@ -19,9 +20,27 @@ const prefixSchema = zod_1.z
     .max(5)
     .transform((s) => s.toUpperCase())
     .refine((s) => /^[A-Z0-9]+$/.test(s), "Prefix must be A–Z / 0–9 only");
+const optionalEmailSchema = (label) => zod_1.z
+    .union([
+    zod_1.z.literal(""),
+    zod_1.z
+        .string()
+        .trim()
+        .min(3, `Invalid ${label}`)
+        .max(320, `Invalid ${label}`)
+        .refine((value) => (0, email_1.isValidEmailAddress)(value), `Invalid ${label}`)
+        .transform((value) => (0, email_1.normalizeEmailAddress)(value)),
+])
+    .optional();
 const adminSchema = zod_1.z.object({
     name: zod_1.z.string().trim().min(2, "Admin name must be at least 2 characters"),
-    email: zod_1.z.string().trim().email("Invalid admin email").transform((s) => s.toLowerCase()),
+    email: zod_1.z
+        .string()
+        .trim()
+        .min(3, "Invalid admin email")
+        .max(320, "Invalid admin email")
+        .refine((value) => (0, email_1.isValidEmailAddress)(value), "Invalid admin email")
+        .transform((value) => (0, email_1.normalizeEmailAddress)(value)),
     password: zod_1.z.string().min(6, "Admin password must be at least 6 characters").optional(),
     sendInvite: zod_1.z.boolean().optional(),
 });
@@ -33,7 +52,7 @@ const createLicenseeLegacy = zod_1.z.object({
     brandName: zod_1.z.string().trim().max(120).optional().or(zod_1.z.literal("")),
     location: zod_1.z.string().trim().max(200).optional().or(zod_1.z.literal("")),
     website: zod_1.z.string().trim().max(200).optional().or(zod_1.z.literal("")),
-    supportEmail: zod_1.z.string().trim().email().optional().or(zod_1.z.literal("")),
+    supportEmail: optionalEmailSchema("support email"),
     supportPhone: zod_1.z.string().trim().max(40).optional().or(zod_1.z.literal("")),
     isActive: zod_1.z.boolean().optional(),
     admin: adminSchema.optional(),
@@ -47,7 +66,7 @@ const createLicenseeWithAdmin = zod_1.z.object({
         brandName: zod_1.z.string().trim().max(120).optional().or(zod_1.z.literal("")),
         location: zod_1.z.string().trim().max(200).optional().or(zod_1.z.literal("")),
         website: zod_1.z.string().trim().max(200).optional().or(zod_1.z.literal("")),
-        supportEmail: zod_1.z.string().trim().email().optional().or(zod_1.z.literal("")),
+        supportEmail: optionalEmailSchema("support email"),
         supportPhone: zod_1.z.string().trim().max(40).optional().or(zod_1.z.literal("")),
         isActive: zod_1.z.boolean().optional(),
     }),
@@ -60,7 +79,7 @@ const updateLicenseeSchema = zod_1.z.object({
     brandName: zod_1.z.string().trim().max(120).optional().or(zod_1.z.literal("")),
     location: zod_1.z.string().trim().max(200).optional().or(zod_1.z.literal("")),
     website: zod_1.z.string().trim().max(200).optional().or(zod_1.z.literal("")),
-    supportEmail: zod_1.z.string().trim().email().optional().or(zod_1.z.literal("")),
+    supportEmail: optionalEmailSchema("support email"),
     supportPhone: zod_1.z.string().trim().max(40).optional().or(zod_1.z.literal("")),
     isActive: zod_1.z.boolean().optional(),
 });
@@ -80,7 +99,12 @@ const createLicensee = async (req, res) => {
         }
         const parsed = createLicenseeSchema.safeParse(req.body);
         if (!parsed.success) {
-            return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+            const first = parsed.error.errors[0];
+            const fieldPath = first?.path?.join(".") || "";
+            const errorMessage = fieldPath.endsWith("supportEmail")
+                ? "Invalid support email. Use a valid address like user@chester.ac.uk."
+                : first?.message || "Invalid input";
+            return res.status(400).json({ success: false, error: errorMessage });
         }
         const payload = parsed.data;
         const licenseePayload = isNewFormat(payload) ? payload.licensee : payload;
@@ -160,23 +184,23 @@ const createLicensee = async (req, res) => {
                         createdAt: true,
                     },
                 });
-            await (0, auditService_1.createAuditLog)({
-                userId: req.user.userId,
-                licenseeId: lic.id,
-                orgId: lic.orgId,
-                action: sendInvite ? "CREATE_LICENSEE_WITH_ADMIN_INVITE" : "CREATE_LICENSEE_WITH_ADMIN",
-                entityType: "Licensee",
-                entityId: lic.id,
-                details: {
-                    licenseeName: lic.name,
-                    prefix: lic.prefix,
-                    adminEmail: email,
-                    sendInvite,
-                },
-                ipAddress: req.ip,
-                userAgent: req.get("user-agent"),
-            });
             return { licensee: lic, adminUser };
+        });
+        await (0, auditService_1.createAuditLog)({
+            userId: req.user.userId,
+            licenseeId: result.licensee.id,
+            orgId: result.licensee.orgId,
+            action: sendInvite ? "CREATE_LICENSEE_WITH_ADMIN_INVITE" : "CREATE_LICENSEE_WITH_ADMIN",
+            entityType: "Licensee",
+            entityId: result.licensee.id,
+            details: {
+                licenseeName: result.licensee.name,
+                prefix: result.licensee.prefix,
+                adminEmail: email,
+                sendInvite,
+            },
+            ipAddress: req.ip,
+            userAgent: req.get("user-agent"),
         });
         let adminInvite = null;
         let warning = null;
@@ -393,7 +417,14 @@ const deleteLicensee = async (req, res) => {
 };
 exports.deleteLicensee = deleteLicensee;
 const resendInviteSchema = zod_1.z.object({
-    email: zod_1.z.string().trim().email().optional(),
+    email: zod_1.z
+        .string()
+        .trim()
+        .min(3, "Invalid email")
+        .max(320, "Invalid email")
+        .refine((value) => (0, email_1.isValidEmailAddress)(value), "Invalid email")
+        .transform((value) => (0, email_1.normalizeEmailAddress)(value))
+        .optional(),
 });
 const resendLicenseeAdminInvite = async (req, res) => {
     try {

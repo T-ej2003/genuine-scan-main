@@ -17,6 +17,8 @@ const supportWorkflowService_1 = require("../services/supportWorkflowService");
 const incidentEmailService_1 = require("../services/incidentEmailService");
 const auditService_1 = require("../services/auditService");
 const incidentUpload_1 = require("../middleware/incidentUpload");
+const incidentPdfService_1 = require("../services/incidentPdfService");
+const soarService_1 = require("../services/soarService");
 const publicIncidentSchema = zod_1.z.object({
     qrCodeValue: zod_1.z.string().trim().min(2).max(128),
     incidentType: zod_1.z.enum(["counterfeit_suspected", "duplicate_scan", "tampered_label", "wrong_product", "other"]),
@@ -241,6 +243,17 @@ const reportIncident = async (req, res) => {
                 template: "customer_acknowledgement",
             });
         }
+        try {
+            await (0, soarService_1.runIncidentAutoContainment)({
+                incidentId: incident.id,
+                trigger: "PUBLIC_REPORT",
+                actorUserId: null,
+                ipAddress: req.ip,
+            });
+        }
+        catch (autoContainmentError) {
+            console.error("runIncidentAutoContainment(public) error:", autoContainmentError);
+        }
         return res.status(201).json({
             success: true,
             data: {
@@ -445,6 +458,19 @@ const patchIncident = async (req, res) => {
             actorType: client_1.IncidentActorType.ADMIN,
             emitEvents: false,
         });
+        if (changedFields.includes("severity") || changedFields.includes("status")) {
+            try {
+                await (0, soarService_1.runIncidentAutoContainment)({
+                    incidentId: updated.id,
+                    trigger: "INCIDENT_UPDATE",
+                    actorUserId: req.user.userId,
+                    ipAddress: req.ip,
+                });
+            }
+            catch (autoContainmentError) {
+                console.error("runIncidentAutoContainment(update) error:", autoContainmentError);
+            }
+        }
         return res.json({ success: true, data: updated });
     }
     catch (error) {
@@ -658,12 +684,14 @@ const exportIncidentPdfHook = async (req, res) => {
         });
         if (!incident)
             return res.status(404).json({ success: false, error: "Incident not found" });
+        const pdfBuffer = await (0, incidentPdfService_1.buildIncidentPdfBuffer)(incident);
+        const fileName = `incident-${incident.id}.pdf`;
         await (0, incidentService_1.recordIncidentEvent)({
             incidentId: incident.id,
             actorType: client_1.IncidentActorType.ADMIN,
             actorUserId: req.user.userId,
             eventType: client_1.IncidentEventType.EXPORTED,
-            eventPayload: { format: "pdf", status: "not_implemented" },
+            eventPayload: { format: "pdf", status: "exported" },
         });
         await (0, auditService_1.createAuditLog)({
             userId: req.user.userId,
@@ -671,16 +699,15 @@ const exportIncidentPdfHook = async (req, res) => {
             action: "INCIDENT_EXPORT_REQUESTED",
             entityType: "Incident",
             entityId: incident.id,
-            details: { format: "pdf", status: "not_implemented" },
+            details: { format: "pdf", status: "exported", bytes: pdfBuffer.length },
         });
-        return res.status(501).json({
-            success: false,
-            error: "Incident PDF export is not implemented yet. Hook is ready for future integration.",
-        });
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename=\"${fileName}\"`);
+        return res.status(200).send(pdfBuffer);
     }
     catch (error) {
         console.error("exportIncidentPdfHook error:", error);
-        return res.status(500).json({ success: false, error: "Failed to process export hook" });
+        return res.status(500).json({ success: false, error: "Failed to export incident PDF" });
     }
 };
 exports.exportIncidentPdfHook = exportIncidentPdfHook;

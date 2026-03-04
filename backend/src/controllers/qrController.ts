@@ -60,6 +60,10 @@ const assignManufacturerSchema = z.object({
   name: z.string().trim().min(2).max(120).optional(),
 });
 
+const renameBatchSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+});
+
 const bulkDeleteQRCodesSchema = z
   .object({
     ids: z.array(z.string().uuid()).optional(),
@@ -796,6 +800,66 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
       return res.status(409).json({ success: false, error: "Please retry — batch busy." });
     }
     return res.status(400).json({ success: false, error: msg });
+  }
+};
+
+export const renameBatch = async (req: AuthRequest, res: Response) => {
+  try {
+    const auth = ensureAuth(req);
+    if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
+
+    if (
+      auth.role === UserRole.MANUFACTURER ||
+      auth.role === UserRole.MANUFACTURER_ADMIN ||
+      auth.role === UserRole.MANUFACTURER_USER
+    ) {
+      return res.status(403).json({ success: false, error: "Manufacturers cannot rename batches" });
+    }
+
+    const parsed = renameBatchSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+    }
+
+    const batchId = String(req.params.id || "").trim();
+    if (!batchId) return res.status(400).json({ success: false, error: "Missing batch id" });
+
+    const existing = await prisma.batch.findUnique({
+      where: { id: batchId },
+      select: { id: true, name: true, licenseeId: true },
+    });
+    if (!existing) return res.status(404).json({ success: false, error: "Batch not found" });
+
+    if (auth.role === UserRole.LICENSEE_ADMIN || auth.role === UserRole.ORG_ADMIN) {
+      if (!req.user?.licenseeId || req.user.licenseeId !== existing.licenseeId) {
+        return res.status(403).json({ success: false, error: "Access denied" });
+      }
+    }
+
+    const nextName = parsed.data.name.trim();
+    if (nextName === existing.name) {
+      return res.json({ success: true, data: existing });
+    }
+
+    const updated = await prisma.batch.update({
+      where: { id: existing.id },
+      data: { name: nextName },
+    });
+
+    await createAuditLog({
+      userId: auth.userId,
+      licenseeId: existing.licenseeId,
+      action: "RENAME_BATCH",
+      entityType: "Batch",
+      entityId: existing.id,
+      details: { from: existing.name, to: nextName },
+      ipAddress: req.ip,
+    });
+
+    return res.json({ success: true, data: updated });
+  } catch (e: any) {
+    console.error("renameBatch error:", e);
+    return res.status(500).json({ success: false, error: e?.message || "Internal server error" });
   }
 };
 

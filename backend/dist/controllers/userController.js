@@ -10,6 +10,7 @@ const client_1 = require("@prisma/client");
 const database_1 = __importDefault(require("../config/database"));
 const auditService_1 = require("../services/auditService");
 const passwordService_1 = require("../services/auth/passwordService");
+const email_1 = require("../utils/email");
 /**
  * Notes:
  * - Manufacturers are Users with role=MANUFACTURER
@@ -22,8 +23,15 @@ const passwordService_1 = require("../services/auth/passwordService");
  *   POST /users -> requireAnyAdmin + enforceTenantIsolation
  * - Your current routes file shows SUPER_ADMIN only; controller still supports safe tenant checks.
  */
+const normalizedEmailSchema = zod_1.z
+    .string()
+    .trim()
+    .min(3, "Invalid email")
+    .max(320, "Invalid email")
+    .refine((value) => (0, email_1.isValidEmailAddress)(value), "Invalid email")
+    .transform((value) => (0, email_1.normalizeEmailAddress)(value));
 const createUserSchema = zod_1.z.object({
-    email: zod_1.z.string().email(),
+    email: normalizedEmailSchema,
     password: zod_1.z.string().min(6),
     name: zod_1.z.string().min(2),
     role: zod_1.z.enum([
@@ -39,7 +47,7 @@ const createUserSchema = zod_1.z.object({
 });
 const updateUserSchema = zod_1.z.object({
     name: zod_1.z.string().min(2).optional(),
-    email: zod_1.z.string().email().optional(),
+    email: normalizedEmailSchema.optional(),
     password: zod_1.z.string().min(6).optional(),
     isActive: zod_1.z.boolean().optional(),
     licenseeId: zod_1.z.string().uuid().optional(), // SUPER_ADMIN only
@@ -107,7 +115,7 @@ const createUser = async (req, res) => {
         if (!parsed.success) {
             return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
         }
-        const email = parsed.data.email.trim().toLowerCase();
+        const email = parsed.data.email;
         const name = parsed.data.name.trim();
         const password = parsed.data.password.trim();
         const role = parsed.data.role;

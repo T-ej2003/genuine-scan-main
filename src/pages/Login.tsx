@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, AlertCircle } from "lucide-react";
+import { Loader2, AlertCircle, Eye, EyeOff } from "lucide-react";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -15,41 +15,61 @@ export default function Login() {
   const [mfaTicket, setMfaTicket] = useState("");
   const [mfaCode, setMfaCode] = useState("");
   const [mfaRiskLevel, setMfaRiskLevel] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const { login, completeMfaLogin, isLoading } = useAuth();
+  const { login, completeMfaLogin } = useAuth();
   const navigate = useNavigate();
+
+  const humanizeAuthError = (value?: string) => {
+    const text = String(value || "").toLowerCase();
+    if (text.includes("invalid email or password") || text.includes("password")) {
+      return "incorrect-password. try again.";
+    }
+    return value || "Login failed";
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setSubmitting(true);
 
-    const result = await login(email.trim().toLowerCase(), password);
-    if (result.success) {
-      navigate("/dashboard");
-      return;
+    try {
+      const result = await login(email.trim().toLowerCase(), password);
+      if (result.success) {
+        navigate("/dashboard");
+        return;
+      }
+
+      if (result.mfaRequired && result.mfaTicket) {
+        setMfaTicket(result.mfaTicket);
+        setMfaRiskLevel(result.riskLevel || null);
+        setMfaCode("");
+        return;
+      }
+
+      setError(humanizeAuthError(result.error));
+    } finally {
+      setSubmitting(false);
     }
-
-    if (result.mfaRequired && result.mfaTicket) {
-      setMfaTicket(result.mfaTicket);
-      setMfaRiskLevel(result.riskLevel || null);
-      setMfaCode("");
-      return;
-    }
-
-    setError(result.error || "Login failed");
   };
 
   const handleMfaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     if (!mfaTicket) return;
+    setSubmitting(true);
 
-    const result = await completeMfaLogin(mfaTicket, mfaCode.trim());
-    if (result.success) {
-      navigate("/dashboard");
-      return;
+    try {
+      const result = await completeMfaLogin(mfaTicket, mfaCode.trim());
+      if (result.success) {
+        navigate("/dashboard");
+        return;
+      }
+      setError(result.error || "MFA verification failed");
+    } finally {
+      setSubmitting(false);
     }
-    setError(result.error || "MFA verification failed");
   };
 
   return (
@@ -78,7 +98,7 @@ export default function Login() {
               value={mfaCode}
               onChange={(e) => setMfaCode(e.target.value)}
               required
-              disabled={isLoading}
+              disabled={submitting}
               className="h-11"
             />
             <p className="text-xs text-slate-500">
@@ -98,7 +118,7 @@ export default function Login() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            disabled={isLoading}
+            disabled={submitting}
             className="h-11"
           />
         </div>
@@ -113,17 +133,28 @@ export default function Login() {
               Forgot password?
             </Link>
           </div>
-          <Input
-            id="password"
-            type="password"
-            autoComplete="current-password"
-            placeholder="Enter your password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            disabled={isLoading}
-            className="h-11"
-          />
+          <div className="relative">
+            <Input
+              id="password"
+              type={showPassword ? "text" : "password"}
+              autoComplete="current-password"
+              placeholder="Enter your password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              disabled={submitting}
+              className="h-11 pr-12"
+            />
+            <button
+              type="button"
+              className="absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center text-muted-foreground hover:text-foreground"
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              onClick={() => setShowPassword((prev) => !prev)}
+              disabled={submitting}
+            >
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
         </div>
           </>
         )}
@@ -134,8 +165,8 @@ export default function Login() {
             : "Password reset is available directly from the sign-in form and uses the existing secure email token flow."}
         </div>
 
-        <Button type="submit" className="h-11 w-full bg-slate-900 text-white hover:bg-slate-800" disabled={isLoading}>
-          {isLoading ? (
+        <Button type="submit" className="h-11 w-full bg-slate-900 text-white hover:bg-slate-800" disabled={submitting}>
+          {submitting ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               {mfaTicket ? "Verifying..." : "Signing in..."}

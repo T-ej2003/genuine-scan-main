@@ -12,6 +12,8 @@ const package_json_1 = __importDefault(require("../package.json"));
 const routes_1 = __importDefault(require("./routes"));
 const database_1 = __importDefault(require("./config/database"));
 const logger_1 = require("./utils/logger");
+const siemOutboxService_1 = require("./services/siemOutboxService");
+const compliancePackService_1 = require("./services/compliancePackService");
 dotenv_1.default.config();
 dotenv_1.default.config({ path: path_1.default.resolve(__dirname, "../.env") });
 const missingRequiredEnv = ["DATABASE_URL", "JWT_SECRET"].filter((k) => !process.env[k]);
@@ -50,6 +52,19 @@ if (process.env.NODE_ENV === "production") {
     }
     if (String(process.env.COOKIE_SECURE || "").trim().toLowerCase() !== "true") {
         logger_1.logger.warn("COOKIE_SECURE is not 'true' in production. Session cookie security may be weaker than intended.");
+    }
+    const missingStrongSecurityEnv = [
+        "QR_SIGN_PRIVATE_KEY",
+        "QR_SIGN_PUBLIC_KEY",
+        "TOKEN_HASH_SECRET",
+        "IP_HASH_SALT",
+        "CUSTOMER_VERIFY_OTP_SECRET",
+        "CUSTOMER_VERIFY_TOKEN_SECRET",
+        "SCAN_FINGERPRINT_SECRET",
+    ].filter((key) => !String(process.env[key] || "").trim());
+    if (missingStrongSecurityEnv.length > 0) {
+        logger_1.logger.error(`Refusing to start: production security hardening requires ${missingStrongSecurityEnv.join(", ")}`);
+        process.exit(1);
     }
 }
 const app = (0, express_1.default)();
@@ -101,6 +116,21 @@ app.use((0, cors_1.default)({
 }));
 app.use(express_1.default.json({ limit: "1mb" }));
 app.use((0, cookie_parser_1.default)());
+app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("X-Permitted-Cross-Domain-Policies", "none");
+    res.setHeader("Permissions-Policy", "geolocation=(), camera=(), microphone=()");
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+    res.setHeader("Cross-Origin-Resource-Policy", "same-site");
+    const forwardedProto = String(req.get("x-forwarded-proto") || "").toLowerCase();
+    const isHttps = req.secure || forwardedProto.includes("https");
+    if (process.env.NODE_ENV === "production" && isHttps) {
+        res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
+    }
+    next();
+});
 const healthPayload = () => ({ status: "ok", timestamp: new Date().toISOString() });
 app.get("/health", (_req, res) => {
     res.json(healthPayload());
@@ -152,6 +182,8 @@ const server = app.listen(PORT, () => {
     logger_1.logger.info(`🚀 Server running on http://localhost:${PORT}`);
     logger_1.logger.info(`📚 API available at http://localhost:${PORT}/api`);
     logger_1.logger.info(`🔍 Health check at http://localhost:${PORT}/health`);
+    (0, siemOutboxService_1.startSecurityEventOutboxWorker)();
+    (0, compliancePackService_1.startCompliancePackScheduler)();
 });
 server.on("error", (err) => {
     if (err.code === "EADDRINUSE") {
@@ -176,6 +208,8 @@ const shutdown = async (signal) => {
         await new Promise((resolve, reject) => {
             server.close((err) => (err ? reject(err) : resolve()));
         });
+        (0, siemOutboxService_1.stopSecurityEventOutboxWorker)();
+        (0, compliancePackService_1.stopCompliancePackScheduler)();
         await database_1.default.$disconnect();
         clearTimeout(forceExit);
         logger_1.logger.info("Shutdown complete");
