@@ -363,6 +363,8 @@ QR inventory and batches:
 
 Manufacturer print jobs:
 
+- `POST /manufacturer/printer-agent/heartbeat`
+- `GET /manufacturer/printer-agent/status`
 - `POST /manufacturer/print-jobs`
 - `POST /manufacturer/print-jobs/:id/direct-print/tokens`
 - `POST /manufacturer/print-jobs/:id/direct-print/resolve`
@@ -453,6 +455,9 @@ Optional:
 - `PRINT_JOB_LOCK_TTL_MINUTES` (default `45`; validity window for direct-print job lock token)
 - `DIRECT_PRINT_TOKEN_TTL_SECONDS` (default `90`; one-time render token lifespan)
 - `DIRECT_PRINT_MAX_BATCH` (default `250`; max one-time render tokens per issuance call)
+- `PRINT_AGENT_HEARTBEAT_TTL_SECONDS` (default `35`; printer heartbeat freshness gate for manufacturer print-job creation)
+- `NOTIFICATION_REALTIME_ALERTS_EMAIL_ENABLED` (default `true`; mirror web notifications to admin email inboxes in real time)
+- `NOTIFICATION_REALTIME_ALERT_EMAIL_SUBJECT_PREFIX` (default `[MSCQR Real-time Alert]`)
 - `QR_ZIP_HIGH_VOLUME_THRESHOLD` (default `100000`)
 - `QR_ZIP_ULTRA_VOLUME_THRESHOLD` (default `1000000`)
 - `QR_ZIP_STANDARD_LEVEL` (default `6`)

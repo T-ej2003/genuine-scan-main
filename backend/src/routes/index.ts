@@ -105,6 +105,10 @@ import {
   issueDirectPrintTokens,
   resolveDirectPrintToken,
 } from "../controllers/printJobController";
+import {
+  getPrinterConnectionStatus,
+  reportPrinterHeartbeat,
+} from "../controllers/printerAgentController";
 import auditRoutes from "./auditRoutes";
 import { updateMyProfile, changeMyPassword } from "../controllers/accountController";
 import {
@@ -380,6 +384,21 @@ router.post("/qr/batches/bulk-delete", authenticate, requireAnyAdmin, enforceTen
 router.delete("/qr/codes", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, bulkDeleteQRCodes);
 
 // ==================== MANUFACTURER PRINT JOBS ====================
+router.post(
+  "/manufacturer/printer-agent/heartbeat",
+  authenticate,
+  requireManufacturer,
+  enforceTenantIsolation,
+  requireCsrf,
+  reportPrinterHeartbeat
+);
+router.get(
+  "/manufacturer/printer-agent/status",
+  authenticate,
+  requireManufacturer,
+  enforceTenantIsolation,
+  getPrinterConnectionStatus
+);
 router.post(
   "/manufacturer/print-jobs",
   authenticate,

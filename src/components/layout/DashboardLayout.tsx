@@ -26,6 +26,7 @@ import {
   SlidersHorizontal,
   Trash2,
   Inbox,
+  Printer,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -53,6 +54,19 @@ type DashboardNotification = {
   readAt?: string | null;
   data?: unknown;
   incidentId?: string | null;
+};
+
+type PrinterConnectionStatus = {
+  connected: boolean;
+  stale: boolean;
+  requiredForPrinting: boolean;
+  lastHeartbeatAt: string | null;
+  ageSeconds: number | null;
+  printerName?: string | null;
+  printerId?: string | null;
+  deviceName?: string | null;
+  agentVersion?: string | null;
+  error?: string | null;
 };
 
 const NOTIFICATION_FETCH_LIMIT = 24;
@@ -88,6 +102,18 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [notificationWindowStart, setNotificationWindowStart] = useState(0);
   const [notificationMotionSeed, setNotificationMotionSeed] = useState(0);
   const clearNotificationsTimerRef = useRef<number | null>(null);
+  const [printerStatus, setPrinterStatus] = useState<PrinterConnectionStatus>({
+    connected: false,
+    stale: true,
+    requiredForPrinting: true,
+    lastHeartbeatAt: null,
+    ageSeconds: null,
+    printerName: null,
+    printerId: null,
+    deviceName: null,
+    agentVersion: null,
+    error: "No printer heartbeat yet",
+  });
 
   const filteredNavItems = navItems.filter((item) => user && item.roles.includes(user.role));
   const contextualHelpRoute = getContextualHelpRoute(location.pathname, user?.role);
@@ -137,6 +163,56 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
+
+  const syncManufacturerPrinterStatus = async () => {
+    if (!user || user.role !== "manufacturer") return;
+
+    const local = await apiClient.getLocalPrintAgentStatus();
+    const heartbeatPayload = local.success
+      ? {
+          connected: Boolean((local.data as any)?.connected),
+          printerName: (local.data as any)?.printerName || undefined,
+          printerId: (local.data as any)?.printerId || undefined,
+          deviceName: (local.data as any)?.deviceName || undefined,
+          agentVersion: (local.data as any)?.agentVersion || undefined,
+          error: (local.data as any)?.error || undefined,
+        }
+      : {
+          connected: false,
+          error: String(local.error || "Local print agent unavailable"),
+        };
+
+    await apiClient.reportPrinterHeartbeat(heartbeatPayload);
+    const remote = await apiClient.getPrinterConnectionStatus();
+    if (remote.success && remote.data) {
+      setPrinterStatus(remote.data as PrinterConnectionStatus);
+      return;
+    }
+
+    setPrinterStatus({
+      connected: false,
+      stale: true,
+      requiredForPrinting: true,
+      lastHeartbeatAt: null,
+      ageSeconds: null,
+      printerName: null,
+      printerId: null,
+      deviceName: null,
+      agentVersion: null,
+      error: String(remote.error || local.error || "Printer heartbeat failed"),
+    });
+  };
+
+  useEffect(() => {
+    if (!user || user.role !== "manufacturer") return;
+
+    syncManufacturerPrinterStatus();
+    const timer = window.setInterval(() => {
+      syncManufacturerPrinterStatus();
+    }, 6000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, user?.role]);
 
   useEffect(() => {
     if (!user) return;
@@ -722,6 +798,31 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {user?.role === "manufacturer" && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={syncManufacturerPrinterStatus}
+              className={cn(
+                "mr-1 gap-2",
+                printerStatus.connected
+                  ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                  : "border-red-300 bg-red-50 text-red-700 hover:bg-red-100"
+              )}
+              title={
+                printerStatus.connected
+                  ? `${printerStatus.printerName || "Printer connected"}${printerStatus.lastHeartbeatAt ? ` · heartbeat ${printerStatus.lastHeartbeatAt}` : ""}`
+                  : printerStatus.error || "Printer disconnected"
+              }
+            >
+              <Printer className="h-4 w-4" />
+              <span className="hidden md:inline">
+                {printerStatus.connected ? "Printer Connected" : "Printer Offline"}
+              </span>
+              <span className="md:hidden">{printerStatus.connected ? "Online" : "Offline"}</span>
+            </Button>
+          )}
 
           <SupportIssueLauncher />
 

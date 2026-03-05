@@ -87,6 +87,19 @@ type TraceEventRow = {
   userId?: string | null;
 };
 
+type PrinterConnectionStatus = {
+  connected: boolean;
+  stale: boolean;
+  requiredForPrinting: boolean;
+  lastHeartbeatAt: string | null;
+  ageSeconds: number | null;
+  printerName?: string | null;
+  printerId?: string | null;
+  deviceName?: string | null;
+  agentVersion?: string | null;
+  error?: string | null;
+};
+
 const LARGE_ALLOCATION_THRESHOLD = 25_000;
 export default function Batches() {
   const { toast } = useToast();
@@ -131,6 +144,18 @@ export default function Batches() {
   const [directPrintTokens, setDirectPrintTokens] = useState<
     Array<{ qrId: string; code: string; renderToken: string; expiresAt: string }>
   >([]);
+  const [printerStatus, setPrinterStatus] = useState<PrinterConnectionStatus>({
+    connected: false,
+    stale: true,
+    requiredForPrinting: true,
+    lastHeartbeatAt: null,
+    ageSeconds: null,
+    printerName: null,
+    printerId: null,
+    deviceName: null,
+    agentVersion: null,
+    error: "No printer heartbeat yet",
+  });
   const [exportingBatchId, setExportingBatchId] = useState<string | null>(null);
 
   // allocation history
@@ -173,6 +198,27 @@ export default function Batches() {
     }
   };
 
+  const loadPrinterStatus = async () => {
+    if (!isManufacturer) return;
+    const res = await apiClient.getPrinterConnectionStatus();
+    if (!res.success || !res.data) {
+      setPrinterStatus({
+        connected: false,
+        stale: true,
+        requiredForPrinting: true,
+        lastHeartbeatAt: null,
+        ageSeconds: null,
+        printerName: null,
+        printerId: null,
+        deviceName: null,
+        agentVersion: null,
+        error: res.error || "Printer status unavailable",
+      });
+      return;
+    }
+    setPrinterStatus(res.data as PrinterConnectionStatus);
+  };
+
   useEffect(() => {
     fetchBatches();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -191,6 +237,16 @@ export default function Batches() {
     fetchManufacturersForAssign();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.licenseeId, role]);
+
+  useEffect(() => {
+    if (!isManufacturer) return;
+    loadPrinterStatus();
+    const timer = window.setInterval(() => {
+      loadPrinterStatus();
+    }, 6000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isManufacturer, user?.id]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -374,6 +430,107 @@ export default function Batches() {
     setDirectRemainingToPrint(null);
     setDirectPrintTokens([]);
     setPrintOpen(true);
+    loadPrinterStatus();
+  };
+
+  const runAutoDirectPrint = async (jobId: string, lockToken: string, requestedQty: number) => {
+    let printedCount = 0;
+    let remainingToPrint = Math.max(0, requestedQty);
+    let guard = 0;
+
+    while (remainingToPrint > 0 && guard < 600) {
+      guard += 1;
+      const nextBatchSize = Math.max(1, Math.min(25, remainingToPrint));
+      const issueRes = await apiClient.requestDirectPrintTokens(jobId, lockToken, nextBatchSize);
+      if (!issueRes.success) {
+        return {
+          success: false,
+          printedCount,
+          remainingToPrint,
+          error: issueRes.error || "Failed to issue direct-print tokens.",
+        };
+      }
+
+      const issueData: any = issueRes.data || {};
+      const items = Array.isArray(issueData.items) ? issueData.items : [];
+      setDirectPrintTokens(items);
+
+      if (typeof issueData.remainingToPrint === "number") {
+        remainingToPrint = issueData.remainingToPrint;
+        setDirectRemainingToPrint(issueData.remainingToPrint);
+      }
+
+      if (items.length === 0) {
+        if (issueData.jobConfirmed || remainingToPrint === 0) {
+          return { success: true, printedCount, remainingToPrint: 0 };
+        }
+        return {
+          success: false,
+          printedCount,
+          remainingToPrint,
+          error: "Print agent received no render tokens while codes remain pending.",
+        };
+      }
+
+      for (const item of items) {
+        const resolveRes = await apiClient.resolveDirectPrintToken(jobId, {
+          printLockToken: lockToken,
+          renderToken: item.renderToken,
+        });
+        if (!resolveRes.success) {
+          return {
+            success: false,
+            printedCount,
+            remainingToPrint,
+            error: resolveRes.error || `Failed to resolve render token for ${item.code}.`,
+          };
+        }
+
+        const resolvedData: any = resolveRes.data || {};
+        const scanUrl = String(resolvedData.scanUrl || "").trim();
+        if (!scanUrl) {
+          return {
+            success: false,
+            printedCount,
+            remainingToPrint,
+            error: `Resolved token missing scan URL for ${item.code}.`,
+          };
+        }
+
+        const localPrintRes = await apiClient.printWithLocalAgent({
+          printJobId: jobId,
+          qrId: item.qrId,
+          code: item.code,
+          scanUrl,
+          copies: 1,
+        });
+
+        if (!localPrintRes.success) {
+          return {
+            success: false,
+            printedCount,
+            remainingToPrint,
+            error: localPrintRes.error || `Local print failed for ${item.code}.`,
+          };
+        }
+
+        printedCount += 1;
+        if (typeof resolvedData.remainingToPrint === "number") {
+          remainingToPrint = resolvedData.remainingToPrint;
+          setDirectRemainingToPrint(resolvedData.remainingToPrint);
+        }
+      }
+    }
+
+    return {
+      success: remainingToPrint === 0,
+      printedCount,
+      remainingToPrint,
+      error:
+        remainingToPrint === 0
+          ? null
+          : "Auto print stopped before all labels completed. Retry remaining labels.",
+    };
   };
 
   const createPrintJob = async () => {
@@ -391,6 +548,29 @@ export default function Batches() {
       });
       return;
     }
+
+    const livePrinterStatus = await apiClient.getPrinterConnectionStatus();
+    if (!livePrinterStatus.success || !livePrinterStatus.data || !(livePrinterStatus.data as any).connected) {
+      setPrinterStatus({
+        connected: false,
+        stale: true,
+        requiredForPrinting: true,
+        lastHeartbeatAt: null,
+        ageSeconds: null,
+        printerName: null,
+        printerId: null,
+        deviceName: null,
+        agentVersion: null,
+        error: livePrinterStatus.error || "Printer disconnected",
+      });
+      toast({
+        title: "Printer not connected",
+        description: "Connect your authenticated print agent and printer before creating a print job.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setPrinterStatus(livePrinterStatus.data as PrinterConnectionStatus);
 
     setPrinting(true);
     try {
@@ -415,10 +595,42 @@ export default function Batches() {
       );
       setDirectRemainingToPrint(typeof data.tokenCount === "number" ? data.tokenCount : null);
       setDirectPrintTokens([]);
+      const createdJobId = String(data.printJobId || "").trim();
+      const createdLockToken = String(data.printLockToken || "").trim();
+      if (!createdJobId || !createdLockToken) {
+        toast({
+          title: "Print job setup incomplete",
+          description: "Missing secure print session data. Please retry.",
+          variant: "destructive",
+        });
+        return;
+      }
       toast({
         title: "Direct-print job created",
-        description: "Use authenticated print-agent calls to request one-time short-lived render tokens.",
+        description: "Auto print pipeline started with your connected printer.",
       });
+
+      const autoResult = await runAutoDirectPrint(
+        createdJobId,
+        createdLockToken,
+        typeof data.tokenCount === "number" ? data.tokenCount : qty
+      );
+
+      if (autoResult.success) {
+        toast({
+          title: "Auto print complete",
+          description: `${autoResult.printedCount} labels printed through the secure direct-print pipeline.`,
+        });
+      } else {
+        toast({
+          title: "Auto print needs attention",
+          description:
+            autoResult.error ||
+            `Printed ${autoResult.printedCount}. Remaining: ${autoResult.remainingToPrint}.`,
+          variant: "destructive",
+        });
+      }
+      await fetchBatches();
     } finally {
       setPrinting(false);
     }
@@ -585,10 +797,31 @@ export default function Batches() {
             </p>
           </div>
 
-          <Button variant="outline" onClick={fetchBatches} disabled={loading}>
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            {isManufacturer && (
+              <Button
+                variant="outline"
+                onClick={loadPrinterStatus}
+                className={
+                  printerStatus.connected
+                    ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                    : "border-red-300 bg-red-50 text-red-700 hover:bg-red-100"
+                }
+                title={
+                  printerStatus.connected
+                    ? `${printerStatus.printerName || "Printer connected"}`
+                    : printerStatus.error || "Printer disconnected"
+                }
+              >
+                {printerStatus.connected ? "Printer Connected" : "Printer Offline"}
+              </Button>
+            )}
+
+            <Button variant="outline" onClick={fetchBatches} disabled={loading}>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Refresh
+            </Button>
+          </div>
         </div>
 
         {error && (
@@ -736,7 +969,7 @@ export default function Batches() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  disabled={loading || (b.availableCodes ?? 0) <= 0}
+                                  disabled={loading || (b.availableCodes ?? 0) <= 0 || !printerStatus.connected}
                                   onClick={() => openPrintPack(b)}
                                 >
                                   <Download className="mr-2 h-4 w-4" />
@@ -955,6 +1188,23 @@ export default function Batches() {
               <div className="text-sm text-muted-foreground">No batch selected.</div>
             ) : (
               <div className="space-y-4 mt-2">
+                <div
+                  className={
+                    printerStatus.connected
+                      ? "rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800"
+                      : "rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+                  }
+                >
+                  <div className="font-medium">
+                    {printerStatus.connected ? "Printer connected" : "Printer offline"}
+                  </div>
+                  <div className="text-xs">
+                    {printerStatus.connected
+                      ? `${printerStatus.printerName || "Authenticated print agent"} is ready. Create print job will auto-print labels.`
+                      : printerStatus.error || "Connect authenticated print agent and printer to continue."}
+                  </div>
+                </div>
+
                 <div className="rounded-md border p-3 text-sm">
                   <div className="font-medium">{printBatch.name}</div>
                   <div className="text-muted-foreground font-mono text-xs">
@@ -977,8 +1227,8 @@ export default function Batches() {
                 </div>
 
                 <div className="flex gap-2">
-                  <Button onClick={createPrintJob} disabled={printing}>
-                    {printing ? "Creating..." : "Create Print Job"}
+                  <Button onClick={createPrintJob} disabled={printing || !printerStatus.connected}>
+                    {printing ? "Auto printing..." : "Create Print Job & Auto Print"}
                   </Button>
                   {printJobId && (
                     <Badge variant="secondary" title={printJobId}>

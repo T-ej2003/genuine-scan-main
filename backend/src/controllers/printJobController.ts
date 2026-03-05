@@ -2,11 +2,21 @@ import { Response } from "express";
 import { z } from "zod";
 import { AuthRequest } from "../middleware/auth";
 import prisma from "../config/database";
-import { Prisma, QRStatus, UserRole } from "@prisma/client";
+import {
+  NotificationAudience,
+  NotificationChannel,
+  Prisma,
+  QRStatus,
+  UserRole,
+} from "@prisma/client";
 import { randomBytes, createHash } from "crypto";
 import { buildScanUrl, getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
 import { createAuditLog } from "../services/auditService";
-import { createUserNotification } from "../services/notificationService";
+import {
+  createRoleNotifications,
+  createUserNotification,
+} from "../services/notificationService";
+import { getPrinterConnectionStatusForUser } from "../services/printerConnectionService";
 
 const MANUFACTURER_ROLES: UserRole[] = [
   UserRole.MANUFACTURER,
@@ -63,6 +73,50 @@ const getManufacturerPrintJob = async (jobId: string, userId: string) =>
     include: { batch: { select: { id: true, name: true, licenseeId: true } } },
   });
 
+const notifySystemPrintEvent = async (params: {
+  licenseeId?: string | null;
+  orgId?: string | null;
+  type: string;
+  title: string;
+  body: string;
+  data?: any;
+}) => {
+  await Promise.allSettled([
+    createRoleNotifications({
+      audience: NotificationAudience.SUPER_ADMIN,
+      type: params.type,
+      title: params.title,
+      body: params.body,
+      licenseeId: params.licenseeId || null,
+      orgId: params.orgId || null,
+      data: params.data || null,
+      channels: [NotificationChannel.WEB],
+    }),
+    params.licenseeId
+      ? createRoleNotifications({
+          audience: NotificationAudience.LICENSEE_ADMIN,
+          licenseeId: params.licenseeId,
+          type: params.type,
+          title: params.title,
+          body: params.body,
+          data: params.data || null,
+          channels: [NotificationChannel.WEB],
+        })
+      : Promise.resolve([] as any[]),
+    params.orgId
+      ? createRoleNotifications({
+          audience: NotificationAudience.MANUFACTURER,
+          orgId: params.orgId,
+          type: params.type,
+          title: params.title,
+          body: params.body,
+          data: params.data || null,
+          channels: [NotificationChannel.WEB],
+        })
+      : Promise.resolve([] as any[]),
+  ]);
+};
+
 export const createPrintJob = async (req: AuthRequest, res: Response) => {
   try {
     if (
@@ -70,6 +124,16 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
       !isManufacturerRole(req.user.role)
     ) {
       return res.status(403).json({ success: false, error: "Access denied" });
+    }
+
+    const printerStatus = getPrinterConnectionStatusForUser(req.user.userId);
+    if (!printerStatus.connected) {
+      return res.status(409).json({
+        success: false,
+        error:
+          "Printer is not connected. Start the authenticated print agent and connect a printer before creating a print job.",
+        data: { printerStatus },
+      });
     }
 
     const parsed = createPrintJobSchema.safeParse(req.body);
@@ -204,6 +268,21 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
           targetRoute: "/batches",
         },
       });
+      await notifySystemPrintEvent({
+        licenseeId: batch.licenseeId,
+        orgId: req.user.orgId || null,
+        type: "system_print_job_created",
+        title: "System print job created",
+        body: `Direct-print job created for ${batch.name} (${quantity} codes).`,
+        data: {
+          printJobId: job.id,
+          batchId: batch.id,
+          batchName: batch.name,
+          quantity,
+          mode: "DIRECT_PRINT",
+          targetRoute: "/batches",
+        },
+      });
     } catch (notifyError) {
       console.error("createPrintJob notification error:", notifyError);
     }
@@ -217,6 +296,7 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
         tokenCount: prepared.length,
         mode: "DIRECT_PRINT",
         lockExpiresAt: getLockExpiresAt(job.createdAt).toISOString(),
+        printerStatus,
       },
     });
   } catch (e: any) {
@@ -566,6 +646,21 @@ export const resolveDirectPrintToken = async (req: AuthRequest, res: Response) =
             targetRoute: "/batches",
           },
         });
+        await notifySystemPrintEvent({
+          licenseeId: job.batch.licenseeId,
+          orgId: req.user.orgId || null,
+          type: "system_print_job_completed",
+          title: "System print job completed",
+          body: `Direct-print job completed for ${job.batch.name}.`,
+          data: {
+            printJobId: job.id,
+            batchId: job.batch.id,
+            batchName: job.batch.name,
+            printedCodes: job.quantity,
+            mode: "DIRECT_PRINT",
+            targetRoute: "/batches",
+          },
+        });
       } catch (notifyError) {
         console.error("resolveDirectPrintToken notification error:", notifyError);
       }
@@ -690,6 +785,21 @@ export const confirmPrintJob = async (req: AuthRequest, res: Response) => {
           batchId: job.batch.id,
           batchName: job.batch.name,
           printedCodes: result.updatedCodes.count,
+          targetRoute: "/batches",
+        },
+      });
+      await notifySystemPrintEvent({
+        licenseeId: job.batch.licenseeId,
+        orgId: req.user.orgId || null,
+        type: "system_print_job_completed",
+        title: "System print job completed",
+        body: `Printing confirmed for ${job.batch.name} (${result.updatedCodes.count} codes).`,
+        data: {
+          printJobId: job.id,
+          batchId: job.batch.id,
+          batchName: job.batch.name,
+          printedCodes: result.updatedCodes.count,
+          mode: "DIRECT_PRINT",
           targetRoute: "/batches",
         },
       });
