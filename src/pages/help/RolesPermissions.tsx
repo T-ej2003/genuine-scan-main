@@ -34,7 +34,7 @@ export default function RolesPermissions() {
           <Gavel className="h-4 w-4" />
           <AlertTitle>Tenant isolation is enforced</AlertTitle>
           <AlertDescription>
-            Licensee/Admin and Manufacturer users are scoped to exactly one organization. They cannot view or edit data belonging to another org.
+            Licensee users and manufacturer users are scoped to exactly one organization. They cannot view or edit data belonging to another org.
           </AlertDescription>
         </Alert>
 
@@ -43,42 +43,42 @@ export default function RolesPermissions() {
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <CardHeader className="space-y-1">
-                <CardTitle className="text-base">Super Admin</CardTitle>
+                <CardTitle className="text-base">Super User</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <p>
                   Full platform access: licensees, QR inventory flows, audit logs, and the IR Center.
                 </p>
                 <p className="text-xs">
-                  Backend roles: <span className="font-mono">SUPER_ADMIN</span> or <span className="font-mono">PLATFORM_SUPER_ADMIN</span>.
+                  Login role: <span className="font-mono">SUPER_ADMIN</span> (legacy aliases map to this role).
                 </p>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader className="space-y-1">
-                <CardTitle className="text-base">Licensee/Admin (brand/company)</CardTitle>
+                <CardTitle className="text-base">Licensee User (brand/company)</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <p>
                   Manages manufacturers and batches within one licensee/org. Can request QR inventory and assign batches.
                 </p>
                 <p className="text-xs">
-                  Backend roles: <span className="font-mono">LICENSEE_ADMIN</span> or <span className="font-mono">ORG_ADMIN</span>.
+                  Login role: <span className="font-mono">LICENSEE_ADMIN</span> (legacy aliases map to this role).
                 </p>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader className="space-y-1">
-                <CardTitle className="text-base">Manufacturer</CardTitle>
+                <CardTitle className="text-base">Manufacturer User</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <p>
                   Operates production: create direct-print jobs, request one-time render tokens via print agent, and update print status for assigned batches only.
                 </p>
                 <p className="text-xs">
-                  Backend roles: <span className="font-mono">MANUFACTURER</span>, <span className="font-mono">MANUFACTURER_ADMIN</span>, or <span className="font-mono">MANUFACTURER_USER</span>.
+                  Login role: <span className="font-mono">MANUFACTURER</span> (legacy aliases map to this role).
                 </p>
               </CardContent>
             </Card>
@@ -91,7 +91,7 @@ export default function RolesPermissions() {
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  Scans a QR and views verification status. Can report suspected counterfeit from the verify page.
+                  Verification end user. Scans a QR, views verification status, and can report suspected counterfeit from the verify flow.
                 </p>
               </CardContent>
             </Card>

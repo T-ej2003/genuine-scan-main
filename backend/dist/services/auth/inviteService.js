@@ -26,16 +26,28 @@ const inferOrgIdForLicensee = async (licenseeId) => {
         throw new Error("Licensee is inactive");
     return { orgId: licensee.orgId, licenseeName: licensee.name };
 };
+const canonicalizeRole = (role) => {
+    if (role === client_1.UserRole.SUPER_ADMIN || role === client_1.UserRole.PLATFORM_SUPER_ADMIN)
+        return client_1.UserRole.SUPER_ADMIN;
+    if (role === client_1.UserRole.LICENSEE_ADMIN || role === client_1.UserRole.ORG_ADMIN)
+        return client_1.UserRole.LICENSEE_ADMIN;
+    if (role === client_1.UserRole.MANUFACTURER ||
+        role === client_1.UserRole.MANUFACTURER_ADMIN ||
+        role === client_1.UserRole.MANUFACTURER_USER) {
+        return client_1.UserRole.MANUFACTURER;
+    }
+    return role;
+};
 const normalizeRole = (role) => {
     const r = String(role || "").trim().toUpperCase();
     if (r === "PLATFORM_SUPER_ADMIN")
-        return client_1.UserRole.PLATFORM_SUPER_ADMIN;
+        return client_1.UserRole.SUPER_ADMIN;
     if (r === "ORG_ADMIN")
-        return client_1.UserRole.ORG_ADMIN;
+        return client_1.UserRole.LICENSEE_ADMIN;
     if (r === "MANUFACTURER_ADMIN")
-        return client_1.UserRole.MANUFACTURER_ADMIN;
+        return client_1.UserRole.MANUFACTURER;
     if (r === "MANUFACTURER_USER")
-        return client_1.UserRole.MANUFACTURER_USER;
+        return client_1.UserRole.MANUFACTURER;
     // Legacy roles (accepted for backward compatibility).
     if (r === "SUPER_ADMIN")
         return client_1.UserRole.SUPER_ADMIN;
@@ -119,7 +131,8 @@ const createInvite = async (input) => {
                 throw new Error("User with this email already exists");
             if (existing.deletedAt || !existing.isActive)
                 throw new Error("User account is disabled");
-            if (existing.role !== role)
+            const existingCanonicalRole = canonicalizeRole(existing.role);
+            if (existingCanonicalRole !== role)
                 throw new Error("Existing user role does not match invite role");
             if ((existing.licenseeId || null) !== (isPlatformRole ? null : licenseeId || null)) {
                 throw new Error("Existing user belongs to a different licensee");

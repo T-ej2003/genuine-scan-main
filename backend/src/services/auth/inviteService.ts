@@ -20,12 +20,25 @@ const inferOrgIdForLicensee = async (licenseeId: string) => {
   return { orgId: licensee.orgId, licenseeName: licensee.name };
 };
 
+const canonicalizeRole = (role: UserRole): UserRole => {
+  if (role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN) return UserRole.SUPER_ADMIN;
+  if (role === UserRole.LICENSEE_ADMIN || role === UserRole.ORG_ADMIN) return UserRole.LICENSEE_ADMIN;
+  if (
+    role === UserRole.MANUFACTURER ||
+    role === UserRole.MANUFACTURER_ADMIN ||
+    role === UserRole.MANUFACTURER_USER
+  ) {
+    return UserRole.MANUFACTURER;
+  }
+  return role;
+};
+
 const normalizeRole = (role: string): UserRole => {
   const r = String(role || "").trim().toUpperCase();
-  if (r === "PLATFORM_SUPER_ADMIN") return UserRole.PLATFORM_SUPER_ADMIN;
-  if (r === "ORG_ADMIN") return UserRole.ORG_ADMIN;
-  if (r === "MANUFACTURER_ADMIN") return UserRole.MANUFACTURER_ADMIN;
-  if (r === "MANUFACTURER_USER") return UserRole.MANUFACTURER_USER;
+  if (r === "PLATFORM_SUPER_ADMIN") return UserRole.SUPER_ADMIN;
+  if (r === "ORG_ADMIN") return UserRole.LICENSEE_ADMIN;
+  if (r === "MANUFACTURER_ADMIN") return UserRole.MANUFACTURER;
+  if (r === "MANUFACTURER_USER") return UserRole.MANUFACTURER;
 
   // Legacy roles (accepted for backward compatibility).
   if (r === "SUPER_ADMIN") return UserRole.SUPER_ADMIN;
@@ -137,7 +150,8 @@ export const createInvite = async (input: {
     if (existing) {
       if (!allowExistingInvitedUser) throw new Error("User with this email already exists");
       if (existing.deletedAt || !existing.isActive) throw new Error("User account is disabled");
-      if (existing.role !== role) throw new Error("Existing user role does not match invite role");
+      const existingCanonicalRole = canonicalizeRole(existing.role);
+      if (existingCanonicalRole !== role) throw new Error("Existing user role does not match invite role");
       if ((existing.licenseeId || null) !== (isPlatformRole ? null : licenseeId || null)) {
         throw new Error("Existing user belongs to a different licensee");
       }

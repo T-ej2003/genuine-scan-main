@@ -564,7 +564,7 @@ export default function Licensees() {
         const uRes = await apiClient.inviteUser({
           name: mfgName,
           email: mfgEmail,
-          role: "MANUFACTURER_USER",
+          role: "MANUFACTURER",
           licenseeId,
         });
         if (!uRes.success) throw new Error(uRes.error || "Manufacturer create failed");
@@ -765,7 +765,7 @@ export default function Licensees() {
     const res = await apiClient.inviteUser({
       name,
       email,
-      role: userForm.role === "LICENSEE_ADMIN" ? "ORG_ADMIN" : "MANUFACTURER_USER",
+      role: userForm.role === "LICENSEE_ADMIN" ? "LICENSEE_ADMIN" : "MANUFACTURER",
       licenseeId: userForm.licenseeId,
     });
 
@@ -781,7 +781,7 @@ export default function Licensees() {
 
     toast({
       title: "Invite sent",
-      description: `Invite sent for ${userForm.role}.`,
+      description: userForm.role === "LICENSEE_ADMIN" ? "Invite sent for Licensee User." : "Invite sent for Manufacturer User.",
     });
     setCreatingUser(false);
     setIsUserOpen(false);
@@ -1514,8 +1514,8 @@ export default function Licensees() {
                       <SelectValue placeholder="Select role" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="MANUFACTURER">MANUFACTURER</SelectItem>
-                      <SelectItem value="LICENSEE_ADMIN">LICENSEE_ADMIN</SelectItem>
+                      <SelectItem value="MANUFACTURER">Manufacturer user</SelectItem>
+                      <SelectItem value="LICENSEE_ADMIN">Licensee user</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

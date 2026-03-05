@@ -222,9 +222,9 @@ export default function Dashboard() {
   const redemptionPct = fulfilled > 0 ? Math.round((qrStatusData.scanned / fulfilled) * 100) : 0;
 
   const roleLabel = useMemo(() => {
-    if (user?.role === "super_admin") return "Super Admin";
-    if (user?.role === "licensee_admin") return "Licensee Admin";
-    if (user?.role === "manufacturer") return "Manufacturer";
+    if (user?.role === "super_admin") return "Super User";
+    if (user?.role === "licensee_admin") return "Licensee User";
+    if (user?.role === "manufacturer") return "Manufacturer User";
     return "User";
   }, [user?.role]);
 

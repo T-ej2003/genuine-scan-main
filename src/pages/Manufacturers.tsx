@@ -402,7 +402,7 @@ export default function Manufacturers() {
       const res = await apiClient.inviteUser({
         email,
         name,
-        role: "MANUFACTURER_USER",
+        role: "MANUFACTURER",
         licenseeId: licId,
       });
 
