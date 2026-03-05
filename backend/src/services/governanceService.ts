@@ -17,6 +17,12 @@ type VerifyUxPolicy = {
   mobileCameraAssist: boolean;
 };
 
+export type DuplicateRiskProfile = {
+  tenantRiskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  productRiskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  anomalyWeight: number;
+};
+
 type ComplianceControlStatus = "EFFECTIVE" | "MONITOR" | "ATTENTION";
 
 type ComplianceControl = {
@@ -34,6 +40,12 @@ const VERIFY_POLICY_DEFAULTS: VerifyUxPolicy = {
   allowOwnershipClaim: true,
   allowFraudReport: true,
   mobileCameraAssist: true,
+};
+
+const DUPLICATE_RISK_PROFILE_DEFAULTS: DuplicateRiskProfile = {
+  tenantRiskLevel: "MEDIUM",
+  productRiskLevel: "MEDIUM",
+  anomalyWeight: 0.22,
 };
 
 const VERIFY_POLICY_FLAG_MAP: Array<{ key: string; field: keyof VerifyUxPolicy }> = [
@@ -174,6 +186,62 @@ export const resolveVerifyUxPolicy = async (licenseeId?: string | null): Promise
   }
 
   return policy;
+};
+
+const normalizeRiskBand = (value: unknown, fallback: DuplicateRiskProfile["tenantRiskLevel"]) => {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (normalized === "LOW" || normalized === "MEDIUM" || normalized === "HIGH" || normalized === "CRITICAL") {
+    return normalized;
+  }
+  return fallback;
+};
+
+export const resolveDuplicateRiskProfile = async (licenseeId?: string | null): Promise<DuplicateRiskProfile> => {
+  const tenantId = String(licenseeId || "").trim();
+  if (!tenantId) return { ...DUPLICATE_RISK_PROFILE_DEFAULTS };
+
+  const flag = await prisma.tenantFeatureFlag
+    .findUnique({
+      where: {
+        licenseeId_key: {
+          licenseeId: tenantId,
+          key: "verify_duplicate_risk_profile",
+        },
+      },
+      select: {
+        enabled: true,
+        config: true,
+      },
+    })
+    .catch((error) => {
+      if (isPrismaMissingTableError(error, ["tenantfeatureflag"])) {
+        warnStorageUnavailableOnce(
+          "tenant-feature-flag-risk-profile",
+          "[governance] TenantFeatureFlag table is unavailable. Using default duplicate risk profile."
+        );
+        return null;
+      }
+      throw error;
+    });
+
+  if (!flag) return { ...DUPLICATE_RISK_PROFILE_DEFAULTS };
+
+  const config = flag.config && typeof flag.config === "object" ? (flag.config as Record<string, unknown>) : {};
+  const tenantRiskLevel = normalizeRiskBand(
+    config.tenantRiskLevel,
+    flag.enabled ? DUPLICATE_RISK_PROFILE_DEFAULTS.tenantRiskLevel : "LOW"
+  );
+  const productRiskLevel = normalizeRiskBand(config.productRiskLevel, DUPLICATE_RISK_PROFILE_DEFAULTS.productRiskLevel);
+  const anomalyWeightRaw = Number(config.anomalyWeight);
+  const anomalyWeight = Number.isFinite(anomalyWeightRaw)
+    ? Math.max(0.05, Math.min(0.8, anomalyWeightRaw))
+    : DUPLICATE_RISK_PROFILE_DEFAULTS.anomalyWeight;
+
+  return {
+    tenantRiskLevel,
+    productRiskLevel,
+    anomalyWeight,
+  };
 };
 
 export const listTenantFeatureFlags = async (licenseeId: string) => {

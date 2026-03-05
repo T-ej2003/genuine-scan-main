@@ -71,6 +71,19 @@ const parseBoolEnv = (value, fallback = false) => {
         return false;
     return fallback;
 };
+const VERIFY_STEP_UP_REQUIRED_ON_SUSPICIOUS = parseBoolEnv(process.env.VERIFY_STEP_UP_REQUIRED_ON_SUSPICIOUS, true);
+const verifyStepUpChallenge = async (req) => {
+    if (!VERIFY_STEP_UP_REQUIRED_ON_SUSPICIOUS)
+        return { ok: true };
+    const captchaToken = String(req.headers["x-captcha-token"] || req.body?.captchaToken || "").trim();
+    if (!captchaToken) {
+        return {
+            ok: false,
+            reason: "Suspicious activity challenge required. Complete captcha and retry.",
+        };
+    }
+    return (0, captchaService_1.verifyCaptchaToken)(captchaToken, req.ip);
+};
 const deviceClaimCookieOptions = () => ({
     httpOnly: true,
     sameSite: "lax",
@@ -381,7 +394,9 @@ const buildFraudVerificationSnapshot = async (normalizedCode) => {
             ownershipStatus: emptyOwnership,
         };
     }
-    const scanInsight = await (0, scanInsightService_1.getScanInsight)(qrCode.id, null);
+    const scanInsight = await (0, scanInsightService_1.getScanInsight)(qrCode.id, null, {
+        licenseeId: qrCode.licenseeId || null,
+    });
     const scanSummary = buildScanSummary({
         scanCount: Number(qrCode.scanCount || 0),
         scannedAt: qrCode.scannedAt,
@@ -419,12 +434,17 @@ const buildFraudVerificationSnapshot = async (normalizedCode) => {
             ownershipStatus,
         };
     }
+    const riskProfile = await (0, governanceService_1.resolveDuplicateRiskProfile)(qrCode.licenseeId || null);
+    const anomalyModelScore = (0, duplicateRiskService_1.deriveAnomalyModelScore)({ scanSignals: scanInsight.signals });
     const duplicateRisk = (0, duplicateRiskService_1.assessDuplicateRisk)({
         scanCount: scanSummary.totalScans,
         scanSignals: scanInsight.signals,
         ownershipStatus,
         latestScanAt: scanInsight.latestScanAt,
         previousScanAt: scanInsight.previousScanAt,
+        anomalyModelScore: Math.round(anomalyModelScore * riskProfile.anomalyWeight),
+        tenantRiskLevel: riskProfile.tenantRiskLevel,
+        productRiskLevel: riskProfile.productRiskLevel,
     });
     return {
         classification: duplicateRisk.classification,
@@ -641,13 +661,17 @@ const verifyQRCode = async (req, res) => {
             });
         }
         const verifyUxPolicy = await (0, governanceService_1.resolveVerifyUxPolicy)(qrCode.licenseeId || null);
+        const riskProfile = await (0, governanceService_1.resolveDuplicateRiskProfile)(qrCode.licenseeId || null);
         const customerUserId = req.customer?.userId || null;
         const requestDeviceFingerprint = (0, requestFingerprint_1.deriveRequestDeviceFingerprint)(req);
         const deviceClaimToken = getDeviceClaimTokenFromRequest(req);
         const deviceTokenHash = deviceClaimToken ? (0, security_1.hashToken)(deviceClaimToken) : null;
         const requesterIpHash = (0, security_1.hashIp)(req.ip);
         const containment = buildContainment(qrCode);
-        const scanInsight = await (0, scanInsightService_1.getScanInsight)(qrCode.id, requestDeviceFingerprint);
+        const scanInsight = await (0, scanInsightService_1.getScanInsight)(qrCode.id, requestDeviceFingerprint, {
+            currentIpAddress: req.ip || null,
+            licenseeId: qrCode.licenseeId || null,
+        });
         const baseScanSummary = buildScanSummary({
             scanCount: Number(qrCode.scanCount || 0),
             scannedAt: qrCode.scannedAt,
@@ -805,7 +829,10 @@ const verifyQRCode = async (req, res) => {
         const isBlocked = blockedByPolicy || finalStatus === client_1.QRStatus.BLOCKED;
         const isReady = isQrReadyForCustomerUse(finalStatus);
         const firstScanTime = updated.scannedAt ? new Date(updated.scannedAt) : null;
-        const postScanInsight = await (0, scanInsightService_1.getScanInsight)(updated.id, requestDeviceFingerprint);
+        const postScanInsight = await (0, scanInsightService_1.getScanInsight)(updated.id, requestDeviceFingerprint, {
+            currentIpAddress: req.ip || null,
+            licenseeId: updated.licenseeId || null,
+        });
         const postScanSummary = buildScanSummary({
             scanCount: Number(updated.scanCount || 0),
             scannedAt: firstScanTime,
@@ -832,6 +859,10 @@ const verifyQRCode = async (req, res) => {
             isBlocked,
             allowClaim: verifyUxPolicy.allowOwnershipClaim,
         });
+        const anomalyModelScore = (0, duplicateRiskService_1.deriveAnomalyModelScore)({
+            scanSignals: postScanInsight.signals,
+            policy,
+        });
         const duplicateRisk = (0, duplicateRiskService_1.assessDuplicateRisk)({
             scanCount: postScanSummary.totalScans,
             scanSignals: postScanInsight.signals,
@@ -840,6 +871,9 @@ const verifyQRCode = async (req, res) => {
             customerUserId,
             latestScanAt: postScanInsight.latestScanAt,
             previousScanAt: postScanInsight.previousScanAt,
+            anomalyModelScore: Math.round(anomalyModelScore * riskProfile.anomalyWeight),
+            tenantRiskLevel: riskProfile.tenantRiskLevel,
+            productRiskLevel: riskProfile.productRiskLevel,
         });
         let classification;
         let reasons;
@@ -884,6 +918,7 @@ const verifyQRCode = async (req, res) => {
             scanSummary: postScanSummary,
             ownershipStatus,
         });
+        const stepUpRequired = classification === "SUSPICIOUS_DUPLICATE" && !customerUserId;
         return res.json({
             success: true,
             data: {
@@ -923,7 +958,12 @@ const verifyQRCode = async (req, res) => {
                 firstVerifiedAt: postScanSummary.firstVerifiedAt,
                 latestVerifiedAt: postScanSummary.latestVerifiedAt,
                 riskScore,
+                riskThreshold: duplicateRisk.threshold,
                 riskSignals,
+                challenge: {
+                    required: stepUpRequired,
+                    methods: stepUpRequired ? ["EMAIL_OTP", "CAPTCHA"] : [],
+                },
                 warningMessage,
                 policy,
             },
@@ -1063,6 +1103,17 @@ const claimProductOwnership = async (req, res) => {
                     existingOwnership: true,
                 },
             });
+            const stepUp = await verifyStepUpChallenge(req);
+            if (!stepUp.ok) {
+                return res.status(403).json({
+                    success: false,
+                    error: stepUp.reason || "Suspicious ownership conflict requires challenge verification.",
+                    challenge: {
+                        required: true,
+                        methods: ["CAPTCHA"],
+                    },
+                });
+            }
             return res.json({
                 success: true,
                 data: {
@@ -1110,6 +1161,17 @@ const claimProductOwnership = async (req, res) => {
             if (error instanceof client_1.Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
                 const existing = await loadOwnershipByQrCodeId(qrCode.id);
                 if (existing) {
+                    const stepUp = await verifyStepUpChallenge(req);
+                    if (!stepUp.ok) {
+                        return res.status(403).json({
+                            success: false,
+                            error: stepUp.reason || "Suspicious ownership conflict requires challenge verification.",
+                            challenge: {
+                                required: true,
+                                methods: ["CAPTCHA"],
+                            },
+                        });
+                    }
                     return res.json({
                         success: true,
                         data: {
@@ -1230,6 +1292,17 @@ const linkDeviceClaimToCustomer = async (req, res) => {
             });
         }
         if (existingOwnership.userId && existingOwnership.userId !== customer.userId) {
+            const stepUp = await verifyStepUpChallenge(req);
+            if (!stepUp.ok) {
+                return res.status(403).json({
+                    success: false,
+                    error: stepUp.reason || "Suspicious ownership link requires challenge verification.",
+                    challenge: {
+                        required: true,
+                        methods: ["CAPTCHA"],
+                    },
+                });
+            }
             return res.status(409).json({
                 success: false,
                 error: "Ownership is already linked to another account.",
@@ -1245,6 +1318,17 @@ const linkDeviceClaimToCustomer = async (req, res) => {
             allowClaim,
         });
         if (!ownershipStatus.isOwnedByRequester) {
+            const stepUp = await verifyStepUpChallenge(req);
+            if (!stepUp.ok) {
+                return res.status(403).json({
+                    success: false,
+                    error: stepUp.reason || "Ownership linking challenge required.",
+                    challenge: {
+                        required: true,
+                        methods: ["CAPTCHA"],
+                    },
+                });
+            }
             return res.status(409).json({
                 success: false,
                 error: "Current device could not prove ownership for linking.",

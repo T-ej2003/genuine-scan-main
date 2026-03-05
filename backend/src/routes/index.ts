@@ -99,14 +99,17 @@ import {
 } from "../controllers/verifyController";
 import { scanToken } from "../controllers/scanController";
 import {
+  confirmDirectPrintItem,
   createPrintJob,
   downloadPrintJobPack,
   confirmPrintJob,
   issueDirectPrintTokens,
+  reportDirectPrintFailure,
   resolveDirectPrintToken,
 } from "../controllers/printJobController";
 import {
   getPrinterConnectionStatus,
+  printerConnectionEvents,
   reportPrinterHeartbeat,
 } from "../controllers/printerAgentController";
 import auditRoutes from "./auditRoutes";
@@ -399,6 +402,13 @@ router.get(
   enforceTenantIsolation,
   getPrinterConnectionStatus
 );
+router.get(
+  "/manufacturer/printer-agent/events",
+  authenticateSSE,
+  requireManufacturer,
+  enforceTenantIsolation,
+  printerConnectionEvents
+);
 router.post(
   "/manufacturer/print-jobs",
   authenticate,
@@ -429,6 +439,22 @@ router.post(
   enforceTenantIsolation,
   requireCsrf,
   resolveDirectPrintToken
+);
+router.post(
+  "/manufacturer/print-jobs/:id/direct-print/confirm-item",
+  authenticate,
+  requireManufacturer,
+  enforceTenantIsolation,
+  requireCsrf,
+  confirmDirectPrintItem
+);
+router.post(
+  "/manufacturer/print-jobs/:id/direct-print/fail",
+  authenticate,
+  requireManufacturer,
+  enforceTenantIsolation,
+  requireCsrf,
+  reportDirectPrintFailure
 );
 router.post(
   "/manufacturer/print-jobs/:id/confirm",

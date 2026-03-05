@@ -58,10 +58,17 @@ type DashboardNotification = {
 
 type PrinterConnectionStatus = {
   connected: boolean;
+  trusted: boolean;
   stale: boolean;
   requiredForPrinting: boolean;
+  trustStatus?: string;
+  trustReason?: string | null;
   lastHeartbeatAt: string | null;
   ageSeconds: number | null;
+  registrationId?: string | null;
+  agentId?: string | null;
+  deviceFingerprint?: string | null;
+  mtlsFingerprint?: string | null;
   printerName?: string | null;
   printerId?: string | null;
   deviceName?: string | null;
@@ -104,15 +111,22 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const clearNotificationsTimerRef = useRef<number | null>(null);
   const [printerStatus, setPrinterStatus] = useState<PrinterConnectionStatus>({
     connected: false,
+    trusted: false,
     stale: true,
     requiredForPrinting: true,
+    trustStatus: "UNREGISTERED",
+    trustReason: "No trusted printer registration",
     lastHeartbeatAt: null,
     ageSeconds: null,
+    registrationId: null,
+    agentId: null,
+    deviceFingerprint: null,
+    mtlsFingerprint: null,
     printerName: null,
     printerId: null,
     deviceName: null,
     agentVersion: null,
-    error: "No printer heartbeat yet",
+    error: "No trusted printer heartbeat yet",
   });
 
   const filteredNavItems = navItems.filter((item) => user && item.roles.includes(user.role));
@@ -176,6 +190,13 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           deviceName: (local.data as any)?.deviceName || undefined,
           agentVersion: (local.data as any)?.agentVersion || undefined,
           error: (local.data as any)?.error || undefined,
+          agentId: (local.data as any)?.agentId || undefined,
+          deviceFingerprint: (local.data as any)?.deviceFingerprint || undefined,
+          publicKeyPem: (local.data as any)?.publicKeyPem || undefined,
+          clientCertFingerprint: (local.data as any)?.clientCertFingerprint || undefined,
+          heartbeatNonce: (local.data as any)?.heartbeatNonce || undefined,
+          heartbeatIssuedAt: (local.data as any)?.heartbeatIssuedAt || undefined,
+          heartbeatSignature: (local.data as any)?.heartbeatSignature || undefined,
         }
       : {
           connected: false,
@@ -191,10 +212,17 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
     setPrinterStatus({
       connected: false,
+      trusted: false,
       stale: true,
       requiredForPrinting: true,
+      trustStatus: "UNREGISTERED",
+      trustReason: "No trusted printer registration",
       lastHeartbeatAt: null,
       ageSeconds: null,
+      registrationId: null,
+      agentId: null,
+      deviceFingerprint: null,
+      mtlsFingerprint: null,
       printerName: null,
       printerId: null,
       deviceName: null,
@@ -806,21 +834,21 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               onClick={syncManufacturerPrinterStatus}
               className={cn(
                 "mr-1 gap-2",
-                printerStatus.connected
+                printerStatus.connected && printerStatus.trusted
                   ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                   : "border-red-300 bg-red-50 text-red-700 hover:bg-red-100"
               )}
               title={
-                printerStatus.connected
+                printerStatus.connected && printerStatus.trusted
                   ? `${printerStatus.printerName || "Printer connected"}${printerStatus.lastHeartbeatAt ? ` · heartbeat ${printerStatus.lastHeartbeatAt}` : ""}`
-                  : printerStatus.error || "Printer disconnected"
+                  : printerStatus.error || printerStatus.trustReason || "Printer disconnected"
               }
             >
               <Printer className="h-4 w-4" />
               <span className="hidden md:inline">
-                {printerStatus.connected ? "Printer Connected" : "Printer Offline"}
+                {printerStatus.connected && printerStatus.trusted ? "Printer Trusted" : "Printer Untrusted"}
               </span>
-              <span className="md:hidden">{printerStatus.connected ? "Online" : "Offline"}</span>
+              <span className="md:hidden">{printerStatus.connected && printerStatus.trusted ? "Trusted" : "Untrusted"}</span>
             </Button>
           )}
 

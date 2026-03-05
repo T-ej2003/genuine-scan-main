@@ -9,6 +9,7 @@ const client_1 = require("@prisma/client");
 const traceEventService_1 = require("./traceEventService");
 const security_1 = require("../utils/security");
 const siemOutboxService_1 = require("./siemOutboxService");
+const forensicChainService_1 = require("./forensicChainService");
 const listeners = new Set();
 const onAuditLog = (cb) => {
     listeners.add(cb);
@@ -76,6 +77,23 @@ const createAuditLog = async (data) => {
     catch (e) {
         // audit log creation should not fail if trace projection fails
         console.error("createTraceEventFromAuditLog failed:", e);
+    }
+    try {
+        await (0, forensicChainService_1.appendForensicChainFromAuditLog)({
+            id: log.id,
+            action: log.action,
+            entityType: log.entityType,
+            entityId: log.entityId,
+            userId: log.userId,
+            orgId: log.orgId,
+            licenseeId: log.licenseeId,
+            details: log.details,
+            createdAt: log.createdAt,
+        });
+    }
+    catch (e) {
+        // forensic projection is best-effort and must not fail request path
+        console.error("appendForensicChainFromAuditLog failed:", e);
     }
     emitAuditLog(log);
     await (0, siemOutboxService_1.queueSecurityEvent)("AUDIT_LOG", {

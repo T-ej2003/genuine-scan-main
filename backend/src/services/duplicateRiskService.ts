@@ -1,9 +1,15 @@
+type RiskBand = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
 type ScanSignals = {
   distinctDeviceCount24h?: number;
   recentScanCount10m?: number;
   distinctCountryCount24h?: number;
   seenOnCurrentDeviceBefore?: boolean;
   previousScanSameDevice?: boolean | null;
+  ipVelocityCount10m?: number;
+  ipReputationScore?: number;
+  deviceGraphOverlap24h?: number;
+  crossCodeCorrelation24h?: number;
 };
 
 type PolicySignal = {
@@ -30,12 +36,16 @@ export type DuplicateRiskInput = {
   customerUserId?: string | null;
   latestScanAt?: string | null;
   previousScanAt?: string | null;
+  anomalyModelScore?: number | null;
+  tenantRiskLevel?: RiskBand | null;
+  productRiskLevel?: RiskBand | null;
 };
 
 export type DuplicateRiskAssessment = {
   riskScore: number;
   classification: "LEGIT_REPEAT" | "SUSPICIOUS_DUPLICATE";
   reasons: string[];
+  threshold: number;
   signals: {
     scanCount: number;
     distinctDeviceCount24h: number;
@@ -46,12 +56,19 @@ export type DuplicateRiskAssessment = {
     ownedByRequester: boolean;
     seenOnCurrentDeviceBefore: boolean;
     previousScanSameDevice: boolean;
+    ipVelocityCount10m: number;
+    ipReputationScore: number;
+    deviceGraphOverlap24h: number;
+    crossCodeCorrelation24h: number;
     policyTriggered: {
       multiScan: boolean;
       geoDrift: boolean;
       velocitySpike: boolean;
     };
     possibleImpossibleTravel: boolean;
+    anomalyModelScore: number;
+    tenantRiskLevel: RiskBand;
+    productRiskLevel: RiskBand;
   };
 };
 
@@ -70,6 +87,48 @@ const parseIsoMs = (value?: string | null) => {
 
 const bool = (value: unknown) => Boolean(value);
 
+const normalizeRiskBand = (value: unknown, fallback: RiskBand): RiskBand => {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (normalized === "LOW" || normalized === "MEDIUM" || normalized === "HIGH" || normalized === "CRITICAL") {
+    return normalized;
+  }
+  return fallback;
+};
+
+const severityWeight = (band: RiskBand) => {
+  if (band === "CRITICAL") return 4;
+  if (band === "HIGH") return 3;
+  if (band === "MEDIUM") return 2;
+  return 1;
+};
+
+const adaptiveThreshold = (tenantRisk: RiskBand, productRisk: RiskBand) => {
+  const dominantWeight = Math.max(severityWeight(tenantRisk), severityWeight(productRisk));
+  const adjustment = dominantWeight >= 4 ? -12 : dominantWeight === 3 ? -7 : dominantWeight === 2 ? 0 : 6;
+  return clamp(60 + adjustment, 45, 75);
+};
+
+export const deriveAnomalyModelScore = (input: {
+  scanSignals?: ScanSignals | null;
+  policy?: PolicySignal | null;
+}) => {
+  const scanSignals = input.scanSignals || {};
+  const policyTriggered = input.policy?.triggered || {};
+
+  let score = 0;
+  score += clamp(Number(scanSignals.ipReputationScore || 0), 0, 100) * 0.45;
+  score += Math.min(25, Math.max(0, Number(scanSignals.ipVelocityCount10m || 0) - 2) * 3);
+  score += Math.min(22, Math.max(0, Number(scanSignals.deviceGraphOverlap24h || 0) - 1) * 4);
+  score += Math.min(18, Math.max(0, Number(scanSignals.crossCodeCorrelation24h || 0) - 1) * 3);
+  score += Math.min(22, Math.max(0, Number(scanSignals.distinctCountryCount24h || 0) - 1) * 10);
+
+  if (policyTriggered.geoDrift) score += 12;
+  if (policyTriggered.velocitySpike) score += 14;
+  if (policyTriggered.multiScan) score += 6;
+
+  return clamp(Math.round(score), 0, 100);
+};
+
 export const assessDuplicateRisk = (input: DuplicateRiskInput): DuplicateRiskAssessment => {
   const scanCount = Math.max(0, Number(input.scanCount || 0));
   const signals = input.scanSignals || null;
@@ -82,6 +141,10 @@ export const assessDuplicateRisk = (input: DuplicateRiskInput): DuplicateRiskAss
   const distinctCountryCount24h = Math.max(0, Number(signals?.distinctCountryCount24h ?? 0));
   const seenOnCurrentDeviceBefore = bool(signals?.seenOnCurrentDeviceBefore);
   const previousScanSameDevice = bool(signals?.previousScanSameDevice === true);
+  const ipVelocityCount10m = Math.max(0, Number(signals?.ipVelocityCount10m ?? 0));
+  const ipReputationScore = clamp(Number(signals?.ipReputationScore ?? 0), 0, 100);
+  const deviceGraphOverlap24h = Math.max(0, Number(signals?.deviceGraphOverlap24h ?? 0));
+  const crossCodeCorrelation24h = Math.max(0, Number(signals?.crossCodeCorrelation24h ?? 0));
 
   const hasCustomerIdentity = Boolean(String(input.customerUserId || "").trim());
   const ownedByRequester = bool(input.ownershipStatus?.isOwnedByRequester);
@@ -92,6 +155,10 @@ export const assessDuplicateRisk = (input: DuplicateRiskInput): DuplicateRiskAss
   const gapMinutes =
     latestMs != null && previousMs != null ? Math.abs(latestMs - previousMs) / 60_000 : Number.POSITIVE_INFINITY;
   const possibleImpossibleTravel = bool(policyTriggered.geoDrift) && gapMinutes <= 45;
+
+  const tenantRiskLevel = normalizeRiskBand(input.tenantRiskLevel, "MEDIUM");
+  const productRiskLevel = normalizeRiskBand(input.productRiskLevel, "MEDIUM");
+  const threshold = adaptiveThreshold(tenantRiskLevel, productRiskLevel);
 
   let score = 8;
   const suspiciousReasons: string[] = [];
@@ -119,6 +186,26 @@ export const assessDuplicateRisk = (input: DuplicateRiskInput): DuplicateRiskAss
   if (distinctCountryCount24h >= 2) {
     score += clamp(20 + (distinctCountryCount24h - 2) * 10, 20, 40);
     uniquePush(suspiciousReasons, "Recent scans came from multiple countries.");
+  }
+
+  if (ipVelocityCount10m >= 5) {
+    score += clamp(8 + (ipVelocityCount10m - 5) * 2, 8, 22);
+    uniquePush(suspiciousReasons, "Same network endpoint is scanning unusually fast.");
+  }
+
+  if (ipReputationScore >= 60) {
+    score += clamp((ipReputationScore - 50) * 0.5, 5, 25);
+    uniquePush(suspiciousReasons, "Network reputation for this scan endpoint is high risk.");
+  }
+
+  if (deviceGraphOverlap24h >= 3) {
+    score += clamp(10 + (deviceGraphOverlap24h - 3) * 2.5, 10, 24);
+    uniquePush(suspiciousReasons, "Device graph overlap indicates coordinated scan activity.");
+  }
+
+  if (crossCodeCorrelation24h >= 4) {
+    score += clamp(8 + (crossCodeCorrelation24h - 4) * 2.5, 8, 20);
+    uniquePush(suspiciousReasons, "This device has correlated scans across multiple codes.");
   }
 
   if (bool(policyTriggered.multiScan)) {
@@ -173,11 +260,18 @@ export const assessDuplicateRisk = (input: DuplicateRiskInput): DuplicateRiskAss
     if (suspiciousReasons.length >= 6) break;
   }
 
+  const anomalyModelScore = clamp(Math.round(Number(input.anomalyModelScore ?? 0)), 0, 100);
+  if (anomalyModelScore > 0) {
+    score += Math.round(anomalyModelScore * 0.22);
+  }
+
   // If we have strong trust signals and no hard anomaly triggers, keep risk in the low band.
   const hasHardAnomaly =
     ownershipConflict ||
     possibleImpossibleTravel ||
     distinctCountryCount24h >= 2 ||
+    ipReputationScore >= 70 ||
+    deviceGraphOverlap24h >= 4 ||
     (distinctDeviceCount24h >= 2 && recentScanCount10m >= 3) ||
     bool(policyTriggered.velocitySpike);
 
@@ -188,7 +282,7 @@ export const assessDuplicateRisk = (input: DuplicateRiskInput): DuplicateRiskAss
   const riskScore = clamp(Math.round(score), 0, 100);
   const strongOwnershipConflict = ownershipConflict && (hasCustomerIdentity || Boolean(input.ownershipStatus?.matchMethod));
   const classification: "LEGIT_REPEAT" | "SUSPICIOUS_DUPLICATE" =
-    riskScore >= 60 || strongOwnershipConflict || (ownershipConflict && riskScore >= 45)
+    riskScore >= threshold || strongOwnershipConflict || (ownershipConflict && riskScore >= Math.max(45, threshold - 10))
       ? "SUSPICIOUS_DUPLICATE"
       : "LEGIT_REPEAT";
 
@@ -213,6 +307,7 @@ export const assessDuplicateRisk = (input: DuplicateRiskInput): DuplicateRiskAss
     riskScore,
     classification,
     reasons,
+    threshold,
     signals: {
       scanCount,
       distinctDeviceCount24h,
@@ -223,12 +318,19 @@ export const assessDuplicateRisk = (input: DuplicateRiskInput): DuplicateRiskAss
       ownedByRequester,
       seenOnCurrentDeviceBefore,
       previousScanSameDevice,
+      ipVelocityCount10m,
+      ipReputationScore,
+      deviceGraphOverlap24h,
+      crossCodeCorrelation24h,
       policyTriggered: {
         multiScan: bool(policyTriggered.multiScan),
         geoDrift: bool(policyTriggered.geoDrift),
         velocitySpike: bool(policyTriggered.velocitySpike),
       },
       possibleImpossibleTravel,
+      anomalyModelScore,
+      tenantRiskLevel,
+      productRiskLevel,
     },
   };
 };
