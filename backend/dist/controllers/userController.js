@@ -55,6 +55,18 @@ const updateUserSchema = zod_1.z.object({
     website: zod_1.z.string().trim().max(200).optional(),
 });
 /* ===================== HELPERS ===================== */
+const canonicalizeRole = (role) => {
+    if (role === client_1.UserRole.SUPER_ADMIN || role === client_1.UserRole.PLATFORM_SUPER_ADMIN)
+        return client_1.UserRole.SUPER_ADMIN;
+    if (role === client_1.UserRole.LICENSEE_ADMIN || role === client_1.UserRole.ORG_ADMIN)
+        return client_1.UserRole.LICENSEE_ADMIN;
+    if (role === client_1.UserRole.MANUFACTURER ||
+        role === client_1.UserRole.MANUFACTURER_ADMIN ||
+        role === client_1.UserRole.MANUFACTURER_USER) {
+        return client_1.UserRole.MANUFACTURER;
+    }
+    return role;
+};
 const MANUFACTURER_ROLES = [
     client_1.UserRole.MANUFACTURER,
     client_1.UserRole.MANUFACTURER_ADMIN,
@@ -118,7 +130,7 @@ const createUser = async (req, res) => {
         const email = parsed.data.email;
         const name = parsed.data.name.trim();
         const password = parsed.data.password.trim();
-        const role = parsed.data.role;
+        const role = canonicalizeRole(parsed.data.role);
         // Tenant logic:
         // - SUPER_ADMIN: can create LICENSEE_ADMIN or MANUFACTURER for any licenseeId (required)
         // - LICENSEE_ADMIN: should only create MANUFACTURER under own licensee (licenseeId ignored)
@@ -136,9 +148,9 @@ const createUser = async (req, res) => {
                 return res.status(403).json({ success: false, error: "No licensee association found" });
             }
             effectiveLicenseeId = actorLicenseeId;
-            // non-super cannot create licensee admins
+            // non-super cannot create licensee users
             if (!isManufacturerRole(role)) {
-                return res.status(403).json({ success: false, error: "Only platform admin can create org admin users" });
+                return res.status(403).json({ success: false, error: "Only super users can create licensee users" });
             }
         }
         if (!effectiveLicenseeId) {

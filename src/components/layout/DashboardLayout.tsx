@@ -481,11 +481,11 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     if (!role) return "User";
     switch (role) {
       case "super_admin":
-        return "Super Admin";
+        return "Super User";
       case "licensee_admin":
-        return "Licensee Admin";
+        return "Licensee User";
       case "manufacturer":
-        return "Manufacturer";
+        return "Manufacturer User";
       default:
         return role;
     }

@@ -58,6 +58,19 @@ const updateUserSchema = z.object({
 
 /* ===================== HELPERS ===================== */
 
+const canonicalizeRole = (role: UserRole): UserRole => {
+  if (role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN) return UserRole.SUPER_ADMIN;
+  if (role === UserRole.LICENSEE_ADMIN || role === UserRole.ORG_ADMIN) return UserRole.LICENSEE_ADMIN;
+  if (
+    role === UserRole.MANUFACTURER ||
+    role === UserRole.MANUFACTURER_ADMIN ||
+    role === UserRole.MANUFACTURER_USER
+  ) {
+    return UserRole.MANUFACTURER;
+  }
+  return role;
+};
+
 const MANUFACTURER_ROLES: UserRole[] = [
   UserRole.MANUFACTURER,
   UserRole.MANUFACTURER_ADMIN,
@@ -134,7 +147,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
     const email = parsed.data.email;
     const name = parsed.data.name.trim();
     const password = parsed.data.password.trim();
-    const role = parsed.data.role as UserRole;
+    const role = canonicalizeRole(parsed.data.role as UserRole);
 
     // Tenant logic:
     // - SUPER_ADMIN: can create LICENSEE_ADMIN or MANUFACTURER for any licenseeId (required)
@@ -155,9 +168,9 @@ export const createUser = async (req: AuthRequest, res: Response) => {
       }
       effectiveLicenseeId = actorLicenseeId;
 
-      // non-super cannot create licensee admins
+      // non-super cannot create licensee users
       if (!isManufacturerRole(role)) {
-        return res.status(403).json({ success: false, error: "Only platform admin can create org admin users" });
+        return res.status(403).json({ success: false, error: "Only super users can create licensee users" });
       }
     }
 

@@ -77,7 +77,7 @@ export default function Login() {
       title="Welcome back"
       description="Sign in to access QR operations, approvals, and traceability workflows."
       sideTitle="Control secure QR inventory and approvals from one console."
-      sideDescription="Designed for super admins, licensee admins, and manufacturers with role-safe access, audit visibility, and operational continuity."
+      sideDescription="Designed for super users, licensee users, and manufacturer users with role-safe access, audit visibility, and operational continuity."
     >
       <form onSubmit={mfaTicket ? handleMfaSubmit : handleSubmit} className="space-y-5">
         {error && (
