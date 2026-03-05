@@ -104,7 +104,7 @@ export const createSupportIssueReport = async (req: AuthRequest, res: Response) 
         reporterRole: created.reporterRole,
         targetRoute: "/support",
       },
-      channels: [NotificationChannel.WEB],
+      channels: [NotificationChannel.WEB, NotificationChannel.EMAIL],
     });
 
     return res.status(201).json({

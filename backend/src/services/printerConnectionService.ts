@@ -4,6 +4,29 @@ import { PrinterTrustStatus, UserRole } from "@prisma/client";
 import prisma from "../config/database";
 import { hashIp, hashToken, normalizeUserAgent, randomOpaqueToken } from "../utils/security";
 
+export type PrinterCapabilitySummary = {
+  transports: string[];
+  protocols: string[];
+  languages: string[];
+  supportsRaster: boolean;
+  supportsPdf: boolean;
+  dpiOptions: number[];
+  mediaSizes: string[];
+};
+
+export type PrinterInventoryDevice = {
+  printerId: string;
+  printerName: string;
+  model: string | null;
+  connection: string | null;
+  online: boolean;
+  isDefault: boolean;
+  protocols: string[];
+  languages: string[];
+  mediaSizes: string[];
+  dpi: number | null;
+};
+
 type PrinterRegistrationWithLatest = {
   id: string;
   userId: string;
@@ -33,6 +56,10 @@ type PrinterRegistrationWithLatest = {
 export type PrinterConnectionStatus = {
   connected: boolean;
   trusted: boolean;
+  compatibilityMode: boolean;
+  compatibilityReason: string | null;
+  eligibleForPrinting: boolean;
+  connectionClass: "TRUSTED" | "COMPATIBILITY" | "BLOCKED";
   stale: boolean;
   requiredForPrinting: boolean;
   trustStatus: PrinterTrustStatus | "UNREGISTERED";
@@ -47,6 +74,11 @@ export type PrinterConnectionStatus = {
   printerId?: string | null;
   deviceName?: string | null;
   agentVersion?: string | null;
+  selectedPrinterId?: string | null;
+  selectedPrinterName?: string | null;
+  capabilitySummary?: PrinterCapabilitySummary | null;
+  printers?: PrinterInventoryDevice[];
+  calibrationProfile?: Record<string, any> | null;
   error?: string | null;
 };
 
@@ -77,8 +109,33 @@ const MAX_SIGNATURE_SKEW_SECONDS = parsePositiveIntEnv("PRINT_AGENT_MAX_SIGNATUR
 
 const REQUIRE_SIGNATURE = parseBoolEnv("PRINT_AGENT_REQUIRE_SIGNATURE", true);
 const REQUIRE_MTLS = parseBoolEnv("PRINT_AGENT_REQUIRE_MTLS", true);
+const ALLOW_COMPATIBILITY_MODE = parseBoolEnv("PRINT_AGENT_ALLOW_COMPATIBILITY_MODE", true);
 
 const normalizePem = (value: string) => String(value || "").replace(/\\n/g, "\n").trim();
+const looksLikePem = (value: string) => normalizePem(value).includes("BEGIN");
+const toCleanString = (value: unknown, max = 500) => String(value || "").trim().slice(0, max);
+const toCleanStringArray = (value: unknown, maxItems = 24, maxLen = 120): string[] => {
+  if (!Array.isArray(value)) return [];
+  const unique = new Set<string>();
+  for (const item of value) {
+    const normalized = toCleanString(item, maxLen);
+    if (!normalized) continue;
+    unique.add(normalized);
+    if (unique.size >= maxItems) break;
+  }
+  return Array.from(unique);
+};
+const toFiniteIntArray = (value: unknown, maxItems = 12): number[] => {
+  if (!Array.isArray(value)) return [];
+  const unique = new Set<number>();
+  for (const item of value) {
+    const parsed = Number.parseInt(String(item || "").trim(), 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) continue;
+    unique.add(parsed);
+    if (unique.size >= maxItems) break;
+  }
+  return Array.from(unique).sort((a, b) => a - b);
+};
 
 const stableStringify = (value: any): string => {
   if (value === null || value === undefined) return "null";
@@ -143,15 +200,67 @@ const verifyAgentSignature = (params: {
   }
 };
 
+const normalizeCapabilitySummary = (source: any): PrinterCapabilitySummary | null => {
+  if (!source || typeof source !== "object") return null;
+  const transports = toCleanStringArray(source.transports || source.paths || source.connections, 12, 80);
+  const protocols = toCleanStringArray(source.protocols, 24, 80);
+  const languages = toCleanStringArray(source.languages || source.labelLanguages, 24, 80);
+  const dpiOptions = toFiniteIntArray(source.dpiOptions || source.dpi || source.dpis, 12);
+  const mediaSizes = toCleanStringArray(source.mediaSizes || source.media || source.paperSizes, 24, 80);
+
+  return {
+    transports,
+    protocols,
+    languages,
+    supportsRaster: Boolean(source.supportsRaster || source.rasterFallback || source.imageFallback),
+    supportsPdf: Boolean(source.supportsPdf || source.pdf),
+    dpiOptions,
+    mediaSizes,
+  };
+};
+
+const normalizePrinterInventory = (value: unknown): PrinterInventoryDevice[] => {
+  if (!Array.isArray(value)) return [];
+  const rows: PrinterInventoryDevice[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const printerId = toCleanString((raw as any).printerId || (raw as any).id, 180);
+    const printerName = toCleanString((raw as any).printerName || (raw as any).name, 180);
+    if (!printerId || !printerName) continue;
+    rows.push({
+      printerId,
+      printerName,
+      model: toCleanString((raw as any).model, 180) || null,
+      connection: toCleanString((raw as any).connection || (raw as any).transport, 80) || null,
+      online: Boolean((raw as any).online ?? true),
+      isDefault: Boolean((raw as any).isDefault),
+      protocols: toCleanStringArray((raw as any).protocols, 12, 60),
+      languages: toCleanStringArray((raw as any).languages, 12, 60),
+      mediaSizes: toCleanStringArray((raw as any).mediaSizes, 12, 60),
+      dpi: Number.isFinite(Number((raw as any).dpi)) ? Number((raw as any).dpi) : null,
+    });
+    if (rows.length >= 40) break;
+  }
+  return rows;
+};
+
 const normalizeStatusPayload = (metadata: any) => {
   const source = metadata && typeof metadata === "object" ? metadata : {};
   return {
     connected: Boolean(source.connected),
-    printerName: String(source.printerName || "").trim() || null,
-    printerId: String(source.printerId || "").trim() || null,
-    deviceName: String(source.deviceName || "").trim() || null,
-    agentVersion: String(source.agentVersion || "").trim() || null,
-    error: String(source.error || "").trim() || null,
+    printerName: toCleanString(source.printerName, 180) || null,
+    printerId: toCleanString(source.printerId, 180) || null,
+    deviceName: toCleanString(source.deviceName, 180) || null,
+    agentVersion: toCleanString(source.agentVersion, 80) || null,
+    error: toCleanString(source.error, 500) || null,
+    selectedPrinterId: toCleanString(source.selectedPrinterId, 180) || null,
+    selectedPrinterName: toCleanString(source.selectedPrinterName, 180) || null,
+    capabilitySummary: normalizeCapabilitySummary(source.capabilitySummary || source.capabilities),
+    printers: normalizePrinterInventory(source.printers),
+    calibrationProfile:
+      source.calibrationProfile && typeof source.calibrationProfile === "object"
+        ? (source.calibrationProfile as Record<string, any>)
+        : null,
   };
 };
 
@@ -160,6 +269,10 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     return {
       connected: false,
       trusted: false,
+      compatibilityMode: false,
+      compatibilityReason: null,
+      eligibleForPrinting: false,
+      connectionClass: "BLOCKED",
       stale: true,
       requiredForPrinting: true,
       trustStatus: "UNREGISTERED",
@@ -174,6 +287,11 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
       printerId: null,
       deviceName: null,
       agentVersion: null,
+      selectedPrinterId: null,
+      selectedPrinterName: null,
+      capabilitySummary: null,
+      printers: [],
+      calibrationProfile: null,
       error: "No printer registration",
     };
   }
@@ -188,7 +306,17 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
   const trustedRegistration = registration.trustStatus === PrinterTrustStatus.TRUSTED && !registration.revokedAt;
   const trustedAttestation = Boolean(latestAttestation?.trustValid && latestAttestation?.signatureValid);
   const trusted = trustedRegistration && trustedAttestation && !stale;
-  const connected = payload.connected && trusted;
+  const compatibilityReason =
+    latestAttestation?.rejectionReason || registration.trustReason || payload.error || "Compatibility mode fallback";
+  const compatibilityMode = Boolean(
+    ALLOW_COMPATIBILITY_MODE &&
+      payload.connected &&
+      !trusted &&
+      !stale &&
+      registration.trustStatus !== PrinterTrustStatus.REVOKED
+  );
+  const connected = payload.connected && (trusted || compatibilityMode);
+  const eligibleForPrinting = connected;
 
   const trustReason = trusted
     ? null
@@ -196,22 +324,33 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
       ? "Printer registration revoked"
       : latestAttestation?.rejectionReason || registration.trustReason || null;
 
-  const error = connected
+  const error = trusted
     ? null
-    : payload.error ||
-      (stale
-        ? "Printer attestation stale"
-        : !latestAttestation
-          ? "No printer attestation yet"
-          : !latestAttestation.signatureValid
-            ? "Invalid printer heartbeat signature"
-            : !latestAttestation.trustValid
-              ? latestAttestation.rejectionReason || "Printer trust validation failed"
-              : trustReason);
+    : connected && compatibilityMode
+      ? `Compatibility mode active: ${compatibilityReason}`
+      : payload.error ||
+        (stale
+          ? "Printer attestation stale"
+          : !latestAttestation
+            ? "No printer attestation yet"
+            : !latestAttestation.signatureValid
+              ? "Invalid printer heartbeat signature"
+              : !latestAttestation.trustValid
+                ? latestAttestation.rejectionReason || "Printer trust validation failed"
+                : trustReason);
+  const connectionClass: "TRUSTED" | "COMPATIBILITY" | "BLOCKED" = trusted
+    ? "TRUSTED"
+    : connected && compatibilityMode
+      ? "COMPATIBILITY"
+      : "BLOCKED";
 
   return {
     connected,
     trusted,
+    compatibilityMode,
+    compatibilityReason: compatibilityMode ? compatibilityReason : null,
+    eligibleForPrinting,
+    connectionClass,
     stale,
     requiredForPrinting: true,
     trustStatus: registration.trustStatus,
@@ -226,6 +365,11 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     printerId: payload.printerId,
     deviceName: payload.deviceName,
     agentVersion: payload.agentVersion,
+    selectedPrinterId: payload.selectedPrinterId || payload.printerId || null,
+    selectedPrinterName: payload.selectedPrinterName || payload.printerName || null,
+    capabilitySummary: payload.capabilitySummary,
+    printers: payload.printers,
+    calibrationProfile: payload.calibrationProfile,
     error,
   };
 };
@@ -257,12 +401,16 @@ const statusChanged = (a: PrinterConnectionStatus, b: PrinterConnectionStatus) =
   return (
     a.connected !== b.connected ||
     a.trusted !== b.trusted ||
+    a.compatibilityMode !== b.compatibilityMode ||
+    String(a.connectionClass || "") !== String(b.connectionClass || "") ||
     a.stale !== b.stale ||
     String(a.error || "") !== String(b.error || "") ||
     String(a.printerName || "") !== String(b.printerName || "") ||
     String(a.printerId || "") !== String(b.printerId || "") ||
     String(a.deviceName || "") !== String(b.deviceName || "") ||
-    String(a.agentVersion || "") !== String(b.agentVersion || "")
+    String(a.agentVersion || "") !== String(b.agentVersion || "") ||
+    String(a.selectedPrinterId || "") !== String(b.selectedPrinterId || "") ||
+    String(a.selectedPrinterName || "") !== String(b.selectedPrinterName || "")
   );
 };
 
@@ -302,12 +450,28 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
   heartbeatNonce?: string | null;
   heartbeatIssuedAt?: string | null;
   heartbeatSignature?: string | null;
+  selectedPrinterId?: string | null;
+  selectedPrinterName?: string | null;
+  capabilitySummary?: any;
+  printers?: any[];
+  calibrationProfile?: any;
 }) => {
   const previousStatus = await getPrinterConnectionStatusForUser(input.userId);
 
   const now = new Date();
-  const agentId = String(input.agentId || "").trim();
-  const deviceFingerprint = String(input.deviceFingerprint || "").trim();
+  const rawAgentId = toCleanString(input.agentId, 180);
+  const rawDeviceFingerprint = toCleanString(input.deviceFingerprint, 256);
+  const fallbackAgentId = `compat-agent-${sha256Hex(`user:${input.userId}`).slice(0, 16)}`;
+  const fallbackDeviceFingerprintSeed = [
+    input.userId,
+    rawAgentId || fallbackAgentId,
+    toCleanString(input.printerId, 180),
+    toCleanString(input.deviceName, 180),
+    toCleanString(input.printerName, 180),
+  ].join("|");
+  const fallbackDeviceFingerprint = `compat-${sha256Hex(fallbackDeviceFingerprintSeed).slice(0, 48)}`;
+  const agentId = rawAgentId || fallbackAgentId;
+  const deviceFingerprint = rawDeviceFingerprint || fallbackDeviceFingerprint;
   const publicKeyPem = String(input.publicKeyPem || "").trim();
   const clientCertFingerprint = String(input.clientCertFingerprint || "").trim();
   const mtlsFingerprintHeader = String(input.mtlsFingerprintHeader || "").trim();
@@ -322,6 +486,14 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
     deviceName: String(input.deviceName || "").trim() || null,
     agentVersion: String(input.agentVersion || "").trim() || null,
     error: String(input.error || "").trim() || null,
+    selectedPrinterId: toCleanString(input.selectedPrinterId, 180) || null,
+    selectedPrinterName: toCleanString(input.selectedPrinterName, 180) || null,
+    capabilitySummary: normalizeCapabilitySummary(input.capabilitySummary),
+    printers: normalizePrinterInventory(input.printers),
+    calibrationProfile:
+      input.calibrationProfile && typeof input.calibrationProfile === "object"
+        ? (input.calibrationProfile as Record<string, any>)
+        : null,
   };
 
   const sourceIpHash = hashIp(input.sourceIp || null);
@@ -344,7 +516,7 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
   let trustValid = false;
   let rejectionReason: string | null = null;
 
-  if (!registration && deviceFingerprint && agentId && publicKeyPem) {
+  if (!registration && deviceFingerprint && agentId) {
     registration = await prisma.printerRegistration.create({
       data: {
         userId: input.userId,
@@ -352,10 +524,12 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
         licenseeId: input.licenseeId || null,
         deviceFingerprint,
         agentId,
-        publicKeyPem,
+        publicKeyPem: publicKeyPem || `compat:${agentId}`,
         certFingerprint: clientCertFingerprint || mtlsFingerprintHeader || null,
         trustStatus: PrinterTrustStatus.PENDING,
-        trustReason: "Awaiting first successful cryptographic attestation",
+        trustReason: publicKeyPem
+          ? "Awaiting first successful cryptographic attestation"
+          : "Compatibility registration pending cryptographic enrollment",
       },
     });
   }
@@ -364,7 +538,12 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
     rejectionReason = "Missing printer registration identity";
   }
 
-  if (registration && publicKeyPem && normalizePem(publicKeyPem) !== normalizePem(registration.publicKeyPem)) {
+  if (
+    registration &&
+    publicKeyPem &&
+    !String(registration.publicKeyPem || "").startsWith("compat:") &&
+    normalizePem(publicKeyPem) !== normalizePem(registration.publicKeyPem)
+  ) {
     rejectionReason = "Printer public key mismatch";
   }
 
@@ -390,6 +569,9 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
     }
 
     if (requiresIdentity && registration && signedPayload && heartbeatSignature) {
+      if (!looksLikePem(registration.publicKeyPem)) {
+        rejectionReason = rejectionReason || "Printer public key is not enrolled";
+      }
       const issuedAtMs = new Date(heartbeatIssuedAt).getTime();
       if (!Number.isFinite(issuedAtMs)) {
         rejectionReason = "Invalid heartbeatIssuedAt";
@@ -445,7 +627,10 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
         orgId: input.orgId || registration.orgId,
         licenseeId: input.licenseeId || registration.licenseeId,
         agentId: agentId || registration.agentId,
-        publicKeyPem: publicKeyPem || registration.publicKeyPem,
+        publicKeyPem:
+          publicKeyPem && (String(registration.publicKeyPem || "").startsWith("compat:") || !registration.publicKeyPem)
+            ? publicKeyPem
+            : registration.publicKeyPem,
         certFingerprint: registration.certFingerprint || clientCertFingerprint || mtlsFingerprintHeader || null,
         trustStatus: nextTrustStatus,
         trustReason: trustValid ? null : rejectionReason,

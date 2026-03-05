@@ -222,6 +222,19 @@ export const createRoleNotifications = async (params: {
             template: `notify_${params.type}`,
           });
         }
+      } else if (channel === NotificationChannel.EMAIL && users.length > 0) {
+        await Promise.allSettled(
+          users.map((user) =>
+            sendAuthEmail({
+              toAddress: user.email,
+              subject: params.title,
+              text: `${params.body}\n\nNotification type: ${params.type}\nGenerated at: ${new Date().toISOString()}`,
+              template: `notify_${params.type}`,
+              licenseeId: params.licenseeId || user.licenseeId || null,
+              orgId: params.orgId || user.orgId || null,
+            })
+          )
+        );
       }
     }
 
