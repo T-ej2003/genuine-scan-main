@@ -4,8 +4,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import { friendlyReferenceLabel, friendlyReferenceWords } from "@/lib/friendly-reference";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { getContextualHelpRoute } from "@/help/contextual-help";
 import apiClient from "@/lib/api-client";
+import { useToast } from "@/hooks/use-toast";
 import {
   LayoutDashboard,
   Building2,
@@ -37,6 +42,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Slider } from "@/components/ui/slider";
 import { SupportIssueLauncher } from "@/components/support/SupportIssueLauncher";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { buildSupportDiagnosticsPayload, captureSupportScreenshot } from "@/lib/support-diagnostics";
 
 interface NavItem {
   label: string;
@@ -59,6 +66,10 @@ type DashboardNotification = {
 type PrinterConnectionStatus = {
   connected: boolean;
   trusted: boolean;
+  compatibilityMode: boolean;
+  compatibilityReason?: string | null;
+  eligibleForPrinting: boolean;
+  connectionClass?: "TRUSTED" | "COMPATIBILITY" | "BLOCKED";
   stale: boolean;
   requiredForPrinting: boolean;
   trustStatus?: string;
@@ -71,14 +82,39 @@ type PrinterConnectionStatus = {
   mtlsFingerprint?: string | null;
   printerName?: string | null;
   printerId?: string | null;
+  selectedPrinterId?: string | null;
+  selectedPrinterName?: string | null;
   deviceName?: string | null;
   agentVersion?: string | null;
+  capabilitySummary?: {
+    transports: string[];
+    protocols: string[];
+    languages: string[];
+    supportsRaster: boolean;
+    supportsPdf: boolean;
+    dpiOptions: number[];
+    mediaSizes: string[];
+  } | null;
+  printers?: Array<{
+    printerId: string;
+    printerName: string;
+    model?: string | null;
+    connection?: string | null;
+    online?: boolean;
+    isDefault?: boolean;
+    protocols?: string[];
+    languages?: string[];
+    mediaSizes?: string[];
+    dpi?: number | null;
+  }>;
+  calibrationProfile?: Record<string, unknown> | null;
   error?: string | null;
 };
 
 const NOTIFICATION_FETCH_LIMIT = 24;
 const NOTIFICATION_WINDOW_SIZE = 4;
 const NOTIFICATION_CLEAR_ANIMATION_MS = 260;
+const PRINTER_FAILURE_REPORT_COOLDOWN_MS = 3 * 60 * 1000;
 
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["super_admin", "licensee_admin", "manufacturer"] },
@@ -96,6 +132,7 @@ const navItems: NavItem[] = [
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
+  const { toast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -109,9 +146,16 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [notificationWindowStart, setNotificationWindowStart] = useState(0);
   const [notificationMotionSeed, setNotificationMotionSeed] = useState(0);
   const clearNotificationsTimerRef = useRef<number | null>(null);
+  const printerConnectedRef = useRef(false);
+  const printerFailureReportRef = useRef<{ signature: string; at: number }>({ signature: "", at: 0 });
+  const printerFailureInFlightRef = useRef(false);
   const [printerStatus, setPrinterStatus] = useState<PrinterConnectionStatus>({
     connected: false,
     trusted: false,
+    compatibilityMode: false,
+    compatibilityReason: null,
+    eligibleForPrinting: false,
+    connectionClass: "BLOCKED",
     stale: true,
     requiredForPrinting: true,
     trustStatus: "UNREGISTERED",
@@ -124,9 +168,40 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     mtlsFingerprint: null,
     printerName: null,
     printerId: null,
+    selectedPrinterId: null,
+    selectedPrinterName: null,
     deviceName: null,
     agentVersion: null,
+    capabilitySummary: null,
+    printers: [],
+    calibrationProfile: null,
     error: "No trusted printer heartbeat yet",
+  });
+  const [printerDialogOpen, setPrinterDialogOpen] = useState(false);
+  const [printerSwitching, setPrinterSwitching] = useState(false);
+  const [detectedPrinters, setDetectedPrinters] = useState<
+    Array<{
+      printerId: string;
+      printerName: string;
+      model?: string | null;
+      connection?: string | null;
+      online?: boolean;
+      isDefault?: boolean;
+      protocols?: string[];
+      languages?: string[];
+      mediaSizes?: string[];
+      dpi?: number | null;
+    }>
+  >([]);
+  const [selectedLocalPrinterId, setSelectedLocalPrinterId] = useState("");
+  const [calibrationForm, setCalibrationForm] = useState({
+    dpi: "",
+    labelWidthMm: "50",
+    labelHeightMm: "50",
+    offsetXmm: "0",
+    offsetYmm: "0",
+    darkness: "",
+    speed: "",
   });
 
   const filteredNavItems = navItems.filter((item) => user && item.roles.includes(user.role));
@@ -178,15 +253,144 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
-  const syncManufacturerPrinterStatus = async () => {
+  const normalizePrinterRows = (rows: unknown): Array<{
+    printerId: string;
+    printerName: string;
+    model?: string | null;
+    connection?: string | null;
+    online?: boolean;
+    isDefault?: boolean;
+    protocols?: string[];
+    languages?: string[];
+    mediaSizes?: string[];
+    dpi?: number | null;
+  }> => {
+    if (!Array.isArray(rows)) return [];
+    const result: Array<{
+      printerId: string;
+      printerName: string;
+      model?: string | null;
+      connection?: string | null;
+      online?: boolean;
+      isDefault?: boolean;
+      protocols?: string[];
+      languages?: string[];
+      mediaSizes?: string[];
+      dpi?: number | null;
+    }> = [];
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue;
+      const printerId = String((row as any).printerId || (row as any).id || "").trim();
+      const printerName = String((row as any).printerName || (row as any).name || "").trim();
+      if (!printerId || !printerName) continue;
+      result.push({
+        printerId,
+        printerName,
+        model: String((row as any).model || "").trim() || null,
+        connection: String((row as any).connection || (row as any).transport || "").trim() || null,
+        online: Boolean((row as any).online ?? true),
+        isDefault: Boolean((row as any).isDefault),
+        protocols: Array.isArray((row as any).protocols) ? (row as any).protocols : [],
+        languages: Array.isArray((row as any).languages) ? (row as any).languages : [],
+        mediaSizes: Array.isArray((row as any).mediaSizes) ? (row as any).mediaSizes : [],
+        dpi: Number.isFinite(Number((row as any).dpi)) ? Number((row as any).dpi) : null,
+      });
+      if (result.length >= 40) break;
+    }
+    return result;
+  };
+
+  const maybeAutoReportPrinterFailure = async (params: {
+    localResult: Awaited<ReturnType<typeof apiClient.getLocalPrintAgentStatus>>;
+    remoteStatus: PrinterConnectionStatus | null;
+    printers: Array<{ printerId: string; printerName: string }>;
+  }) => {
+    if (!user || user.role !== "manufacturer") return;
+    const remoteReady = Boolean(params.remoteStatus?.connected && params.remoteStatus?.eligibleForPrinting);
+    if (remoteReady) {
+      printerFailureReportRef.current = { signature: "", at: 0 };
+      return;
+    }
+    const localReady = Boolean((params.localResult as any)?.success && (params.localResult as any)?.data?.connected);
+    if (localReady && params.remoteStatus?.compatibilityMode) return;
+
+    const localError = String(params.localResult.error || "").trim();
+    const remoteError = String(params.remoteStatus?.error || "").trim();
+    const signature = [
+      localError || "no-local-error",
+      remoteError || "no-remote-error",
+      String(params.remoteStatus?.trustReason || ""),
+      String(params.remoteStatus?.connectionClass || ""),
+      String(params.remoteStatus?.selectedPrinterId || params.remoteStatus?.printerId || ""),
+    ].join("|");
+    const now = Date.now();
+    if (
+      printerFailureReportRef.current.signature === signature &&
+      now - printerFailureReportRef.current.at < PRINTER_FAILURE_REPORT_COOLDOWN_MS
+    ) {
+      return;
+    }
+    if (printerFailureInFlightRef.current) return;
+
+    printerFailureInFlightRef.current = true;
+    printerFailureReportRef.current = { signature, at: now };
+    try {
+      const screenshot = await captureSupportScreenshot();
+      const form = new FormData();
+      form.append(
+        "title",
+        `Auto printer connection failure: ${params.remoteStatus?.selectedPrinterName || params.remoteStatus?.printerName || "Unknown printer"}`
+      );
+      form.append(
+        "description",
+        [
+          "Automatic printer failure report from manufacturer console.",
+          `Local agent: ${params.localResult.success ? "reachable" : "unreachable"}`,
+          `Server class: ${params.remoteStatus?.connectionClass || "BLOCKED"}`,
+          localError ? `Local error: ${localError}` : "",
+          remoteError ? `Server error: ${remoteError}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n")
+      );
+      form.append("sourcePath", `${window.location.pathname}${window.location.search}`);
+      form.append("pageUrl", window.location.href);
+      form.append("autoDetected", "true");
+      form.append(
+        "diagnostics",
+        JSON.stringify({
+          ...buildSupportDiagnosticsPayload(),
+          printer: {
+            local: params.localResult.success ? params.localResult.data : null,
+            remote: params.remoteStatus,
+            discoveredPrinters: params.printers,
+          },
+        })
+      );
+      if (screenshot) {
+        form.append("screenshot", screenshot);
+      }
+      await apiClient.createSupportIssueReport(form);
+    } catch {
+      // avoid surfacing auto-report failures in normal UX loop
+    } finally {
+      printerFailureInFlightRef.current = false;
+    }
+  };
+
+  const syncManufacturerPrinterStatus = async (opts?: { silent?: boolean }) => {
     if (!user || user.role !== "manufacturer") return;
 
     const local = await apiClient.getLocalPrintAgentStatus();
+    const localPrinters = normalizePrinterRows((local as any)?.data?.printers || []);
+
     const heartbeatPayload = local.success
       ? {
           connected: Boolean((local.data as any)?.connected),
           printerName: (local.data as any)?.printerName || undefined,
           printerId: (local.data as any)?.printerId || undefined,
+          selectedPrinterId: (local.data as any)?.selectedPrinterId || undefined,
+          selectedPrinterName: (local.data as any)?.selectedPrinterName || undefined,
           deviceName: (local.data as any)?.deviceName || undefined,
           agentVersion: (local.data as any)?.agentVersion || undefined,
           error: (local.data as any)?.error || undefined,
@@ -197,6 +401,9 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           heartbeatNonce: (local.data as any)?.heartbeatNonce || undefined,
           heartbeatIssuedAt: (local.data as any)?.heartbeatIssuedAt || undefined,
           heartbeatSignature: (local.data as any)?.heartbeatSignature || undefined,
+          capabilitySummary: (local.data as any)?.capabilitySummary || undefined,
+          printers: localPrinters,
+          calibrationProfile: (local.data as any)?.calibrationProfile || undefined,
         }
       : {
           connected: false,
@@ -206,13 +413,48 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     await apiClient.reportPrinterHeartbeat(heartbeatPayload);
     const remote = await apiClient.getPrinterConnectionStatus();
     if (remote.success && remote.data) {
-      setPrinterStatus(remote.data as PrinterConnectionStatus);
+      const nextStatus = remote.data as PrinterConnectionStatus;
+      const mergedPrinters =
+        normalizePrinterRows(nextStatus.printers || []).length > 0
+          ? normalizePrinterRows(nextStatus.printers || [])
+          : localPrinters;
+      setPrinterStatus({
+        ...nextStatus,
+        printers: mergedPrinters,
+      });
+      setDetectedPrinters(mergedPrinters);
+      if (!selectedLocalPrinterId) {
+        const defaultPrinter =
+          mergedPrinters.find((row) => row.isDefault) ||
+          mergedPrinters.find((row) => row.printerId === nextStatus.selectedPrinterId) ||
+          mergedPrinters[0];
+        if (defaultPrinter?.printerId) {
+          setSelectedLocalPrinterId(defaultPrinter.printerId);
+        }
+      }
+
+      const nowConnected = Boolean(nextStatus.connected && nextStatus.eligibleForPrinting);
+      if (nowConnected && !printerConnectedRef.current) {
+        setPrinterDialogOpen(true);
+      }
+      printerConnectedRef.current = nowConnected;
+      if (!nowConnected) {
+        void maybeAutoReportPrinterFailure({
+          localResult: local,
+          remoteStatus: nextStatus,
+          printers: mergedPrinters.map((item) => ({ printerId: item.printerId, printerName: item.printerName })),
+        });
+      }
       return;
     }
 
-    setPrinterStatus({
+    const fallbackStatus: PrinterConnectionStatus = {
       connected: false,
       trusted: false,
+      compatibilityMode: false,
+      compatibilityReason: null,
+      eligibleForPrinting: false,
+      connectionClass: "BLOCKED",
       stale: true,
       requiredForPrinting: true,
       trustStatus: "UNREGISTERED",
@@ -225,22 +467,127 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       mtlsFingerprint: null,
       printerName: null,
       printerId: null,
+      selectedPrinterId: null,
+      selectedPrinterName: null,
       deviceName: null,
       agentVersion: null,
+      capabilitySummary: null,
+      printers: localPrinters,
+      calibrationProfile: null,
       error: String(remote.error || local.error || "Printer heartbeat failed"),
-    });
+    };
+
+    setPrinterStatus(fallbackStatus);
+    setDetectedPrinters(localPrinters);
+    printerConnectedRef.current = false;
+    if (!opts?.silent) {
+      void maybeAutoReportPrinterFailure({
+        localResult: local,
+        remoteStatus: fallbackStatus,
+        printers: localPrinters.map((item) => ({ printerId: item.printerId, printerName: item.printerName })),
+      });
+    }
+  };
+
+  const switchLocalPrinter = async () => {
+    const targetPrinterId = String(selectedLocalPrinterId || "").trim();
+    if (!targetPrinterId) return;
+    setPrinterSwitching(true);
+    try {
+      const switched = await apiClient.selectLocalPrinter(targetPrinterId);
+      if (!switched.success) {
+        toast({
+          title: "Printer switch failed",
+          description: switched.error || "Local print agent could not switch printer.",
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: "Printer switched",
+        description: "Local print agent updated active printer.",
+      });
+      await syncManufacturerPrinterStatus({ silent: true });
+    } finally {
+      setPrinterSwitching(false);
+    }
+  };
+
+  const applyCalibrationProfile = async () => {
+    const targetPrinterId = String(selectedLocalPrinterId || printerStatus.selectedPrinterId || "").trim();
+    if (!targetPrinterId) return;
+
+    setPrinterSwitching(true);
+    try {
+      const response = await apiClient.applyLocalPrinterCalibration({
+        printerId: targetPrinterId,
+        dpi: Number(calibrationForm.dpi || 0) || undefined,
+        labelWidthMm: Number(calibrationForm.labelWidthMm || 0) || undefined,
+        labelHeightMm: Number(calibrationForm.labelHeightMm || 0) || undefined,
+        offsetXmm: Number(calibrationForm.offsetXmm || 0) || 0,
+        offsetYmm: Number(calibrationForm.offsetYmm || 0) || 0,
+        darkness: Number(calibrationForm.darkness || 0) || undefined,
+        speed: Number(calibrationForm.speed || 0) || undefined,
+      });
+      if (!response.success) {
+        toast({
+          title: "Calibration update failed",
+          description: response.error || "Could not apply calibration to local print agent.",
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: "Calibration applied",
+        description: "Updated alignment profile for active printer.",
+      });
+      await syncManufacturerPrinterStatus({ silent: true });
+    } finally {
+      setPrinterSwitching(false);
+    }
   };
 
   useEffect(() => {
     if (!user || user.role !== "manufacturer") return;
 
-    syncManufacturerPrinterStatus();
+    syncManufacturerPrinterStatus({ silent: true });
     const timer = window.setInterval(() => {
-      syncManufacturerPrinterStatus();
+      syncManufacturerPrinterStatus({ silent: true });
     }, 6000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, user?.role]);
+
+  useEffect(() => {
+    if (!printerStatus) return;
+    if (!selectedLocalPrinterId) {
+      const next = String(
+        printerStatus.selectedPrinterId ||
+          printerStatus.printerId ||
+          detectedPrinters.find((item) => item.isDefault)?.printerId ||
+          detectedPrinters[0]?.printerId ||
+          ""
+      ).trim();
+      if (next) setSelectedLocalPrinterId(next);
+    }
+  }, [printerStatus, detectedPrinters, selectedLocalPrinterId]);
+
+  useEffect(() => {
+    const profile =
+      printerStatus.calibrationProfile && typeof printerStatus.calibrationProfile === "object"
+        ? (printerStatus.calibrationProfile as Record<string, unknown>)
+        : null;
+    if (!profile) return;
+    setCalibrationForm((prev) => ({
+      dpi: profile.dpi ? String(profile.dpi) : prev.dpi,
+      labelWidthMm: profile.labelWidthMm ? String(profile.labelWidthMm) : prev.labelWidthMm,
+      labelHeightMm: profile.labelHeightMm ? String(profile.labelHeightMm) : prev.labelHeightMm,
+      offsetXmm: profile.offsetXmm != null ? String(profile.offsetXmm) : prev.offsetXmm,
+      offsetYmm: profile.offsetYmm != null ? String(profile.offsetYmm) : prev.offsetYmm,
+      darkness: profile.darkness ? String(profile.darkness) : prev.darkness,
+      speed: profile.speed ? String(profile.speed) : prev.speed,
+    }));
+  }, [printerStatus.calibrationProfile]);
 
   useEffect(() => {
     if (!user) return;
@@ -518,6 +865,27 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         return role;
     }
   };
+
+  const printerReady = printerStatus.connected && printerStatus.eligibleForPrinting;
+  const printerModeLabel = printerStatus.trusted
+    ? "Trusted"
+    : printerStatus.compatibilityMode
+      ? "Compatibility"
+      : "Untrusted";
+  const printerToneClass = printerStatus.trusted
+    ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+    : printerStatus.compatibilityMode
+      ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
+      : "border-red-300 bg-red-50 text-red-700 hover:bg-red-100";
+  const printerTitle = printerReady
+    ? `${printerStatus.selectedPrinterName || printerStatus.printerName || "Printer connected"}${printerStatus.lastHeartbeatAt ? ` · heartbeat ${printerStatus.lastHeartbeatAt}` : ""}`
+    : printerStatus.error || printerStatus.trustReason || "Printer disconnected";
+  const selectedPrinter =
+    detectedPrinters.find((row) => row.printerId === selectedLocalPrinterId) ||
+    detectedPrinters.find((row) => row.printerId === printerStatus.selectedPrinterId) ||
+    detectedPrinters[0] ||
+    null;
+  const capability = printerStatus.capabilitySummary;
 
   return (
     <div className="min-h-screen bg-background">
@@ -831,24 +1199,22 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             <Button
               variant="outline"
               size="sm"
-              onClick={syncManufacturerPrinterStatus}
-              className={cn(
-                "mr-1 gap-2",
-                printerStatus.connected && printerStatus.trusted
-                  ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                  : "border-red-300 bg-red-50 text-red-700 hover:bg-red-100"
-              )}
-              title={
-                printerStatus.connected && printerStatus.trusted
-                  ? `${printerStatus.printerName || "Printer connected"}${printerStatus.lastHeartbeatAt ? ` · heartbeat ${printerStatus.lastHeartbeatAt}` : ""}`
-                  : printerStatus.error || printerStatus.trustReason || "Printer disconnected"
-              }
+              onClick={() => {
+                if (printerReady || detectedPrinters.length > 0) {
+                  setPrinterDialogOpen(true);
+                  void syncManufacturerPrinterStatus({ silent: true });
+                  return;
+                }
+                void syncManufacturerPrinterStatus();
+              }}
+              className={cn("mr-1 gap-2", printerToneClass)}
+              title={printerTitle}
             >
               <Printer className="h-4 w-4" />
               <span className="hidden md:inline">
-                {printerStatus.connected && printerStatus.trusted ? "Printer Trusted" : "Printer Untrusted"}
+                {`Printer ${printerModeLabel}`}
               </span>
-              <span className="md:hidden">{printerStatus.connected && printerStatus.trusted ? "Trusted" : "Untrusted"}</span>
+              <span className="md:hidden">{printerModeLabel}</span>
             </Button>
           )}
 
@@ -896,6 +1262,150 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             </DropdownMenuContent>
           </DropdownMenu>
         </header>
+
+        {user?.role === "manufacturer" && (
+          <Dialog open={printerDialogOpen} onOpenChange={setPrinterDialogOpen}>
+            <DialogContent className="sm:max-w-[720px] max-h-[86vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Printer Connection</DialogTitle>
+                <DialogDescription>
+                  Confirm active printer, switch if multiple devices are attached, and tune alignment before print jobs.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4">
+                <div
+                  className={cn(
+                    "rounded-md border p-3",
+                    printerStatus.trusted
+                      ? "border-emerald-200 bg-emerald-50"
+                      : printerStatus.compatibilityMode
+                        ? "border-amber-200 bg-amber-50"
+                        : "border-red-200 bg-red-50"
+                  )}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold">
+                      {printerStatus.selectedPrinterName || printerStatus.printerName || "Printer status unavailable"}
+                    </span>
+                    <Badge variant={printerStatus.trusted ? "default" : printerStatus.compatibilityMode ? "secondary" : "destructive"}>
+                      {printerStatus.trusted ? "Trusted" : printerStatus.compatibilityMode ? "Compatibility" : "Blocked"}
+                    </Badge>
+                    {selectedPrinter?.online === false && <Badge variant="destructive">Offline</Badge>}
+                  </div>
+                  <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                    <div>Printer ID: {printerStatus.selectedPrinterId || printerStatus.printerId || "—"}</div>
+                    <div>Device: {printerStatus.deviceName || "—"}</div>
+                    <div>Agent version: {printerStatus.agentVersion || "—"}</div>
+                    <div>Connection class: {printerStatus.connectionClass || "BLOCKED"}</div>
+                  </div>
+                  {!printerReady && (
+                    <div className="mt-2 text-xs text-red-700">
+                      {printerStatus.error || printerStatus.compatibilityReason || printerStatus.trustReason || "Printer not ready"}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2 rounded-md border p-3">
+                  <Label className="text-sm">Select printer</Label>
+                  <Select value={selectedLocalPrinterId} onValueChange={setSelectedLocalPrinterId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select connected printer" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {detectedPrinters.length === 0 ? (
+                        <SelectItem value="__none__" disabled>
+                          No printers discovered
+                        </SelectItem>
+                      ) : (
+                        detectedPrinters.map((row) => (
+                          <SelectItem key={row.printerId} value={row.printerId}>
+                            {row.printerName}
+                            {row.connection ? ` · ${row.connection}` : ""}
+                            {row.online === false ? " · offline" : ""}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                  <div className="flex justify-end">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={printerSwitching || !selectedLocalPrinterId || detectedPrinters.length <= 1}
+                      onClick={switchLocalPrinter}
+                    >
+                      {printerSwitching ? "Switching..." : "Switch printer"}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="text-sm font-medium">Alignment and Calibration</div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div className="space-y-1">
+                      <Label className="text-xs">DPI</Label>
+                      <Input value={calibrationForm.dpi} onChange={(e) => setCalibrationForm((prev) => ({ ...prev, dpi: e.target.value }))} placeholder="300" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Width (mm)</Label>
+                      <Input value={calibrationForm.labelWidthMm} onChange={(e) => setCalibrationForm((prev) => ({ ...prev, labelWidthMm: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Height (mm)</Label>
+                      <Input value={calibrationForm.labelHeightMm} onChange={(e) => setCalibrationForm((prev) => ({ ...prev, labelHeightMm: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Darkness</Label>
+                      <Input value={calibrationForm.darkness} onChange={(e) => setCalibrationForm((prev) => ({ ...prev, darkness: e.target.value }))} placeholder="8" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Offset X (mm)</Label>
+                      <Input value={calibrationForm.offsetXmm} onChange={(e) => setCalibrationForm((prev) => ({ ...prev, offsetXmm: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Offset Y (mm)</Label>
+                      <Input value={calibrationForm.offsetYmm} onChange={(e) => setCalibrationForm((prev) => ({ ...prev, offsetYmm: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Speed</Label>
+                      <Input value={calibrationForm.speed} onChange={(e) => setCalibrationForm((prev) => ({ ...prev, speed: e.target.value }))} placeholder="4" />
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <Button size="sm" variant="outline" disabled={printerSwitching || !selectedPrinter} onClick={applyCalibrationProfile}>
+                      {printerSwitching ? "Applying..." : "Apply calibration"}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-2 rounded-md border p-3">
+                  <div className="text-sm font-medium">Capabilities</div>
+                  <div className="grid grid-cols-1 gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                    <div>Transports: {capability?.transports?.join(", ") || selectedPrinter?.connection || "auto"}</div>
+                    <div>Protocols: {capability?.protocols?.join(", ") || selectedPrinter?.protocols?.join(", ") || "auto"}</div>
+                    <div>Languages: {capability?.languages?.join(", ") || selectedPrinter?.languages?.join(", ") || "AUTO"}</div>
+                    <div>Media sizes: {capability?.mediaSizes?.join(", ") || selectedPrinter?.mediaSizes?.join(", ") || "auto"}</div>
+                    <div>DPI options: {capability?.dpiOptions?.join(", ") || (selectedPrinter?.dpi ? String(selectedPrinter.dpi) : "auto")}</div>
+                    <div>
+                      Fallback rendering: {capability?.supportsRaster ? "Raster enabled" : "Raster unknown"} /{" "}
+                      {capability?.supportsPdf ? "PDF enabled" : "PDF unknown"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setPrinterDialogOpen(false)}>
+                    Close
+                  </Button>
+                  <Button onClick={() => void syncManufacturerPrinterStatus()} disabled={printerSwitching}>
+                    Refresh status
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
 
         <main className="p-4 lg:p-6">{children}</main>
         <footer className="px-4 pb-6 lg:px-6">

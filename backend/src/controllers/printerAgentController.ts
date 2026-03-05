@@ -25,6 +25,8 @@ const heartbeatSchema = z.object({
   connected: z.boolean(),
   printerName: z.string().trim().max(180).optional(),
   printerId: z.string().trim().max(180).optional(),
+  selectedPrinterId: z.string().trim().max(180).optional(),
+  selectedPrinterName: z.string().trim().max(180).optional(),
   deviceName: z.string().trim().max(180).optional(),
   agentVersion: z.string().trim().max(80).optional(),
   error: z.string().trim().max(500).optional(),
@@ -35,6 +37,9 @@ const heartbeatSchema = z.object({
   heartbeatNonce: z.string().trim().max(180).optional(),
   heartbeatIssuedAt: z.string().trim().max(80).optional(),
   heartbeatSignature: z.string().trim().max(2000).optional(),
+  capabilitySummary: z.any().optional(),
+  printers: z.array(z.any()).max(50).optional(),
+  calibrationProfile: z.any().optional(),
 });
 
 const writeSse = (res: Response, event: string, data: any) => {
@@ -67,6 +72,8 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
       connected: parsed.data.connected,
       printerName: parsed.data.printerName || null,
       printerId: parsed.data.printerId || null,
+      selectedPrinterId: parsed.data.selectedPrinterId || null,
+      selectedPrinterName: parsed.data.selectedPrinterName || null,
       deviceName: parsed.data.deviceName || null,
       agentVersion: parsed.data.agentVersion || null,
       error: parsed.data.error || null,
@@ -80,15 +87,26 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
       heartbeatNonce: parsed.data.heartbeatNonce || null,
       heartbeatIssuedAt: parsed.data.heartbeatIssuedAt || null,
       heartbeatSignature: parsed.data.heartbeatSignature || null,
+      capabilitySummary: parsed.data.capabilitySummary || null,
+      printers: parsed.data.printers || [],
+      calibrationProfile: parsed.data.calibrationProfile || null,
     });
 
     if (update.changed) {
       const action = update.status.connected
-        ? "PRINTER_CONNECTION_TRUSTED_ONLINE"
+        ? update.status.trusted
+          ? "PRINTER_CONNECTION_TRUSTED_ONLINE"
+          : "PRINTER_CONNECTION_COMPAT_MODE_ONLINE"
         : "PRINTER_CONNECTION_UNTRUSTED_OR_OFFLINE";
-      const title = update.status.connected ? "Trusted printer connected" : "Printer trust or connection lost";
+      const title = update.status.connected
+        ? update.status.trusted
+          ? "Trusted printer connected"
+          : "Printer connected in compatibility mode"
+        : "Printer trust or connection lost";
       const body = update.status.connected
-        ? `${update.status.printerName || "Connected printer"} is cryptographically trusted and ready for secure direct-print.`
+        ? update.status.trusted
+          ? `${update.status.printerName || "Connected printer"} is cryptographically trusted and ready for secure direct-print.`
+          : `${update.status.printerName || "Connected printer"} is connected in compatibility mode. Direct-print is enabled while advanced trust enrollment is pending.`
         : `Printer unavailable for issuance${update.status.error ? `: ${update.status.error}` : "."} Direct-print jobs are blocked.`;
 
       await createAuditLog({
@@ -100,10 +118,18 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
         details: {
           connected: update.status.connected,
           trusted: update.status.trusted,
+          compatibilityMode: update.status.compatibilityMode,
+          compatibilityReason: update.status.compatibilityReason,
+          connectionClass: update.status.connectionClass,
           trustStatus: update.status.trustStatus,
           trustReason: update.status.trustReason,
           printerName: update.status.printerName || null,
           printerId: update.status.printerId || null,
+          selectedPrinterId: update.status.selectedPrinterId || null,
+          selectedPrinterName: update.status.selectedPrinterName || null,
+          capabilitySummary: update.status.capabilitySummary || null,
+          printers: update.status.printers || [],
+          calibrationProfile: update.status.calibrationProfile || null,
           deviceName: update.status.deviceName || null,
           agentVersion: update.status.agentVersion || null,
           agentId: update.status.agentId || null,
@@ -126,10 +152,17 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
           data: {
             connected: update.status.connected,
             trusted: update.status.trusted,
+            compatibilityMode: update.status.compatibilityMode,
+            compatibilityReason: update.status.compatibilityReason,
+            connectionClass: update.status.connectionClass,
             trustStatus: update.status.trustStatus,
             trustReason: update.status.trustReason,
             printerName: update.status.printerName || null,
             printerId: update.status.printerId || null,
+            selectedPrinterId: update.status.selectedPrinterId || null,
+            selectedPrinterName: update.status.selectedPrinterName || null,
+            capabilitySummary: update.status.capabilitySummary || null,
+            printers: update.status.printers || [],
             deviceName: update.status.deviceName || null,
             manufacturerUserId: req.user.userId,
             licenseeId: req.user.licenseeId || null,
@@ -148,10 +181,17 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
               data: {
                 connected: update.status.connected,
                 trusted: update.status.trusted,
+                compatibilityMode: update.status.compatibilityMode,
+                compatibilityReason: update.status.compatibilityReason,
+                connectionClass: update.status.connectionClass,
                 trustStatus: update.status.trustStatus,
                 trustReason: update.status.trustReason,
                 printerName: update.status.printerName || null,
                 printerId: update.status.printerId || null,
+                selectedPrinterId: update.status.selectedPrinterId || null,
+                selectedPrinterName: update.status.selectedPrinterName || null,
+                capabilitySummary: update.status.capabilitySummary || null,
+                printers: update.status.printers || [],
                 deviceName: update.status.deviceName || null,
                 manufacturerUserId: req.user.userId,
                 targetRoute: "/batches",
