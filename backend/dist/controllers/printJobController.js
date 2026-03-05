@@ -11,6 +11,7 @@ const crypto_1 = require("crypto");
 const qrTokenService_1 = require("../services/qrTokenService");
 const auditService_1 = require("../services/auditService");
 const notificationService_1 = require("../services/notificationService");
+const printerConnectionService_1 = require("../services/printerConnectionService");
 const MANUFACTURER_ROLES = [
     client_1.UserRole.MANUFACTURER,
     client_1.UserRole.MANUFACTURER_ADMIN,
@@ -50,11 +51,55 @@ const getManufacturerPrintJob = async (jobId, userId) => database_1.default.prin
     where: { id: jobId, manufacturerId: userId },
     include: { batch: { select: { id: true, name: true, licenseeId: true } } },
 });
+const notifySystemPrintEvent = async (params) => {
+    await Promise.allSettled([
+        (0, notificationService_1.createRoleNotifications)({
+            audience: client_1.NotificationAudience.SUPER_ADMIN,
+            type: params.type,
+            title: params.title,
+            body: params.body,
+            licenseeId: params.licenseeId || null,
+            orgId: params.orgId || null,
+            data: params.data || null,
+            channels: [client_1.NotificationChannel.WEB],
+        }),
+        params.licenseeId
+            ? (0, notificationService_1.createRoleNotifications)({
+                audience: client_1.NotificationAudience.LICENSEE_ADMIN,
+                licenseeId: params.licenseeId,
+                type: params.type,
+                title: params.title,
+                body: params.body,
+                data: params.data || null,
+                channels: [client_1.NotificationChannel.WEB],
+            })
+            : Promise.resolve([]),
+        params.orgId
+            ? (0, notificationService_1.createRoleNotifications)({
+                audience: client_1.NotificationAudience.MANUFACTURER,
+                orgId: params.orgId,
+                type: params.type,
+                title: params.title,
+                body: params.body,
+                data: params.data || null,
+                channels: [client_1.NotificationChannel.WEB],
+            })
+            : Promise.resolve([]),
+    ]);
+};
 const createPrintJob = async (req, res) => {
     try {
         if (!req.user ||
             !isManufacturerRole(req.user.role)) {
             return res.status(403).json({ success: false, error: "Access denied" });
+        }
+        const printerStatus = (0, printerConnectionService_1.getPrinterConnectionStatusForUser)(req.user.userId);
+        if (!printerStatus.connected) {
+            return res.status(409).json({
+                success: false,
+                error: "Printer is not connected. Start the authenticated print agent and connect a printer before creating a print job.",
+                data: { printerStatus },
+            });
         }
         const parsed = createPrintJobSchema.safeParse(req.body);
         if (!parsed.success) {
@@ -171,6 +216,21 @@ const createPrintJob = async (req, res) => {
                     targetRoute: "/batches",
                 },
             });
+            await notifySystemPrintEvent({
+                licenseeId: batch.licenseeId,
+                orgId: req.user.orgId || null,
+                type: "system_print_job_created",
+                title: "System print job created",
+                body: `Direct-print job created for ${batch.name} (${quantity} codes).`,
+                data: {
+                    printJobId: job.id,
+                    batchId: batch.id,
+                    batchName: batch.name,
+                    quantity,
+                    mode: "DIRECT_PRINT",
+                    targetRoute: "/batches",
+                },
+            });
         }
         catch (notifyError) {
             console.error("createPrintJob notification error:", notifyError);
@@ -184,6 +244,7 @@ const createPrintJob = async (req, res) => {
                 tokenCount: prepared.length,
                 mode: "DIRECT_PRINT",
                 lockExpiresAt: getLockExpiresAt(job.createdAt).toISOString(),
+                printerStatus,
             },
         });
     }
@@ -496,6 +557,21 @@ const resolveDirectPrintToken = async (req, res) => {
                         targetRoute: "/batches",
                     },
                 });
+                await notifySystemPrintEvent({
+                    licenseeId: job.batch.licenseeId,
+                    orgId: req.user.orgId || null,
+                    type: "system_print_job_completed",
+                    title: "System print job completed",
+                    body: `Direct-print job completed for ${job.batch.name}.`,
+                    data: {
+                        printJobId: job.id,
+                        batchId: job.batch.id,
+                        batchName: job.batch.name,
+                        printedCodes: job.quantity,
+                        mode: "DIRECT_PRINT",
+                        targetRoute: "/batches",
+                    },
+                });
             }
             catch (notifyError) {
                 console.error("resolveDirectPrintToken notification error:", notifyError);
@@ -609,6 +685,21 @@ const confirmPrintJob = async (req, res) => {
                     batchId: job.batch.id,
                     batchName: job.batch.name,
                     printedCodes: result.updatedCodes.count,
+                    targetRoute: "/batches",
+                },
+            });
+            await notifySystemPrintEvent({
+                licenseeId: job.batch.licenseeId,
+                orgId: req.user.orgId || null,
+                type: "system_print_job_completed",
+                title: "System print job completed",
+                body: `Printing confirmed for ${job.batch.name} (${result.updatedCodes.count} codes).`,
+                data: {
+                    printJobId: job.id,
+                    batchId: job.batch.id,
+                    batchName: job.batch.name,
+                    printedCodes: result.updatedCodes.count,
+                    mode: "DIRECT_PRINT",
                     targetRoute: "/batches",
                 },
             });

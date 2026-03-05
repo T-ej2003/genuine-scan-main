@@ -6,6 +6,7 @@ import {
 
 import prisma from "../config/database";
 import { sendIncidentEmail } from "./incidentEmailService";
+import { sendAuthEmail } from "./auth/authEmailService";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
 
 export type NotificationRealtimeEvent = {
@@ -21,6 +22,71 @@ export type NotificationRealtimeEvent = {
 type NotificationListener = (event: NotificationRealtimeEvent) => void;
 
 const listeners = new Set<NotificationListener>();
+
+const parseBool = (value: unknown, fallback = false) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+};
+
+const realtimeAlertEmailsEnabled = () =>
+  parseBool(process.env.NOTIFICATION_REALTIME_ALERTS_EMAIL_ENABLED, true);
+
+const realtimeAlertSubjectPrefix = () =>
+  String(process.env.NOTIFICATION_REALTIME_ALERT_EMAIL_SUBJECT_PREFIX || "[MSCQR Real-time Alert]")
+    .trim();
+
+const isRealtimeAlertRole = (role: UserRole) =>
+  role === UserRole.SUPER_ADMIN ||
+  role === UserRole.PLATFORM_SUPER_ADMIN ||
+  role === UserRole.LICENSEE_ADMIN ||
+  role === UserRole.ORG_ADMIN;
+
+const sendRealtimeAlertEmailForNotification = async (params: {
+  toAddress: string;
+  role: UserRole;
+  title: string;
+  body: string;
+  type: string;
+  licenseeId?: string | null;
+  orgId?: string | null;
+  data?: any;
+}) => {
+  if (!realtimeAlertEmailsEnabled()) return { delivered: false };
+  if (!isRealtimeAlertRole(params.role)) return { delivered: false };
+
+  const email = String(params.toAddress || "").trim().toLowerCase();
+  if (!email) return { delivered: false };
+
+  const subject = `${realtimeAlertSubjectPrefix()} ${params.title}`.trim();
+  const text = [
+    params.body,
+    "",
+    `Notification type: ${params.type}`,
+    params.licenseeId ? `Licensee: ${params.licenseeId}` : "",
+    params.orgId ? `Org: ${params.orgId}` : "",
+    `Generated at: ${new Date().toISOString()}`,
+    "",
+    "This is an automated MSCQR real-time alert email.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  try {
+    return await sendAuthEmail({
+      toAddress: email,
+      subject,
+      text,
+      template: `realtime_alert_${String(params.type || "system").slice(0, 48)}`,
+      orgId: params.orgId || null,
+      licenseeId: params.licenseeId || null,
+    });
+  } catch (error) {
+    console.error("sendRealtimeAlertEmailForNotification error:", error);
+    return { delivered: false, error: "Failed to send real-time alert email" };
+  }
+};
 
 export const onNotificationEvent = (cb: NotificationListener) => {
   listeners.add(cb);
@@ -159,6 +225,23 @@ export const createRoleNotifications = async (params: {
       }
     }
 
+    if (channels.includes(NotificationChannel.WEB) && users.length > 0) {
+      await Promise.allSettled(
+        users.map((user) =>
+          sendRealtimeAlertEmailForNotification({
+            toAddress: user.email,
+            role: user.role,
+            title: params.title,
+            body: params.body,
+            type: params.type,
+            licenseeId: params.licenseeId || user.licenseeId || null,
+            orgId: params.orgId || user.orgId || null,
+            data: params.data || null,
+          })
+        )
+      );
+    }
+
     return created;
   } catch (error) {
     if (isPrismaMissingTableError(error, ["notification"])) {
@@ -211,6 +294,33 @@ export const createUserNotification = async (params: {
         userIds: [params.userId],
         notificationId: created.id,
       });
+
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: params.userId },
+          select: { email: true, role: true, licenseeId: true, orgId: true },
+        });
+        if (user) {
+          const delivery = await sendRealtimeAlertEmailForNotification({
+            toAddress: user.email,
+            role: user.role,
+            title: params.title,
+            body: params.body,
+            type: params.type,
+            licenseeId: params.licenseeId || user.licenseeId || null,
+            orgId: params.orgId || user.orgId || null,
+            data: params.data || null,
+          });
+          if (delivery.delivered) {
+            await prisma.notification.update({
+              where: { id: created.id },
+              data: { emailedAt: new Date() },
+            });
+          }
+        }
+      } catch (emailError) {
+        console.error("createUserNotification realtime email error:", emailError);
+      }
     }
 
     return created;

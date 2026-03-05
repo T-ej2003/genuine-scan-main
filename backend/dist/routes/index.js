@@ -20,6 +20,7 @@ const userController_1 = require("../controllers/userController");
 const verifyController_1 = require("../controllers/verifyController");
 const scanController_1 = require("../controllers/scanController");
 const printJobController_1 = require("../controllers/printJobController");
+const printerAgentController_1 = require("../controllers/printerAgentController");
 const auditRoutes_1 = __importDefault(require("./auditRoutes"));
 const accountController_1 = require("../controllers/accountController");
 const incidentController_1 = require("../controllers/incidentController");
@@ -178,6 +179,8 @@ router.delete("/qr/batches/:id", auth_1.authenticate, rbac_1.requireAnyAdmin, te
 router.post("/qr/batches/bulk-delete", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, qrController_1.bulkDeleteBatches);
 router.delete("/qr/codes", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, qrController_1.bulkDeleteQRCodes);
 // ==================== MANUFACTURER PRINT JOBS ====================
+router.post("/manufacturer/printer-agent/heartbeat", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, printerAgentController_1.reportPrinterHeartbeat);
+router.get("/manufacturer/printer-agent/status", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, printerAgentController_1.getPrinterConnectionStatus);
 router.post("/manufacturer/print-jobs", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, printJobController_1.createPrintJob);
 router.get("/manufacturer/print-jobs/:id/pack", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, printJobController_1.downloadPrintJobPack);
 router.post("/manufacturer/print-jobs/:id/direct-print/tokens", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, printJobController_1.issueDirectPrintTokens);

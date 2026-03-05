@@ -604,6 +604,146 @@ class ApiClient {
     });
   }
 
+  async reportPrinterHeartbeat(payload: {
+    connected: boolean;
+    printerName?: string;
+    printerId?: string;
+    deviceName?: string;
+    agentVersion?: string;
+    error?: string;
+  }) {
+    return this.request<{
+      connected: boolean;
+      stale: boolean;
+      requiredForPrinting: boolean;
+      lastHeartbeatAt: string | null;
+      ageSeconds: number | null;
+      printerName?: string | null;
+      printerId?: string | null;
+      deviceName?: string | null;
+      agentVersion?: string | null;
+      error?: string | null;
+    }>(`/manufacturer/printer-agent/heartbeat`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getPrinterConnectionStatus() {
+    return this.request<{
+      connected: boolean;
+      stale: boolean;
+      requiredForPrinting: boolean;
+      lastHeartbeatAt: string | null;
+      ageSeconds: number | null;
+      printerName?: string | null;
+      printerId?: string | null;
+      deviceName?: string | null;
+      agentVersion?: string | null;
+      error?: string | null;
+    }>(`/manufacturer/printer-agent/status`);
+  }
+
+  async getLocalPrintAgentStatus() {
+    const base = String(import.meta.env.VITE_PRINT_AGENT_URL || "http://127.0.0.1:17866")
+      .trim()
+      .replace(/\/+$/, "");
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 2500);
+    try {
+      const resp = await fetch(`${base}/status`, {
+        method: "GET",
+        cache: "no-store",
+        mode: "cors",
+        signal: controller.signal,
+      });
+      if (!resp.ok) {
+        return { success: false, error: `Local print agent status failed: HTTP ${resp.status}` };
+      }
+      const payload = await resp.json().catch(() => ({}));
+      const data = payload && typeof payload === "object" ? payload : {};
+      return {
+        success: true,
+        data: {
+          connected: Boolean((data as any).connected),
+          printerName: String((data as any).printerName || "").trim() || null,
+          printerId: String((data as any).printerId || "").trim() || null,
+          deviceName: String((data as any).deviceName || "").trim() || null,
+          agentVersion: String((data as any).agentVersion || "").trim() || null,
+          error: String((data as any).error || "").trim() || null,
+        },
+      };
+    } catch (error: any) {
+      const aborted = error?.name === "AbortError";
+      return {
+        success: false,
+        error: aborted
+          ? "Local print agent status timed out"
+          : "Local print agent is unavailable",
+      };
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
+  async printWithLocalAgent(payload: {
+    printJobId: string;
+    qrId: string;
+    code: string;
+    scanUrl: string;
+    copies?: number;
+  }) {
+    const base = String(import.meta.env.VITE_PRINT_AGENT_URL || "http://127.0.0.1:17866")
+      .trim()
+      .replace(/\/+$/, "");
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 8000);
+    try {
+      const resp = await fetch(`${base}/print`, {
+        method: "POST",
+        mode: "cors",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          printJobId: payload.printJobId,
+          qrId: payload.qrId,
+          code: payload.code,
+          scanUrl: payload.scanUrl,
+          copies: Math.max(1, Math.min(5, Number(payload.copies || 1))),
+        }),
+        signal: controller.signal,
+      });
+      const body = await resp.json().catch(() => ({}));
+      if (!resp.ok || body?.success === false) {
+        return {
+          success: false,
+          error:
+            String(body?.error || "").trim() ||
+            `Local print failed: HTTP ${resp.status}`,
+        };
+      }
+      return {
+        success: true,
+        data: {
+          queued: Boolean(body?.queued ?? true),
+          printerName: body?.printerName || null,
+          jobRef: body?.jobRef || null,
+        },
+      };
+    } catch (error: any) {
+      const aborted = error?.name === "AbortError";
+      return {
+        success: false,
+        error: aborted
+          ? "Local print request timed out"
+          : "Local print agent is unavailable",
+      };
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
   // ==================== MANUFACTURERS ====================
   async getManufacturers(arg?: string | { licenseeId?: string; includeInactive?: boolean }) {
     let licenseeId: string | undefined;
