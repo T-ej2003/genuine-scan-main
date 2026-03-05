@@ -1,28 +1,48 @@
 import { Response } from "express";
-import { z } from "zod";
-import { AuthRequest } from "../middleware/auth";
-import prisma from "../config/database";
+import { randomBytes, createHash } from "crypto";
 import {
+  IncidentActorType,
+  IncidentEventType,
+  IncidentPriority,
+  IncidentSeverity,
+  IncidentType,
   NotificationAudience,
   NotificationChannel,
   Prisma,
+  PrintItemEventType,
+  PrintItemState,
+  PrintSessionStatus,
   QRStatus,
   UserRole,
 } from "@prisma/client";
-import { randomBytes, createHash } from "crypto";
+import { z } from "zod";
+
+import { AuthRequest } from "../middleware/auth";
+import prisma from "../config/database";
 import { buildScanUrl, getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
 import { createAuditLog } from "../services/auditService";
-import {
-  createRoleNotifications,
-  createUserNotification,
-} from "../services/notificationService";
+import { createRoleNotifications, createUserNotification } from "../services/notificationService";
 import { getPrinterConnectionStatusForUser } from "../services/printerConnectionService";
+import {
+  beginIdempotentAction,
+  completeIdempotentAction,
+  extractIdempotencyKey,
+  type IdempotencyBeginResult,
+} from "../services/idempotencyService";
 
 const MANUFACTURER_ROLES: UserRole[] = [
   UserRole.MANUFACTURER,
   UserRole.MANUFACTURER_ADMIN,
   UserRole.MANUFACTURER_USER,
 ];
+
+const OPEN_PRINT_STATES: PrintItemState[] = [
+  PrintItemState.RESERVED,
+  PrintItemState.ISSUED,
+  PrintItemState.AGENT_ACKED,
+];
+
+const CLOSABLE_PRINT_STATES: PrintItemState[] = [PrintItemState.PRINT_CONFIRMED];
 
 const isManufacturerRole = (role?: UserRole | null) =>
   Boolean(role && MANUFACTURER_ROLES.includes(role));
@@ -48,6 +68,20 @@ const resolveDirectPrintTokenSchema = z.object({
   renderToken: z.string().min(16),
 });
 
+const confirmDirectPrintItemSchema = z.object({
+  printLockToken: z.string().min(10),
+  printItemId: z.string().uuid(),
+  agentMetadata: z.any().optional(),
+});
+
+const reportDirectPrintFailureSchema = z.object({
+  printLockToken: z.string().min(10),
+  reason: z.string().trim().min(3).max(500),
+  printItemId: z.string().uuid().optional(),
+  retries: z.number().int().min(0).max(20).optional(),
+  agentMetadata: z.any().optional(),
+});
+
 const hashLockToken = (raw: string) =>
   createHash("sha256").update(raw).digest("hex");
 
@@ -67,11 +101,27 @@ const getLockExpiresAt = (createdAt: Date) =>
 const isLockExpired = (createdAt: Date, now: Date = new Date()) =>
   getLockExpiresAt(createdAt).getTime() <= now.getTime();
 
+const ensureManufacturerUser = (req: AuthRequest, res: Response) => {
+  if (!req.user || !isManufacturerRole(req.user.role)) {
+    res.status(403).json({ success: false, error: "Access denied" });
+    return null;
+  }
+  return req.user;
+};
+
 const getManufacturerPrintJob = async (jobId: string, userId: string) =>
   prisma.printJob.findFirst({
     where: { id: jobId, manufacturerId: userId },
     include: { batch: { select: { id: true, name: true, licenseeId: true } } },
   });
+
+const ensureTrustedPrinterConnected = async (userId: string) => {
+  const printerStatus = await getPrinterConnectionStatusForUser(userId);
+  if (!printerStatus.connected || !printerStatus.trusted) {
+    throw Object.assign(new Error("PRINTER_NOT_TRUSTED"), { printerStatus });
+  }
+  return printerStatus;
+};
 
 const notifySystemPrintEvent = async (params: {
   licenseeId?: string | null;
@@ -80,7 +130,10 @@ const notifySystemPrintEvent = async (params: {
   title: string;
   body: string;
   data?: any;
+  channels?: NotificationChannel[];
 }) => {
+  const channels = params.channels && params.channels.length > 0 ? params.channels : [NotificationChannel.WEB];
+
   await Promise.allSettled([
     createRoleNotifications({
       audience: NotificationAudience.SUPER_ADMIN,
@@ -90,7 +143,7 @@ const notifySystemPrintEvent = async (params: {
       licenseeId: params.licenseeId || null,
       orgId: params.orgId || null,
       data: params.data || null,
-      channels: [NotificationChannel.WEB],
+      channels,
     }),
     params.licenseeId
       ? createRoleNotifications({
@@ -117,61 +170,443 @@ const notifySystemPrintEvent = async (params: {
   ]);
 };
 
-export const createPrintJob = async (req: AuthRequest, res: Response) => {
-  try {
-    if (
-      !req.user ||
-      !isManufacturerRole(req.user.role)
-    ) {
-      return res.status(403).json({ success: false, error: "Access denied" });
-    }
+const handleIdempotencyError = (error: unknown, res: Response) => {
+  const message = String((error as any)?.message || "");
+  if (message.includes("IDEMPOTENCY_KEY_REQUIRED")) {
+    res.status(400).json({ success: false, error: "Missing x-idempotency-key header" });
+    return true;
+  }
+  if (message.includes("IDEMPOTENCY_KEY_IN_PROGRESS")) {
+    res.status(409).json({ success: false, error: "Request with this idempotency key is already in progress" });
+    return true;
+  }
+  if (message.includes("IDEMPOTENCY_KEY_PAYLOAD_MISMATCH")) {
+    res.status(409).json({ success: false, error: "Idempotency key was already used for a different payload" });
+    return true;
+  }
+  return false;
+};
 
-    const printerStatus = getPrinterConnectionStatusForUser(req.user.userId);
-    if (!printerStatus.connected) {
-      return res.status(409).json({
-        success: false,
-        error:
-          "Printer is not connected. Start the authenticated print agent and connect a printer before creating a print job.",
-        data: { printerStatus },
+const beginPrintActionIdempotency = async (params: {
+  req: AuthRequest;
+  action: string;
+  scope: string;
+  payload?: any;
+}) => {
+  return beginIdempotentAction({
+    action: params.action,
+    scope: params.scope,
+    idempotencyKey: extractIdempotencyKey(params.req.headers as any, params.req.body as any),
+    requestPayload: params.payload ?? null,
+    required: true,
+  });
+};
+
+const replayIdempotentResponseIfAny = (idempotency: IdempotencyBeginResult<any>, res: Response) => {
+  if (!idempotency.replayed) return false;
+  return res.status(idempotency.statusCode || 200).json(idempotency.responsePayload || { success: true });
+};
+
+const mapLegacyPrintItemState = (status: QRStatus): PrintItemState => {
+  if (status === QRStatus.PRINTED || status === QRStatus.REDEEMED || status === QRStatus.SCANNED) {
+    return PrintItemState.CLOSED;
+  }
+  if (status === QRStatus.BLOCKED) {
+    return PrintItemState.FROZEN;
+  }
+  return PrintItemState.RESERVED;
+};
+
+const getOrCreatePrintSession = async (job: {
+  id: string;
+  batchId: string;
+  manufacturerId: string;
+  quantity: number;
+  status: any;
+}) => {
+  const existing = await prisma.printSession.findUnique({ where: { printJobId: job.id } });
+  if (existing) return existing;
+
+  return prisma.$transaction(async (tx) => {
+    const stillExisting = await tx.printSession.findUnique({ where: { printJobId: job.id } });
+    if (stillExisting) return stillExisting;
+
+    const qrRows = await tx.qRCode.findMany({
+      where: { printJobId: job.id },
+      orderBy: { code: "asc" },
+      select: { id: true, code: true, status: true },
+    });
+
+    const totalItems = qrRows.length || job.quantity;
+
+    const created = await tx.printSession.create({
+      data: {
+        printJobId: job.id,
+        batchId: job.batchId,
+        manufacturerId: job.manufacturerId,
+        status: job.status === "CONFIRMED" ? PrintSessionStatus.COMPLETED : PrintSessionStatus.ACTIVE,
+        totalItems,
+        issuedItems: qrRows.filter((row) => row.status !== QRStatus.ACTIVATED && row.status !== QRStatus.ALLOCATED).length,
+        confirmedItems: qrRows.filter((row) => row.status === QRStatus.PRINTED || row.status === QRStatus.REDEEMED || row.status === QRStatus.SCANNED).length,
+        completedAt: job.status === "CONFIRMED" ? new Date() : null,
+      },
+    });
+
+    if (qrRows.length > 0) {
+      await tx.printItem.createMany({
+        data: qrRows.map((row) => ({
+          printSessionId: created.id,
+          qrCodeId: row.id,
+          code: row.code,
+          state: mapLegacyPrintItemState(row.status),
+          issuedAt: row.status === QRStatus.ACTIVATED ? null : new Date(),
+          printConfirmedAt:
+            row.status === QRStatus.PRINTED || row.status === QRStatus.REDEEMED || row.status === QRStatus.SCANNED
+              ? new Date()
+              : null,
+          closedAt:
+            row.status === QRStatus.PRINTED || row.status === QRStatus.REDEEMED || row.status === QRStatus.SCANNED
+              ? new Date()
+              : null,
+        })),
+        skipDuplicates: true,
       });
     }
+
+    return created;
+  });
+};
+
+const countRemainingToPrint = async (tx: Prisma.TransactionClient, printSessionId: string) => {
+  return tx.printItem.count({
+    where: {
+      printSessionId,
+      state: { in: OPEN_PRINT_STATES },
+    },
+  });
+};
+
+const finalizePrintSessionIfReady = async (params: {
+  tx: Prisma.TransactionClient;
+  printSessionId: string;
+  printJobId: string;
+  batchId: string;
+  now: Date;
+  actorUserId: string;
+}) => {
+  const remainingToPrint = await countRemainingToPrint(params.tx, params.printSessionId);
+  let confirmedAt: Date | null = null;
+
+  if (remainingToPrint > 0) {
+    return {
+      remainingToPrint,
+      jobConfirmed: false,
+      confirmedAt,
+    };
+  }
+
+  const closableItems = await params.tx.printItem.findMany({
+    where: {
+      printSessionId: params.printSessionId,
+      state: { in: CLOSABLE_PRINT_STATES },
+    },
+    select: { id: true },
+  });
+
+  if (closableItems.length > 0) {
+    await params.tx.printItem.updateMany({
+      where: {
+        id: { in: closableItems.map((item) => item.id) },
+        state: { in: CLOSABLE_PRINT_STATES },
+      },
+      data: {
+        state: PrintItemState.CLOSED,
+        closedAt: params.now,
+      },
+    });
+
+    await params.tx.printItemEvent.createMany({
+      data: closableItems.map((item) => ({
+        printItemId: item.id,
+        eventType: PrintItemEventType.CLOSED,
+        previousState: PrintItemState.PRINT_CONFIRMED,
+        nextState: PrintItemState.CLOSED,
+        actorUserId: params.actorUserId,
+        details: {
+          reason: "session_completed",
+        },
+      })),
+    });
+  }
+
+  await params.tx.printSession.update({
+    where: { id: params.printSessionId },
+    data: {
+      status: PrintSessionStatus.COMPLETED,
+      completedAt: params.now,
+    },
+  });
+
+  const jobUpdate = await params.tx.printJob.updateMany({
+    where: { id: params.printJobId, status: "PENDING" },
+    data: { status: "CONFIRMED", confirmedAt: params.now },
+  });
+
+  if (jobUpdate.count > 0) {
+    await params.tx.batch.update({
+      where: { id: params.batchId },
+      data: { printedAt: params.now },
+    });
+    confirmedAt = params.now;
+  } else {
+    const currentJob = await params.tx.printJob.findUnique({ where: { id: params.printJobId }, select: { confirmedAt: true } });
+    confirmedAt = currentJob?.confirmedAt || null;
+  }
+
+  return {
+    remainingToPrint: 0,
+    jobConfirmed: true,
+    confirmedAt,
+  };
+};
+
+const createFailStopIncident = async (params: {
+  tx: Prisma.TransactionClient;
+  printJobId: string;
+  printSessionId: string;
+  licenseeId: string | null;
+  reason: string;
+  actorUserId?: string | null;
+  diagnostics: Record<string, any>;
+}) => {
+  const incident = await params.tx.incident.create({
+    data: {
+      qrCodeValue: `PRINT_JOB:${params.printJobId}`,
+      licenseeId: params.licenseeId,
+      reportedBy: "ADMIN",
+      incidentType: IncidentType.OTHER,
+      severity: IncidentSeverity.CRITICAL,
+      priority: IncidentPriority.P1,
+      description: `Direct-print fail-stop triggered for session ${params.printSessionId}: ${params.reason}`,
+      tags: ["print_fail_stop", "direct_print", `print_job_${params.printJobId}`],
+    },
+  });
+
+  await params.tx.incidentEvent.create({
+    data: {
+      incidentId: incident.id,
+      actorType: IncidentActorType.SYSTEM,
+      actorUserId: params.actorUserId || null,
+      eventType: IncidentEventType.CREATED,
+      eventPayload: {
+        reason: params.reason,
+        diagnostics: params.diagnostics,
+        context: "DIRECT_PRINT_FAIL_STOP",
+      },
+    },
+  });
+
+  return incident;
+};
+
+const failStopPrintSession = async (params: {
+  printSessionId: string;
+  printJobId: string;
+  batchId: string;
+  licenseeId: string | null;
+  actorUserId: string;
+  reason: string;
+  printItemId?: string;
+  retries?: number;
+  metadata?: any;
+}) => {
+  const now = new Date();
+
+  const result = await prisma.$transaction(async (tx) => {
+    const session = await tx.printSession.findUnique({
+      where: { id: params.printSessionId },
+      select: { id: true, status: true },
+    });
+    if (!session) throw new Error("PRINT_SESSION_NOT_FOUND");
+
+    const toFreeze = await tx.printItem.findMany({
+      where: {
+        printSessionId: params.printSessionId,
+        state: { in: [PrintItemState.RESERVED, PrintItemState.ISSUED, PrintItemState.AGENT_ACKED, PrintItemState.PRINT_CONFIRMED] },
+      },
+      select: { id: true, code: true, qrCodeId: true, state: true },
+    });
+
+    let failedItem: { id: string; code: string } | null = null;
+    if (params.printItemId) {
+      const updated = await tx.printItem.updateMany({
+        where: {
+          id: params.printItemId,
+          printSessionId: params.printSessionId,
+          state: { in: [PrintItemState.ISSUED, PrintItemState.AGENT_ACKED, PrintItemState.PRINT_CONFIRMED] },
+        },
+        data: {
+          state: PrintItemState.FAILED,
+          failedAt: now,
+          failureReason: params.reason,
+          deadLetterReason: params.reason,
+        },
+      });
+      if (updated.count > 0) {
+        const row = await tx.printItem.findUnique({ where: { id: params.printItemId }, select: { id: true, code: true } });
+        failedItem = row || null;
+      }
+    }
+
+    const freezeTargets = toFreeze.filter((item) => item.id !== params.printItemId);
+    if (freezeTargets.length > 0) {
+      await tx.printItem.updateMany({
+        where: { id: { in: freezeTargets.map((item) => item.id) } },
+        data: {
+          state: PrintItemState.FROZEN,
+          frozenAt: now,
+          failureReason: params.reason,
+        },
+      });
+
+      await tx.qRCode.updateMany({
+        where: {
+          id: { in: freezeTargets.map((item) => item.qrCodeId) },
+          status: { in: [QRStatus.ACTIVATED, QRStatus.PRINTED] },
+        },
+        data: {
+          status: QRStatus.BLOCKED,
+          blockedAt: now,
+          underInvestigationAt: now,
+          underInvestigationReason: `Print fail-stop: ${params.reason}`,
+        },
+      });
+    }
+
+    if (failedItem) {
+      await tx.printItemEvent.create({
+        data: {
+          printItemId: failedItem.id,
+          eventType: PrintItemEventType.FAILED,
+          nextState: PrintItemState.FAILED,
+          actorUserId: params.actorUserId,
+          details: {
+            reason: params.reason,
+            retries: params.retries ?? 0,
+            metadata: params.metadata ?? null,
+          },
+        },
+      });
+    }
+
+    if (freezeTargets.length > 0) {
+      await tx.printItemEvent.createMany({
+        data: freezeTargets.map((item) => ({
+          printItemId: item.id,
+          eventType: PrintItemEventType.FROZEN,
+          previousState: item.state,
+          nextState: PrintItemState.FROZEN,
+          actorUserId: params.actorUserId,
+          details: {
+            reason: params.reason,
+            metadata: params.metadata ?? null,
+          },
+        })),
+      });
+    }
+
+    await tx.printSession.update({
+      where: { id: params.printSessionId },
+      data: {
+        status: PrintSessionStatus.FAILED,
+        failedReason: params.reason,
+        frozenItems: freezeTargets.length,
+      },
+    });
+
+    await tx.printJob.updateMany({
+      where: { id: params.printJobId, status: "PENDING" },
+      data: { status: "CANCELLED" },
+    });
+
+    const incident = await createFailStopIncident({
+      tx,
+      printJobId: params.printJobId,
+      printSessionId: params.printSessionId,
+      licenseeId: params.licenseeId,
+      actorUserId: params.actorUserId,
+      reason: params.reason,
+      diagnostics: {
+        printItemId: params.printItemId || null,
+        retries: params.retries ?? 0,
+        failedItemCode: failedItem?.code || null,
+        frozenCount: freezeTargets.length,
+        metadata: params.metadata ?? null,
+      },
+    });
+
+    return {
+      incident,
+      failedItem,
+      frozenCount: freezeTargets.length,
+    };
+  });
+
+  await createAuditLog({
+    userId: params.actorUserId,
+    licenseeId: params.licenseeId || undefined,
+    action: "DIRECT_PRINT_FAIL_STOP",
+    entityType: "PrintSession",
+    entityId: params.printSessionId,
+    details: {
+      printJobId: params.printJobId,
+      reason: params.reason,
+      printItemId: params.printItemId || null,
+      retries: params.retries ?? 0,
+      frozenCount: result.frozenCount,
+      incidentId: result.incident.id,
+      metadata: params.metadata ?? null,
+    },
+  });
+
+  return result;
+};
+
+export const createPrintJob = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = ensureManufacturerUser(req, res);
+    if (!user) return;
 
     const parsed = createPrintJobSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
+    let idempotency;
+    try {
+      idempotency = await beginPrintActionIdempotency({
+        req,
+        action: "print_job_create",
+        scope: `user:${user.userId}:batch:${parsed.data.batchId}`,
+        payload: parsed.data,
+      });
+    } catch (error) {
+      if (handleIdempotencyError(error, res)) return;
+      throw error;
+    }
+
+    if (replayIdempotentResponseIfAny(idempotency, res)) return;
+
+    const printerStatus = await ensureTrustedPrinterConnected(user.userId);
+
     const { batchId, quantity, rangeStart, rangeEnd } = parsed.data;
 
     const batch = await prisma.batch.findFirst({
-      where: { id: batchId, manufacturerId: req.user.userId },
+      where: { id: batchId, manufacturerId: user.userId },
       select: { id: true, name: true, licenseeId: true, manufacturerId: true },
     });
     if (!batch) {
       return res.status(404).json({ success: false, error: "Batch not found or not assigned to you" });
-    }
-
-    const where: any = {
-      batchId: batch.id,
-      status: QRStatus.ALLOCATED,
-    };
-
-    if (rangeStart && rangeEnd) {
-      where.code = { gte: rangeStart, lte: rangeEnd };
-    }
-
-    const candidates = await prisma.qRCode.findMany({
-      where,
-      orderBy: { code: "asc" },
-      take: quantity,
-      select: { id: true, code: true, licenseeId: true, batchId: true },
-    });
-
-    if (candidates.length < quantity) {
-      return res.status(400).json({
-        success: false,
-        error: `Not enough unprinted codes. Available: ${candidates.length}, requested: ${quantity}`,
-      });
     }
 
     const printLockToken = randomBytes(24).toString("base64url");
@@ -179,27 +614,50 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
     const now = new Date();
     const expAt = getQrTokenExpiryDate(now);
 
-    const prepared = candidates.map((qr) => {
-      const nonce = randomNonce();
-      const payload = {
-        qr_id: qr.id,
-        batch_id: qr.batchId,
-        licensee_id: qr.licenseeId,
-        manufacturer_id: batch.manufacturerId || null,
-        iat: Math.floor(now.getTime() / 1000),
-        exp: Math.floor(expAt.getTime() / 1000),
-        nonce,
-      };
-      const token = signQrPayload(payload);
-      const tokenHash = hashToken(token);
-      return { qr, nonce, tokenHash };
-    });
+    const created = await prisma.$transaction(async (tx) => {
+      const rangeFilter =
+        rangeStart && rangeEnd
+          ? Prisma.sql`AND q."code" >= ${rangeStart} AND q."code" <= ${rangeEnd}`
+          : Prisma.empty;
 
-    const job = await prisma.$transaction(async (tx) => {
+      const reservedRows = await tx.$queryRaw<
+        Array<{ id: string; code: string; licenseeId: string; batchId: string | null }>
+      >(Prisma.sql`
+        SELECT q."id", q."code", q."licenseeId", q."batchId"
+        FROM "QRCode" q
+        WHERE q."batchId" = ${batch.id}
+          AND q."status" = CAST(${QRStatus.ALLOCATED} AS "QRStatus")
+          AND q."printJobId" IS NULL
+          ${rangeFilter}
+        ORDER BY q."code" ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT ${quantity};
+      `);
+
+      if (reservedRows.length < quantity) {
+        throw new Error(`NOT_ENOUGH_CODES:${reservedRows.length}`);
+      }
+
+      const prepared = reservedRows.map((qr) => {
+        const nonce = randomNonce();
+        const payload = {
+          qr_id: qr.id,
+          batch_id: qr.batchId,
+          licensee_id: qr.licenseeId,
+          manufacturer_id: batch.manufacturerId || null,
+          iat: Math.floor(now.getTime() / 1000),
+          exp: Math.floor(expAt.getTime() / 1000),
+          nonce,
+        };
+        const token = signQrPayload(payload);
+        const tokenHash = hashToken(token);
+        return { qr, nonce, tokenHash };
+      });
+
       const createdJob = await tx.printJob.create({
         data: {
           batchId: batch.id,
-          manufacturerId: req.user!.userId,
+          manufacturerId: user.userId,
           quantity,
           rangeStart: rangeStart || null,
           rangeEnd: rangeEnd || null,
@@ -233,34 +691,81 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
         throw new Error("BATCH_BUSY");
       }
 
-      return createdJob;
-    }, { timeout: 20000, maxWait: 10000 });
+      const session = await tx.printSession.create({
+        data: {
+          printJobId: createdJob.id,
+          batchId: batch.id,
+          manufacturerId: user.userId,
+          printerRegistrationId: printerStatus.registrationId || null,
+          status: PrintSessionStatus.ACTIVE,
+          totalItems: prepared.length,
+        },
+      });
+
+      await tx.printItem.createMany({
+        data: prepared.map((item) => ({
+          printSessionId: session.id,
+          qrCodeId: item.qr.id,
+          code: item.qr.code,
+          state: PrintItemState.RESERVED,
+        })),
+      });
+
+      return {
+        job: createdJob,
+        session,
+        preparedCount: prepared.length,
+      };
+    }, { timeout: 30000, maxWait: 10000 });
 
     await createAuditLog({
-      userId: req.user.userId,
+      userId: user.userId,
       licenseeId: batch.licenseeId,
       action: "CREATED",
       entityType: "PrintJob",
-      entityId: job.id,
+      entityId: created.job.id,
       details: {
         batchId: batch.id,
         quantity,
         rangeStart: rangeStart || null,
         rangeEnd: rangeEnd || null,
         mode: "DIRECT_PRINT",
+        printSessionId: created.session.id,
       },
       ipAddress: req.ip,
+      userAgent: req.get("user-agent") || undefined,
+    });
+
+    const responsePayload = {
+      success: true,
+      data: {
+        printJobId: created.job.id,
+        printSessionId: created.session.id,
+        printLockToken,
+        quantity,
+        tokenCount: created.preparedCount,
+        mode: "DIRECT_PRINT",
+        lockExpiresAt: getLockExpiresAt(created.job.createdAt).toISOString(),
+        printerStatus,
+      },
+    };
+
+    await completeIdempotentAction({
+      keyHash: idempotency.keyHash,
+      statusCode: 201,
+      responsePayload,
     });
 
     try {
       await createUserNotification({
-        userId: req.user.userId,
+        userId: user.userId,
         licenseeId: batch.licenseeId,
         type: "manufacturer_print_job_created",
         title: "Direct-print job prepared",
         body: `Direct-print session ready for ${batch.name} (${quantity} codes).`,
         data: {
-          printJobId: job.id,
+          printJobId: created.job.id,
+          printSessionId: created.session.id,
           batchId: batch.id,
           batchName: batch.name,
           quantity,
@@ -270,12 +775,13 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
       });
       await notifySystemPrintEvent({
         licenseeId: batch.licenseeId,
-        orgId: req.user.orgId || null,
+        orgId: user.orgId || null,
         type: "system_print_job_created",
         title: "System print job created",
         body: `Direct-print job created for ${batch.name} (${quantity} codes).`,
         data: {
-          printJobId: job.id,
+          printJobId: created.job.id,
+          printSessionId: created.session.id,
           batchId: batch.id,
           batchName: batch.name,
           quantity,
@@ -287,23 +793,27 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
       console.error("createPrintJob notification error:", notifyError);
     }
 
-    return res.status(201).json({
-      success: true,
-      data: {
-        printJobId: job.id,
-        printLockToken,
-        quantity,
-        tokenCount: prepared.length,
-        mode: "DIRECT_PRINT",
-        lockExpiresAt: getLockExpiresAt(job.createdAt).toISOString(),
-        printerStatus,
-      },
-    });
+    return res.status(201).json(responsePayload);
   } catch (e: any) {
     console.error("createPrintJob error:", e);
     const msg = String(e?.message || "");
     if (msg.includes("BATCH_BUSY")) {
       return res.status(409).json({ success: false, error: "Please retry — batch busy." });
+    }
+    if (msg.startsWith("NOT_ENOUGH_CODES:")) {
+      const available = Number(msg.split(":")[1] || "0");
+      return res.status(400).json({
+        success: false,
+        error: `Not enough unprinted codes. Available: ${available}`,
+      });
+    }
+    if (msg.includes("PRINTER_NOT_TRUSTED")) {
+      const printerStatus = (e as any)?.printerStatus || null;
+      return res.status(409).json({
+        success: false,
+        error: "Printer is not cryptographically trusted. Reconnect signed agent with valid mTLS device identity.",
+        data: { printerStatus },
+      });
     }
     return res.status(400).json({ success: false, error: e?.message || "Bad request" });
   }
@@ -319,9 +829,8 @@ export const downloadPrintJobPack = async (_req: AuthRequest, res: Response) => 
 
 export const issueDirectPrintTokens = async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user || !isManufacturerRole(req.user.role)) {
-      return res.status(403).json({ success: false, error: "Access denied" });
-    }
+    const user = ensureManufacturerUser(req, res);
+    if (!user) return;
 
     const parsed = issueDirectPrintTokensSchema.safeParse(req.body || {});
     if (!parsed.success) {
@@ -333,12 +842,29 @@ export const issueDirectPrintTokens = async (req: AuthRequest, res: Response) =>
       return res.status(400).json({ success: false, error: "Missing print job id" });
     }
 
-    const job = await getManufacturerPrintJob(jobId, req.user.userId);
+    let idempotency;
+    try {
+      idempotency = await beginPrintActionIdempotency({
+        req,
+        action: "print_job_issue_tokens",
+        scope: `job:${jobId}`,
+        payload: parsed.data,
+      });
+    } catch (error) {
+      if (handleIdempotencyError(error, res)) return;
+      throw error;
+    }
+
+    if (replayIdempotentResponseIfAny(idempotency, res)) return;
+
+    const job = await getManufacturerPrintJob(jobId, user.userId);
     if (!job) return res.status(404).json({ success: false, error: "Print job not found" });
 
     if (job.status === "CONFIRMED") {
       return res.status(409).json({ success: false, error: "Print job already confirmed" });
     }
+
+    await ensureTrustedPrinterConnected(user.userId);
 
     const now = new Date();
     if (isLockExpired(job.createdAt, now)) {
@@ -353,53 +879,61 @@ export const issueDirectPrintTokens = async (req: AuthRequest, res: Response) =>
       return res.status(403).json({ success: false, error: "Invalid print lock token" });
     }
 
-    const requestedCount = Math.max(1, Math.min(DIRECT_PRINT_MAX_BATCH, parsed.data.count || 1));
-
-    const qrRows = await prisma.qRCode.findMany({
-      where: { printJobId: job.id, status: QRStatus.ACTIVATED },
-      orderBy: { code: "asc" },
-      take: requestedCount,
-      select: { id: true, code: true },
+    const session = await getOrCreatePrintSession({
+      id: job.id,
+      batchId: job.batchId,
+      manufacturerId: job.manufacturerId,
+      quantity: job.quantity,
+      status: job.status,
     });
 
-    if (qrRows.length === 0) {
-      const remainingToPrint = await prisma.qRCode.count({ where: { printJobId: job.id, status: QRStatus.ACTIVATED } });
-      if (remainingToPrint === 0) {
-        await prisma.$transaction(async (tx) => {
-          const updated = await tx.printJob.updateMany({
-            where: { id: job.id, status: "PENDING" },
-            data: { status: "CONFIRMED", confirmedAt: now },
-          });
-          if (updated.count > 0) {
-            await tx.batch.update({ where: { id: job.batchId }, data: { printedAt: now } });
-          }
-        });
-      }
-
-      return res.json({
-        success: true,
-        data: {
-          printJobId: job.id,
-          items: [],
-          remainingToPrint,
-          jobConfirmed: remainingToPrint === 0,
-          lockExpiresAt: getLockExpiresAt(job.createdAt).toISOString(),
-        },
+    if (session.status !== PrintSessionStatus.ACTIVE) {
+      return res.status(409).json({
+        success: false,
+        error: `Print session is not active (${session.status}).`,
       });
     }
 
+    const requestedCount = Math.max(1, Math.min(DIRECT_PRINT_MAX_BATCH, parsed.data.count || 1));
     const renderTokenExpiresAt = new Date(now.getTime() + DIRECT_PRINT_RENDER_TOKEN_TTL_SECONDS * 1000);
-    const rowsWithTokens = qrRows.map((row) => {
-      const renderToken = randomBytes(24).toString("base64url");
-      return {
-        qrId: row.id,
-        code: row.code,
-        renderToken,
-        tokenHash: hashToken(renderToken),
-      };
-    });
 
-    await prisma.$transaction(async (tx) => {
+    const txResult = await prisma.$transaction(async (tx) => {
+      const reservedItems = await tx.printItem.findMany({
+        where: {
+          printSessionId: session.id,
+          state: PrintItemState.RESERVED,
+        },
+        orderBy: { code: "asc" },
+        take: requestedCount,
+        select: { id: true, qrCodeId: true, code: true },
+      });
+
+      if (reservedItems.length === 0) {
+        const remainingToPrint = await countRemainingToPrint(tx, session.id);
+        return {
+          items: [] as Array<{
+            printItemId: string;
+            qrId: string;
+            code: string;
+            renderToken: string;
+            tokenHash: string;
+          }> ,
+          remainingToPrint,
+        };
+      }
+
+      const rowsWithTokens = reservedItems.map((row, index) => {
+        const renderToken = randomBytes(24).toString("base64url");
+        return {
+          printItemId: row.id,
+          qrId: row.qrCodeId,
+          code: row.code,
+          renderToken,
+          tokenHash: hashToken(renderToken),
+          issueSequence: session.issuedItems + index + 1,
+        };
+      });
+
       await tx.printRenderToken.deleteMany({
         where: {
           printJobId: job.id,
@@ -416,49 +950,116 @@ export const issueDirectPrintTokens = async (req: AuthRequest, res: Response) =>
           expiresAt: renderTokenExpiresAt,
         })),
       });
+
+      for (const item of rowsWithTokens) {
+        const updated = await tx.printItem.updateMany({
+          where: {
+            id: item.printItemId,
+            state: PrintItemState.RESERVED,
+          },
+          data: {
+            state: PrintItemState.ISSUED,
+            issuedAt: now,
+            issueSequence: item.issueSequence,
+            currentRenderTokenHash: item.tokenHash,
+          },
+        });
+
+        if (updated.count === 0) {
+          throw new Error("PRINT_ITEM_STATE_CONFLICT");
+        }
+      }
+
+      await tx.printItemEvent.createMany({
+        data: rowsWithTokens.map((item) => ({
+          printItemId: item.printItemId,
+          eventType: PrintItemEventType.ISSUED,
+          previousState: PrintItemState.RESERVED,
+          nextState: PrintItemState.ISSUED,
+          actorUserId: user.userId,
+          details: {
+            expiresAt: renderTokenExpiresAt.toISOString(),
+          },
+        })),
+      });
+
+      await tx.printSession.update({
+        where: { id: session.id },
+        data: {
+          issuedItems: { increment: rowsWithTokens.length },
+        },
+      });
+
+      const remainingToPrint = await countRemainingToPrint(tx, session.id);
+
+      return {
+        items: rowsWithTokens,
+        remainingToPrint,
+      };
     });
 
     await createAuditLog({
-      userId: req.user.userId,
+      userId: user.userId,
       licenseeId: job.batch.licenseeId,
       action: "DIRECT_PRINT_TOKEN_ISSUED",
-      entityType: "PrintJob",
-      entityId: job.id,
+      entityType: "PrintSession",
+      entityId: session.id,
       details: {
-        issuedCount: rowsWithTokens.length,
+        printJobId: job.id,
+        issuedCount: txResult.items.length,
         expiresAt: renderTokenExpiresAt.toISOString(),
       },
       ipAddress: req.ip,
+      userAgent: req.get("user-agent") || undefined,
     });
 
-    const remainingToPrint = await prisma.qRCode.count({ where: { printJobId: job.id, status: QRStatus.ACTIVATED } });
-
-    return res.json({
+    const responsePayload = {
       success: true,
       data: {
         printJobId: job.id,
+        printSessionId: session.id,
         lockExpiresAt: getLockExpiresAt(job.createdAt).toISOString(),
         directPrintTokenExpiresAt: renderTokenExpiresAt.toISOString(),
-        remainingToPrint,
-        items: rowsWithTokens.map((item) => ({
+        remainingToPrint: txResult.remainingToPrint,
+        items: txResult.items.map((item) => ({
+          printItemId: item.printItemId,
           qrId: item.qrId,
           code: item.code,
           renderToken: item.renderToken,
           expiresAt: renderTokenExpiresAt.toISOString(),
         })),
       },
+    };
+
+    await completeIdempotentAction({
+      keyHash: idempotency.keyHash,
+      statusCode: 200,
+      responsePayload,
     });
+
+    return res.json(responsePayload);
   } catch (e: any) {
     console.error("issueDirectPrintTokens error:", e);
+    const msg = String(e?.message || "");
+    if (msg.includes("PRINT_ITEM_STATE_CONFLICT")) {
+      return res.status(409).json({ success: false, error: "Print item state conflict. Retry token issuance." });
+    }
+    if (msg.includes("PRINTER_NOT_TRUSTED")) {
+      const printerStatus = (e as any)?.printerStatus || null;
+      return res.status(409).json({
+        success: false,
+        error: "Printer trust validation failed. Token issuance blocked.",
+        data: { printerStatus },
+      });
+    }
     return res.status(400).json({ success: false, error: e?.message || "Bad request" });
   }
 };
 
 export const resolveDirectPrintToken = async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user || !isManufacturerRole(req.user.role)) {
-      return res.status(403).json({ success: false, error: "Access denied" });
-    }
+    const user = ensureManufacturerUser(req, res);
+    if (!user) return;
 
     const parsed = resolveDirectPrintTokenSchema.safeParse(req.body || {});
     if (!parsed.success) {
@@ -470,8 +1071,35 @@ export const resolveDirectPrintToken = async (req: AuthRequest, res: Response) =
       return res.status(400).json({ success: false, error: "Missing print job id" });
     }
 
-    const job = await getManufacturerPrintJob(jobId, req.user.userId);
+    let idempotency;
+    try {
+      idempotency = await beginPrintActionIdempotency({
+        req,
+        action: "print_job_resolve_token",
+        scope: `job:${jobId}`,
+        payload: parsed.data,
+      });
+    } catch (error) {
+      if (handleIdempotencyError(error, res)) return;
+      throw error;
+    }
+
+    if (replayIdempotentResponseIfAny(idempotency, res)) return;
+
+    const job = await getManufacturerPrintJob(jobId, user.userId);
     if (!job) return res.status(404).json({ success: false, error: "Print job not found" });
+
+    const session = await getOrCreatePrintSession({
+      id: job.id,
+      batchId: job.batchId,
+      manufacturerId: job.manufacturerId,
+      quantity: job.quantity,
+      status: job.status,
+    });
+
+    if (session.status !== PrintSessionStatus.ACTIVE) {
+      return res.status(409).json({ success: false, error: `Print session is ${session.status}` });
+    }
 
     const now = new Date();
     if (isLockExpired(job.createdAt, now)) {
@@ -524,10 +1152,6 @@ export const resolveDirectPrintToken = async (req: AuthRequest, res: Response) =
       return res.status(409).json({ success: false, error: "QR code is not bound to this print job" });
     }
 
-    if (qr.status === QRStatus.PRINTED) {
-      return res.status(409).json({ success: false, error: "QR code already printed" });
-    }
-
     if (qr.status !== QRStatus.ACTIVATED) {
       return res.status(409).json({ success: false, error: "QR code is not ready for direct-print rendering" });
     }
@@ -537,6 +1161,23 @@ export const resolveDirectPrintToken = async (req: AuthRequest, res: Response) =
         success: false,
         error: "QR token metadata missing. Regenerate print job to re-initialize secure token state.",
       });
+    }
+
+    const printItem = await prisma.printItem.findUnique({
+      where: { qrCodeId: qr.id },
+      select: { id: true, printSessionId: true, state: true, currentRenderTokenHash: true },
+    });
+
+    if (!printItem || printItem.printSessionId !== session.id) {
+      return res.status(409).json({ success: false, error: "Print item not found for this session" });
+    }
+
+    if (printItem.state !== PrintItemState.ISSUED) {
+      return res.status(409).json({ success: false, error: `Print item is ${printItem.state}, expected ISSUED` });
+    }
+
+    if (printItem.currentRenderTokenHash && printItem.currentRenderTokenHash !== renderTokenHash) {
+      return res.status(409).json({ success: false, error: "Render token no longer valid for this print item" });
     }
 
     const payload = {
@@ -572,160 +1213,128 @@ export const resolveDirectPrintToken = async (req: AuthRequest, res: Response) =
         throw new Error("RENDER_TOKEN_ALREADY_USED");
       }
 
-      const markPrinted = await tx.qRCode.updateMany({
-        where: { id: qr.id, printJobId: job.id, status: QRStatus.ACTIVATED },
+      const markAcked = await tx.printItem.updateMany({
+        where: {
+          id: printItem.id,
+          state: PrintItemState.ISSUED,
+        },
         data: {
-          status: QRStatus.PRINTED,
-          printedAt: now,
-          printedByUserId: req.user!.userId,
+          state: PrintItemState.AGENT_ACKED,
+          agentAckedAt: now,
+          attemptCount: { increment: 1 },
         },
       });
 
-      if (markPrinted.count === 0) {
-        throw new Error("QR_ALREADY_PRINTED");
+      if (markAcked.count === 0) {
+        throw new Error("PRINT_ITEM_ALREADY_ACKED");
       }
 
-      const remainingToPrint = await tx.qRCode.count({
-        where: { printJobId: job.id, status: QRStatus.ACTIVATED },
+      await tx.printItemEvent.create({
+        data: {
+          printItemId: printItem.id,
+          eventType: PrintItemEventType.AGENT_ACKED,
+          previousState: PrintItemState.ISSUED,
+          nextState: PrintItemState.AGENT_ACKED,
+          actorUserId: user.userId,
+          details: {
+            renderTokenId: renderTokenRow.id,
+          },
+        },
       });
 
-      let confirmedAt: Date | null = null;
-      if (remainingToPrint === 0) {
-        const update = await tx.printJob.updateMany({
-          where: { id: job.id, status: "PENDING" },
-          data: { status: "CONFIRMED", confirmedAt: now },
-        });
+      const remainingToPrint = await countRemainingToPrint(tx, session.id);
 
-        if (update.count > 0) {
-          await tx.batch.update({
-            where: { id: job.batchId },
-            data: { printedAt: now },
-          });
-          confirmedAt = now;
-        } else {
-          const current = await tx.printJob.findUnique({
-            where: { id: job.id },
-            select: { confirmedAt: true },
-          });
-          confirmedAt = current?.confirmedAt || null;
-        }
-      }
-
-      return { remainingToPrint, confirmedAt };
+      return {
+        remainingToPrint,
+      };
     });
 
     await createAuditLog({
-      userId: req.user.userId,
+      userId: user.userId,
       licenseeId: job.batch.licenseeId,
-      action: "PRINTED",
-      entityType: "QRCode",
-      entityId: qr.id,
+      action: "DIRECT_PRINT_ITEM_ACKED",
+      entityType: "PrintItem",
+      entityId: printItem.id,
       details: {
         mode: "DIRECT_PRINT",
         printJobId: job.id,
+        printSessionId: session.id,
         code: qr.code,
         remainingToPrint: txResult.remainingToPrint,
       },
       ipAddress: req.ip,
+      userAgent: req.get("user-agent") || undefined,
     });
 
-    if (txResult.remainingToPrint === 0) {
-      try {
-        await createUserNotification({
-          userId: req.user.userId,
-          licenseeId: job.batch.licenseeId,
-          type: "manufacturer_print_job_confirmed",
-          title: "Direct-print job confirmed",
-          body: `All secure direct-print tokens consumed for ${job.batch.name}.`,
-          data: {
-            printJobId: job.id,
-            batchId: job.batch.id,
-            batchName: job.batch.name,
-            printedCodes: job.quantity,
-            mode: "DIRECT_PRINT",
-            targetRoute: "/batches",
-          },
-        });
-        await notifySystemPrintEvent({
-          licenseeId: job.batch.licenseeId,
-          orgId: req.user.orgId || null,
-          type: "system_print_job_completed",
-          title: "System print job completed",
-          body: `Direct-print job completed for ${job.batch.name}.`,
-          data: {
-            printJobId: job.id,
-            batchId: job.batch.id,
-            batchName: job.batch.name,
-            printedCodes: job.quantity,
-            mode: "DIRECT_PRINT",
-            targetRoute: "/batches",
-          },
-        });
-      } catch (notifyError) {
-        console.error("resolveDirectPrintToken notification error:", notifyError);
-      }
-    }
-
-    return res.json({
+    const responsePayload = {
       success: true,
       data: {
         printJobId: job.id,
+        printSessionId: session.id,
+        printItemId: printItem.id,
         qrId: qr.id,
         code: qr.code,
         renderResolvedAt: now.toISOString(),
         remainingToPrint: txResult.remainingToPrint,
-        jobConfirmed: txResult.remainingToPrint === 0,
-        confirmedAt: txResult.confirmedAt ? txResult.confirmedAt.toISOString() : null,
+        jobConfirmed: false,
+        confirmedAt: null,
         scanToken: signedQrToken,
         scanUrl: buildScanUrl(signedQrToken),
       },
+    };
+
+    await completeIdempotentAction({
+      keyHash: idempotency.keyHash,
+      statusCode: 200,
+      responsePayload,
     });
+
+    return res.json(responsePayload);
   } catch (e: any) {
     const msg = String(e?.message || "");
     if (msg.includes("RENDER_TOKEN_ALREADY_USED")) {
       return res.status(409).json({ success: false, error: "Render token already used" });
     }
-    if (msg.includes("QR_ALREADY_PRINTED")) {
-      return res.status(409).json({ success: false, error: "QR code already printed" });
+    if (msg.includes("PRINT_ITEM_ALREADY_ACKED")) {
+      return res.status(409).json({ success: false, error: "Print item already acknowledged" });
     }
     console.error("resolveDirectPrintToken error:", e);
     return res.status(400).json({ success: false, error: e?.message || "Bad request" });
   }
 };
 
-export const confirmPrintJob = async (req: AuthRequest, res: Response) => {
+export const confirmDirectPrintItem = async (req: AuthRequest, res: Response) => {
   try {
-    if (
-      !req.user ||
-      !isManufacturerRole(req.user.role)
-    ) {
-      return res.status(403).json({ success: false, error: "Access denied" });
-    }
+    const user = ensureManufacturerUser(req, res);
+    if (!user) return;
 
-    const parsed = confirmSchema.safeParse(req.body || {});
+    const parsed = confirmDirectPrintItemSchema.safeParse(req.body || {});
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const jobId = String(req.params.id || "");
-    if (!jobId) return res.status(400).json({ success: false, error: "Missing print job id" });
-
-    const job = await getManufacturerPrintJob(jobId, req.user.userId);
-    if (!job) return res.status(404).json({ success: false, error: "Print job not found" });
-
-    if (job.status === "CONFIRMED") {
-      const printedCount = await prisma.qRCode.count({
-        where: { printJobId: job.id, status: QRStatus.PRINTED },
-      });
-      return res.json({
-        success: true,
-        data: {
-          printJobId: job.id,
-          confirmedAt: job.confirmedAt,
-          printedCodes: printedCount,
-        },
-      });
+    const jobId = String(req.params.id || "").trim();
+    if (!jobId) {
+      return res.status(400).json({ success: false, error: "Missing print job id" });
     }
+
+    let idempotency;
+    try {
+      idempotency = await beginPrintActionIdempotency({
+        req,
+        action: "print_job_confirm_item",
+        scope: `job:${jobId}:item:${parsed.data.printItemId}`,
+        payload: parsed.data,
+      });
+    } catch (error) {
+      if (handleIdempotencyError(error, res)) return;
+      throw error;
+    }
+
+    if (replayIdempotentResponseIfAny(idempotency, res)) return;
+
+    const job = await getManufacturerPrintJob(jobId, user.userId);
+    if (!job) return res.status(404).json({ success: false, error: "Print job not found" });
 
     const now = new Date();
     if (isLockExpired(job.createdAt, now)) {
@@ -740,79 +1349,433 @@ export const confirmPrintJob = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ success: false, error: "Invalid print lock token" });
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      const updatedJob = await tx.printJob.update({
-        where: { id: job.id },
-        data: { status: "CONFIRMED", confirmedAt: now },
+    const session = await getOrCreatePrintSession({
+      id: job.id,
+      batchId: job.batchId,
+      manufacturerId: job.manufacturerId,
+      quantity: job.quantity,
+      status: job.status,
+    });
+
+    if (session.status !== PrintSessionStatus.ACTIVE && session.status !== PrintSessionStatus.COMPLETED) {
+      return res.status(409).json({ success: false, error: `Print session is ${session.status}` });
+    }
+
+    const printItem = await prisma.printItem.findFirst({
+      where: {
+        id: parsed.data.printItemId,
+        printSessionId: session.id,
+      },
+      include: {
+        qrCode: {
+          select: {
+            id: true,
+            code: true,
+            status: true,
+            printJobId: true,
+          },
+        },
+      },
+    });
+
+    if (!printItem) {
+      return res.status(404).json({ success: false, error: "Print item not found for this session" });
+    }
+
+    if (printItem.state === PrintItemState.CLOSED) {
+      const responsePayload = {
+        success: true,
+        data: {
+          printJobId: job.id,
+          printSessionId: session.id,
+          printItemId: printItem.id,
+          qrId: printItem.qrCodeId,
+          code: printItem.code,
+          printConfirmedAt: printItem.printConfirmedAt?.toISOString?.() || null,
+          remainingToPrint: 0,
+          jobConfirmed: true,
+          confirmedAt: job.confirmedAt ? job.confirmedAt.toISOString() : null,
+        },
+      };
+
+      await completeIdempotentAction({
+        keyHash: idempotency.keyHash,
+        statusCode: 200,
+        responsePayload,
       });
 
-      const updatedCodes = await tx.qRCode.updateMany({
-        where: { printJobId: job.id, status: QRStatus.ACTIVATED },
+      return res.json(responsePayload);
+    }
+
+    if (printItem.state !== PrintItemState.AGENT_ACKED) {
+      return res.status(409).json({ success: false, error: `Print item is ${printItem.state}, expected AGENT_ACKED` });
+    }
+
+    const txResult = await prisma.$transaction(async (tx) => {
+      const markConfirmed = await tx.printItem.updateMany({
+        where: {
+          id: printItem.id,
+          state: PrintItemState.AGENT_ACKED,
+        },
+        data: {
+          state: PrintItemState.PRINT_CONFIRMED,
+          printConfirmedAt: now,
+        },
+      });
+
+      if (markConfirmed.count === 0) {
+        throw new Error("PRINT_ITEM_CONFIRM_CONFLICT");
+      }
+
+      await tx.printItemEvent.create({
+        data: {
+          printItemId: printItem.id,
+          eventType: PrintItemEventType.PRINT_CONFIRMED,
+          previousState: PrintItemState.AGENT_ACKED,
+          nextState: PrintItemState.PRINT_CONFIRMED,
+          actorUserId: user.userId,
+          details: {
+            agentMetadata: parsed.data.agentMetadata ?? null,
+          },
+        },
+      });
+
+      const qrUpdated = await tx.qRCode.updateMany({
+        where: {
+          id: printItem.qrCodeId,
+          printJobId: job.id,
+          status: QRStatus.ACTIVATED,
+        },
         data: {
           status: QRStatus.PRINTED,
           printedAt: now,
-          printedByUserId: req.user!.userId,
+          printedByUserId: user.userId,
         },
       });
 
-      await tx.batch.update({
-        where: { id: job.batchId },
-        data: { printedAt: now },
+      if (qrUpdated.count === 0 && printItem.qrCode.status !== QRStatus.PRINTED) {
+        throw new Error("QR_NOT_PRINTABLE");
+      }
+
+      await tx.printSession.update({
+        where: { id: session.id },
+        data: {
+          confirmedItems: { increment: 1 },
+        },
       });
 
-      return { updatedJob, updatedCodes };
+      const finalize = await finalizePrintSessionIfReady({
+        tx,
+        printSessionId: session.id,
+        printJobId: job.id,
+        batchId: job.batchId,
+        now,
+        actorUserId: user.userId,
+      });
+
+      return finalize;
     });
 
     await createAuditLog({
-      userId: req.user.userId,
+      userId: user.userId,
       licenseeId: job.batch.licenseeId,
-      action: "PRINTED",
-      entityType: "PrintJob",
-      entityId: job.id,
-      details: { printedCodes: result.updatedCodes.count },
+      action: "DIRECT_PRINT_ITEM_CONFIRMED",
+      entityType: "PrintItem",
+      entityId: printItem.id,
+      details: {
+        printJobId: job.id,
+        printSessionId: session.id,
+        qrId: printItem.qrCodeId,
+        code: printItem.code,
+        remainingToPrint: txResult.remainingToPrint,
+      },
       ipAddress: req.ip,
+      userAgent: req.get("user-agent") || undefined,
     });
 
-    try {
-      await createUserNotification({
-        userId: req.user.userId,
-        licenseeId: job.batch.licenseeId,
-        type: "manufacturer_print_job_confirmed",
-        title: "Printing confirmed",
-        body: `Printing confirmed for ${job.batch.name} (${result.updatedCodes.count} codes).`,
-        data: {
-          printJobId: job.id,
-          batchId: job.batch.id,
-          batchName: job.batch.name,
-          printedCodes: result.updatedCodes.count,
-          targetRoute: "/batches",
-        },
-      });
-      await notifySystemPrintEvent({
-        licenseeId: job.batch.licenseeId,
-        orgId: req.user.orgId || null,
-        type: "system_print_job_completed",
-        title: "System print job completed",
-        body: `Printing confirmed for ${job.batch.name} (${result.updatedCodes.count} codes).`,
-        data: {
-          printJobId: job.id,
-          batchId: job.batch.id,
-          batchName: job.batch.name,
-          printedCodes: result.updatedCodes.count,
-          mode: "DIRECT_PRINT",
-          targetRoute: "/batches",
-        },
-      });
-    } catch (notifyError) {
-      console.error("confirmPrintJob notification error:", notifyError);
+    if (txResult.jobConfirmed) {
+      try {
+        await createUserNotification({
+          userId: user.userId,
+          licenseeId: job.batch.licenseeId,
+          type: "manufacturer_print_job_confirmed",
+          title: "Direct-print job confirmed",
+          body: `All secure direct-print items were confirmed for ${job.batch.name}.`,
+          data: {
+            printJobId: job.id,
+            printSessionId: session.id,
+            batchId: job.batch.id,
+            batchName: job.batch.name,
+            printedCodes: job.quantity,
+            mode: "DIRECT_PRINT",
+            targetRoute: "/batches",
+          },
+        });
+
+        await notifySystemPrintEvent({
+          licenseeId: job.batch.licenseeId,
+          orgId: user.orgId || null,
+          type: "system_print_job_completed",
+          title: "System print job completed",
+          body: `Direct-print job completed for ${job.batch.name}.`,
+          data: {
+            printJobId: job.id,
+            printSessionId: session.id,
+            batchId: job.batch.id,
+            batchName: job.batch.name,
+            printedCodes: job.quantity,
+            mode: "DIRECT_PRINT",
+            targetRoute: "/batches",
+          },
+        });
+      } catch (notifyError) {
+        console.error("confirmDirectPrintItem notification error:", notifyError);
+      }
     }
+
+    const responsePayload = {
+      success: true,
+      data: {
+        printJobId: job.id,
+        printSessionId: session.id,
+        printItemId: printItem.id,
+        qrId: printItem.qrCodeId,
+        code: printItem.code,
+        printConfirmedAt: now.toISOString(),
+        remainingToPrint: txResult.remainingToPrint,
+        jobConfirmed: txResult.jobConfirmed,
+        confirmedAt: txResult.confirmedAt ? txResult.confirmedAt.toISOString() : null,
+      },
+    };
+
+    await completeIdempotentAction({
+      keyHash: idempotency.keyHash,
+      statusCode: 200,
+      responsePayload,
+    });
+
+    return res.json(responsePayload);
+  } catch (e: any) {
+    const msg = String(e?.message || "");
+    if (msg.includes("PRINT_ITEM_CONFIRM_CONFLICT")) {
+      return res.status(409).json({ success: false, error: "Print item confirmation conflict" });
+    }
+    if (msg.includes("QR_NOT_PRINTABLE")) {
+      return res.status(409).json({ success: false, error: "QR is not in printable state" });
+    }
+    console.error("confirmDirectPrintItem error:", e);
+    return res.status(400).json({ success: false, error: e?.message || "Bad request" });
+  }
+};
+
+export const reportDirectPrintFailure = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = ensureManufacturerUser(req, res);
+    if (!user) return;
+
+    const parsed = reportDirectPrintFailureSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+    }
+
+    const jobId = String(req.params.id || "").trim();
+    if (!jobId) {
+      return res.status(400).json({ success: false, error: "Missing print job id" });
+    }
+
+    let idempotency;
+    try {
+      idempotency = await beginPrintActionIdempotency({
+        req,
+        action: "print_job_fail_stop",
+        scope: `job:${jobId}`,
+        payload: parsed.data,
+      });
+    } catch (error) {
+      if (handleIdempotencyError(error, res)) return;
+      throw error;
+    }
+
+    if (replayIdempotentResponseIfAny(idempotency, res)) return;
+
+    const job = await getManufacturerPrintJob(jobId, user.userId);
+    if (!job) return res.status(404).json({ success: false, error: "Print job not found" });
+
+    const now = new Date();
+    if (isLockExpired(job.createdAt, now)) {
+      return res.status(410).json({
+        success: false,
+        error: "Print lock token expired. Create a new print job to continue secure direct printing.",
+      });
+    }
+
+    const tokenHash = hashLockToken(parsed.data.printLockToken);
+    if (tokenHash !== job.printLockTokenHash) {
+      return res.status(403).json({ success: false, error: "Invalid print lock token" });
+    }
+
+    const session = await getOrCreatePrintSession({
+      id: job.id,
+      batchId: job.batchId,
+      manufacturerId: job.manufacturerId,
+      quantity: job.quantity,
+      status: job.status,
+    });
+
+    const failed = await failStopPrintSession({
+      printSessionId: session.id,
+      printJobId: job.id,
+      batchId: job.batchId,
+      licenseeId: job.batch.licenseeId || null,
+      actorUserId: user.userId,
+      reason: parsed.data.reason,
+      printItemId: parsed.data.printItemId,
+      retries: parsed.data.retries,
+      metadata: parsed.data.agentMetadata,
+    });
+
+    const alertBody = `Direct-print fail-stop activated for ${job.batch.name}. Reason: ${parsed.data.reason}`;
+
+    await Promise.allSettled([
+      notifySystemPrintEvent({
+        licenseeId: job.batch.licenseeId,
+        orgId: user.orgId || null,
+        type: "system_print_job_failed",
+        title: "Direct-print fail-stop triggered",
+        body: alertBody,
+        data: {
+          printJobId: job.id,
+          printSessionId: session.id,
+          incidentId: failed.incident.id,
+          frozenCount: failed.frozenCount,
+          failedItemId: parsed.data.printItemId || null,
+          reason: parsed.data.reason,
+          retries: parsed.data.retries ?? 0,
+          targetRoute: "/incidents",
+        },
+        channels: [NotificationChannel.WEB, NotificationChannel.EMAIL],
+      }),
+      createRoleNotifications({
+        audience: NotificationAudience.SUPER_ADMIN,
+        type: "print_fail_stop_incident",
+        title: "Print fail-stop incident created",
+        body: alertBody,
+        licenseeId: job.batch.licenseeId || null,
+        orgId: user.orgId || null,
+        incidentId: failed.incident.id,
+        data: {
+          incidentId: failed.incident.id,
+          printJobId: job.id,
+          printSessionId: session.id,
+          frozenCount: failed.frozenCount,
+          reason: parsed.data.reason,
+          targetRoute: "/incidents",
+        },
+        channels: [NotificationChannel.WEB, NotificationChannel.EMAIL],
+      }),
+    ]);
+
+    const responsePayload = {
+      success: true,
+      data: {
+        printJobId: job.id,
+        printSessionId: session.id,
+        incidentId: failed.incident.id,
+        frozenCount: failed.frozenCount,
+        reason: parsed.data.reason,
+      },
+    };
+
+    await completeIdempotentAction({
+      keyHash: idempotency.keyHash,
+      statusCode: 202,
+      responsePayload,
+    });
+
+    return res.status(202).json(responsePayload);
+  } catch (e: any) {
+    console.error("reportDirectPrintFailure error:", e);
+    return res.status(400).json({ success: false, error: e?.message || "Bad request" });
+  }
+};
+
+export const confirmPrintJob = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = ensureManufacturerUser(req, res);
+    if (!user) return;
+
+    const parsed = confirmSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+    }
+
+    const jobId = String(req.params.id || "");
+    if (!jobId) return res.status(400).json({ success: false, error: "Missing print job id" });
+
+    const job = await getManufacturerPrintJob(jobId, user.userId);
+    if (!job) return res.status(404).json({ success: false, error: "Print job not found" });
+
+    const tokenHash = hashLockToken(parsed.data.printLockToken);
+    if (tokenHash !== job.printLockTokenHash) {
+      return res.status(403).json({ success: false, error: "Invalid print lock token" });
+    }
+
+    const session = await getOrCreatePrintSession({
+      id: job.id,
+      batchId: job.batchId,
+      manufacturerId: job.manufacturerId,
+      quantity: job.quantity,
+      status: job.status,
+    });
+
+    const remainingToPrint = await prisma.printItem.count({
+      where: {
+        printSessionId: session.id,
+        state: { in: OPEN_PRINT_STATES },
+      },
+    });
+
+    if (remainingToPrint > 0) {
+      return res.status(409).json({
+        success: false,
+        error: `Cannot confirm job while ${remainingToPrint} items are not print-confirmed. Use per-item confirm or fail-stop.`,
+      });
+    }
+
+    const now = new Date();
+    const finalize = await prisma.$transaction((tx) =>
+      finalizePrintSessionIfReady({
+        tx,
+        printSessionId: session.id,
+        printJobId: job.id,
+        batchId: job.batchId,
+        now,
+        actorUserId: user.userId,
+      })
+    );
+
+    await createAuditLog({
+      userId: user.userId,
+      licenseeId: job.batch.licenseeId,
+      action: "PRINT_CONFIRMED",
+      entityType: "PrintJob",
+      entityId: job.id,
+      details: {
+        printSessionId: session.id,
+        remainingToPrint: finalize.remainingToPrint,
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || undefined,
+    });
 
     return res.json({
       success: true,
       data: {
         printJobId: job.id,
-        confirmedAt: result.updatedJob.confirmedAt,
-        printedCodes: result.updatedCodes.count,
+        printSessionId: session.id,
+        confirmedAt: finalize.confirmedAt,
+        remainingToPrint: finalize.remainingToPrint,
+        jobConfirmed: finalize.jobConfirmed,
       },
     });
   } catch (e: any) {

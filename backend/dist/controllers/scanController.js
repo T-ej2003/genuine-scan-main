@@ -14,6 +14,7 @@ const locationService_1 = require("../services/locationService");
 const scanInsightService_1 = require("../services/scanInsightService");
 const duplicateRiskService_1 = require("../services/duplicateRiskService");
 const requestFingerprint_1 = require("../utils/requestFingerprint");
+const governanceService_1 = require("../services/governanceService");
 const deviceFingerprint = (req) => (0, requestFingerprint_1.deriveRequestDeviceFingerprint)(req);
 const isQrReadyForCustomerUse = (status) => {
     return status === client_1.QRStatus.PRINTED || status === client_1.QRStatus.REDEEMED || status === client_1.QRStatus.SCANNED;
@@ -268,7 +269,10 @@ const scanToken = async (req, res) => {
         });
         const finalStatus = policy.autoBlockedQr || policy.autoBlockedBatch ? client_1.QRStatus.BLOCKED : updated.status;
         const effectiveOutcome = finalStatus === client_1.QRStatus.BLOCKED ? "BLOCKED" : decision.outcome;
-        const scanInsight = await (0, scanInsightService_1.getScanInsight)(updated.id, fp || null);
+        const scanInsight = await (0, scanInsightService_1.getScanInsight)(updated.id, fp || null, {
+            currentIpAddress: req.ip || null,
+            licenseeId: updated.licenseeId,
+        });
         const customerUserId = req.customer?.userId || null;
         const containment = {
             qrUnderInvestigation: updated.underInvestigationAt
@@ -324,6 +328,11 @@ const scanToken = async (req, res) => {
             isReady,
             isBlocked,
         });
+        const riskProfile = await (0, governanceService_1.resolveDuplicateRiskProfile)(updated.licenseeId || null);
+        const anomalyModelScore = (0, duplicateRiskService_1.deriveAnomalyModelScore)({
+            scanSignals: scanInsight.signals,
+            policy,
+        });
         const duplicateRisk = (0, duplicateRiskService_1.assessDuplicateRisk)({
             scanCount: totalScans,
             scanSignals: scanInsight.signals,
@@ -332,6 +341,9 @@ const scanToken = async (req, res) => {
             customerUserId,
             latestScanAt: scanInsight.latestScanAt,
             previousScanAt: scanInsight.previousScanAt,
+            anomalyModelScore: Math.round(anomalyModelScore * riskProfile.anomalyWeight),
+            tenantRiskLevel: riskProfile.tenantRiskLevel,
+            productRiskLevel: riskProfile.productRiskLevel,
         });
         let classification;
         let reasons;
@@ -409,6 +421,7 @@ const scanToken = async (req, res) => {
                 classification,
                 reasons,
                 riskScore,
+                riskThreshold: duplicateRisk.threshold,
                 riskSignals,
                 scanSummary: {
                     totalScans,

@@ -89,10 +89,17 @@ type TraceEventRow = {
 
 type PrinterConnectionStatus = {
   connected: boolean;
+  trusted: boolean;
   stale: boolean;
   requiredForPrinting: boolean;
+  trustStatus?: string;
+  trustReason?: string | null;
   lastHeartbeatAt: string | null;
   ageSeconds: number | null;
+  registrationId?: string | null;
+  agentId?: string | null;
+  deviceFingerprint?: string | null;
+  mtlsFingerprint?: string | null;
   printerName?: string | null;
   printerId?: string | null;
   deviceName?: string | null;
@@ -142,19 +149,26 @@ export default function Batches() {
   const [directTokenBatchSize, setDirectTokenBatchSize] = useState<string>("1");
   const [directRemainingToPrint, setDirectRemainingToPrint] = useState<number | null>(null);
   const [directPrintTokens, setDirectPrintTokens] = useState<
-    Array<{ qrId: string; code: string; renderToken: string; expiresAt: string }>
+    Array<{ printItemId: string; qrId: string; code: string; renderToken: string; expiresAt: string }>
   >([]);
   const [printerStatus, setPrinterStatus] = useState<PrinterConnectionStatus>({
     connected: false,
+    trusted: false,
     stale: true,
     requiredForPrinting: true,
+    trustStatus: "UNREGISTERED",
+    trustReason: "No trusted printer registration",
     lastHeartbeatAt: null,
     ageSeconds: null,
+    registrationId: null,
+    agentId: null,
+    deviceFingerprint: null,
+    mtlsFingerprint: null,
     printerName: null,
     printerId: null,
     deviceName: null,
     agentVersion: null,
-    error: "No printer heartbeat yet",
+    error: "No trusted printer heartbeat yet",
   });
   const [exportingBatchId, setExportingBatchId] = useState<string | null>(null);
 
@@ -204,10 +218,17 @@ export default function Batches() {
     if (!res.success || !res.data) {
       setPrinterStatus({
         connected: false,
+        trusted: false,
         stale: true,
         requiredForPrinting: true,
+        trustStatus: "UNREGISTERED",
+        trustReason: "No trusted printer registration",
         lastHeartbeatAt: null,
         ageSeconds: null,
+        registrationId: null,
+        agentId: null,
+        deviceFingerprint: null,
+        mtlsFingerprint: null,
         printerName: null,
         printerId: null,
         deviceName: null,
@@ -440,7 +461,7 @@ export default function Batches() {
 
     while (remainingToPrint > 0 && guard < 600) {
       guard += 1;
-      const nextBatchSize = Math.max(1, Math.min(25, remainingToPrint));
+      const nextBatchSize = Math.max(1, Math.min(250, remainingToPrint));
       const issueRes = await apiClient.requestDirectPrintTokens(jobId, lockToken, nextBatchSize);
       if (!issueRes.success) {
         return {
@@ -478,6 +499,12 @@ export default function Batches() {
           renderToken: item.renderToken,
         });
         if (!resolveRes.success) {
+          await apiClient.reportDirectPrintFailure(jobId, {
+            printLockToken: lockToken,
+            reason: resolveRes.error || `Failed to resolve render token for ${item.code}.`,
+            printItemId: item.printItemId,
+            retries: 0,
+          });
           return {
             success: false,
             printedCount,
@@ -487,13 +514,20 @@ export default function Batches() {
         }
 
         const resolvedData: any = resolveRes.data || {};
+        const printItemId = String(resolvedData.printItemId || item.printItemId || "").trim();
         const scanUrl = String(resolvedData.scanUrl || "").trim();
-        if (!scanUrl) {
+        if (!scanUrl || !printItemId) {
+          await apiClient.reportDirectPrintFailure(jobId, {
+            printLockToken: lockToken,
+            reason: `Resolved token missing print session metadata for ${item.code}.`,
+            printItemId: printItemId || item.printItemId,
+            retries: 0,
+          });
           return {
             success: false,
             printedCount,
             remainingToPrint,
-            error: `Resolved token missing scan URL for ${item.code}.`,
+            error: `Resolved token missing scan URL or print item id for ${item.code}.`,
           };
         }
 
@@ -506,6 +540,12 @@ export default function Batches() {
         });
 
         if (!localPrintRes.success) {
+          await apiClient.reportDirectPrintFailure(jobId, {
+            printLockToken: lockToken,
+            reason: localPrintRes.error || `Local print failed for ${item.code}.`,
+            printItemId,
+            retries: 0,
+          });
           return {
             success: false,
             printedCount,
@@ -514,10 +554,34 @@ export default function Batches() {
           };
         }
 
+        const confirmRes = await apiClient.confirmDirectPrintItem(jobId, {
+          printLockToken: lockToken,
+          printItemId,
+          agentMetadata: {
+            localPrintSuccess: true,
+            localAgentVersion: (localPrintRes as any)?.data?.agentVersion || null,
+          },
+        });
+        if (!confirmRes.success) {
+          await apiClient.reportDirectPrintFailure(jobId, {
+            printLockToken: lockToken,
+            reason: confirmRes.error || `Failed to confirm print item ${item.code}.`,
+            printItemId,
+            retries: 0,
+          });
+          return {
+            success: false,
+            printedCount,
+            remainingToPrint,
+            error: confirmRes.error || `Failed to confirm print item ${item.code}.`,
+          };
+        }
+
+        const confirmData: any = confirmRes.data || {};
         printedCount += 1;
-        if (typeof resolvedData.remainingToPrint === "number") {
-          remainingToPrint = resolvedData.remainingToPrint;
-          setDirectRemainingToPrint(resolvedData.remainingToPrint);
+        if (typeof confirmData.remainingToPrint === "number") {
+          remainingToPrint = confirmData.remainingToPrint;
+          setDirectRemainingToPrint(confirmData.remainingToPrint);
         }
       }
     }
@@ -550,22 +614,34 @@ export default function Batches() {
     }
 
     const livePrinterStatus = await apiClient.getPrinterConnectionStatus();
-    if (!livePrinterStatus.success || !livePrinterStatus.data || !(livePrinterStatus.data as any).connected) {
+    if (
+      !livePrinterStatus.success ||
+      !livePrinterStatus.data ||
+      !(livePrinterStatus.data as any).connected ||
+      !(livePrinterStatus.data as any).trusted
+    ) {
       setPrinterStatus({
         connected: false,
+        trusted: false,
         stale: true,
         requiredForPrinting: true,
+        trustStatus: "UNREGISTERED",
+        trustReason: "No trusted printer registration",
         lastHeartbeatAt: null,
         ageSeconds: null,
+        registrationId: null,
+        agentId: null,
+        deviceFingerprint: null,
+        mtlsFingerprint: null,
         printerName: null,
         printerId: null,
         deviceName: null,
         agentVersion: null,
-        error: livePrinterStatus.error || "Printer disconnected",
+        error: livePrinterStatus.error || "Printer disconnected or not trusted",
       });
       toast({
-        title: "Printer not connected",
-        description: "Connect your authenticated print agent and printer before creating a print job.",
+        title: "Printer not trusted",
+        description: "Connect your signed print agent with trusted mTLS identity before creating a print job.",
         variant: "destructive",
       });
       return;
@@ -638,7 +714,7 @@ export default function Batches() {
 
   const requestDirectPrintTokens = async () => {
     if (!printJobId || !printLockToken) return;
-    const count = Math.max(1, Math.min(100, Number.parseInt(directTokenBatchSize, 10) || 1));
+    const count = Math.max(1, Math.min(250, Number.parseInt(directTokenBatchSize, 10) || 1));
 
     setPrinting(true);
     try {
@@ -803,17 +879,17 @@ export default function Batches() {
                 variant="outline"
                 onClick={loadPrinterStatus}
                 className={
-                  printerStatus.connected
+                  printerStatus.connected && printerStatus.trusted
                     ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                     : "border-red-300 bg-red-50 text-red-700 hover:bg-red-100"
                 }
                 title={
-                  printerStatus.connected
+                  printerStatus.connected && printerStatus.trusted
                     ? `${printerStatus.printerName || "Printer connected"}`
-                    : printerStatus.error || "Printer disconnected"
+                    : printerStatus.error || printerStatus.trustReason || "Printer disconnected"
                 }
               >
-                {printerStatus.connected ? "Printer Connected" : "Printer Offline"}
+                {printerStatus.connected && printerStatus.trusted ? "Printer Trusted" : "Printer Untrusted"}
               </Button>
             )}
 
@@ -969,7 +1045,7 @@ export default function Batches() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  disabled={loading || (b.availableCodes ?? 0) <= 0 || !printerStatus.connected}
+                                  disabled={loading || (b.availableCodes ?? 0) <= 0 || !printerStatus.connected || !printerStatus.trusted}
                                   onClick={() => openPrintPack(b)}
                                 >
                                   <Download className="mr-2 h-4 w-4" />
@@ -1190,18 +1266,18 @@ export default function Batches() {
               <div className="space-y-4 mt-2">
                 <div
                   className={
-                    printerStatus.connected
+                    printerStatus.connected && printerStatus.trusted
                       ? "rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800"
                       : "rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800"
                   }
                 >
                   <div className="font-medium">
-                    {printerStatus.connected ? "Printer connected" : "Printer offline"}
+                    {printerStatus.connected && printerStatus.trusted ? "Printer trusted and connected" : "Printer untrusted or offline"}
                   </div>
                   <div className="text-xs">
-                    {printerStatus.connected
+                    {printerStatus.connected && printerStatus.trusted
                       ? `${printerStatus.printerName || "Authenticated print agent"} is ready. Create print job will auto-print labels.`
-                      : printerStatus.error || "Connect authenticated print agent and printer to continue."}
+                      : printerStatus.error || printerStatus.trustReason || "Connect authenticated print agent and printer to continue."}
                   </div>
                 </div>
 
@@ -1227,7 +1303,7 @@ export default function Batches() {
                 </div>
 
                 <div className="flex gap-2">
-                  <Button onClick={createPrintJob} disabled={printing || !printerStatus.connected}>
+                  <Button onClick={createPrintJob} disabled={printing || !printerStatus.connected || !printerStatus.trusted}>
                     {printing ? "Auto printing..." : "Create Print Job & Auto Print"}
                   </Button>
                   {printJobId && (
@@ -1263,7 +1339,7 @@ export default function Batches() {
                         <Input
                           type="number"
                           min={1}
-                          max={100}
+                          max={250}
                           value={directTokenBatchSize}
                           onChange={(e) => setDirectTokenBatchSize(e.target.value)}
                         />

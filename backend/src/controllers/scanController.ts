@@ -8,8 +8,9 @@ import { evaluateScanAndEnforcePolicy } from "../services/policyEngineService";
 import { reverseGeocode } from "../services/locationService";
 import { getScanInsight } from "../services/scanInsightService";
 import { CustomerVerifyRequest } from "../middleware/customerVerifyAuth";
-import { assessDuplicateRisk } from "../services/duplicateRiskService";
+import { assessDuplicateRisk, deriveAnomalyModelScore } from "../services/duplicateRiskService";
 import { deriveRequestDeviceFingerprint } from "../utils/requestFingerprint";
+import { resolveDuplicateRiskProfile } from "../services/governanceService";
 
 const deviceFingerprint = (req: Request) => deriveRequestDeviceFingerprint(req);
 
@@ -293,7 +294,10 @@ export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
     const finalStatus =
       policy.autoBlockedQr || policy.autoBlockedBatch ? QRStatus.BLOCKED : updated.status;
     const effectiveOutcome = finalStatus === QRStatus.BLOCKED ? "BLOCKED" : decision.outcome;
-    const scanInsight = await getScanInsight(updated.id, fp || null);
+    const scanInsight = await getScanInsight(updated.id, fp || null, {
+      currentIpAddress: req.ip || null,
+      licenseeId: updated.licenseeId,
+    });
     const customerUserId = req.customer?.userId || null;
 
     const containment = {
@@ -361,6 +365,12 @@ export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
       isBlocked,
     });
 
+    const riskProfile = await resolveDuplicateRiskProfile(updated.licenseeId || null);
+    const anomalyModelScore = deriveAnomalyModelScore({
+      scanSignals: scanInsight.signals,
+      policy,
+    });
+
     const duplicateRisk = assessDuplicateRisk({
       scanCount: totalScans,
       scanSignals: scanInsight.signals,
@@ -369,6 +379,9 @@ export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
       customerUserId,
       latestScanAt: scanInsight.latestScanAt,
       previousScanAt: scanInsight.previousScanAt,
+      anomalyModelScore: Math.round(anomalyModelScore * riskProfile.anomalyWeight),
+      tenantRiskLevel: riskProfile.tenantRiskLevel,
+      productRiskLevel: riskProfile.productRiskLevel,
     });
 
     let classification: "FIRST_SCAN" | "LEGIT_REPEAT" | "SUSPICIOUS_DUPLICATE" | "BLOCKED_BY_SECURITY" | "NOT_READY_FOR_CUSTOMER_USE";
@@ -447,6 +460,7 @@ export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
         classification,
         reasons,
         riskScore,
+        riskThreshold: duplicateRisk.threshold,
         riskSignals,
         scanSummary: {
           totalScans,

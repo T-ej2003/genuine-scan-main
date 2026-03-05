@@ -11,8 +11,16 @@ type ScanInsight = {
         distinctCountryCount24h: number;
         seenOnCurrentDeviceBefore: boolean;
         previousScanSameDevice: boolean | null;
+        ipVelocityCount10m: number;
+        ipReputationScore: number;
+        deviceGraphOverlap24h: number;
+        crossCodeCorrelation24h: number;
     };
 };
-export declare const getScanInsight: (qrCodeId: string, currentDevice?: string | null) => Promise<ScanInsight>;
+type ScanInsightOptions = {
+    currentIpAddress?: string | null;
+    licenseeId?: string | null;
+};
+export declare const getScanInsight: (qrCodeId: string, currentDevice?: string | null, options?: ScanInsightOptions) => Promise<ScanInsight>;
 export {};
 //# sourceMappingURL=scanInsightService.d.ts.map

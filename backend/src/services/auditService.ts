@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { createTraceEventFromAuditLog } from "./traceEventService";
 import { hashIp, normalizeUserAgent } from "../utils/security";
 import { queueSecurityEvent } from "./siemOutboxService";
+import { appendForensicChainFromAuditLog } from "./forensicChainService";
 
 export interface AuditLogInput {
   userId?: string;
@@ -89,6 +90,22 @@ export const createAuditLog = async (data: AuditLogInput) => {
   } catch (e) {
     // audit log creation should not fail if trace projection fails
     console.error("createTraceEventFromAuditLog failed:", e);
+  }
+  try {
+    await appendForensicChainFromAuditLog({
+      id: log.id,
+      action: log.action,
+      entityType: log.entityType,
+      entityId: log.entityId,
+      userId: log.userId,
+      orgId: log.orgId,
+      licenseeId: log.licenseeId,
+      details: log.details,
+      createdAt: log.createdAt,
+    });
+  } catch (e) {
+    // forensic projection is best-effort and must not fail request path
+    console.error("appendForensicChainFromAuditLog failed:", e);
   }
   emitAuditLog(log);
   await queueSecurityEvent("AUDIT_LOG", {

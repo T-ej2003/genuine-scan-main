@@ -83,6 +83,24 @@ const run = () => {
   });
   assert(ownershipConflict.classification === "SUSPICIOUS_DUPLICATE", "Ownership conflict should be suspicious");
 
+  const adaptiveHighRisk = assessDuplicateRisk({
+    scanCount: 3,
+    scanSignals: {
+      distinctDeviceCount24h: 2,
+      recentScanCount10m: 2,
+      distinctCountryCount24h: 1,
+      ipVelocityCount10m: 6,
+      ipReputationScore: 72,
+      deviceGraphOverlap24h: 3,
+      crossCodeCorrelation24h: 5,
+    },
+    tenantRiskLevel: "HIGH",
+    productRiskLevel: "CRITICAL",
+    anomalyModelScore: 68,
+  });
+  assert(adaptiveHighRisk.classification === "SUSPICIOUS_DUPLICATE", "High-risk adaptive profile should tighten threshold");
+  assert(adaptiveHighRisk.threshold <= 55, "High-risk adaptive threshold should be lower than default");
+
   console.log("duplicate risk engine tests passed");
 };
 

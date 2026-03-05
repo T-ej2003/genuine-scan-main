@@ -47,6 +47,48 @@ enum PrintJobStatus {
   CANCELLED
 }
 
+enum PrintSessionStatus {
+  ACTIVE
+  FAILED
+  COMPLETED
+  CANCELLED
+}
+
+enum PrintItemState {
+  RESERVED
+  ISSUED
+  AGENT_ACKED
+  PRINT_CONFIRMED
+  CLOSED
+  FROZEN
+  FAILED
+}
+
+enum PrintItemEventType {
+  RESERVED
+  ISSUED
+  AGENT_ACKED
+  PRINT_CONFIRMED
+  CLOSED
+  FROZEN
+  FAILED
+  INCIDENT_RAISED
+}
+
+enum PrinterTrustStatus {
+  PENDING
+  TRUSTED
+  REVOKED
+  FAILED
+}
+
+enum ForensicEventType {
+  PRINT_ISSUANCE
+  PRINT_CONFIRM
+  SCAN_VERIFY
+  SECURITY_BLOCK
+}
+
 enum TraceEventType {
   COMMISSIONED
   ASSIGNED
@@ -260,6 +302,9 @@ model User {
   batchPrintDownloads Batch[] @relation("BatchPrintPackDownloadedBy")
   printedQRCodes QRCode[] @relation("QRCodePrintedBy")
   printJobs PrintJob[] @relation("ManufacturerPrintJobs")
+  printSessions PrintSession[] @relation("ManufacturerPrintSessions")
+  printerRegistrations PrinterRegistration[] @relation("PrinterRegistrations")
+  printItemEvents PrintItemEvent[] @relation("PrintItemEventActor")
   traceEventsAsActor TraceEvent[] @relation("TraceEventUser")
   traceEventsAsManufacturer TraceEvent[] @relation("TraceEventManufacturer")
   policyAlertsAsManufacturer PolicyAlert[] @relation("PolicyAlertManufacturer")
@@ -310,6 +355,7 @@ model Organization {
   auditLogs AuditLog[]
   policyRules PolicyRule[]
   notifications Notification[]
+  printerRegistrations PrinterRegistration[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -355,6 +401,8 @@ model Licensee {
   evidenceRetentionJobs EvidenceRetentionJob[]
   compliancePackJobs CompliancePackJob[]
   routeTransitionMetrics RouteTransitionMetric[]
+  printerRegistrations PrinterRegistration[]
+  forensicEventChainEntries ForensicEventChain[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -402,6 +450,7 @@ model Batch {
   qrCodes        QRCode[]
   batchPrintPackTokens BatchPrintPackToken[]
   printJobs          PrintJob[]
+  printSessions      PrintSession[]
   scanLogs            QrScanLog[]
   traceEvents         TraceEvent[]
   policyAlerts        PolicyAlert[]
@@ -435,6 +484,7 @@ model PrintJob {
 
   qrCodes QRCode[]
   renderTokens PrintRenderToken[]
+  printSession PrintSession?
 
   @@index([batchId])
   @@index([manufacturerId])
@@ -475,6 +525,7 @@ model QRCode {
   printJobId String?
   printJob   PrintJob? @relation(fields: [printJobId], references: [id])
   renderTokens PrintRenderToken[]
+  printItem PrintItem?
   traceEvents TraceEvent[]
   policyAlerts PolicyAlert[]
   incidents Incident[]
@@ -509,6 +560,159 @@ model PrintRenderToken {
   @@index([qrCodeId, createdAt])
   @@index([expiresAt])
   @@index([usedAt])
+}
+
+model PrintSession {
+  id String @id @default(uuid())
+
+  printJobId String @unique
+  printJob PrintJob @relation(fields: [printJobId], references: [id], onDelete: Cascade)
+
+  batchId String
+  batch Batch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  manufacturerId String
+  manufacturer User @relation("ManufacturerPrintSessions", fields: [manufacturerId], references: [id], onDelete: Cascade)
+
+  printerRegistrationId String?
+  printerRegistration PrinterRegistration? @relation(fields: [printerRegistrationId], references: [id], onDelete: SetNull)
+
+  status PrintSessionStatus @default(ACTIVE)
+  totalItems Int
+  issuedItems Int @default(0)
+  confirmedItems Int @default(0)
+  frozenItems Int @default(0)
+  failedReason String?
+  startedAt DateTime @default(now())
+  completedAt DateTime?
+
+  items PrintItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([manufacturerId, status])
+  @@index([batchId, status])
+  @@index([printerRegistrationId])
+}
+
+model PrintItem {
+  id String @id @default(uuid())
+
+  printSessionId String
+  printSession PrintSession @relation(fields: [printSessionId], references: [id], onDelete: Cascade)
+
+  qrCodeId String @unique
+  qrCode QRCode @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+
+  code String
+  state PrintItemState @default(RESERVED)
+  issueSequence Int?
+  attemptCount Int @default(0)
+  currentRenderTokenHash String?
+
+  issuedAt DateTime?
+  agentAckedAt DateTime?
+  printConfirmedAt DateTime?
+  closedAt DateTime?
+  frozenAt DateTime?
+  failedAt DateTime?
+  failureReason String?
+  deadLetterReason String?
+
+  events PrintItemEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([printSessionId, state, issueSequence])
+  @@index([state, updatedAt])
+  @@index([currentRenderTokenHash])
+}
+
+model PrintItemEvent {
+  id String @id @default(uuid())
+
+  printItemId String
+  printItem PrintItem @relation(fields: [printItemId], references: [id], onDelete: Cascade)
+
+  eventType PrintItemEventType
+  previousState PrintItemState?
+  nextState PrintItemState?
+  details Json?
+
+  actorUserId String?
+  actorUser User? @relation("PrintItemEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([printItemId, createdAt])
+  @@index([eventType, createdAt])
+  @@index([actorUserId, createdAt])
+}
+
+model PrinterRegistration {
+  id String @id @default(uuid())
+
+  userId String
+  user User @relation("PrinterRegistrations", fields: [userId], references: [id], onDelete: Cascade)
+
+  orgId String?
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+
+  licenseeId String?
+  licensee Licensee? @relation(fields: [licenseeId], references: [id], onDelete: SetNull)
+
+  deviceFingerprint String
+  agentId String
+  publicKeyPem String
+  certFingerprint String?
+
+  trustStatus PrinterTrustStatus @default(PENDING)
+  trustReason String?
+  approvedAt DateTime?
+  revokedAt DateTime?
+  lastSeenAt DateTime?
+
+  attestations PrinterAttestation[]
+  printSessions PrintSession[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, deviceFingerprint])
+  @@index([agentId])
+  @@index([trustStatus, lastSeenAt])
+  @@index([licenseeId, trustStatus])
+  @@index([orgId, trustStatus])
+}
+
+model PrinterAttestation {
+  id String @id @default(uuid())
+
+  printerRegistrationId String
+  printerRegistration PrinterRegistration @relation(fields: [printerRegistrationId], references: [id], onDelete: Cascade)
+
+  signedPayloadHash String
+  heartbeatNonce String
+  attestedAt DateTime
+  expiresAt DateTime
+
+  sourceIpHash String?
+  userAgentHash String?
+  mtlsFingerprint String?
+
+  signatureValid Boolean @default(false)
+  trustValid Boolean @default(false)
+  rejectionReason String?
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@unique([printerRegistrationId, heartbeatNonce])
+  @@index([printerRegistrationId, createdAt])
+  @@index([expiresAt])
+  @@index([trustValid, createdAt])
 }
 
 model Ownership {
@@ -1353,6 +1557,46 @@ model IncidentEvidenceFingerprint {
 
   @@index([incidentId])
   @@index([sha256])
+}
+
+model ForensicEventChain {
+  id String @id @default(uuid())
+
+  eventType ForensicEventType
+  chainScope String @default("GLOBAL")
+  previousHash String
+  payloadHash String
+  eventHash String @unique
+  payload Json
+
+  auditLogId String?
+  licenseeId String?
+  licensee Licensee? @relation(fields: [licenseeId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([chainScope, createdAt])
+  @@index([eventType, createdAt])
+  @@index([licenseeId, createdAt])
+}
+
+model ActionIdempotencyKey {
+  id String @id @default(uuid())
+
+  keyHash String @unique
+  action String
+  scope String?
+  requestHash String?
+
+  statusCode Int?
+  responsePayload Json?
+
+  createdAt DateTime @default(now())
+  completedAt DateTime?
+  expiresAt DateTime
+
+  @@index([action, scope, createdAt])
+  @@index([expiresAt])
 }
 
 model RouteTransitionMetric {

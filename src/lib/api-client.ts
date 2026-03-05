@@ -101,6 +101,15 @@ class ApiClient {
     // Double-submit CSRF: server sets `aq_csrf` cookie; client mirrors it in header.
     const isStateChanging = !["GET", "HEAD", "OPTIONS"].includes(method);
     if (isStateChanging) {
+      const hasIdempotencyHeader = Object.keys(headers).some((key) => key.toLowerCase() === "x-idempotency-key");
+      if (!hasIdempotencyHeader) {
+        const generatedKey =
+          typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        headers["x-idempotency-key"] = generatedKey;
+      }
+
       const csrf = this.readCookie("aq_csrf");
       if (csrf && !headers["x-csrf-token"] && !headers["X-CSRF-Token"]) {
         headers["x-csrf-token"] = csrf;
@@ -505,10 +514,12 @@ class ApiClient {
   async requestDirectPrintTokens(jobId: string, printLockToken: string, count = 1) {
     return this.request<{
       printJobId: string;
+      printSessionId?: string;
       lockExpiresAt?: string;
       directPrintTokenExpiresAt?: string;
       remainingToPrint: number;
       items: Array<{
+        printItemId: string;
         qrId: string;
         code: string;
         renderToken: string;
@@ -523,6 +534,8 @@ class ApiClient {
   async resolveDirectPrintToken(jobId: string, payload: { printLockToken: string; renderToken: string }) {
     return this.request<{
       printJobId: string;
+      printSessionId?: string;
+      printItemId: string;
       qrId: string;
       code: string;
       renderResolvedAt: string;
@@ -532,6 +545,52 @@ class ApiClient {
       scanToken: string;
       scanUrl: string;
     }>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/direct-print/resolve`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async confirmDirectPrintItem(
+    jobId: string,
+    payload: {
+      printLockToken: string;
+      printItemId: string;
+      agentMetadata?: any;
+    }
+  ) {
+    return this.request<{
+      printJobId: string;
+      printSessionId?: string;
+      printItemId: string;
+      qrId: string;
+      code: string;
+      printConfirmedAt: string;
+      remainingToPrint: number;
+      jobConfirmed: boolean;
+      confirmedAt: string | null;
+    }>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/direct-print/confirm-item`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async reportDirectPrintFailure(
+    jobId: string,
+    payload: {
+      printLockToken: string;
+      reason: string;
+      printItemId?: string;
+      retries?: number;
+      agentMetadata?: any;
+    }
+  ) {
+    return this.request<{
+      printJobId: string;
+      printSessionId?: string;
+      incidentId?: string;
+      frozenCount?: number;
+      reason: string;
+    }>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/direct-print/fail`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -611,13 +670,27 @@ class ApiClient {
     deviceName?: string;
     agentVersion?: string;
     error?: string;
+    agentId?: string;
+    deviceFingerprint?: string;
+    publicKeyPem?: string;
+    clientCertFingerprint?: string;
+    heartbeatNonce?: string;
+    heartbeatIssuedAt?: string;
+    heartbeatSignature?: string;
   }) {
     return this.request<{
       connected: boolean;
+      trusted: boolean;
       stale: boolean;
       requiredForPrinting: boolean;
+      trustStatus: string;
+      trustReason?: string | null;
       lastHeartbeatAt: string | null;
       ageSeconds: number | null;
+      registrationId?: string | null;
+      agentId?: string | null;
+      deviceFingerprint?: string | null;
+      mtlsFingerprint?: string | null;
       printerName?: string | null;
       printerId?: string | null;
       deviceName?: string | null;
@@ -632,10 +705,17 @@ class ApiClient {
   async getPrinterConnectionStatus() {
     return this.request<{
       connected: boolean;
+      trusted: boolean;
       stale: boolean;
       requiredForPrinting: boolean;
+      trustStatus: string;
+      trustReason?: string | null;
       lastHeartbeatAt: string | null;
       ageSeconds: number | null;
+      registrationId?: string | null;
+      agentId?: string | null;
+      deviceFingerprint?: string | null;
+      mtlsFingerprint?: string | null;
       printerName?: string | null;
       printerId?: string | null;
       deviceName?: string | null;
@@ -671,6 +751,13 @@ class ApiClient {
           deviceName: String((data as any).deviceName || "").trim() || null,
           agentVersion: String((data as any).agentVersion || "").trim() || null,
           error: String((data as any).error || "").trim() || null,
+          agentId: String((data as any).agentId || "").trim() || null,
+          deviceFingerprint: String((data as any).deviceFingerprint || "").trim() || null,
+          publicKeyPem: String((data as any).publicKeyPem || "").trim() || null,
+          clientCertFingerprint: String((data as any).clientCertFingerprint || "").trim() || null,
+          heartbeatNonce: String((data as any).heartbeatNonce || "").trim() || null,
+          heartbeatIssuedAt: String((data as any).heartbeatIssuedAt || "").trim() || null,
+          heartbeatSignature: String((data as any).heartbeatSignature || "").trim() || null,
         },
       };
     } catch (error: any) {
