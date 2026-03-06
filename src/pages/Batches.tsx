@@ -8,6 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useOperationProgress } from "@/hooks/useOperationProgress";
 import apiClient from "@/lib/api-client";
 import { friendlyReferenceLabel, shortRawReference } from "@/lib/friendly-reference";
+import { getPrinterDiagnosticSummary, type LocalPrinterAgentSnapshot } from "@/lib/printer-diagnostics";
 import { buildSupportDiagnosticsPayload, captureSupportScreenshot } from "@/lib/support-diagnostics";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -47,6 +48,7 @@ import { onMutationEvent } from "@/lib/mutation-events";
 import { format } from "date-fns";
 import { Search, Trash2, RefreshCw, Download, UserCog, Activity, PencilLine } from "lucide-react";
 import QRCode from "qrcode";
+import { useNavigate } from "react-router-dom";
 
 import { saveAs } from "file-saver";
 
@@ -157,6 +159,7 @@ export default function Batches() {
   const { toast } = useToast();
   const { user } = useAuth();
   const progress = useOperationProgress();
+  const navigate = useNavigate();
 
   const role = user?.role;
 
@@ -219,6 +222,12 @@ export default function Batches() {
   const [printProgressError, setPrintProgressError] = useState<string | null>(null);
   const printerFailureReportRef = useRef<{ signature: string; at: number }>({ signature: "", at: 0 });
   const printerFailureInFlightRef = useRef(false);
+  const [localPrinterAgent, setLocalPrinterAgent] = useState<LocalPrinterAgentSnapshot>({
+    reachable: false,
+    connected: false,
+    error: "Local print agent has not been checked yet.",
+    checkedAt: null,
+  });
   const [printerStatus, setPrinterStatus] = useState<PrinterConnectionStatus>({
     connected: false,
     trusted: false,
@@ -259,6 +268,16 @@ export default function Batches() {
   const printerHasInventory =
     detectedPrinters.length > 0 || Boolean(printerStatus.selectedPrinterId || printerStatus.printerId);
   const printerUnavailable = !printerReady && !printerHasInventory;
+  const printerDiagnostics = useMemo(
+    () =>
+      getPrinterDiagnosticSummary({
+        localAgent: localPrinterAgent,
+        remoteStatus: printerStatus,
+        printers: detectedPrinters,
+        selectedPrinterId,
+      }),
+    [detectedPrinters, localPrinterAgent, printerStatus, selectedPrinterId]
+  );
 
   const normalizePrinterRows = (rows: unknown): LocalPrinterRow[] => {
     if (!Array.isArray(rows)) return [];
@@ -431,6 +450,12 @@ export default function Batches() {
       apiClient.getLocalPrintAgentStatus(),
     ]);
     const localPrinters = normalizePrinterRows((local as any)?.data?.printers || []);
+    setLocalPrinterAgent({
+      reachable: Boolean(local.success),
+      connected: Boolean((local as any)?.data?.connected),
+      error: local.success ? String((local as any)?.data?.error || "").trim() || null : String(local.error || "Local print agent is unavailable"),
+      checkedAt: new Date().toISOString(),
+    });
 
     if (!remote.success || !remote.data) {
       setPrinterStatus({
@@ -1371,23 +1396,17 @@ export default function Batches() {
                 variant="outline"
                 onClick={loadPrinterStatus}
                 className={
-                  printerStatus.trusted
+                  printerDiagnostics.tone === "success"
                     ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                    : printerStatus.compatibilityMode
+                    : printerDiagnostics.tone === "warning"
                       ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
-                      : printerUnavailable
+                      : printerDiagnostics.tone === "neutral"
                         ? "border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200"
                         : "border-red-300 bg-red-50 text-red-700 hover:bg-red-100"
                 }
-                title={
-                  printerReady
-                    ? `${printerStatus.selectedPrinterName || printerStatus.printerName || "Printer connected"}`
-                    : printerUnavailable
-                      ? "No local print agent or printer is currently detected."
-                      : printerStatus.error || printerStatus.trustReason || "Printer disconnected"
-                }
+                title={printerDiagnostics.summary}
               >
-                {printerStatus.trusted ? "Printer Trusted" : printerStatus.compatibilityMode ? "Printer Compatibility" : printerUnavailable ? "Printer Unavailable" : "Printer Attention"}
+                {`Printer ${printerDiagnostics.badgeLabel}`}
               </Button>
             )}
 
@@ -1767,31 +1786,22 @@ export default function Batches() {
               <div className="space-y-4 mt-2">
                 <div
                   className={
-                    printerStatus.trusted
+                    printerDiagnostics.tone === "success"
                       ? "rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800"
-                      : printerStatus.compatibilityMode
+                      : printerDiagnostics.tone === "warning"
                         ? "rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
-                      : printerUnavailable
+                      : printerDiagnostics.tone === "neutral"
                         ? "rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"
                         : "rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800"
                   }
                 >
-                  <div className="font-medium">
-                    {printerStatus.trusted
-                      ? "Trusted printer connected"
-                      : printerStatus.compatibilityMode
-                        ? "Printer connected in compatibility mode"
-                        : printerUnavailable
-                          ? "No printer connected yet"
-                          : "Printer trust or connection needs attention"}
-                  </div>
+                  <div className="font-medium">{printerDiagnostics.title}</div>
                   <div className="text-xs">
                     {printerReady
                       ? `${printerStatus.selectedPrinterName || printerStatus.printerName || "Authenticated print agent"} is ready. Create print job will auto-print labels.`
-                      : printerUnavailable
-                        ? "Open the local print agent, connect a desktop or label printer, then refresh this dialog."
-                        : printerStatus.error || printerStatus.trustReason || "Connect authenticated print agent and printer to continue."}
+                      : printerDiagnostics.summary}
                   </div>
+                  {!printerReady && <div className="mt-2 text-[11px]">{printerDiagnostics.detail}</div>}
                 </div>
 
                 <div className="rounded-md border p-3 text-sm">
@@ -1895,6 +1905,9 @@ export default function Batches() {
                     </Button>
                     <Button variant="outline" size="sm" disabled={switchingPrinter || !selectedPrinterId} onClick={applyCalibration}>
                       {switchingPrinter ? "Applying..." : "Apply calibration"}
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => navigate("/printer-diagnostics")}>
+                      Open diagnostics
                     </Button>
                   </div>
                   <div className="text-[11px] text-muted-foreground">
