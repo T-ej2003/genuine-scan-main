@@ -316,6 +316,17 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
     const localError = String(params.localResult.error || "").trim();
     const remoteError = String(params.remoteStatus?.error || "").trim();
+    const hasKnownPrinter =
+      params.printers.length > 0 ||
+      Boolean(params.remoteStatus?.selectedPrinterId || params.remoteStatus?.printerId);
+    const errorSummary = `${localError} ${remoteError} ${String(params.remoteStatus?.trustReason || "")}`.toLowerCase();
+    const agentUnavailable =
+      errorSummary.includes("local print agent unavailable") ||
+      errorSummary.includes("local print agent is unavailable") ||
+      errorSummary.includes("heartbeat failed");
+    if (!hasKnownPrinter && agentUnavailable) return;
+    if (!hasKnownPrinter) return;
+
     const signature = [
       localError || "no-local-error",
       remoteError || "no-remote-error",
@@ -867,19 +878,28 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   };
 
   const printerReady = printerStatus.connected && printerStatus.eligibleForPrinting;
+  const printerHasInventory =
+    detectedPrinters.length > 0 || Boolean(printerStatus.selectedPrinterId || printerStatus.printerId);
+  const printerUnavailable = !printerReady && !printerHasInventory;
   const printerModeLabel = printerStatus.trusted
     ? "Trusted"
     : printerStatus.compatibilityMode
       ? "Compatibility"
-      : "Untrusted";
+      : printerUnavailable
+        ? "Unavailable"
+        : "Attention";
   const printerToneClass = printerStatus.trusted
     ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
     : printerStatus.compatibilityMode
       ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
-      : "border-red-300 bg-red-50 text-red-700 hover:bg-red-100";
+      : printerUnavailable
+        ? "border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200"
+        : "border-red-300 bg-red-50 text-red-700 hover:bg-red-100";
   const printerTitle = printerReady
     ? `${printerStatus.selectedPrinterName || printerStatus.printerName || "Printer connected"}${printerStatus.lastHeartbeatAt ? ` · heartbeat ${printerStatus.lastHeartbeatAt}` : ""}`
-    : printerStatus.error || printerStatus.trustReason || "Printer disconnected";
+    : printerUnavailable
+      ? "No local print agent or printer is currently detected."
+      : printerStatus.error || printerStatus.trustReason || "Printer disconnected";
   const selectedPrinter =
     detectedPrinters.find((row) => row.printerId === selectedLocalPrinterId) ||
     detectedPrinters.find((row) => row.printerId === printerStatus.selectedPrinterId) ||
@@ -1281,15 +1301,25 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                       ? "border-emerald-200 bg-emerald-50"
                       : printerStatus.compatibilityMode
                         ? "border-amber-200 bg-amber-50"
-                        : "border-red-200 bg-red-50"
+                        : printerUnavailable
+                          ? "border-slate-200 bg-slate-50"
+                          : "border-red-200 bg-red-50"
                   )}
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-semibold">
                       {printerStatus.selectedPrinterName || printerStatus.printerName || "Printer status unavailable"}
                     </span>
-                    <Badge variant={printerStatus.trusted ? "default" : printerStatus.compatibilityMode ? "secondary" : "destructive"}>
-                      {printerStatus.trusted ? "Trusted" : printerStatus.compatibilityMode ? "Compatibility" : "Blocked"}
+                    <Badge
+                      variant={
+                        printerStatus.trusted
+                          ? "default"
+                          : printerStatus.compatibilityMode || printerUnavailable
+                            ? "secondary"
+                            : "destructive"
+                      }
+                    >
+                      {printerStatus.trusted ? "Trusted" : printerStatus.compatibilityMode ? "Compatibility" : printerUnavailable ? "Unavailable" : "Blocked"}
                     </Badge>
                     {selectedPrinter?.online === false && <Badge variant="destructive">Offline</Badge>}
                   </div>
@@ -1300,8 +1330,10 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                     <div>Connection class: {printerStatus.connectionClass || "BLOCKED"}</div>
                   </div>
                   {!printerReady && (
-                    <div className="mt-2 text-xs text-red-700">
-                      {printerStatus.error || printerStatus.compatibilityReason || printerStatus.trustReason || "Printer not ready"}
+                    <div className={cn("mt-2 text-xs", printerUnavailable ? "text-slate-600" : "text-red-700")}>
+                      {printerUnavailable
+                        ? "No printer is currently paired on this device. Open the local print agent, connect a printer, then refresh."
+                        : printerStatus.error || printerStatus.compatibilityReason || printerStatus.trustReason || "Printer not ready"}
                     </div>
                   )}
                 </div>

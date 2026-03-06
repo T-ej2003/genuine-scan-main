@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { formatDistanceToNowStrict } from "date-fns";
-import { Bug, Loader2, MessageSquareText, RefreshCw, ShieldCheck, TimerReset } from "lucide-react";
+import { Bug, Loader2, MessageSquareText, RefreshCw, Send, ShieldCheck, TimerReset } from "lucide-react";
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
@@ -48,12 +48,16 @@ type SupportIssueReport = {
   title: string;
   description?: string | null;
   status: string;
+  responseMessage?: string | null;
+  respondedAt?: string | null;
+  respondedByUserId?: string | null;
   sourcePath?: string | null;
   pageUrl?: string | null;
   autoDetected?: boolean;
   screenshotPath?: string | null;
   createdAt: string;
   reporterUser?: { id: string; name?: string | null; email?: string | null; role?: string | null } | null;
+  respondedByUser?: { id: string; name?: string | null; email?: string | null; role?: string | null } | null;
   licensee?: { id: string; name: string; prefix: string } | null;
 };
 
@@ -92,6 +96,8 @@ export default function SupportCenter() {
   const [users, setUsers] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [newMessage, setNewMessage] = useState("");
+  const [issueReplyDrafts, setIssueReplyDrafts] = useState<Record<string, string>>({});
+  const [respondingReportId, setRespondingReportId] = useState<string | null>(null);
 
   const [filters, setFilters] = useState({
     status: "all",
@@ -105,7 +111,7 @@ export default function SupportCenter() {
     isInternal: true,
   });
 
-  const canEdit = user?.role === "super_admin";
+  const canEdit = user?.role === "super_admin" || user?.role === "platform_super_admin";
 
   const loadTickets = async () => {
     setLoading(true);
@@ -236,6 +242,44 @@ export default function SupportCenter() {
     await loadDetail(detail.id);
   };
 
+  const respondToIssueReport = async (report: SupportIssueReport) => {
+    const message = String(issueReplyDrafts[report.id] || "").trim();
+    if (!message) {
+      toast({
+        title: "Response required",
+        description: "Enter the reply that should be sent to the reporting user.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setRespondingReportId(report.id);
+    try {
+      const response = await apiClient.respondToSupportIssueReport(report.id, {
+        message,
+        status: "RESPONDED",
+      });
+
+      if (!response.success) {
+        toast({
+          title: "Response failed",
+          description: response.error || "Could not send support response.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      toast({
+        title: "Reporter notified",
+        description: "The response was sent through both in-app notification and email.",
+      });
+      setIssueReplyDrafts((prev) => ({ ...prev, [report.id]: "" }));
+      await loadTickets();
+    } finally {
+      setRespondingReportId(null);
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -322,9 +366,12 @@ export default function SupportCenter() {
                           {report.licensee?.name ? ` · ${report.licensee.name}` : ""}
                         </p>
                       </div>
-                      <Badge variant={report.autoDetected ? "default" : "outline"}>
-                        {report.autoDetected ? "Auto-captured" : "Manual"}
-                      </Badge>
+                      <div className="flex flex-col items-end gap-2">
+                        <Badge variant={report.autoDetected ? "default" : "outline"}>
+                          {report.autoDetected ? "Auto-captured" : "Manual"}
+                        </Badge>
+                        <Badge variant="outline">{toLabel(report.status)}</Badge>
+                      </div>
                     </div>
                     {report.description ? (
                       <p className="mt-2 line-clamp-2 text-xs text-slate-600">{report.description}</p>
@@ -342,6 +389,53 @@ export default function SupportCenter() {
                       >
                         Open screenshot
                       </a>
+                    ) : null}
+                    {report.responseMessage ? (
+                      <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/70 p-3">
+                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-emerald-800">
+                          <span className="font-semibold">Latest response sent</span>
+                          {report.respondedByUser?.name || report.respondedByUser?.email ? (
+                            <span>by {report.respondedByUser?.name || report.respondedByUser?.email}</span>
+                          ) : null}
+                          {report.respondedAt ? (
+                            <span>{formatDistanceToNowStrict(new Date(report.respondedAt), { addSuffix: true })}</span>
+                          ) : null}
+                        </div>
+                        <p className="mt-2 whitespace-pre-wrap text-xs text-slate-700">{report.responseMessage}</p>
+                      </div>
+                    ) : null}
+                    {canEdit ? (
+                      <div className="mt-3 space-y-2 rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+                        <Label htmlFor={`issue-response-${report.id}`} className="text-xs font-semibold text-slate-700">
+                          Respond to reporter
+                        </Label>
+                        <Textarea
+                          id={`issue-response-${report.id}`}
+                          rows={3}
+                          value={issueReplyDrafts[report.id] ?? ""}
+                          onChange={(e) =>
+                            setIssueReplyDrafts((prev) => ({
+                              ...prev,
+                              [report.id]: e.target.value,
+                            }))
+                          }
+                          placeholder="Send remediation guidance, status update, or next step."
+                        />
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-[11px] text-slate-500">
+                            This reply is delivered through email and the reporter&apos;s notification feed.
+                          </p>
+                          <Button
+                            size="sm"
+                            onClick={() => respondToIssueReport(report)}
+                            disabled={respondingReportId === report.id}
+                            className="bg-slate-900 text-white hover:bg-slate-800"
+                          >
+                            {respondingReportId === report.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                            {report.responseMessage ? "Update response" : "Send response"}
+                          </Button>
+                        </div>
+                      </div>
                     ) : null}
                   </div>
                 ))}

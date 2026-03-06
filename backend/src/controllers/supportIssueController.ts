@@ -7,7 +7,7 @@ import { z } from "zod";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { createAuditLog } from "../services/auditService";
-import { createRoleNotifications } from "../services/notificationService";
+import { createRoleNotifications, createUserNotification } from "../services/notificationService";
 import { resolveSupportIssueUploadPath } from "../middleware/supportIssueUpload";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
 
@@ -24,6 +24,11 @@ const createSchema = z.object({
   pageUrl: z.string().trim().max(1200).optional().or(z.literal("")),
   autoDetected: z.string().trim().toLowerCase().optional(),
   diagnostics: z.string().trim().max(250_000).optional().or(z.literal("")),
+});
+
+const responseSchema = z.object({
+  message: z.string().trim().min(5).max(5000),
+  status: z.enum(["OPEN", "RESPONDED", "CLOSED"]).optional(),
 });
 
 const parseDiagnostics = (raw?: string | null) => {
@@ -149,6 +154,7 @@ export const listSupportIssueReports = async (req: AuthRequest, res: Response) =
         skip: offset,
         include: {
           reporterUser: { select: { id: true, name: true, email: true, role: true } },
+          respondedByUser: { select: { id: true, name: true, email: true, role: true } },
           licensee: { select: { id: true, name: true, prefix: true } },
         },
       }),
@@ -177,6 +183,110 @@ export const listSupportIssueReports = async (req: AuthRequest, res: Response) =
     }
     console.error("listSupportIssueReports error:", error);
     return res.status(500).json({ success: false, error: "Failed to load support reports" });
+  }
+};
+
+export const respondToSupportIssueReport = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ success: false, error: "Report ID is required" });
+
+    const parsed = responseSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid response payload" });
+    }
+
+    const existing = await prisma.supportIssueReport.findUnique({
+      where: { id },
+      include: {
+        reporterUser: { select: { id: true, email: true, licenseeId: true, orgId: true, name: true } },
+        licensee: { select: { id: true, name: true, prefix: true } },
+      },
+    });
+    if (!existing) return res.status(404).json({ success: false, error: "Support report not found" });
+
+    const respondedAt = new Date();
+    const status = parsed.data.status || "RESPONDED";
+
+    const updated = await prisma.supportIssueReport.update({
+      where: { id: existing.id },
+      data: {
+        status,
+        responseMessage: parsed.data.message,
+        respondedAt,
+        respondedByUserId: req.user.userId,
+      },
+      include: {
+        reporterUser: { select: { id: true, name: true, email: true, role: true } },
+        respondedByUser: { select: { id: true, name: true, email: true, role: true } },
+        licensee: { select: { id: true, name: true, prefix: true } },
+      },
+    });
+
+    await createAuditLog({
+      userId: req.user.userId,
+      licenseeId: updated.licenseeId || undefined,
+      orgId: req.user.orgId || undefined,
+      action: "SUPPORT_ISSUE_RESPONDED",
+      entityType: "SupportIssueReport",
+      entityId: updated.id,
+      details: {
+        status,
+        responseLength: parsed.data.message.length,
+      },
+      ipAddress: req.ip,
+    });
+
+    if (existing.reporterUserId) {
+      const notificationTitle = `Support response: ${updated.title}`;
+      const notificationBody = parsed.data.message;
+      const notificationData = {
+        supportReportId: updated.id,
+        status: updated.status,
+        respondedAt: respondedAt.toISOString(),
+        targetRoute: "/support",
+      };
+
+      await Promise.allSettled([
+        createUserNotification({
+          userId: existing.reporterUserId,
+          title: notificationTitle,
+          body: notificationBody,
+          type: "support_issue_response",
+          licenseeId: updated.licenseeId || existing.reporterUser?.licenseeId || null,
+          orgId: existing.reporterUser?.orgId || null,
+          data: notificationData,
+          channel: NotificationChannel.WEB,
+        }),
+        createUserNotification({
+          userId: existing.reporterUserId,
+          title: notificationTitle,
+          body: notificationBody,
+          type: "support_issue_response",
+          licenseeId: updated.licenseeId || existing.reporterUser?.licenseeId || null,
+          orgId: existing.reporterUser?.orgId || null,
+          data: notificationData,
+          channel: NotificationChannel.EMAIL,
+        }),
+      ]);
+    }
+
+    return res.json({
+      success: true,
+      data: updated,
+    });
+  } catch (error) {
+    if (isPrismaMissingTableError(error, ["supportissuereport", "notification"])) {
+      warnStorageUnavailableOnce(
+        "support-issue-respond-storage",
+        "[support-issue] support issue response storage is unavailable. Response was not persisted."
+      );
+      return res.status(503).json({ success: false, error: "Support report storage unavailable" });
+    }
+    console.error("respondToSupportIssueReport error:", error);
+    return res.status(500).json({ success: false, error: "Failed to respond to support report" });
   }
 };
 

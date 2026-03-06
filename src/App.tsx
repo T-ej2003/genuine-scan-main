@@ -242,7 +242,7 @@ function AppRoutes() {
         <Route
           path="/help/support"
           element={
-            <HelpRoleRoute allowedRoles={["super_admin"]} allowPublic={false}>
+            <HelpRoleRoute allowPublic={true}>
               <HelpSupport />
             </HelpRoleRoute>
           }

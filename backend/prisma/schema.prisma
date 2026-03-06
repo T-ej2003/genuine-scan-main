@@ -315,6 +315,7 @@ model User {
   supportTicketsAssigned SupportTicket[] @relation("SupportTicketAssignedTo")
   supportTicketMessages SupportTicketMessage[] @relation("SupportTicketMessageAuthor")
   supportIssueReportsSubmitted SupportIssueReport[] @relation("SupportIssueReportSubmittedBy")
+  supportIssueReportsResponded SupportIssueReport[] @relation("SupportIssueReportRespondedBy")
   notifications Notification[] @relation("UserNotifications")
   tenantFeatureFlagsUpdated TenantFeatureFlag[] @relation("TenantFeatureFlagUpdatedBy")
   evidenceRetentionPoliciesUpdated EvidenceRetentionPolicy[] @relation("EvidenceRetentionPolicyUpdatedBy")
@@ -1417,6 +1418,10 @@ model SupportIssueReport {
   title String
   description String?
   status String @default("OPEN")
+  responseMessage String?
+  respondedAt DateTime?
+  respondedByUserId String?
+  respondedByUser User? @relation("SupportIssueReportRespondedBy", fields: [respondedByUserId], references: [id], onDelete: SetNull)
   sourcePath String?
   pageUrl String?
   autoDetected Boolean @default(false)
@@ -1432,6 +1437,7 @@ model SupportIssueReport {
 
   @@index([licenseeId, createdAt])
   @@index([reporterUserId, createdAt])
+  @@index([respondedByUserId, respondedAt])
   @@index([status])
 }
 

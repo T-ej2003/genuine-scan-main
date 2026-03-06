@@ -2013,6 +2013,19 @@ class ApiClient {
     return this.request(`/support/reports${query}`);
   }
 
+  async respondToSupportIssueReport(
+    reportId: string,
+    payload: {
+      message: string;
+      status?: "OPEN" | "RESPONDED" | "CLOSED";
+    }
+  ) {
+    return this.request(`/support/reports/${encodeURIComponent(reportId)}/respond`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
   getSupportIssueScreenshotUrl(fileName: string) {
     return `${BASE_URL}/support/reports/files/${encodeURIComponent(fileName)}`;
   }

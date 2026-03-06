@@ -79,7 +79,7 @@ const getManufacturerPrintJob = async (jobId, userId) => database_1.default.prin
 });
 const ensureTrustedPrinterConnected = async (userId) => {
     const printerStatus = await (0, printerConnectionService_1.getPrinterConnectionStatusForUser)(userId);
-    if (!printerStatus.connected || !printerStatus.trusted) {
+    if (!printerStatus.connected || !printerStatus.eligibleForPrinting) {
         throw Object.assign(new Error("PRINTER_NOT_TRUSTED"), { printerStatus });
     }
     return printerStatus;
@@ -669,7 +669,7 @@ const createPrintJob = async (req, res) => {
             const printerStatus = e?.printerStatus || null;
             return res.status(409).json({
                 success: false,
-                error: "Printer is not cryptographically trusted. Reconnect signed agent with valid mTLS device identity.",
+                error: "Printer is not ready for secure issuance. Reconnect print agent or switch to compatibility-ready local printer profile.",
                 data: { printerStatus },
             });
         }
@@ -878,7 +878,7 @@ const issueDirectPrintTokens = async (req, res) => {
             const printerStatus = e?.printerStatus || null;
             return res.status(409).json({
                 success: false,
-                error: "Printer trust validation failed. Token issuance blocked.",
+                error: "Printer readiness validation failed. Token issuance blocked until printer is eligible for printing.",
                 data: { printerStatus },
             });
         }

@@ -213,6 +213,7 @@ router.patch("/support/tickets/:id", auth_1.authenticate, rbac_1.requirePlatform
 router.post("/support/tickets/:id/messages", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, supportController_1.addSupportMessage);
 router.get("/support/reports", auth_1.authenticate, rbac_1.requireOpsUser, tenantIsolation_1.enforceTenantIsolation, supportIssueController_1.listSupportIssueReports);
 router.post("/support/reports", auth_1.authenticate, rbac_1.requireOpsUser, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, supportIssueUpload_1.supportIssueUpload.single("screenshot"), supportIssueController_1.createSupportIssueReport);
+router.post("/support/reports/:id/respond", auth_1.authenticate, rbac_1.requirePlatformAdmin, csrf_1.requireCsrf, supportIssueController_1.respondToSupportIssueReport);
 router.get("/support/reports/files/:fileName", auth_1.authenticate, rbac_1.requireOpsUser, tenantIsolation_1.enforceTenantIsolation, supportIssueController_1.serveSupportIssueScreenshot);
 // ==================== GOVERNANCE ====================
 router.get("/governance/feature-flags", auth_1.authenticate, rbac_1.requirePlatformAdmin, governanceController_1.getFeatureFlags);

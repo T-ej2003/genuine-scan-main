@@ -8,30 +8,30 @@ import { Bell, ShieldCheck, Ticket } from "lucide-react";
 export default function SupportHelp() {
   return (
     <HelpShell
-      title="Support Tickets"
-      subtitle="Super Admin guide for support queue handling, SLA monitoring, and ticket-to-incident workflow."
+      title="Support and Response"
+      subtitle="Public guidance for getting help, plus the super admin workflow for ticket handling, SLA monitoring, and ticket-to-incident response."
     >
       <div className="space-y-6">
         <Alert>
           <ShieldCheck className="h-4 w-4" />
-          <AlertTitle>Super Admin scope</AlertTitle>
+          <AlertTitle>How support works</AlertTitle>
           <AlertDescription>
-            Support workflow is restricted to Super Admin. Every ticket update is captured in audit logs and linked incident history.
+            Public users can verify products and contact the MSCQR team for help. Authenticated users can also submit in-app issue reports. Support workflow handling and SLA ownership stay with Super Admin.
           </AlertDescription>
         </Alert>
 
         <section className="space-y-3">
-          <h2 className="text-lg font-semibold text-foreground">What the Support page is for</h2>
+          <h2 className="text-lg font-semibold text-foreground">How to get help</h2>
           <Card>
             <CardHeader className="space-y-1">
-              <CardTitle className="text-base">Ticket operations</CardTitle>
+              <CardTitle className="text-base">Support entry points</CardTitle>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
               <ul className="list-disc pl-5">
-                <li>Review ticket queue by status, priority, and search terms.</li>
-                <li>Open ticket detail with incident stage and SLA context.</li>
-                <li>Set ticket status and assignment.</li>
-                <li>Add internal or customer-facing support notes.</li>
+                <li>Use the public verifier first to confirm the QR code result and capture the exact issue.</li>
+                <li>Authenticated users can submit an in-app support report with diagnostics and screenshots.</li>
+                <li>For onboarding or platform administration queries, contact `administration@mscqr.com`.</li>
+                <li>Super Admin replies are delivered back through system notifications and email.</li>
               </ul>
             </CardContent>
           </Card>
