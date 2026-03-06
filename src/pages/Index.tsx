@@ -1,12 +1,72 @@
-import type { ElementType, ReactNode } from "react";
+import { useEffect, useMemo, useState, type ElementType, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, CircleHelp, Headset, Lock, Mail, QrCode, ShieldCheck, ShieldAlert, Smartphone, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 const CONTACT_EMAIL = "administration@mscqr.com";
 
+const SECTION_LINKS = [
+  { id: "scan", label: "Scan", routeLabel: "/verify", helper: "Public verification" },
+  { id: "security", label: "Security", routeLabel: "/login", helper: "Authenticated control plane" },
+  { id: "support", label: "Support", routeLabel: "/help/support", helper: "Support guidance" },
+  { id: "contact", label: "Contact", routeLabel: CONTACT_EMAIL, helper: "Admin contact" },
+] as const;
+
 export default function Index() {
+  const [activeSection, setActiveSection] = useState<(typeof SECTION_LINKS)[number]["id"]>("scan");
+  const activeSectionMeta = useMemo(
+    () => SECTION_LINKS.find((item) => item.id === activeSection) || SECTION_LINKS[0],
+    [activeSection]
+  );
+
+  useEffect(() => {
+    const updateFromHash = () => {
+      const currentHash = window.location.hash.replace("#", "").trim();
+      if (SECTION_LINKS.some((item) => item.id === currentHash)) {
+        setActiveSection(currentHash as (typeof SECTION_LINKS)[number]["id"]);
+      }
+    };
+
+    updateFromHash();
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const next = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        const id = next?.target?.id;
+        if (id && SECTION_LINKS.some((item) => item.id === id)) {
+          setActiveSection(id as (typeof SECTION_LINKS)[number]["id"]);
+        }
+      },
+      {
+        rootMargin: "-30% 0px -45% 0px",
+        threshold: [0.2, 0.45, 0.7],
+      }
+    );
+
+    SECTION_LINKS.forEach((item) => {
+      const el = document.getElementById(item.id);
+      if (el) observer.observe(el);
+    });
+
+    window.addEventListener("hashchange", updateFromHash);
+
+    return () => {
+      window.removeEventListener("hashchange", updateFromHash);
+      observer.disconnect();
+    };
+  }, []);
+
+  const focusSection = (id: (typeof SECTION_LINKS)[number]["id"]) => {
+    setActiveSection(id);
+    const target = document.getElementById(id);
+    target?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    window.history.replaceState(null, "", `#${id}`);
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top,_rgba(20,184,166,0.16),_transparent_45%),radial-gradient(circle_at_80%_20%,_rgba(59,130,246,0.16),_transparent_38%),linear-gradient(180deg,_#020617_0%,_#0f172a_40%,_#020617_100%)]" />
@@ -21,11 +81,23 @@ export default function Index() {
             </div>
           </Link>
 
-          <nav className="hidden items-center gap-6 text-sm text-slate-300 md:flex">
-            <a href="#scan" className="hover:text-white">Scan</a>
-            <a href="#security" className="hover:text-white">Security</a>
-            <a href="#support" className="hover:text-white">Support</a>
-            <a href="#contact" className="hover:text-white">Contact</a>
+          <nav className="hidden items-center gap-2 md:flex">
+            {SECTION_LINKS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => focusSection(item.id)}
+                aria-current={activeSection === item.id ? "true" : undefined}
+                className={cn(
+                  "rounded-full border px-3 py-2 text-sm transition",
+                  activeSection === item.id
+                    ? "border-emerald-300/40 bg-emerald-300/10 text-white shadow-[0_0_0_1px_rgba(110,231,183,0.16)_inset]"
+                    : "border-transparent text-slate-300 hover:border-white/10 hover:bg-white/5 hover:text-white"
+                )}
+              >
+                {item.label}
+              </button>
+            ))}
           </nav>
 
           <div className="flex items-center gap-2">
@@ -47,6 +119,19 @@ export default function Index() {
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-emerald-300/25 bg-emerald-300/10 px-3 py-1 text-xs font-medium text-emerald-200">
               <ShieldCheck className="h-3.5 w-3.5" />
               MSCQR powered by AuthenticQR platform
+            </div>
+
+            <div className="mb-5 flex flex-wrap items-center gap-3">
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-slate-200">
+                <span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_0_6px_rgba(110,231,183,0.12)]" />
+                Viewing {activeSectionMeta.label}
+              </div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-slate-300">
+                Route {activeSectionMeta.routeLabel}
+              </div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-slate-300">
+                {activeSectionMeta.helper}
+              </div>
             </div>
 
             <h1 className="text-balance text-4xl font-semibold leading-tight text-white md:text-6xl">
@@ -88,10 +173,44 @@ export default function Index() {
               <StatPill label="Support route" value="/help/support" />
               <StatPill label="Transport security" value="HTTPS / TLS" />
             </div>
+
+            <div className="mt-8 grid gap-3 sm:grid-cols-2">
+              {SECTION_LINKS.map((item) => (
+                <button
+                  key={`jump-${item.id}`}
+                  type="button"
+                  onClick={() => focusSection(item.id)}
+                  className={cn(
+                    "rounded-2xl border px-4 py-4 text-left transition",
+                    activeSection === item.id
+                      ? "border-emerald-300/35 bg-emerald-300/10 shadow-[0_16px_36px_-28px_rgba(16,185,129,0.85)]"
+                      : "border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.05]"
+                  )}
+                >
+                  <div className="text-xs uppercase tracking-[0.18em] text-slate-400">{item.routeLabel}</div>
+                  <div className="mt-2 text-base font-semibold text-white">{item.label}</div>
+                  <div className="mt-1 text-sm text-slate-300">{item.helper}</div>
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="rounded-3xl border border-white/10 bg-white/5 p-5 shadow-[0_20px_80px_rgba(2,6,23,0.55)] backdrop-blur">
             <div className="rounded-2xl border border-white/10 bg-slate-900/80 p-5">
+              <div className="mb-4 rounded-2xl border border-emerald-300/15 bg-emerald-300/8 p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200">Route focus</div>
+                <div className="mt-2 flex items-end justify-between gap-4">
+                  <div>
+                    <div className="text-xl font-semibold text-white">{activeSectionMeta.label}</div>
+                    <div className="mt-1 text-sm text-slate-300">{activeSectionMeta.helper}</div>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-right">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Route</div>
+                    <div className="mt-1 text-sm font-semibold text-white">{activeSectionMeta.routeLabel}</div>
+                  </div>
+                </div>
+              </div>
+
               <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-300">Quick Actions</h2>
               <div className="mt-4 grid gap-3">
                 <ActionCard
@@ -130,7 +249,13 @@ export default function Index() {
           </div>
         </section>
 
-        <section id="scan" className="border-y border-white/5 bg-white/[0.02]">
+        <section
+          id="scan"
+          className={cn(
+            "border-y border-white/5 bg-white/[0.02] transition-colors duration-300",
+            activeSection === "scan" && "bg-white/[0.04]"
+          )}
+        >
           <div className="mx-auto w-full max-w-7xl px-4 py-14">
             <div className="grid gap-5 md:grid-cols-3">
               <FeatureCard
@@ -152,7 +277,10 @@ export default function Index() {
           </div>
         </section>
 
-        <section id="security" className="mx-auto w-full max-w-7xl px-4 py-16">
+        <section
+          id="security"
+          className={cn("mx-auto w-full max-w-7xl px-4 py-16 transition-all duration-300", activeSection === "security" && "scale-[1.001]")}
+        >
           <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
             <div>
               <h2 className="text-3xl font-semibold text-white md:text-4xl">Authentication and control posture</h2>
@@ -203,7 +331,13 @@ export default function Index() {
           </div>
         </section>
 
-        <section id="support" className="border-y border-white/5 bg-slate-900/40">
+        <section
+          id="support"
+          className={cn(
+            "border-y border-white/5 bg-slate-900/40 transition-colors duration-300",
+            activeSection === "support" && "bg-slate-900/55"
+          )}
+        >
           <div className="mx-auto w-full max-w-7xl px-4 py-16">
             <div className="grid gap-6 md:grid-cols-2">
               <Panel
@@ -244,7 +378,13 @@ export default function Index() {
         </section>
       </main>
 
-      <footer id="contact" className="border-t border-white/10 bg-slate-950/90">
+      <footer
+        id="contact"
+        className={cn(
+          "border-t border-white/10 bg-slate-950/90 transition-colors duration-300",
+          activeSection === "contact" && "bg-slate-900"
+        )}
+      >
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-8 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
             <img src="/brand/authenticqr-mark.svg" alt="MSCQR logo" className="h-9 w-9 rounded-lg border border-white/10 bg-slate-900 p-1" />
