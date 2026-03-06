@@ -20,6 +20,7 @@ vi.mock("@/lib/api-client", () => ({
   default: {
     getSupportTickets: vi.fn(),
     getSupportIssueReports: vi.fn(),
+    respondToSupportIssueReport: vi.fn(),
     getSupportIssueScreenshotUrl: vi.fn(),
     getSupportTicket: vi.fn(),
     getUsers: vi.fn(),
@@ -47,10 +48,22 @@ describe("SupportCenter regression", () => {
     messages: [],
   };
 
+  const issueReport = {
+    id: "report-1",
+    title: "Printer failed during pairing",
+    description: "Local agent unavailable while opening dashboard.",
+    status: "OPEN",
+    createdAt: "2026-03-05T14:00:00.000Z",
+    autoDetected: true,
+    reporterUser: { id: "manufacturer-1", name: "Factory User", email: "factory@example.com", role: "manufacturer" },
+    licensee: { id: "lic-1", name: "Acme Brands", prefix: "ACM" },
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(apiClient.getSupportTickets).mockResolvedValue({ success: true, data: { tickets: [ticket], total: 1 } } as any);
-    vi.mocked(apiClient.getSupportIssueReports).mockResolvedValue({ success: true, data: { reports: [], total: 0 } } as any);
+    vi.mocked(apiClient.getSupportIssueReports).mockResolvedValue({ success: true, data: { reports: [issueReport], total: 1 } } as any);
+    vi.mocked(apiClient.respondToSupportIssueReport).mockResolvedValue({ success: true, data: { ...issueReport, status: "RESPONDED" } } as any);
     vi.mocked(apiClient.getSupportIssueScreenshotUrl).mockImplementation((name: string) => `/api/support/reports/files/${name}`);
     vi.mocked(apiClient.getSupportTicket).mockResolvedValue({ success: true, data: detail } as any);
     vi.mocked(apiClient.getUsers).mockResolvedValue({
@@ -96,6 +109,34 @@ describe("SupportCenter regression", () => {
         expect.objectContaining({
           status: "OPEN",
           assignedToUserId: null,
+        })
+      );
+    });
+  });
+
+  it("responds to incoming issue reports and calls the response API", async () => {
+    render(
+      <MemoryRouter>
+        <SupportCenter />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Printer failed during pairing")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("Send remediation guidance, status update, or next step."), {
+      target: { value: "We reviewed the issue. Reopen the dashboard after the print agent is running." },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Send response" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(apiClient.respondToSupportIssueReport)).toHaveBeenCalledWith(
+        issueReport.id,
+        expect.objectContaining({
+          message: "We reviewed the issue. Reopen the dashboard after the print agent is running.",
+          status: "RESPONDED",
         })
       );
     });

@@ -55,8 +55,9 @@ export default function Index() {
             </h1>
 
             <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300 md:text-lg">
-              MSCQR helps manufacturers, licensees, and customers verify genuine products through secure QR scans,
-              controlled code lifecycle management, and traceable audit events.
+              MSCQR runs a public verification route for customers and a role-scoped operations portal for licensees,
+              manufacturers, and super admins. QR codes move through issuance, print, scan, and audit workflows with
+              traceable platform events and authenticated operational controls.
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -82,9 +83,10 @@ export default function Index() {
 
             <div className="mt-8 grid gap-3 sm:grid-cols-2">
               <StatPill label="Public verification" value="24/7" />
-              <StatPill label="Verification route" value="/verify" />
-              <StatPill label="Help documentation" value="/help" />
-              <StatPill label="Secure TLS" value="HTTPS" />
+              <StatPill label="Public route" value="/verify" />
+              <StatPill label="Authenticated portal" value="/login" />
+              <StatPill label="Support route" value="/help/support" />
+              <StatPill label="Transport security" value="HTTPS / TLS" />
             </div>
           </div>
 
@@ -103,7 +105,7 @@ export default function Index() {
                 <ActionCard
                   icon={Lock}
                   title="Login to dashboard"
-                  description="Sign in for QR operations, governance, audit logs, incidents, and support workflows."
+                  description="Sign in for role-scoped QR operations, governance, audit logs, incident handling, notifications, and support workflows."
                   href="/login"
                   cta="Open Login"
                   internal
@@ -111,7 +113,7 @@ export default function Index() {
                 <ActionCard
                   icon={Headset}
                   title="Support and documentation"
-                  description="Read setup, usage, and response guidance from the support/help section."
+                  description="Open the public support page for setup guidance, reporting paths, and response expectations."
                   href="/help/support"
                   cta="Open Support"
                   internal
@@ -134,17 +136,17 @@ export default function Index() {
               <FeatureCard
                 icon={Smartphone}
                 title="Customer scan flow"
-                description="Customers can scan a printed QR code and receive an authenticity result with guidance and reporting actions."
+                description="Customers use the public verifier to check a code, receive an authenticity result, and escalate suspicious activity when needed."
               />
               <FeatureCard
                 icon={Users}
-                title="Role-based operations"
-                description="Separate workflows for super admins, licensee admins, manufacturers, and incident response teams."
+                title="Role-scoped operations"
+                description="The authenticated portal separates super admin, licensee, manufacturer, governance, and support workflows."
               />
               <FeatureCard
                 icon={ShieldAlert}
-                title="Fraud signal awareness"
-                description="Repeat-scan and suspicious behavior signals help identify potential cloning or misuse patterns."
+                title="Traceable lifecycle control"
+                description="Operational events, audit logs, and support handling stay attached to the QR lifecycle so disputes and failures can be reviewed."
               />
             </div>
           </div>
@@ -153,43 +155,48 @@ export default function Index() {
         <section id="security" className="mx-auto w-full max-w-7xl px-4 py-16">
           <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
             <div>
-              <h2 className="text-3xl font-semibold text-white md:text-4xl">How secure is MSCQR?</h2>
+              <h2 className="text-3xl font-semibold text-white md:text-4xl">Authentication and control posture</h2>
               <p className="mt-4 max-w-2xl leading-7 text-slate-300">
-                MSCQR uses the AuthenticQR platform to combine secure QR verification with operational controls. Security
-                depends on production configuration, but the app includes controls for protected scan workflows, audit
-                trails, incident handling, and tenant-separated operations.
+                MSCQR uses the AuthenticQR platform for public verification and authenticated back-office operations.
+                Security still depends on production deployment and operating procedures, but the application ships with
+                role-aware access control, auditable workflows, notification trails, and tenant-separated operational
+                paths.
               </p>
               <ul className="mt-6 space-y-3 text-sm text-slate-200">
-                <SecurityBullet>HTTPS/TLS deployment support with reverse proxy configuration for secure traffic.</SecurityBullet>
-                <SecurityBullet>Multi-tenant role controls to separate admin, manufacturer, and response operations.</SecurityBullet>
-                <SecurityBullet>Incident reporting and response flows to track suspicious scans and follow-up actions.</SecurityBullet>
-                <SecurityBullet>Audit logs and governance workflows for traceability and operational accountability.</SecurityBullet>
-                <SecurityBullet>Backend protections such as rate limiting and validation (server configuration dependent).</SecurityBullet>
+                <SecurityBullet>Public verification is separated from the authenticated operations portal.</SecurityBullet>
+                <SecurityBullet>Role-scoped access is used for super admin, licensee, manufacturer, and response workflows.</SecurityBullet>
+                <SecurityBullet>Privileged actions use authenticated API requests, CSRF checks, validation, and audit logging.</SecurityBullet>
+                <SecurityBullet>Admin MFA-capable login, notification trails, and incident/governance flows are available in the platform.</SecurityBullet>
+                <SecurityBullet>Transport security is designed for HTTPS/TLS deployment behind the production reverse proxy.</SecurityBullet>
+                <SecurityBullet>Control wording is aligned for ISO 27001 and SOC 2 style evidence collection; certification claims depend on formal external audit and current operating evidence.</SecurityBullet>
               </ul>
             </div>
 
             <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
               <div className="rounded-2xl border border-emerald-300/15 bg-slate-900/70 p-5">
-                <h3 className="text-lg font-semibold text-white">Transport Security Trust Seal</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-300">
-                  MSCQR highlights transport security trust signaling with the Sectigo secure site seal on the public homepage.
-                  Use HTTPS access to ensure the secure connection indicator is visible in the browser.
-                </p>
-                <div className="mt-5 rounded-xl border border-white/10 bg-white p-4">
-                  <a
-                    href="https://www.sectigo.com/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center"
-                    aria-label="Sectigo secure site seal"
-                  >
-                    <img
-                      src="https://www.sectigo.com/images/seals/sectigo_trust_seal_md_2x.png"
-                      alt="Sectigo Secure Site Seal"
-                      className="h-auto max-w-full"
-                      loading="lazy"
-                    />
-                  </a>
+                <h3 className="text-lg font-semibold text-white">Current operating profile</h3>
+                <div className="mt-4 space-y-3">
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                    <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Public access</div>
+                    <p className="mt-2 text-sm leading-6 text-slate-200">
+                      Customers verify products through <span className="font-semibold text-white">/verify</span> and can
+                      move into suspicious-activity reporting from that flow.
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                    <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Authenticated operations</div>
+                    <p className="mt-2 text-sm leading-6 text-slate-200">
+                      Internal users sign in through <span className="font-semibold text-white">/login</span> for QR
+                      lifecycle management, printing, audit review, incidents, governance, and support response.
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                    <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Support and evidence</div>
+                    <p className="mt-2 text-sm leading-6 text-slate-200">
+                      Incoming support reports, workflow updates, notifications, and audit events are retained as part of
+                      the operational evidence trail.
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -201,15 +208,15 @@ export default function Index() {
             <div className="grid gap-6 md:grid-cols-2">
               <Panel
                 title="Support"
-                description="Need help with scanning, verification, user access, or platform usage? Start with the public help documentation, then sign in for role-specific operations."
+                description="Need help with scanning, verification, user access, printer readiness, or platform usage? Start with the public support page, then sign in for tenant-specific workflows."
                 actions={
                   <>
-                    <Link to="/help">
+                    <Link to="/help/support">
                       <Button variant="outline" className="border-white/15 bg-white/5 text-slate-100 hover:bg-white/10">
-                        Open Help Hub
+                        Open Support Page
                       </Button>
                     </Link>
-                    <Link to="/help/support">
+                    <Link to="/help">
                       <Button className="bg-emerald-400 text-slate-950 hover:bg-emerald-300">Support Guide</Button>
                     </Link>
                   </>

@@ -256,6 +256,9 @@ export default function Batches() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyLastUpdatedAt, setHistoryLastUpdatedAt] = useState<Date | null>(null);
   const printerReady = printerStatus.connected && printerStatus.eligibleForPrinting;
+  const printerHasInventory =
+    detectedPrinters.length > 0 || Boolean(printerStatus.selectedPrinterId || printerStatus.printerId);
+  const printerUnavailable = !printerReady && !printerHasInventory;
 
   const normalizePrinterRows = (rows: unknown): LocalPrinterRow[] => {
     if (!Array.isArray(rows)) return [];
@@ -459,12 +462,6 @@ export default function Batches() {
         error: remote.error || local.error || "Printer status unavailable",
       });
       setDetectedPrinters(localPrinters);
-      if (!localPrinters.length) {
-        void autoReportPrinterFailure({
-          context: "load_printer_status",
-          reason: String(remote.error || local.error || "No printer inventory available"),
-        });
-      }
       return;
     }
 
@@ -1065,7 +1062,7 @@ export default function Batches() {
         capabilitySummary: null,
         printers: detectedPrinters,
         calibrationProfile: null,
-        error: livePrinterStatus.error || "Printer disconnected or not trusted",
+        error: livePrinterStatus.error || (detectedPrinters.length > 0 ? "Printer connection requires attention" : "Printer unavailable"),
       });
       toast({
         title: "Printer unavailable",
@@ -1378,15 +1375,19 @@ export default function Batches() {
                     ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                     : printerStatus.compatibilityMode
                       ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
-                      : "border-red-300 bg-red-50 text-red-700 hover:bg-red-100"
+                      : printerUnavailable
+                        ? "border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200"
+                        : "border-red-300 bg-red-50 text-red-700 hover:bg-red-100"
                 }
                 title={
                   printerReady
                     ? `${printerStatus.selectedPrinterName || printerStatus.printerName || "Printer connected"}`
-                    : printerStatus.error || printerStatus.trustReason || "Printer disconnected"
+                    : printerUnavailable
+                      ? "No local print agent or printer is currently detected."
+                      : printerStatus.error || printerStatus.trustReason || "Printer disconnected"
                 }
               >
-                {printerStatus.trusted ? "Printer Trusted" : printerStatus.compatibilityMode ? "Printer Compatibility" : "Printer Untrusted"}
+                {printerStatus.trusted ? "Printer Trusted" : printerStatus.compatibilityMode ? "Printer Compatibility" : printerUnavailable ? "Printer Unavailable" : "Printer Attention"}
               </Button>
             )}
 
@@ -1770,7 +1771,9 @@ export default function Batches() {
                       ? "rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800"
                       : printerStatus.compatibilityMode
                         ? "rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
-                      : "rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+                      : printerUnavailable
+                        ? "rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"
+                        : "rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800"
                   }
                 >
                   <div className="font-medium">
@@ -1778,12 +1781,16 @@ export default function Batches() {
                       ? "Trusted printer connected"
                       : printerStatus.compatibilityMode
                         ? "Printer connected in compatibility mode"
-                        : "Printer untrusted or offline"}
+                        : printerUnavailable
+                          ? "No printer connected yet"
+                          : "Printer trust or connection needs attention"}
                   </div>
                   <div className="text-xs">
                     {printerReady
                       ? `${printerStatus.selectedPrinterName || printerStatus.printerName || "Authenticated print agent"} is ready. Create print job will auto-print labels.`
-                      : printerStatus.error || printerStatus.trustReason || "Connect authenticated print agent and printer to continue."}
+                      : printerUnavailable
+                        ? "Open the local print agent, connect a desktop or label printer, then refresh this dialog."
+                        : printerStatus.error || printerStatus.trustReason || "Connect authenticated print agent and printer to continue."}
                   </div>
                 </div>
 

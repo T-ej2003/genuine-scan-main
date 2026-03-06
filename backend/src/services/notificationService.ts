@@ -297,6 +297,11 @@ export const createUserNotification = async (params: {
       },
     });
 
+    const user = await prisma.user.findUnique({
+      where: { id: params.userId },
+      select: { email: true, role: true, licenseeId: true, orgId: true },
+    });
+
     if (channel === NotificationChannel.WEB) {
       emitNotificationEvent({
         type: "created",
@@ -309,10 +314,6 @@ export const createUserNotification = async (params: {
       });
 
       try {
-        const user = await prisma.user.findUnique({
-          where: { id: params.userId },
-          select: { email: true, role: true, licenseeId: true, orgId: true },
-        });
         if (user) {
           const delivery = await sendRealtimeAlertEmailForNotification({
             toAddress: user.email,
@@ -333,6 +334,27 @@ export const createUserNotification = async (params: {
         }
       } catch (emailError) {
         console.error("createUserNotification realtime email error:", emailError);
+      }
+    }
+
+    if (channel === NotificationChannel.EMAIL && user?.email) {
+      try {
+        const delivery = await sendAuthEmail({
+          toAddress: user.email,
+          subject: params.title,
+          text: `${params.body}\n\nNotification type: ${params.type}\nGenerated at: ${new Date().toISOString()}`,
+          template: `notify_${params.type}`,
+          licenseeId: params.licenseeId || user.licenseeId || null,
+          orgId: params.orgId || user.orgId || null,
+        });
+        if (delivery.delivered) {
+          await prisma.notification.update({
+            where: { id: created.id },
+            data: { emailedAt: new Date() },
+          });
+        }
+      } catch (emailError) {
+        console.error("createUserNotification email delivery error:", emailError);
       }
     }
 

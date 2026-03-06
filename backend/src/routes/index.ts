@@ -157,6 +157,7 @@ import {
 import {
   createSupportIssueReport,
   listSupportIssueReports,
+  respondToSupportIssueReport,
   serveSupportIssueScreenshot,
 } from "../controllers/supportIssueController";
 import { supportIssueUpload } from "../middleware/supportIssueUpload";
@@ -537,6 +538,13 @@ router.post(
   requireCsrf,
   supportIssueUpload.single("screenshot"),
   createSupportIssueReport
+);
+router.post(
+  "/support/reports/:id/respond",
+  authenticate,
+  requirePlatformAdmin,
+  requireCsrf,
+  respondToSupportIssueReport
 );
 router.get(
   "/support/reports/files/:fileName",
