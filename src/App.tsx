@@ -20,7 +20,6 @@ const Licensees = lazy(() => import("@/pages/Licensees"));
 const QRRequests = lazy(() => import("@/pages/QRRequests"));
 const Batches = lazy(() => import("@/pages/Batches"));
 const QRTracking = lazy(() => import("@/pages/QRTracking"));
-const QRCodes = lazy(() => import("@/pages/QRCodes"));
 const Manufacturers = lazy(() => import("@/pages/Manufacturers"));
 const AuditLogs = lazy(() => import("@/pages/AuditLogs"));
 const Incidents = lazy(() => import("@/pages/Incidents"));
@@ -321,8 +320,8 @@ function AppRoutes() {
         <Route
           path="/qr-codes"
           element={
-            <ProtectedRoute allowedRoles={["super_admin"]}>
-              <QRCodes />
+            <ProtectedRoute>
+              <Navigate to="/qr-tracking" replace />
             </ProtectedRoute>
           }
         />

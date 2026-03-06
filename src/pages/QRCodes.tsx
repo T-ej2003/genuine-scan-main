@@ -3,7 +3,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useAuth } from "@/contexts/AuthContext";
-import { useToast } from "@/hooks/use-toast";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -91,7 +90,6 @@ function safeDate(d: any): Date | null {
 
 export default function QRCodes() {
   const { user } = useAuth();
-  const { toast } = useToast();
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -302,38 +300,6 @@ export default function QRCodes() {
     }
   };
 
-  const openSignedVerify = async (code: string) => {
-    try {
-      setUiError(null);
-      const links = await getSignedScanLinks([code]);
-      const signedUrl = links.get(String(code).trim().toUpperCase());
-      if (!signedUrl) throw new Error("Signed scan URL is unavailable for this code.");
-      window.open(signedUrl, "_blank", "noopener,noreferrer");
-      toast({
-        title: "Verify page opened",
-        description: "A short-lived signed verification link was opened in a new tab.",
-      });
-    } catch (e: any) {
-      setUiError(e?.message || "Failed to open verify page");
-    }
-  };
-
-  const copySignedVerify = async (code: string) => {
-    try {
-      setUiError(null);
-      const links = await getSignedScanLinks([code]);
-      const signedUrl = links.get(String(code).trim().toUpperCase());
-      if (!signedUrl) throw new Error("Signed scan URL is unavailable for this code.");
-      await navigator.clipboard.writeText(signedUrl);
-      toast({
-        title: "Signed link copied",
-        description: "The short-lived verification URL is now in your clipboard.",
-      });
-    } catch (e: any) {
-      setUiError(e?.message || "Failed to copy signed verification URL");
-    }
-  };
-
   const downloadZipSelected = async () => {
     const codes = Object.entries(selectedCodes).filter(([, v]) => v).map(([k]) => k);
     if (codes.length === 0) {
@@ -439,22 +405,6 @@ export default function QRCodes() {
             {uiError}
           </div>
         )}
-
-        <Card className="border-amber-200 bg-amber-50/70">
-          <CardContent className="pt-6">
-            <div className="space-y-2">
-              <div className="text-sm font-semibold text-amber-900">Temporary client test mode</div>
-              <p className="text-sm leading-6 text-amber-900/90">
-                Use this page during the meeting to open short-lived signed verify links, copy them to a phone, or
-                download PNG QR codes for scan testing. This is isolated to admin QR utilities and does not re-enable
-                the disabled manufacturer print-pack flow.
-              </p>
-              <p className="text-xs text-amber-800/90">
-                Revert this access change after the meeting and return to the current hardened state.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
 
         {/* Stats */}
         <div className="grid gap-4 md:grid-cols-4">
@@ -572,7 +522,7 @@ export default function QRCodes() {
                     <TableHead>Scan</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead>Scanned</TableHead>
-                    <TableHead className="text-right">Test actions</TableHead>
+                    <TableHead className="text-right">PNG</TableHead>
                   </TableRow>
                 </TableHeader>
 
@@ -614,7 +564,7 @@ export default function QRCodes() {
                               <span className="font-mono font-medium">{qr.code}</span>
                             </div>
                             <div className="mt-1 text-xs text-muted-foreground">
-                              Signed scan URL is generated server-side when you open, copy, or download.
+                              Signed scan URL is generated server-side at download time.
                             </div>
                           </TableCell>
 
@@ -649,32 +599,14 @@ export default function QRCodes() {
                           </TableCell>
 
                           <TableCell className="text-right">
-                            <div className="flex flex-wrap justify-end gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => void openSignedVerify(qr.code)}
-                                disabled={loading || downloading}
-                              >
-                                Open verify
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => void copySignedVerify(qr.code)}
-                                disabled={loading || downloading}
-                              >
-                                Copy link
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => void downloadSinglePng(qr.code)}
-                                disabled={loading || downloading}
-                              >
-                                Download PNG
-                              </Button>
-                            </div>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => downloadSinglePng(qr.code)}
+                              disabled={loading || downloading}
+                            >
+                              Download
+                            </Button>
                           </TableCell>
                         </TableRow>
                       );
