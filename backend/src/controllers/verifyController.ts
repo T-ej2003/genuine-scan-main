@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { IncidentActorType, Prisma, QRStatus } from "@prisma/client";
+import { IncidentActorType, OwnershipTransferStatus, Prisma, QRStatus } from "@prisma/client";
 import { z } from "zod";
 
 import prisma from "../config/database";
@@ -15,7 +15,7 @@ import { sendAuthEmail } from "../services/auth/authEmailService";
 import { getSuperadminAlertEmails, sendIncidentEmail } from "../services/incidentEmailService";
 import { createIncidentFromReport } from "../services/incidentService";
 import { evaluateScanAndEnforcePolicy } from "../services/policyEngineService";
-import { recordScan } from "../services/qrService";
+import { buildVerifyUrl, recordScan } from "../services/qrService";
 import { getScanInsight } from "../services/scanInsightService";
 import { resolveDuplicateRiskProfile, resolveVerifyUxPolicy } from "../services/governanceService";
 import { runTamperEvidenceChecks, summarizeTamperFindings } from "../services/tamperEvidenceService";
@@ -44,6 +44,7 @@ type OwnershipStatus = {
 };
 
 type OwnershipRecord = {
+  id: string;
   userId: string | null;
   claimedAt: Date;
   deviceTokenHash: string | null;
@@ -51,6 +52,48 @@ type OwnershipRecord = {
   userAgentHash: string | null;
   claimSource: string | null;
   linkedAt: Date | null;
+};
+
+type OwnershipTransferRecord = {
+  id: string;
+  qrCodeId: string;
+  ownershipId: string;
+  initiatedByCustomerId: string;
+  initiatedByEmail: string | null;
+  recipientEmail: string | null;
+  status: OwnershipTransferStatus;
+  expiresAt: Date;
+  acceptedAt: Date | null;
+  cancelledAt: Date | null;
+  lastViewedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type OwnershipTransferState =
+  | "none"
+  | "pending_owner_action"
+  | "pending_buyer_action"
+  | "ready_to_accept"
+  | "accepted"
+  | "cancelled"
+  | "expired"
+  | "invalid";
+
+type OwnershipTransferStatusView = {
+  state: OwnershipTransferState;
+  active: boolean;
+  canCreate: boolean;
+  canCancel: boolean;
+  canAccept: boolean;
+  initiatedByYou: boolean;
+  recipientEmailMasked: string | null;
+  initiatedAt: string | null;
+  expiresAt: string | null;
+  acceptedAt: string | null;
+  invalidReason?: string | null;
+  transferId?: string | null;
+  acceptUrl?: string | null;
 };
 
 type ScanSummary = {
@@ -106,6 +149,18 @@ const verifyOtpSchema = z.object({
   otp: z.string().trim().min(4).max(12),
 });
 
+const createOwnershipTransferSchema = z.object({
+  recipientEmail: z.string().trim().email().max(160).optional(),
+});
+
+const cancelOwnershipTransferSchema = z.object({
+  transferId: z.string().trim().min(6).optional(),
+});
+
+const acceptOwnershipTransferSchema = z.object({
+  token: z.string().trim().min(16),
+});
+
 const DEVICE_CLAIM_COOKIE = "gs_device_claim";
 const DEVICE_CLAIM_COOKIE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 365;
 
@@ -116,10 +171,17 @@ const parseBoolEnv = (value: unknown, fallback = false) => {
   return fallback;
 };
 
+const parseIntEnv = (key: string, fallback: number, min = 1, max = 24 * 365) => {
+  const raw = Number(String(process.env[key] || "").trim());
+  if (!Number.isFinite(raw)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(raw)));
+};
+
 const VERIFY_STEP_UP_REQUIRED_ON_SUSPICIOUS = parseBoolEnv(
   process.env.VERIFY_STEP_UP_REQUIRED_ON_SUSPICIOUS,
   true
 );
+const OWNERSHIP_TRANSFER_TTL_HOURS = parseIntEnv("OWNERSHIP_TRANSFER_TTL_HOURS", 72, 1, 24 * 30);
 
 const verifyStepUpChallenge = async (req: Request) => {
   if (!VERIFY_STEP_UP_REQUIRED_ON_SUSPICIOUS) return { ok: true };
@@ -419,6 +481,7 @@ const loadOwnershipByQrCodeId = async (qrCodeId: string): Promise<OwnershipRecor
     return await prisma.ownership.findUnique({
       where: { qrCodeId },
       select: {
+        id: true,
         userId: true,
         claimedAt: true,
         deviceTokenHash: true,
@@ -440,6 +503,174 @@ const loadOwnershipByQrCodeId = async (qrCodeId: string): Promise<OwnershipRecor
     }
     throw error;
   }
+};
+
+const expirePendingOwnershipTransfers = async (where?: Prisma.OwnershipTransferWhereInput) => {
+  await prisma.ownershipTransfer.updateMany({
+    where: {
+      status: OwnershipTransferStatus.PENDING,
+      expiresAt: { lt: new Date() },
+      ...(where || {}),
+    },
+    data: {
+      status: OwnershipTransferStatus.EXPIRED,
+    },
+  });
+};
+
+const loadPendingOwnershipTransferForQr = async (qrCodeId: string): Promise<OwnershipTransferRecord | null> => {
+  try {
+    await expirePendingOwnershipTransfers({ qrCodeId });
+    return await prisma.ownershipTransfer.findFirst({
+      where: {
+        qrCodeId,
+        status: OwnershipTransferStatus.PENDING,
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: {
+        id: true,
+        qrCodeId: true,
+        ownershipId: true,
+        initiatedByCustomerId: true,
+        initiatedByEmail: true,
+        recipientEmail: true,
+        status: true,
+        expiresAt: true,
+        acceptedAt: true,
+        cancelledAt: true,
+        lastViewedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && (error.code === "P2021" || error.code === "P2022")) {
+      return null;
+    }
+    throw error;
+  }
+};
+
+const loadOwnershipTransferByRawToken = async (rawToken: string): Promise<OwnershipTransferRecord | null> => {
+  const token = String(rawToken || "").trim();
+  if (!token) return null;
+
+  try {
+    const tokenHash = hashToken(token);
+    await expirePendingOwnershipTransfers({ tokenHash });
+    const transfer = await prisma.ownershipTransfer.findUnique({
+      where: { tokenHash },
+      select: {
+        id: true,
+        qrCodeId: true,
+        ownershipId: true,
+        initiatedByCustomerId: true,
+        initiatedByEmail: true,
+        recipientEmail: true,
+        status: true,
+        expiresAt: true,
+        acceptedAt: true,
+        cancelledAt: true,
+        lastViewedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    if (transfer && transfer.status === OwnershipTransferStatus.PENDING) {
+      await prisma.ownershipTransfer.update({
+        where: { id: transfer.id },
+        data: { lastViewedAt: new Date() },
+      });
+    }
+    return transfer;
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && (error.code === "P2021" || error.code === "P2022")) {
+      return null;
+    }
+    throw error;
+  }
+};
+
+const buildOwnershipTransferLink = (code: string, rawToken: string) => {
+  const url = new URL(buildVerifyUrl(code));
+  url.searchParams.set("transfer", rawToken);
+  return url.toString();
+};
+
+const createOwnershipTransferView = (params: {
+  code: string;
+  transfer: OwnershipTransferRecord | null;
+  rawToken?: string | null;
+  customerUserId?: string | null;
+  ownershipStatus: OwnershipStatus;
+  isReady: boolean;
+  isBlocked: boolean;
+  transferRequested?: boolean;
+}): OwnershipTransferStatusView => {
+  const transfer = params.transfer;
+  const initiatedByYou = Boolean(
+    transfer &&
+      params.customerUserId &&
+      transfer.initiatedByCustomerId &&
+      transfer.initiatedByCustomerId === params.customerUserId
+  );
+  const tokenMatched = Boolean(transfer && params.rawToken);
+
+  if (!transfer) {
+    return {
+      state: params.transferRequested ? "invalid" : "none",
+      active: false,
+      canCreate: Boolean(
+        params.isReady &&
+          !params.isBlocked &&
+          params.ownershipStatus.isOwnedByRequester &&
+          params.customerUserId
+      ),
+      canCancel: false,
+      canAccept: false,
+      initiatedByYou: false,
+      recipientEmailMasked: null,
+      initiatedAt: null,
+      expiresAt: null,
+      acceptedAt: null,
+      invalidReason: params.transferRequested ? "Transfer link is invalid or has expired." : null,
+      transferId: null,
+      acceptUrl: null,
+    };
+  }
+
+  const canAccept =
+    tokenMatched &&
+    transfer.status === OwnershipTransferStatus.PENDING &&
+    Boolean(params.customerUserId) &&
+    transfer.initiatedByCustomerId !== params.customerUserId &&
+    !params.ownershipStatus.isOwnedByRequester &&
+    params.isReady &&
+    !params.isBlocked;
+
+  let state: OwnershipTransferState = "pending_buyer_action";
+  if (transfer.status === OwnershipTransferStatus.ACCEPTED) state = "accepted";
+  else if (transfer.status === OwnershipTransferStatus.CANCELLED) state = "cancelled";
+  else if (transfer.status === OwnershipTransferStatus.EXPIRED) state = "expired";
+  else if (canAccept) state = "ready_to_accept";
+  else if (initiatedByYou) state = "pending_owner_action";
+  else if (tokenMatched) state = "pending_buyer_action";
+
+  return {
+    state,
+    active: transfer.status === OwnershipTransferStatus.PENDING,
+    canCreate: false,
+    canCancel: initiatedByYou && transfer.status === OwnershipTransferStatus.PENDING,
+    canAccept,
+    initiatedByYou,
+    recipientEmailMasked: transfer.recipientEmail ? maskEmail(transfer.recipientEmail) : null,
+    initiatedAt: transfer.createdAt.toISOString(),
+    expiresAt: transfer.expiresAt.toISOString(),
+    acceptedAt: transfer.acceptedAt?.toISOString() || null,
+    invalidReason: null,
+    transferId: transfer.id,
+    acceptUrl: tokenMatched && params.rawToken ? buildOwnershipTransferLink(params.code, params.rawToken) : null,
+  };
 };
 
 const buildSecurityContainmentReasons = (containment: ReturnType<typeof buildContainment>) => {
@@ -768,6 +999,21 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
           reasons,
           scanSummary: emptySummary,
           ownershipStatus: emptyOwnership,
+          ownershipTransfer: {
+            state: "none",
+            active: false,
+            canCreate: false,
+            canCancel: false,
+            canAccept: false,
+            initiatedByYou: false,
+            recipientEmailMasked: null,
+            initiatedAt: null,
+            expiresAt: null,
+            acceptedAt: null,
+            invalidReason: null,
+            transferId: null,
+            acceptUrl: null,
+          },
           verificationTimeline: buildVerificationTimeline({
             scanSummary: emptySummary,
             classification: "NOT_READY_FOR_CUSTOMER_USE",
@@ -795,6 +1041,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
     const riskProfile = await resolveDuplicateRiskProfile(qrCode.licenseeId || null);
 
     const customerUserId = req.customer?.userId || null;
+    const requestedTransferToken = String(req.query.transfer || "").trim() || null;
     const requestDeviceFingerprint = deriveRequestDeviceFingerprint(req);
     const deviceClaimToken = getDeviceClaimTokenFromRequest(req);
     const deviceTokenHash = deviceClaimToken ? hashToken(deviceClaimToken) : null;
@@ -821,6 +1068,18 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       isReady: qrReady,
       isBlocked: qrBlocked,
       allowClaim: verifyUxPolicy.allowOwnershipClaim,
+    });
+    const baseOwnershipTransfer = createOwnershipTransferView({
+      code: qrCode.code,
+      transfer: requestedTransferToken
+        ? await loadOwnershipTransferByRawToken(requestedTransferToken)
+        : await loadPendingOwnershipTransferForQr(qrCode.id),
+      rawToken: requestedTransferToken,
+      customerUserId,
+      ownershipStatus: baseOwnershipStatus,
+      isReady: qrReady,
+      isBlocked: qrBlocked,
+      transferRequested: Boolean(requestedTransferToken),
     });
 
     const basePayload = {
@@ -868,6 +1127,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
           reasons,
           scanSummary: baseScanSummary,
           ownershipStatus: baseOwnershipStatus,
+          ownershipTransfer: baseOwnershipTransfer,
           verificationTimeline,
           riskExplanation,
           verifyUxPolicy,
@@ -912,6 +1172,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
           reasons,
           scanSummary: baseScanSummary,
           ownershipStatus: baseOwnershipStatus,
+          ownershipTransfer: baseOwnershipTransfer,
           verificationTimeline,
           riskExplanation,
           verifyUxPolicy,
@@ -1010,6 +1271,18 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       isReady,
       isBlocked,
       allowClaim: verifyUxPolicy.allowOwnershipClaim,
+    });
+    const ownershipTransfer = createOwnershipTransferView({
+      code: updated.code,
+      transfer: requestedTransferToken
+        ? await loadOwnershipTransferByRawToken(requestedTransferToken)
+        : await loadPendingOwnershipTransferForQr(updated.id),
+      rawToken: requestedTransferToken,
+      customerUserId,
+      ownershipStatus,
+      isReady,
+      isBlocked,
+      transferRequested: Boolean(requestedTransferToken),
     });
 
     const anomalyModelScore = deriveAnomalyModelScore({
@@ -1110,6 +1383,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
         reasons,
         scanSummary: postScanSummary,
         ownershipStatus,
+        ownershipTransfer,
         verificationTimeline,
         riskExplanation,
         verifyUxPolicy,
@@ -1217,6 +1491,7 @@ export const claimProductOwnership = async (req: CustomerVerifyRequest, res: Res
               claimSource: "DEVICE_AND_USER",
             },
             select: {
+              id: true,
               userId: true,
               claimedAt: true,
               deviceTokenHash: true,
@@ -1315,6 +1590,7 @@ export const claimProductOwnership = async (req: CustomerVerifyRequest, res: Res
           claimSource: customerUserId ? "USER" : "DEVICE",
         },
         select: {
+          id: true,
           userId: true,
           claimedAt: true,
           deviceTokenHash: true,
@@ -1528,6 +1804,7 @@ export const linkDeviceClaimToCustomer = async (req: CustomerVerifyRequest, res:
         claimSource: "DEVICE_AND_USER",
       },
       select: {
+        id: true,
         userId: true,
         claimedAt: true,
         deviceTokenHash: true,
@@ -1572,6 +1849,547 @@ export const linkDeviceClaimToCustomer = async (req: CustomerVerifyRequest, res:
     return res.status(500).json({
       success: false,
       error: "Failed to link claim",
+    });
+  }
+};
+
+export const createOwnershipTransfer = async (req: CustomerVerifyRequest, res: Response) => {
+  try {
+    const customer = req.customer;
+    if (!customer) {
+      return res.status(401).json({ success: false, error: "Customer authentication required" });
+    }
+
+    const parsed = createOwnershipTransferSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: parsed.error.errors[0]?.message || "Invalid ownership transfer payload",
+      });
+    }
+
+    const normalizedCode = normalizeCode(req.params.code || "");
+    if (!normalizedCode || normalizedCode.length < 2) {
+      return res.status(400).json({ success: false, error: "Invalid QR code format" });
+    }
+
+    const qrCode = await prisma.qRCode.findUnique({
+      where: { code: normalizedCode },
+      select: {
+        id: true,
+        code: true,
+        status: true,
+        licenseeId: true,
+      },
+    });
+    if (!qrCode) {
+      return res.status(404).json({ success: false, error: "QR code not found" });
+    }
+
+    const verifyUxPolicy = await resolveVerifyUxPolicy(qrCode.licenseeId || null);
+    const allowClaim = verifyUxPolicy.allowOwnershipClaim !== false;
+    const isBlocked = qrCode.status === QRStatus.BLOCKED;
+    const isReady = isQrReadyForCustomerUse(qrCode.status);
+    if (!allowClaim || isBlocked || !isReady) {
+      return res.status(409).json({
+        success: false,
+        error: "Ownership transfer is not available for this product state.",
+      });
+    }
+
+    const deviceClaimToken = getDeviceClaimTokenFromRequest(req);
+    const deviceTokenHash = deviceClaimToken ? hashToken(deviceClaimToken) : null;
+    const requesterIpHash = hashIp(req.ip);
+
+    let ownership = await loadOwnershipByQrCodeId(qrCode.id);
+    if (!ownership) {
+      return res.status(409).json({
+        success: false,
+        error: "Claim ownership before starting a resale transfer.",
+      });
+    }
+
+    let ownershipStatus = buildOwnershipStatus({
+      ownership,
+      customerUserId: customer.userId,
+      deviceTokenHash,
+      ipHash: requesterIpHash,
+      isReady,
+      isBlocked,
+      allowClaim,
+    });
+
+    if (!ownershipStatus.isOwnedByRequester) {
+      return res.status(403).json({
+        success: false,
+        error: "Only the current signed-in owner can start a transfer.",
+      });
+    }
+
+    if (ownership.userId !== customer.userId) {
+      ownership = await prisma.ownership.update({
+        where: { qrCodeId: qrCode.id },
+        data: {
+          userId: customer.userId,
+          linkedAt: new Date(),
+          claimSource: "DEVICE_AND_USER",
+        },
+        select: {
+          id: true,
+          userId: true,
+          claimedAt: true,
+          deviceTokenHash: true,
+          ipHash: true,
+          userAgentHash: true,
+          claimSource: true,
+          linkedAt: true,
+        },
+      });
+      ownershipStatus = buildOwnershipStatus({
+        ownership,
+        customerUserId: customer.userId,
+        deviceTokenHash,
+        ipHash: requesterIpHash,
+        isReady,
+        isBlocked,
+        allowClaim,
+      });
+    }
+
+    await expirePendingOwnershipTransfers({ qrCodeId: qrCode.id });
+    await prisma.ownershipTransfer.updateMany({
+      where: {
+        qrCodeId: qrCode.id,
+        status: OwnershipTransferStatus.PENDING,
+      },
+      data: {
+        status: OwnershipTransferStatus.CANCELLED,
+        cancelledAt: new Date(),
+      },
+    });
+
+    const rawToken = randomOpaqueToken(32);
+    const expiresAt = new Date(Date.now() + OWNERSHIP_TRANSFER_TTL_HOURS * 60 * 60 * 1000);
+    const recipientEmail = parsed.data.recipientEmail?.trim().toLowerCase() || null;
+    const normalizedUa = normalizeUserAgent(req.get("user-agent") || null);
+
+    const transfer = await prisma.ownershipTransfer.create({
+      data: {
+        qrCodeId: qrCode.id,
+        ownershipId: ownership.id,
+        initiatedByCustomerId: customer.userId,
+        initiatedByEmail: customer.email,
+        recipientEmail,
+        tokenHash: hashToken(rawToken),
+        status: OwnershipTransferStatus.PENDING,
+        expiresAt,
+        metadata: {
+          requestedFromIpHash: requesterIpHash,
+          requestedUserAgentHash: normalizedUa ? hashToken(`ua:${normalizedUa}`) : null,
+        },
+      },
+      select: {
+        id: true,
+        qrCodeId: true,
+        ownershipId: true,
+        initiatedByCustomerId: true,
+        initiatedByEmail: true,
+        recipientEmail: true,
+        status: true,
+        expiresAt: true,
+        acceptedAt: true,
+        cancelledAt: true,
+        lastViewedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    const transferLink = buildOwnershipTransferLink(qrCode.code, rawToken);
+
+    await createAuditLog({
+      action: "VERIFY_TRANSFER_CREATED",
+      entityType: "OwnershipTransfer",
+      entityId: transfer.id,
+      licenseeId: qrCode.licenseeId || undefined,
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || undefined,
+      details: {
+        qrCodeId: qrCode.id,
+        recipientEmail: recipientEmail || null,
+        expiresAt: expiresAt.toISOString(),
+      },
+    });
+
+    const emailJobs: Promise<any>[] = [];
+    if (recipientEmail) {
+      emailJobs.push(
+        sendAuthEmail({
+          toAddress: recipientEmail,
+          subject: "MSCQR ownership transfer ready to accept",
+          text:
+            `A current owner started a product transfer for QR ${qrCode.code}.\n\n` +
+            `Open this secure link to review and accept the transfer:\n${transferLink}\n\n` +
+            `This link expires at ${expiresAt.toISOString()}.`,
+          template: "verify_transfer_recipient",
+          licenseeId: qrCode.licenseeId || null,
+          userAgent: req.get("user-agent") || undefined,
+        })
+      );
+    }
+    if (customer.email) {
+      emailJobs.push(
+        sendAuthEmail({
+          toAddress: customer.email,
+          subject: "MSCQR ownership transfer created",
+          text:
+            `Your transfer for QR ${qrCode.code} is active.\n\n` +
+            `Share this secure link with the next owner:\n${transferLink}\n\n` +
+            `It expires at ${expiresAt.toISOString()}.`,
+          template: "verify_transfer_sender",
+          licenseeId: qrCode.licenseeId || null,
+          userAgent: req.get("user-agent") || undefined,
+        })
+      );
+    }
+    await Promise.allSettled(emailJobs);
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        message: "Ownership transfer created. Share the secure acceptance link with the next owner.",
+        transferLink,
+        transferToken: rawToken,
+        ownershipStatus,
+        ownershipTransfer: createOwnershipTransferView({
+          code: qrCode.code,
+          transfer,
+          rawToken,
+          customerUserId: customer.userId,
+          ownershipStatus,
+          isReady,
+          isBlocked,
+          transferRequested: true,
+        }),
+      },
+    });
+  } catch (error) {
+    console.error("createOwnershipTransfer error:", error);
+    return res.status(500).json({ success: false, error: "Failed to create ownership transfer" });
+  }
+};
+
+export const cancelOwnershipTransfer = async (req: CustomerVerifyRequest, res: Response) => {
+  try {
+    const customer = req.customer;
+    if (!customer) {
+      return res.status(401).json({ success: false, error: "Customer authentication required" });
+    }
+
+    const parsed = cancelOwnershipTransferSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: parsed.error.errors[0]?.message || "Invalid cancellation payload",
+      });
+    }
+
+    const normalizedCode = normalizeCode(req.params.code || "");
+    if (!normalizedCode || normalizedCode.length < 2) {
+      return res.status(400).json({ success: false, error: "Invalid QR code format" });
+    }
+
+    const qrCode = await prisma.qRCode.findUnique({
+      where: { code: normalizedCode },
+      select: { id: true, code: true, licenseeId: true, status: true },
+    });
+    if (!qrCode) {
+      return res.status(404).json({ success: false, error: "QR code not found" });
+    }
+
+    await expirePendingOwnershipTransfers({ qrCodeId: qrCode.id });
+    const transfer = await prisma.ownershipTransfer.findFirst({
+      where: {
+        qrCodeId: qrCode.id,
+        status: OwnershipTransferStatus.PENDING,
+        ...(parsed.data.transferId ? { id: parsed.data.transferId } : {}),
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: {
+        id: true,
+        qrCodeId: true,
+        ownershipId: true,
+        initiatedByCustomerId: true,
+        initiatedByEmail: true,
+        recipientEmail: true,
+        status: true,
+        expiresAt: true,
+        acceptedAt: true,
+        cancelledAt: true,
+        lastViewedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!transfer) {
+      return res.status(404).json({ success: false, error: "No active transfer found for this product." });
+    }
+    if (transfer.initiatedByCustomerId !== customer.userId) {
+      return res.status(403).json({ success: false, error: "Only the transfer initiator can cancel it." });
+    }
+
+    const cancelled = await prisma.ownershipTransfer.update({
+      where: { id: transfer.id },
+      data: {
+        status: OwnershipTransferStatus.CANCELLED,
+        cancelledAt: new Date(),
+      },
+      select: {
+        id: true,
+        qrCodeId: true,
+        ownershipId: true,
+        initiatedByCustomerId: true,
+        initiatedByEmail: true,
+        recipientEmail: true,
+        status: true,
+        expiresAt: true,
+        acceptedAt: true,
+        cancelledAt: true,
+        lastViewedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    await createAuditLog({
+      action: "VERIFY_TRANSFER_CANCELLED",
+      entityType: "OwnershipTransfer",
+      entityId: cancelled.id,
+      licenseeId: qrCode.licenseeId || undefined,
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || undefined,
+      details: {
+        qrCodeId: qrCode.id,
+      },
+    });
+
+    await Promise.allSettled(
+      [cancelled.initiatedByEmail, cancelled.recipientEmail]
+        .filter(Boolean)
+        .map((email) =>
+          sendAuthEmail({
+            toAddress: String(email),
+            subject: "MSCQR ownership transfer cancelled",
+            text: `The pending ownership transfer for QR ${qrCode.code} has been cancelled.`,
+            template: "verify_transfer_cancelled",
+            licenseeId: qrCode.licenseeId || null,
+            userAgent: req.get("user-agent") || undefined,
+          })
+        )
+    );
+
+    return res.json({
+      success: true,
+      data: {
+        message: "Ownership transfer cancelled.",
+        ownershipTransfer: createOwnershipTransferView({
+          code: qrCode.code,
+          transfer: cancelled,
+          customerUserId: customer.userId,
+          ownershipStatus: {
+            isClaimed: true,
+            claimedAt: null,
+            isOwnedByRequester: true,
+            isClaimedByAnother: false,
+            canClaim: false,
+            state: "owned_by_you",
+            matchMethod: "user",
+          },
+          isReady: isQrReadyForCustomerUse(qrCode.status),
+          isBlocked: qrCode.status === QRStatus.BLOCKED,
+        }),
+      },
+    });
+  } catch (error) {
+    console.error("cancelOwnershipTransfer error:", error);
+    return res.status(500).json({ success: false, error: "Failed to cancel ownership transfer" });
+  }
+};
+
+export const acceptOwnershipTransfer = async (req: CustomerVerifyRequest, res: Response) => {
+  try {
+    const customer = req.customer;
+    if (!customer) {
+      return res.status(401).json({ success: false, error: "Customer authentication required" });
+    }
+
+    const parsed = acceptOwnershipTransferSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: parsed.error.errors[0]?.message || "Invalid transfer acceptance payload",
+      });
+    }
+
+    const transfer = await loadOwnershipTransferByRawToken(parsed.data.token);
+    if (!transfer || transfer.status !== OwnershipTransferStatus.PENDING) {
+      return res.status(404).json({ success: false, error: "Transfer link is invalid or has expired." });
+    }
+    if (transfer.initiatedByCustomerId === customer.userId) {
+      return res.status(409).json({ success: false, error: "The current owner cannot accept their own transfer." });
+    }
+
+    const qrCode = await prisma.qRCode.findUnique({
+      where: { id: transfer.qrCodeId },
+      select: {
+        id: true,
+        code: true,
+        status: true,
+        licenseeId: true,
+      },
+    });
+    if (!qrCode) {
+      return res.status(404).json({ success: false, error: "QR code not found" });
+    }
+
+    const isBlocked = qrCode.status === QRStatus.BLOCKED;
+    const isReady = isQrReadyForCustomerUse(qrCode.status);
+    if (isBlocked || !isReady) {
+      return res.status(409).json({
+        success: false,
+        error: "This product is not in a transferable state.",
+      });
+    }
+
+    const normalizedUa = normalizeUserAgent(req.get("user-agent") || null);
+    const requesterIpHash = hashIp(req.ip);
+
+    const result = await prisma.$transaction(async (tx) => {
+      const currentTransfer = await tx.ownershipTransfer.findUnique({
+        where: { id: transfer.id },
+      });
+      if (!currentTransfer || currentTransfer.status !== OwnershipTransferStatus.PENDING) {
+        throw new Error("Transfer link is no longer active.");
+      }
+
+      const updatedOwnership = await tx.ownership.update({
+        where: { id: transfer.ownershipId },
+        data: {
+          userId: customer.userId,
+          linkedAt: new Date(),
+          claimedAt: new Date(),
+          ipHash: requesterIpHash,
+          userAgentHash: normalizedUa ? hashToken(`ua:${normalizedUa}`) : null,
+          claimSource: "USER_TRANSFERRED",
+        },
+      select: {
+        id: true,
+        userId: true,
+        claimedAt: true,
+          deviceTokenHash: true,
+          ipHash: true,
+          userAgentHash: true,
+          claimSource: true,
+          linkedAt: true,
+        },
+      });
+
+      const acceptedTransfer = await tx.ownershipTransfer.update({
+        where: { id: transfer.id },
+        data: {
+          status: OwnershipTransferStatus.ACCEPTED,
+          acceptedAt: new Date(),
+        },
+        select: {
+          id: true,
+          qrCodeId: true,
+          ownershipId: true,
+          initiatedByCustomerId: true,
+          initiatedByEmail: true,
+          recipientEmail: true,
+          status: true,
+          expiresAt: true,
+          acceptedAt: true,
+          cancelledAt: true,
+          lastViewedAt: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+
+      await tx.ownershipTransfer.updateMany({
+        where: {
+          qrCodeId: transfer.qrCodeId,
+          status: OwnershipTransferStatus.PENDING,
+          id: { not: transfer.id },
+        },
+        data: {
+          status: OwnershipTransferStatus.CANCELLED,
+          cancelledAt: new Date(),
+        },
+      });
+
+      return { updatedOwnership, acceptedTransfer };
+    });
+
+    await createAuditLog({
+      action: "VERIFY_TRANSFER_ACCEPTED",
+      entityType: "OwnershipTransfer",
+      entityId: transfer.id,
+      licenseeId: qrCode.licenseeId || undefined,
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || undefined,
+      details: {
+        qrCodeId: qrCode.id,
+        recipientCustomerId: customer.userId,
+      },
+    });
+
+    await Promise.allSettled(
+      [transfer.initiatedByEmail, customer.email, transfer.recipientEmail]
+        .filter(Boolean)
+        .map((email) =>
+          sendAuthEmail({
+            toAddress: String(email),
+            subject: "MSCQR ownership transfer accepted",
+            text: `The ownership transfer for QR ${qrCode.code} has been accepted successfully.`,
+            template: "verify_transfer_accepted",
+            licenseeId: qrCode.licenseeId || null,
+            userAgent: req.get("user-agent") || undefined,
+          })
+        )
+    );
+
+    const ownershipStatus = buildOwnershipStatus({
+      ownership: result.updatedOwnership,
+      customerUserId: customer.userId,
+      isReady,
+      isBlocked,
+      allowClaim: true,
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        message: "Ownership transfer accepted. This product is now linked to your signed-in account.",
+        code: qrCode.code,
+        ownershipStatus,
+        ownershipTransfer: createOwnershipTransferView({
+          code: qrCode.code,
+          transfer: result.acceptedTransfer,
+          customerUserId: customer.userId,
+          ownershipStatus,
+          isReady,
+          isBlocked,
+        }),
+      },
+    });
+  } catch (error: any) {
+    console.error("acceptOwnershipTransfer error:", error);
+    return res.status(500).json({
+      success: false,
+      error: error?.message || "Failed to accept ownership transfer",
     });
   }
 };

@@ -17,6 +17,7 @@ export declare const generateQRCodes: (req: AuthRequest, res: Response) => Promi
 export declare const blockQRCode: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
 export declare const blockBatch: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
 export declare const getBatches: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const getBatchAllocationMap: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
 export declare const getQRCodes: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
 export declare const generateSignedScanLinks: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
 export declare const getStats: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;

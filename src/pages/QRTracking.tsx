@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
-import { AlertTriangle, Ban, CheckCircle2, RefreshCw, ScanEye, Search, ShieldAlert } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, Copy, RefreshCw, ScanEye, Search, ShieldAlert } from "lucide-react";
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import apiClient from "@/lib/api-client";
@@ -16,6 +16,7 @@ import { PremiumSectionAccordion } from "@/components/premium/PremiumSectionAcco
 import { TrackingInsightsPanel, type TrackingTotals, type TrackingTrendPoint } from "@/components/premium/TrackingInsightsPanel";
 import { PremiumTableSkeleton } from "@/components/premium/PremiumLoadingBlocks";
 import { PREMIUM_PALETTE } from "@/components/premium/palette";
+import { BatchAllocationMapDialog } from "@/components/batches/BatchAllocationMapDialog";
 
 type BatchSummaryRow = {
   id: string;
@@ -24,6 +25,9 @@ type BatchSummaryRow = {
   startCode: string;
   endCode: string;
   totalCodes: number;
+  batchInventoryTotal: number;
+  scopeCodeCount: number;
+  scanEventCount: number;
   createdAt: string;
   counts?: Record<string, number>;
 };
@@ -50,8 +54,7 @@ type ScanLogRow = {
 
 type TrackingFilterState = {
   code: string;
-  batchId: string;
-  batchName: string;
+  batchQuery: string;
   status: string;
   firstScan: string;
   fromDate: string;
@@ -82,14 +85,33 @@ export default function QRTracking() {
 
   const [summary, setSummary] = useState<BatchSummaryRow[]>([]);
   const [logs, setLogs] = useState<ScanLogRow[]>([]);
+  const [scopeMeta, setScopeMeta] = useState<{
+    mode: "inventory" | "activity";
+    title: string;
+    description: string;
+    quantities: { distinctCodes: number; scanEvents: number; matchedBatches: number };
+  } | null>(null);
+  const [analyticsTotals, setAnalyticsTotals] = useState<TrackingTotals>({
+    total: 0,
+    dormant: 0,
+    allocated: 0,
+    printed: 0,
+    redeemed: 0,
+    blocked: 0,
+    created: 0,
+    scanEvents: 0,
+  });
+  const [analyticsTrend, setAnalyticsTrend] = useState<TrackingTrendPoint[]>([]);
   const [licensees, setLicensees] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [allocationMapOpen, setAllocationMapOpen] = useState(false);
+  const [allocationMapLoading, setAllocationMapLoading] = useState(false);
+  const [allocationMap, setAllocationMap] = useState<any | null>(null);
 
   const [filters, setFilters] = useState<TrackingFilterState>({
     code: "",
-    batchId: "",
-    batchName: "",
+    batchQuery: "",
     status: "all",
     firstScan: "all",
     fromDate: "",
@@ -109,40 +131,57 @@ export default function QRTracking() {
     const current = { ...filters, ...(opts?.override || {}) };
 
     try {
-      const [summaryRes, logsRes] = await Promise.all([
-        apiClient.getBatchSummary({ licenseeId: isSuperAdmin && current.licenseeId !== "all" ? current.licenseeId : undefined }),
-        apiClient.getScanLogs({
-          licenseeId: isSuperAdmin && current.licenseeId !== "all" ? current.licenseeId : undefined,
-          code: current.code.trim() || undefined,
-          batchId: current.batchId.trim() || undefined,
-          status: current.status !== "all" ? (current.status as any) : undefined,
-          onlyFirstScan:
-            current.firstScan === "yes"
-              ? true
-              : current.firstScan === "no"
+      const response = await apiClient.getQrTrackingAnalytics({
+        licenseeId: isSuperAdmin && current.licenseeId !== "all" ? current.licenseeId : undefined,
+        code: current.code.trim() || undefined,
+        batchQuery: current.batchQuery.trim() || undefined,
+        status: current.status !== "all" ? (current.status as any) : undefined,
+        onlyFirstScan:
+          current.firstScan === "yes"
+            ? true
+            : current.firstScan === "no"
               ? false
               : undefined,
-          from: asIsoStart(current.fromDate),
-          to: asIsoEnd(current.toDate),
-          limit: 200,
-        }),
-      ]);
+        from: asIsoStart(current.fromDate),
+        to: asIsoEnd(current.toDate),
+        limit: 200,
+      });
 
-      if (!summaryRes.success) throw new Error(summaryRes.error || "Failed to load batch summary");
-      if (!logsRes.success) throw new Error(logsRes.error || "Failed to load scan logs");
+      if (!response.success || !response.data) {
+        throw new Error(response.error || "Failed to load tracking analytics");
+      }
 
-      setSummary((summaryRes.data as any[]) || []);
-      const payload: any = logsRes.data;
-      const list = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload?.logs)
-        ? payload.logs
-        : [];
-      setLogs(list);
+      const payload: any = response.data;
+      setSummary(Array.isArray(payload.batches) ? payload.batches : []);
+      setLogs(Array.isArray(payload.logs) ? payload.logs : []);
+      setAnalyticsTotals({
+        total: Number(payload.totals?.total || 0),
+        dormant: Number(payload.totals?.dormant || 0),
+        allocated: Number(payload.totals?.allocated || 0),
+        printed: Number(payload.totals?.printed || 0),
+        redeemed: Number(payload.totals?.redeemed || 0),
+        blocked: Number(payload.totals?.blocked || 0),
+        created: Number(payload.totals?.created || 0),
+        scanEvents: Number(payload.scope?.quantities?.scanEvents || 0),
+      });
+      setAnalyticsTrend(Array.isArray(payload.trend) ? payload.trend : []);
+      setScopeMeta(payload.scope || null);
     } catch (e: any) {
       setError(e?.message || "Failed to load tracking data");
       setSummary([]);
       setLogs([]);
+      setAnalyticsTrend([]);
+      setScopeMeta(null);
+      setAnalyticsTotals({
+        total: 0,
+        dormant: 0,
+        allocated: 0,
+        printed: 0,
+        redeemed: 0,
+        blocked: 0,
+        created: 0,
+        scanEvents: 0,
+      });
     } finally {
       if (!opts?.silent) setLoading(false);
     }
@@ -175,19 +214,6 @@ export default function QRTracking() {
     return map;
   }, [summary]);
 
-  const filteredSummary = useMemo(() => {
-    const q = filters.batchName.trim().toLowerCase();
-    if (!q) return summary;
-    return summary.filter((b) => {
-      return (
-        String(b.name || "").toLowerCase().includes(q) ||
-        String(b.id || "").toLowerCase().includes(q) ||
-        String(b.startCode || "").toLowerCase().includes(q) ||
-        String(b.endCode || "").toLowerCase().includes(q)
-      );
-    });
-  }, [summary, filters.batchName]);
-
   const friendlyError = useMemo(() => {
     const msg = String(error || "").toLowerCase();
     if (!msg) return "";
@@ -204,108 +230,31 @@ export default function QRTracking() {
 
   const blockedLogCount = logs.filter((l) => String(l.qrCode?.status || l.status || "").toUpperCase() === "BLOCKED").length;
   const firstScanCount = logs.filter((l) => Boolean(l.isFirstScan)).length;
-  const summaryInScope = useMemo(() => {
-    const batchQuery = filters.batchId.trim().toLowerCase();
-    if (!batchQuery) return filteredSummary;
-    return filteredSummary.filter((b) => {
-      const id = String(b.id || "").toLowerCase();
-      const name = String(b.name || "").toLowerCase();
-      return id.includes(batchQuery) || name.includes(batchQuery);
-    });
-  }, [filteredSummary, filters.batchId]);
-  const hasScanScopedFilters = useMemo(
-    () =>
-      Boolean(filters.code.trim()) ||
-      filters.status !== "all" ||
-      filters.firstScan !== "all" ||
-      Boolean(filters.fromDate) ||
-      Boolean(filters.toDate),
-    [filters.code, filters.status, filters.firstScan, filters.fromDate, filters.toDate]
-  );
-
-  const analyticsTotals = useMemo<TrackingTotals>(() => {
-    const totals: TrackingTotals = {
-      total: 0,
-      dormant: 0,
-      allocated: 0,
-      printed: 0,
-      redeemed: 0,
-      blocked: 0,
-      created: summaryInScope.length,
-    };
-
-    if (hasScanScopedFilters && logs.length) {
-      const uniqueCodes = new Set<string>();
-      logs.forEach((entry) => {
-        uniqueCodes.add(String(entry.code || entry.id || ""));
-        const status = String(entry.qrCode?.status || entry.status || "").toUpperCase();
-        if (status === "BLOCKED") totals.blocked += 1;
-        else if (status === "PRINTED") totals.printed += 1;
-        else if (status === "REDEEMED" || status === "SCANNED") totals.redeemed += 1;
-        else if (status === "ALLOCATED" || status === "ACTIVE" || status === "ACTIVATED") totals.allocated += 1;
-        else totals.dormant += 1;
-      });
-      totals.total = uniqueCodes.size || logs.length;
-      return totals;
+  const openAllocationMap = async (batchId: string) => {
+    setAllocationMapOpen(true);
+    setAllocationMapLoading(true);
+    setAllocationMap(null);
+    try {
+      const response = await apiClient.getBatchAllocationMap(batchId);
+      if (!response.success || !response.data) {
+        throw new Error(response.error || "Could not load allocation details.");
+      }
+      setAllocationMap(response.data);
+    } catch (e: any) {
+      setAllocationMapOpen(false);
+      setError(e?.message || "Could not load allocation details.");
+    } finally {
+      setAllocationMapLoading(false);
     }
+  };
 
-    summaryInScope.forEach((row) => {
-      const counts = row.counts || {};
-      totals.total += Number(row.totalCodes || 0);
-      totals.dormant += toCount(counts, "DORMANT");
-      totals.allocated += toCount(counts, "ALLOCATED") + toCount(counts, "ACTIVE") + toCount(counts, "ACTIVATED");
-      totals.printed += toCount(counts, "PRINTED");
-      totals.redeemed += toCount(counts, "REDEEMED") + toCount(counts, "SCANNED");
-      totals.blocked += toCount(counts, "BLOCKED");
-    });
-
-    return totals;
-  }, [summaryInScope, hasScanScopedFilters, logs]);
-
-  const analyticsTrend = useMemo<TrackingTrendPoint[]>(() => {
-    const byDay = new Map<string, TrackingTrendPoint>();
-    const formatDay = (value: string) => format(new Date(value), "MMM d");
-    const seedPoint = (label: string): TrackingTrendPoint => ({
-      label,
-      total: 0,
-      dormant: 0,
-      allocated: 0,
-      printed: 0,
-      redeemed: 0,
-      blocked: 0,
-    });
-
-    if (logs.length) {
-      logs.forEach((entry) => {
-        const day = entry.scannedAt ? formatDay(entry.scannedAt) : "Unknown";
-        const current = byDay.get(day) || seedPoint(day);
-        const status = String(entry.qrCode?.status || entry.status || "").toUpperCase();
-        current.total += 1;
-        if (status === "BLOCKED") current.blocked += 1;
-        else if (status === "PRINTED") current.printed += 1;
-        else if (status === "REDEEMED" || status === "SCANNED") current.redeemed += 1;
-        else if (status === "ALLOCATED" || status === "ACTIVE" || status === "ACTIVATED") current.allocated += 1;
-        else current.dormant += 1;
-        byDay.set(day, current);
-      });
-      return Array.from(byDay.values()).slice(-10);
+  const copyBatchId = async (batchId: string) => {
+    try {
+      await navigator.clipboard.writeText(batchId);
+    } catch {
+      // non-blocking convenience action
     }
-
-    summaryInScope.forEach((row) => {
-      const day = row.createdAt ? formatDay(row.createdAt) : "Unknown";
-      const current = byDay.get(day) || seedPoint(day);
-      const counts = row.counts || {};
-      current.total += Number(row.totalCodes || 0);
-      current.dormant += toCount(counts, "DORMANT");
-      current.allocated += toCount(counts, "ALLOCATED") + toCount(counts, "ACTIVE") + toCount(counts, "ACTIVATED");
-      current.printed += toCount(counts, "PRINTED");
-      current.redeemed += toCount(counts, "REDEEMED") + toCount(counts, "SCANNED");
-      current.blocked += toCount(counts, "BLOCKED");
-      byDay.set(day, current);
-    });
-
-    return Array.from(byDay.values()).slice(-10);
-  }, [logs, summaryInScope]);
+  };
 
   return (
     <DashboardLayout>
@@ -356,6 +305,28 @@ export default function QRTracking() {
 
         <TrackingInsightsPanel totals={analyticsTotals} trend={analyticsTrend} loading={loading && !logs.length && !summary.length} />
 
+        {scopeMeta ? (
+          <div className="grid gap-3 md:grid-cols-4">
+            <div className="rounded-xl border bg-white p-4 shadow-sm">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">Scope mode</p>
+              <p className="mt-1 text-lg font-semibold text-slate-900">{scopeMeta.title}</p>
+              <p className="mt-1 text-xs text-slate-600">{scopeMeta.description}</p>
+            </div>
+            <div className="rounded-xl border bg-white p-4 shadow-sm">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">Distinct QR codes</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-900">{scopeMeta.quantities.distinctCodes.toLocaleString()}</p>
+            </div>
+            <div className="rounded-xl border bg-white p-4 shadow-sm">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">Scan events</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-900">{scopeMeta.quantities.scanEvents.toLocaleString()}</p>
+            </div>
+            <div className="rounded-xl border bg-white p-4 shadow-sm">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">Matched batches</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-900">{scopeMeta.quantities.matchedBatches.toLocaleString()}</p>
+            </div>
+          </div>
+        ) : null}
+
         <PremiumSectionAccordion
           defaultOpen={["tracking-filters"]}
           items={[
@@ -376,8 +347,7 @@ export default function QRTracking() {
                       onClick={() => {
                         const reset: TrackingFilterState = {
                           code: "",
-                          batchId: "",
-                          batchName: "",
+                          batchQuery: "",
                           status: "all",
                           firstScan: "all",
                           fromDate: "",
@@ -423,15 +393,9 @@ export default function QRTracking() {
                     </div>
 
                     <Input
-                      placeholder="Filter by batch ID"
-                      value={filters.batchId}
-                      onChange={(e) => setFilters((prev) => ({ ...prev, batchId: e.target.value }))}
-                    />
-
-                    <Input
-                      placeholder="Filter summary by batch name"
-                      value={filters.batchName}
-                      onChange={(e) => setFilters((prev) => ({ ...prev, batchName: e.target.value }))}
+                      placeholder="Batch ID / batch name"
+                      value={filters.batchQuery}
+                      onChange={(e) => setFilters((prev) => ({ ...prev, batchQuery: e.target.value }))}
                     />
 
                     <Select value={filters.status} onValueChange={(value) => setFilters((prev) => ({ ...prev, status: value }))}>
@@ -492,9 +456,9 @@ export default function QRTracking() {
               value: "batch-summary",
               title: "Batch Summary",
               subtitle: "Inventory state by batch and lifecycle status",
-              badge: <Badge className="border-[#8d9db664] bg-[#bccad630] text-[#4f5b75]">{filteredSummary.length} batches</Badge>,
+              badge: <Badge className="border-[#8d9db664] bg-[#bccad630] text-[#4f5b75]">{summary.length} batches</Badge>,
               content:
-                loading && !filteredSummary.length ? (
+                loading && !summary.length ? (
                   <PremiumTableSkeleton rows={6} />
                 ) : (
                   <div className="overflow-hidden rounded-lg border">
@@ -502,8 +466,11 @@ export default function QRTracking() {
                       <TableHeader>
                         <TableRow className="bg-slate-50">
                           <TableHead>Batch</TableHead>
+                          <TableHead>Batch ID</TableHead>
                           <TableHead>Range</TableHead>
-                          <TableHead>Total</TableHead>
+                          <TableHead>In Scope</TableHead>
+                          <TableHead>Inventory Total</TableHead>
+                          <TableHead>Events</TableHead>
                           <TableHead>Dormant</TableHead>
                           <TableHead>Allocated</TableHead>
                           <TableHead>Printed</TableHead>
@@ -513,14 +480,14 @@ export default function QRTracking() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredSummary.length === 0 ? (
+                        {summary.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={9} className="text-slate-500">
+                            <TableCell colSpan={12} className="text-slate-500">
                               No batches found for current filters.
                             </TableCell>
                           </TableRow>
                         ) : (
-                          filteredSummary.map((b) => {
+                          summary.map((b) => {
                             const counts = b.counts || {};
                             const allocated =
                               toCount(counts, "ALLOCATED") + toCount(counts, "ACTIVE") + toCount(counts, "ACTIVATED");
@@ -531,10 +498,23 @@ export default function QRTracking() {
                               <TableRow key={b.id}>
                                 <TableCell className="font-medium text-slate-900">{b.name}</TableCell>
                                 <TableCell className="font-mono text-xs text-slate-600">
+                                  <div className="flex items-center gap-2">
+                                    <span>{b.id}</span>
+                                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyBatchId(b.id)}>
+                                      <Copy className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </div>
+                                  <Button type="button" variant="link" className="h-auto px-0 text-xs" onClick={() => openAllocationMap(b.id)}>
+                                    Open allocation map
+                                  </Button>
+                                </TableCell>
+                                <TableCell className="font-mono text-xs text-slate-600">
                                   <div>{b.startCode}</div>
                                   <div>{b.endCode}</div>
                                 </TableCell>
-                                <TableCell>{b.totalCodes}</TableCell>
+                                <TableCell>{Number(b.scopeCodeCount || 0).toLocaleString()}</TableCell>
+                                <TableCell>{Number(b.batchInventoryTotal || b.totalCodes || 0).toLocaleString()}</TableCell>
+                                <TableCell>{Number(b.scanEventCount || 0).toLocaleString()}</TableCell>
                                 <TableCell>
                                   <Badge className={statusTone("DORMANT")}>{toCount(counts, "DORMANT")}</Badge>
                                 </TableCell>
@@ -647,6 +627,19 @@ export default function QRTracking() {
                 ),
             },
           ]}
+        />
+
+        <BatchAllocationMapDialog
+          open={allocationMapOpen}
+          onOpenChange={(open) => {
+            setAllocationMapOpen(open);
+            if (!open) {
+              setAllocationMap(null);
+              setAllocationMapLoading(false);
+            }
+          }}
+          loading={allocationMapLoading}
+          payload={allocationMap}
         />
       </div>
     </DashboardLayout>

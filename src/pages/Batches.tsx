@@ -10,6 +10,7 @@ import apiClient from "@/lib/api-client";
 import { friendlyReferenceLabel, shortRawReference } from "@/lib/friendly-reference";
 import { getPrinterDiagnosticSummary, type LocalPrinterAgentSnapshot } from "@/lib/printer-diagnostics";
 import { buildSupportDiagnosticsPayload, captureSupportScreenshot } from "@/lib/support-diagnostics";
+import { BatchAllocationMapDialog } from "@/components/batches/BatchAllocationMapDialog";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -48,7 +49,7 @@ import { onMutationEvent } from "@/lib/mutation-events";
 import { format } from "date-fns";
 import { Search, Trash2, RefreshCw, Download, UserCog, Activity, PencilLine } from "lucide-react";
 import QRCode from "qrcode";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { saveAs } from "file-saver";
 
@@ -56,6 +57,10 @@ type BatchRow = {
   id: string;
   name: string;
   licenseeId: string;
+  manufacturerId?: string | null;
+  batchKind?: "RECEIVED_PARENT" | "MANUFACTURER_CHILD";
+  parentBatchId?: string | null;
+  rootBatchId?: string | null;
   startCode: string;
   endCode: string;
   totalCodes: number;
@@ -65,6 +70,12 @@ type BatchRow = {
   manufacturer?: { id: string; name: string; email: string };
   _count?: { qrCodes: number };
   availableCodes?: number;
+  unassignedRemainingCodes?: number;
+  assignedCodes?: number;
+  printableCodes?: number;
+  printedCodes?: number;
+  redeemedCodes?: number;
+  blockedCodes?: number;
   remainingStartCode?: string | null;
   remainingEndCode?: string | null;
 };
@@ -160,6 +171,7 @@ export default function Batches() {
   const { user } = useAuth();
   const progress = useOperationProgress();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const role = user?.role;
 
@@ -257,6 +269,10 @@ export default function Batches() {
     error: "No trusted printer heartbeat yet",
   });
   const [exportingBatchId, setExportingBatchId] = useState<string | null>(null);
+  const [allocationMapOpen, setAllocationMapOpen] = useState(false);
+  const [allocationMapLoading, setAllocationMapLoading] = useState(false);
+  const [allocationMap, setAllocationMap] = useState<any | null>(null);
+  const [allocationHint, setAllocationHint] = useState<{ title: string; body: string } | null>(null);
 
   // allocation history
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -520,6 +536,18 @@ export default function Batches() {
   }, []);
 
   useEffect(() => {
+    const manufacturerName = String(searchParams.get("manufacturerName") || "").trim();
+    const printState = String(searchParams.get("printState") || "").trim().toLowerCase();
+    if (manufacturerName) {
+      setQ(manufacturerName);
+      setAssignmentFilter("assigned");
+    }
+    if (printState === "printed" || printState === "pending") {
+      setPrintFilter(printState === "printed" ? "printed" : "unprinted");
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
     const off = onMutationEvent(() => {
       fetchBatches();
       fetchManufacturersForAssign();
@@ -567,13 +595,18 @@ export default function Batches() {
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
+    const manufacturerIdFilter = String(searchParams.get("manufacturerId") || "").trim();
     return rows.filter((b) => {
+      if (manufacturerIdFilter && String(b.manufacturer?.id || b.manufacturerId || "").trim() !== manufacturerIdFilter) {
+        return false;
+      }
       if (isManufacturer) {
         if (printFilter === "printed" && !b.printedAt) return false;
         if (printFilter === "unprinted" && b.printedAt) return false;
       } else {
-        if (assignmentFilter === "assigned" && !b.manufacturer) return false;
-        if (assignmentFilter === "unassigned" && b.manufacturer) return false;
+        const isAssignedRow = b.batchKind === "MANUFACTURER_CHILD" || Boolean(b.manufacturer);
+        if (assignmentFilter === "assigned" && !isAssignedRow) return false;
+        if (assignmentFilter === "unassigned" && isAssignedRow) return false;
       }
       if (!s) return true;
       const hay = [
@@ -591,7 +624,17 @@ export default function Batches() {
 
       return hay.includes(s);
     });
-  }, [rows, q, assignmentFilter, isManufacturer, printFilter]);
+  }, [rows, q, assignmentFilter, isManufacturer, printFilter, searchParams]);
+
+  const getAvailableInventory = (batch: BatchRow) =>
+    batch.batchKind === "MANUFACTURER_CHILD"
+      ? Number(batch.printableCodes ?? batch.availableCodes ?? 0)
+      : Number(batch.unassignedRemainingCodes ?? batch.availableCodes ?? 0);
+
+  const getAvailabilityTitle = (batch: BatchRow) =>
+    batch.batchKind === "MANUFACTURER_CHILD" ? "Ready to print" : "Unassigned remaining";
+
+  const getAvailabilityTone = (value: number) => (value > 0 ? "default" : "secondary");
 
   // -------- DELETE (admins) --------
   const handleDelete = async (batch: BatchRow) => {
@@ -669,10 +712,11 @@ export default function Batches() {
       toast({ title: "Enter a valid quantity", variant: "destructive" });
       return;
     }
-    if (assignBatch.availableCodes != null && qty > assignBatch.availableCodes) {
+    const availableInventory = getAvailableInventory(assignBatch);
+    if (availableInventory > 0 && qty > availableInventory) {
       toast({
         title: "Quantity too large",
-        description: `Available: ${assignBatch.availableCodes}.`,
+        description: `Unassigned remaining: ${availableInventory}.`,
         variant: "destructive",
       });
       return;
@@ -682,7 +726,7 @@ export default function Batches() {
     if (showLargeAllocationProgress) {
       progress.start({
         title: "Allocating QR batch",
-        description: "Validating availability, assigning manufacturer, and creating child batch.",
+        description: "Validating remainder, assigning manufacturer, and creating allocated batch.",
         phaseLabel: "Allocation",
         detail: `Allocating ${qty.toLocaleString()} QR codes to selected manufacturer.`,
         mode: "simulated",
@@ -716,12 +760,18 @@ export default function Batches() {
       const createdName = data.newBatchName || "Auto";
       if (showLargeAllocationProgress) {
         await progress.complete(
-          `Allocated ${qty.toLocaleString()} codes. Child batch ${data.newBatchId || "(id pending)"} is ready for print.`
+          `Allocated ${qty.toLocaleString()} codes. Batch ${data.newBatchId || "(id pending)"} is ready for print.`
         );
+      }
+      if (data.message?.title || data.message?.body) {
+        setAllocationHint({
+          title: data.message?.title || "Allocation complete",
+          body: data.message?.body || "The source batch retains the remainder and the allocated batch is ready for print.",
+        });
       }
       toast({
         title: "Assigned",
-        description: `Created child batch ${data.newBatchId || "(id pending)"}: ${createdName}`,
+        description: `Created allocated batch ${data.newBatchId || "(id pending)"}: ${createdName}`,
       });
       setAssignOpen(false);
       setAssignBatch(null);
@@ -1045,10 +1095,11 @@ export default function Batches() {
       toast({ title: "Enter a valid quantity", variant: "destructive" });
       return;
     }
-    if (printBatch.availableCodes != null && qty > printBatch.availableCodes) {
+    const availableInventory = getAvailableInventory(printBatch);
+    if (availableInventory > 0 && qty > availableInventory) {
       toast({
         title: "Quantity too large",
-        description: `Available: ${printBatch.availableCodes}.`,
+        description: `Ready to print: ${availableInventory}.`,
         variant: "destructive",
       });
       return;
@@ -1300,6 +1351,27 @@ export default function Batches() {
     await fetchHistory(b);
   };
 
+  const openAllocationMap = async (batch: BatchRow) => {
+    setAllocationMapOpen(true);
+    setAllocationMapLoading(true);
+    setAllocationMap(null);
+    try {
+      const response = await apiClient.getBatchAllocationMap(batch.id);
+      if (!response.success || !response.data) {
+        toast({
+          title: "Allocation map unavailable",
+          description: response.error || "Could not load allocation details for this batch.",
+          variant: "destructive",
+        });
+        setAllocationMapOpen(false);
+        return;
+      }
+      setAllocationMap(response.data);
+    } finally {
+      setAllocationMapLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!historyOpen || !historyBatch) return;
     const timer = window.setInterval(() => {
@@ -1423,6 +1495,20 @@ export default function Batches() {
           </div>
         )}
 
+        {allocationHint ? (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="font-semibold">{allocationHint.title}</p>
+                <p className="mt-1">{allocationHint.body}</p>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => setAllocationHint(null)}>
+                Dismiss
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
         <Card>
           <CardHeader className="pb-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1468,7 +1554,7 @@ export default function Batches() {
                   <TableRow>
                     <TableHead>Batch</TableHead>
                     <TableHead>Range</TableHead>
-                    <TableHead>Availability</TableHead>
+                    <TableHead>Inventory State</TableHead>
                     <TableHead>Manufacturer</TableHead>
                     <TableHead>Printed</TableHead>
                     <TableHead>Created</TableHead>
@@ -1491,8 +1577,11 @@ export default function Batches() {
                     </TableRow>
                   ) : (
                     filtered.map((b) => {
-                      const assignedCount = b._count?.qrCodes ?? 0;
+                      const assignedCount = Number(b.assignedCodes ?? b._count?.qrCodes ?? 0);
                       const printed = !!b.printedAt;
+                      const availableInventory = getAvailableInventory(b);
+                      const isAllocatedBatch = b.batchKind === "MANUFACTURER_CHILD";
+                      const canAssignThisBatch = canAssignManufacturer && !isAllocatedBatch && !printed && availableInventory > 0;
 
                       return (
                         <TableRow key={b.id}>
@@ -1508,7 +1597,12 @@ export default function Batches() {
                                 <div className="text-xs text-muted-foreground">{b.licenseeId}</div>
                               )}
                               <div className="flex items-center gap-2 text-xs">
-                                <Badge variant={assignedCount > 0 ? "default" : "secondary"}>{assignedCount} assigned</Badge>
+                                <Badge variant={isAllocatedBatch ? "default" : "secondary"}>
+                                  {isAllocatedBatch ? "Allocated batch" : "Source batch"}
+                                </Badge>
+                                <Badge variant={assignedCount > 0 ? "default" : "secondary"}>
+                                  {assignedCount.toLocaleString()} assigned
+                                </Badge>
                                 <Badge variant={b.totalCodes > 0 ? "outline" : "secondary"}>{b.totalCodes} total</Badge>
                               </div>
                             </div>
@@ -1521,7 +1615,18 @@ export default function Batches() {
 
                           <TableCell>
                             <div className="space-y-1">
-                              <Badge variant={b.availableCodes ? "default" : "secondary"}>{b.availableCodes ?? 0} remaining</Badge>
+                              <Badge variant={getAvailabilityTone(availableInventory)}>
+                                {getAvailabilityTitle(b)}: {availableInventory.toLocaleString()}
+                              </Badge>
+                              {isAllocatedBatch ? (
+                                <div className="text-[11px] text-muted-foreground">
+                                  Printed {Number(b.printedCodes || 0).toLocaleString()} · Redeemed {Number(b.redeemedCodes || 0).toLocaleString()}
+                                </div>
+                              ) : (
+                                <div className="text-[11px] text-muted-foreground">
+                                  Still available for later manufacturer allocation.
+                                </div>
+                              )}
                               <div className="text-[11px] text-muted-foreground font-mono break-all">
                                 {b.remainingStartCode && b.remainingEndCode
                                   ? `${b.remainingStartCode} → ${b.remainingEndCode}`
@@ -1577,12 +1682,16 @@ export default function Batches() {
                                     <Activity className="mr-2 h-4 w-4" />
                                     History
                                   </Button>
+                                  <Button size="sm" variant="outline" onClick={() => openAllocationMap(b)}>
+                                    <Activity className="mr-2 h-4 w-4" />
+                                    Allocation map
+                                  </Button>
                                   <Button size="sm" variant="outline" onClick={() => openRename(b)} disabled={!!b.printedAt}>
                                     <PencilLine className="mr-2 h-4 w-4" />
                                     Rename
                                   </Button>
                                   {canAssignManufacturer && (
-                                    <Button size="sm" variant="outline" onClick={() => openAssign(b)} disabled={!!b.manufacturer || !!b.printedAt}>
+                                    <Button size="sm" variant="outline" onClick={() => openAssign(b)} disabled={!canAssignThisBatch}>
                                       <UserCog className="mr-2 h-4 w-4" />
                                       Assign
                                     </Button>
@@ -1636,7 +1745,7 @@ export default function Batches() {
             <DialogHeader>
               <DialogTitle>Assign Manufacturer</DialogTitle>
               <DialogDescription>
-                Split this received batch by quantity and assign the new batch to a manufacturer.
+                Split the current source batch by quantity. The unassigned remainder stays in the source batch and the allocated portion becomes a new manufacturer batch.
               </DialogDescription>
             </DialogHeader>
 
@@ -1684,12 +1793,12 @@ export default function Batches() {
                     placeholder="Enter quantity"
                   />
                   <div className="text-xs text-muted-foreground">
-                    Available in this batch: {assignBatch.availableCodes ?? assignBatch.totalCodes}
+                    Unassigned remaining in this source batch: {getAvailableInventory(assignBatch)}
                   </div>
-                  {assignBatch.availableCodes != null && Number(assignQuantity) > 0 && (
+                  {getAvailableInventory(assignBatch) > 0 && Number(assignQuantity) > 0 && (
                     <div className="text-xs text-muted-foreground">
-                      Remaining after split:{" "}
-                      {Math.max(assignBatch.availableCodes - Number(assignQuantity), 0)}
+                      Remaining in source batch after allocation:{" "}
+                      {Math.max(getAvailableInventory(assignBatch) - Number(assignQuantity), 0)}
                     </div>
                   )}
                 </div>
@@ -1821,7 +1930,7 @@ export default function Batches() {
                     placeholder="Enter quantity"
                   />
                   <div className="text-xs text-muted-foreground">
-                    Available: {printBatch.availableCodes ?? printBatch.totalCodes}
+                    Ready to print: {getAvailableInventory(printBatch)}
                   </div>
                 </div>
 
@@ -2060,6 +2169,26 @@ export default function Batches() {
             )}
           </DialogContent>
         </Dialog>
+
+        <BatchAllocationMapDialog
+          open={allocationMapOpen}
+          onOpenChange={(open) => {
+            setAllocationMapOpen(open);
+            if (!open) {
+              setAllocationMap(null);
+              setAllocationMapLoading(false);
+            }
+          }}
+          loading={allocationMapLoading}
+          payload={allocationMap}
+          onOpenBatches={(batchId) => {
+            const found = rows.find((row) => row.id === batchId);
+            if (found) {
+              setQ(found.name);
+              setAllocationMapOpen(false);
+            }
+          }}
+        />
 
         <OperationProgressDialog
           open={progress.state.open}

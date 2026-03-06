@@ -3,10 +3,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getBatchSummary = exports.getScanLogs = void 0;
+exports.getQrTrackingAnalyticsController = exports.getBatchSummary = exports.getScanLogs = void 0;
 const database_1 = __importDefault(require("../config/database"));
 const client_1 = require("@prisma/client");
 const locationService_1 = require("../services/locationService");
+const qrTrackingAnalyticsService_1 = require("../services/qrTrackingAnalyticsService");
 const getScanLogs = async (req, res) => {
     try {
         if (!req.user)
@@ -168,4 +169,78 @@ const getBatchSummary = async (req, res) => {
     }
 };
 exports.getBatchSummary = getBatchSummary;
+const getQrTrackingAnalyticsController = async (req, res) => {
+    try {
+        if (!req.user)
+            return res.status(401).json({ success: false, error: "Not authenticated" });
+        if (req.user.role !== client_1.UserRole.SUPER_ADMIN &&
+            req.user.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN &&
+            req.user.role !== client_1.UserRole.LICENSEE_ADMIN &&
+            req.user.role !== client_1.UserRole.ORG_ADMIN &&
+            req.user.role !== client_1.UserRole.MANUFACTURER &&
+            req.user.role !== client_1.UserRole.MANUFACTURER_ADMIN &&
+            req.user.role !== client_1.UserRole.MANUFACTURER_USER) {
+            return res.status(403).json({ success: false, error: "Access denied" });
+        }
+        const parseDate = (value) => {
+            const raw = String(value || "").trim();
+            if (!raw)
+                return undefined;
+            const date = new Date(raw);
+            return Number.isFinite(date.getTime()) ? date : undefined;
+        };
+        const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 500);
+        const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
+        const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
+            ? req.query.licenseeId || undefined
+            : req.user.licenseeId || undefined;
+        const statusRaw = String(req.query.status || "").trim().toUpperCase();
+        const validStatuses = new Set(["DORMANT", "ACTIVE", "ALLOCATED", "ACTIVATED", "PRINTED", "REDEEMED", "BLOCKED", "SCANNED"]);
+        const status = validStatuses.has(statusRaw) ? statusRaw : undefined;
+        const onlyFirstScanRaw = String(req.query.onlyFirstScan || "").trim().toLowerCase();
+        const firstScan = onlyFirstScanRaw === "true" ? true : onlyFirstScanRaw === "false" ? false : undefined;
+        const manufacturerId = req.user.role === client_1.UserRole.MANUFACTURER ||
+            req.user.role === client_1.UserRole.MANUFACTURER_ADMIN ||
+            req.user.role === client_1.UserRole.MANUFACTURER_USER
+            ? req.user.userId
+            : undefined;
+        const data = await (0, qrTrackingAnalyticsService_1.getQrTrackingAnalytics)({
+            licenseeId,
+            manufacturerId,
+            batchQuery: String(req.query.batchQuery || req.query.batchId || req.query.batchName || "").trim() || undefined,
+            code: String(req.query.code || "").trim() || undefined,
+            status,
+            firstScan,
+            from: parseDate(req.query.from),
+            to: parseDate(req.query.to),
+            limit,
+            offset,
+        });
+        return res.json({ success: true, data });
+    }
+    catch (error) {
+        console.error("getQrTrackingAnalyticsController error:", error);
+        if (error instanceof client_1.Prisma.PrismaClientKnownRequestError && error.code === "P2021") {
+            return res.json({
+                success: true,
+                data: {
+                    scope: {
+                        mode: "inventory",
+                        title: "Inventory scope",
+                        description: "Tracking analytics are unavailable until the scan log tables are ready.",
+                        quantities: { distinctCodes: 0, scanEvents: 0, matchedBatches: 0 },
+                    },
+                    totals: { total: 0, dormant: 0, allocated: 0, printed: 0, redeemed: 0, blocked: 0, created: 0 },
+                    trend: [],
+                    batches: [],
+                    logs: [],
+                    pagination: { total: 0, limit: 0, offset: 0 },
+                    supportedStatuses: [],
+                },
+            });
+        }
+        return res.status(500).json({ success: false, error: "Internal server error" });
+    }
+};
+exports.getQrTrackingAnalyticsController = getQrTrackingAnalyticsController;
 //# sourceMappingURL=qrLogController.js.map

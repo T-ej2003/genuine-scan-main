@@ -11,6 +11,12 @@ import { createHash, randomBytes } from "crypto";
 import { buildScanUrl, getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
 import { resolveQrZipProfile, streamQrZipToResponse } from "../services/qrZipStreamService";
 import { createUserNotification } from "../services/notificationService";
+import {
+  backfillBatchLineageFromAuditLogs,
+  buildLineageSuccessMessage,
+  enrichBatchSummaries,
+  getBatchAllocationMap as loadBatchAllocationMap,
+} from "../services/batchAllocationService";
 
 /* ===================== SCHEMAS ===================== */
 
@@ -98,6 +104,11 @@ const ensureAuth = (req: AuthRequest) => {
   if (!role || !userId) return null;
   return { role, userId };
 };
+
+const isManufacturerRole = (role?: UserRole | null) =>
+  role === UserRole.MANUFACTURER ||
+  role === UserRole.MANUFACTURER_ADMIN ||
+  role === UserRole.MANUFACTURER_USER;
 
 const safeFilePart = (s: string) => {
   return (
@@ -661,6 +672,12 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
     const requestedChildBatchName = String(parsed.data.name || "").trim();
 
     const result = await prisma.$transaction(async (tx) => {
+      const sourceBatch = await tx.batch.findUnique({
+        where: { id: batch.id },
+        select: { id: true, name: true, rootBatchId: true },
+      });
+      if (!sourceBatch) throw new Error("Batch not found");
+
       const eligible = await tx.qRCode.findMany({
         where: {
           batchId: batch.id,
@@ -694,6 +711,8 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
           name: newName,
           licenseeId: batch.licenseeId,
           manufacturerId: manufacturer.id,
+          parentBatchId: sourceBatch.id,
+          rootBatchId: sourceBatch.rootBatchId || sourceBatch.id,
           startCode,
           endCode,
           totalCodes,
@@ -739,7 +758,18 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
         });
       }
 
-      return { newBatchId: newBatch.id, newBatchName: newBatch.name, allocated: totalCodes, startCode, endCode };
+      return {
+        newBatchId: newBatch.id,
+        newBatchName: newBatch.name,
+        allocated: totalCodes,
+        startCode,
+        endCode,
+        sourceBatchId: sourceBatch.id,
+        sourceBatchName: sourceBatch.name,
+        sourceRemainingCodes: remaining.length,
+        sourceRemainingStartCode: remaining[0]?.code || null,
+        sourceRemainingEndCode: remaining[remaining.length - 1]?.code || null,
+      };
     });
 
     await createAuditLog({
@@ -792,7 +822,19 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
       console.error("assignManufacturer notification error:", notifyError);
     }
 
-    return res.json({ success: true, data: result });
+    return res.json({
+      success: true,
+      data: {
+        ...result,
+        message: buildLineageSuccessMessage({
+          sourceBatchName: result.sourceBatchName,
+          sourceBatchId: result.sourceBatchId,
+          allocatedBatchName: result.newBatchName,
+          allocatedBatchId: result.newBatchId,
+          sourceRemainingCodes: result.sourceRemainingCodes,
+        }),
+      },
+    });
   } catch (e) {
     console.error("assignManufacturer error:", e);
     const msg = (e as any)?.message || "Internal server error";
@@ -1259,13 +1301,14 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
       if (qLicenseeId) where.licenseeId = qLicenseeId;
     }
 
-    if (
-      req.user?.role === UserRole.MANUFACTURER ||
-      req.user?.role === UserRole.MANUFACTURER_ADMIN ||
-      req.user?.role === UserRole.MANUFACTURER_USER
-    ) {
+    if (isManufacturerRole(req.user?.role)) {
       where.manufacturerId = req.user.userId;
     }
+
+    await backfillBatchLineageFromAuditLogs({
+      licenseeId: where.licenseeId,
+      force: Boolean(req.query.forceLineage),
+    });
 
     const batches = await prisma.batch.findMany({
       where,
@@ -1273,6 +1316,8 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
       include: {
         licensee: { select: { id: true, name: true, prefix: true } },
         manufacturer: { select: { id: true, name: true, email: true } },
+        parentBatch: { select: { id: true, name: true } },
+        rootBatch: { select: { id: true, name: true } },
         _count: { select: { qrCodes: true } },
       },
     });
@@ -1281,59 +1326,59 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
       return res.json({ success: true, data: batches });
     }
 
-    const batchIds = batches.map((b) => b.id);
-
-    const allocatableStatuses = [QRStatus.DORMANT, QRStatus.ACTIVE, QRStatus.ALLOCATED];
-
-    const remainingGroups = await prisma.qRCode.groupBy({
-      by: ["batchId"],
-      where: {
-        batchId: { in: batchIds },
-        status: { in: allocatableStatuses },
-      },
-      _count: { _all: true },
-      _min: { code: true },
-      _max: { code: true },
-    });
-
-    const allocatedGroups = await prisma.qRCode.groupBy({
-      by: ["batchId"],
-      where: {
-        batchId: { in: batchIds },
-        status: { in: allocatableStatuses },
-      },
-      _count: { _all: true },
-    });
-
-    const remainingMap = new Map<
-      string,
-      { availableCodes: number; remainingStartCode: string | null; remainingEndCode: string | null }
-    >();
-    for (const g of remainingGroups) {
-      if (!g.batchId) continue;
-      remainingMap.set(g.batchId, {
-        availableCodes: g._count?._all || 0,
-        remainingStartCode: g._min?.code || null,
-        remainingEndCode: g._max?.code || null,
-      });
-    }
-
-    const allocatedMap = new Map<string, number>();
-    for (const g of allocatedGroups) {
-      if (!g.batchId) continue;
-      allocatedMap.set(g.batchId, g._count?._all || 0);
-    }
-
-    const enriched = batches.map((b) => ({
-      ...b,
-      availableCodes: remainingMap.get(b.id)?.availableCodes ?? 0,
-      remainingStartCode: remainingMap.get(b.id)?.remainingStartCode ?? null,
-      remainingEndCode: remainingMap.get(b.id)?.remainingEndCode ?? null,
-    }));
+    const enriched = await enrichBatchSummaries(batches as any);
 
     return res.json({ success: true, data: enriched });
   } catch (e) {
     console.error("getBatches error:", e);
+    return res.status(500).json({ success: false, error: "Internal server error" });
+  }
+};
+
+export const getBatchAllocationMap = async (req: AuthRequest, res: Response) => {
+  try {
+    const auth = ensureAuth(req);
+    if (!auth || !req.user) {
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
+
+    const batchId = String(req.params.id || "").trim();
+    if (!batchId) {
+      return res.status(400).json({ success: false, error: "Missing batch id" });
+    }
+
+    const focusBatch = await prisma.batch.findUnique({
+      where: { id: batchId },
+      select: { id: true, licenseeId: true, manufacturerId: true },
+    });
+    if (!focusBatch) {
+      return res.status(404).json({ success: false, error: "Batch not found" });
+    }
+
+    if (isManufacturerRole(req.user.role)) {
+      if (focusBatch.manufacturerId !== req.user.userId) {
+        return res.status(403).json({ success: false, error: "Access denied" });
+      }
+    } else if (
+      (req.user.role === UserRole.LICENSEE_ADMIN || req.user.role === UserRole.ORG_ADMIN) &&
+      req.user.licenseeId !== focusBatch.licenseeId
+    ) {
+      return res.status(403).json({ success: false, error: "Access denied" });
+    }
+
+    await backfillBatchLineageFromAuditLogs({
+      licenseeId: focusBatch.licenseeId,
+      force: true,
+    });
+
+    const allocationMap = await loadBatchAllocationMap(batchId, { licenseeId: focusBatch.licenseeId });
+    if (!allocationMap) {
+      return res.status(404).json({ success: false, error: "Allocation map unavailable" });
+    }
+
+    return res.json({ success: true, data: allocationMap });
+  } catch (error) {
+    console.error("getBatchAllocationMap error:", error);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 };

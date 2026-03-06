@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 
@@ -33,6 +34,7 @@ export default function Dashboard() {
   const [statusFocus, setStatusFocus] = useState<StatusFocus>("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
 
   const pollRef = useRef<number | null>(null);
   const sseRef = useRef<EventSource | null>(null);
@@ -259,7 +261,7 @@ export default function Dashboard() {
     const totalQrCta =
       user?.role === "super_admin" ? "Inspect master inventory" : "Inspect tenant inventory";
     const scopeHref = user?.role === "super_admin" ? "/licensees" : "/dashboard";
-    const scopeCta = user?.role === "super_admin" ? "Manage licensees" : "View scope";
+    const scopeCta = user?.role === "super_admin" ? "Manage licensees" : "Open scope details";
     const manufacturersHref = user?.role === "manufacturer" ? "/qr-tracking" : "/manufacturers";
     const manufacturersCta =
       user?.role === "manufacturer" ? "View manufacturer telemetry" : "Manage manufacturers";
@@ -283,6 +285,7 @@ export default function Dashboard() {
           user?.role === "manufacturer" ? "Current assigned tenant" : "Currently enabled tenants",
         href: scopeHref,
         ctaLabel: scopeCta,
+        action: user?.role === "manufacturer" ? "scope" : "navigate",
       },
       {
         title: "Manufacturers",
@@ -362,7 +365,7 @@ export default function Dashboard() {
               icon={item.icon}
               subtitle={item.subtitle}
               variant={item.variant}
-              onClick={() => navigate(item.href)}
+              onClick={() => (item.action === "scope" ? setScopeDialogOpen(true) : navigate(item.href))}
               ctaLabel={item.ctaLabel}
             />
           ))}
@@ -463,6 +466,46 @@ export default function Dashboard() {
             onViewAll={canViewAudit ? () => navigate("/audit-logs") : undefined}
           />
         </div>
+
+        <Dialog open={scopeDialogOpen} onOpenChange={setScopeDialogOpen}>
+          <DialogContent className="sm:max-w-[620px]">
+            <DialogHeader>
+              <DialogTitle>Manufacturer Scope Details</DialogTitle>
+              <DialogDescription>
+                This shows the tenant boundary applied to your manufacturer account and where to operate within it.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="rounded-xl border bg-slate-50 p-4">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Assigned licensee</p>
+                <p className="mt-1 text-lg font-semibold text-slate-900">
+                  {user?.licensee?.brandName || user?.licensee?.name || "No licensee linked"}
+                </p>
+                <p className="mt-1 text-sm text-slate-600">
+                  Prefix: <span className="font-mono">{user?.licensee?.prefix || "—"}</span>
+                </p>
+                <p className="mt-2 text-sm text-slate-600">
+                  You can only view batches, tracking analytics, print jobs, and incidents within this assigned tenant.
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <button type="button" className="rounded-xl border p-4 text-left hover:bg-slate-50" onClick={() => navigate("/batches")}>
+                  <p className="font-medium text-slate-900">Batches</p>
+                  <p className="mt-1 text-xs text-slate-600">Print assigned inventory and inspect allocation results.</p>
+                </button>
+                <button type="button" className="rounded-xl border p-4 text-left hover:bg-slate-50" onClick={() => navigate("/qr-tracking")}>
+                  <p className="font-medium text-slate-900">QR Tracking</p>
+                  <p className="mt-1 text-xs text-slate-600">Review scan analytics within your production scope.</p>
+                </button>
+                <button type="button" className="rounded-xl border p-4 text-left hover:bg-slate-50" onClick={() => navigate("/help/licensee-admin")}>
+                  <p className="font-medium text-slate-900">Help</p>
+                  <p className="mt-1 text-xs text-slate-600">See the exact navigation path used by licensee operators.</p>
+                </button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );

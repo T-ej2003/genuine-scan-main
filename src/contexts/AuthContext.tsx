@@ -39,6 +39,14 @@ function normalizeUser(u: any): User {
     name: String(u.name ?? ""),
     role: normalizeRole(u.role),
     licenseeId,
+    licensee: u.licensee
+      ? {
+          id: String(u.licensee.id),
+          name: String(u.licensee.name || ""),
+          prefix: String(u.licensee.prefix || ""),
+          brandName: u.licensee.brandName ?? null,
+        }
+      : null,
     createdAt: u.createdAt ?? new Date().toISOString(),
     isActive: typeof u.isActive === "boolean" ? u.isActive : true,
     deletedAt: u.deletedAt ?? null,

@@ -82,6 +82,13 @@ enum PrinterTrustStatus {
   FAILED
 }
 
+enum OwnershipTransferStatus {
+  PENDING
+  ACCEPTED
+  CANCELLED
+  EXPIRED
+}
+
 enum ForensicEventType {
   PRINT_ISSUANCE
   PRINT_CONFIRM
@@ -438,6 +445,14 @@ model Batch {
   manufacturerId String?
   manufacturer   User?   @relation("ManufacturerBatches", fields: [manufacturerId], references: [id])
 
+  parentBatchId String?
+  parentBatch   Batch?   @relation("BatchAllocationLineage", fields: [parentBatchId], references: [id], onDelete: SetNull)
+  allocatedBatches Batch[] @relation("BatchAllocationLineage")
+
+  rootBatchId String?
+  rootBatch   Batch?   @relation("BatchAllocationRoot", fields: [rootBatchId], references: [id], onDelete: SetNull)
+  allocationScopeBatches Batch[] @relation("BatchAllocationRoot")
+
   startCode  String
   endCode    String
   totalCodes Int
@@ -461,6 +476,8 @@ model Batch {
 
   @@index([licenseeId])
   @@index([manufacturerId])
+  @@index([parentBatchId])
+  @@index([rootBatchId])
   @@index([printedAt])
   @@index([printPackDownloadedAt])
   @@index([suspendedAt])
@@ -531,6 +548,7 @@ model QRCode {
   policyAlerts PolicyAlert[]
   incidents Incident[]
   ownership Ownership?
+  ownershipTransfers OwnershipTransfer[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -727,10 +745,42 @@ model Ownership {
   claimSource String @default("USER")
   linkedAt DateTime?
   claimedAt DateTime @default(now())
+  transfers OwnershipTransfer[]
 
   @@index([userId])
   @@index([deviceTokenHash])
   @@index([ipHash])
+}
+
+model OwnershipTransfer {
+  id String @id @default(cuid())
+
+  qrCodeId String
+  qrCode QRCode @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+
+  ownershipId String
+  ownership Ownership @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
+
+  initiatedByCustomerId String
+  initiatedByEmail String?
+  recipientEmail String?
+
+  tokenHash String @unique
+  status OwnershipTransferStatus @default(PENDING)
+  expiresAt DateTime
+  acceptedAt DateTime?
+  cancelledAt DateTime?
+  lastViewedAt DateTime?
+  metadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([qrCodeId, status])
+  @@index([ownershipId, status])
+  @@index([initiatedByCustomerId, status])
+  @@index([recipientEmail, status])
+  @@index([expiresAt])
 }
 
 model QrScanLog {

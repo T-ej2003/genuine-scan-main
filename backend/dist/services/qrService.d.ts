@@ -50,6 +50,8 @@ export declare const recordScan: (code: string, meta?: {
             createdAt: Date;
             updatedAt: Date;
             manufacturerId: string | null;
+            parentBatchId: string | null;
+            rootBatchId: string | null;
             startCode: string;
             endCode: string;
             totalCodes: number;

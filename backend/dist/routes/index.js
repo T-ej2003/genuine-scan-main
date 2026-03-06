@@ -108,6 +108,9 @@ router.post("/verify/auth/email-otp/request", verifyOtpRequestLimiter, verifyCon
 router.post("/verify/auth/email-otp/verify", verifyOtpVerifyLimiter, verifyController_1.verifyCustomerEmailOtp);
 router.post("/verify/:code/claim", verifyClaimLimiter, customerVerifyAuth_1.optionalCustomerVerifyAuth, verifyController_1.claimProductOwnership);
 router.post("/verify/:code/link-claim", verifyClaimLimiter, customerVerifyAuth_1.requireCustomerVerifyAuth, verifyController_1.linkDeviceClaimToCustomer);
+router.post("/verify/:code/transfer", verifyClaimLimiter, customerVerifyAuth_1.requireCustomerVerifyAuth, verifyController_1.createOwnershipTransfer);
+router.post("/verify/:code/transfer/cancel", verifyClaimLimiter, customerVerifyAuth_1.requireCustomerVerifyAuth, verifyController_1.cancelOwnershipTransfer);
+router.post("/verify/transfer/accept", verifyClaimLimiter, customerVerifyAuth_1.requireCustomerVerifyAuth, verifyController_1.acceptOwnershipTransfer);
 router.post("/verify/report-fraud", verifyReportLimiter, incidentController_1.uploadIncidentReportPhotos, verifyController_1.reportFraud);
 router.post("/fraud-report", verifyReportLimiter, incidentController_1.uploadIncidentReportPhotos, verifyController_1.reportFraud);
 router.post("/verify/feedback", verifyFeedbackLimiter, verifyController_1.submitProductFeedback);
@@ -163,6 +166,7 @@ router.post("/admin/licensees/:licenseeId/qr-allocate-range", auth_1.authenticat
 // ==================== BATCHES ====================
 router.post("/qr/batches", auth_1.authenticate, rbac_1.requireLicenseeAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, qrController_1.createBatch);
 router.get("/qr/batches", auth_1.authenticate, tenantIsolation_1.enforceTenantIsolation, qrController_1.getBatches);
+router.get("/qr/batches/:id/allocation-map", auth_1.authenticate, tenantIsolation_1.enforceTenantIsolation, qrController_1.getBatchAllocationMap);
 router.post("/qr/batches/:id/assign-manufacturer", auth_1.authenticate, rbac_1.requireLicenseeAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, qrController_1.assignManufacturer);
 router.patch("/qr/batches/:id/rename", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, qrController_1.renameBatch);
 // Super admin bulk allocation helper
@@ -229,6 +233,7 @@ router.get("/audit/export/incidents/:id/bundle", auth_1.authenticate, rbac_1.req
 // ==================== QR LOGS (ADMINS) ====================
 router.get("/admin/qr/scan-logs", auth_1.authenticate, rbac_1.requireOpsUser, tenantIsolation_1.enforceTenantIsolation, qrLogController_1.getScanLogs);
 router.get("/admin/qr/batch-summary", auth_1.authenticate, rbac_1.requireOpsUser, tenantIsolation_1.enforceTenantIsolation, qrLogController_1.getBatchSummary);
+router.get("/admin/qr/analytics", auth_1.authenticate, rbac_1.requireOpsUser, tenantIsolation_1.enforceTenantIsolation, qrLogController_1.getQrTrackingAnalyticsController);
 // ==================== INCIDENT RESPONSE ====================
 router.get("/incidents", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, incidentController_1.listIncidents);
 router.get("/incidents/evidence-files/:fileName", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, incidentController_1.serveIncidentEvidenceFile);

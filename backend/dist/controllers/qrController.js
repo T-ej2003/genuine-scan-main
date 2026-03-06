@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.exportQRCodesCsv = exports.getStats = exports.generateSignedScanLinks = exports.getQRCodes = exports.getBatches = exports.blockBatch = exports.blockQRCode = exports.generateQRCodes = exports.downloadBatchPrintPack = exports.createBatchPrintToken = exports.confirmBatchPrint = exports.markPrinted = exports.renameBatch = exports.assignManufacturer = exports.bulkDeleteBatches = exports.deleteBatch = exports.adminAllocateBatch = exports.createBatch = exports.bulkDeleteQRCodes = exports.allocateQRRangeForLicensee = exports.allocateQRRange = void 0;
+exports.exportQRCodesCsv = exports.getStats = exports.generateSignedScanLinks = exports.getQRCodes = exports.getBatchAllocationMap = exports.getBatches = exports.blockBatch = exports.blockQRCode = exports.generateQRCodes = exports.downloadBatchPrintPack = exports.createBatchPrintToken = exports.confirmBatchPrint = exports.markPrinted = exports.renameBatch = exports.assignManufacturer = exports.bulkDeleteBatches = exports.deleteBatch = exports.adminAllocateBatch = exports.createBatch = exports.bulkDeleteQRCodes = exports.allocateQRRangeForLicensee = exports.allocateQRRange = void 0;
 const zod_1 = require("zod");
 const client_1 = require("@prisma/client");
 const database_1 = __importDefault(require("../config/database"));
@@ -14,6 +14,7 @@ const crypto_1 = require("crypto");
 const qrTokenService_1 = require("../services/qrTokenService");
 const qrZipStreamService_1 = require("../services/qrZipStreamService");
 const notificationService_1 = require("../services/notificationService");
+const batchAllocationService_1 = require("../services/batchAllocationService");
 /* ===================== SCHEMAS ===================== */
 const allocateRangeSchema = zod_1.z
     .object({
@@ -89,6 +90,9 @@ const ensureAuth = (req) => {
         return null;
     return { role, userId };
 };
+const isManufacturerRole = (role) => role === client_1.UserRole.MANUFACTURER ||
+    role === client_1.UserRole.MANUFACTURER_ADMIN ||
+    role === client_1.UserRole.MANUFACTURER_USER;
 const safeFilePart = (s) => {
     return (String(s || "")
         .trim()
@@ -582,6 +586,12 @@ const assignManufacturer = async (req, res) => {
         const quantity = parsed.data.quantity;
         const requestedChildBatchName = String(parsed.data.name || "").trim();
         const result = await database_1.default.$transaction(async (tx) => {
+            const sourceBatch = await tx.batch.findUnique({
+                where: { id: batch.id },
+                select: { id: true, name: true, rootBatchId: true },
+            });
+            if (!sourceBatch)
+                throw new Error("Batch not found");
             const eligible = await tx.qRCode.findMany({
                 where: {
                     batchId: batch.id,
@@ -607,6 +617,8 @@ const assignManufacturer = async (req, res) => {
                     name: newName,
                     licenseeId: batch.licenseeId,
                     manufacturerId: manufacturer.id,
+                    parentBatchId: sourceBatch.id,
+                    rootBatchId: sourceBatch.rootBatchId || sourceBatch.id,
                     startCode,
                     endCode,
                     totalCodes,
@@ -649,7 +661,18 @@ const assignManufacturer = async (req, res) => {
                     },
                 });
             }
-            return { newBatchId: newBatch.id, newBatchName: newBatch.name, allocated: totalCodes, startCode, endCode };
+            return {
+                newBatchId: newBatch.id,
+                newBatchName: newBatch.name,
+                allocated: totalCodes,
+                startCode,
+                endCode,
+                sourceBatchId: sourceBatch.id,
+                sourceBatchName: sourceBatch.name,
+                sourceRemainingCodes: remaining.length,
+                sourceRemainingStartCode: remaining[0]?.code || null,
+                sourceRemainingEndCode: remaining[remaining.length - 1]?.code || null,
+            };
         });
         await (0, auditService_1.createAuditLog)({
             userId: auth.userId,
@@ -699,7 +722,19 @@ const assignManufacturer = async (req, res) => {
         catch (notifyError) {
             console.error("assignManufacturer notification error:", notifyError);
         }
-        return res.json({ success: true, data: result });
+        return res.json({
+            success: true,
+            data: {
+                ...result,
+                message: (0, batchAllocationService_1.buildLineageSuccessMessage)({
+                    sourceBatchName: result.sourceBatchName,
+                    sourceBatchId: result.sourceBatchId,
+                    allocatedBatchName: result.newBatchName,
+                    allocatedBatchId: result.newBatchId,
+                    sourceRemainingCodes: result.sourceRemainingCodes,
+                }),
+            },
+        });
     }
     catch (e) {
         console.error("assignManufacturer error:", e);
@@ -1124,65 +1159,28 @@ const getBatches = async (req, res) => {
             if (qLicenseeId)
                 where.licenseeId = qLicenseeId;
         }
-        if (req.user?.role === client_1.UserRole.MANUFACTURER ||
-            req.user?.role === client_1.UserRole.MANUFACTURER_ADMIN ||
-            req.user?.role === client_1.UserRole.MANUFACTURER_USER) {
+        if (isManufacturerRole(req.user?.role)) {
             where.manufacturerId = req.user.userId;
         }
+        await (0, batchAllocationService_1.backfillBatchLineageFromAuditLogs)({
+            licenseeId: where.licenseeId,
+            force: Boolean(req.query.forceLineage),
+        });
         const batches = await database_1.default.batch.findMany({
             where,
             orderBy: { createdAt: "desc" },
             include: {
                 licensee: { select: { id: true, name: true, prefix: true } },
                 manufacturer: { select: { id: true, name: true, email: true } },
+                parentBatch: { select: { id: true, name: true } },
+                rootBatch: { select: { id: true, name: true } },
                 _count: { select: { qrCodes: true } },
             },
         });
         if (!batches.length) {
             return res.json({ success: true, data: batches });
         }
-        const batchIds = batches.map((b) => b.id);
-        const allocatableStatuses = [client_1.QRStatus.DORMANT, client_1.QRStatus.ACTIVE, client_1.QRStatus.ALLOCATED];
-        const remainingGroups = await database_1.default.qRCode.groupBy({
-            by: ["batchId"],
-            where: {
-                batchId: { in: batchIds },
-                status: { in: allocatableStatuses },
-            },
-            _count: { _all: true },
-            _min: { code: true },
-            _max: { code: true },
-        });
-        const allocatedGroups = await database_1.default.qRCode.groupBy({
-            by: ["batchId"],
-            where: {
-                batchId: { in: batchIds },
-                status: { in: allocatableStatuses },
-            },
-            _count: { _all: true },
-        });
-        const remainingMap = new Map();
-        for (const g of remainingGroups) {
-            if (!g.batchId)
-                continue;
-            remainingMap.set(g.batchId, {
-                availableCodes: g._count?._all || 0,
-                remainingStartCode: g._min?.code || null,
-                remainingEndCode: g._max?.code || null,
-            });
-        }
-        const allocatedMap = new Map();
-        for (const g of allocatedGroups) {
-            if (!g.batchId)
-                continue;
-            allocatedMap.set(g.batchId, g._count?._all || 0);
-        }
-        const enriched = batches.map((b) => ({
-            ...b,
-            availableCodes: remainingMap.get(b.id)?.availableCodes ?? 0,
-            remainingStartCode: remainingMap.get(b.id)?.remainingStartCode ?? null,
-            remainingEndCode: remainingMap.get(b.id)?.remainingEndCode ?? null,
-        }));
+        const enriched = await (0, batchAllocationService_1.enrichBatchSummaries)(batches);
         return res.json({ success: true, data: enriched });
     }
     catch (e) {
@@ -1191,6 +1189,48 @@ const getBatches = async (req, res) => {
     }
 };
 exports.getBatches = getBatches;
+const getBatchAllocationMap = async (req, res) => {
+    try {
+        const auth = ensureAuth(req);
+        if (!auth || !req.user) {
+            return res.status(401).json({ success: false, error: "Not authenticated" });
+        }
+        const batchId = String(req.params.id || "").trim();
+        if (!batchId) {
+            return res.status(400).json({ success: false, error: "Missing batch id" });
+        }
+        const focusBatch = await database_1.default.batch.findUnique({
+            where: { id: batchId },
+            select: { id: true, licenseeId: true, manufacturerId: true },
+        });
+        if (!focusBatch) {
+            return res.status(404).json({ success: false, error: "Batch not found" });
+        }
+        if (isManufacturerRole(req.user.role)) {
+            if (focusBatch.manufacturerId !== req.user.userId) {
+                return res.status(403).json({ success: false, error: "Access denied" });
+            }
+        }
+        else if ((req.user.role === client_1.UserRole.LICENSEE_ADMIN || req.user.role === client_1.UserRole.ORG_ADMIN) &&
+            req.user.licenseeId !== focusBatch.licenseeId) {
+            return res.status(403).json({ success: false, error: "Access denied" });
+        }
+        await (0, batchAllocationService_1.backfillBatchLineageFromAuditLogs)({
+            licenseeId: focusBatch.licenseeId,
+            force: true,
+        });
+        const allocationMap = await (0, batchAllocationService_1.getBatchAllocationMap)(batchId, { licenseeId: focusBatch.licenseeId });
+        if (!allocationMap) {
+            return res.status(404).json({ success: false, error: "Allocation map unavailable" });
+        }
+        return res.json({ success: true, data: allocationMap });
+    }
+    catch (error) {
+        console.error("getBatchAllocationMap error:", error);
+        return res.status(500).json({ success: false, error: "Internal server error" });
+    }
+};
+exports.getBatchAllocationMap = getBatchAllocationMap;
 const getQRCodes = async (req, res) => {
     try {
         const role = req.user?.role;

@@ -84,12 +84,12 @@ export default function LicenseeAdminHelp() {
             <CardContent className="space-y-2 text-sm text-muted-foreground">
               <ol className="list-decimal pl-5">
                 <li>Open <Badge variant="outline">Batches</Badge>.</li>
-                <li>Find a received batch with remaining quantity.</li>
+                <li>Find a <strong>Source batch</strong> with <strong>Unassigned remaining</strong> inventory.</li>
                 <li>Open actions and choose <strong>Assign Manufacturer</strong>.</li>
                 <li>Select the manufacturer and quantity, then submit.</li>
               </ol>
               <p className="text-xs text-muted-foreground">
-                Allocation uses the next available unassigned codes to prevent overlaps.
+                The unassigned remainder stays in the source batch. Use <Badge variant="outline">Allocation map</Badge> from Batches or QR Tracking to see where the allocated portion went and what is still pending print.
               </p>
             </CardContent>
           </Card>
@@ -141,7 +141,7 @@ export default function LicenseeAdminHelp() {
                 <CardTitle className="text-base">“Insufficient available quantity”</CardTitle>
               </CardHeader>
               <CardContent className="text-sm text-muted-foreground">
-                The batch may already be partially assigned. Reduce the quantity and retry, then refresh the page.
+                Open <Badge variant="outline">Allocation map</Badge> for that batch first. It shows the current source remainder and every allocated manufacturer batch so you can assign only the true unassigned quantity.
               </CardContent>
             </Card>
             <Card>
@@ -149,7 +149,7 @@ export default function LicenseeAdminHelp() {
                 <CardTitle className="text-base">Manufacturer can’t see a batch</CardTitle>
               </CardHeader>
               <CardContent className="text-sm text-muted-foreground">
-                Confirm the batch was assigned to that manufacturer and the manufacturer user accepted their invite and can sign in.
+                Open <Badge variant="outline">Manufacturers</Badge>, use <strong>View details</strong> or the <strong>Pending</strong>/<strong>Printed</strong> chips, then open that manufacturer’s batches directly.
               </CardContent>
             </Card>
           </div>
@@ -158,4 +158,3 @@ export default function LicenseeAdminHelp() {
     </HelpShell>
   );
 }
-

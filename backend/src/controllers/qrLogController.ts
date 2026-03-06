@@ -3,6 +3,7 @@ import { AuthRequest } from "../middleware/auth";
 import prisma from "../config/database";
 import { Prisma, UserRole } from "@prisma/client";
 import { compactDeviceLabel, reverseGeocode } from "../services/locationService";
+import { getQrTrackingAnalytics } from "../services/qrTrackingAnalyticsService";
 
 export const getScanLogs = async (req: AuthRequest, res: Response) => {
   try {
@@ -177,6 +178,87 @@ export const getBatchSummary = async (req: AuthRequest, res: Response) => {
     return res.json({ success: true, data });
   } catch (e) {
     console.error("getBatchSummary error:", e);
+    return res.status(500).json({ success: false, error: "Internal server error" });
+  }
+};
+
+export const getQrTrackingAnalyticsController = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+    if (
+      req.user.role !== UserRole.SUPER_ADMIN &&
+      req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
+      req.user.role !== UserRole.LICENSEE_ADMIN &&
+      req.user.role !== UserRole.ORG_ADMIN &&
+      req.user.role !== UserRole.MANUFACTURER &&
+      req.user.role !== UserRole.MANUFACTURER_ADMIN &&
+      req.user.role !== UserRole.MANUFACTURER_USER
+    ) {
+      return res.status(403).json({ success: false, error: "Access denied" });
+    }
+
+    const parseDate = (value: unknown) => {
+      const raw = String(value || "").trim();
+      if (!raw) return undefined;
+      const date = new Date(raw);
+      return Number.isFinite(date.getTime()) ? date : undefined;
+    };
+
+    const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 500);
+    const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
+    const licenseeId =
+      req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
+        ? (req.query.licenseeId as string | undefined) || undefined
+        : req.user.licenseeId || undefined;
+
+    const statusRaw = String(req.query.status || "").trim().toUpperCase();
+    const validStatuses = new Set(["DORMANT", "ACTIVE", "ALLOCATED", "ACTIVATED", "PRINTED", "REDEEMED", "BLOCKED", "SCANNED"]);
+    const status = validStatuses.has(statusRaw) ? (statusRaw as any) : undefined;
+    const onlyFirstScanRaw = String(req.query.onlyFirstScan || "").trim().toLowerCase();
+    const firstScan = onlyFirstScanRaw === "true" ? true : onlyFirstScanRaw === "false" ? false : undefined;
+
+    const manufacturerId =
+      req.user.role === UserRole.MANUFACTURER ||
+      req.user.role === UserRole.MANUFACTURER_ADMIN ||
+      req.user.role === UserRole.MANUFACTURER_USER
+        ? req.user.userId
+        : undefined;
+
+    const data = await getQrTrackingAnalytics({
+      licenseeId,
+      manufacturerId,
+      batchQuery: String(req.query.batchQuery || req.query.batchId || req.query.batchName || "").trim() || undefined,
+      code: String(req.query.code || "").trim() || undefined,
+      status,
+      firstScan,
+      from: parseDate(req.query.from),
+      to: parseDate(req.query.to),
+      limit,
+      offset,
+    });
+
+    return res.json({ success: true, data });
+  } catch (error) {
+    console.error("getQrTrackingAnalyticsController error:", error);
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2021") {
+      return res.json({
+        success: true,
+        data: {
+          scope: {
+            mode: "inventory",
+            title: "Inventory scope",
+            description: "Tracking analytics are unavailable until the scan log tables are ready.",
+            quantities: { distinctCodes: 0, scanEvents: 0, matchedBatches: 0 },
+          },
+          totals: { total: 0, dormant: 0, allocated: 0, printed: 0, redeemed: 0, blocked: 0, created: 0 },
+          trend: [],
+          batches: [],
+          logs: [],
+          pagination: { total: 0, limit: 0, offset: 0 },
+          supportedStatuses: [],
+        },
+      });
+    }
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 };
