@@ -1269,6 +1269,98 @@ class ApiClient {
     return () => es.close();
   }
 
+  streamPrinterConnectionStatus(
+    onSnapshot: (payload: {
+      reason?: string;
+      serverTime?: string;
+      status: {
+        connected: boolean;
+        trusted: boolean;
+        compatibilityMode: boolean;
+        compatibilityReason?: string | null;
+        eligibleForPrinting: boolean;
+        connectionClass: "TRUSTED" | "COMPATIBILITY" | "BLOCKED";
+        stale: boolean;
+        requiredForPrinting: boolean;
+        trustStatus: string;
+        trustReason?: string | null;
+        lastHeartbeatAt: string | null;
+        ageSeconds: number | null;
+        registrationId?: string | null;
+        agentId?: string | null;
+        deviceFingerprint?: string | null;
+        mtlsFingerprint?: string | null;
+        printerName?: string | null;
+        printerId?: string | null;
+        selectedPrinterId?: string | null;
+        selectedPrinterName?: string | null;
+        deviceName?: string | null;
+        agentVersion?: string | null;
+        capabilitySummary?: {
+          transports: string[];
+          protocols: string[];
+          languages: string[];
+          supportsRaster: boolean;
+          supportsPdf: boolean;
+          dpiOptions: number[];
+          mediaSizes: string[];
+        } | null;
+        printers?: Array<{
+          printerId: string;
+          printerName: string;
+          model?: string | null;
+          connection?: string | null;
+          online?: boolean;
+          isDefault?: boolean;
+          protocols?: string[];
+          languages?: string[];
+          mediaSizes?: string[];
+          dpi?: number | null;
+        }>;
+        calibrationProfile?: Record<string, unknown> | null;
+        error?: string | null;
+      };
+    }) => void,
+    onError?: () => void,
+    onOpen?: () => void
+  ) {
+    const token = this.getToken();
+    const params = new URLSearchParams();
+    if (token) params.set("token", token);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    const url = `${BASE_URL}/manufacturer/printer-agent/events${query}`;
+
+    let es: EventSource;
+    try {
+      es = new EventSource(url, { withCredentials: true });
+    } catch {
+      es = new EventSource(url);
+    }
+
+    es.addEventListener("printer_status", (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data || "{}");
+        if (!payload || typeof payload !== "object" || !payload.status || typeof payload.status !== "object") return;
+        onSnapshot({
+          reason: typeof payload.reason === "string" ? payload.reason : undefined,
+          serverTime: typeof payload.serverTime === "string" ? payload.serverTime : undefined,
+          status: payload.status,
+        });
+      } catch {
+        // ignore malformed snapshots
+      }
+    });
+
+    es.onerror = () => {
+      onError?.();
+    };
+    es.onopen = () => {
+      onOpen?.();
+    };
+
+    return () => es.close();
+  }
+
   // product batches removed
 
   // ==================== QR REQUESTS ====================

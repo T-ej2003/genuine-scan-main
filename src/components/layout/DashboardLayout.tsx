@@ -32,6 +32,11 @@ import {
   Trash2,
   Inbox,
   Printer,
+  RefreshCw,
+  Monitor,
+  Wifi,
+  CheckCircle2,
+  AlertTriangle,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -130,6 +135,71 @@ const navItems: NavItem[] = [
   { label: "Audit Logs", href: "/audit-logs", icon: FileText, roles: ["super_admin", "licensee_admin", "manufacturer"] },
 ];
 
+const KNOWN_PRINTER_VENDORS = [
+  "Zebra",
+  "Brother",
+  "Epson",
+  "Canon",
+  "HP",
+  "TSC",
+  "SATO",
+  "Citizen",
+  "Bixolon",
+  "Honeywell",
+  "Datamax",
+  "Godex",
+  "Star",
+  "Toshiba",
+  "Xprinter",
+];
+
+const formatPrinterTimestamp = (value?: string | null) => {
+  if (!value) return "Awaiting heartbeat";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Awaiting heartbeat";
+  return parsed.toLocaleString();
+};
+
+const formatPrinterAge = (seconds?: number | null) => {
+  if (seconds == null || !Number.isFinite(seconds)) return "Awaiting heartbeat";
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+  return `${Math.round(seconds / 3600)}h ago`;
+};
+
+const derivePrinterIdentity = (params: {
+  printerName?: string | null;
+  selectedPrinterName?: string | null;
+  model?: string | null;
+  deviceName?: string | null;
+}) => {
+  const displayName =
+    String(params.selectedPrinterName || params.printerName || params.deviceName || "Printer").trim() || "Printer";
+  const combined = [displayName, params.model || "", params.deviceName || ""].join(" ").trim();
+  const vendor =
+    KNOWN_PRINTER_VENDORS.find((candidate) => new RegExp(`\\b${candidate}\\b`, "i").test(combined)) ||
+    displayName.split(/[\s/-]+/).filter(Boolean)[0] ||
+    "Printer";
+  const model =
+    String(params.model || "")
+      .trim()
+      .replace(new RegExp(`^${vendor}\\s+`, "i"), "") || null;
+  const monogram = vendor
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("")
+    .slice(0, 2) || "PR";
+
+  return {
+    displayName,
+    vendor,
+    model,
+    monogram,
+  };
+};
+
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const { toast } = useToast();
@@ -147,6 +217,20 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [notificationMotionSeed, setNotificationMotionSeed] = useState(0);
   const clearNotificationsTimerRef = useRef<number | null>(null);
   const printerConnectedRef = useRef(false);
+  const detectedPrintersRef = useRef<
+    Array<{
+      printerId: string;
+      printerName: string;
+      model?: string | null;
+      connection?: string | null;
+      online?: boolean;
+      isDefault?: boolean;
+      protocols?: string[];
+      languages?: string[];
+      mediaSizes?: string[];
+      dpi?: number | null;
+    }>
+  >([]);
   const printerFailureReportRef = useRef<{ signature: string; at: number }>({ signature: "", at: 0 });
   const printerFailureInFlightRef = useRef(false);
   const [printerStatus, setPrinterStatus] = useState<PrinterConnectionStatus>({
@@ -179,6 +263,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   });
   const [printerDialogOpen, setPrinterDialogOpen] = useState(false);
   const [printerSwitching, setPrinterSwitching] = useState(false);
+  const [printerStatusLive, setPrinterStatusLive] = useState(false);
+  const [printerStatusUpdatedAt, setPrinterStatusUpdatedAt] = useState<string | null>(null);
   const [detectedPrinters, setDetectedPrinters] = useState<
     Array<{
       printerId: string;
@@ -298,6 +384,52 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       if (result.length >= 40) break;
     }
     return result;
+  };
+
+  const applyPrinterStatusSnapshot = (
+    nextStatus: PrinterConnectionStatus,
+    options?: {
+      fallbackPrinters?: Array<{
+        printerId: string;
+        printerName: string;
+        model?: string | null;
+        connection?: string | null;
+        online?: boolean;
+        isDefault?: boolean;
+        protocols?: string[];
+        languages?: string[];
+        mediaSizes?: string[];
+        dpi?: number | null;
+      }>;
+      updatedAt?: string | null;
+    }
+  ) => {
+    const fallbackPrinters = Array.isArray(options?.fallbackPrinters) ? options?.fallbackPrinters : detectedPrintersRef.current;
+    const remotePrinters = normalizePrinterRows(nextStatus.printers || []);
+    const mergedPrinters = remotePrinters.length > 0 ? remotePrinters : fallbackPrinters;
+
+    setPrinterStatus({
+      ...nextStatus,
+      printers: mergedPrinters,
+    });
+    setDetectedPrinters(mergedPrinters);
+    setPrinterStatusUpdatedAt(options?.updatedAt || nextStatus.lastHeartbeatAt || new Date().toISOString());
+
+    setSelectedLocalPrinterId((prev) => {
+      if (prev && mergedPrinters.some((row) => row.printerId === prev)) return prev;
+      const fallbackPrinter =
+        mergedPrinters.find((row) => row.printerId === nextStatus.selectedPrinterId) ||
+        mergedPrinters.find((row) => row.printerId === nextStatus.printerId) ||
+        mergedPrinters.find((row) => row.isDefault) ||
+        mergedPrinters[0];
+      return fallbackPrinter?.printerId || prev;
+    });
+
+    const nowConnected = Boolean(nextStatus.connected && nextStatus.eligibleForPrinting);
+    if (nowConnected && !printerConnectedRef.current) {
+      setPrinterDialogOpen(true);
+    }
+    printerConnectedRef.current = nowConnected;
   };
 
   const maybeAutoReportPrinterFailure = async (params: {
@@ -425,30 +557,15 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     const remote = await apiClient.getPrinterConnectionStatus();
     if (remote.success && remote.data) {
       const nextStatus = remote.data as PrinterConnectionStatus;
+      applyPrinterStatusSnapshot(nextStatus, {
+        fallbackPrinters: localPrinters,
+        updatedAt: nextStatus.lastHeartbeatAt || new Date().toISOString(),
+      });
       const mergedPrinters =
         normalizePrinterRows(nextStatus.printers || []).length > 0
           ? normalizePrinterRows(nextStatus.printers || [])
           : localPrinters;
-      setPrinterStatus({
-        ...nextStatus,
-        printers: mergedPrinters,
-      });
-      setDetectedPrinters(mergedPrinters);
-      if (!selectedLocalPrinterId) {
-        const defaultPrinter =
-          mergedPrinters.find((row) => row.isDefault) ||
-          mergedPrinters.find((row) => row.printerId === nextStatus.selectedPrinterId) ||
-          mergedPrinters[0];
-        if (defaultPrinter?.printerId) {
-          setSelectedLocalPrinterId(defaultPrinter.printerId);
-        }
-      }
-
       const nowConnected = Boolean(nextStatus.connected && nextStatus.eligibleForPrinting);
-      if (nowConnected && !printerConnectedRef.current) {
-        setPrinterDialogOpen(true);
-      }
-      printerConnectedRef.current = nowConnected;
       if (!nowConnected) {
         void maybeAutoReportPrinterFailure({
           localResult: local,
@@ -488,9 +605,10 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       error: String(remote.error || local.error || "Printer heartbeat failed"),
     };
 
-    setPrinterStatus(fallbackStatus);
-    setDetectedPrinters(localPrinters);
-    printerConnectedRef.current = false;
+    applyPrinterStatusSnapshot(fallbackStatus, {
+      fallbackPrinters: localPrinters,
+      updatedAt: new Date().toISOString(),
+    });
     if (!opts?.silent) {
       void maybeAutoReportPrinterFailure({
         localResult: local,
@@ -500,9 +618,10 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const switchLocalPrinter = async () => {
-    const targetPrinterId = String(selectedLocalPrinterId || "").trim();
+  const switchLocalPrinter = async (targetOverride?: string) => {
+    const targetPrinterId = String(targetOverride || selectedLocalPrinterId || "").trim();
     if (!targetPrinterId) return;
+    setSelectedLocalPrinterId(targetPrinterId);
     setPrinterSwitching(true);
     try {
       const switched = await apiClient.selectLocalPrinter(targetPrinterId);
@@ -566,6 +685,35 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       syncManufacturerPrinterStatus({ silent: true });
     }, 6000);
     return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, user?.role]);
+
+  useEffect(() => {
+    detectedPrintersRef.current = detectedPrinters;
+  }, [detectedPrinters]);
+
+  useEffect(() => {
+    if (!user || user.role !== "manufacturer") return;
+
+    const stop = apiClient.streamPrinterConnectionStatus(
+      (payload) => {
+        setPrinterStatusLive(true);
+        applyPrinterStatusSnapshot(payload.status as PrinterConnectionStatus, {
+          updatedAt: payload.serverTime || payload.status.lastHeartbeatAt || new Date().toISOString(),
+        });
+      },
+      () => {
+        setPrinterStatusLive(false);
+      },
+      () => {
+        setPrinterStatusLive(true);
+      }
+    );
+
+    return () => {
+      setPrinterStatusLive(false);
+      stop();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, user?.role]);
 
@@ -898,7 +1046,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const printerTitle = printerReady
     ? `${printerStatus.selectedPrinterName || printerStatus.printerName || "Printer connected"}${printerStatus.lastHeartbeatAt ? ` · heartbeat ${printerStatus.lastHeartbeatAt}` : ""}`
     : printerUnavailable
-      ? "No local print agent or printer is currently detected."
+      ? "No printer connection detected"
       : printerStatus.error || printerStatus.trustReason || "Printer disconnected";
   const selectedPrinter =
     detectedPrinters.find((row) => row.printerId === selectedLocalPrinterId) ||
@@ -906,6 +1054,43 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     detectedPrinters[0] ||
     null;
   const capability = printerStatus.capabilitySummary;
+  const activePrinterId = String(printerStatus.selectedPrinterId || printerStatus.printerId || "").trim();
+  const printerIdentity = derivePrinterIdentity({
+    printerName: printerStatus.printerName,
+    selectedPrinterName: printerStatus.selectedPrinterName,
+    model: selectedPrinter?.model || null,
+    deviceName: printerStatus.deviceName,
+  });
+  const printerFeedLabel = printerStatusLive ? "Real-time feed active" : "Polling mode";
+  const printerUpdatedLabel = formatPrinterTimestamp(printerStatusUpdatedAt || printerStatus.lastHeartbeatAt);
+  const printerHeartbeatAgeLabel = formatPrinterAge(printerStatus.ageSeconds);
+  const printerSummaryMessage = printerReady
+    ? `${printerIdentity.displayName} is ready for direct-print and server-issued QR fulfillment.`
+    : printerUnavailable
+      ? "No printer connection detected"
+      : printerStatus.compatibilityMode
+        ? printerStatus.compatibilityReason || "Compatibility mode is active while advanced trust enrollment is still pending."
+        : printerStatus.error || printerStatus.trustReason || "Printer attention is required before issuing print jobs.";
+  const printerNextStep = printerReady
+    ? "You can continue to batch operations or keep this dialog open to verify calibration."
+    : printerUnavailable
+      ? "Open the local print agent on this workstation, connect a printer, then use Try again (Refresh)."
+      : printerStatus.compatibilityMode
+        ? "Review the active printer details below and continue if compatibility mode is acceptable for this session."
+        : "Reconnect the agent or printer, then refresh status before starting a print job.";
+  const selectedPrinterIsActive = Boolean(selectedPrinter && selectedPrinter.printerId === activePrinterId);
+  const printerDiscoveryCountLabel =
+    detectedPrinters.length === 1 ? "1 printer detected" : `${detectedPrinters.length} printers detected`;
+  const printerTransportLabel = capability?.transports?.join(", ") || selectedPrinter?.connection || "Auto-detect";
+  const printerProtocolLabel = capability?.protocols?.join(", ") || selectedPrinter?.protocols?.join(", ") || "Auto-detect";
+  const printerLanguageLabel = capability?.languages?.join(", ") || selectedPrinter?.languages?.join(", ") || "AUTO";
+  const openPrinterConnectionDialog = () => {
+    setPrinterDialogOpen(true);
+    void syncManufacturerPrinterStatus({ silent: true });
+  };
+  const refreshPrinterConnectionStatus = () => {
+    void syncManufacturerPrinterStatus({ silent: true });
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -1219,14 +1404,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                if (printerReady || detectedPrinters.length > 0) {
-                  setPrinterDialogOpen(true);
-                  void syncManufacturerPrinterStatus({ silent: true });
-                  return;
-                }
-                void syncManufacturerPrinterStatus();
-              }}
+              onClick={openPrinterConnectionDialog}
               className={cn("mr-1 gap-2", printerToneClass)}
               title={printerTitle}
             >
@@ -1285,96 +1463,266 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
         {user?.role === "manufacturer" && (
           <Dialog open={printerDialogOpen} onOpenChange={setPrinterDialogOpen}>
-            <DialogContent className="sm:max-w-[720px] max-h-[86vh] overflow-y-auto">
+            <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[860px]">
               <DialogHeader>
-                <DialogTitle>Printer Connection</DialogTitle>
+                <DialogTitle>Printer Connection Center</DialogTitle>
                 <DialogDescription>
-                  Confirm active printer, switch if multiple devices are attached, and tune alignment before print jobs.
+                  Open the local printer setup, review live metadata, switch devices when several printers are attached,
+                  and confirm readiness before direct-print jobs are issued.
                 </DialogDescription>
               </DialogHeader>
 
-              <div className="space-y-4">
-                <div
-                  className={cn(
-                    "rounded-md border p-3",
-                    printerStatus.trusted
-                      ? "border-emerald-200 bg-emerald-50"
-                      : printerStatus.compatibilityMode
-                        ? "border-amber-200 bg-amber-50"
-                        : printerUnavailable
-                          ? "border-slate-200 bg-slate-50"
-                          : "border-red-200 bg-red-50"
-                  )}
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-semibold">
-                      {printerStatus.selectedPrinterName || printerStatus.printerName || "Printer status unavailable"}
-                    </span>
-                    <Badge
-                      variant={
-                        printerStatus.trusted
-                          ? "default"
-                          : printerStatus.compatibilityMode || printerUnavailable
-                            ? "secondary"
-                            : "destructive"
-                      }
-                    >
-                      {printerStatus.trusted ? "Trusted" : printerStatus.compatibilityMode ? "Compatibility" : printerUnavailable ? "Unavailable" : "Blocked"}
-                    </Badge>
-                    {selectedPrinter?.online === false && <Badge variant="destructive">Offline</Badge>}
+              <div className="space-y-5">
+                <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+                  <div
+                    className={cn(
+                      "rounded-2xl border p-4 shadow-sm",
+                      printerStatus.trusted
+                        ? "border-emerald-200 bg-[linear-gradient(135deg,#ecfdf5_0%,#f8fffc_100%)]"
+                        : printerStatus.compatibilityMode
+                          ? "border-amber-200 bg-[linear-gradient(135deg,#fffbeb_0%,#fffdf7_100%)]"
+                          : printerUnavailable
+                            ? "border-slate-200 bg-[linear-gradient(135deg,#f8fafc_0%,#ffffff_100%)]"
+                            : "border-red-200 bg-[linear-gradient(135deg,#fef2f2_0%,#fff8f8_100%)]"
+                    )}
+                  >
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="flex items-start gap-4">
+                        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-lg font-semibold tracking-[0.24em] text-slate-700 shadow-sm">
+                          {printerIdentity.monogram}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-lg font-semibold text-slate-950">{printerIdentity.displayName}</span>
+                            <Badge
+                              variant={
+                                printerStatus.trusted
+                                  ? "default"
+                                  : printerStatus.compatibilityMode || printerUnavailable
+                                    ? "secondary"
+                                    : "destructive"
+                              }
+                            >
+                              {printerStatus.trusted ? "Trusted" : printerStatus.compatibilityMode ? "Compatibility" : printerUnavailable ? "Unavailable" : "Blocked"}
+                            </Badge>
+                            {selectedPrinter?.online === false && <Badge variant="destructive">Offline</Badge>}
+                          </div>
+                          <p className="mt-1 text-sm font-medium text-slate-700">
+                            {printerIdentity.vendor}
+                            {printerIdentity.model ? ` · ${printerIdentity.model}` : ""}
+                          </p>
+                          <p
+                            className={cn(
+                              "mt-3 text-sm leading-6",
+                              printerUnavailable ? "text-slate-700" : printerReady ? "text-emerald-800" : "text-slate-700"
+                            )}
+                          >
+                            {printerSummaryMessage}
+                          </p>
+                          <p className="mt-2 text-xs leading-5 text-slate-600">{printerNextStep}</p>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-2 text-xs text-slate-600 sm:min-w-[15rem]">
+                        <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2">
+                          <div className="font-medium text-slate-500">Printer ID</div>
+                          <div className="mt-1 font-semibold text-slate-900">{printerStatus.selectedPrinterId || printerStatus.printerId || "—"}</div>
+                        </div>
+                        <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2">
+                          <div className="font-medium text-slate-500">Device</div>
+                          <div className="mt-1 font-semibold text-slate-900">{printerStatus.deviceName || "—"}</div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-                    <div>Printer ID: {printerStatus.selectedPrinterId || printerStatus.printerId || "—"}</div>
-                    <div>Device: {printerStatus.deviceName || "—"}</div>
-                    <div>Agent version: {printerStatus.agentVersion || "—"}</div>
-                    <div>Connection class: {printerStatus.connectionClass || "BLOCKED"}</div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Live connection</div>
+                        <div className="mt-1 text-lg font-semibold text-slate-950">{printerFeedLabel}</div>
+                      </div>
+                      <div className={cn("inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium", printerStatusLive ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-700")}>
+                        <Wifi className="h-3.5 w-3.5" />
+                        {printerStatusLive ? "Streaming" : "Polling"}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 text-sm text-slate-700">
+                      <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+                        <Monitor className="mt-0.5 h-4 w-4 text-slate-500" />
+                        <div>
+                          <div className="font-medium text-slate-900">Last status update</div>
+                          <div className="text-xs text-slate-600">{printerUpdatedLabel}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+                        <RefreshCw className="mt-0.5 h-4 w-4 text-slate-500" />
+                        <div>
+                          <div className="font-medium text-slate-900">Heartbeat age</div>
+                          <div className="text-xs text-slate-600">{printerHeartbeatAgeLabel}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+                        {printerReady ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" /> : <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-600" />}
+                        <div>
+                          <div className="font-medium text-slate-900">Connection class</div>
+                          <div className="text-xs text-slate-600">{printerStatus.connectionClass || "BLOCKED"}</div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  {!printerReady && (
-                    <div className={cn("mt-2 text-xs", printerUnavailable ? "text-slate-600" : "text-red-700")}>
-                      {printerUnavailable
-                        ? "No printer is currently paired on this device. Open the local print agent, connect a printer, then refresh."
-                        : printerStatus.error || printerStatus.compatibilityReason || printerStatus.trustReason || "Printer not ready"}
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Printer roster</div>
+                      <div className="mt-1 text-lg font-semibold text-slate-950">
+                        {detectedPrinters.length > 0 ? printerDiscoveryCountLabel : "No printer connection detected"}
+                      </div>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Review every printer reported by the local agent, confirm which device is active, and switch before issuing a job.
+                      </p>
+                    </div>
+                    <Button variant="outline" className="gap-2" onClick={refreshPrinterConnectionStatus} disabled={printerSwitching}>
+                      <RefreshCw className="h-4 w-4" />
+                      Try again (Refresh)
+                    </Button>
+                  </div>
+
+                  {detectedPrinters.length === 0 ? (
+                    <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6">
+                      <div className="text-base font-semibold text-slate-950">No printer connection detected</div>
+                      <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                        The local print agent did not report a connected printer. Start the agent on this device, pair a USB or network printer, then use Try again (Refresh) to reload live metadata and readiness checks.
+                      </p>
+                      <div className="mt-4 flex flex-wrap gap-3">
+                        <Button onClick={refreshPrinterConnectionStatus} disabled={printerSwitching}>
+                          Try again (Refresh)
+                        </Button>
+                        <Button variant="outline" onClick={() => navigate("/batches")}>
+                          Open batch operations
+                        </Button>
+                        <Button variant="ghost" onClick={() => navigate(contextualHelpRoute)}>
+                          Open help
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      {detectedPrinters.map((row) => {
+                        const rowIdentity = derivePrinterIdentity({
+                          printerName: row.printerName,
+                          selectedPrinterName: row.printerName,
+                          model: row.model || null,
+                          deviceName: printerStatus.deviceName,
+                        });
+                        const isActive = row.printerId === activePrinterId;
+                        const isSelected = row.printerId === selectedLocalPrinterId;
+
+                        return (
+                          <div
+                            key={row.printerId}
+                            className={cn(
+                              "rounded-2xl border p-4 transition",
+                              isActive
+                                ? "border-emerald-200 bg-emerald-50/70 shadow-[0_10px_24px_-22px_rgba(16,185,129,0.85)]"
+                                : isSelected
+                                  ? "border-sky-200 bg-sky-50/70"
+                                  : "border-slate-200 bg-slate-50 hover:border-slate-300"
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <button
+                                type="button"
+                                className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                                onClick={() => setSelectedLocalPrinterId(row.printerId)}
+                              >
+                                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white bg-white text-sm font-semibold tracking-[0.2em] text-slate-700">
+                                  {rowIdentity.monogram}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <div className="truncate font-semibold text-slate-950">{row.printerName}</div>
+                                    {isActive && <Badge variant="default">Active</Badge>}
+                                    {row.online === false && <Badge variant="destructive">Offline</Badge>}
+                                  </div>
+                                  <div className="mt-1 text-xs text-slate-600">
+                                    {rowIdentity.vendor}
+                                    {row.model ? ` · ${row.model}` : ""}
+                                    {row.connection ? ` · ${row.connection}` : ""}
+                                  </div>
+                                  <div className="mt-2 text-xs text-slate-500">
+                                    {row.languages?.join(", ") || "AUTO"} · {row.mediaSizes?.join(", ") || "Auto media"}
+                                  </div>
+                                </div>
+                              </button>
+
+                              <Button
+                                size="sm"
+                                variant={isActive ? "secondary" : "outline"}
+                                disabled={printerSwitching || isActive}
+                                onClick={() => void switchLocalPrinter(row.printerId)}
+                              >
+                                {isActive ? "Active printer" : "Make active"}
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
 
-                <div className="space-y-2 rounded-md border p-3">
-                  <Label className="text-sm">Select printer</Label>
-                  <Select value={selectedLocalPrinterId} onValueChange={setSelectedLocalPrinterId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select connected printer" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {detectedPrinters.length === 0 ? (
-                        <SelectItem value="__none__" disabled>
-                          No printers discovered
-                        </SelectItem>
-                      ) : (
-                        detectedPrinters.map((row) => (
-                          <SelectItem key={row.printerId} value={row.printerId}>
-                            {row.printerName}
-                            {row.connection ? ` · ${row.connection}` : ""}
-                            {row.online === false ? " · offline" : ""}
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                  <div className="flex justify-end">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={printerSwitching || !selectedLocalPrinterId || detectedPrinters.length <= 1}
-                      onClick={switchLocalPrinter}
-                    >
-                      {printerSwitching ? "Switching..." : "Switch printer"}
-                    </Button>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-900">Select printer</Label>
+                      <Select value={selectedLocalPrinterId} onValueChange={setSelectedLocalPrinterId}>
+                        <SelectTrigger className="md:w-[24rem]">
+                          <SelectValue placeholder="Select connected printer" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {detectedPrinters.length === 0 ? (
+                            <SelectItem value="__none__" disabled>
+                              No printers discovered
+                            </SelectItem>
+                          ) : (
+                            detectedPrinters.map((row) => (
+                              <SelectItem key={row.printerId} value={row.printerId}>
+                                {row.printerName}
+                                {row.connection ? ` · ${row.connection}` : ""}
+                                {row.online === false ? " · offline" : ""}
+                              </SelectItem>
+                            ))
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={printerSwitching || !selectedLocalPrinterId || selectedPrinterIsActive}
+                        onClick={() => void switchLocalPrinter()}
+                      >
+                        {printerSwitching ? "Switching..." : "Switch printer"}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => navigate("/batches")}>
+                        Open batch operations
+                      </Button>
+                    </div>
                   </div>
                 </div>
 
-                <div className="space-y-3 rounded-md border p-3">
-                  <div className="text-sm font-medium">Alignment and Calibration</div>
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="text-sm font-semibold text-slate-950">Alignment and calibration</div>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Use the active printer profile to align label size, offsets, DPI, darkness, and speed before issuing print jobs.
+                  </p>
+                  <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
                     <div className="space-y-1">
                       <Label className="text-xs">DPI</Label>
                       <Input value={calibrationForm.dpi} onChange={(e) => setCalibrationForm((prev) => ({ ...prev, dpi: e.target.value }))} placeholder="300" />
@@ -1404,34 +1752,55 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                       <Input value={calibrationForm.speed} onChange={(e) => setCalibrationForm((prev) => ({ ...prev, speed: e.target.value }))} placeholder="4" />
                     </div>
                   </div>
-                  <div className="flex justify-end">
+                  <div className="mt-4 flex justify-end">
                     <Button size="sm" variant="outline" disabled={printerSwitching || !selectedPrinter} onClick={applyCalibrationProfile}>
                       {printerSwitching ? "Applying..." : "Apply calibration"}
                     </Button>
                   </div>
                 </div>
 
-                <div className="space-y-2 rounded-md border p-3">
-                  <div className="text-sm font-medium">Capabilities</div>
-                  <div className="grid grid-cols-1 gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-                    <div>Transports: {capability?.transports?.join(", ") || selectedPrinter?.connection || "auto"}</div>
-                    <div>Protocols: {capability?.protocols?.join(", ") || selectedPrinter?.protocols?.join(", ") || "auto"}</div>
-                    <div>Languages: {capability?.languages?.join(", ") || selectedPrinter?.languages?.join(", ") || "AUTO"}</div>
-                    <div>Media sizes: {capability?.mediaSizes?.join(", ") || selectedPrinter?.mediaSizes?.join(", ") || "auto"}</div>
-                    <div>DPI options: {capability?.dpiOptions?.join(", ") || (selectedPrinter?.dpi ? String(selectedPrinter.dpi) : "auto")}</div>
-                    <div>
-                      Fallback rendering: {capability?.supportsRaster ? "Raster enabled" : "Raster unknown"} /{" "}
-                      {capability?.supportsPdf ? "PDF enabled" : "PDF unknown"}
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="text-sm font-semibold text-slate-950">Capabilities and transport</div>
+                  <div className="mt-3 grid grid-cols-1 gap-3 text-sm text-slate-700 sm:grid-cols-2">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <div className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Transport</div>
+                      <div className="mt-1 font-semibold text-slate-950">{printerTransportLabel}</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <div className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Protocols</div>
+                      <div className="mt-1 font-semibold text-slate-950">{printerProtocolLabel}</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <div className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Languages</div>
+                      <div className="mt-1 font-semibold text-slate-950">{printerLanguageLabel}</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <div className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Media sizes</div>
+                      <div className="mt-1 font-semibold text-slate-950">{capability?.mediaSizes?.join(", ") || selectedPrinter?.mediaSizes?.join(", ") || "Auto-detect"}</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <div className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">DPI options</div>
+                      <div className="mt-1 font-semibold text-slate-950">{capability?.dpiOptions?.join(", ") || (selectedPrinter?.dpi ? String(selectedPrinter.dpi) : "Auto-detect")}</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <div className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Fallback rendering</div>
+                      <div className="mt-1 font-semibold text-slate-950">
+                        {capability?.supportsRaster ? "Raster enabled" : "Raster unknown"} / {capability?.supportsPdf ? "PDF enabled" : "PDF unknown"}
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex justify-end gap-2">
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button variant="outline" onClick={() => navigate(contextualHelpRoute)}>
+                    Open help
+                  </Button>
                   <Button variant="outline" onClick={() => setPrinterDialogOpen(false)}>
                     Close
                   </Button>
-                  <Button onClick={() => void syncManufacturerPrinterStatus()} disabled={printerSwitching}>
-                    Refresh status
+                  <Button variant="outline" className="gap-2" onClick={refreshPrinterConnectionStatus} disabled={printerSwitching}>
+                    <RefreshCw className="h-4 w-4" />
+                    Try again (Refresh)
                   </Button>
                 </div>
               </div>
