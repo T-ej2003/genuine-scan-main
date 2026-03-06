@@ -42,6 +42,30 @@ type OwnershipStatus = {
   matchMethod?: "user" | "device_token" | "ip_fallback" | null;
 };
 
+type OwnershipTransferView = {
+  state?:
+    | "none"
+    | "pending_owner_action"
+    | "pending_buyer_action"
+    | "ready_to_accept"
+    | "accepted"
+    | "cancelled"
+    | "expired"
+    | "invalid";
+  active?: boolean;
+  canCreate?: boolean;
+  canCancel?: boolean;
+  canAccept?: boolean;
+  initiatedByYou?: boolean;
+  recipientEmailMasked?: string | null;
+  initiatedAt?: string | null;
+  expiresAt?: string | null;
+  acceptedAt?: string | null;
+  invalidReason?: string | null;
+  transferId?: string | null;
+  acceptUrl?: string | null;
+};
+
 type ScanSummary = {
   totalScans: number;
   firstVerifiedAt: string | null;
@@ -62,6 +86,7 @@ type VerifyPayload = {
   reasons?: string[];
   scanSummary?: ScanSummary;
   ownershipStatus?: OwnershipStatus;
+  ownershipTransfer?: OwnershipTransferView | null;
   verificationTimeline?: {
     firstSeen?: string | null;
     latestSeen?: string | null;
@@ -334,6 +359,12 @@ export default function Verify() {
   const [claiming, setClaiming] = useState(false);
   const [linkingClaim, setLinkingClaim] = useState(false);
   const [claimConfirmOpen, setClaimConfirmOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferRecipientEmail, setTransferRecipientEmail] = useState("");
+  const [transferSubmitting, setTransferSubmitting] = useState(false);
+  const [transferAccepting, setTransferAccepting] = useState(false);
+  const [transferCancelling, setTransferCancelling] = useState(false);
+  const [issuedTransferLink, setIssuedTransferLink] = useState<string | null>(null);
 
   const [reportOpen, setReportOpen] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -358,6 +389,7 @@ export default function Verify() {
   const [loadingStage, setLoadingStage] = useState<0 | 1>(0);
 
   const token = useMemo(() => searchParams.get("t")?.trim() || "", [searchParams]);
+  const transferToken = useMemo(() => searchParams.get("transfer")?.trim() || "", [searchParams]);
   const codeParam = useMemo(() => {
     const raw = String(code || "");
     try {
@@ -369,9 +401,9 @@ export default function Verify() {
 
   const requestKey = useMemo(() => {
     if (token) return `token:${token}|cust:${customerToken.slice(-10)}`;
-    if (codeParam) return `code:${codeParam.toUpperCase()}|cust:${customerToken.slice(-10)}`;
+    if (codeParam) return `code:${codeParam.toUpperCase()}|transfer:${transferToken.slice(-10)}|cust:${customerToken.slice(-10)}`;
     return "";
-  }, [codeParam, customerToken, token]);
+  }, [codeParam, customerToken, token, transferToken]);
 
   const deviceId = useMemo(() => getOrCreateAnonDeviceId(), []);
   const inFlightRef = useRef(new Map<string, Promise<any>>());
@@ -384,6 +416,7 @@ export default function Verify() {
   const reasons = useMemo(() => deriveReasons(result, classification), [classification, result]);
   const scanSummary = useMemo(() => deriveScanSummary(result), [result]);
   const ownershipStatus = result?.ownershipStatus || DEFAULT_OWNERSHIP_STATUS;
+  const ownershipTransfer = result?.ownershipTransfer || null;
   const verifyUxPolicy = { ...DEFAULT_VERIFY_POLICY, ...(result?.verifyUxPolicy || {}) };
   const showLinkClaim =
     Boolean(customerToken) && ownershipStatus.isOwnedByRequester && ownershipStatus.matchMethod && ownershipStatus.matchMethod !== "user";
@@ -498,6 +531,7 @@ export default function Verify() {
             lon: geo.lon,
             acc: geo.acc,
             customerToken: customerToken || undefined,
+            transferToken: transferToken || undefined,
           });
         })();
 
@@ -821,6 +855,109 @@ export default function Verify() {
       );
     } finally {
       setLinkingClaim(false);
+    }
+  };
+
+  const handleCreateTransfer = async () => {
+    if (!customerToken || !displayedCode || displayedCode === "—") {
+      toast({ title: "Sign-in required", description: "Sign in before starting a resale transfer.", variant: "destructive" });
+      return;
+    }
+
+    setTransferSubmitting(true);
+    try {
+      const response = await apiClient.createOwnershipTransfer(
+        displayedCode,
+        { recipientEmail: transferRecipientEmail.trim() || undefined },
+        customerToken
+      );
+      if (!response.success || !response.data) {
+        toast({
+          title: "Transfer unavailable",
+          description: response.error || "Could not start the ownership transfer.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setIssuedTransferLink(response.data.transferLink || null);
+      setResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              ownershipStatus: response.data?.ownershipStatus || prev.ownershipStatus,
+              ownershipTransfer: response.data?.ownershipTransfer || prev.ownershipTransfer,
+            }
+          : prev
+      );
+      toast({
+        title: "Transfer ready",
+        description: response.data.message || "Share the secure transfer link with the next owner.",
+      });
+      setTransferOpen(false);
+    } finally {
+      setTransferSubmitting(false);
+    }
+  };
+
+  const handleCancelTransfer = async () => {
+    if (!customerToken || !displayedCode || !ownershipTransfer?.transferId) return;
+    setTransferCancelling(true);
+    try {
+      const response = await apiClient.cancelOwnershipTransfer(
+        displayedCode,
+        { transferId: ownershipTransfer.transferId || undefined },
+        customerToken
+      );
+      if (!response.success) {
+        toast({
+          title: "Cancel failed",
+          description: response.error || "Could not cancel the transfer.",
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({ title: "Transfer cancelled", description: response.data?.message || "Pending resale transfer cancelled." });
+      await fetchVerification();
+    } finally {
+      setTransferCancelling(false);
+    }
+  };
+
+  const handleAcceptTransfer = async () => {
+    if (!customerToken || !transferToken) {
+      toast({ title: "Sign-in required", description: "Sign in before accepting the transfer.", variant: "destructive" });
+      return;
+    }
+    setTransferAccepting(true);
+    try {
+      const response = await apiClient.acceptOwnershipTransfer({ token: transferToken }, customerToken);
+      if (!response.success) {
+        toast({
+          title: "Accept failed",
+          description: response.error || "Could not accept the transfer.",
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: "Ownership transferred",
+        description: response.data?.message || "This product is now linked to your account.",
+      });
+      await fetchVerification();
+    } finally {
+      setTransferAccepting(false);
+    }
+  };
+
+  const handleCopyTransferLink = async () => {
+    const link = issuedTransferLink || ownershipTransfer?.acceptUrl || "";
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      toast({ title: "Transfer link copied", description: "Send this secure acceptance link to the next owner." });
+    } catch {
+      toast({ title: "Copy failed", description: "Could not copy the transfer link.", variant: "destructive" });
     }
   };
 
@@ -1385,6 +1522,94 @@ export default function Verify() {
                         </Button>
                       ) : null}
 
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="font-medium text-slate-900">Resale / ownership transfer</p>
+                            <p className="mt-1 text-xs text-slate-600">
+                              Use this when selling a genuine item to the next owner. The new buyer accepts the transfer from a secure link.
+                            </p>
+                          </div>
+                          {ownershipTransfer?.state && ownershipTransfer.state !== "none" ? (
+                            <Badge variant="outline">{toLabel(ownershipTransfer.state)}</Badge>
+                          ) : null}
+                        </div>
+
+                        <div className="mt-3 space-y-3">
+                          {ownershipTransfer?.state === "invalid" ? (
+                            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                              {ownershipTransfer.invalidReason || "This transfer link is invalid or has expired."}
+                            </div>
+                          ) : null}
+
+                          {ownershipTransfer?.active ? (
+                            <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+                              <p>Started: {formatDateTime(ownershipTransfer.initiatedAt)}</p>
+                              <p>Expires: {formatDateTime(ownershipTransfer.expiresAt)}</p>
+                              {ownershipTransfer.recipientEmailMasked ? <p>Recipient: {ownershipTransfer.recipientEmailMasked}</p> : null}
+                            </div>
+                          ) : null}
+
+                          {ownershipTransfer?.canCreate ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button type="button" variant="outline" onClick={() => setTransferOpen(true)} className={motionButtonClass}>
+                                Start resale transfer
+                              </Button>
+                              {issuedTransferLink ? (
+                                <Button type="button" variant="outline" onClick={handleCopyTransferLink}>
+                                  Copy latest transfer link
+                                </Button>
+                              ) : null}
+                            </div>
+                          ) : null}
+
+                          {ownershipTransfer?.canCancel ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button type="button" variant="outline" onClick={handleCopyTransferLink} disabled={!ownershipTransfer?.acceptUrl && !issuedTransferLink}>
+                                Copy transfer link
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={handleCancelTransfer}
+                                disabled={transferCancelling}
+                                className="border-rose-300 text-rose-800 hover:bg-rose-50"
+                              >
+                                {transferCancelling ? (
+                                  <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Cancelling
+                                  </>
+                                ) : (
+                                  "Cancel transfer"
+                                )}
+                              </Button>
+                            </div>
+                          ) : null}
+
+                          {ownershipTransfer?.canAccept ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                type="button"
+                                onClick={handleAcceptTransfer}
+                                disabled={transferAccepting}
+                                className={cn("bg-slate-900 text-white hover:bg-slate-800", motionButtonClass)}
+                              >
+                                {transferAccepting ? (
+                                  <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Accepting
+                                  </>
+                                ) : (
+                                  "Accept ownership transfer"
+                                )}
+                              </Button>
+                              <p className="text-xs text-slate-600">Sign-in is required so the new owner gets portable proof of ownership.</p>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+
                       {!customerToken ? (
                         <div className="space-y-3 rounded-lg border border-slate-200 p-3">
                           <p className="text-sm font-medium text-slate-900">Sign in for better protection (optional)</p>
@@ -1605,6 +1830,63 @@ export default function Verify() {
                 </>
               ) : (
                 "Confirm claim"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Start resale transfer</DialogTitle>
+            <DialogDescription>
+              Create a short-lived secure transfer link for the next owner. They will verify the product and accept the transfer from that link.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label>Recipient email (optional)</Label>
+              <Input
+                type="email"
+                value={transferRecipientEmail}
+                onChange={(e) => setTransferRecipientEmail(e.target.value)}
+                placeholder="buyer@example.com"
+                disabled={transferSubmitting}
+              />
+              <p className="text-xs text-slate-600">
+                Leave this blank if you only want to copy the transfer link and share it manually.
+              </p>
+            </div>
+            {issuedTransferLink ? (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                <p className="font-medium text-slate-900">Latest transfer link</p>
+                <p className="mt-2 break-all font-mono">{issuedTransferLink}</p>
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setTransferOpen(false)} disabled={transferSubmitting}>
+              Cancel
+            </Button>
+            {issuedTransferLink ? (
+              <Button type="button" variant="outline" onClick={handleCopyTransferLink} disabled={transferSubmitting}>
+                Copy link
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              onClick={handleCreateTransfer}
+              disabled={transferSubmitting}
+              className="bg-slate-900 text-white hover:bg-slate-800"
+            >
+              {transferSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Creating
+                </>
+              ) : (
+                "Create transfer"
               )}
             </Button>
           </DialogFooter>

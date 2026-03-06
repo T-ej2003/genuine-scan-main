@@ -43,6 +43,7 @@ import {
   assignManufacturer,
   renameBatch,
   getBatches,
+  getBatchAllocationMap,
   getStats,
   deleteBatch,
   bulkDeleteBatches,
@@ -65,7 +66,7 @@ import {
   approveQrAllocationRequest,
   rejectQrAllocationRequest,
 } from "../controllers/qrRequestController";
-import { getScanLogs, getBatchSummary } from "../controllers/qrLogController";
+import { getScanLogs, getBatchSummary, getQrTrackingAnalyticsController } from "../controllers/qrLogController";
 import {
   getTraceTimelineController,
   getBatchSlaAnalyticsController,
@@ -96,6 +97,9 @@ import {
   verifyCustomerEmailOtp,
   claimProductOwnership,
   linkDeviceClaimToCustomer,
+  createOwnershipTransfer,
+  cancelOwnershipTransfer,
+  acceptOwnershipTransfer,
 } from "../controllers/verifyController";
 import { scanToken } from "../controllers/scanController";
 import {
@@ -255,6 +259,9 @@ router.post("/verify/auth/email-otp/request", verifyOtpRequestLimiter, requestCu
 router.post("/verify/auth/email-otp/verify", verifyOtpVerifyLimiter, verifyCustomerEmailOtp);
 router.post("/verify/:code/claim", verifyClaimLimiter, optionalCustomerVerifyAuth, claimProductOwnership);
 router.post("/verify/:code/link-claim", verifyClaimLimiter, requireCustomerVerifyAuth, linkDeviceClaimToCustomer);
+router.post("/verify/:code/transfer", verifyClaimLimiter, requireCustomerVerifyAuth, createOwnershipTransfer);
+router.post("/verify/:code/transfer/cancel", verifyClaimLimiter, requireCustomerVerifyAuth, cancelOwnershipTransfer);
+router.post("/verify/transfer/accept", verifyClaimLimiter, requireCustomerVerifyAuth, acceptOwnershipTransfer);
 router.post("/verify/report-fraud", verifyReportLimiter, uploadIncidentReportPhotos, reportFraud);
 router.post("/fraud-report", verifyReportLimiter, uploadIncidentReportPhotos, reportFraud);
 router.post("/verify/feedback", verifyFeedbackLimiter, submitProductFeedback);
@@ -352,6 +359,7 @@ router.post(
 // ==================== BATCHES ====================
 router.post("/qr/batches", authenticate, requireLicenseeAdmin, enforceTenantIsolation, requireCsrf, createBatch);
 router.get("/qr/batches", authenticate, enforceTenantIsolation, getBatches);
+router.get("/qr/batches/:id/allocation-map", authenticate, enforceTenantIsolation, getBatchAllocationMap);
 
 router.post(
   "/qr/batches/:id/assign-manufacturer",
@@ -618,6 +626,7 @@ router.get(
 // ==================== QR LOGS (ADMINS) ====================
 router.get("/admin/qr/scan-logs", authenticate, requireOpsUser, enforceTenantIsolation, getScanLogs);
 router.get("/admin/qr/batch-summary", authenticate, requireOpsUser, enforceTenantIsolation, getBatchSummary);
+router.get("/admin/qr/analytics", authenticate, requireOpsUser, enforceTenantIsolation, getQrTrackingAnalyticsController);
 
 // ==================== INCIDENT RESPONSE ====================
 router.get("/incidents", authenticate, requireAnyAdmin, enforceTenantIsolation, listIncidents);

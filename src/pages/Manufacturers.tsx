@@ -351,6 +351,14 @@ export default function Manufacturers() {
     setDetailsOpen(true);
   };
 
+  const openManufacturerBatches = (manufacturer: ManufacturerRow, printState?: "pending" | "printed") => {
+    const params = new URLSearchParams();
+    params.set("manufacturerId", manufacturer.id);
+    params.set("manufacturerName", manufacturer.name);
+    if (printState) params.set("printState", printState);
+    navigate(`/batches?${params.toString()}`);
+  };
+
   const copyId = async (id: string) => {
     try {
       await navigator.clipboard.writeText(id);
@@ -735,15 +743,31 @@ export default function Manufacturers() {
                           <div className="text-xs text-muted-foreground">
                             {manufacturerStats[m.id]?.assignedCodes || 0} codes
                           </div>
+                          <div className="mt-2">
+                            <Button size="sm" variant="outline" onClick={() => openManufacturerBatches(m)}>
+                              Open manufacturer batches
+                            </Button>
+                          </div>
                         </TableCell>
 
                         <TableCell>
-                          <div className="flex items-center gap-1 text-sm">
-                            <Activity className="h-4 w-4 text-muted-foreground" />
-                            <span>{manufacturerStats[m.id]?.printedBatches || 0} printed</span>
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {manufacturerStats[m.id]?.pendingPrintBatches || 0} pending
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs text-emerald-700"
+                              onClick={() => openManufacturerBatches(m, "printed")}
+                            >
+                              <Activity className="h-3.5 w-3.5" />
+                              {manufacturerStats[m.id]?.printedBatches || 0} printed
+                            </button>
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs text-amber-700"
+                              onClick={() => openManufacturerBatches(m, "pending")}
+                            >
+                              <Activity className="h-3.5 w-3.5" />
+                              {manufacturerStats[m.id]?.pendingPrintBatches || 0} pending
+                            </button>
                           </div>
                         </TableCell>
 
@@ -760,47 +784,48 @@ export default function Manufacturers() {
                         </TableCell>
 
                         <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon">
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
+                          <div className="flex items-center justify-end gap-2">
+                            <Button size="sm" variant="outline" onClick={() => openDetails(m)}>
+                              <Eye className="mr-2 h-4 w-4" />
+                              View details
+                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
 
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => openDetails(m)}>
-                                <Eye className="mr-2 h-4 w-4" />
-                                View Details
-                              </DropdownMenuItem>
-
-                              <DropdownMenuItem onClick={() => copyId(m.id)}>
-                                <Copy className="mr-2 h-4 w-4" />
-                                Copy ID
-                              </DropdownMenuItem>
-
-                              <DropdownMenuItem onClick={() => navigate("/batches")}>
-                                <PackageCheck className="mr-2 h-4 w-4" />
-                                Open Batches
-                              </DropdownMenuItem>
-
-                              {m.isActive ? (
-                                <DropdownMenuItem onClick={() => deactivate(m)}>
-                                  <Power className="mr-2 h-4 w-4" />
-                                  Deactivate
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => copyId(m.id)}>
+                                  <Copy className="mr-2 h-4 w-4" />
+                                  Copy ID
                                 </DropdownMenuItem>
-                              ) : (
-                                <DropdownMenuItem onClick={() => restore(m)}>
-                                  <Power className="mr-2 h-4 w-4" />
-                                  Restore
-                                </DropdownMenuItem>
-                              )}
 
-                              <DropdownMenuItem className="text-destructive" onClick={() => hardDelete(m)}>
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                Hard Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                                <DropdownMenuItem onClick={() => openManufacturerBatches(m)}>
+                                  <PackageCheck className="mr-2 h-4 w-4" />
+                                  Open Batches
+                                </DropdownMenuItem>
+
+                                {m.isActive ? (
+                                  <DropdownMenuItem onClick={() => deactivate(m)}>
+                                    <Power className="mr-2 h-4 w-4" />
+                                    Deactivate
+                                  </DropdownMenuItem>
+                                ) : (
+                                  <DropdownMenuItem onClick={() => restore(m)}>
+                                    <Power className="mr-2 h-4 w-4" />
+                                    Restore
+                                  </DropdownMenuItem>
+                                )}
+
+                                <DropdownMenuItem className="text-destructive" onClick={() => hardDelete(m)}>
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  Hard Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -917,9 +942,9 @@ export default function Manufacturers() {
                     <Copy className="mr-2 h-4 w-4" />
                     Copy ID
                   </Button>
-                  <Button onClick={() => navigate("/batches")}>
+                  <Button onClick={() => openManufacturerBatches(detailsManufacturer)}>
                     <PackageCheck className="mr-2 h-4 w-4" />
-                    Open Batches
+                    Open manufacturer batches
                   </Button>
                 </div>
               </div>

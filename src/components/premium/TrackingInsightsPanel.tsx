@@ -22,6 +22,7 @@ import { PremiumChartSkeleton } from "@/components/premium/PremiumLoadingBlocks"
 
 export type TrackingTotals = {
   total: number;
+  scanEvents?: number;
   dormant: number;
   allocated: number;
   printed: number;
@@ -33,6 +34,7 @@ export type TrackingTotals = {
 export type TrackingTrendPoint = {
   label: string;
   total: number;
+  scanEvents?: number;
   dormant: number;
   allocated: number;
   printed: number;
@@ -50,14 +52,25 @@ type TrackingInsightsPanelProps = {
 };
 
 const metricConfig: Array<{ key: keyof TrackingTotals; label: string; color: string }> = [
-  { key: "total", label: "Total", color: "#667292" },
-  { key: "dormant", label: "Dormant", color: "#8d9db6" },
-  { key: "allocated", label: "Allocated", color: "#6f8fb0" },
-  { key: "printed", label: "Printed", color: "#9aa7bd" },
-  { key: "redeemed", label: "Redeemed", color: "#5f7e7a" },
-  { key: "blocked", label: "Blocked", color: "#aa5d67" },
-  { key: "created", label: "Created", color: "#8a97b0" },
+  { key: "total", label: "Distinct codes", color: "#0f172a" },
+  { key: "scanEvents", label: "Scan events", color: "#1d4ed8" },
+  { key: "dormant", label: "Dormant", color: "#475569" },
+  { key: "allocated", label: "Allocated", color: "#d97706" },
+  { key: "printed", label: "Printed", color: "#0891b2" },
+  { key: "redeemed", label: "Redeemed", color: "#059669" },
+  { key: "blocked", label: "Blocked", color: "#dc2626" },
+  { key: "created", label: "Batches", color: "#7c3aed" },
 ];
+
+const legendEntries = [
+  { key: "total", label: "Distinct codes", color: "#0f172a" },
+  { key: "scanEvents", label: "Scan events", color: "#1d4ed8" },
+  { key: "dormant", label: "Dormant", color: "#475569" },
+  { key: "allocated", label: "Allocated", color: "#d97706" },
+  { key: "printed", label: "Printed", color: "#0891b2" },
+  { key: "redeemed", label: "Redeemed", color: "#059669" },
+  { key: "blocked", label: "Blocked", color: "#dc2626" },
+] as const;
 
 const chartModes: Array<{ key: ChartMode; label: string; icon: React.ReactNode }> = [
   { key: "bar", label: "Bar", icon: <BarChart3 className="h-3.5 w-3.5" /> },
@@ -72,11 +85,11 @@ export function TrackingInsightsPanel({ totals, trend, loading, className }: Tra
   const distributionData = useMemo(
     () =>
       [
-        { name: "Dormant", value: totals.dormant, color: "#8d9db6" },
-        { name: "Allocated", value: totals.allocated, color: "#7c90ae" },
-        { name: "Printed", value: totals.printed, color: "#97a7bf" },
-        { name: "Redeemed", value: totals.redeemed, color: "#5d827a" },
-        { name: "Blocked", value: totals.blocked, color: "#aa5d67" },
+        { name: "Dormant", value: totals.dormant, color: "#475569" },
+        { name: "Allocated", value: totals.allocated, color: "#d97706" },
+        { name: "Printed", value: totals.printed, color: "#0891b2" },
+        { name: "Redeemed", value: totals.redeemed, color: "#059669" },
+        { name: "Blocked", value: totals.blocked, color: "#dc2626" },
       ].filter((entry) => entry.value > 0),
     [totals]
   );
@@ -121,6 +134,15 @@ export function TrackingInsightsPanel({ totals, trend, loading, className }: Tra
         ))}
       </div>
 
+      <div className="mt-4 flex flex-wrap gap-2">
+        {legendEntries.map((entry) => (
+          <div key={entry.key} className="inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1 text-xs text-slate-700">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
+            {entry.label}
+          </div>
+        ))}
+      </div>
+
       <div className="mt-4 rounded-2xl border border-[#8d9db63f] bg-gradient-to-br from-white via-white to-[#f1e3dd54] p-2 sm:p-4">
         {!hasGraphData ? (
           <div className="flex h-60 items-center justify-center rounded-xl border border-dashed border-[#8d9db66f] bg-[#bccad61c] text-sm text-slate-600">
@@ -135,9 +157,10 @@ export function TrackingInsightsPanel({ totals, trend, loading, className }: Tra
                   <XAxis dataKey="label" tick={{ fill: "#667292", fontSize: 11 }} />
                   <YAxis tick={{ fill: "#667292", fontSize: 11 }} />
                   <Tooltip />
-                  <Bar dataKey="total" name="Total" fill="#667292" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="redeemed" name="Redeemed" fill="#5d827a" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="blocked" name="Blocked" fill="#aa5d67" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="total" name="Distinct codes" fill="#0f172a" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="scanEvents" name="Scan events" fill="#1d4ed8" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="redeemed" name="Redeemed" fill="#059669" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="blocked" name="Blocked" fill="#dc2626" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : null}
@@ -149,9 +172,10 @@ export function TrackingInsightsPanel({ totals, trend, loading, className }: Tra
                   <XAxis dataKey="label" tick={{ fill: "#667292", fontSize: 11 }} />
                   <YAxis tick={{ fill: "#667292", fontSize: 11 }} />
                   <Tooltip />
-                  <Line type="monotone" dataKey="total" stroke="#667292" strokeWidth={2.5} dot={false} />
-                  <Line type="monotone" dataKey="redeemed" stroke="#5d827a" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="blocked" stroke="#aa5d67" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="total" stroke="#0f172a" strokeWidth={2.5} dot={false} />
+                  <Line type="monotone" dataKey="scanEvents" stroke="#1d4ed8" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="redeemed" stroke="#059669" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="blocked" stroke="#dc2626" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             ) : null}
@@ -161,16 +185,17 @@ export function TrackingInsightsPanel({ totals, trend, loading, className }: Tra
                 <AreaChart data={trend} margin={{ left: 4, right: 8, top: 8, bottom: 8 }}>
                   <defs>
                     <linearGradient id="trackingAreaTotal" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#667292" stopOpacity={0.45} />
-                      <stop offset="95%" stopColor="#667292" stopOpacity={0.05} />
+                      <stop offset="5%" stopColor="#0f172a" stopOpacity={0.45} />
+                      <stop offset="95%" stopColor="#0f172a" stopOpacity={0.05} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#bccad6" />
                   <XAxis dataKey="label" tick={{ fill: "#667292", fontSize: 11 }} />
                   <YAxis tick={{ fill: "#667292", fontSize: 11 }} />
                   <Tooltip />
-                  <Area type="monotone" dataKey="total" stroke="#667292" fill="url(#trackingAreaTotal)" strokeWidth={2.5} />
-                  <Area type="monotone" dataKey="blocked" stroke="#aa5d67" fill="#aa5d6726" strokeWidth={1.6} />
+                  <Area type="monotone" dataKey="total" stroke="#0f172a" fill="url(#trackingAreaTotal)" strokeWidth={2.5} />
+                  <Area type="monotone" dataKey="scanEvents" stroke="#1d4ed8" fill="#1d4ed820" strokeWidth={1.6} />
+                  <Area type="monotone" dataKey="blocked" stroke="#dc2626" fill="#dc262620" strokeWidth={1.6} />
                 </AreaChart>
               </ResponsiveContainer>
             ) : null}

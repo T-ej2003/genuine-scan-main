@@ -15,6 +15,12 @@ export interface User {
   name: string;
   role: UserRole;
   licenseeId?: string;
+  licensee?: {
+    id: string;
+    name: string;
+    prefix: string;
+    brandName?: string | null;
+  } | null;
   createdAt: string;
   isActive: boolean;
   deletedAt?: string | null;

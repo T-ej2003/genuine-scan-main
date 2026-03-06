@@ -21,6 +21,7 @@ type RequestOptions = RequestInit & {
   skipJson?: boolean;
   timeoutMs?: number;
   skipAuthRefresh?: boolean;
+  suppressMutationEvent?: boolean;
 };
 
 class ApiClient {
@@ -204,7 +205,7 @@ class ApiClient {
         if (method === "GET" && payload.success) {
           this.getCache.set(cacheKey, (payload as ApiResponse<T>).data as T);
         }
-        if (method !== "GET" && method !== "HEAD" && payload.success) {
+        if (method !== "GET" && method !== "HEAD" && payload.success && !options.suppressMutationEvent) {
           emitMutationEvent({ endpoint, method });
         }
         return payload as ApiResponse<T>;
@@ -214,7 +215,7 @@ class ApiClient {
         this.getCache.set(cacheKey, payload as T);
       }
 
-      if (method !== "GET" && method !== "HEAD") {
+      if (method !== "GET" && method !== "HEAD" && !options.suppressMutationEvent) {
         emitMutationEvent({ endpoint, method });
       }
       return { success: true, data: payload as T };
@@ -506,6 +507,22 @@ class ApiClient {
     });
   }
 
+  async getBatchAllocationMap(batchId: string) {
+    return this.request<{
+      sourceBatchId: string;
+      focusBatchId: string;
+      sourceBatch: any | null;
+      selectedBatch: any | null;
+      allocations: any[];
+      totals: {
+        totalDistributedCodes: number;
+        sourceRemainingCodes: number;
+        pendingPrintableCodes: number;
+        printedCodes: number;
+      };
+    }>(`/qr/batches/${encodeURIComponent(batchId)}/allocation-map`);
+  }
+
   // ==================== PRINT JOBS (MANUFACTURER) ====================
   async createPrintJob(payload: { batchId: string; quantity: number; rangeStart?: string; rangeEnd?: string }) {
     return this.request("/manufacturer/print-jobs", { method: "POST", body: JSON.stringify(payload) });
@@ -751,6 +768,7 @@ class ApiClient {
     }>(`/manufacturer/printer-agent/heartbeat`, {
       method: "POST",
       body: JSON.stringify(payload),
+      suppressMutationEvent: true,
     });
   }
 
@@ -1411,7 +1429,7 @@ class ApiClient {
   // Public endpoint, no auth required. Still works if token exists.
   async verifyQRCode(
     code: string,
-    opts?: { device?: string; lat?: number; lon?: number; acc?: number; customerToken?: string }
+    opts?: { device?: string; lat?: number; lon?: number; acc?: number; customerToken?: string; transferToken?: string }
   ) {
     const c = String(code || "").trim();
     const params = new URLSearchParams();
@@ -1419,6 +1437,7 @@ class ApiClient {
     if (opts?.lat != null) params.append("lat", String(opts.lat));
     if (opts?.lon != null) params.append("lon", String(opts.lon));
     if (opts?.acc != null) params.append("acc", String(opts.acc));
+    if (opts?.transferToken) params.append("transfer", opts.transferToken);
     const query = params.toString() ? `?${params.toString()}` : "";
     const headers = opts?.customerToken ? { Authorization: `Bearer ${opts.customerToken}` } : undefined;
     return this.request(`/verify/${encodeURIComponent(c)}${query}`, { method: "GET", headers });
@@ -1528,6 +1547,44 @@ class ApiClient {
     });
   }
 
+  async createOwnershipTransfer(code: string, payload: { recipientEmail?: string }, customerToken: string) {
+    return this.request<{
+      message?: string;
+      transferLink: string;
+      transferToken: string;
+      ownershipStatus?: any;
+      ownershipTransfer?: any;
+    }>(`/verify/${encodeURIComponent(code)}/transfer`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${customerToken}` },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async cancelOwnershipTransfer(code: string, payload: { transferId?: string }, customerToken: string) {
+    return this.request<{
+      message?: string;
+      ownershipTransfer?: any;
+    }>(`/verify/${encodeURIComponent(code)}/transfer/cancel`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${customerToken}` },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async acceptOwnershipTransfer(payload: { token: string }, customerToken: string) {
+    return this.request<{
+      message?: string;
+      code?: string;
+      ownershipStatus?: any;
+      ownershipTransfer?: any;
+    }>(`/verify/transfer/accept`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${customerToken}` },
+      body: JSON.stringify(payload),
+    });
+  }
+
   async submitFraudReport(formData: FormData, customerToken?: string) {
     const headers: Record<string, string> = {};
     if (customerToken) headers["Authorization"] = `Bearer ${customerToken}`;
@@ -1571,6 +1628,31 @@ class ApiClient {
     if (options?.manufacturerId) params.append("manufacturerId", options.manufacturerId);
     const query = params.toString() ? `?${params.toString()}` : "";
     return this.request(`/admin/qr/batch-summary${query}`);
+  }
+
+  async getQrTrackingAnalytics(options?: {
+    licenseeId?: string;
+    batchQuery?: string;
+    code?: string;
+    status?: "DORMANT" | "ACTIVE" | "ALLOCATED" | "ACTIVATED" | "PRINTED" | "REDEEMED" | "BLOCKED" | "SCANNED";
+    onlyFirstScan?: boolean;
+    from?: string;
+    to?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const params = new URLSearchParams();
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
+    if (options?.batchQuery) params.append("batchQuery", options.batchQuery);
+    if (options?.code) params.append("code", options.code);
+    if (options?.status) params.append("status", options.status);
+    if (options?.onlyFirstScan != null) params.append("onlyFirstScan", String(options.onlyFirstScan));
+    if (options?.from) params.append("from", options.from);
+    if (options?.to) params.append("to", options.to);
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/admin/qr/analytics${query}`);
   }
 
   // ==================== TRACE / ANALYTICS / POLICY ====================
@@ -2219,6 +2301,7 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify(payload),
       timeoutMs: 8000,
+      suppressMutationEvent: true,
     });
   }
 
