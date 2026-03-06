@@ -5,7 +5,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { DocScreenshot } from "@/components/help/DocScreenshot";
 import { ScreenshotChecklist } from "@/components/help/ScreenshotChecklist";
-import { Download, Factory, FileArchive, ShieldCheck } from "lucide-react";
+import { Download, Factory, FileArchive, ShieldCheck, Wrench } from "lucide-react";
 
 export default function ManufacturerHelp() {
   return (
@@ -89,6 +89,42 @@ export default function ManufacturerHelp() {
               </ul>
             </CardContent>
           </Card>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold text-foreground">Printer onboarding and diagnostics</h2>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card>
+              <CardHeader className="space-y-1">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Wrench className="h-4 w-4 text-primary" />
+                  Before you expect a printer to connect
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm text-muted-foreground">
+                <ol className="list-decimal pl-5">
+                  <li>Install and start the local MSCQR print agent on the workstation that will print.</li>
+                  <li>Make sure the operating system already lists the printer and driver correctly.</li>
+                  <li>Open <Badge variant="outline">http://127.0.0.1:17866/status</Badge> on that workstation.</li>
+                  <li>Confirm the response lists at least one printer before returning to MSCQR.</li>
+                </ol>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="space-y-1">
+                <CardTitle className="text-base">If a client says “it didn’t connect”</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm text-muted-foreground">
+                <ul className="list-disc pl-5">
+                  <li><Badge variant="outline">Agent offline</Badge> means the browser cannot reach the local print agent.</li>
+                  <li><Badge variant="outline">No printer connection detected</Badge> means the agent is running but the OS exposed no printer.</li>
+                  <li><Badge variant="outline">Trust blocked</Badge> means the server rejected the latest heartbeat or identity material.</li>
+                  <li>Open <Badge variant="outline">Printer Diagnostics</Badge> to separate those cases and copy the diagnostic snapshot.</li>
+                </ul>
+              </CardContent>
+            </Card>
+          </div>
         </section>
 
         <section className="space-y-3">

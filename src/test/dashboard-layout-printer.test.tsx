@@ -91,7 +91,7 @@ describe("DashboardLayout printer connection dialog", () => {
     } as any);
   });
 
-  it("opens the printer dialog even when no printer is connected", async () => {
+  it("opens the printer dialog even when the local agent is unreachable", async () => {
     render(
       <MemoryRouter>
         <DashboardLayout>
@@ -104,13 +104,13 @@ describe("DashboardLayout printer connection dialog", () => {
       expect(vi.mocked(apiClient.getLocalPrintAgentStatus)).toHaveBeenCalled();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /printer unavailable/i }));
+    fireEvent.click(screen.getByRole("button", { name: /agent offline/i }));
 
     await waitFor(() => {
       expect(screen.getByText("Printer Connection Center")).toBeInTheDocument();
     });
 
-    expect(screen.getAllByText("No printer connection detected").length).toBeGreaterThan(0);
+    expect(screen.getByText(/The browser could not reach the workstation print agent/i)).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Try again (Refresh)" }).length).toBeGreaterThan(0);
   });
 });

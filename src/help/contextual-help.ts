@@ -23,6 +23,7 @@ export const getContextualHelpRoute = (pathname: string, role?: UserRole | null)
   if (starts(pathname, "/incidents")) return role === "super_admin" ? "/help/incidents" : "/help/licensee-admin";
   if (starts(pathname, "/licensees")) return "/help/super-admin";
   if (starts(pathname, "/qr-codes")) return "/help/super-admin";
+  if (starts(pathname, "/printer-diagnostics")) return "/help/manufacturer";
   if (starts(pathname, "/qr-requests")) return role === "super_admin" ? "/help/super-admin" : "/help/licensee-admin";
   if (starts(pathname, "/batches")) {
     if (role === "manufacturer") return "/help/manufacturer";
@@ -144,6 +145,15 @@ export const getPageGuidance = (pathname: string, role?: UserRole | null): PageG
       summary: "Inspect code status and lifecycle readiness across allocations and prints.",
       firstAction: "Use status filters to identify dormant, blocked, or active stock.",
       note: "Avoid deleting records unless operational policy requires it.",
+    };
+  }
+
+  if (starts(pathname, "/printer-diagnostics")) {
+    return {
+      title: "Diagnose printer issues",
+      summary: "Separate local print agent problems, operating-system printer visibility, and backend trust failures.",
+      firstAction: "Start with the top status card, then inspect local agent reachability and discovered printers.",
+      note: "If the local agent is unreachable, browser-side printer connection cannot work.",
     };
   }
 

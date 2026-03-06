@@ -49,6 +49,7 @@ import { Slider } from "@/components/ui/slider";
 import { SupportIssueLauncher } from "@/components/support/SupportIssueLauncher";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { buildSupportDiagnosticsPayload, captureSupportScreenshot } from "@/lib/support-diagnostics";
+import { getPrinterDiagnosticSummary, type LocalPrinterAgentSnapshot } from "@/lib/printer-diagnostics";
 
 interface NavItem {
   label: string;
@@ -265,6 +266,12 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [printerSwitching, setPrinterSwitching] = useState(false);
   const [printerStatusLive, setPrinterStatusLive] = useState(false);
   const [printerStatusUpdatedAt, setPrinterStatusUpdatedAt] = useState<string | null>(null);
+  const [localPrinterAgent, setLocalPrinterAgent] = useState<LocalPrinterAgentSnapshot>({
+    reachable: false,
+    connected: false,
+    error: "Local print agent has not been checked yet.",
+    checkedAt: null,
+  });
   const [detectedPrinters, setDetectedPrinters] = useState<
     Array<{
       printerId: string;
@@ -526,6 +533,12 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
     const local = await apiClient.getLocalPrintAgentStatus();
     const localPrinters = normalizePrinterRows((local as any)?.data?.printers || []);
+    setLocalPrinterAgent({
+      reachable: Boolean(local.success),
+      connected: Boolean((local as any)?.data?.connected),
+      error: local.success ? String((local as any)?.data?.error || "").trim() || null : String(local.error || "Local print agent is unavailable"),
+      checkedAt: new Date().toISOString(),
+    });
 
     const heartbeatPayload = local.success
       ? {
@@ -1029,25 +1042,26 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const printerHasInventory =
     detectedPrinters.length > 0 || Boolean(printerStatus.selectedPrinterId || printerStatus.printerId);
   const printerUnavailable = !printerReady && !printerHasInventory;
-  const printerModeLabel = printerStatus.trusted
-    ? "Trusted"
-    : printerStatus.compatibilityMode
-      ? "Compatibility"
-      : printerUnavailable
-        ? "Unavailable"
-        : "Attention";
-  const printerToneClass = printerStatus.trusted
-    ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-    : printerStatus.compatibilityMode
-      ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
-      : printerUnavailable
-        ? "border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200"
-        : "border-red-300 bg-red-50 text-red-700 hover:bg-red-100";
-  const printerTitle = printerReady
-    ? `${printerStatus.selectedPrinterName || printerStatus.printerName || "Printer connected"}${printerStatus.lastHeartbeatAt ? ` · heartbeat ${printerStatus.lastHeartbeatAt}` : ""}`
-    : printerUnavailable
-      ? "No printer connection detected"
-      : printerStatus.error || printerStatus.trustReason || "Printer disconnected";
+  const printerDiagnostics = useMemo(
+    () =>
+      getPrinterDiagnosticSummary({
+        localAgent: localPrinterAgent,
+        remoteStatus: printerStatus,
+        printers: detectedPrinters,
+        selectedPrinterId: selectedLocalPrinterId,
+      }),
+    [detectedPrinters, localPrinterAgent, printerStatus, selectedLocalPrinterId]
+  );
+  const printerModeLabel = printerDiagnostics.badgeLabel;
+  const printerToneClass =
+    printerDiagnostics.tone === "success"
+      ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+      : printerDiagnostics.tone === "warning"
+        ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
+        : printerDiagnostics.tone === "neutral"
+          ? "border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200"
+          : "border-red-300 bg-red-50 text-red-700 hover:bg-red-100";
+  const printerTitle = printerDiagnostics.summary;
   const selectedPrinter =
     detectedPrinters.find((row) => row.printerId === selectedLocalPrinterId) ||
     detectedPrinters.find((row) => row.printerId === printerStatus.selectedPrinterId) ||
@@ -1066,18 +1080,10 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const printerHeartbeatAgeLabel = formatPrinterAge(printerStatus.ageSeconds);
   const printerSummaryMessage = printerReady
     ? `${printerIdentity.displayName} is ready for direct-print and server-issued QR fulfillment.`
-    : printerUnavailable
-      ? "No printer connection detected"
-      : printerStatus.compatibilityMode
-        ? printerStatus.compatibilityReason || "Compatibility mode is active while advanced trust enrollment is still pending."
-        : printerStatus.error || printerStatus.trustReason || "Printer attention is required before issuing print jobs.";
+    : printerDiagnostics.summary;
   const printerNextStep = printerReady
     ? "You can continue to batch operations or keep this dialog open to verify calibration."
-    : printerUnavailable
-      ? "Open the local print agent on this workstation, connect a printer, then use Try again (Refresh)."
-      : printerStatus.compatibilityMode
-        ? "Review the active printer details below and continue if compatibility mode is acceptable for this session."
-        : "Reconnect the agent or printer, then refresh status before starting a print job.";
+    : printerDiagnostics.nextSteps[0] || "Refresh diagnostics before starting a print job.";
   const selectedPrinterIsActive = Boolean(selectedPrinter && selectedPrinter.printerId === activePrinterId);
   const printerDiscoveryCountLabel =
     detectedPrinters.length === 1 ? "1 printer detected" : `${detectedPrinters.length} printers detected`;
@@ -1477,11 +1483,11 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                   <div
                     className={cn(
                       "rounded-2xl border p-4 shadow-sm",
-                      printerStatus.trusted
+                      printerDiagnostics.tone === "success"
                         ? "border-emerald-200 bg-[linear-gradient(135deg,#ecfdf5_0%,#f8fffc_100%)]"
-                        : printerStatus.compatibilityMode
+                        : printerDiagnostics.tone === "warning"
                           ? "border-amber-200 bg-[linear-gradient(135deg,#fffbeb_0%,#fffdf7_100%)]"
-                          : printerUnavailable
+                          : printerDiagnostics.tone === "neutral"
                             ? "border-slate-200 bg-[linear-gradient(135deg,#f8fafc_0%,#ffffff_100%)]"
                             : "border-red-200 bg-[linear-gradient(135deg,#fef2f2_0%,#fff8f8_100%)]"
                     )}
@@ -1496,14 +1502,14 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                             <span className="text-lg font-semibold text-slate-950">{printerIdentity.displayName}</span>
                             <Badge
                               variant={
-                                printerStatus.trusted
+                                printerDiagnostics.tone === "success"
                                   ? "default"
-                                  : printerStatus.compatibilityMode || printerUnavailable
+                                  : printerDiagnostics.tone === "warning" || printerDiagnostics.tone === "neutral"
                                     ? "secondary"
                                     : "destructive"
                               }
                             >
-                              {printerStatus.trusted ? "Trusted" : printerStatus.compatibilityMode ? "Compatibility" : printerUnavailable ? "Unavailable" : "Blocked"}
+                              {printerDiagnostics.badgeLabel}
                             </Badge>
                             {selectedPrinter?.online === false && <Badge variant="destructive">Offline</Badge>}
                           </div>
@@ -1519,6 +1525,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                           >
                             {printerSummaryMessage}
                           </p>
+                          <p className="mt-2 text-xs leading-5 text-slate-600">{printerDiagnostics.detail}</p>
                           <p className="mt-2 text-xs leading-5 text-slate-600">{printerNextStep}</p>
                         </div>
                       </div>
@@ -1603,6 +1610,9 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                         </Button>
                         <Button variant="outline" onClick={() => navigate("/batches")}>
                           Open batch operations
+                        </Button>
+                        <Button variant="outline" onClick={() => navigate("/printer-diagnostics")}>
+                          Open diagnostics
                         </Button>
                         <Button variant="ghost" onClick={() => navigate(contextualHelpRoute)}>
                           Open help
@@ -1792,6 +1802,9 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                 </div>
 
                 <div className="flex flex-wrap justify-end gap-2">
+                  <Button variant="outline" onClick={() => navigate("/printer-diagnostics")}>
+                    Open diagnostics
+                  </Button>
                   <Button variant="outline" onClick={() => navigate(contextualHelpRoute)}>
                     Open help
                   </Button>
