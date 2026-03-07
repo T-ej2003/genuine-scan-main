@@ -17,6 +17,7 @@ import {
   enrichBatchSummaries,
   getBatchAllocationMap as loadBatchAllocationMap,
 } from "../services/batchAllocationService";
+import { resolveScopedLicenseeAccess } from "../services/manufacturerScopeService";
 
 /* ===================== SCHEMAS ===================== */
 
@@ -374,8 +375,8 @@ export const createBatch = async (req: AuthRequest, res: Response) => {
         where: {
           id: manufacturerId,
           role: { in: [UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER] },
-          licenseeId,
           isActive: true,
+          OR: [{ licenseeId }, { manufacturerLicenseeLinks: { some: { licenseeId } } }],
         },
         select: { id: true },
       });
@@ -686,8 +687,11 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
       where: {
         id: parsed.data.manufacturerId,
         role: { in: [UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER] },
-        licenseeId: batch.licenseeId,
         isActive: true,
+        OR: [
+          { licenseeId: batch.licenseeId },
+          { manufacturerLicenseeLinks: { some: { licenseeId: batch.licenseeId } } },
+        ],
       },
       select: { id: true, name: true },
     });
@@ -1318,13 +1322,14 @@ export const blockBatch = async (req: AuthRequest, res: Response) => {
 
 export const getBatches = async (req: AuthRequest, res: Response) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
     const where: any = {};
+    const scope = await resolveScopedLicenseeAccess(req.user, (req.query.licenseeId as string | undefined) || null);
 
-    if (req.user?.role !== UserRole.SUPER_ADMIN && req.user?.role !== UserRole.PLATFORM_SUPER_ADMIN) {
-      if (req.user?.licenseeId) where.licenseeId = req.user.licenseeId;
-    } else {
-      const qLicenseeId = (req.query.licenseeId as string | undefined) || undefined;
-      if (qLicenseeId) where.licenseeId = qLicenseeId;
+    if (scope.scopeLicenseeId) {
+      where.licenseeId = scope.scopeLicenseeId;
     }
 
     if (isManufacturerRole(req.user?.role)) {
@@ -1413,6 +1418,9 @@ export const getQRCodes = async (req: AuthRequest, res: Response) => {
   try {
     const role = req.user?.role;
     const userId = req.user?.userId;
+    if (!role || !userId || !req.user) {
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
 
     const q = (req.query.q as string | undefined)?.trim();
     const status = (req.query.status as QRStatus | undefined) || undefined;
@@ -1420,13 +1428,10 @@ export const getQRCodes = async (req: AuthRequest, res: Response) => {
     const limit = Math.min(parseInt(String(req.query.limit ?? "500"), 10) || 500, 2000);
     const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
 
-    const licenseeId: string | undefined =
-      role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN
-        ? ((req.query.licenseeId as string | undefined) || undefined)
-        : (req.user?.licenseeId ?? undefined) || undefined;
+    const scope = await resolveScopedLicenseeAccess(req.user, (req.query.licenseeId as string | undefined) || null);
 
     const where: any = {};
-    if (licenseeId) where.licenseeId = licenseeId;
+    if (scope.scopeLicenseeId) where.licenseeId = scope.scopeLicenseeId;
     if (status) where.status = status;
     if (q) where.code = { contains: q, mode: "insensitive" };
 
@@ -1600,11 +1605,12 @@ export const getStats = async (req: AuthRequest, res: Response) => {
   try {
     const role = req.user?.role;
     const userId = req.user?.userId;
+    if (!role || !userId || !req.user) {
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
 
-    const licenseeId: string | undefined =
-      role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN
-        ? ((req.query.licenseeId as string | undefined) || undefined)
-        : (req.user?.licenseeId ?? undefined) || undefined;
+    const scope = await resolveScopedLicenseeAccess(req.user, (req.query.licenseeId as string | undefined) || null);
+    const licenseeId = scope.scopeLicenseeId || undefined;
 
     if (
       (role === UserRole.MANUFACTURER ||
@@ -1648,15 +1654,13 @@ export const exportQRCodesCsv = async (req: AuthRequest, res: Response) => {
   try {
     const role = req.user?.role;
     const userId = req.user?.userId;
-    if (!role || !userId) return res.status(401).json({ success: false, error: "Not authenticated" });
+    if (!role || !userId || !req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
 
     const q = (req.query.q as string | undefined)?.trim();
     const status = (req.query.status as QRStatus | undefined) || undefined;
 
-    const licenseeId =
-      role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN
-        ? ((req.query.licenseeId as string | undefined) || undefined)
-        : req.user?.licenseeId;
+    const scope = await resolveScopedLicenseeAccess(req.user, (req.query.licenseeId as string | undefined) || null);
+    const licenseeId = scope.scopeLicenseeId || undefined;
 
     const where: any = {};
     if (licenseeId) where.licenseeId = licenseeId;

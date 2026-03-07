@@ -2,6 +2,7 @@ import { Response } from "express";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { UserRole } from "@prisma/client";
+import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
 
 export const getDashboardStats = async (req: AuthRequest, res: Response) => {
   try {
@@ -42,8 +43,13 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     } else if (scopeLicenseeId) {
       qrWhere.licenseeId = scopeLicenseeId;
       batchWhere.licenseeId = scopeLicenseeId;
-      mfgWhere.licenseeId = scopeLicenseeId;
+      mfgWhere.OR = [{ licenseeId: scopeLicenseeId }, { manufacturerLicenseeLinks: { some: { licenseeId: scopeLicenseeId } } }];
     }
+
+    const linkedLicenseeIds =
+      role === UserRole.MANUFACTURER || role === UserRole.MANUFACTURER_ADMIN || role === UserRole.MANUFACTURER_USER
+        ? await resolveAccessibleLicenseeIdsForUser(req.user!)
+        : [];
 
     const [
       totalQRCodes,
@@ -54,7 +60,9 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       prisma.qRCode.count({ where: qrWhere }),
       role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN
         ? prisma.licensee.count({ where: { ...(scopeLicenseeId ? { id: scopeLicenseeId } : {}), isActive: true } })
-        : scopeLicenseeId
+        : linkedLicenseeIds.length > 0
+          ? prisma.licensee.count({ where: { id: { in: linkedLicenseeIds }, isActive: true } })
+          : scopeLicenseeId
           ? prisma.licensee.count({ where: { id: scopeLicenseeId, isActive: true } })
           : 0,
       prisma.user.count({ where: mfgWhere }),

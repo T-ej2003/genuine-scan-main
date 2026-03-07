@@ -116,7 +116,9 @@ export default function QRCodes() {
       ? selectedLicensee === "all"
         ? undefined
         : selectedLicensee
-      : user?.licenseeId;
+      : user?.role === "licensee_admin"
+        ? user?.licenseeId
+        : undefined;
 
   const uiStats = useMemo(() => {
     const by = stats?.byStatus || {};

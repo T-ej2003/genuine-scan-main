@@ -4,6 +4,7 @@ import { AuthRequest } from "../middleware/auth";
 import { getEffectiveLicenseeId } from "../middleware/tenantIsolation";
 import { onAuditLog } from "../services/auditService";
 import { UserRole } from "@prisma/client";
+import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
 
 function writeSse(res: Response, event: string, data: any) {
   res.write(`event: ${event}\n`);
@@ -36,8 +37,16 @@ async function computeDashboard(req: AuthRequest) {
   } else if (scopedLicenseeId) {
     qrWhere.licenseeId = scopedLicenseeId;
     batchWhere.licenseeId = scopedLicenseeId;
-    manufacturersWhere.licenseeId = scopedLicenseeId;
+    manufacturersWhere.OR = [
+      { licenseeId: scopedLicenseeId },
+      { manufacturerLicenseeLinks: { some: { licenseeId: scopedLicenseeId } } },
+    ];
   }
+
+  const linkedLicenseeIds =
+    role === UserRole.MANUFACTURER || role === UserRole.MANUFACTURER_ADMIN || role === UserRole.MANUFACTURER_USER
+      ? await resolveAccessibleLicenseeIdsForUser(req.user)
+      : [];
 
   const [totalQRCodes, totalBatches, manufacturers, activeLicensees, qrGrouped, qrTotal] =
     await Promise.all([
@@ -47,7 +56,9 @@ async function computeDashboard(req: AuthRequest) {
 
       role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN
         ? prisma.licensee.count({ where: { isActive: true } })
-        : scopedLicenseeId
+        : linkedLicenseeIds.length > 0
+          ? prisma.licensee.count({ where: { id: { in: linkedLicenseeIds }, isActive: true } })
+          : scopedLicenseeId
           ? prisma.licensee.count({ where: { id: scopedLicenseeId, isActive: true } })
           : 0,
 
@@ -96,6 +107,10 @@ export const dashboardEvents = async (req: AuthRequest, res: Response) => {
 
     const scopedLicenseeId = getEffectiveLicenseeId(req);
     const role = req.user.role;
+    const linkedLicenseeIds =
+      role === UserRole.MANUFACTURER || role === UserRole.MANUFACTURER_ADMIN || role === UserRole.MANUFACTURER_USER
+        ? await resolveAccessibleLicenseeIdsForUser(req.user)
+        : [];
 
     // Keepalive ping (prevents proxies killing connection)
     const keepAlive = setInterval(() => {
@@ -107,8 +122,12 @@ export const dashboardEvents = async (req: AuthRequest, res: Response) => {
       try {
         // Tenant filter
         if (role !== UserRole.SUPER_ADMIN && role !== UserRole.PLATFORM_SUPER_ADMIN) {
-          if (!scopedLicenseeId) return;
-          if (log.licenseeId !== scopedLicenseeId) return;
+          if (linkedLicenseeIds.length > 0) {
+            if (!log.licenseeId || !linkedLicenseeIds.includes(log.licenseeId)) return;
+          } else {
+            if (!scopedLicenseeId) return;
+            if (log.licenseeId !== scopedLicenseeId) return;
+          }
         } else {
           // super admin can optionally scope via ?licenseeId= (supported by getEffectiveLicenseeId)
           if (scopedLicenseeId && log.licenseeId !== scopedLicenseeId) return;

@@ -4,6 +4,7 @@ import prisma from "../config/database";
 import { Prisma, UserRole } from "@prisma/client";
 import { compactDeviceLabel, reverseGeocode } from "../services/locationService";
 import { getQrTrackingAnalytics } from "../services/qrTrackingAnalyticsService";
+import { resolveScopedLicenseeAccess } from "../services/manufacturerScopeService";
 
 export const getScanLogs = async (req: AuthRequest, res: Response) => {
   try {
@@ -28,10 +29,8 @@ export const getScanLogs = async (req: AuthRequest, res: Response) => {
     const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 1000);
     const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
 
-    const licenseeId =
-      req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
-        ? (req.query.licenseeId as string | undefined) || undefined
-        : req.user.licenseeId || undefined;
+    const scope = await resolveScopedLicenseeAccess(req.user, (req.query.licenseeId as string | undefined) || null);
+    const licenseeId = scope.scopeLicenseeId || undefined;
     const batchId = (req.query.batchId as string | undefined) || undefined;
     const code = (req.query.code as string | undefined)?.trim() || undefined;
     const statusRaw = String(req.query.status || "").trim().toUpperCase();
@@ -125,10 +124,8 @@ export const getBatchSummary = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
-    const licenseeId =
-      req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
-        ? (req.query.licenseeId as string | undefined) || undefined
-        : req.user.licenseeId || undefined;
+    const scope = await resolveScopedLicenseeAccess(req.user, (req.query.licenseeId as string | undefined) || null);
+    const licenseeId = scope.scopeLicenseeId || undefined;
     const manufacturerId =
       req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
         ? (req.query.manufacturerId as string | undefined) || undefined
@@ -206,10 +203,8 @@ export const getQrTrackingAnalyticsController = async (req: AuthRequest, res: Re
 
     const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 500);
     const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
-    const licenseeId =
-      req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
-        ? (req.query.licenseeId as string | undefined) || undefined
-        : req.user.licenseeId || undefined;
+    const scope = await resolveScopedLicenseeAccess(req.user, (req.query.licenseeId as string | undefined) || null);
+    const licenseeId = scope.scopeLicenseeId || undefined;
 
     const statusRaw = String(req.query.status || "").trim().toUpperCase();
     const validStatuses = new Set(["DORMANT", "ACTIVE", "ALLOCATED", "ACTIVATED", "PRINTED", "REDEEMED", "BLOCKED", "SCANNED"]);

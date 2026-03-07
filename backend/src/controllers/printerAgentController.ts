@@ -3,6 +3,7 @@ import { Response } from "express";
 import { z } from "zod";
 
 import { AuthRequest } from "../middleware/auth";
+import { resolveScopedLicenseeAccess } from "../services/manufacturerScopeService";
 import { createAuditLog } from "../services/auditService";
 import { createRoleNotifications } from "../services/notificationService";
 import {
@@ -23,6 +24,7 @@ const isManufacturerRole = (role?: UserRole | null) =>
   Boolean(role && MANUFACTURER_ROLES.includes(role));
 
 const heartbeatSchema = z.object({
+  licenseeId: z.string().trim().uuid().optional(),
   connected: z.boolean(),
   printerName: z.string().trim().max(180).optional(),
   printerId: z.string().trim().max(180).optional(),
@@ -64,11 +66,13 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid heartbeat payload" });
     }
+    const scope = await resolveScopedLicenseeAccess(req.user, parsed.data.licenseeId || null);
+    const scopedLicenseeId = scope.licenseeId || req.user.licenseeId || null;
 
     const update = await upsertPrinterConnectionHeartbeat({
       userId: req.user.userId,
       role: req.user.role,
-      licenseeId: req.user.licenseeId,
+      licenseeId: scopedLicenseeId,
       orgId: req.user.orgId,
       connected: parsed.data.connected,
       printerName: parsed.data.printerName || null,
@@ -96,7 +100,7 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
     await syncLocalAgentPrintersFromHeartbeat({
       userId: req.user.userId,
       orgId: req.user.orgId,
-      licenseeId: req.user.licenseeId,
+      licenseeId: scopedLicenseeId,
       printerRegistrationId: update.status.registrationId || null,
       agentId: update.status.agentId || parsed.data.agentId || null,
       deviceFingerprint: update.status.deviceFingerprint || parsed.data.deviceFingerprint || null,
@@ -133,7 +137,7 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
 
       await createAuditLog({
         userId: req.user.userId,
-        licenseeId: req.user.licenseeId || undefined,
+        licenseeId: scopedLicenseeId || undefined,
         action,
         entityType: "PrinterAgent",
         entityId: req.user.userId,
@@ -169,7 +173,7 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
           type: "system_printer_status_changed",
           title,
           body,
-          licenseeId: req.user.licenseeId || null,
+          licenseeId: scopedLicenseeId || null,
           orgId: req.user.orgId || null,
           data: {
             connected: update.status.connected,
@@ -187,16 +191,16 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
             printers: update.status.printers || [],
             deviceName: update.status.deviceName || null,
             manufacturerUserId: req.user.userId,
-            licenseeId: req.user.licenseeId || null,
+            licenseeId: scopedLicenseeId || null,
             orgId: req.user.orgId || null,
             targetRoute: "/batches",
           },
           channels: [NotificationChannel.WEB, NotificationChannel.EMAIL],
         }),
-        req.user.licenseeId
+        scopedLicenseeId
           ? createRoleNotifications({
               audience: NotificationAudience.LICENSEE_ADMIN,
-              licenseeId: req.user.licenseeId,
+              licenseeId: scopedLicenseeId,
               type: "system_printer_status_changed",
               title,
               body,

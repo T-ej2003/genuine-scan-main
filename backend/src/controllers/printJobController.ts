@@ -230,6 +230,7 @@ const notifySystemPrintEvent = async (params: {
     params.orgId
       ? createRoleNotifications({
           audience: NotificationAudience.MANUFACTURER,
+          licenseeId: params.licenseeId || null,
           orgId: params.orgId,
           type: params.type,
           title: params.title,
@@ -673,11 +674,19 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
     if (replayIdempotentResponseIfAny(idempotency, res)) return;
 
     const { batchId, printerId, quantity, rangeStart, rangeEnd, reprintOfJobId, reprintReason } = parsed.data;
+    const batch = await prisma.batch.findFirst({
+      where: { id: batchId, manufacturerId: user.userId },
+      select: { id: true, name: true, licenseeId: true, manufacturerId: true },
+    });
+    if (!batch) {
+      return res.status(404).json({ success: false, error: "Batch not found or not assigned to you" });
+    }
+
     const printerSelection = await ensureSelectedPrinterReady({
       printerId,
       userId: user.userId,
       orgId: user.orgId || null,
-      licenseeId: user.licenseeId || null,
+      licenseeId: batch.licenseeId || null,
     });
     if (
       printerSelection.printMode === PrintDispatchMode.NETWORK_DIRECT &&
@@ -687,14 +696,6 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
         success: false,
         error: "Network-direct printing currently supports registered ZPL, TSPL, EPL, and CPCL printers only.",
       });
-    }
-
-    const batch = await prisma.batch.findFirst({
-      where: { id: batchId, manufacturerId: user.userId },
-      select: { id: true, name: true, licenseeId: true, manufacturerId: true },
-    });
-    if (!batch) {
-      return res.status(404).json({ success: false, error: "Batch not found or not assigned to you" });
     }
 
     const printLockToken = randomBytes(24).toString("base64url");
@@ -1013,7 +1014,7 @@ export const issueDirectPrintTokens = async (req: AuthRequest, res: Response) =>
       printerId: job.printerId || "",
       userId: user.userId,
       orgId: user.orgId || null,
-      licenseeId: user.licenseeId || null,
+      licenseeId: job.batch.licenseeId || null,
     });
 
     const now = new Date();
@@ -1284,7 +1285,7 @@ export const resolveDirectPrintToken = async (req: AuthRequest, res: Response) =
       printerId: job.printerId || "",
       userId: user.userId,
       orgId: user.orgId || null,
-      licenseeId: user.licenseeId || null,
+      licenseeId: job.batch.licenseeId || null,
     });
 
     const renderTokenHash = hashToken(parsed.data.renderToken);

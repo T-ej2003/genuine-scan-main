@@ -33,12 +33,25 @@ const normalizeRole = (role: any): User["role"] => {
 
 function normalizeUser(u: any): User {
   const licenseeId = u.licenseeId ?? u.licensee?.id ?? undefined;
+  const linkedLicensees = Array.isArray(u.linkedLicensees)
+    ? u.linkedLicensees
+        .filter((entry: any) => entry?.id)
+        .map((entry: any) => ({
+          id: String(entry.id),
+          name: String(entry.name || ""),
+          prefix: String(entry.prefix || ""),
+          brandName: entry.brandName ?? null,
+          orgId: entry.orgId ?? null,
+          isPrimary: Boolean(entry.isPrimary),
+        }))
+    : undefined;
   return {
     id: String(u.id),
     email: String(u.email),
     name: String(u.name ?? ""),
     role: normalizeRole(u.role),
     licenseeId,
+    orgId: u.orgId ?? null,
     licensee: u.licensee
       ? {
           id: String(u.licensee.id),
@@ -47,6 +60,7 @@ function normalizeUser(u: any): User {
           brandName: u.licensee.brandName ?? null,
         }
       : null,
+    linkedLicensees,
     createdAt: u.createdAt ?? new Date().toISOString(),
     isActive: typeof u.isActive === "boolean" ? u.isActive : true,
     deletedAt: u.deletedAt ?? null,

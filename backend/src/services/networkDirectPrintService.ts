@@ -58,6 +58,7 @@ const notifySystemPrintEvent = async (params: {
     params.orgId
       ? createRoleNotifications({
           audience: NotificationAudience.MANUFACTURER,
+          licenseeId: params.licenseeId || null,
           orgId: params.orgId,
           type: params.type,
           title: params.title,

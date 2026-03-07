@@ -46,9 +46,10 @@ export default function Dashboard() {
     }
 
     try {
+      const scopedLicenseeId = user?.role === "manufacturer" ? undefined : user?.licenseeId;
       const [summaryRes, qrRes] = await Promise.all([
-        apiClient.getDashboardStats(user?.licenseeId),
-        apiClient.getQRStats(user?.licenseeId),
+        apiClient.getDashboardStats(scopedLicenseeId),
+        apiClient.getQRStats(scopedLicenseeId),
       ]);
 
       if (!summaryRes.success) throw new Error(summaryRes.error || "Failed to load dashboard stats");
@@ -266,11 +267,11 @@ export default function Dashboard() {
     const scopeCard =
       user?.role === "manufacturer"
         ? {
-            title: "My Licensee Scope",
-            value: user?.licenseeId ? 1 : 0,
+            title: "Linked Licensees",
+            value: user?.linkedLicensees?.length || (user?.licenseeId ? 1 : 0),
             icon: Building2,
             variant: "info" as const,
-            subtitle: "Current assigned tenant",
+            subtitle: "Authorized operating scope",
             href: "/dashboard",
             ctaLabel: "Open scope details",
             action: "scope" as const,
@@ -336,6 +337,7 @@ export default function Dashboard() {
     qrStatusData.scanned,
     totalQRCodes,
     user?.licenseeId,
+    user?.linkedLicensees,
     user?.role,
   ]);
 
@@ -498,15 +500,19 @@ export default function Dashboard() {
             </DialogHeader>
             <div className="space-y-4">
               <div className="rounded-xl border bg-slate-50 p-4">
-                <p className="text-[11px] uppercase tracking-wide text-slate-500">Assigned licensee</p>
-                <p className="mt-1 text-lg font-semibold text-slate-900">
-                  {user?.licensee?.brandName || user?.licensee?.name || "No licensee linked"}
-                </p>
-                <p className="mt-1 text-sm text-slate-600">
-                  Prefix: <span className="font-mono">{user?.licensee?.prefix || "—"}</span>
-                </p>
-                <p className="mt-2 text-sm text-slate-600">
-                  You can only view batches, tracking analytics, print jobs, and incidents within this assigned tenant.
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Linked licensees</p>
+                <div className="mt-2 space-y-2">
+                  {(user?.linkedLicensees?.length ? user.linkedLicensees : user?.licensee ? [user.licensee] : []).map((entry) => (
+                    <div key={entry.id} className="rounded-lg border bg-white px-3 py-2">
+                      <p className="text-sm font-semibold text-slate-900">{entry.brandName || entry.name}</p>
+                      <p className="text-xs text-slate-600">
+                        Prefix: <span className="font-mono">{entry.prefix || "—"}</span>
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-3 text-sm text-slate-600">
+                  Manufacturer access is limited to batches, tracking, printing, and incidents inside these linked licensee scopes only.
                 </p>
               </div>
 

@@ -6,6 +6,7 @@ import { hashToken, randomOpaqueToken } from "../../utils/security";
 import { sendAuthEmail } from "./authEmailService";
 import { createAuditLog } from "../auditService";
 import { normalizeEmailAddress } from "../../utils/email";
+import { isManufacturerRole, listManufacturerLicenseeLinks, upsertManufacturerLicenseeLink } from "../manufacturerScopeService";
 
 const addHours = (d: Date, hours: number) => new Date(d.getTime() + hours * 60 * 60 * 1000);
 
@@ -135,6 +136,8 @@ export const createInvite = async (input: {
       },
     });
 
+    let linkAction: "LINKED_EXISTING" | "ALREADY_LINKED" | null = null;
+
     let createdUser:
       | {
           id: string;
@@ -152,13 +155,44 @@ export const createInvite = async (input: {
       if (existing.deletedAt || !existing.isActive) throw new Error("User account is disabled");
       const existingCanonicalRole = canonicalizeRole(existing.role);
       if (existingCanonicalRole !== role) throw new Error("Existing user role does not match invite role");
-      if ((existing.licenseeId || null) !== (isPlatformRole ? null : licenseeId || null)) {
-        throw new Error("Existing user belongs to a different licensee");
-      }
-      if ((existing.orgId || null) !== (org.orgId || null)) {
-        throw new Error("Existing user belongs to a different organization");
-      }
       const existingStatus = String(existing.status || "").toUpperCase();
+
+      if (isManufacturerRole(role) && licenseeId) {
+        const existingLinks = await listManufacturerLicenseeLinks(existing.id, tx);
+        const alreadyLinked = existingLinks.some((row) => row.licenseeId === licenseeId);
+
+        if (alreadyLinked) {
+          linkAction = "ALREADY_LINKED";
+        } else {
+          await upsertManufacturerLicenseeLink(tx, {
+            manufacturerId: existing.id,
+            licenseeId,
+            makePrimary: !existing.licenseeId,
+          });
+          linkAction = "LINKED_EXISTING";
+        }
+
+        if (existingStatus !== UserStatus.INVITED || existing.passwordHash) {
+          createdUser = {
+            id: existing.id,
+            email: existing.email,
+            name: existing.name,
+            role: existing.role,
+            licenseeId: existing.licenseeId || licenseeId,
+            orgId: existing.orgId,
+            status: existing.status as UserStatus,
+          };
+          return { createdUser: createdUser!, invite: null, linkAction };
+        }
+      } else {
+        if ((existing.licenseeId || null) !== (isPlatformRole ? null : licenseeId || null)) {
+          throw new Error("Existing user belongs to a different licensee");
+        }
+        if ((existing.orgId || null) !== (org.orgId || null)) {
+          throw new Error("Existing user belongs to a different organization");
+        }
+      }
+
       if (existingStatus !== UserStatus.INVITED || existing.passwordHash) {
         throw new Error("User is already active. Invite is not required.");
       }
@@ -186,6 +220,14 @@ export const createInvite = async (input: {
         },
         select: { id: true, email: true, name: true, role: true, licenseeId: true, orgId: true, status: true },
       });
+
+      if (isManufacturerRole(role) && licenseeId) {
+        await upsertManufacturerLicenseeLink(tx, {
+          manufacturerId: createdUser.id,
+          licenseeId,
+          makePrimary: true,
+        });
+      }
     }
 
     await tx.invite.updateMany({
@@ -213,8 +255,51 @@ export const createInvite = async (input: {
       select: { id: true, email: true, role: true, expiresAt: true },
     });
 
-    return { createdUser: createdUser!, invite };
+    return { createdUser: createdUser!, invite, linkAction };
   });
+
+  if (result.linkAction && !result.invite) {
+    await createAuditLog({
+      userId: input.createdByUserId,
+      licenseeId: licenseeId || undefined,
+      orgId: org.orgId || undefined,
+      action: "MANUFACTURER_LICENSEE_LINKED",
+      entityType: "User",
+      entityId: result.createdUser.id,
+      details: {
+        email,
+        licenseeId,
+        linkAction: result.linkAction,
+      },
+      ipHash: input.ipHash || undefined,
+      userAgent: input.userAgent || undefined,
+    } as any);
+
+    return {
+      inviteId: null,
+      expiresAt: null,
+      email,
+      role,
+      inviteLink: null,
+      emailDelivered: false,
+      deliveryError: null,
+      providerMessageId: null,
+      providerResponse: null,
+      acceptedRecipients: [],
+      rejectedRecipients: [],
+      linkAction: result.linkAction,
+      user: {
+        id: result.createdUser.id,
+        email: result.createdUser.email,
+        name: result.createdUser.name,
+        role: result.createdUser.role,
+        licenseeId: result.createdUser.licenseeId,
+        orgId: result.createdUser.orgId,
+        status: result.createdUser.status,
+      },
+      csrfToken: newCsrfToken(),
+    };
+  }
 
   // Send email outside the transaction (delivery should not block DB state).
   const baseUrl = resolveWebAppBaseUrl();
@@ -251,6 +336,7 @@ export const createInvite = async (input: {
       role: result.invite.role,
       expiresAt: result.invite.expiresAt,
       manufacturerId,
+      linkAction: result.linkAction,
       emailDelivered: delivery.delivered,
       emailError: delivery.error || null,
       emailProviderMessageId: delivery.providerMessageId || null,
@@ -274,6 +360,7 @@ export const createInvite = async (input: {
     providerResponse: delivery.providerResponse || null,
     acceptedRecipients: delivery.acceptedRecipients || [],
     rejectedRecipients: delivery.rejectedRecipients || [],
+    linkAction: result.linkAction,
     user: {
       id: result.createdUser.id,
       email: result.createdUser.email,

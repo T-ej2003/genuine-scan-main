@@ -15,12 +15,21 @@ export interface User {
   name: string;
   role: UserRole;
   licenseeId?: string;
+  orgId?: string | null;
   licensee?: {
     id: string;
     name: string;
     prefix: string;
     brandName?: string | null;
   } | null;
+  linkedLicensees?: Array<{
+    id: string;
+    name: string;
+    prefix: string;
+    brandName?: string | null;
+    orgId?: string | null;
+    isPrimary?: boolean;
+  }>;
   createdAt: string;
   isActive: boolean;
   deletedAt?: string | null;

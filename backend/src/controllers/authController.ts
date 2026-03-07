@@ -14,6 +14,7 @@ import {
   disableAdminMfa,
   getAdminMfaStatus,
 } from "../services/auth/mfaService";
+import { isManufacturerRole, listManufacturerLicenseeLinks, normalizeLinkedLicensees } from "../services/manufacturerScopeService";
 
 const loginSchema = z.object({
   email: z.string().email("Invalid email format"),
@@ -321,13 +322,41 @@ export const me = async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: "User not found" });
     }
 
+    const linkedLicensees = isManufacturerRole(user.role)
+      ? normalizeLinkedLicensees(await listManufacturerLicenseeLinks(user.id, prisma))
+      : [];
+    const primaryLicensee =
+      user.licensee ||
+      linkedLicensees.find((row) => row.isPrimary) ||
+      linkedLicensees[0] ||
+      null;
+
     // Ensure CSRF cookie exists for cookie-auth flows.
     const hasCsrfCookie = Boolean((req as any).cookies?.[CSRF_TOKEN_COOKIE]);
     if (!hasCsrfCookie) {
       res.cookie(CSRF_TOKEN_COOKIE, newCsrfToken(), { ...csrfCookieOptions(), maxAge: getRefreshTokenTtlDays() * 24 * 60 * 60 * 1000 });
     }
 
-    return res.json({ success: true, data: { id: user.id, email: user.email, name: user.name, role: user.role, licenseeId: user.licenseeId, orgId: user.orgId, licensee: user.licensee ? { id: user.licensee.id, name: user.licensee.name, prefix: user.licensee.prefix } : null } });
+    return res.json({
+      success: true,
+      data: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        licenseeId: primaryLicensee?.id || user.licenseeId,
+        orgId: user.orgId || primaryLicensee?.orgId || null,
+        licensee: primaryLicensee
+          ? {
+              id: primaryLicensee.id,
+              name: primaryLicensee.name,
+              prefix: primaryLicensee.prefix,
+              brandName: primaryLicensee.brandName ?? null,
+            }
+          : null,
+        linkedLicensees,
+      },
+    });
   } catch (error) {
     console.error("Me error:", error);
     return res.status(500).json({ success: false, error: "Internal server error" });

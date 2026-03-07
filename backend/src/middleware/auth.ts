@@ -4,6 +4,7 @@ import prisma from "../config/database";
 import { JWTPayload } from "../types";
 import { UserRole } from "@prisma/client";
 import { ACCESS_TOKEN_COOKIE } from "../services/auth/tokenService";
+import { isManufacturerRole, listManufacturerLinkedLicenseeIds } from "../services/manufacturerScopeService";
 
 export interface AuthRequest extends Request {
   user?: JWTPayload;
@@ -26,15 +27,29 @@ async function hydrateTenantIfNeeded(payload: JWTPayload): Promise<JWTPayload> {
   if (!payload?.userId || !payload?.role) return payload;
 
   if (payload.role === UserRole.SUPER_ADMIN || payload.role === UserRole.PLATFORM_SUPER_ADMIN) return payload;
-  if (payload.licenseeId && payload.orgId) return payload;
+  if (isManufacturerRole(payload.role) && Array.isArray(payload.linkedLicenseeIds) && payload.linkedLicenseeIds.length > 0) {
+    return payload;
+  }
+  if (!isManufacturerRole(payload.role) && payload.licenseeId && payload.orgId) return payload;
 
-  // fallback: lookup the user to get licenseeId
   const u = await prisma.user.findUnique({
     where: { id: payload.userId },
-    select: { licenseeId: true, orgId: true },
+    select: {
+      licenseeId: true,
+      orgId: true,
+    },
   });
 
-  return { ...payload, licenseeId: u?.licenseeId ?? null, orgId: u?.orgId ?? null };
+  const linkedLicenseeIds = isManufacturerRole(payload.role)
+    ? await listManufacturerLinkedLicenseeIds(payload.userId, prisma).catch(() => [])
+    : payload.linkedLicenseeIds || null;
+
+  return {
+    ...payload,
+    licenseeId: u?.licenseeId ?? payload.licenseeId ?? linkedLicenseeIds?.[0] ?? null,
+    orgId: u?.orgId ?? payload.orgId ?? null,
+    linkedLicenseeIds: linkedLicenseeIds.length ? linkedLicenseeIds : payload.linkedLicenseeIds ?? null,
+  };
 }
 
 export const authenticate = async (req: AuthRequest, res: Response, next: NextFunction) => {
