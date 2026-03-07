@@ -11,6 +11,8 @@ import { friendlyReferenceLabel, shortRawReference } from "@/lib/friendly-refere
 import { getPrinterDiagnosticSummary, type LocalPrinterAgentSnapshot } from "@/lib/printer-diagnostics";
 import { buildSupportDiagnosticsPayload, captureSupportScreenshot } from "@/lib/support-diagnostics";
 import { BatchAllocationMapDialog } from "@/components/batches/BatchAllocationMapDialog";
+import { LicenseeBatchWorkspaceDialog } from "@/components/batches/LicenseeBatchWorkspaceDialog";
+import { buildStableBatchOverviewRows, type StableBatchOverviewRow } from "@/lib/batch-workspace";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,13 +28,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 import {
   Select,
@@ -47,7 +43,7 @@ import { useToast } from "@/hooks/use-toast";
 import { onMutationEvent } from "@/lib/mutation-events";
 
 import { format } from "date-fns";
-import { Search, Trash2, RefreshCw, Download, UserCog, Activity, PencilLine } from "lucide-react";
+import { Search, RefreshCw, Download } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { saveAs } from "file-saver";
@@ -65,6 +61,7 @@ type BatchRow = {
   totalCodes: number;
   printedAt: string | null;
   createdAt: string;
+  updatedAt?: string;
   licensee?: { id: string; name: string; prefix: string };
   manufacturer?: { id: string; name: string; email: string };
   _count?: { qrCodes: number };
@@ -237,7 +234,6 @@ export default function Batches() {
 
   // manufacturers for assign dropdown (licensee_admin)
   const [manufacturers, setManufacturers] = useState<ManufacturerRow[]>([]);
-  const [assignOpen, setAssignOpen] = useState(false);
   const [assignBatch, setAssignBatch] = useState<BatchRow | null>(null);
   const [assignManufacturerId, setAssignManufacturerId] = useState<string>("");
   const [assignQuantity, setAssignQuantity] = useState<string>("");
@@ -321,13 +317,11 @@ export default function Batches() {
   const [allocationMapLoading, setAllocationMapLoading] = useState(false);
   const [allocationMap, setAllocationMap] = useState<any | null>(null);
   const [allocationHint, setAllocationHint] = useState<{ title: string; body: string } | null>(null);
-
-  // allocation history
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [historyBatch, setHistoryBatch] = useState<BatchRow | null>(null);
-  const [historyLogs, setHistoryLogs] = useState<TraceEventRow[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyLastUpdatedAt, setHistoryLastUpdatedAt] = useState<Date | null>(null);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [workspaceBatch, setWorkspaceBatch] = useState<StableBatchOverviewRow | null>(null);
+  const [workspaceHistoryLogs, setWorkspaceHistoryLogs] = useState<TraceEventRow[]>([]);
+  const [workspaceHistoryLoading, setWorkspaceHistoryLoading] = useState(false);
+  const [workspaceHistoryLastUpdatedAt, setWorkspaceHistoryLastUpdatedAt] = useState<Date | null>(null);
   const printerReady = printerStatus.connected && printerStatus.eligibleForPrinting;
   const printerHasInventory =
     detectedPrinters.length > 0 || Boolean(printerStatus.selectedPrinterId || printerStatus.printerId);
@@ -665,7 +659,7 @@ export default function Batches() {
     });
   }, [registeredPrinters, selectedPrinterId]);
 
-  const filtered = useMemo(() => {
+  const filteredRows = useMemo(() => {
     const s = q.trim().toLowerCase();
     const manufacturerIdFilter = String(searchParams.get("manufacturerId") || "").trim();
     return rows.filter((b) => {
@@ -697,6 +691,47 @@ export default function Batches() {
       return hay.includes(s);
     });
   }, [rows, q, assignmentFilter, isManufacturer, printFilter, searchParams]);
+
+  const stableRows = useMemo(() => buildStableBatchOverviewRows(rows), [rows]);
+
+  const filteredStableRows = useMemo(() => {
+    const search = q.trim().toLowerCase();
+    const manufacturerIdFilter = String(searchParams.get("manufacturerId") || "").trim();
+
+    return stableRows.filter((row) => {
+      if (manufacturerIdFilter) {
+        const matchesManufacturer = row.manufacturerSummary.some(
+          (allocation) => allocation.manufacturerId === manufacturerIdFilter
+        );
+        if (!matchesManufacturer) return false;
+      }
+
+      if (assignmentFilter === "assigned" && row.assignedCodes <= 0) return false;
+      if (assignmentFilter === "unassigned" && row.remainingUnassignedCodes <= 0) return false;
+
+      if (!search) return true;
+
+      const haystack = [
+        row.sourceBatchName,
+        row.sourceBatchId,
+        row.sourceOriginalRangeStart,
+        row.sourceOriginalRangeEnd,
+        row.licensee?.name,
+        row.licensee?.prefix,
+        ...row.manufacturerSummary.flatMap((allocation) => [
+          allocation.manufacturerName,
+          allocation.manufacturerEmail,
+          allocation.batchName,
+          allocation.batchId,
+        ]),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(search);
+    });
+  }, [assignmentFilter, q, searchParams, stableRows]);
 
   const getAvailableInventory = (batch: BatchRow) =>
     batch.batchKind === "MANUFACTURER_CHILD"
@@ -732,14 +767,6 @@ export default function Batches() {
     } finally {
       setLoading(false);
     }
-  };
-
-  // -------- ASSIGN MANUFACTURER (licensee_admin) --------
-  const openAssign = (b: BatchRow) => {
-    setAssignBatch(b);
-    setAssignManufacturerId(b.manufacturer?.id || "");
-    setAssignQuantity("");
-    setAssignOpen(true);
   };
 
   const openRename = (b: BatchRow) => {
@@ -845,11 +872,12 @@ export default function Batches() {
         title: "Assigned",
         description: `Created allocated batch ${data.newBatchId || "(id pending)"}: ${createdName}`,
       });
-      setAssignOpen(false);
-      setAssignBatch(null);
       setAssignManufacturerId("");
       setAssignQuantity("");
       await fetchBatches();
+      if (workspaceBatch) {
+        await fetchWorkspaceHistory(workspaceBatch, { silent: true });
+      }
     } catch (e: any) {
       if (showLargeAllocationProgress) progress.close();
       toast({ title: "Assign failed", description: e?.message || "Error", variant: "destructive" });
@@ -1517,35 +1545,59 @@ export default function Batches() {
     }
   };
 
-  const fetchHistory = async (batch: BatchRow, opts?: { silent?: boolean }) => {
+  const fetchWorkspaceHistory = async (workspace: StableBatchOverviewRow, opts?: { silent?: boolean }) => {
     if (!opts?.silent) {
-      setHistoryLoading(true);
+      setWorkspaceHistoryLoading(true);
     }
     try {
-      const traceRes = await apiClient.getTraceTimeline({ batchId: batch.id, limit: 100 });
-      if (traceRes.success) {
-        const payload: any = traceRes.data;
+      const batchIds = Array.from(
+        new Set(
+          [workspace.sourceBatchRow?.id || workspace.sourceBatchId, ...workspace.allocations.map((allocation) => allocation.batchId)]
+            .map((value) => String(value || "").trim())
+            .filter(Boolean)
+        )
+      );
+
+      const responses = await Promise.all(batchIds.map((batchId) => apiClient.getTraceTimeline({ batchId, limit: 60 })));
+      const merged = new Map<string, TraceEventRow>();
+
+      for (const response of responses) {
+        if (!response.success) continue;
+        const payload: any = response.data;
         const list = Array.isArray(payload)
           ? payload
           : Array.isArray(payload?.events)
-          ? payload.events
-          : Array.isArray(payload?.logs)
-          ? payload.logs
-          : [];
-        setHistoryLogs((list as TraceEventRow[]) || []);
-        setHistoryLastUpdatedAt(new Date());
-      } else {
-        setHistoryLogs([]);
+            ? payload.events
+            : Array.isArray(payload?.logs)
+              ? payload.logs
+              : [];
+
+        for (const item of list as TraceEventRow[]) {
+          const key = String(item.id || `${item.createdAt}:${item.action || item.sourceAction || item.eventType || "event"}`).trim();
+          if (!merged.has(key)) {
+            merged.set(key, item);
+          }
+        }
       }
+
+      setWorkspaceHistoryLogs(
+        Array.from(merged.values()).sort(
+          (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+        )
+      );
+      setWorkspaceHistoryLastUpdatedAt(new Date());
     } finally {
-      setHistoryLoading(false);
+      setWorkspaceHistoryLoading(false);
     }
   };
 
-  const openHistory = async (b: BatchRow) => {
-    setHistoryBatch(b);
-    setHistoryOpen(true);
-    await fetchHistory(b);
+  const openWorkspace = async (workspace: StableBatchOverviewRow) => {
+    setWorkspaceBatch(workspace);
+    setWorkspaceOpen(true);
+    setAssignBatch(workspace.sourceBatchRow || null);
+    setAssignManufacturerId("");
+    setAssignQuantity("");
+    await fetchWorkspaceHistory(workspace);
   };
 
   const openAllocationMap = async (batch: BatchRow) => {
@@ -1570,59 +1622,26 @@ export default function Batches() {
   };
 
   useEffect(() => {
-    if (!historyOpen || !historyBatch) return;
+    if (!workspaceOpen || !workspaceBatch) return;
     const timer = window.setInterval(() => {
-      fetchHistory(historyBatch, { silent: true });
+      fetchWorkspaceHistory(workspaceBatch, { silent: true });
     }, 8_000);
     return () => window.clearInterval(timer);
-  }, [historyOpen, historyBatch]);
+  }, [workspaceBatch, workspaceOpen]);
 
-  const eventBadgeClass = (eventType?: string) => {
-    if (eventType === "COMMISSIONED") return "bg-sky-500/10 text-sky-700";
-    if (eventType === "ASSIGNED") return "bg-cyan-500/10 text-cyan-700";
-    if (eventType === "PRINTED") return "bg-amber-500/10 text-amber-700";
-    if (eventType === "REDEEMED") return "bg-emerald-500/10 text-emerald-700";
-    if (eventType === "BLOCKED") return "bg-red-500/10 text-red-700";
-    return "bg-muted text-muted-foreground";
-  };
-
-  const historySummary = (log: TraceEventRow) => {
-    const d = log?.details || {};
-    const eventType = log?.eventType || "";
-    if (eventType === "COMMISSIONED") {
-      const qty = d.quantity ?? d.created ?? d.totalCodes;
-      const range = d.startCode && d.endCode ? ` (${d.startCode} → ${d.endCode})` : "";
-      return `Commissioned ${qty ?? "—"} codes${range}.`;
+  useEffect(() => {
+    if (!workspaceOpen || !workspaceBatch) return;
+    const refreshed = stableRows.find((row) => row.sourceBatchId === workspaceBatch.sourceBatchId) || null;
+    if (!refreshed) {
+      setWorkspaceOpen(false);
+      setWorkspaceBatch(null);
+      setWorkspaceHistoryLogs([]);
+      setWorkspaceHistoryLastUpdatedAt(null);
+      return;
     }
-    if (eventType === "ASSIGNED") {
-      return `Assigned ${d.quantity ?? "—"} codes to manufacturer ${d.manufacturerId || "—"}.`;
-    }
-    if (eventType === "PRINTED") {
-      return `Printed ${d.printedCodes ?? d.codes ?? "—"} codes.`;
-    }
-    if (eventType === "REDEEMED") {
-      return `Redeemed on scan${d.scanCount != null ? ` (scan #${d.scanCount})` : ""}.`;
-    }
-    if (eventType === "BLOCKED") {
-      return `Blocked${d.reason ? `: ${d.reason}` : ""}${d.blockedCodes ? ` (${d.blockedCodes} codes)` : ""}.`;
-    }
-
-    const ctx = d.context || "";
-    if (ctx === "ASSIGN_MANUFACTURER_QUANTITY_CHILD") {
-      return `Allocated ${d.quantity ?? "—"} to manufacturer ${d.manufacturerId || "—"} (${d.startCode || "?"} → ${d.endCode || "?"})`;
-    }
-    return log?.sourceAction || log?.action || "Activity";
-  };
-
-  const historyUser = (log: TraceEventRow) => {
-    if (log?.user?.name) return `${log.user.name} (${log.user.email || log.user.id || "id"})`;
-    if (log?.manufacturer?.name) {
-      return `${log.manufacturer.name} (${log.manufacturer.email || log.manufacturer.id || "id"})`;
-    }
-    if (log?.user?.email) return log.user.email;
-    if (log?.userId) return log.userId;
-    return "System";
-  };
+    setWorkspaceBatch(refreshed);
+    setAssignBatch(refreshed.sourceBatchRow || null);
+  }, [stableRows, workspaceBatch, workspaceOpen]);
 
   const downloadAuditPackage = async (batch: BatchRow) => {
     if (exportingBatchId) return;
@@ -1655,7 +1674,7 @@ export default function Batches() {
             <p className="text-muted-foreground">
               {isManufacturer
                 ? "Your assigned QR batches (create direct-print jobs, issue one-time render tokens, then confirm printing)"
-                : "Manage received QR batches (assign by quantity / delete / review printing)"}
+                : "Manage received source batches through a stable workspace for allocation, printing review, and audit."}
             </p>
           </div>
 
@@ -1724,9 +1743,9 @@ export default function Batches() {
                     <SelectValue placeholder="Assignment filter" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All batches</SelectItem>
-                    <SelectItem value="assigned">Assigned batches</SelectItem>
-                    <SelectItem value="unassigned">Unassigned batches</SelectItem>
+                    <SelectItem value="all">All source batches</SelectItem>
+                    <SelectItem value="assigned">With manufacturer assignments</SelectItem>
+                    <SelectItem value="unassigned">With unassigned inventory</SelectItem>
                   </SelectContent>
                 </Select>
               ) : (
@@ -1745,273 +1764,330 @@ export default function Batches() {
           </CardHeader>
 
           <CardContent>
-            <div className="rounded-md border">
-              <Table className="table-fixed">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Batch</TableHead>
-                    <TableHead>Range</TableHead>
-                    <TableHead>Inventory State</TableHead>
-                    <TableHead>Manufacturer</TableHead>
-                    <TableHead>Printed</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead>Controls</TableHead>
-                  </TableRow>
-                </TableHeader>
+            {isManufacturer ? (
+              <>
+                <div className="rounded-md border">
+                  <Table className="table-fixed">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Batch</TableHead>
+                        <TableHead>Range</TableHead>
+                        <TableHead>Inventory State</TableHead>
+                        <TableHead>Manufacturer</TableHead>
+                        <TableHead>Printed</TableHead>
+                        <TableHead>Created</TableHead>
+                        <TableHead>Controls</TableHead>
+                      </TableRow>
+                    </TableHeader>
 
-                <TableBody>
-                  {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-muted-foreground">
-                        Loading...
-                      </TableCell>
-                    </TableRow>
-                  ) : filtered.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-muted-foreground">
-                        No batches found.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filtered.map((b) => {
-                      const assignedCount = Number(b.assignedCodes ?? b._count?.qrCodes ?? 0);
-                      const printed = !!b.printedAt;
-                      const availableInventory = getAvailableInventory(b);
-                      const isAllocatedBatch = b.batchKind === "MANUFACTURER_CHILD";
-                      const canAssignThisBatch = canAssignManufacturer && !isAllocatedBatch && !printed && availableInventory > 0;
-
-                      return (
-                        <TableRow key={b.id}>
-                          <TableCell>
-                            <div className="space-y-1">
-                              <div className="font-medium break-words">{b.name}</div>
-                              <div className="text-[11px] text-muted-foreground font-mono break-all">{b.id}</div>
-                              {b.licensee?.name ? (
-                                <div className="text-xs text-muted-foreground">
-                                  {b.licensee.name} ({b.licensee.prefix})
-                                </div>
-                              ) : (
-                                <div className="text-xs text-muted-foreground">{b.licenseeId}</div>
-                              )}
-                              <div className="flex items-center gap-2 text-xs">
-                                <Badge variant={isAllocatedBatch ? "default" : "secondary"}>
-                                  {isAllocatedBatch ? "Allocated batch" : "Source batch"}
-                                </Badge>
-                                <Badge variant={assignedCount > 0 ? "default" : "secondary"}>
-                                  {assignedCount.toLocaleString()} assigned
-                                </Badge>
-                                <Badge variant={b.totalCodes > 0 ? "outline" : "secondary"}>{b.totalCodes} total</Badge>
-                              </div>
-                            </div>
+                    <TableBody>
+                      {loading ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-muted-foreground">
+                            Loading...
                           </TableCell>
-
-                          <TableCell className="font-mono text-xs">
-                            <div className="break-all">{b.startCode}</div>
-                            <div className="break-all">{b.endCode}</div>
+                        </TableRow>
+                      ) : filteredRows.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-muted-foreground">
+                            No batches found.
                           </TableCell>
+                        </TableRow>
+                      ) : (
+                        filteredRows.map((b) => {
+                          const printed = !!b.printedAt;
 
-                          <TableCell>
-                            <div className="space-y-1">
-                              <Badge variant={getAvailabilityTone(availableInventory)}>
-                                {getAvailabilityTitle(b)}: {availableInventory.toLocaleString()}
-                              </Badge>
-                              {isAllocatedBatch ? (
-                                <div className="text-[11px] text-muted-foreground">
-                                  Printed {Number(b.printedCodes || 0).toLocaleString()} · Redeemed {Number(b.redeemedCodes || 0).toLocaleString()}
-                                </div>
-                              ) : (
-                                <div className="text-[11px] text-muted-foreground">
-                                  Still available for later manufacturer allocation.
-                                </div>
-                              )}
-                              <div className="text-[11px] text-muted-foreground font-mono break-all">
-                                {b.remainingStartCode && b.remainingEndCode
-                                  ? `${b.remainingStartCode} → ${b.remainingEndCode}`
-                                  : "—"}
-                              </div>
-                            </div>
-                          </TableCell>
-
-                          <TableCell>
-                            {b.manufacturer ? (
-                              <div className="space-y-1">
-                                <div>{b.manufacturer.name}</div>
-                                <div className="text-xs text-muted-foreground break-all">{b.manufacturer.email}</div>
-                              </div>
-                            ) : (
-                              <span className="text-muted-foreground">Unassigned</span>
-                            )}
-                          </TableCell>
-
-                          <TableCell>
-                            {printed ? (
-                              <Badge className="bg-success/10 text-success">
-                                {format(new Date(b.printedAt as string), "MMM d, yyyy")}
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-muted text-muted-foreground">Not printed</Badge>
-                            )}
-                          </TableCell>
-
-                          <TableCell className="text-muted-foreground">
-                            {b.createdAt ? format(new Date(b.createdAt), "MMM d, yyyy") : "—"}
-                          </TableCell>
-
-                          <TableCell>
-                            {/* Manufacturer: direct-print controls */}
-                            {isManufacturer ? (
-                              <div className="flex flex-wrap gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  disabled={loading || getAvailableInventory(b) <= 0}
-                                  onClick={() => openPrintPack(b)}
-                                >
-                                  <Download className="mr-2 h-4 w-4" />
-                                  {"Create Print Job"}
-                                </Button>
-                              </div>
-                            ) : (
-                              <div className="rounded-lg border bg-muted/20 p-2">
-                                <div className="mb-2 text-[11px] font-medium text-muted-foreground">Control Panel</div>
-                                <div className="flex flex-wrap gap-2">
-                                  <Button size="sm" variant="outline" onClick={() => openHistory(b)}>
-                                    <Activity className="mr-2 h-4 w-4" />
-                                    History
-                                  </Button>
-                                  <Button size="sm" variant="outline" onClick={() => openAllocationMap(b)}>
-                                    <Activity className="mr-2 h-4 w-4" />
-                                    Allocation map
-                                  </Button>
-                                  <Button size="sm" variant="outline" onClick={() => openRename(b)} disabled={!!b.printedAt}>
-                                    <PencilLine className="mr-2 h-4 w-4" />
-                                    Rename
-                                  </Button>
-                                  {canAssignManufacturer && (
-                                    <Button size="sm" variant="outline" onClick={() => openAssign(b)} disabled={!canAssignThisBatch}>
-                                      <UserCog className="mr-2 h-4 w-4" />
-                                      Assign
-                                    </Button>
+                          return (
+                            <TableRow key={b.id}>
+                              <TableCell>
+                                <div className="space-y-1">
+                                  <div className="font-medium break-words">{b.name}</div>
+                                  <div className="text-[11px] text-muted-foreground font-mono break-all">{b.id}</div>
+                                  {b.licensee?.name ? (
+                                    <div className="text-xs text-muted-foreground">
+                                      {b.licensee.name} ({b.licensee.prefix})
+                                    </div>
+                                  ) : (
+                                    <div className="text-xs text-muted-foreground">{b.licenseeId}</div>
                                   )}
+                                  <div className="flex items-center gap-2 text-xs">
+                                    <Badge variant="default">Allocated batch</Badge>
+                                    <Badge variant={Number(b.totalCodes || 0) > 0 ? "outline" : "secondary"}>
+                                      {Number(b.totalCodes || 0).toLocaleString()} total
+                                    </Badge>
+                                  </div>
+                                </div>
+                              </TableCell>
+
+                              <TableCell className="font-mono text-xs">
+                                <div className="break-all">{b.startCode}</div>
+                                <div className="break-all">{b.endCode}</div>
+                              </TableCell>
+
+                              <TableCell>
+                                <div className="space-y-1">
+                                  <Badge variant={getAvailabilityTone(getAvailableInventory(b))}>
+                                    {getAvailabilityTitle(b)}: {getAvailableInventory(b).toLocaleString()}
+                                  </Badge>
+                                  <div className="text-[11px] text-muted-foreground">
+                                    Printed {Number(b.printedCodes || 0).toLocaleString()} · Redeemed {Number(b.redeemedCodes || 0).toLocaleString()}
+                                  </div>
+                                  <div className="text-[11px] text-muted-foreground font-mono break-all">
+                                    {b.remainingStartCode && b.remainingEndCode
+                                      ? `${b.remainingStartCode} -> ${b.remainingEndCode}`
+                                      : "-"}
+                                  </div>
+                                </div>
+                              </TableCell>
+
+                              <TableCell>
+                                {b.manufacturer ? (
+                                  <div className="space-y-1">
+                                    <div>{b.manufacturer.name}</div>
+                                    <div className="text-xs text-muted-foreground break-all">{b.manufacturer.email}</div>
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground">Unassigned</span>
+                                )}
+                              </TableCell>
+
+                              <TableCell>
+                                {printed ? (
+                                  <Badge className="bg-success/10 text-success">
+                                    {format(new Date(b.printedAt as string), "MMM d, yyyy")}
+                                  </Badge>
+                                ) : (
+                                  <Badge className="bg-muted text-muted-foreground">Not printed</Badge>
+                                )}
+                              </TableCell>
+
+                              <TableCell className="text-muted-foreground">
+                                {b.createdAt ? format(new Date(b.createdAt), "MMM d, yyyy") : "-"}
+                              </TableCell>
+
+                              <TableCell>
+                                <div className="flex flex-wrap gap-2">
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    onClick={() => downloadAuditPackage(b)}
-                                    disabled={exportingBatchId === b.id}
+                                    disabled={loading || getAvailableInventory(b) <= 0}
+                                    onClick={() => openPrintPack(b)}
                                   >
                                     <Download className="mr-2 h-4 w-4" />
-                                    {exportingBatchId === b.id ? "Preparing..." : "Audit"}
+                                    Create Print Job
                                   </Button>
-                                  {canDelete && (
-                                    <Button size="sm" variant="outline" className="text-destructive" onClick={() => handleDelete(b)}>
-                                      <Trash2 className="mr-2 h-4 w-4" />
-                                      Delete
-                                    </Button>
-                                  )}
                                 </div>
-                              </div>
-                            )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="mt-3 text-sm text-muted-foreground">
+                  Showing {filteredRows.length} of {rows.length}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="mb-4 rounded-2xl border bg-muted/10 px-4 py-3 text-sm text-muted-foreground">
+                  One stable row is shown for each source batch. Open the workspace to allocate more quantity, review manufacturer distribution, inspect print status, and download audit evidence without split-row confusion in the main list.
+                </div>
+
+                <div className="rounded-md border">
+                  <Table className="table-fixed">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[24%]">Batch</TableHead>
+                        <TableHead className="w-[16%]">Original range</TableHead>
+                        <TableHead className="w-[19%]">Inventory</TableHead>
+                        <TableHead className="w-[16%]">Manufacturers</TableHead>
+                        <TableHead className="w-[14%]">Print status</TableHead>
+                        <TableHead className="w-[11%]">Updated</TableHead>
+                        <TableHead className="w-[120px] text-right">Workspace</TableHead>
+                      </TableRow>
+                    </TableHeader>
+
+                    <TableBody>
+                      {loading ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-muted-foreground">
+                            Loading...
                           </TableCell>
                         </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+                      ) : filteredStableRows.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-muted-foreground">
+                            No source batches found.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        filteredStableRows.map((row) => {
+                          const topManufacturer = row.manufacturerSummary[0] || null;
 
-            <div className="mt-3 text-sm text-muted-foreground">
-              Showing {filtered.length} of {rows.length}
-            </div>
+                          return (
+                            <TableRow
+                              key={row.sourceBatchId}
+                              className="cursor-pointer hover:bg-muted/20"
+                              onClick={() => void openWorkspace(row)}
+                            >
+                              <TableCell>
+                                <div className="space-y-2 pr-4">
+                                  <div>
+                                    <div className="font-medium break-words">{row.sourceBatchName}</div>
+                                    <div className="text-[11px] text-muted-foreground font-mono break-all">
+                                      {row.sourceBatchId}
+                                    </div>
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    {row.licensee?.name ? `${row.licensee.name} (${row.licensee.prefix})` : "Licensee scope"}
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    <Badge variant="secondary">Source batch</Badge>
+                                    <Badge variant="outline">{row.originalTotalCodes.toLocaleString()} total</Badge>
+                                  </div>
+                                </div>
+                              </TableCell>
+
+                              <TableCell className="font-mono text-[11px] leading-5">
+                                <div className="break-all">{row.sourceOriginalRangeStart}</div>
+                                <div className="break-all">{row.sourceOriginalRangeEnd}</div>
+                              </TableCell>
+
+                              <TableCell>
+                                <div className="space-y-2 pr-4">
+                                  <Badge variant={row.remainingUnassignedCodes > 0 ? "default" : "secondary"}>
+                                    {row.remainingUnassignedCodes.toLocaleString()} unassigned remaining
+                                  </Badge>
+                                  <div className="flex flex-wrap gap-2 text-xs">
+                                    <Badge variant={row.assignedCodes > 0 ? "secondary" : "outline"}>
+                                      {row.assignedCodes.toLocaleString()} assigned
+                                    </Badge>
+                                    <Badge variant={row.pendingPrintableCodes > 0 ? "secondary" : "outline"}>
+                                      {row.pendingPrintableCodes.toLocaleString()} ready to print
+                                    </Badge>
+                                  </div>
+                                  <div className="text-[11px] text-muted-foreground font-mono break-all">
+                                    {row.remainingRangeStart && row.remainingRangeEnd
+                                      ? `${row.remainingRangeStart} -> ${row.remainingRangeEnd}`
+                                      : "No unassigned range remains."}
+                                  </div>
+                                </div>
+                              </TableCell>
+
+                              <TableCell>
+                                {topManufacturer ? (
+                                  <div className="space-y-2">
+                                    <div className="font-medium">{topManufacturer.manufacturerName}</div>
+                                    <div className="text-xs text-muted-foreground">
+                                      {row.manufacturerCount > 1
+                                        ? `+${row.manufacturerCount - 1} more manufacturer accounts`
+                                        : `${topManufacturer.allocatedCodes.toLocaleString()} assigned`}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground">Not assigned yet</span>
+                                )}
+                              </TableCell>
+
+                              <TableCell>
+                                <div className="space-y-2">
+                                  <Badge variant={row.printedCodes > 0 ? "secondary" : "outline"}>
+                                    {row.printedCodes.toLocaleString()} printed
+                                  </Badge>
+                                  <div className="text-xs text-muted-foreground">
+                                    Ready {row.pendingPrintableCodes.toLocaleString()} · Redeemed {row.redeemedCodes.toLocaleString()}
+                                  </div>
+                                </div>
+                              </TableCell>
+
+                              <TableCell className="text-muted-foreground">
+                                {row.sourceUpdatedAt ? format(new Date(row.sourceUpdatedAt), "MMM d, yyyy") : "-"}
+                              </TableCell>
+
+                              <TableCell className="text-right">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    void openWorkspace(row);
+                                  }}
+                                >
+                                  Open
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="mt-3 text-sm text-muted-foreground">
+                  Showing {filteredStableRows.length} of {stableRows.length}
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
 
-        {/* Assign Manufacturer Dialog */}
-        <Dialog
-          open={assignOpen}
-          onOpenChange={(v) => {
-            setAssignOpen(v);
-            if (!v) {
+        <LicenseeBatchWorkspaceDialog
+          open={workspaceOpen}
+          onOpenChange={(open) => {
+            setWorkspaceOpen(open);
+            if (!open) {
+              setWorkspaceBatch(null);
               setAssignBatch(null);
               setAssignManufacturerId("");
               setAssignQuantity("");
+              setWorkspaceHistoryLogs([]);
+              setWorkspaceHistoryLastUpdatedAt(null);
             }
           }}
-        >
-          <DialogContent className="sm:max-w-[520px]">
-            <DialogHeader>
-              <DialogTitle>Assign Manufacturer</DialogTitle>
-              <DialogDescription>
-                Split the current source batch by quantity. The unassigned remainder stays in the source batch and the allocated portion becomes a new manufacturer batch.
-              </DialogDescription>
-            </DialogHeader>
-
-            {!assignBatch ? (
-              <div className="text-sm text-muted-foreground">No batch selected.</div>
-            ) : (
-              <div className="space-y-4 mt-2">
-                <div className="rounded-md border p-3 text-sm">
-                  <div className="font-medium">{assignBatch.name}</div>
-                  <div className="text-muted-foreground font-mono text-xs">{assignBatch.id}</div>
-                  <div className="text-muted-foreground font-mono text-xs">
-                    {assignBatch.startCode} → {assignBatch.endCode}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Manufacturer</Label>
-                  <Select value={assignManufacturerId} onValueChange={setAssignManufacturerId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select manufacturer" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {manufacturers.length === 0 ? (
-                        <SelectItem value="__none__" disabled>
-                          No manufacturers found
-                        </SelectItem>
-                      ) : (
-                        manufacturers.map((m) => (
-                          <SelectItem key={m.id} value={m.id}>
-                            {m.name} ({m.email})
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Quantity to allocate</Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={assignQuantity}
-                    onChange={(e) => setAssignQuantity(e.target.value)}
-                    placeholder="Enter quantity"
-                  />
-                  <div className="text-xs text-muted-foreground">
-                    Unassigned remaining in this source batch: {getAvailableInventory(assignBatch)}
-                  </div>
-                  {getAvailableInventory(assignBatch) > 0 && Number(assignQuantity) > 0 && (
-                    <div className="text-xs text-muted-foreground">
-                      Remaining in source batch after allocation:{" "}
-                      {Math.max(getAvailableInventory(assignBatch) - Number(assignQuantity), 0)}
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex justify-end gap-3 pt-2">
-                  <Button variant="outline" onClick={() => setAssignOpen(false)} disabled={loading}>
-                    Cancel
-                  </Button>
-                  <Button onClick={submitAssign} disabled={loading}>
-                    Save
-                  </Button>
-                </div>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
+          workspace={workspaceBatch}
+          manufacturers={manufacturers}
+          assignManufacturerId={assignManufacturerId}
+          assignQuantity={assignQuantity}
+          assigning={loading}
+          onAssignManufacturerChange={setAssignManufacturerId}
+          onAssignQuantityChange={setAssignQuantity}
+          onSubmitAssign={submitAssign}
+          onOpenRename={() => {
+            if (workspaceBatch?.sourceBatchRow) {
+              openRename(workspaceBatch.sourceBatchRow);
+            }
+          }}
+          onOpenAllocationMap={() => {
+            if (workspaceBatch?.sourceBatchRow) {
+              void openAllocationMap(workspaceBatch.sourceBatchRow);
+            }
+          }}
+          onDownloadAudit={() => {
+            if (workspaceBatch?.sourceBatchRow) {
+              void downloadAuditPackage(workspaceBatch.sourceBatchRow);
+            }
+          }}
+          onDelete={() => {
+            if (workspaceBatch?.sourceBatchRow) {
+              void handleDelete(workspaceBatch.sourceBatchRow);
+            }
+          }}
+          canAssignManufacturer={canAssignManufacturer}
+          canDelete={canDelete}
+          exportingAudit={exportingBatchId === workspaceBatch?.sourceBatchRow?.id}
+          historyLoading={workspaceHistoryLoading}
+          historyLogs={workspaceHistoryLogs}
+          historyLastUpdatedAt={workspaceHistoryLastUpdatedAt}
+          onRefreshHistory={() => {
+            if (workspaceBatch) {
+              void fetchWorkspaceHistory(workspaceBatch);
+            }
+          }}
+        />
 
         {/* Rename Batch Dialog */}
         <Dialog
@@ -2367,76 +2443,6 @@ export default function Batches() {
                     Close
                   </Button>
                 </div>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
-
-        {/* Allocation History Dialog */}
-        <Dialog
-          open={historyOpen}
-          onOpenChange={(v) => {
-            setHistoryOpen(v);
-            if (!v) {
-              setHistoryBatch(null);
-              setHistoryLogs([]);
-              setHistoryLastUpdatedAt(null);
-            }
-          }}
-        >
-          <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Batch History</DialogTitle>
-              <DialogDescription>
-                {historyBatch ? historyBatch.name : "Selected batch"} — lifecycle timeline (COMMISSIONED → ASSIGNED → PRINTED → REDEEMED/BLOCKED)
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2 text-xs">
-              <div className="flex items-center gap-2">
-                <Badge className="bg-emerald-500/10 text-emerald-700">Live</Badge>
-                <span className="text-muted-foreground">
-                  {historyLastUpdatedAt ? `Updated ${format(historyLastUpdatedAt, "PPp")}` : "Waiting for first snapshot..."}
-                </span>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  if (!historyBatch) return;
-                  fetchHistory(historyBatch);
-                }}
-                disabled={!historyBatch || historyLoading}
-              >
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Refresh now
-              </Button>
-            </div>
-
-            {historyLoading ? (
-              <div className="text-sm text-muted-foreground">Loading history…</div>
-            ) : historyLogs.length === 0 ? (
-              <div className="text-sm text-muted-foreground">No history found.</div>
-            ) : (
-              <div className="space-y-2">
-                {historyLogs.map((log, idx) => (
-                  <div key={log.id || `${log.createdAt}-${idx}`} className="rounded-md border p-3 text-sm">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="space-y-1">
-                        {log.eventType && (
-                          <Badge className={eventBadgeClass(log.eventType)}>{log.eventType}</Badge>
-                        )}
-                        <div className="font-medium">{historySummary(log)}</div>
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {log.createdAt ? format(new Date(log.createdAt), "PPp") : "—"}
-                      </div>
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                      By {historyUser(log)}
-                    </div>
-                  </div>
-                ))}
               </div>
             )}
           </DialogContent>

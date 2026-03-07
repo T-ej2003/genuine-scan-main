@@ -435,6 +435,17 @@ const deleteBatch = async (req, res) => {
         if (batch.printedAt) {
             return res.status(400).json({ success: false, error: "Cannot delete a printed batch" });
         }
+        const dependentAllocations = await database_1.default.batch.count({
+            where: {
+                OR: [{ parentBatchId: batch.id }, { rootBatchId: batch.id }],
+            },
+        });
+        if (dependentAllocations > 0) {
+            return res.status(409).json({
+                success: false,
+                error: "This source batch still has assigned manufacturer allocations. Manage allocations from the batch workspace instead of deleting the source row.",
+            });
+        }
         const result = await database_1.default.$transaction(async (tx) => {
             const unassigned = await tx.qRCode.updateMany({
                 where: { batchId: batch.id },
@@ -505,6 +516,18 @@ const bulkDeleteBatches = async (req, res) => {
         });
         if (printed) {
             return res.status(400).json({ success: false, error: "Cannot bulk delete: some batches are printed" });
+        }
+        const dependentAllocation = await database_1.default.batch.findFirst({
+            where: {
+                OR: [{ parentBatchId: { in: batchIds } }, { rootBatchId: { in: batchIds } }],
+            },
+            select: { id: true },
+        });
+        if (dependentAllocation) {
+            return res.status(409).json({
+                success: false,
+                error: "Some selected source batches still have assigned manufacturer allocations. Remove those allocations first.",
+            });
         }
         const txResult = await database_1.default.$transaction(async (tx) => {
             const unassigned = await tx.qRCode.updateMany({
@@ -648,19 +671,18 @@ const assignManufacturer = async (req, res) => {
                 orderBy: { code: "asc" },
                 select: { code: true },
             });
-            if (remaining.length === 0) {
-                await tx.batch.delete({ where: { id: batch.id } });
-            }
-            else {
-                await tx.batch.update({
-                    where: { id: batch.id },
-                    data: {
+            await tx.batch.update({
+                where: { id: batch.id },
+                data: remaining.length === 0
+                    ? {
+                        totalCodes: 0,
+                    }
+                    : {
                         startCode: remaining[0].code,
                         endCode: remaining[remaining.length - 1].code,
                         totalCodes: remaining.length,
                     },
-                });
-            }
+            });
             return {
                 newBatchId: newBatch.id,
                 newBatchName: newBatch.name,
@@ -1168,7 +1190,7 @@ const getBatches = async (req, res) => {
         });
         const batches = await database_1.default.batch.findMany({
             where,
-            orderBy: { createdAt: "desc" },
+            orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
             include: {
                 licensee: { select: { id: true, name: true, prefix: true } },
                 manufacturer: { select: { id: true, name: true, email: true } },

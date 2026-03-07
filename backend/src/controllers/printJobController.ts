@@ -27,7 +27,7 @@ import { getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../
 import { createAuditLog } from "../services/auditService";
 import { createRoleNotifications, createUserNotification } from "../services/notificationService";
 import { getPrinterConnectionStatusForUser } from "../services/printerConnectionService";
-import { buildApprovedPrintPayload } from "../services/printPayloadService";
+import { buildApprovedPrintPayload, resolvePayloadType, supportsNetworkDirectPayloadType } from "../services/printPayloadService";
 import { getRegisteredPrinterForManufacturer } from "../services/printerRegistryService";
 import { getPrintJobOperationalView, listPrintJobsForManufacturer, startNetworkDirectDispatch } from "../services/networkDirectPrintService";
 import {
@@ -175,10 +175,7 @@ const ensureSelectedPrinterReady = async (params: {
       printer,
       printerStatus,
       printMode: PrintDispatchMode.LOCAL_AGENT,
-      payloadType:
-        printer.commandLanguage === "ZPL" || printer.commandLanguage === "AUTO"
-          ? PrintPayloadType.ZPL
-          : PrintPayloadType.JSON,
+      payloadType: resolvePayloadType(printer as any),
     };
   }
 
@@ -190,10 +187,7 @@ const ensureSelectedPrinterReady = async (params: {
       printer,
       printerStatus: null,
       printMode: PrintDispatchMode.NETWORK_DIRECT,
-      payloadType:
-        printer.commandLanguage === "ZPL" || printer.commandLanguage === "AUTO"
-          ? PrintPayloadType.ZPL
-          : PrintPayloadType.OTHER,
+      payloadType: resolvePayloadType(printer as any),
     };
   }
 
@@ -685,10 +679,13 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
       orgId: user.orgId || null,
       licenseeId: user.licenseeId || null,
     });
-    if (printerSelection.printMode === PrintDispatchMode.NETWORK_DIRECT && printerSelection.payloadType !== PrintPayloadType.ZPL) {
+    if (
+      printerSelection.printMode === PrintDispatchMode.NETWORK_DIRECT &&
+      !supportsNetworkDirectPayloadType(printerSelection.payloadType)
+    ) {
       return res.status(409).json({
         success: false,
-        error: "Network-direct printing currently supports registered ZPL-compatible printers only.",
+        error: "Network-direct printing currently supports registered ZPL, TSPL, EPL, and CPCL printers only.",
       });
     }
 

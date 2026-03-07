@@ -79,20 +79,50 @@ export default function LicenseeAdminHelp() {
 
           <Card>
             <CardHeader className="space-y-1">
-              <CardTitle className="text-base">Assign a received batch to a manufacturer</CardTitle>
+              <CardTitle className="text-base">Manage a source batch from the workspace dialog</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-muted-foreground">
               <ol className="list-decimal pl-5">
                 <li>Open <Badge variant="outline">Batches</Badge>.</li>
-                <li>Find a <strong>Source batch</strong> with <strong>Unassigned remaining</strong> inventory.</li>
-                <li>Open actions and choose <strong>Assign Manufacturer</strong>.</li>
-                <li>Select the manufacturer and quantity, then submit.</li>
+                <li>Find the source batch row and click <strong>Open</strong>.</li>
+                <li>Use the <strong>Overview</strong> tab to confirm total quantity, remaining unassigned stock, and existing manufacturer allocations.</li>
+                <li>Use the <strong>Operations</strong> tab to allocate more quantity, rename the source batch, open the allocation structure, or export the audit package.</li>
+                <li>Use the <strong>Audit</strong> tab to review the merged activity timeline for the source batch and every manufacturer allocation underneath it.</li>
               </ol>
               <p className="text-xs text-muted-foreground">
-                The unassigned remainder stays in the source batch. Use <Badge variant="outline">Allocation map</Badge> from Batches or QR Tracking to see where the allocated portion went and what is still pending print.
+                The main table now stays stable with one row per original source batch. Split allocations are managed in the workspace instead of appearing as confusing extra rows in the list.
               </p>
             </CardContent>
           </Card>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card>
+              <CardHeader className="space-y-1">
+                <CardTitle className="text-base">Find pending or printed work by manufacturer</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm text-muted-foreground">
+                <ol className="list-decimal pl-5">
+                  <li>Open <Badge variant="outline">Manufacturers</Badge>.</li>
+                  <li>Select <strong>View details</strong> for the factory you need.</li>
+                  <li>Use the <strong>Pending</strong> or <strong>Printed</strong> chips to jump into the right workload immediately.</li>
+                  <li>Choose <strong>Open manufacturer batches</strong> to inspect assigned inventory directly.</li>
+                </ol>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="space-y-1">
+                <CardTitle className="text-base">Use QR Tracking without losing allocation context</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm text-muted-foreground">
+                <ol className="list-decimal pl-5">
+                  <li>Open <Badge variant="outline">QR Tracking</Badge> and filter by batch ID or batch name.</li>
+                  <li>Open the allocation structure from the tracked batch when you need to understand where quantity moved.</li>
+                  <li>Use batch ID, lifecycle totals, and audit history together before deciding a quantity is missing.</li>
+                </ol>
+              </CardContent>
+            </Card>
+          </div>
         </section>
 
         <section className="space-y-3">
@@ -105,14 +135,14 @@ export default function LicenseeAdminHelp() {
               eager
             />
             <DocScreenshot
-              filename="licensee-assign-batch.png"
-              alt="Assign batch to manufacturer"
-              caption="Batches: assign received inventory to a manufacturer."
+              filename="licensee-batch-workspace-annotated.svg"
+              alt="Licensee batch workspace"
+              caption="Batches: one stable source row opens a workspace for overview, operations, and audit."
             />
             <DocScreenshot
-              filename="licensee-create-manufacturer.png"
-              alt="Create manufacturer modal"
-              caption="Manufacturers: invite a factory user."
+              filename="licensee-manufacturer-ops-annotated.svg"
+              alt="Manufacturer controls"
+              caption="Manufacturers: add a factory user, inspect details, and jump into pending or printed work."
             />
           </div>
           <ScreenshotChecklist
@@ -122,12 +152,12 @@ export default function LicenseeAdminHelp() {
                 whereToCapture: "QR Requests page with quantity filled and Submit highlighted.",
               },
               {
-                filename: "licensee-assign-batch.png",
-                whereToCapture: "Batches page with Assign Manufacturer dialog open.",
+                filename: "licensee-batch-workspace-annotated.svg",
+                whereToCapture: "Batches page showing the stable source row and the workspace dialog with Overview, Operations, and Audit tabs.",
               },
               {
-                filename: "licensee-create-manufacturer.png",
-                whereToCapture: "Manufacturers page with Add Manufacturer modal open (Invite mode).",
+                filename: "licensee-manufacturer-ops-annotated.svg",
+                whereToCapture: "Manufacturers page showing Add Manufacturer, View details, Pending/Printed chips, and Open manufacturer batches.",
               },
             ]}
           />
@@ -141,7 +171,7 @@ export default function LicenseeAdminHelp() {
                 <CardTitle className="text-base">“Insufficient available quantity”</CardTitle>
               </CardHeader>
               <CardContent className="text-sm text-muted-foreground">
-                Open <Badge variant="outline">Allocation map</Badge> for that batch first. It shows the current source remainder and every allocated manufacturer batch so you can assign only the true unassigned quantity.
+                Open the source batch workspace first, then use <Badge variant="outline">View allocation structure</Badge>. It shows the current source remainder and every allocated manufacturer batch so you can assign only the true unassigned quantity.
               </CardContent>
             </Card>
             <Card>

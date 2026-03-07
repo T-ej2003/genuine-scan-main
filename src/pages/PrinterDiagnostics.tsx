@@ -507,6 +507,37 @@ export default function PrinterDiagnostics() {
           </CardContent>
         </Card>
 
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Printer compatibility matrix</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
+              <div className="font-semibold text-foreground">LOCAL_AGENT</div>
+              <p className="mt-2 leading-6">
+                Best for USB-connected printers, Wi-Fi printers, home and office devices, and industrial printers that
+                depend on the workstation driver or spooler path.
+              </p>
+              <ul className="mt-3 list-disc space-y-2 pl-5 text-xs">
+                <li>Supports operating-system managed printers discovered by the local agent.</li>
+                <li>Recommended when the printer is installed on Windows, macOS, or Linux.</li>
+                <li>Use this path for SBPL, ESC/POS, or other device-specific drivers.</li>
+              </ul>
+            </div>
+            <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
+              <div className="font-semibold text-foreground">NETWORK_DIRECT</div>
+              <p className="mt-2 leading-6">
+                Best for controlled factory LAN printers with a stable IP address and approved raw TCP access.
+              </p>
+              <ul className="mt-3 list-disc space-y-2 pl-5 text-xs">
+                <li>Current direct-dispatch languages: ZPL, TSPL, EPL, and CPCL.</li>
+                <li>Printer must be registered here first. Freeform IP/port entry during print is not allowed.</li>
+                <li>Use <strong>Test</strong> after registration to confirm connectivity and language readiness.</li>
+              </ul>
+            </div>
+          </CardContent>
+        </Card>
+
         <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
           <Card>
             <CardHeader>
@@ -632,7 +663,7 @@ export default function PrinterDiagnostics() {
                 </Button>
               </div>
               <div className="text-xs text-muted-foreground">
-                Network-direct printing is restricted to registered IP/port targets only. Freeform socket destinations are not allowed.
+                Network-direct printing is restricted to registered IP/port targets only. Freeform socket destinations are not allowed. Direct dispatch currently supports ZPL, TSPL, EPL, and CPCL.
               </div>
             </CardContent>
           </Card>

@@ -9,6 +9,7 @@ import {
 import prisma from "../config/database";
 import { testNetworkPrinterConnectivity } from "./networkPrinterSocketService";
 import { getPrinterConnectionStatusForUser, type PrinterConnectionStatus } from "./printerConnectionService";
+import { supportsNetworkDirectPayload } from "./printPayloadService";
 
 const toCleanString = (value: unknown, max = 180) => String(value || "").trim().slice(0, max);
 const toNullableString = (value: unknown, max = 180) => {
@@ -112,6 +113,13 @@ export const buildPrinterRegistryStatus = async (
   userContext?: { userId: string }
 ): Promise<PrinterRegistryStatus> => {
   if (printer.connectionType === PrinterConnectionType.NETWORK_DIRECT) {
+    if (!supportsNetworkDirectPayload(printer as any)) {
+      return {
+        state: "BLOCKED",
+        summary: "Language not available for network-direct dispatch",
+        detail: "Network-direct printing currently supports ZPL, TSPL, EPL, and CPCL. Use the local agent for other printer languages.",
+      };
+    }
     if (!printer.ipAddress || !printer.port) {
       return {
         state: "BLOCKED",
@@ -426,22 +434,28 @@ export const testRegisteredPrinterConnection = async (params: {
     port: params.printer.port,
   });
 
+  const networkDirectSupported = supportsNetworkDirectPayload(params.printer as any);
+  const validationStatus = networkDirectSupported ? "READY" : "BLOCKED";
+  const validationMessage = networkDirectSupported
+    ? `TCP connectivity validated in ${result.latencyMs}ms`
+    : `TCP connectivity validated in ${result.latencyMs}ms, but network-direct printing currently supports only ZPL, TSPL, EPL, and CPCL.`;
+
   await prisma.printer.update({
     where: { id: params.printer.id },
     data: {
       lastValidatedAt: new Date(),
-      lastValidationStatus: "READY",
-      lastValidationMessage: `TCP connectivity validated in ${result.latencyMs}ms`,
+      lastValidationStatus: validationStatus,
+      lastValidationMessage: validationMessage,
     },
   });
 
   return {
-    ok: true,
+    ok: networkDirectSupported,
     latencyMs: result.latencyMs,
     registryStatus: {
-      state: "READY" as const,
-      summary: "Network printer validated",
-      detail: `TCP connectivity validated in ${result.latencyMs}ms`,
+      state: validationStatus === "READY" ? "READY" : "BLOCKED",
+      summary: networkDirectSupported ? "Network printer validated" : "Language not available for network-direct dispatch",
+      detail: validationMessage,
     },
   };
 };

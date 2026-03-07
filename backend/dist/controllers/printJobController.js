@@ -123,9 +123,7 @@ const ensureSelectedPrinterReady = async (params) => {
             printer,
             printerStatus,
             printMode: client_1.PrintDispatchMode.LOCAL_AGENT,
-            payloadType: printer.commandLanguage === "ZPL" || printer.commandLanguage === "AUTO"
-                ? client_1.PrintPayloadType.ZPL
-                : client_1.PrintPayloadType.JSON,
+            payloadType: (0, printPayloadService_1.resolvePayloadType)(printer),
         };
     }
     if (printer.connectionType === client_1.PrinterConnectionType.NETWORK_DIRECT) {
@@ -136,9 +134,7 @@ const ensureSelectedPrinterReady = async (params) => {
             printer,
             printerStatus: null,
             printMode: client_1.PrintDispatchMode.NETWORK_DIRECT,
-            payloadType: printer.commandLanguage === "ZPL" || printer.commandLanguage === "AUTO"
-                ? client_1.PrintPayloadType.ZPL
-                : client_1.PrintPayloadType.OTHER,
+            payloadType: (0, printPayloadService_1.resolvePayloadType)(printer),
         };
     }
     throw new Error("PRINTER_MODE_UNSUPPORTED");
@@ -545,10 +541,11 @@ const createPrintJob = async (req, res) => {
             orgId: user.orgId || null,
             licenseeId: user.licenseeId || null,
         });
-        if (printerSelection.printMode === client_1.PrintDispatchMode.NETWORK_DIRECT && printerSelection.payloadType !== client_1.PrintPayloadType.ZPL) {
+        if (printerSelection.printMode === client_1.PrintDispatchMode.NETWORK_DIRECT &&
+            !(0, printPayloadService_1.supportsNetworkDirectPayloadType)(printerSelection.payloadType)) {
             return res.status(409).json({
                 success: false,
-                error: "Network-direct printing currently supports registered ZPL-compatible printers only.",
+                error: "Network-direct printing currently supports registered ZPL, TSPL, EPL, and CPCL printers only.",
             });
         }
         const batch = await database_1.default.batch.findFirst({

@@ -64,14 +64,14 @@ export default function ManufacturerHelp() {
               <CardHeader className="space-y-1">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Download className="h-4 w-4 text-primary" />
-                  Request direct-print tokens
+                  Start controlled dispatch
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">
-                  <li>After job creation, issue one-time render tokens.</li>
-                  <li>Your print agent resolves each token and renders QR just-in-time.</li>
-                  <li>Printed status updates as tokens are consumed and job confirms on completion.</li>
+                  <li>After job creation, MSCQR dispatches approved payloads through the selected printer profile.</li>
+                  <li>Local-agent jobs stay tied to the workstation printer. Network-direct jobs are sent from the backend to the registered IP/port target.</li>
+                  <li>Printed status updates as the job confirms on completion.</li>
                 </ol>
               </CardContent>
             </Card>
@@ -125,21 +125,50 @@ export default function ManufacturerHelp() {
               </CardContent>
             </Card>
           </div>
+
+          <Card>
+            <CardHeader className="space-y-1">
+              <CardTitle className="text-base">Printer compatibility matrix</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm text-muted-foreground">
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-xl border bg-muted/20 p-4">
+                  <div className="font-semibold text-foreground">LOCAL_AGENT</div>
+                  <p className="mt-2">
+                    Use this for USB, Wi-Fi, home, office, and workstation-managed industrial printers. The operating
+                    system driver path must already work before MSCQR can use it.
+                  </p>
+                </div>
+                <div className="rounded-xl border bg-muted/20 p-4">
+                  <div className="font-semibold text-foreground">NETWORK_DIRECT</div>
+                  <p className="mt-2">
+                    Use this for controlled LAN label printers registered by IP and port in Printer Diagnostics.
+                    Current direct dispatch support: <strong>ZPL</strong>, <strong>TSPL</strong>, <strong>EPL</strong>,
+                    and <strong>CPCL</strong>.
+                  </p>
+                </div>
+              </div>
+              <p className="text-xs">
+                If a printer uses SBPL, ESC/POS, or another language, keep it on the local-agent path until a direct
+                adapter is added.
+              </p>
+            </CardContent>
+          </Card>
         </section>
 
         <section className="space-y-3">
           <h2 className="text-lg font-semibold text-foreground">Screenshots</h2>
           <div className="grid gap-4 md:grid-cols-2">
             <DocScreenshot
-              filename="manufacturer-create-print-job.png"
+              filename="manufacturer-print-job-annotated.svg"
               alt="Create print job modal"
-              caption="Batches: create print job."
+              caption="Batches: select the printer profile, validate readiness, and start controlled dispatch."
               eager
             />
             <DocScreenshot
-              filename="manufacturer-download-print-pack.png"
-              alt="Issue direct-print tokens"
-              caption="Print job: issue one-time render tokens."
+              filename="manufacturer-printer-diagnostics-annotated.svg"
+              alt="Printer diagnostics"
+              caption="Printer Diagnostics: choose LOCAL_AGENT vs NETWORK_DIRECT and validate registered profiles."
             />
             <DocScreenshot
               filename="manufacturer-print-status.png"
@@ -150,12 +179,12 @@ export default function ManufacturerHelp() {
           <ScreenshotChecklist
             items={[
               {
-                filename: "manufacturer-create-print-job.png",
-                whereToCapture: "Manufacturer Batches page with Create Print Job dialog open.",
+                filename: "manufacturer-print-job-annotated.svg",
+                whereToCapture: "Manufacturer Batches page showing printer profile selection, dispatch mode, and Create Print Job action.",
               },
               {
-                filename: "manufacturer-download-print-pack.png",
-                whereToCapture: "Create Print Job dialog showing one-time direct-print token issuance.",
+                filename: "manufacturer-printer-diagnostics-annotated.svg",
+                whereToCapture: "Printer Diagnostics page showing the compatibility matrix and registered printer validation controls.",
               },
               {
                 filename: "manufacturer-print-status.png",

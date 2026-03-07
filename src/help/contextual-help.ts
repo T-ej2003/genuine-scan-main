@@ -71,8 +71,8 @@ export const getPageGuidance = (pathname: string, role?: UserRole | null): PageG
       firstAction:
         role === "manufacturer"
           ? "Open an assigned batch and start print job creation."
-          : "Create a batch or assign it to a manufacturer.",
-      note: "Only assigned stock can move to next lifecycle step.",
+          : "Open a source batch workspace to allocate quantity, review manufacturer distribution, and inspect audit history.",
+      note: role === "manufacturer" ? "Only assigned stock can move to next lifecycle step." : "The main list shows one stable source row per original batch.",
     };
   }
 
@@ -80,7 +80,7 @@ export const getPageGuidance = (pathname: string, role?: UserRole | null): PageG
     return {
       title: "Manage manufacturer accounts",
       summary: "Create, activate, and maintain factory user accounts for print execution.",
-      firstAction: "Check account status and confirm assignment readiness.",
+      firstAction: "Check account status, then use View details or Pending/Printed chips to jump into that manufacturer's work.",
       note: "Deactivate unused factory users for better security.",
     };
   }
@@ -151,9 +151,9 @@ export const getPageGuidance = (pathname: string, role?: UserRole | null): PageG
   if (starts(pathname, "/printer-diagnostics")) {
     return {
       title: "Diagnose printer issues",
-      summary: "Separate local print agent problems, operating-system printer visibility, and backend trust failures.",
+      summary: "Separate local print agent problems, operating-system printer visibility, backend trust failures, and network-direct compatibility.",
       firstAction: "Start with the top status card, then inspect local agent reachability and discovered printers.",
-      note: "If the local agent is unreachable, browser-side printer connection cannot work.",
+      note: "Use LOCAL_AGENT for workstation-managed printers and NETWORK_DIRECT for registered ZPL, TSPL, EPL, or CPCL LAN printers.",
     };
   }
 
