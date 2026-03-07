@@ -2,6 +2,7 @@ import { NotificationAudience, UserRole } from "@prisma/client";
 import { Response } from "express";
 
 import { AuthRequest } from "../middleware/auth";
+import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
 import { listNotificationsForUser, onNotificationEvent, type NotificationRealtimeEvent } from "../services/notificationService";
 
 const toInt = (value: unknown, fallback: number, min: number, max: number) => {
@@ -23,7 +24,11 @@ const writeSse = (res: Response, event: string, data: any) => {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 };
 
-const shouldDeliver = (event: NotificationRealtimeEvent, user: NonNullable<AuthRequest["user"]>) => {
+const shouldDeliver = (
+  event: NotificationRealtimeEvent,
+  user: NonNullable<AuthRequest["user"]>,
+  accessibleLicenseeIds: string[]
+) => {
   if (event.userIds?.length && event.userIds.includes(user.userId)) return true;
 
   if (event.audience !== NotificationAudience.ALL) {
@@ -33,6 +38,7 @@ const shouldDeliver = (event: NotificationRealtimeEvent, user: NonNullable<AuthR
 
   if (!isPlatform(user.role)) {
     const userLicenseeId = user.licenseeId || null;
+    const scopedLicenseeIds = Array.from(new Set(accessibleLicenseeIds.length ? accessibleLicenseeIds : userLicenseeId ? [userLicenseeId] : []));
     const userOrgId = user.orgId || null;
     const userAudience = audienceForRole(user.role);
 
@@ -40,8 +46,9 @@ const shouldDeliver = (event: NotificationRealtimeEvent, user: NonNullable<AuthR
       if (!userOrgId || event.orgId !== userOrgId) return false;
     }
 
-    if (event.licenseeId && userLicenseeId && event.licenseeId !== userLicenseeId) return false;
-    if (event.licenseeId && !userLicenseeId) {
+    if (event.licenseeId && scopedLicenseeIds.length > 0 && !scopedLicenseeIds.includes(event.licenseeId)) return false;
+    if (event.licenseeId && !scopedLicenseeIds.length && userLicenseeId && event.licenseeId !== userLicenseeId) return false;
+    if (event.licenseeId && !scopedLicenseeIds.length && !userLicenseeId) {
       // Manufacturer users can be scoped by org only (legacy rows may still carry licenseeId).
       if (!(userAudience === NotificationAudience.MANUFACTURER && event.orgId && userOrgId && event.orgId === userOrgId)) {
         return false;
@@ -57,6 +64,7 @@ export const notificationEvents = async (req: AuthRequest, res: Response) => {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
 
     const limit = toInt(req.query.limit, 8, 1, 40);
+    const accessibleLicenseeIds = await resolveAccessibleLicenseeIdsForUser(req.user);
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -68,6 +76,7 @@ export const notificationEvents = async (req: AuthRequest, res: Response) => {
         userId: req.user!.userId,
         role: req.user!.role,
         licenseeId: req.user!.licenseeId,
+        licenseeIds: accessibleLicenseeIds,
         orgId: req.user!.orgId,
         limit,
         offset: 0,
@@ -90,7 +99,7 @@ export const notificationEvents = async (req: AuthRequest, res: Response) => {
 
     const off = onNotificationEvent(async (event) => {
       try {
-        if (!shouldDeliver(event, req.user!)) return;
+        if (!shouldDeliver(event, req.user!, accessibleLicenseeIds)) return;
         await sendSnapshot(event.type);
       } catch {
         // ignore per-event failures

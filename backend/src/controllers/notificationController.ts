@@ -1,6 +1,7 @@
 import { Response } from "express";
 
 import { AuthRequest } from "../middleware/auth";
+import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
 import {
   listNotificationsForUser,
   markAllNotificationsRead,
@@ -28,11 +29,13 @@ export const listNotifications = async (req: AuthRequest, res: Response) => {
     const limit = toInt(req.query.limit, 40, 1, 200);
     const offset = toInt(req.query.offset, 0, 0, 2000);
     const unreadOnly = parseBool(req.query.unreadOnly);
+    const licenseeIds = await resolveAccessibleLicenseeIdsForUser(req.user);
 
     const data = await listNotificationsForUser({
       userId: req.user.userId,
       role: req.user.role,
       licenseeId: req.user.licenseeId,
+      licenseeIds,
       orgId: req.user.orgId,
       limit,
       offset,
@@ -59,12 +62,14 @@ export const readNotification = async (req: AuthRequest, res: Response) => {
 
     const id = String(req.params.id || "").trim();
     if (!id) return res.status(400).json({ success: false, error: "Notification ID is required" });
+    const licenseeIds = await resolveAccessibleLicenseeIdsForUser(req.user);
 
     const updated = await markNotificationRead({
       notificationId: id,
       userId: req.user.userId,
       role: req.user.role,
       licenseeId: req.user.licenseeId,
+      licenseeIds,
       orgId: req.user.orgId,
     });
 
@@ -79,11 +84,13 @@ export const readNotification = async (req: AuthRequest, res: Response) => {
 export const readAllNotifications = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+    const licenseeIds = await resolveAccessibleLicenseeIdsForUser(req.user);
 
     const updatedCount = await markAllNotificationsRead({
       userId: req.user.userId,
       role: req.user.role,
       licenseeId: req.user.licenseeId,
+      licenseeIds,
       orgId: req.user.orgId,
     });
 

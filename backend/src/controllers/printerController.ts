@@ -11,6 +11,7 @@ import {
   upsertNetworkDirectPrinter,
 } from "../services/printerRegistryService";
 import { createAuditLog } from "../services/auditService";
+import { isManufacturerRole, resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
 
 const NETWORK_DIRECT_LANGUAGE_OPTIONS = [
   PrinterCommandLanguage.AUTO,
@@ -51,10 +52,11 @@ const isOpsRole = (role?: UserRole | null) =>
       ].includes(role)
   );
 
-const resolveScope = (req: AuthRequest) => ({
+const resolveScope = async (req: AuthRequest) => ({
   userId: req.user!.userId,
   orgId: req.user?.orgId || null,
   licenseeId: getEffectiveLicenseeId(req),
+  licenseeIds: isManufacturerRole(req.user?.role) ? await resolveAccessibleLicenseeIdsForUser(req.user!) : null,
 });
 
 export const listPrinters = async (req: AuthRequest, res: Response) => {
@@ -63,12 +65,13 @@ export const listPrinters = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
-    const scope = resolveScope(req);
+    const scope = await resolveScope(req);
     const includeInactive = String(req.query.includeInactive || "").trim().toLowerCase() === "true";
     const rows = await listRegisteredPrintersForManufacturer({
       userId: scope.userId,
       orgId: scope.orgId,
       licenseeId: scope.licenseeId,
+      licenseeIds: scope.licenseeIds,
       includeInactive,
     });
 
@@ -90,7 +93,10 @@ export const createNetworkPrinter = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid printer payload" });
     }
 
-    const scope = resolveScope(req);
+    const scope = await resolveScope(req);
+    if (!scope.licenseeId) {
+      return res.status(400).json({ success: false, error: "licenseeId is required to register a network printer" });
+    }
     const printer = await upsertNetworkDirectPrinter({
       userId: scope.userId,
       orgId: scope.orgId,
@@ -135,12 +141,13 @@ export const updateNetworkPrinter = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid printer payload" });
     }
 
-    const scope = resolveScope(req);
+    const scope = await resolveScope(req);
     const current = await getRegisteredPrinterForManufacturer({
       printerId,
       userId: scope.userId,
       orgId: scope.orgId,
       licenseeId: scope.licenseeId,
+      licenseeIds: scope.licenseeIds,
       includeInactive: true,
     });
     if (!current) return res.status(404).json({ success: false, error: "Printer not found" });
@@ -152,7 +159,7 @@ export const updateNetworkPrinter = async (req: AuthRequest, res: Response) => {
       printerId,
       userId: scope.userId,
       orgId: scope.orgId,
-      licenseeId: scope.licenseeId,
+      licenseeId: scope.licenseeId || current.licenseeId || null,
       name: parsed.data.name || current.name,
       vendor: parsed.data.vendor ?? current.vendor,
       model: parsed.data.model ?? current.model,
@@ -198,12 +205,13 @@ export const testPrinter = async (req: AuthRequest, res: Response) => {
     const printerId = String(req.params.id || "").trim();
     if (!printerId) return res.status(400).json({ success: false, error: "Missing printer id" });
 
-    const scope = resolveScope(req);
+    const scope = await resolveScope(req);
     const printer = await getRegisteredPrinterForManufacturer({
       printerId,
       userId: scope.userId,
       orgId: scope.orgId,
       licenseeId: scope.licenseeId,
+      licenseeIds: scope.licenseeIds,
       includeInactive: true,
     });
     if (!printer) return res.status(404).json({ success: false, error: "Printer not found" });

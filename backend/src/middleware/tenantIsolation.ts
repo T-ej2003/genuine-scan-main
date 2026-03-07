@@ -3,6 +3,7 @@
 import { Response, NextFunction } from "express";
 import { UserRole } from "@prisma/client";
 import { AuthRequest } from "./auth";
+import { assertUserCanAccessLicensee, isManufacturerRole } from "../services/manufacturerScopeService";
 
 /**
  * Extract a possible licenseeId from params/body/query.
@@ -33,7 +34,7 @@ function extractRouteLicenseeId(req: AuthRequest): string | null {
  * Blocks non-super admins from accessing another licensee scope.
  * If a route doesn't carry licenseeId at all, it just passes (tenant filtering should happen in controllers/services).
  */
-export const enforceTenantIsolation = (req: AuthRequest, res: Response, next: NextFunction) => {
+export const enforceTenantIsolation = async (req: AuthRequest, res: Response, next: NextFunction) => {
   if (!req.user) {
     return res.status(401).json({ success: false, error: "Authentication required" });
   }
@@ -41,12 +42,21 @@ export const enforceTenantIsolation = (req: AuthRequest, res: Response, next: Ne
   // Super admin can operate across tenants (but may still choose a scope via licenseeId)
   if (req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN) return next();
 
+  const routeLicenseeId = extractRouteLicenseeId(req);
+
+  if (isManufacturerRole(req.user.role)) {
+    if (!routeLicenseeId) return next();
+    const allowed = await assertUserCanAccessLicensee(req.user, routeLicenseeId);
+    if (!allowed) {
+      return res.status(403).json({ success: false, error: "Access denied to this licensee" });
+    }
+    return next();
+  }
+
   // Everyone else must be attached to a licensee
   if (!req.user.licenseeId) {
     return res.status(403).json({ success: false, error: "No licensee association found" });
   }
-
-  const routeLicenseeId = extractRouteLicenseeId(req);
 
   // If request explicitly tries to operate on a different licensee => forbid
   if (routeLicenseeId && routeLicenseeId !== req.user.licenseeId) {
@@ -65,6 +75,10 @@ export const getEffectiveLicenseeId = (req: AuthRequest): string | null => {
   if (!req.user) return null;
 
   if (req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN) {
+    return extractRouteLicenseeId(req);
+  }
+
+  if (isManufacturerRole(req.user.role)) {
     return extractRouteLicenseeId(req);
   }
 

@@ -109,6 +109,26 @@ const normalizeRole = (role: UserRole): NotificationAudience => {
   return NotificationAudience.MANUFACTURER;
 };
 
+const normalizeLicenseeScope = (licenseeId?: string | null, licenseeIds?: string[] | null) =>
+  Array.from(
+    new Set(
+      [licenseeId || null, ...(Array.isArray(licenseeIds) ? licenseeIds : [])]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    )
+  );
+
+const buildLicenseeBroadcastScope = (licenseeId?: string | null, licenseeIds?: string[] | null) => {
+  const scopedLicenseeIds = normalizeLicenseeScope(licenseeId, licenseeIds);
+  if (!scopedLicenseeIds.length) return null;
+  return {
+    OR: [
+      scopedLicenseeIds.length === 1 ? { licenseeId: scopedLicenseeIds[0] } : { licenseeId: { in: scopedLicenseeIds } },
+      { licenseeId: null },
+    ],
+  };
+};
+
 const roleFilter = (audience: NotificationAudience) => {
   if (audience === NotificationAudience.SUPER_ADMIN) {
     return { in: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN] as UserRole[] };
@@ -141,7 +161,16 @@ export const createRoleNotifications = async (params: {
   };
   const roleWhere = roleFilter(params.audience);
   if (roleWhere) userWhere.role = roleWhere;
-  if (params.licenseeId) userWhere.licenseeId = params.licenseeId;
+  if (params.licenseeId) {
+    if (params.audience === NotificationAudience.MANUFACTURER) {
+      userWhere.OR = [
+        { licenseeId: params.licenseeId },
+        { manufacturerLicenseeLinks: { some: { licenseeId: params.licenseeId, revokedAt: null } } },
+      ];
+    } else {
+      userWhere.licenseeId = params.licenseeId;
+    }
+  }
   if (params.orgId) userWhere.orgId = params.orgId;
 
   const users = await prisma.user.findMany({
@@ -426,7 +455,7 @@ export const notifyIncidentLifecycle = async (params: {
   if (manufacturerOrgId) {
     targets.push({
       audience: NotificationAudience.MANUFACTURER,
-      licenseeId: null,
+      licenseeId: params.licenseeId || null,
       orgId: manufacturerOrgId,
       channels: [NotificationChannel.WEB],
     });
@@ -451,6 +480,7 @@ export const listNotificationsForUser = async (params: {
   userId: string;
   role: UserRole;
   licenseeId?: string | null;
+  licenseeIds?: string[] | null;
   orgId?: string | null;
   limit: number;
   offset: number;
@@ -466,8 +496,11 @@ export const listNotificationsForUser = async (params: {
 
   if (params.role !== UserRole.SUPER_ADMIN && params.role !== UserRole.PLATFORM_SUPER_ADMIN) {
     const tenantFilters: any[] = [];
-    if (params.licenseeId) {
-      tenantFilters.push({ OR: [{ licenseeId: params.licenseeId }, { licenseeId: null }] });
+    const licenseeScope = buildLicenseeBroadcastScope(params.licenseeId, params.licenseeIds);
+    if (licenseeScope) {
+      tenantFilters.push(licenseeScope);
+    } else if (audience === NotificationAudience.MANUFACTURER) {
+      tenantFilters.push({ licenseeId: null });
     } else if (audience !== NotificationAudience.MANUFACTURER) {
       tenantFilters.push({ licenseeId: null });
     }
@@ -537,6 +570,7 @@ export const markNotificationRead = async (params: {
   userId: string;
   role: UserRole;
   licenseeId?: string | null;
+  licenseeIds?: string[] | null;
   orgId?: string | null;
 }) => {
   const audience = normalizeRole(params.role);
@@ -548,8 +582,11 @@ export const markNotificationRead = async (params: {
     };
     if (params.role !== UserRole.SUPER_ADMIN && params.role !== UserRole.PLATFORM_SUPER_ADMIN) {
       const tenantFilters: any[] = [];
-      if (params.licenseeId) {
-        tenantFilters.push({ OR: [{ licenseeId: params.licenseeId }, { licenseeId: null }] });
+      const licenseeScope = buildLicenseeBroadcastScope(params.licenseeId, params.licenseeIds);
+      if (licenseeScope) {
+        tenantFilters.push(licenseeScope);
+      } else if (audience === NotificationAudience.MANUFACTURER) {
+        tenantFilters.push({ licenseeId: null });
       } else if (audience !== NotificationAudience.MANUFACTURER) {
         tenantFilters.push({ licenseeId: null });
       }
@@ -607,6 +644,7 @@ export const markAllNotificationsRead = async (params: {
   userId: string;
   role: UserRole;
   licenseeId?: string | null;
+  licenseeIds?: string[] | null;
   orgId?: string | null;
 }) => {
   const audience = normalizeRole(params.role);
@@ -618,8 +656,11 @@ export const markAllNotificationsRead = async (params: {
   };
   if (params.role !== UserRole.SUPER_ADMIN && params.role !== UserRole.PLATFORM_SUPER_ADMIN) {
     const tenantFilters: any[] = [];
-    if (params.licenseeId) {
-      tenantFilters.push({ OR: [{ licenseeId: params.licenseeId }, { licenseeId: null }] });
+    const licenseeScope = buildLicenseeBroadcastScope(params.licenseeId, params.licenseeIds);
+    if (licenseeScope) {
+      tenantFilters.push(licenseeScope);
+    } else if (audience === NotificationAudience.MANUFACTURER) {
+      tenantFilters.push({ licenseeId: null });
     } else if (audience !== NotificationAudience.MANUFACTURER) {
       tenantFilters.push({ licenseeId: null });
     }

@@ -4,6 +4,7 @@ import { createAuditLog, getAuditLogs, onAuditLog } from "../services/auditServi
 import prisma from "../config/database";
 import { UserRole } from "@prisma/client";
 import { z } from "zod";
+import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
 
 const hiddenActionsForNonSuper = ["CUSTOMER_FRAUD_REPORT", "CUSTOMER_FRAUD_REPORT_RESPONSE"];
 
@@ -40,15 +41,21 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
     const entityId = req.query.entityId as string | undefined;
     const action = req.query.action as string | undefined;
 
-    const licenseeId =
-      req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
-        ? (req.query.licenseeId as string | undefined)
-        : req.user.licenseeId ?? undefined;
+    const isSuper = req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN;
+    const isManufacturer =
+      req.user.role === UserRole.MANUFACTURER ||
+      req.user.role === UserRole.MANUFACTURER_ADMIN ||
+      req.user.role === UserRole.MANUFACTURER_USER;
+    const licenseeId = isSuper ? (req.query.licenseeId as string | undefined) : isManufacturer ? undefined : req.user.licenseeId ?? undefined;
 
     let userIds: string[] | undefined;
-    if (req.user.role !== UserRole.SUPER_ADMIN && req.user.role !== UserRole.PLATFORM_SUPER_ADMIN && licenseeId) {
+    if (isManufacturer) {
+      userIds = [req.user.userId];
+    } else if (!isSuper && licenseeId) {
       const users = await prisma.user.findMany({
-        where: { licenseeId },
+        where: {
+          OR: [{ licenseeId }, { manufacturerLicenseeLinks: { some: { licenseeId } } }],
+        },
         select: { id: true },
       });
       userIds = users.map((u) => u.id);
@@ -68,9 +75,7 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
       entityId,
       action,
       excludeActions:
-        req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
-          ? undefined
-          : hiddenActionsForNonSuper,
+        isSuper ? undefined : hiddenActionsForNonSuper,
       licenseeId,
       userIds,
       limit,
@@ -110,15 +115,21 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
     const entityId = req.query.entityId as string | undefined;
     const action = req.query.action as string | undefined;
 
-    const licenseeId =
-      req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
-        ? (req.query.licenseeId as string | undefined)
-        : req.user.licenseeId ?? undefined;
+    const isSuper = req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN;
+    const isManufacturer =
+      req.user.role === UserRole.MANUFACTURER ||
+      req.user.role === UserRole.MANUFACTURER_ADMIN ||
+      req.user.role === UserRole.MANUFACTURER_USER;
+    const licenseeId = isSuper ? (req.query.licenseeId as string | undefined) : isManufacturer ? undefined : req.user.licenseeId ?? undefined;
 
     let userIds: string[] | undefined;
-    if (req.user.role !== UserRole.SUPER_ADMIN && req.user.role !== UserRole.PLATFORM_SUPER_ADMIN && licenseeId) {
+    if (isManufacturer) {
+      userIds = [req.user.userId];
+    } else if (!isSuper && licenseeId) {
       const users = await prisma.user.findMany({
-        where: { licenseeId },
+        where: {
+          OR: [{ licenseeId }, { manufacturerLicenseeLinks: { some: { licenseeId } } }],
+        },
         select: { id: true },
       });
       userIds = users.map((u) => u.id);
@@ -140,9 +151,7 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
       entityId,
       action,
       excludeActions:
-        req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
-          ? undefined
-          : hiddenActionsForNonSuper,
+        isSuper ? undefined : hiddenActionsForNonSuper,
       licenseeId,
       userIds,
       limit,
@@ -222,11 +231,23 @@ export const streamLogs = async (req: AuthRequest, res: Response) => {
   }, 20000);
 
   const isSuper = req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN;
+  const linkedLicenseeIds =
+    req.user.role === UserRole.MANUFACTURER ||
+    req.user.role === UserRole.MANUFACTURER_ADMIN ||
+    req.user.role === UserRole.MANUFACTURER_USER
+      ? await resolveAccessibleLicenseeIdsForUser(req.user)
+      : [];
   const tenantId = req.user.licenseeId;
 
   const unsubscribe = onAuditLog((log) => {
     if (!isSuper && hiddenActionsForNonSuper.includes(String(log.action || ""))) return;
-    if (!isSuper && log.licenseeId !== tenantId) return;
+    if (!isSuper) {
+      if (linkedLicenseeIds.length > 0) {
+        if (!log.licenseeId || !linkedLicenseeIds.includes(log.licenseeId)) return;
+      } else if (log.licenseeId !== tenantId) {
+        return;
+      }
+    }
     res.write(`event: audit\ndata: ${JSON.stringify(log)}\n\n`);
   });
 

@@ -412,14 +412,25 @@ export default function Manufacturers() {
         name,
         role: "MANUFACTURER",
         licenseeId: licId,
+        allowExistingInvitedUser: true,
       });
 
       if (!res.success) throw new Error(res.error || "Create manufacturer failed");
 
-      toast({
-        title: "Invite sent",
-        description: `An invite link was emailed to ${email}. It expires in 24 hours.`,
-      });
+      if (res.data?.linkAction === "LINKED_EXISTING" || res.data?.linkAction === "ALREADY_LINKED") {
+        toast({
+          title: res.data.linkAction === "ALREADY_LINKED" ? "Manufacturer already linked" : "Manufacturer linked",
+          description:
+            res.data.linkAction === "ALREADY_LINKED"
+              ? `${email} is already available under this licensee.`
+              : `${email} was linked to this licensee without creating a new invite.`,
+        });
+      } else {
+        toast({
+          title: "Invite sent",
+          description: `An invite link was emailed to ${email}. It expires in 24 hours.`,
+        });
+      }
 
       setCreateOpen(false);
       setCreateForm({ licenseeId: "", name: "", email: "", location: "", website: "" });

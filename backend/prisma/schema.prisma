@@ -321,6 +321,7 @@ model User {
 
   licenseeId String?
   licensee   Licensee? @relation(fields: [licenseeId], references: [id])
+  manufacturerLicenseeLinks ManufacturerLicenseeLink[] @relation("ManufacturerLicenseeLinks")
 
   status   UserStatus @default(ACTIVE)
   isActive  Boolean   @default(true)
@@ -427,6 +428,7 @@ model Licensee {
   suspendedReason String?
 
   users          User[]
+  manufacturerLinks ManufacturerLicenseeLink[] @relation("LicenseeManufacturerLinks")
   qrRanges       QRRange[]
   batches        Batch[]
   qrCodes        QRCode[]
@@ -456,6 +458,22 @@ model Licensee {
 
   @@index([isActive])
   @@index([orgId])
+}
+
+model ManufacturerLicenseeLink {
+  manufacturerId String
+  manufacturer   User @relation("ManufacturerLicenseeLinks", fields: [manufacturerId], references: [id], onDelete: Cascade)
+
+  licenseeId String
+  licensee   Licensee @relation("LicenseeManufacturerLinks", fields: [licenseeId], references: [id], onDelete: Cascade)
+
+  isPrimary Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@id([manufacturerId, licenseeId])
+  @@index([licenseeId])
+  @@index([manufacturerId, isPrimary])
 }
 
 model QRRange {

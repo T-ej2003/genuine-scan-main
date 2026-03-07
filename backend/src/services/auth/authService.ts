@@ -6,6 +6,7 @@ import { createRefreshToken, rotateRefreshToken, revokeAllUserRefreshTokens, rev
 import { createAuditLog } from "../auditService";
 import { assessAuthSessionRisk } from "./sessionRiskService";
 import { createAdminMfaChallenge, getAdminMfaStatus } from "./mfaService";
+import { listManufacturerLicenseeLinks, normalizeLinkedLicensees } from "../manufacturerScopeService";
 
 const parseIntEnv = (key: string, fallback: number) => {
   const raw = String(process.env[key] || "").trim();
@@ -45,13 +46,22 @@ export const buildJwtPayloadForUser = (u: {
   role: UserRole;
   licenseeId: string | null;
   orgId: string | null;
+  linkedLicenseeIds?: string[] | null;
 }) => ({
   userId: u.id,
   email: u.email,
   role: u.role,
   licenseeId: u.licenseeId,
   orgId: u.orgId,
+  linkedLicenseeIds: u.linkedLicenseeIds || null,
 });
+
+const mapLinkedLicenseesForSession = async (userId: string) => {
+  const links = await listManufacturerLicenseeLinks(userId, prisma).catch(() => []);
+  const linkedLicensees = normalizeLinkedLicensees(links);
+  const linkedLicenseeIds = linkedLicensees.map((row) => row.id);
+  return { linkedLicensees, linkedLicenseeIds };
+};
 
 export const issueSessionForUser = async (input: {
   userId: string;
@@ -63,7 +73,7 @@ export const issueSessionForUser = async (input: {
 
   const user = await prisma.user.findUnique({
     where: { id: input.userId },
-    include: { licensee: { select: { id: true, name: true, prefix: true } } },
+    include: { licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } } },
   });
 
   if (!user) throw new Error("User not found");
@@ -71,12 +81,22 @@ export const issueSessionForUser = async (input: {
     throw new Error("Account is disabled");
   }
 
+  const linkedScope = isManufacturerRole(user.role)
+    ? await mapLinkedLicenseesForSession(user.id)
+    : { linkedLicensees: [], linkedLicenseeIds: [] as string[] };
+  const primaryLicensee =
+    user.licensee ||
+    linkedScope.linkedLicensees.find((row) => row.isPrimary) ||
+    linkedScope.linkedLicensees[0] ||
+    null;
+
   const payload = buildJwtPayloadForUser({
     id: user.id,
     email: user.email,
     role: user.role,
-    licenseeId: user.licenseeId,
-    orgId: user.orgId,
+    licenseeId: primaryLicensee?.id || user.licenseeId,
+    orgId: user.orgId || primaryLicensee?.orgId || null,
+    linkedLicenseeIds: linkedScope.linkedLicenseeIds,
   });
 
   const accessToken = signAccessToken(payload);
@@ -102,11 +122,17 @@ export const issueSessionForUser = async (input: {
       email: user.email,
       name: user.name,
       role: user.role,
-      licenseeId: user.licenseeId,
-      orgId: user.orgId,
-      licensee: user.licensee
-        ? { id: user.licensee.id, name: user.licensee.name, prefix: user.licensee.prefix }
+      licenseeId: primaryLicensee?.id || user.licenseeId,
+      orgId: user.orgId || primaryLicensee?.orgId || null,
+      licensee: primaryLicensee
+        ? {
+            id: primaryLicensee.id,
+            name: primaryLicensee.name,
+            prefix: primaryLicensee.prefix,
+            brandName: "brandName" in primaryLicensee ? primaryLicensee.brandName ?? null : null,
+          }
         : null,
+      linkedLicensees: linkedScope.linkedLicensees,
     },
   };
 };

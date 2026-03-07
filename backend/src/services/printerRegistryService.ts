@@ -272,10 +272,20 @@ export const syncLocalAgentPrintersFromHeartbeat = async (params: {
 
 const printerListWhere = (params: {
   licenseeId?: string | null;
+  licenseeIds?: string[] | null;
   orgId?: string | null;
   userId: string;
   includeInactive?: boolean;
-}): Prisma.PrinterWhereInput => ({
+}): Prisma.PrinterWhereInput => {
+  const normalizedLicenseeIds = Array.from(new Set((params.licenseeIds || []).filter(Boolean)));
+  const networkScope = params.licenseeId
+    ? { licenseeId: params.licenseeId }
+    : normalizedLicenseeIds.length > 0
+      ? { licenseeId: normalizedLicenseeIds.length === 1 ? normalizedLicenseeIds[0] : { in: normalizedLicenseeIds } }
+      : params.orgId
+        ? { orgId: params.orgId }
+        : {};
+  return ({
   ...(params.includeInactive ? {} : { isActive: true }),
   OR: [
     {
@@ -292,16 +302,17 @@ const printerListWhere = (params: {
     },
     {
       connectionType: PrinterConnectionType.NETWORK_DIRECT,
-      ...(params.orgId ? { orgId: params.orgId } : {}),
-      ...(params.licenseeId ? { licenseeId: params.licenseeId } : {}),
+      ...networkScope,
     },
   ],
 });
+};
 
 export const listRegisteredPrintersForManufacturer = async (params: {
   userId: string;
   orgId?: string | null;
   licenseeId?: string | null;
+  licenseeIds?: string[] | null;
   includeInactive?: boolean;
 }) => {
   const printers = (await prisma.printer.findMany({
@@ -341,6 +352,7 @@ export const getRegisteredPrinterForManufacturer = async (params: {
   userId: string;
   orgId?: string | null;
   licenseeId?: string | null;
+  licenseeIds?: string[] | null;
   includeInactive?: boolean;
 }) => {
   return (await prisma.printer.findFirst({
