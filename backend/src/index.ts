@@ -9,6 +9,7 @@ import prisma from "./config/database";
 import { logger } from "./utils/logger";
 import { startSecurityEventOutboxWorker, stopSecurityEventOutboxWorker } from "./services/siemOutboxService";
 import { startCompliancePackScheduler, stopCompliancePackScheduler } from "./services/compliancePackService";
+import { resumePendingNetworkDirectJobs } from "./services/networkDirectPrintService";
 
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -215,6 +216,9 @@ const server = app.listen(PORT, () => {
   logger.info(`🔍 Health check at http://localhost:${PORT}/health`);
   startSecurityEventOutboxWorker();
   startCompliancePackScheduler();
+  void resumePendingNetworkDirectJobs().catch((error) => {
+    logger.error("Failed to resume pending network-direct jobs", { error: error?.message || error });
+  });
 });
 
 server.on("error", (err: NodeJS.ErrnoException) => {

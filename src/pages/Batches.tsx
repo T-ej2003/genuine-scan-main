@@ -48,7 +48,6 @@ import { onMutationEvent } from "@/lib/mutation-events";
 
 import { format } from "date-fns";
 import { Search, Trash2, RefreshCw, Download, UserCog, Activity, PencilLine } from "lucide-react";
-import QRCode from "qrcode";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { saveAs } from "file-saver";
@@ -164,6 +163,56 @@ type LocalPrinterRow = {
   dpi?: number | null;
 };
 
+type RegisteredPrinterRow = {
+  id: string;
+  name: string;
+  vendor?: string | null;
+  model?: string | null;
+  connectionType: "LOCAL_AGENT" | "NETWORK_DIRECT";
+  commandLanguage: "AUTO" | "ZPL" | "TSPL" | "SBPL" | "EPL" | "CPCL" | "ESC_POS" | "OTHER";
+  ipAddress?: string | null;
+  port?: number | null;
+  nativePrinterId?: string | null;
+  isActive: boolean;
+  isDefault?: boolean;
+  registryStatus?: {
+    state: "READY" | "ATTENTION" | "OFFLINE" | "BLOCKED";
+    summary: string;
+    detail?: string | null;
+  } | null;
+};
+
+type PrintJobRow = {
+  id: string;
+  jobNumber?: string | null;
+  status: "PENDING" | "SENT" | "CONFIRMED" | "FAILED" | "CANCELLED";
+  printMode: "LOCAL_AGENT" | "NETWORK_DIRECT";
+  quantity: number;
+  itemCount?: number | null;
+  failureReason?: string | null;
+  createdAt: string;
+  updatedAt?: string;
+  sentAt?: string | null;
+  confirmedAt?: string | null;
+  completedAt?: string | null;
+  printer?: {
+    id: string;
+    name: string;
+    connectionType: "LOCAL_AGENT" | "NETWORK_DIRECT";
+    commandLanguage: string;
+  } | null;
+  session?: {
+    id: string;
+    status: string;
+    totalItems?: number;
+    confirmedItems?: number;
+    frozenItems?: number;
+    failedReason?: string | null;
+    remainingToPrint?: number;
+    counts?: Record<string, number>;
+  } | null;
+};
+
 const LARGE_ALLOCATION_THRESHOLD = 25_000;
 const PRINTER_FAILURE_AUTO_REPORT_COOLDOWN_MS = 3 * 60 * 1000;
 export default function Batches() {
@@ -206,13 +255,12 @@ export default function Batches() {
   const [printJobId, setPrintJobId] = useState<string>("");
   const [printLockToken, setPrintLockToken] = useState<string>("");
   const [printJobTokensCount, setPrintJobTokensCount] = useState<number>(0);
-  const [directTokenBatchSize, setDirectTokenBatchSize] = useState<string>("1");
   const [directRemainingToPrint, setDirectRemainingToPrint] = useState<number | null>(null);
-  const [directPrintTokens, setDirectPrintTokens] = useState<
-    Array<{ printItemId: string; qrId: string; code: string; renderToken: string; expiresAt: string }>
-  >([]);
   const [detectedPrinters, setDetectedPrinters] = useState<LocalPrinterRow[]>([]);
   const [selectedPrinterId, setSelectedPrinterId] = useState<string>("");
+  const [registeredPrinters, setRegisteredPrinters] = useState<RegisteredPrinterRow[]>([]);
+  const [selectedPrinterProfileId, setSelectedPrinterProfileId] = useState<string>("");
+  const [recentPrintJobs, setRecentPrintJobs] = useState<PrintJobRow[]>([]);
   const [switchingPrinter, setSwitchingPrinter] = useState(false);
   const [printPath, setPrintPath] = useState<"auto" | "spooler" | "raw-9100" | "label-language" | "pdf-raster">("auto");
   const [labelLanguage, setLabelLanguage] = useState<"AUTO" | "ZPL" | "EPL" | "CPCL" | "TSPL" | "ESC_POS">("AUTO");
@@ -284,6 +332,7 @@ export default function Batches() {
   const printerHasInventory =
     detectedPrinters.length > 0 || Boolean(printerStatus.selectedPrinterId || printerStatus.printerId);
   const printerUnavailable = !printerReady && !printerHasInventory;
+  const activeLocalPrinterId = String(selectedPrinterId || printerStatus.selectedPrinterId || printerStatus.printerId || "").trim();
   const printerDiagnostics = useMemo(
     () =>
       getPrinterDiagnosticSummary({
@@ -293,6 +342,22 @@ export default function Batches() {
         selectedPrinterId,
       }),
     [detectedPrinters, localPrinterAgent, printerStatus, selectedPrinterId]
+  );
+  const selectedPrinterProfile = useMemo(
+    () => registeredPrinters.find((row) => row.id === selectedPrinterProfileId) || null,
+    [registeredPrinters, selectedPrinterProfileId]
+  );
+  const selectedPrinterMode = selectedPrinterProfile?.connectionType || null;
+  const selectedLocalProfileMatchesAgent =
+    selectedPrinterProfile?.connectionType === "LOCAL_AGENT"
+      ? !selectedPrinterProfile.nativePrinterId || selectedPrinterProfile.nativePrinterId === activeLocalPrinterId
+      : false;
+  const selectedPrinterCanPrint = Boolean(
+    selectedPrinterProfile &&
+      selectedPrinterProfile.isActive &&
+      (selectedPrinterProfile.connectionType === "NETWORK_DIRECT"
+        ? selectedPrinterProfile.registryStatus?.state !== "BLOCKED"
+        : printerReady && selectedLocalProfileMatchesAgent)
   );
 
   const normalizePrinterRows = (rows: unknown): LocalPrinterRow[] => {
@@ -329,52 +394,6 @@ export default function Batches() {
     darkness: Number(calibrationProfile.darkness || 0) || undefined,
     speed: Number(calibrationProfile.speed || 0) || undefined,
   });
-
-  const printWithBrowserFallback = async (params: { code: string; scanUrl: string; copies?: number }) => {
-    const dataUrl = await QRCode.toDataURL(params.scanUrl, {
-      margin: 1,
-      width: 420,
-      errorCorrectionLevel: "M",
-    });
-    const popup = window.open("", "_blank", "width=560,height=760");
-    if (!popup) {
-      throw new Error("Browser print popup blocked");
-    }
-    popup.document.write(`
-      <!doctype html>
-      <html>
-      <head>
-        <title>MSCQR Print ${params.code}</title>
-        <style>
-          body { margin: 0; padding: 18px; font-family: Arial, sans-serif; }
-          .label { width: 52mm; min-height: 52mm; border: 1px dashed #ccc; padding: 8px; box-sizing: border-box; }
-          .code { font-size: 11px; margin-bottom: 6px; }
-          img { width: 100%; height: auto; display: block; }
-          .url { margin-top: 6px; font-size: 9px; word-break: break-all; color: #444; }
-        </style>
-      </head>
-      <body>
-        <div class="label">
-          <div class="code">${params.code}</div>
-          <img src="${dataUrl}" alt="QR ${params.code}" />
-          <div class="url">${params.scanUrl}</div>
-        </div>
-      </body>
-      </html>
-    `);
-    popup.document.close();
-    popup.focus();
-    popup.print();
-    popup.close();
-    return {
-      success: true,
-      data: {
-        queued: true,
-        printerName: "Browser print dialog",
-        jobRef: `browser-${Date.now()}`,
-      },
-    };
-  };
 
   const autoReportPrinterFailure = async (params: {
     context: string;
@@ -459,6 +478,42 @@ export default function Batches() {
     }
   };
 
+  const loadRegisteredPrinters = async (preferredLocalPrinterId?: string | null) => {
+    if (!isManufacturer) return;
+    const response = await apiClient.listRegisteredPrinters(true);
+    if (!response.success) {
+      setRegisteredPrinters([]);
+      return;
+    }
+
+    const printers = (Array.isArray(response.data) ? response.data : []) as RegisteredPrinterRow[];
+    setRegisteredPrinters(printers);
+    setSelectedPrinterProfileId((prev) => {
+      if (prev && printers.some((row) => row.id === prev && row.isActive)) return prev;
+
+      const trimmedLocalId = String(preferredLocalPrinterId || "").trim();
+      if (trimmedLocalId) {
+        const matchingLocal = printers.find(
+          (row) => row.connectionType === "LOCAL_AGENT" && row.nativePrinterId === trimmedLocalId && row.isActive
+        );
+        if (matchingLocal) return matchingLocal.id;
+      }
+
+      const preferred = printers.find((row) => row.isDefault && row.isActive) || printers.find((row) => row.isActive);
+      return preferred?.id || "";
+    });
+  };
+
+  const loadRecentPrintJobs = async (batchId?: string) => {
+    if (!isManufacturer) return;
+    const response = await apiClient.listPrintJobs({ batchId, limit: 8 });
+    if (!response.success) {
+      setRecentPrintJobs([]);
+      return;
+    }
+    setRecentPrintJobs((Array.isArray(response.data) ? response.data : []) as PrintJobRow[]);
+  };
+
   const loadPrinterStatus = async () => {
     if (!isManufacturer) return;
     const [remote, local] = await Promise.all([
@@ -503,6 +558,9 @@ export default function Batches() {
         error: remote.error || local.error || "Printer status unavailable",
       });
       setDetectedPrinters(localPrinters);
+      await loadRegisteredPrinters(
+        String((local as any)?.data?.selectedPrinterId || (local as any)?.data?.printerId || "").trim() || null
+      );
       return;
     }
 
@@ -528,6 +586,7 @@ export default function Batches() {
     if (preferredPrinterId) {
       setSelectedPrinterId(preferredPrinterId);
     }
+    await loadRegisteredPrinters(preferredPrinterId || null);
   };
 
   useEffect(() => {
@@ -564,6 +623,7 @@ export default function Batches() {
   useEffect(() => {
     if (!isManufacturer) return;
     loadPrinterStatus();
+    loadRecentPrintJobs();
     const timer = window.setInterval(() => {
       loadPrinterStatus();
     }, 6000);
@@ -592,6 +652,18 @@ export default function Batches() {
       // ignore malformed local calibration profile
     }
   }, [selectedPrinterId]);
+
+  useEffect(() => {
+    if (!selectedPrinterId) return;
+    setSelectedPrinterProfileId((prev) => {
+      const current = registeredPrinters.find((row) => row.id === prev) || null;
+      if (current?.connectionType === "NETWORK_DIRECT") return prev;
+      const matchingLocal = registeredPrinters.find(
+        (row) => row.connectionType === "LOCAL_AGENT" && row.nativePrinterId === selectedPrinterId && row.isActive
+      );
+      return matchingLocal?.id || prev;
+    });
+  }, [registeredPrinters, selectedPrinterId]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -793,9 +865,7 @@ export default function Batches() {
     setPrintJobId("");
     setPrintLockToken("");
     setPrintJobTokensCount(0);
-    setDirectTokenBatchSize("1");
     setDirectRemainingToPrint(null);
-    setDirectPrintTokens([]);
     setPrintProgressOpen(false);
     setPrintProgressPhase("Preparing print pipeline");
     setPrintProgressTotal(0);
@@ -805,6 +875,7 @@ export default function Batches() {
     setPrintProgressError(null);
     setPrintOpen(true);
     void loadPrinterStatus();
+    void loadRecentPrintJobs(b.id);
   };
 
   const switchSelectedPrinter = async () => {
@@ -856,11 +927,67 @@ export default function Batches() {
     }
   };
 
+  const syncProgressFromPrintJob = (job: PrintJobRow | null) => {
+    if (!job) return;
+    const total = Number(job.itemCount || job.quantity || 0);
+    const confirmed = Number(job.session?.confirmedItems || 0);
+    const remaining =
+      typeof job.session?.remainingToPrint === "number"
+        ? job.session.remainingToPrint
+        : Math.max(0, total - confirmed);
+
+    if (total > 0) setPrintProgressTotal(total);
+    setPrintProgressPrinted(confirmed);
+    setPrintProgressRemaining(remaining);
+    setDirectRemainingToPrint(remaining);
+
+    if (job.status === "CONFIRMED") {
+      setPrintProgressPhase("Print job completed");
+      setPrintProgressError(null);
+      return;
+    }
+    if (job.status === "FAILED") {
+      setPrintProgressPhase("Print job failed");
+      setPrintProgressError(job.failureReason || job.session?.failedReason || "Print job failed");
+      return;
+    }
+    if (job.status === "CANCELLED") {
+      setPrintProgressPhase("Print job cancelled");
+      setPrintProgressError(job.failureReason || "Print job cancelled");
+      return;
+    }
+    if (job.printMode === "NETWORK_DIRECT") {
+      setPrintProgressPhase(job.status === "SENT" ? "Dispatching to registered network printer" : "Preparing network printer dispatch");
+    } else {
+      setPrintProgressPhase("Local print session active");
+    }
+  };
+
+  const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+  const pollPrintJobUntilSettled = async (jobId: string, timeoutMs = 90_000) => {
+    const startedAt = Date.now();
+    let latest: PrintJobRow | null = null;
+
+    while (Date.now() - startedAt < timeoutMs) {
+      const response = await apiClient.getPrintJobStatus(jobId);
+      if (response.success && response.data) {
+        latest = response.data as PrintJobRow;
+        syncProgressFromPrintJob(latest);
+        if (latest.status === "CONFIRMED" || latest.status === "FAILED" || latest.status === "CANCELLED") {
+          return { settled: true as const, job: latest };
+        }
+      }
+      await sleep(1200);
+    }
+
+    return { settled: false as const, job: latest };
+  };
+
   const runAutoDirectPrint = async (jobId: string, lockToken: string, requestedQty: number) => {
     let printedCount = 0;
     let remainingToPrint = Math.max(0, requestedQty);
     let guard = 0;
-    let usedBrowserFallback = false;
 
     setPrintProgressOpen(true);
     setPrintProgressTotal(requestedQty);
@@ -880,14 +1007,12 @@ export default function Batches() {
           success: false,
           printedCount,
           remainingToPrint,
-          usedBrowserFallback,
           error: issueRes.error || "Failed to issue direct-print tokens.",
         };
       }
 
       const issueData: any = issueRes.data || {};
       const items = Array.isArray(issueData.items) ? issueData.items : [];
-      setDirectPrintTokens(items);
 
       if (typeof issueData.remainingToPrint === "number") {
         remainingToPrint = issueData.remainingToPrint;
@@ -898,14 +1023,13 @@ export default function Batches() {
       if (items.length === 0) {
         if (issueData.jobConfirmed || remainingToPrint === 0) {
           setPrintProgressPhase("Print session completed");
-          return { success: true, printedCount, remainingToPrint: 0, usedBrowserFallback };
+          return { success: true, printedCount, remainingToPrint: 0 };
         }
         setPrintProgressError("Print agent received no render tokens while codes remain pending.");
         return {
           success: false,
           printedCount,
           remainingToPrint,
-          usedBrowserFallback,
           error: "Print agent received no render tokens while codes remain pending.",
         };
       }
@@ -934,7 +1058,6 @@ export default function Batches() {
             success: false,
             printedCount,
             remainingToPrint,
-            usedBrowserFallback,
             error: resolveRes.error || `Failed to resolve render token for ${item.code}.`,
           };
         }
@@ -942,60 +1065,51 @@ export default function Batches() {
         const resolvedData: any = resolveRes.data || {};
         const printItemId = String(resolvedData.printItemId || item.printItemId || "").trim();
         const scanUrl = String(resolvedData.scanUrl || "").trim();
-        if (!scanUrl || !printItemId) {
+        const payloadContent = String(resolvedData.payloadContent || "");
+        const payloadHash = String(resolvedData.payloadHash || "").trim();
+        const payloadType = String(resolvedData.payloadType || "").trim();
+        if (!scanUrl || !printItemId || !payloadContent || !payloadHash || !payloadType) {
           await apiClient.reportDirectPrintFailure(jobId, {
             printLockToken: lockToken,
             reason: `Resolved token missing print session metadata for ${item.code}.`,
             printItemId: printItemId || item.printItemId,
             retries: 0,
           });
-          setPrintProgressError(`Resolved token missing scan URL or print item id for ${item.code}.`);
+          setPrintProgressError(`Resolved token missing approved payload or print item id for ${item.code}.`);
           return {
             success: false,
             printedCount,
             remainingToPrint,
-            usedBrowserFallback,
-            error: `Resolved token missing scan URL or print item id for ${item.code}.`,
+            error: `Resolved token missing approved payload or print item id for ${item.code}.`,
           };
         }
 
-        let localPrintRes = await apiClient.printWithLocalAgent({
+        const localPrintRes = await apiClient.printWithLocalAgent({
           printJobId: jobId,
           qrId: item.qrId,
           code: item.code,
           scanUrl,
+          payloadType: resolvedData.payloadType,
+          payloadContent,
+          payloadHash,
+          previewLabel: resolvedData.previewLabel || undefined,
+          commandLanguage: resolvedData.commandLanguage || undefined,
           copies: 1,
-          printerId: selectedPrinterId || printerStatus.selectedPrinterId || undefined,
+          printerId:
+            selectedPrinterId ||
+            printerStatus.selectedPrinterId ||
+            resolvedData?.printer?.nativePrinterId ||
+            undefined,
           printPath,
-          labelLanguage,
+          labelLanguage:
+            resolvedData.commandLanguage && resolvedData.commandLanguage !== "OTHER"
+              ? resolvedData.commandLanguage
+              : labelLanguage,
           mediaSize:
             (printerStatus.capabilitySummary?.mediaSizes && printerStatus.capabilitySummary.mediaSizes[0]) ||
             undefined,
           calibrationProfile: buildCalibrationPayload(),
         });
-
-        if (!localPrintRes.success) {
-          const canFallbackToBrowser =
-            printerStatus.compatibilityMode ||
-            String(localPrintRes.error || "").toLowerCase().includes("unavailable") ||
-            String(localPrintRes.error || "").toLowerCase().includes("timed out");
-          if (canFallbackToBrowser) {
-            try {
-              setPrintProgressPhase("Falling back to browser print dialog");
-              localPrintRes = await printWithBrowserFallback({
-                code: item.code,
-                scanUrl,
-                copies: 1,
-              });
-              usedBrowserFallback = true;
-            } catch (fallbackError: any) {
-              localPrintRes = {
-                success: false,
-                error: fallbackError?.message || "Browser print fallback failed",
-              } as any;
-            }
-          }
-        }
 
         if (!localPrintRes.success) {
           await apiClient.reportDirectPrintFailure(jobId, {
@@ -1007,6 +1121,8 @@ export default function Batches() {
               selectedPrinterId: selectedPrinterId || printerStatus.selectedPrinterId || null,
               printPath,
               labelLanguage,
+              payloadType,
+              payloadHash,
               calibrationProfile: buildCalibrationPayload(),
             },
           });
@@ -1021,13 +1137,13 @@ export default function Batches() {
               selectedPrinterId: selectedPrinterId || printerStatus.selectedPrinterId || null,
               printPath,
               labelLanguage,
+              payloadType,
             },
           });
           return {
             success: false,
             printedCount,
             remainingToPrint,
-            usedBrowserFallback,
             error: localPrintRes.error || `Local print failed for ${item.code}.`,
           };
         }
@@ -1043,7 +1159,8 @@ export default function Batches() {
             selectedPrinterName: printerStatus.selectedPrinterName || printerStatus.printerName || null,
             printPath,
             labelLanguage,
-            usedBrowserFallback,
+            payloadType,
+            payloadHash,
             calibrationProfile: buildCalibrationPayload(),
           },
         });
@@ -1059,7 +1176,6 @@ export default function Batches() {
             success: false,
             printedCount,
             remainingToPrint,
-            usedBrowserFallback,
             error: confirmRes.error || `Failed to confirm print item ${item.code}.`,
           };
         }
@@ -1080,7 +1196,6 @@ export default function Batches() {
       success: remainingToPrint === 0,
       printedCount,
       remainingToPrint,
-      usedBrowserFallback,
       error:
         remainingToPrint === 0
           ? null
@@ -1105,69 +1220,98 @@ export default function Batches() {
       return;
     }
 
-    const livePrinterStatus = await apiClient.getPrinterConnectionStatus();
-    if (
-      !livePrinterStatus.success ||
-      !livePrinterStatus.data ||
-      !(livePrinterStatus.data as any).connected ||
-      !(livePrinterStatus.data as any).eligibleForPrinting
-    ) {
-      setPrinterStatus({
-        connected: false,
-        trusted: false,
-        compatibilityMode: false,
-        compatibilityReason: null,
-        eligibleForPrinting: false,
-        connectionClass: "BLOCKED",
-        stale: true,
-        requiredForPrinting: true,
-        trustStatus: "UNREGISTERED",
-        trustReason: "No trusted printer registration",
-        lastHeartbeatAt: null,
-        ageSeconds: null,
-        registrationId: null,
-        agentId: null,
-        deviceFingerprint: null,
-        mtlsFingerprint: null,
-        printerName: null,
-        printerId: null,
-        selectedPrinterId: null,
-        selectedPrinterName: null,
-        deviceName: null,
-        agentVersion: null,
-        capabilitySummary: null,
-        printers: detectedPrinters,
-        calibrationProfile: null,
-        error: livePrinterStatus.error || (detectedPrinters.length > 0 ? "Printer connection requires attention" : "Printer unavailable"),
-      });
+    if (!selectedPrinterProfile) {
       toast({
-        title: "Printer unavailable",
-        description: "Reconnect print agent or select a compatible local printer profile before creating a print job.",
+        title: "Select a printer profile",
+        description: "Choose a registered local-agent or network-direct printer before creating a job.",
         variant: "destructive",
-      });
-      void autoReportPrinterFailure({
-        context: "create_print_job_printer_gate",
-        reason: String(livePrinterStatus.error || "Printer not eligible for printing"),
       });
       return;
     }
-    setPrinterStatus(livePrinterStatus.data as PrinterConnectionStatus);
 
-    const selectedPrinter =
-      detectedPrinters.find((row) => row.printerId === selectedPrinterId) ||
-      detectedPrinters.find((row) => row.printerId === (livePrinterStatus.data as any).selectedPrinterId) ||
-      null;
-    if (selectedPrinter && selectedPrinter.online === false) {
+    if (selectedPrinterProfile.connectionType === "LOCAL_AGENT") {
+      const livePrinterStatus = await apiClient.getPrinterConnectionStatus();
+      if (
+        !livePrinterStatus.success ||
+        !livePrinterStatus.data ||
+        !(livePrinterStatus.data as any).connected ||
+        !(livePrinterStatus.data as any).eligibleForPrinting
+      ) {
+        setPrinterStatus({
+          connected: false,
+          trusted: false,
+          compatibilityMode: false,
+          compatibilityReason: null,
+          eligibleForPrinting: false,
+          connectionClass: "BLOCKED",
+          stale: true,
+          requiredForPrinting: true,
+          trustStatus: "UNREGISTERED",
+          trustReason: "No trusted printer registration",
+          lastHeartbeatAt: null,
+          ageSeconds: null,
+          registrationId: null,
+          agentId: null,
+          deviceFingerprint: null,
+          mtlsFingerprint: null,
+          printerName: null,
+          printerId: null,
+          selectedPrinterId: null,
+          selectedPrinterName: null,
+          deviceName: null,
+          agentVersion: null,
+          capabilitySummary: null,
+          printers: detectedPrinters,
+          calibrationProfile: null,
+          error: livePrinterStatus.error || (detectedPrinters.length > 0 ? "Printer connection requires attention" : "Printer unavailable"),
+        });
+        toast({
+          title: "Printer unavailable",
+          description: "Reconnect the local print agent or switch to a ready local printer profile before creating a job.",
+          variant: "destructive",
+        });
+        void autoReportPrinterFailure({
+          context: "create_print_job_printer_gate",
+          reason: String(livePrinterStatus.error || "Printer not eligible for printing"),
+        });
+        return;
+      }
+      setPrinterStatus(livePrinterStatus.data as PrinterConnectionStatus);
+
+      const selectedPrinter =
+        detectedPrinters.find((row) => row.printerId === selectedPrinterId) ||
+        detectedPrinters.find((row) => row.printerId === (livePrinterStatus.data as any).selectedPrinterId) ||
+        null;
+      if (selectedPrinter && selectedPrinter.online === false) {
+        toast({
+          title: "Selected printer offline",
+          description: "Switch to an online printer and retry.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (selectedPrinterProfile.nativePrinterId && activeLocalPrinterId && selectedPrinterProfile.nativePrinterId !== activeLocalPrinterId) {
+        toast({
+          title: "Active workstation printer mismatch",
+          description: "Switch the local agent to the registered printer profile you selected, then retry.",
+          variant: "destructive",
+        });
+        return;
+      }
+    } else if (!selectedPrinterCanPrint) {
       toast({
-        title: "Selected printer offline",
-        description: "Switch to an online printer and retry.",
+        title: "Network printer needs attention",
+        description:
+          selectedPrinterProfile.registryStatus?.detail ||
+          selectedPrinterProfile.registryStatus?.summary ||
+          "Validate this network printer in diagnostics before printing.",
         variant: "destructive",
       });
       return;
     }
 
     try {
-      if (selectedPrinterId) {
+      if (selectedPrinterProfile.connectionType === "LOCAL_AGENT" && selectedPrinterId) {
         window.localStorage.setItem(
           `printer-calibration:${selectedPrinterId}`,
           JSON.stringify({
@@ -1190,7 +1334,11 @@ export default function Batches() {
       setPrintProgressTotal(qty);
       setPrintProgressRemaining(qty);
 
-      const res = await apiClient.createPrintJob({ batchId: printBatch.id, quantity: qty });
+      const res = await apiClient.createPrintJob({
+        batchId: printBatch.id,
+        printerId: selectedPrinterProfile.id,
+        quantity: qty,
+      });
       if (!res.success) {
         const raw = (res.error || "Error").toLowerCase();
         const isBusy = raw.includes("conflict") || raw.includes("busy") || raw.includes("retry");
@@ -1216,65 +1364,118 @@ export default function Batches() {
         typeof data.tokenCount === "number" ? data.tokenCount : 0
       );
       setDirectRemainingToPrint(typeof data.tokenCount === "number" ? data.tokenCount : null);
-      setDirectPrintTokens([]);
       setPrintProgressTotal(typeof data.tokenCount === "number" ? data.tokenCount : qty);
       setPrintProgressRemaining(typeof data.tokenCount === "number" ? data.tokenCount : qty);
       const createdJobId = String(data.printJobId || "").trim();
       const createdLockToken = String(data.printLockToken || "").trim();
-      if (!createdJobId || !createdLockToken) {
+      const createdMode = String(data.mode || selectedPrinterProfile.connectionType).trim();
+      if (!createdJobId) {
         toast({
           title: "Print job setup incomplete",
-          description: "Missing secure print session data. Please retry.",
+          description: "Missing print job identifier. Please retry.",
           variant: "destructive",
         });
-        setPrintProgressError("Missing secure print session data.");
+        setPrintProgressError("Missing print job identifier.");
         return;
       }
-      toast({
-        title: "Direct-print job created",
-        description: "Auto print pipeline started with your selected printer.",
-      });
 
-      const autoResult = await runAutoDirectPrint(
-        createdJobId,
-        createdLockToken,
-        typeof data.tokenCount === "number" ? data.tokenCount : qty
-      );
-
-      if (autoResult.success) {
+      if (createdMode === "NETWORK_DIRECT") {
         toast({
-          title: "Auto print complete",
-          description: `${autoResult.printedCount} labels printed through the secure direct-print pipeline${autoResult.usedBrowserFallback ? " (browser fallback used)." : "."}`,
+          title: "Network-direct job started",
+          description: `Dispatching ${qty} label${qty === 1 ? "" : "s"} to ${selectedPrinterProfile.name}.`,
         });
-        setPrintProgressPhase("Completed");
-        setPrintProgressError(null);
+        setPrintProgressPhase("Dispatching to registered network printer");
+        const pollResult = await pollPrintJobUntilSettled(createdJobId);
+        if (pollResult.settled && pollResult.job?.status === "CONFIRMED") {
+          toast({
+            title: "Network print complete",
+            description: `${pollResult.job.session?.confirmedItems || qty} labels confirmed by the server.`,
+          });
+          setPrintProgressPhase("Completed");
+          setPrintProgressError(null);
+        } else if (pollResult.settled && pollResult.job?.status === "FAILED") {
+          const message = pollResult.job.failureReason || pollResult.job.session?.failedReason || "Network printer dispatch failed.";
+          toast({
+            title: "Network print failed",
+            description: message,
+            variant: "destructive",
+          });
+          setPrintProgressError(message);
+          void autoReportPrinterFailure({
+            context: "network_direct_print",
+            reason: message,
+            diagnostics: { printJobId: createdJobId, printerId: selectedPrinterProfile.id },
+          });
+        } else {
+          toast({
+            title: "Network print continues in background",
+            description: `Job ${friendlyReferenceLabel(createdJobId, "Job")} is still running. Review live status below or in diagnostics.`,
+          });
+        }
       } else {
+        if (!createdLockToken) {
+          toast({
+            title: "Print job setup incomplete",
+            description: "Missing secure local-agent session token. Please retry.",
+            variant: "destructive",
+          });
+          setPrintProgressError("Missing secure local-agent session token.");
+          return;
+        }
         toast({
-          title: "Auto print needs attention",
-          description:
-            autoResult.error ||
-            `Printed ${autoResult.printedCount}. Remaining: ${autoResult.remainingToPrint}.`,
-          variant: "destructive",
+          title: "Local print job created",
+          description: `Approved payloads are being issued to ${selectedPrinterProfile.name}.`,
         });
-        setPrintProgressError(
-          autoResult.error ||
-            `Printed ${autoResult.printedCount}. Remaining: ${autoResult.remainingToPrint}.`
+
+        const autoResult = await runAutoDirectPrint(
+          createdJobId,
+          createdLockToken,
+          typeof data.tokenCount === "number" ? data.tokenCount : qty
         );
-        void autoReportPrinterFailure({
-          context: "auto_print_flow",
-          reason:
+
+        if (autoResult.success) {
+          toast({
+            title: "Local print complete",
+            description: `${autoResult.printedCount} labels printed through the controlled local-agent pipeline.`,
+          });
+          setPrintProgressPhase("Completed");
+          setPrintProgressError(null);
+        } else {
+          toast({
+            title: "Local print needs attention",
+            description:
+              autoResult.error ||
+              `Printed ${autoResult.printedCount}. Remaining: ${autoResult.remainingToPrint}.`,
+            variant: "destructive",
+          });
+          setPrintProgressError(
             autoResult.error ||
-            `Printed ${autoResult.printedCount}. Remaining: ${autoResult.remainingToPrint}.`,
-          diagnostics: {
-            printJobId: createdJobId,
-            tokenCount: data.tokenCount,
-            printedCount: autoResult.printedCount,
-            remainingToPrint: autoResult.remainingToPrint,
-            usedBrowserFallback: autoResult.usedBrowserFallback,
-          },
+              `Printed ${autoResult.printedCount}. Remaining: ${autoResult.remainingToPrint}.`
+          );
+          void autoReportPrinterFailure({
+            context: "auto_print_flow",
+            reason:
+              autoResult.error ||
+              `Printed ${autoResult.printedCount}. Remaining: ${autoResult.remainingToPrint}.`,
+            diagnostics: {
+              printJobId: createdJobId,
+              tokenCount: data.tokenCount,
+              printedCount: autoResult.printedCount,
+              remainingToPrint: autoResult.remainingToPrint,
+              printerId: selectedPrinterProfile.id,
+            },
+          });
+        }
+      }
+
+      if (createdMode !== "NETWORK_DIRECT" && createdLockToken && directRemainingToPrint === 0) {
+        toast({
+          title: "Print session closed",
+          description: "All remaining labels were processed.",
         });
       }
       await fetchBatches();
+      await loadRecentPrintJobs(printBatch.id);
     } finally {
       setPrinting(false);
     }
@@ -1282,39 +1483,35 @@ export default function Batches() {
 
   const requestDirectPrintTokens = async () => {
     if (!printJobId || !printLockToken) return;
-    const count = Math.max(1, Math.min(250, Number.parseInt(directTokenBatchSize, 10) || 1));
 
     setPrinting(true);
     try {
-      const res = await apiClient.requestDirectPrintTokens(printJobId, printLockToken, count);
-      if (!res.success) {
+      const statusRes = await apiClient.getPrintJobStatus(printJobId);
+      if (statusRes.success && statusRes.data) {
+        syncProgressFromPrintJob(statusRes.data as PrintJobRow);
+      }
+
+      const remaining =
+        ((statusRes.data as PrintJobRow | undefined)?.session?.remainingToPrint ??
+          directRemainingToPrint ??
+          printJobTokensCount ??
+          1);
+      const retryResult = await runAutoDirectPrint(printJobId, printLockToken, Math.max(1, remaining));
+      if (!retryResult.success) {
         toast({
-          title: "Token request failed",
-          description: res.error || "Could not issue direct-print tokens.",
+          title: "Retry failed",
+          description:
+            retryResult.error ||
+            `Printed ${retryResult.printedCount}. Remaining: ${retryResult.remainingToPrint}.`,
           variant: "destructive",
         });
         return;
       }
-      const data: any = res.data || {};
-      const items = Array.isArray(data.items) ? data.items : [];
-      setDirectPrintTokens(items);
-      if (typeof data.remainingToPrint === "number") {
-        setDirectRemainingToPrint(data.remainingToPrint);
-      }
-
-      if (items.length === 0) {
-        toast({
-          title: data.jobConfirmed ? "Job confirmed" : "No active tokens",
-          description: data.jobConfirmed
-            ? "All QR codes in this direct-print job are completed."
-            : "No unprinted QR codes are currently available for this job.",
-        });
-      } else {
-        toast({
-          title: "Direct-print tokens issued",
-          description: `${items.length} one-time render token(s) generated.`,
-        });
-      }
+      toast({
+        title: "Retry completed",
+        description: `${retryResult.printedCount} additional labels printed.`,
+      });
+      await loadRecentPrintJobs(printBatch?.id);
     } finally {
       setPrinting(false);
     }
@@ -1667,7 +1864,7 @@ export default function Batches() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  disabled={loading || (b.availableCodes ?? 0) <= 0 || !printerReady}
+                                  disabled={loading || getAvailableInventory(b) <= 0}
                                   onClick={() => openPrintPack(b)}
                                 >
                                   <Download className="mr-2 h-4 w-4" />
@@ -1872,7 +2069,6 @@ export default function Batches() {
             setPrintOpen(v);
             if (!v) {
               setPrintBatch(null);
-              setDirectPrintTokens([]);
               setDirectRemainingToPrint(null);
               if (!printing) {
                 setPrintProgressOpen(false);
@@ -1884,8 +2080,8 @@ export default function Batches() {
             <DialogHeader>
               <DialogTitle>Create Print Job</DialogTitle>
               <DialogDescription>
-                Select quantity, create a direct-print job, and issue one-time short-lived render tokens for your authenticated
-                print agent.
+                Select quantity and a registered printer profile. Local-agent jobs stream approved payloads through the
+                workstation agent. Network-direct jobs are dispatched server-side to the registered LAN printer.
               </DialogDescription>
             </DialogHeader>
 
@@ -1906,11 +2102,19 @@ export default function Batches() {
                 >
                   <div className="font-medium">{printerDiagnostics.title}</div>
                   <div className="text-xs">
-                    {printerReady
-                      ? `${printerStatus.selectedPrinterName || printerStatus.printerName || "Authenticated print agent"} is ready. Create print job will auto-print labels.`
-                      : printerDiagnostics.summary}
+                    {selectedPrinterProfile?.connectionType === "NETWORK_DIRECT"
+                      ? selectedPrinterProfile.registryStatus?.summary || "Registered network printer selected."
+                      : printerReady
+                        ? `${printerStatus.selectedPrinterName || printerStatus.printerName || "Authenticated print agent"} is ready.`
+                        : printerDiagnostics.summary}
                   </div>
-                  {!printerReady && <div className="mt-2 text-[11px]">{printerDiagnostics.detail}</div>}
+                  <div className="mt-2 text-[11px]">
+                    {selectedPrinterProfile?.connectionType === "NETWORK_DIRECT"
+                      ? selectedPrinterProfile.registryStatus?.detail || "Server will dispatch directly to the selected registered printer."
+                      : !printerReady
+                        ? printerDiagnostics.detail
+                        : "Server-approved payloads only. Browser print fallback is disabled."}
+                  </div>
                 </div>
 
                 <div className="rounded-md border p-3 text-sm">
@@ -1935,23 +2139,27 @@ export default function Batches() {
                 </div>
 
                 <div className="space-y-3 rounded-md border p-3">
-                  <div className="text-sm font-medium">Printer and compatibility profile</div>
+                  <div className="text-sm font-medium">Printer profile and dispatch mode</div>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div className="space-y-1">
-                      <Label className="text-xs">Active printer</Label>
-                      <Select value={selectedPrinterId || "__none__"} onValueChange={(v) => setSelectedPrinterId(v === "__none__" ? "" : v)}>
+                      <Label className="text-xs">Registered printer profile</Label>
+                      <Select
+                        value={selectedPrinterProfileId || "__none__"}
+                        onValueChange={(value) => setSelectedPrinterProfileId(value === "__none__" ? "" : value)}
+                      >
                         <SelectTrigger>
-                          <SelectValue placeholder="Select printer" />
+                          <SelectValue placeholder="Select printer profile" />
                         </SelectTrigger>
                         <SelectContent>
-                          {detectedPrinters.length === 0 ? (
-                            <SelectItem value="__none__">No printers discovered</SelectItem>
+                          {registeredPrinters.length === 0 ? (
+                            <SelectItem value="__none__">No registered printers</SelectItem>
                           ) : (
-                            detectedPrinters.map((row) => (
-                              <SelectItem key={row.printerId} value={row.printerId}>
-                                {row.printerName}
-                                {row.connection ? ` · ${row.connection}` : ""}
-                                {row.online === false ? " · offline" : ""}
+                            registeredPrinters.map((row) => (
+                              <SelectItem key={row.id} value={row.id}>
+                                {row.name}
+                                {row.connectionType === "NETWORK_DIRECT" && row.ipAddress ? ` · ${row.ipAddress}:${row.port || 9100}` : ""}
+                                {row.connectionType === "LOCAL_AGENT" && row.nativePrinterId ? ` · ${row.nativePrinterId}` : ""}
+                                {!row.isActive ? " · inactive" : ""}
                               </SelectItem>
                             ))
                           )}
@@ -1959,76 +2167,133 @@ export default function Batches() {
                       </Select>
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs">Print path</Label>
-                      <Select value={printPath} onValueChange={(value) => setPrintPath(value as any)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Print path" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="auto">Auto detect</SelectItem>
-                          <SelectItem value="spooler">OS spooler (CUPS/Windows/macOS)</SelectItem>
-                          <SelectItem value="raw-9100">Raw 9100 / JetDirect</SelectItem>
-                          <SelectItem value="label-language">Label language mode</SelectItem>
-                          <SelectItem value="pdf-raster">Raster/PDF fallback</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <Label className="text-xs">Dispatch mode</Label>
+                      <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                        {selectedPrinterProfile?.connectionType === "NETWORK_DIRECT" ? "Network-direct" : "Local agent"}
+                      </div>
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs">Label language</Label>
-                      <Select value={labelLanguage} onValueChange={(value) => setLabelLanguage(value as any)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Label language" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="AUTO">Auto</SelectItem>
-                          <SelectItem value="ZPL">ZPL</SelectItem>
-                          <SelectItem value="EPL">EPL</SelectItem>
-                          <SelectItem value="CPCL">CPCL</SelectItem>
-                          <SelectItem value="TSPL">TSPL</SelectItem>
-                          <SelectItem value="ESC_POS">ESC/POS</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">DPI (optional)</Label>
-                      <Input
-                        value={calibrationProfile.dpi}
-                        onChange={(e) => setCalibrationProfile((prev) => ({ ...prev, dpi: e.target.value }))}
-                        placeholder="300"
-                      />
+                      <Label className="text-xs">Command language</Label>
+                      <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                        {selectedPrinterProfile?.commandLanguage || "AUTO"}
+                      </div>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    <Input value={calibrationProfile.labelWidthMm} onChange={(e) => setCalibrationProfile((prev) => ({ ...prev, labelWidthMm: e.target.value }))} placeholder="Width mm" />
-                    <Input value={calibrationProfile.labelHeightMm} onChange={(e) => setCalibrationProfile((prev) => ({ ...prev, labelHeightMm: e.target.value }))} placeholder="Height mm" />
-                    <Input value={calibrationProfile.offsetXmm} onChange={(e) => setCalibrationProfile((prev) => ({ ...prev, offsetXmm: e.target.value }))} placeholder="Offset X" />
-                    <Input value={calibrationProfile.offsetYmm} onChange={(e) => setCalibrationProfile((prev) => ({ ...prev, offsetYmm: e.target.value }))} placeholder="Offset Y" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    <Input value={calibrationProfile.darkness} onChange={(e) => setCalibrationProfile((prev) => ({ ...prev, darkness: e.target.value }))} placeholder="Darkness" />
-                    <Input value={calibrationProfile.speed} onChange={(e) => setCalibrationProfile((prev) => ({ ...prev, speed: e.target.value }))} placeholder="Speed" />
-                  </div>
-                  <div className="flex flex-wrap justify-end gap-2">
-                    <Button variant="outline" size="sm" disabled={switchingPrinter || !selectedPrinterId || detectedPrinters.length <= 1} onClick={switchSelectedPrinter}>
-                      {switchingPrinter ? "Switching..." : "Switch printer"}
-                    </Button>
-                    <Button variant="outline" size="sm" disabled={switchingPrinter || !selectedPrinterId} onClick={applyCalibration}>
-                      {switchingPrinter ? "Applying..." : "Apply calibration"}
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => navigate("/printer-diagnostics")}>
-                      Open diagnostics
-                    </Button>
-                  </div>
-                  <div className="text-[11px] text-muted-foreground">
-                    Capabilities: {(printerStatus.capabilitySummary?.protocols || []).join(", ") || "auto"} ·{" "}
-                    {(printerStatus.capabilitySummary?.languages || []).join(", ") || "AUTO"} ·{" "}
-                    media {(printerStatus.capabilitySummary?.mediaSizes || []).join(", ") || "auto"}
-                  </div>
+
+                  {selectedPrinterProfile?.connectionType === "LOCAL_AGENT" ? (
+                    <>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Active workstation printer</Label>
+                          <Select value={selectedPrinterId || "__none__"} onValueChange={(v) => setSelectedPrinterId(v === "__none__" ? "" : v)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select printer" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {detectedPrinters.length === 0 ? (
+                                <SelectItem value="__none__">No printers discovered</SelectItem>
+                              ) : (
+                                detectedPrinters.map((row) => (
+                                  <SelectItem key={row.printerId} value={row.printerId}>
+                                    {row.printerName}
+                                    {row.connection ? ` · ${row.connection}` : ""}
+                                    {row.online === false ? " · offline" : ""}
+                                  </SelectItem>
+                                ))
+                              )}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Print path</Label>
+                          <Select value={printPath} onValueChange={(value) => setPrintPath(value as any)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Print path" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="auto">Auto detect</SelectItem>
+                              <SelectItem value="spooler">OS spooler (CUPS/Windows/macOS)</SelectItem>
+                              <SelectItem value="raw-9100">Raw 9100 / JetDirect</SelectItem>
+                              <SelectItem value="label-language">Label language mode</SelectItem>
+                              <SelectItem value="pdf-raster">Raster fallback inside agent</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Agent label language</Label>
+                          <Select value={labelLanguage} onValueChange={(value) => setLabelLanguage(value as any)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Label language" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="AUTO">Auto</SelectItem>
+                              <SelectItem value="ZPL">ZPL</SelectItem>
+                              <SelectItem value="EPL">EPL</SelectItem>
+                              <SelectItem value="CPCL">CPCL</SelectItem>
+                              <SelectItem value="TSPL">TSPL</SelectItem>
+                              <SelectItem value="ESC_POS">ESC/POS</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">DPI (optional)</Label>
+                          <Input
+                            value={calibrationProfile.dpi}
+                            onChange={(e) => setCalibrationProfile((prev) => ({ ...prev, dpi: e.target.value }))}
+                            placeholder="300"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        <Input value={calibrationProfile.labelWidthMm} onChange={(e) => setCalibrationProfile((prev) => ({ ...prev, labelWidthMm: e.target.value }))} placeholder="Width mm" />
+                        <Input value={calibrationProfile.labelHeightMm} onChange={(e) => setCalibrationProfile((prev) => ({ ...prev, labelHeightMm: e.target.value }))} placeholder="Height mm" />
+                        <Input value={calibrationProfile.offsetXmm} onChange={(e) => setCalibrationProfile((prev) => ({ ...prev, offsetXmm: e.target.value }))} placeholder="Offset X" />
+                        <Input value={calibrationProfile.offsetYmm} onChange={(e) => setCalibrationProfile((prev) => ({ ...prev, offsetYmm: e.target.value }))} placeholder="Offset Y" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        <Input value={calibrationProfile.darkness} onChange={(e) => setCalibrationProfile((prev) => ({ ...prev, darkness: e.target.value }))} placeholder="Darkness" />
+                        <Input value={calibrationProfile.speed} onChange={(e) => setCalibrationProfile((prev) => ({ ...prev, speed: e.target.value }))} placeholder="Speed" />
+                      </div>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button variant="outline" size="sm" disabled={switchingPrinter || !selectedPrinterId || detectedPrinters.length <= 1} onClick={switchSelectedPrinter}>
+                          {switchingPrinter ? "Switching..." : "Switch workstation printer"}
+                        </Button>
+                        <Button variant="outline" size="sm" disabled={switchingPrinter || !selectedPrinterId} onClick={applyCalibration}>
+                          {switchingPrinter ? "Applying..." : "Apply calibration"}
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => navigate("/printer-diagnostics")}>
+                          Open diagnostics
+                        </Button>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Capabilities: {(printerStatus.capabilitySummary?.protocols || []).join(", ") || "auto"} ·{" "}
+                        {(printerStatus.capabilitySummary?.languages || []).join(", ") || "AUTO"} · media{" "}
+                        {(printerStatus.capabilitySummary?.mediaSizes || []).join(", ") || "auto"}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="rounded-md border bg-muted/20 p-3 text-sm">
+                      <div className="font-medium">{selectedPrinterProfile?.name || "Network printer"}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {selectedPrinterProfile?.ipAddress || "—"}:{selectedPrinterProfile?.port || 9100} ·{" "}
+                        {selectedPrinterProfile?.commandLanguage || "AUTO"}
+                      </div>
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        {selectedPrinterProfile?.registryStatus?.detail ||
+                          "Server will open a controlled TCP connection only to this registered printer profile."}
+                      </div>
+                      <div className="mt-3 flex justify-end">
+                        <Button variant="outline" size="sm" onClick={() => navigate("/printer-diagnostics")}>
+                          Validate in diagnostics
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex gap-2">
-                  <Button onClick={createPrintJob} disabled={printing || !printerReady}>
-                    {printing ? "Auto printing..." : "Create Print Job & Auto Print"}
+                  <Button onClick={createPrintJob} disabled={printing || !selectedPrinterProfile || !selectedPrinterCanPrint}>
+                    {printing ? "Starting..." : "Create Print Job & Start Dispatch"}
                   </Button>
                   {printJobId && (
                     <Badge variant="secondary" title={printJobId}>
@@ -2037,12 +2302,14 @@ export default function Batches() {
                   )}
                 </div>
 
-                {printJobId && printLockToken && (
+                {printJobId && (
                   <div className="rounded-md border p-3 text-sm space-y-2">
-                    <div className="text-xs text-muted-foreground">Print Lock Token</div>
-                    <div className="font-mono text-xs break-all">{printLockToken}</div>
+                    <div className="text-xs text-muted-foreground">Active print job</div>
+                    <div className="font-medium">
+                      {friendlyReferenceLabel(printJobId, "Job")} · #{shortRawReference(printJobId, 8)}
+                    </div>
                     <div className="text-xs text-muted-foreground">
-                      Secured QRs in this job: {printJobTokensCount}
+                      Target printer: {selectedPrinterProfile?.name || "—"} · {selectedPrinterProfile?.connectionType === "NETWORK_DIRECT" ? "Network-direct" : "Local agent"}
                     </div>
                     {directRemainingToPrint != null && (
                       <div className="text-xs text-muted-foreground">Remaining to print: {directRemainingToPrint}</div>
@@ -2050,43 +2317,48 @@ export default function Batches() {
                   </div>
                 )}
 
-                {printJobId && printLockToken && (
+                {printJobId && printLockToken && selectedPrinterProfile?.connectionType === "LOCAL_AGENT" && directRemainingToPrint !== 0 && (
                   <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm space-y-3">
-                    <div className="font-medium text-emerald-900">Direct-print pipeline active</div>
+                    <div className="font-medium text-emerald-900">Local-agent retry controls</div>
                     <div className="text-xs text-emerald-900">
-                      ZIP/PNG distribution is disabled for manufacturer security hardening. Use authenticated print-agent calls
-                      to request one-time render tokens per QR.
+                      Reissue only the remaining approved labels through the authenticated local agent. Raw render tokens are not shown in the UI.
                     </div>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Tokens per request</Label>
-                        <Input
-                          type="number"
-                          min={1}
-                          max={250}
-                          value={directTokenBatchSize}
-                          onChange={(e) => setDirectTokenBatchSize(e.target.value)}
-                        />
-                      </div>
+                    <div className="flex justify-end">
                       <Button variant="outline" onClick={requestDirectPrintTokens} disabled={printing || !printJobId}>
-                        Issue one-time tokens
+                        Retry pending labels
                       </Button>
                     </div>
+                  </div>
+                )}
 
-                    {directPrintTokens.length > 0 && (
-                      <div className="space-y-2">
-                        <div className="text-xs font-medium">Issued Token Set</div>
-                        <div className="max-h-48 overflow-auto rounded-md border bg-background p-2 space-y-2">
-                          {directPrintTokens.map((item) => (
-                            <div key={item.qrId} className="rounded border p-2">
-                              <div className="text-xs text-muted-foreground">{item.code}</div>
-                              <div className="font-mono text-[11px] break-all">{item.renderToken}</div>
-                              <div className="text-[11px] text-muted-foreground">Expires: {item.expiresAt}</div>
+                {recentPrintJobs.length > 0 && (
+                  <div className="rounded-md border p-3 text-sm space-y-3">
+                    <div className="font-medium">Recent print jobs</div>
+                    <div className="space-y-2">
+                      {recentPrintJobs.map((job) => (
+                        <div key={job.id} className="rounded-md border bg-muted/20 px-3 py-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="font-medium">
+                              {job.jobNumber || friendlyReferenceLabel(job.id, "Job")}
                             </div>
-                          ))}
+                            <Badge variant={job.status === "FAILED" ? "destructive" : "secondary"}>
+                              {job.status}
+                            </Badge>
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {job.printMode === "NETWORK_DIRECT" ? "Network-direct" : "Local agent"} ·{" "}
+                            {job.printer?.name || "Unknown printer"} · {job.itemCount || job.quantity} labels
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            Confirmed {job.session?.confirmedItems || 0}
+                            {typeof job.session?.remainingToPrint === "number"
+                              ? ` · Remaining ${job.session.remainingToPrint}`
+                              : ""}
+                            {job.failureReason ? ` · ${job.failureReason}` : ""}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      ))}
+                    </div>
                   </div>
                 )}
 

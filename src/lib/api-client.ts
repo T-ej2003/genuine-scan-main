@@ -10,13 +10,6 @@ export interface ApiResponse<T = any> {
   message?: string;
 }
 
-export type DownloadProgress = {
-  loadedBytes: number;
-  totalBytes: number | null;
-  percent: number | null;
-  elapsedMs: number;
-};
-
 type RequestOptions = RequestInit & {
   skipJson?: boolean;
   timeoutMs?: number;
@@ -524,8 +517,76 @@ class ApiClient {
   }
 
   // ==================== PRINT JOBS (MANUFACTURER) ====================
-  async createPrintJob(payload: { batchId: string; quantity: number; rangeStart?: string; rangeEnd?: string }) {
+  async createPrintJob(payload: {
+    batchId: string;
+    printerId: string;
+    quantity: number;
+    rangeStart?: string;
+    rangeEnd?: string;
+    reprintOfJobId?: string;
+    reprintReason?: string;
+  }) {
     return this.request("/manufacturer/print-jobs", { method: "POST", body: JSON.stringify(payload) });
+  }
+
+  async listRegisteredPrinters(includeInactive = false) {
+    const query = includeInactive ? "?includeInactive=true" : "";
+    return this.request<any[]>(`/manufacturer/printers${query}`);
+  }
+
+  async createNetworkPrinter(payload: {
+    name: string;
+    vendor?: string;
+    model?: string;
+    connectionType?: "NETWORK_DIRECT";
+    commandLanguage?: "AUTO" | "ZPL" | "TSPL" | "SBPL" | "EPL" | "CPCL" | "ESC_POS" | "OTHER";
+    ipAddress: string;
+    port?: number;
+    capabilitySummary?: Record<string, unknown>;
+    calibrationProfile?: Record<string, unknown>;
+    isActive?: boolean;
+    isDefault?: boolean;
+  }) {
+    return this.request(`/manufacturer/printers`, { method: "POST", body: JSON.stringify(payload) });
+  }
+
+  async updateNetworkPrinter(
+    printerId: string,
+    payload: Partial<{
+      name: string;
+      vendor: string;
+      model: string;
+      commandLanguage: "AUTO" | "ZPL" | "TSPL" | "SBPL" | "EPL" | "CPCL" | "ESC_POS" | "OTHER";
+      ipAddress: string;
+      port: number;
+      capabilitySummary: Record<string, unknown>;
+      calibrationProfile: Record<string, unknown>;
+      isActive: boolean;
+      isDefault: boolean;
+    }>
+  ) {
+    return this.request(`/manufacturer/printers/${encodeURIComponent(printerId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async testRegisteredPrinter(printerId: string) {
+    return this.request(`/manufacturer/printers/${encodeURIComponent(printerId)}/test`, {
+      method: "POST",
+    });
+  }
+
+  async listPrintJobs(options?: { batchId?: string; limit?: number }) {
+    const params = new URLSearchParams();
+    if (options?.batchId) params.append("batchId", options.batchId);
+    if (options?.limit) params.append("limit", String(options.limit));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request<any[]>(`/manufacturer/print-jobs${query}`);
+  }
+
+  async getPrintJobStatus(jobId: string) {
+    return this.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}`);
   }
 
   async requestDirectPrintTokens(jobId: string, printLockToken: string, count = 1) {
@@ -559,8 +620,21 @@ class ApiClient {
       remainingToPrint: number;
       jobConfirmed: boolean;
       confirmedAt: string | null;
+      printMode: "LOCAL_AGENT" | "NETWORK_DIRECT";
+      payloadType: "ZPL" | "TSPL" | "SBPL" | "EPL" | "CPCL" | "ESC_POS" | "JSON" | "OTHER";
+      payloadContent: string;
+      payloadHash: string;
+      previewLabel: string;
+      commandLanguage: string;
       scanToken: string;
       scanUrl: string;
+      printer: {
+        id: string;
+        name: string;
+        connectionType: "LOCAL_AGENT" | "NETWORK_DIRECT";
+        commandLanguage: string;
+        nativePrinterId?: string | null;
+      };
     }>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/direct-print/resolve`, {
       method: "POST",
       body: JSON.stringify(payload),
@@ -611,66 +685,6 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify(payload),
     });
-  }
-
-  // Legacy download API is intentionally disabled on server for manufacturer direct-print hardening.
-  async downloadPrintJobPack(jobId: string, printLockToken: string, onProgress?: (progress: DownloadProgress) => void) {
-    const headers: Record<string, string> = {};
-    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
-    const query = `?token=${encodeURIComponent(printLockToken)}`;
-    const resp = await fetch(`${BASE_URL}/manufacturer/print-jobs/${encodeURIComponent(jobId)}/pack${query}`, {
-      headers,
-      credentials: "include",
-    });
-    if (!resp.ok) throw new Error(`Download failed: HTTP ${resp.status}`);
-
-    const totalHeader = resp.headers.get("content-length");
-    const totalBytes = totalHeader ? Number(totalHeader) : NaN;
-    const resolvedTotal = Number.isFinite(totalBytes) && totalBytes > 0 ? totalBytes : null;
-
-    if (!resp.body || typeof resp.body.getReader !== "function") {
-      const blob = await resp.blob();
-      onProgress?.({
-        loadedBytes: blob.size,
-        totalBytes: resolvedTotal,
-        percent: resolvedTotal ? 100 : null,
-        elapsedMs: 0,
-      });
-      return blob;
-    }
-
-    const reader = resp.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let loadedBytes = 0;
-    const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      chunks.push(value);
-      loadedBytes += value.byteLength;
-
-      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-      const elapsedMs = Math.max(1, now - startedAt);
-      onProgress?.({
-        loadedBytes,
-        totalBytes: resolvedTotal,
-        percent: resolvedTotal ? Math.min(100, (loadedBytes / resolvedTotal) * 100) : null,
-        elapsedMs,
-      });
-    }
-
-    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-    const elapsedMs = Math.max(1, now - startedAt);
-    onProgress?.({
-      loadedBytes,
-      totalBytes: resolvedTotal,
-      percent: resolvedTotal ? 100 : null,
-      elapsedMs,
-    });
-
-    return new Blob(chunks, { type: resp.headers.get("content-type") || "application/zip" });
   }
 
   async confirmPrintJob(jobId: string, printLockToken: string) {
@@ -1031,6 +1045,11 @@ class ApiClient {
     qrId: string;
     code: string;
     scanUrl: string;
+    payloadType?: "ZPL" | "TSPL" | "SBPL" | "EPL" | "CPCL" | "ESC_POS" | "JSON" | "OTHER";
+    payloadContent?: string;
+    payloadHash?: string;
+    previewLabel?: string;
+    commandLanguage?: string;
     copies?: number;
     printerId?: string;
     printPath?: "auto" | "spooler" | "raw-9100" | "label-language" | "pdf-raster";
@@ -1055,6 +1074,11 @@ class ApiClient {
           qrId: payload.qrId,
           code: payload.code,
           scanUrl: payload.scanUrl,
+          payloadType: payload.payloadType || undefined,
+          payloadContent: payload.payloadContent || undefined,
+          payloadHash: payload.payloadHash || undefined,
+          previewLabel: payload.previewLabel || undefined,
+          commandLanguage: payload.commandLanguage || undefined,
           copies: Math.max(1, Math.min(5, Number(payload.copies || 1))),
           printerId: payload.printerId || undefined,
           printPath: payload.printPath || "auto",

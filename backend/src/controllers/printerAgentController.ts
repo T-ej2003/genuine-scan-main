@@ -10,6 +10,7 @@ import {
   onPrinterConnectionEvent,
   upsertPrinterConnectionHeartbeat,
 } from "../services/printerConnectionService";
+import { syncLocalAgentPrintersFromHeartbeat } from "../services/printerRegistryService";
 import { hmacSha256Hex } from "../utils/security";
 
 const MANUFACTURER_ROLES: UserRole[] = [
@@ -90,6 +91,27 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
       capabilitySummary: parsed.data.capabilitySummary || null,
       printers: parsed.data.printers || [],
       calibrationProfile: parsed.data.calibrationProfile || null,
+    });
+
+    await syncLocalAgentPrintersFromHeartbeat({
+      userId: req.user.userId,
+      orgId: req.user.orgId,
+      licenseeId: req.user.licenseeId,
+      printerRegistrationId: update.status.registrationId || null,
+      agentId: update.status.agentId || parsed.data.agentId || null,
+      deviceFingerprint: update.status.deviceFingerprint || parsed.data.deviceFingerprint || null,
+      selectedPrinterId: update.status.selectedPrinterId || parsed.data.selectedPrinterId || null,
+      selectedPrinterName: update.status.selectedPrinterName || parsed.data.selectedPrinterName || null,
+      printers: Array.isArray(parsed.data.printers) ? parsed.data.printers : [],
+      capabilitySummary:
+        update.status.capabilitySummary && typeof update.status.capabilitySummary === "object"
+          ? (update.status.capabilitySummary as Record<string, unknown>)
+          : null,
+      calibrationProfile:
+        update.status.calibrationProfile && typeof update.status.calibrationProfile === "object"
+          ? (update.status.calibrationProfile as Record<string, unknown>)
+          : null,
+      connected: update.status.connected,
     });
 
     if (update.changed) {

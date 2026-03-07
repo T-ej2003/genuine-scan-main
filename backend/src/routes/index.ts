@@ -107,7 +107,9 @@ import {
   createPrintJob,
   downloadPrintJobPack,
   confirmPrintJob,
+  getManufacturerPrintJobStatus,
   issueDirectPrintTokens,
+  listManufacturerPrintJobs,
   reportDirectPrintFailure,
   resolveDirectPrintToken,
 } from "../controllers/printJobController";
@@ -116,6 +118,12 @@ import {
   printerConnectionEvents,
   reportPrinterHeartbeat,
 } from "../controllers/printerAgentController";
+import {
+  createNetworkPrinter,
+  listPrinters,
+  testPrinter,
+  updateNetworkPrinter,
+} from "../controllers/printerController";
 import auditRoutes from "./auditRoutes";
 import { updateMyProfile, changeMyPassword } from "../controllers/accountController";
 import {
@@ -425,6 +433,51 @@ router.post(
   enforceTenantIsolation,
   requireCsrf,
   createPrintJob
+);
+router.get(
+  "/manufacturer/printers",
+  authenticate,
+  requireManufacturer,
+  enforceTenantIsolation,
+  listPrinters
+);
+router.post(
+  "/manufacturer/printers",
+  authenticate,
+  requireManufacturer,
+  enforceTenantIsolation,
+  requireCsrf,
+  createNetworkPrinter
+);
+router.patch(
+  "/manufacturer/printers/:id",
+  authenticate,
+  requireManufacturer,
+  enforceTenantIsolation,
+  requireCsrf,
+  updateNetworkPrinter
+);
+router.post(
+  "/manufacturer/printers/:id/test",
+  authenticate,
+  requireManufacturer,
+  enforceTenantIsolation,
+  requireCsrf,
+  testPrinter
+);
+router.get(
+  "/manufacturer/print-jobs",
+  authenticate,
+  requireManufacturer,
+  enforceTenantIsolation,
+  listManufacturerPrintJobs
+);
+router.get(
+  "/manufacturer/print-jobs/:id",
+  authenticate,
+  requireManufacturer,
+  enforceTenantIsolation,
+  getManufacturerPrintJobStatus
 );
 router.get(
   "/manufacturer/print-jobs/:id/pack",

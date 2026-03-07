@@ -7,4 +7,6 @@ export declare const resolveDirectPrintToken: (req: AuthRequest, res: Response) 
 export declare const confirmDirectPrintItem: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 export declare const reportDirectPrintFailure: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 export declare const confirmPrintJob: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
+export declare const listManufacturerPrintJobs: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
+export declare const getManufacturerPrintJobStatus: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 //# sourceMappingURL=printJobController.d.ts.map
