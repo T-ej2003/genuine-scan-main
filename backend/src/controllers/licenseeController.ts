@@ -535,7 +535,7 @@ export const resendLicenseeAdminInvite = async (req: AuthRequest, res: Response)
     await createAuditLog({
       userId: req.user!.userId,
       licenseeId: id,
-      orgId: licensee.orgId,
+      orgId: licensee.orgId || undefined,
       action: "RESEND_LICENSEE_ADMIN_INVITE",
       entityType: "Invite",
       entityId: invite.inviteId,
