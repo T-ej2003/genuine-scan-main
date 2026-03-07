@@ -83,8 +83,8 @@ UPDATE "PrintJob"
 SET
   "jobNumber" = COALESCE("jobNumber", CONCAT('PJ-', UPPER(SUBSTRING(REPLACE("id", '-', ''), 1, 12)))),
   "itemCount" = COALESCE("itemCount", "quantity"),
-  "sentAt" = COALESCE("sentAt", CASE WHEN "status" IN ('SENT', 'CONFIRMED', 'FAILED', 'CANCELLED') THEN "createdAt" ELSE NULL END),
-  "completedAt" = COALESCE("completedAt", CASE WHEN "status" = 'CONFIRMED' THEN COALESCE("confirmedAt", "createdAt") ELSE NULL END),
+  "sentAt" = COALESCE("sentAt", CASE WHEN "status"::text IN ('SENT', 'CONFIRMED', 'FAILED', 'CANCELLED') THEN "createdAt" ELSE NULL END),
+  "completedAt" = COALESCE("completedAt", CASE WHEN "status"::text = 'CONFIRMED' THEN COALESCE("confirmedAt", "createdAt") ELSE NULL END),
   "updatedAt" = COALESCE("updatedAt", "createdAt");
 
 CREATE UNIQUE INDEX IF NOT EXISTS "PrintJob_jobNumber_key" ON "PrintJob"("jobNumber");
