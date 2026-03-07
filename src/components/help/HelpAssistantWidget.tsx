@@ -61,6 +61,7 @@ const routeLabel = (route: string) => {
     "/support": "Support tickets",
     "/governance": "Governance",
     "/ir": "IR Center",
+    "/printer-diagnostics": "Printer Diagnostics",
     "/account": "Account settings",
     "/login": "Sign in",
     "/accept-invite": "Accept invite",
@@ -99,10 +100,10 @@ const roleScopedIntro = (activeRole: HelpKbRole) => {
     return "Super Admin mode: ask about any role workflow, policy, incident response, or customer verification.";
   }
   if (activeRole === "licensee") {
-    return "Licensee/Admin mode: ask about inventory requests, batches, manufacturers, tracking, and account access.";
+    return "Licensee/Admin mode: ask about inventory requests, the batch workspace, manufacturers, tracking, and account access.";
   }
   if (activeRole === "manufacturer") {
-    return "Manufacturer mode: ask about assigned batches, direct-print jobs, one-time render tokens, and status updates.";
+    return "Manufacturer mode: ask about assigned batches, printer profiles, local-agent vs network-direct printing, and status updates.";
   }
   return "Customer mode: ask about verification results, repeat scans, ownership claim, and counterfeit reporting.";
 };
@@ -272,15 +273,16 @@ export default function HelpAssistantWidget() {
     if (activeRole === "licensee") {
       return [
         "How do I request QR inventory?",
-        "How do I assign batches to manufacturers?",
+        "How do I use the batch workspace?",
         "How do I add a manufacturer account?",
-        "How do I read scan tracking signals?",
+        "How do I open a manufacturer's pending or printed batches?",
       ];
     }
     if (activeRole === "manufacturer") {
       return [
         "How do I create a print job?",
-        "How do I request one-time direct-print tokens?",
+        "Which printers are supported?",
+        "How do I use printer diagnostics?",
         "Why is a batch not visible to me?",
         "When does printed status update?",
       ];

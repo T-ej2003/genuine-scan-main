@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { ComplianceStatements } from "@/components/help/ComplianceStatements";
 import { getRoleHelpHome } from "@/help/contextual-help";
+import { HELP_SITE_CONFIG } from "@/help/site-config";
 
 export function HelpShell({
   title,
@@ -39,7 +40,7 @@ export function HelpShell({
             </span>
             <div className="leading-tight">
               <p className="text-sm font-semibold text-foreground">Help Center</p>
-              <p className="text-xs text-muted-foreground">AuthenticQR documentation</p>
+              <p className="text-xs text-muted-foreground">{HELP_SITE_CONFIG.appName} documentation</p>
             </div>
           </Link>
 
