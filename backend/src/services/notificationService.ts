@@ -501,7 +501,7 @@ export const listNotificationsForUser = async (params: {
       tenantFilters.push(licenseeScope);
     } else if (audience === NotificationAudience.MANUFACTURER) {
       tenantFilters.push({ licenseeId: null });
-    } else if (audience !== NotificationAudience.MANUFACTURER) {
+    } else {
       tenantFilters.push({ licenseeId: null });
     }
 
@@ -587,7 +587,7 @@ export const markNotificationRead = async (params: {
         tenantFilters.push(licenseeScope);
       } else if (audience === NotificationAudience.MANUFACTURER) {
         tenantFilters.push({ licenseeId: null });
-      } else if (audience !== NotificationAudience.MANUFACTURER) {
+      } else {
         tenantFilters.push({ licenseeId: null });
       }
       if (audience === NotificationAudience.MANUFACTURER) {
@@ -661,7 +661,7 @@ export const markAllNotificationsRead = async (params: {
       tenantFilters.push(licenseeScope);
     } else if (audience === NotificationAudience.MANUFACTURER) {
       tenantFilters.push({ licenseeId: null });
-    } else if (audience !== NotificationAudience.MANUFACTURER) {
+    } else {
       tenantFilters.push({ licenseeId: null });
     }
     if (audience === NotificationAudience.MANUFACTURER) {

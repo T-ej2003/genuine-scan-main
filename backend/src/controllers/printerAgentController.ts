@@ -67,7 +67,7 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid heartbeat payload" });
     }
     const scope = await resolveScopedLicenseeAccess(req.user, parsed.data.licenseeId || null);
-    const scopedLicenseeId = scope.licenseeId || req.user.licenseeId || null;
+    const scopedLicenseeId = scope.scopeLicenseeId || req.user.licenseeId || null;
 
     const update = await upsertPrinterConnectionHeartbeat({
       userId: req.user.userId,

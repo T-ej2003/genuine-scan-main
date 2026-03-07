@@ -42,7 +42,9 @@ async function hydrateTenantIfNeeded(payload: JWTPayload): Promise<JWTPayload> {
 
   const linkedLicenseeIds = isManufacturerRole(payload.role)
     ? await listManufacturerLinkedLicenseeIds(payload.userId, prisma).catch(() => [])
-    : payload.linkedLicenseeIds || null;
+    : Array.isArray(payload.linkedLicenseeIds)
+      ? payload.linkedLicenseeIds
+      : [];
 
   return {
     ...payload,
