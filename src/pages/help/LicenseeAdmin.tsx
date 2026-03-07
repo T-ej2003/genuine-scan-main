@@ -87,6 +87,7 @@ export default function LicenseeAdminHelp() {
                 <li>Find the source batch row and click <strong>Open</strong>.</li>
                 <li>Use the <strong>Overview</strong> tab to confirm total quantity, remaining unassigned stock, and existing manufacturer allocations.</li>
                 <li>Use the <strong>Operations</strong> tab to allocate more quantity, rename the source batch, open the allocation structure, or export the audit package.</li>
+                <li>Use <strong>View allocation structure</strong> when you need to jump into a related source or manufacturer batch without leaving extra dialogs stacked on screen.</li>
                 <li>Use the <strong>Audit</strong> tab to review the merged activity timeline for the source batch and every manufacturer allocation underneath it.</li>
               </ol>
               <p className="text-xs text-muted-foreground">
@@ -137,7 +138,7 @@ export default function LicenseeAdminHelp() {
             <DocScreenshot
               filename="licensee-batch-workspace-annotated.svg"
               alt="Licensee batch workspace"
-              caption="Batches: one stable source row opens a workspace for overview, operations, and audit."
+              caption="Batches: one stable source row opens a workspace for overview, operations, allocation structure, and merged audit history."
             />
             <DocScreenshot
               filename="licensee-manufacturer-ops-annotated.svg"
@@ -180,6 +181,14 @@ export default function LicenseeAdminHelp() {
               </CardHeader>
               <CardContent className="text-sm text-muted-foreground">
                 Open <Badge variant="outline">Manufacturers</Badge>, use <strong>View details</strong> or the <strong>Pending</strong>/<strong>Printed</strong> chips, then open that manufacturer’s batches directly.
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="space-y-1">
+                <CardTitle className="text-base">Audit tab looks empty after a new allocation</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-muted-foreground">
+                Click <strong>Refresh history</strong> in the workspace. The audit tab now merges source-batch trace events with batch audit logs for newly created manufacturer allocations.
               </CardContent>
             </Card>
           </div>
