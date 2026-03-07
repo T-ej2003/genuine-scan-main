@@ -43,8 +43,42 @@ enum QrAllocationRequestStatus {
 
 enum PrintJobStatus {
   PENDING
+  SENT
   CONFIRMED
+  FAILED
   CANCELLED
+}
+
+enum PrinterConnectionType {
+  LOCAL_AGENT
+  NETWORK_DIRECT
+}
+
+enum PrinterCommandLanguage {
+  AUTO
+  ZPL
+  TSPL
+  SBPL
+  EPL
+  CPCL
+  ESC_POS
+  OTHER
+}
+
+enum PrintDispatchMode {
+  LOCAL_AGENT
+  NETWORK_DIRECT
+}
+
+enum PrintPayloadType {
+  ZPL
+  TSPL
+  SBPL
+  EPL
+  CPCL
+  ESC_POS
+  JSON
+  OTHER
 }
 
 enum PrintSessionStatus {
@@ -311,6 +345,9 @@ model User {
   printJobs PrintJob[] @relation("ManufacturerPrintJobs")
   printSessions PrintSession[] @relation("ManufacturerPrintSessions")
   printerRegistrations PrinterRegistration[] @relation("PrinterRegistrations")
+  printersCreated Printer[] @relation("PrinterCreatedBy")
+  assignedPrinters Printer[] @relation("PrinterAssignedUser")
+  approvedPrintJobs PrintJob[] @relation("PrintJobApprovedBy")
   printItemEvents PrintItemEvent[] @relation("PrintItemEventActor")
   traceEventsAsActor TraceEvent[] @relation("TraceEventUser")
   traceEventsAsManufacturer TraceEvent[] @relation("TraceEventManufacturer")
@@ -364,6 +401,7 @@ model Organization {
   policyRules PolicyRule[]
   notifications Notification[]
   printerRegistrations PrinterRegistration[]
+  printers Printer[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -410,6 +448,7 @@ model Licensee {
   compliancePackJobs CompliancePackJob[]
   routeTransitionMetrics RouteTransitionMetric[]
   printerRegistrations PrinterRegistration[]
+  printers Printer[]
   forensicEventChainEntries ForensicEventChain[]
 
   createdAt DateTime @default(now())
@@ -485,20 +524,40 @@ model Batch {
 
 model PrintJob {
   id         String   @id @default(uuid())
+  jobNumber  String?  @unique
   batchId    String
   batch      Batch    @relation(fields: [batchId], references: [id])
 
   manufacturerId String
   manufacturer   User   @relation("ManufacturerPrintJobs", fields: [manufacturerId], references: [id])
 
+  printerId String?
+  printer Printer? @relation(fields: [printerId], references: [id], onDelete: SetNull)
+
   status     PrintJobStatus @default(PENDING)
+  printMode  PrintDispatchMode @default(LOCAL_AGENT)
+  payloadType PrintPayloadType?
+  payloadHash String?
   quantity   Int
+  itemCount Int?
   rangeStart String?
   rangeEnd   String?
+  sentAt DateTime?
+  completedAt DateTime?
+  failureReason String?
+
+  reprintOfJobId String?
+  reprintOfJob PrintJob? @relation("PrintJobReprints", fields: [reprintOfJobId], references: [id], onDelete: SetNull)
+  reprintJobs PrintJob[] @relation("PrintJobReprints")
+
+  approvedByUserId String?
+  approvedByUser User? @relation("PrintJobApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  reprintReason String?
 
   printLockTokenHash String @unique
   confirmedAt DateTime?
   createdAt   DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   qrCodes QRCode[]
   renderTokens PrintRenderToken[]
@@ -506,7 +565,10 @@ model PrintJob {
 
   @@index([batchId])
   @@index([manufacturerId])
+  @@index([printerId])
+  @@index([printMode, status])
   @@index([status])
+  @@index([reprintOfJobId])
 }
 
 model QRCode {
@@ -596,6 +658,9 @@ model PrintSession {
   printerRegistrationId String?
   printerRegistration PrinterRegistration? @relation(fields: [printerRegistrationId], references: [id], onDelete: SetNull)
 
+  printerId String?
+  printer Printer? @relation(fields: [printerId], references: [id], onDelete: SetNull)
+
   status PrintSessionStatus @default(ACTIVE)
   totalItems Int
   issuedItems Int @default(0)
@@ -613,6 +678,7 @@ model PrintSession {
   @@index([manufacturerId, status])
   @@index([batchId, status])
   @@index([printerRegistrationId])
+  @@index([printerId])
 }
 
 model PrintItem {
@@ -695,6 +761,7 @@ model PrinterRegistration {
 
   attestations PrinterAttestation[]
   printSessions PrintSession[]
+  printers Printer[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -704,6 +771,64 @@ model PrinterRegistration {
   @@index([trustStatus, lastSeenAt])
   @@index([licenseeId, trustStatus])
   @@index([orgId, trustStatus])
+}
+
+model Printer {
+  id String @id @default(uuid())
+
+  name String
+  vendor String?
+  model String?
+
+  connectionType PrinterConnectionType
+  commandLanguage PrinterCommandLanguage @default(AUTO)
+
+  ipAddress String?
+  port Int?
+
+  nativePrinterId String?
+  agentId String?
+  deviceFingerprint String?
+
+  printerRegistrationId String?
+  printerRegistration PrinterRegistration? @relation(fields: [printerRegistrationId], references: [id], onDelete: SetNull)
+
+  orgId String?
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+
+  licenseeId String?
+  licensee Licensee? @relation(fields: [licenseeId], references: [id], onDelete: SetNull)
+
+  assignedUserId String?
+  assignedUser User? @relation("PrinterAssignedUser", fields: [assignedUserId], references: [id], onDelete: SetNull)
+
+  createdByUserId String?
+  createdByUser User? @relation("PrinterCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  isActive Boolean @default(true)
+  isDefault Boolean @default(false)
+
+  lastSeenAt DateTime?
+  lastValidatedAt DateTime?
+  lastValidationStatus String?
+  lastValidationMessage String?
+
+  capabilitySummary Json?
+  calibrationProfile Json?
+  metadata Json?
+
+  printJobs PrintJob[]
+  printSessions PrintSession[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([printerRegistrationId, nativePrinterId])
+  @@unique([licenseeId, ipAddress, port])
+  @@index([connectionType, isActive])
+  @@index([orgId, isActive])
+  @@index([licenseeId, isActive])
+  @@index([assignedUserId, isActive])
 }
 
 model PrinterAttestation {

@@ -8,10 +8,14 @@ import {
   IncidentType,
   NotificationAudience,
   NotificationChannel,
+  PrintDispatchMode,
+  PrintJobStatus,
   Prisma,
   PrintItemEventType,
   PrintItemState,
+  PrintPayloadType,
   PrintSessionStatus,
+  PrinterConnectionType,
   QRStatus,
   UserRole,
 } from "@prisma/client";
@@ -19,10 +23,13 @@ import { z } from "zod";
 
 import { AuthRequest } from "../middleware/auth";
 import prisma from "../config/database";
-import { buildScanUrl, getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
+import { getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
 import { createAuditLog } from "../services/auditService";
 import { createRoleNotifications, createUserNotification } from "../services/notificationService";
 import { getPrinterConnectionStatusForUser } from "../services/printerConnectionService";
+import { buildApprovedPrintPayload } from "../services/printPayloadService";
+import { getRegisteredPrinterForManufacturer } from "../services/printerRegistryService";
+import { getPrintJobOperationalView, listPrintJobsForManufacturer, startNetworkDirectDispatch } from "../services/networkDirectPrintService";
 import {
   beginIdempotentAction,
   completeIdempotentAction,
@@ -49,9 +56,17 @@ const isManufacturerRole = (role?: UserRole | null) =>
 
 const createPrintJobSchema = z.object({
   batchId: z.string().uuid(),
+  printerId: z.string().uuid(),
   quantity: z.number().int().positive().max(200000),
   rangeStart: z.string().optional(),
   rangeEnd: z.string().optional(),
+  reprintOfJobId: z.string().uuid().optional(),
+  reprintReason: z.string().trim().min(3).max(300).optional(),
+});
+
+const listPrintJobsQuerySchema = z.object({
+  batchId: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 
 const confirmSchema = z.object({
@@ -112,8 +127,14 @@ const ensureManufacturerUser = (req: AuthRequest, res: Response) => {
 const getManufacturerPrintJob = async (jobId: string, userId: string) =>
   prisma.printJob.findFirst({
     where: { id: jobId, manufacturerId: userId },
-    include: { batch: { select: { id: true, name: true, licenseeId: true } } },
+    include: {
+      batch: { select: { id: true, name: true, licenseeId: true } },
+      printer: true,
+      printSession: true,
+    },
   });
+
+const generatePrintJobNumber = () => `PJ-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${randomBytes(4).toString("hex").toUpperCase()}`;
 
 const ensureTrustedPrinterConnected = async (userId: string) => {
   const printerStatus = await getPrinterConnectionStatusForUser(userId);
@@ -121,6 +142,62 @@ const ensureTrustedPrinterConnected = async (userId: string) => {
     throw Object.assign(new Error("PRINTER_NOT_TRUSTED"), { printerStatus });
   }
   return printerStatus;
+};
+
+const ensureSelectedPrinterReady = async (params: {
+  printerId: string;
+  userId: string;
+  orgId?: string | null;
+  licenseeId?: string | null;
+}) => {
+  const printer = await getRegisteredPrinterForManufacturer({
+    printerId: params.printerId,
+    userId: params.userId,
+    orgId: params.orgId,
+    licenseeId: params.licenseeId,
+    includeInactive: true,
+  });
+
+  if (!printer) {
+    throw new Error("PRINTER_NOT_FOUND");
+  }
+  if (!printer.isActive) {
+    throw new Error("PRINTER_INACTIVE");
+  }
+
+  if (printer.connectionType === PrinterConnectionType.LOCAL_AGENT) {
+    const printerStatus = await ensureTrustedPrinterConnected(params.userId);
+    const activePrinterId = String(printerStatus.selectedPrinterId || printerStatus.printerId || "").trim();
+    if (printer.nativePrinterId && activePrinterId && printer.nativePrinterId !== activePrinterId) {
+      throw Object.assign(new Error("PRINTER_SELECTION_MISMATCH"), { printerStatus, printer });
+    }
+    return {
+      printer,
+      printerStatus,
+      printMode: PrintDispatchMode.LOCAL_AGENT,
+      payloadType:
+        printer.commandLanguage === "ZPL" || printer.commandLanguage === "AUTO"
+          ? PrintPayloadType.ZPL
+          : PrintPayloadType.JSON,
+    };
+  }
+
+  if (printer.connectionType === PrinterConnectionType.NETWORK_DIRECT) {
+    if (!printer.ipAddress || !printer.port) {
+      throw new Error("PRINTER_NETWORK_CONFIG_INVALID");
+    }
+    return {
+      printer,
+      printerStatus: null,
+      printMode: PrintDispatchMode.NETWORK_DIRECT,
+      payloadType:
+        printer.commandLanguage === "ZPL" || printer.commandLanguage === "AUTO"
+          ? PrintPayloadType.ZPL
+          : PrintPayloadType.OTHER,
+    };
+  }
+
+  throw new Error("PRINTER_MODE_UNSUPPORTED");
 };
 
 const notifySystemPrintEvent = async (params: {
@@ -223,6 +300,8 @@ const getOrCreatePrintSession = async (job: {
   manufacturerId: string;
   quantity: number;
   status: any;
+  printerRegistrationId?: string | null;
+  printerId?: string | null;
 }) => {
   const existing = await prisma.printSession.findUnique({ where: { printJobId: job.id } });
   if (existing) return existing;
@@ -244,6 +323,8 @@ const getOrCreatePrintSession = async (job: {
         printJobId: job.id,
         batchId: job.batchId,
         manufacturerId: job.manufacturerId,
+        printerRegistrationId: job.printerRegistrationId || null,
+        printerId: job.printerId || null,
         status: job.status === "CONFIRMED" ? PrintSessionStatus.COMPLETED : PrintSessionStatus.ACTIVE,
         totalItems,
         issuedItems: qrRows.filter((row) => row.status !== QRStatus.ACTIVATED && row.status !== QRStatus.ALLOCATED).length,
@@ -348,8 +429,8 @@ const finalizePrintSessionIfReady = async (params: {
   });
 
   const jobUpdate = await params.tx.printJob.updateMany({
-    where: { id: params.printJobId, status: "PENDING" },
-    data: { status: "CONFIRMED", confirmedAt: params.now },
+    where: { id: params.printJobId, status: { in: [PrintJobStatus.PENDING, PrintJobStatus.SENT] } },
+    data: { status: PrintJobStatus.CONFIRMED, confirmedAt: params.now, completedAt: params.now },
   });
 
   if (jobUpdate.count > 0) {
@@ -525,8 +606,8 @@ const failStopPrintSession = async (params: {
     });
 
     await tx.printJob.updateMany({
-      where: { id: params.printJobId, status: "PENDING" },
-      data: { status: "CANCELLED" },
+      where: { id: params.printJobId, status: { in: [PrintJobStatus.PENDING, PrintJobStatus.SENT] } },
+      data: { status: PrintJobStatus.FAILED, failureReason: params.reason, completedAt: now },
     });
 
     const incident = await createFailStopIncident({
@@ -597,9 +678,19 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
 
     if (replayIdempotentResponseIfAny(idempotency, res)) return;
 
-    const printerStatus = await ensureTrustedPrinterConnected(user.userId);
-
-    const { batchId, quantity, rangeStart, rangeEnd } = parsed.data;
+    const { batchId, printerId, quantity, rangeStart, rangeEnd, reprintOfJobId, reprintReason } = parsed.data;
+    const printerSelection = await ensureSelectedPrinterReady({
+      printerId,
+      userId: user.userId,
+      orgId: user.orgId || null,
+      licenseeId: user.licenseeId || null,
+    });
+    if (printerSelection.printMode === PrintDispatchMode.NETWORK_DIRECT && printerSelection.payloadType !== PrintPayloadType.ZPL) {
+      return res.status(409).json({
+        success: false,
+        error: "Network-direct printing currently supports registered ZPL-compatible printers only.",
+      });
+    }
 
     const batch = await prisma.batch.findFirst({
       where: { id: batchId, manufacturerId: user.userId },
@@ -656,13 +747,20 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
 
       const createdJob = await tx.printJob.create({
         data: {
+          jobNumber: generatePrintJobNumber(),
           batchId: batch.id,
           manufacturerId: user.userId,
+          printerId: printerSelection.printer.id,
           quantity,
+          itemCount: prepared.length,
+          printMode: printerSelection.printMode,
+          payloadType: printerSelection.payloadType,
           rangeStart: rangeStart || null,
           rangeEnd: rangeEnd || null,
+          reprintOfJobId: reprintOfJobId || null,
+          reprintReason: reprintReason || null,
           printLockTokenHash,
-          status: "PENDING",
+          status: PrintJobStatus.PENDING,
         },
       });
 
@@ -696,7 +794,11 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
           printJobId: createdJob.id,
           batchId: batch.id,
           manufacturerId: user.userId,
-          printerRegistrationId: printerStatus.registrationId || null,
+          printerRegistrationId:
+            printerSelection.printMode === PrintDispatchMode.LOCAL_AGENT
+              ? printerSelection.printer.printerRegistrationId || printerSelection.printerStatus?.registrationId || null
+              : null,
+          printerId: printerSelection.printer.id,
           status: PrintSessionStatus.ACTIVE,
           totalItems: prepared.length,
         },
@@ -729,7 +831,9 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
         quantity,
         rangeStart: rangeStart || null,
         rangeEnd: rangeEnd || null,
-        mode: "DIRECT_PRINT",
+        mode: printerSelection.printMode,
+        printerId: printerSelection.printer.id,
+        printerName: printerSelection.printer.name,
         printSessionId: created.session.id,
       },
       ipAddress: req.ip,
@@ -741,12 +845,21 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
       data: {
         printJobId: created.job.id,
         printSessionId: created.session.id,
-        printLockToken,
+        printLockToken: printerSelection.printMode === PrintDispatchMode.LOCAL_AGENT ? printLockToken : null,
         quantity,
         tokenCount: created.preparedCount,
-        mode: "DIRECT_PRINT",
+        mode: printerSelection.printMode,
         lockExpiresAt: getLockExpiresAt(created.job.createdAt).toISOString(),
-        printerStatus,
+        printer: {
+          id: printerSelection.printer.id,
+          name: printerSelection.printer.name,
+          connectionType: printerSelection.printer.connectionType,
+          commandLanguage: printerSelection.printer.commandLanguage,
+          ipAddress: printerSelection.printer.ipAddress,
+          port: printerSelection.printer.port,
+          nativePrinterId: printerSelection.printer.nativePrinterId,
+        },
+        printerStatus: printerSelection.printerStatus,
       },
     };
 
@@ -761,15 +874,17 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
         userId: user.userId,
         licenseeId: batch.licenseeId,
         type: "manufacturer_print_job_created",
-        title: "Direct-print job prepared",
-        body: `Direct-print session ready for ${batch.name} (${quantity} codes).`,
+        title: printerSelection.printMode === PrintDispatchMode.NETWORK_DIRECT ? "Network-direct job prepared" : "Direct-print job prepared",
+        body: `${printerSelection.printMode === PrintDispatchMode.NETWORK_DIRECT ? "Network-direct" : "Local-agent"} session ready for ${batch.name} (${quantity} codes).`,
         data: {
           printJobId: created.job.id,
           printSessionId: created.session.id,
           batchId: batch.id,
           batchName: batch.name,
           quantity,
-          mode: "DIRECT_PRINT",
+          mode: printerSelection.printMode,
+          printerId: printerSelection.printer.id,
+          printerName: printerSelection.printer.name,
           targetRoute: "/batches",
         },
       });
@@ -778,19 +893,28 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
         orgId: user.orgId || null,
         type: "system_print_job_created",
         title: "System print job created",
-        body: `Direct-print job created for ${batch.name} (${quantity} codes).`,
+        body: `${printerSelection.printMode === PrintDispatchMode.NETWORK_DIRECT ? "Network-direct" : "Local-agent"} print job created for ${batch.name} (${quantity} codes).`,
         data: {
           printJobId: created.job.id,
           printSessionId: created.session.id,
           batchId: batch.id,
           batchName: batch.name,
           quantity,
-          mode: "DIRECT_PRINT",
+          mode: printerSelection.printMode,
+          printerId: printerSelection.printer.id,
+          printerName: printerSelection.printer.name,
           targetRoute: "/batches",
         },
       });
     } catch (notifyError) {
       console.error("createPrintJob notification error:", notifyError);
+    }
+
+    if (printerSelection.printMode === PrintDispatchMode.NETWORK_DIRECT) {
+      await startNetworkDirectDispatch({
+        jobId: created.job.id,
+        actorUserId: user.userId,
+      });
     }
 
     return res.status(201).json(responsePayload);
@@ -815,6 +939,23 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
           "Printer is not ready for secure issuance. Reconnect print agent or switch to compatibility-ready local printer profile.",
         data: { printerStatus },
       });
+    }
+    if (msg.includes("PRINTER_NOT_FOUND")) {
+      return res.status(404).json({ success: false, error: "Registered printer not found for this manufacturer scope." });
+    }
+    if (msg.includes("PRINTER_INACTIVE")) {
+      return res.status(409).json({ success: false, error: "Selected printer profile is inactive." });
+    }
+    if (msg.includes("PRINTER_SELECTION_MISMATCH")) {
+      const printerStatus = (e as any)?.printerStatus || null;
+      return res.status(409).json({
+        success: false,
+        error: "Selected local printer does not match the active workstation printer. Switch printer selection and retry.",
+        data: { printerStatus },
+      });
+    }
+    if (msg.includes("PRINTER_NETWORK_CONFIG_INVALID")) {
+      return res.status(409).json({ success: false, error: "Selected network printer is missing IP address or TCP port." });
     }
     return res.status(400).json({ success: false, error: e?.message || "Bad request" });
   }
@@ -860,12 +1001,23 @@ export const issueDirectPrintTokens = async (req: AuthRequest, res: Response) =>
 
     const job = await getManufacturerPrintJob(jobId, user.userId);
     if (!job) return res.status(404).json({ success: false, error: "Print job not found" });
+    if (job.printMode !== PrintDispatchMode.LOCAL_AGENT) {
+      return res.status(409).json({ success: false, error: "This print job is not configured for local-agent dispatch." });
+    }
+    if (!job.printer) {
+      return res.status(409).json({ success: false, error: "Registered printer metadata is missing for this job." });
+    }
 
-    if (job.status === "CONFIRMED") {
+    if (job.status === PrintJobStatus.CONFIRMED) {
       return res.status(409).json({ success: false, error: "Print job already confirmed" });
     }
 
-    await ensureTrustedPrinterConnected(user.userId);
+    await ensureSelectedPrinterReady({
+      printerId: job.printerId || "",
+      userId: user.userId,
+      orgId: user.orgId || null,
+      licenseeId: user.licenseeId || null,
+    });
 
     const now = new Date();
     if (isLockExpired(job.createdAt, now)) {
@@ -886,6 +1038,8 @@ export const issueDirectPrintTokens = async (req: AuthRequest, res: Response) =>
       manufacturerId: job.manufacturerId,
       quantity: job.quantity,
       status: job.status,
+      printerRegistrationId: job.printSession?.printerRegistrationId || null,
+      printerId: job.printerId || null,
     });
 
     if (session.status !== PrintSessionStatus.ACTIVE) {
@@ -991,6 +1145,11 @@ export const issueDirectPrintTokens = async (req: AuthRequest, res: Response) =>
         },
       });
 
+      await tx.printJob.updateMany({
+        where: { id: job.id, status: PrintJobStatus.PENDING },
+        data: { status: PrintJobStatus.SENT, sentAt: now },
+      });
+
       const remainingToPrint = await countRemainingToPrint(tx, session.id);
 
       return {
@@ -1089,6 +1248,13 @@ export const resolveDirectPrintToken = async (req: AuthRequest, res: Response) =
 
     const job = await getManufacturerPrintJob(jobId, user.userId);
     if (!job) return res.status(404).json({ success: false, error: "Print job not found" });
+    if (job.printMode !== PrintDispatchMode.LOCAL_AGENT) {
+      return res.status(409).json({ success: false, error: "This print job is not configured for local-agent dispatch." });
+    }
+    if (!job.printer) {
+      return res.status(409).json({ success: false, error: "Registered printer metadata is missing for this job." });
+    }
+    const printer = job.printer;
 
     const session = await getOrCreatePrintSession({
       id: job.id,
@@ -1096,6 +1262,8 @@ export const resolveDirectPrintToken = async (req: AuthRequest, res: Response) =
       manufacturerId: job.manufacturerId,
       quantity: job.quantity,
       status: job.status,
+      printerRegistrationId: job.printSession?.printerRegistrationId || null,
+      printerId: job.printerId || null,
     });
 
     if (session.status !== PrintSessionStatus.ACTIVE) {
@@ -1114,6 +1282,13 @@ export const resolveDirectPrintToken = async (req: AuthRequest, res: Response) =
     if (lockHash !== job.printLockTokenHash) {
       return res.status(403).json({ success: false, error: "Invalid print lock token" });
     }
+
+    await ensureSelectedPrinterReady({
+      printerId: job.printerId || "",
+      userId: user.userId,
+      orgId: user.orgId || null,
+      licenseeId: user.licenseeId || null,
+    });
 
     const renderTokenHash = hashToken(parsed.data.renderToken);
     const renderTokenRow = await prisma.printRenderToken.findUnique({
@@ -1181,22 +1356,32 @@ export const resolveDirectPrintToken = async (req: AuthRequest, res: Response) =
       return res.status(409).json({ success: false, error: "Render token no longer valid for this print item" });
     }
 
-    const payload = {
-      qr_id: qr.id,
-      batch_id: qr.batchId,
-      licensee_id: qr.licenseeId,
-      manufacturer_id: job.manufacturerId,
-      iat: Math.floor(qr.tokenIssuedAt.getTime() / 1000),
-      exp: Math.floor(qr.tokenExpiresAt.getTime() / 1000),
-      nonce: qr.tokenNonce,
-    };
-
-    const signedQrToken = signQrPayload(payload);
-    const signedQrHash = hashToken(signedQrToken);
-    if (qr.tokenHash && signedQrHash !== qr.tokenHash) {
+    let approvedPayload;
+    try {
+      approvedPayload = buildApprovedPrintPayload({
+        printer: {
+          id: printer.id,
+          name: printer.name,
+          connectionType: printer.connectionType,
+          commandLanguage: printer.commandLanguage,
+          nativePrinterId: printer.nativePrinterId,
+          ipAddress: printer.ipAddress,
+          port: printer.port,
+          calibrationProfile: (printer.calibrationProfile as Record<string, unknown> | null) || null,
+          capabilitySummary: (printer.capabilitySummary as Record<string, unknown> | null) || null,
+          metadata: (printer.metadata as Record<string, unknown> | null) || null,
+        },
+        qr,
+        manufacturerId: job.manufacturerId,
+        printJobId: job.id,
+        printItemId: printItem.id,
+        jobNumber: job.jobNumber,
+        reprintOfJobId: job.reprintOfJobId,
+      });
+    } catch (error: any) {
       return res.status(409).json({
         success: false,
-        error: "Token integrity mismatch for this QR. Create a new print job to continue.",
+        error: error?.message || "Failed to build approved print payload for this label.",
       });
     }
 
@@ -1279,8 +1464,21 @@ export const resolveDirectPrintToken = async (req: AuthRequest, res: Response) =
         remainingToPrint: txResult.remainingToPrint,
         jobConfirmed: false,
         confirmedAt: null,
-        scanToken: signedQrToken,
-        scanUrl: buildScanUrl(signedQrToken),
+        printMode: job.printMode,
+        payloadType: approvedPayload.payloadType,
+        payloadContent: approvedPayload.payloadContent,
+        payloadHash: approvedPayload.payloadHash,
+        previewLabel: approvedPayload.previewLabel,
+        commandLanguage: approvedPayload.commandLanguage,
+        scanToken: approvedPayload.scanToken,
+        scanUrl: approvedPayload.scanUrl,
+        printer: {
+          id: printer.id,
+          name: printer.name,
+          connectionType: printer.connectionType,
+          commandLanguage: printer.commandLanguage,
+          nativePrinterId: printer.nativePrinterId,
+        },
       },
     };
 
@@ -1356,6 +1554,8 @@ export const confirmDirectPrintItem = async (req: AuthRequest, res: Response) =>
       manufacturerId: job.manufacturerId,
       quantity: job.quantity,
       status: job.status,
+      printerRegistrationId: job.printSession?.printerRegistrationId || null,
+      printerId: job.printerId || null,
     });
 
     if (session.status !== PrintSessionStatus.ACTIVE && session.status !== PrintSessionStatus.COMPLETED) {
@@ -1621,6 +1821,8 @@ export const reportDirectPrintFailure = async (req: AuthRequest, res: Response) 
       manufacturerId: job.manufacturerId,
       quantity: job.quantity,
       status: job.status,
+      printerRegistrationId: job.printSession?.printerRegistrationId || null,
+      printerId: job.printerId || null,
     });
 
     const failed = await failStopPrintSession({
@@ -1727,6 +1929,8 @@ export const confirmPrintJob = async (req: AuthRequest, res: Response) => {
       manufacturerId: job.manufacturerId,
       quantity: job.quantity,
       status: job.status,
+      printerRegistrationId: job.printSession?.printerRegistrationId || null,
+      printerId: job.printerId || null,
     });
 
     const remainingToPrint = await prisma.printItem.count({
@@ -1782,5 +1986,50 @@ export const confirmPrintJob = async (req: AuthRequest, res: Response) => {
   } catch (e: any) {
     console.error("confirmPrintJob error:", e);
     return res.status(400).json({ success: false, error: e?.message || "Bad request" });
+  }
+};
+
+export const listManufacturerPrintJobs = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = ensureManufacturerUser(req, res);
+    if (!user) return;
+
+    const parsed = listPrintJobsQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid query" });
+    }
+
+    const rows = await listPrintJobsForManufacturer({
+      userId: user.userId,
+      batchId: parsed.data.batchId,
+      limit: parsed.data.limit,
+    });
+
+    return res.json({ success: true, data: rows });
+  } catch (error: any) {
+    console.error("listManufacturerPrintJobs error:", error);
+    return res.status(500).json({ success: false, error: error?.message || "Internal server error" });
+  }
+};
+
+export const getManufacturerPrintJobStatus = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = ensureManufacturerUser(req, res);
+    if (!user) return;
+
+    const jobId = String(req.params.id || "").trim();
+    if (!jobId) {
+      return res.status(400).json({ success: false, error: "Missing print job id" });
+    }
+
+    const view = await getPrintJobOperationalView({ jobId, userId: user.userId });
+    if (!view) {
+      return res.status(404).json({ success: false, error: "Print job not found" });
+    }
+
+    return res.json({ success: true, data: view });
+  } catch (error: any) {
+    console.error("getManufacturerPrintJobStatus error:", error);
+    return res.status(500).json({ success: false, error: error?.message || "Internal server error" });
   }
 };

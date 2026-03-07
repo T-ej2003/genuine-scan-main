@@ -14,6 +14,7 @@ const database_1 = __importDefault(require("./config/database"));
 const logger_1 = require("./utils/logger");
 const siemOutboxService_1 = require("./services/siemOutboxService");
 const compliancePackService_1 = require("./services/compliancePackService");
+const networkDirectPrintService_1 = require("./services/networkDirectPrintService");
 dotenv_1.default.config();
 dotenv_1.default.config({ path: path_1.default.resolve(__dirname, "../.env") });
 const missingRequiredEnv = ["DATABASE_URL", "JWT_SECRET"].filter((k) => !process.env[k]);
@@ -184,6 +185,9 @@ const server = app.listen(PORT, () => {
     logger_1.logger.info(`🔍 Health check at http://localhost:${PORT}/health`);
     (0, siemOutboxService_1.startSecurityEventOutboxWorker)();
     (0, compliancePackService_1.startCompliancePackScheduler)();
+    void (0, networkDirectPrintService_1.resumePendingNetworkDirectJobs)().catch((error) => {
+        logger_1.logger.error("Failed to resume pending network-direct jobs", { error: error?.message || error });
+    });
 });
 server.on("error", (err) => {
     if (err.code === "EADDRINUSE") {
