@@ -99,6 +99,17 @@ type TraceEventRow = {
   userId?: string | null;
 };
 
+type AuditLogRow = {
+  id: string;
+  action?: string;
+  entityType?: string | null;
+  entityId?: string | null;
+  createdAt: string;
+  details?: any;
+  user?: { id: string; name?: string | null; email?: string | null } | null;
+  userId?: string | null;
+};
+
 type PrinterConnectionStatus = {
   connected: boolean;
   trusted: boolean;
@@ -212,6 +223,30 @@ type PrintJobRow = {
 
 const LARGE_ALLOCATION_THRESHOLD = 25_000;
 const PRINTER_FAILURE_AUTO_REPORT_COOLDOWN_MS = 3 * 60 * 1000;
+
+const inferTraceEventTypeFromAudit = (log: AuditLogRow): TraceEventType | undefined => {
+  const action = String(log.action || "").trim().toUpperCase();
+  const context = String(log.details?.context || "").trim().toUpperCase();
+
+  if (action === "ALLOCATED" || context.includes("ASSIGN_MANUFACTURER")) return "ASSIGNED";
+  if (action.includes("PRINT")) return "PRINTED";
+  if (action.includes("REDEEM") || action.includes("SCAN")) return "REDEEMED";
+  if (action.includes("BLOCK")) return "BLOCKED";
+  if (action.includes("COMMISSION")) return "COMMISSIONED";
+  return undefined;
+};
+
+const normalizeAuditLogToTraceEvent = (log: AuditLogRow): TraceEventRow => ({
+  id: String(log.id || `${log.createdAt}:${log.action || "AUDIT"}`).trim(),
+  eventType: inferTraceEventTypeFromAudit(log),
+  action: log.action,
+  sourceAction: log.action || null,
+  createdAt: String(log.createdAt || new Date().toISOString()),
+  details: log.details || {},
+  user: log.user || null,
+  userId: log.userId || log.user?.id || null,
+});
+
 export default function Batches() {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -1558,10 +1593,13 @@ export default function Batches() {
         )
       );
 
-      const responses = await Promise.all(batchIds.map((batchId) => apiClient.getTraceTimeline({ batchId, limit: 60 })));
+      const [traceResponses, auditResponses] = await Promise.all([
+        Promise.all(batchIds.map((batchId) => apiClient.getTraceTimeline({ batchId, limit: 60 }))),
+        Promise.all(batchIds.map((batchId) => apiClient.getAuditLogs({ entityType: "Batch", entityId: batchId, limit: 60 }))),
+      ]);
       const merged = new Map<string, TraceEventRow>();
 
-      for (const response of responses) {
+      for (const response of traceResponses) {
         if (!response.success) continue;
         const payload: any = response.data;
         const list = Array.isArray(payload)
@@ -1576,6 +1614,29 @@ export default function Batches() {
           const key = String(item.id || `${item.createdAt}:${item.action || item.sourceAction || item.eventType || "event"}`).trim();
           if (!merged.has(key)) {
             merged.set(key, item);
+          }
+        }
+      }
+
+      for (const response of auditResponses) {
+        if (!response.success) continue;
+        const payload: any = response.data;
+        const list = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.logs)
+            ? payload.logs
+            : Array.isArray(payload?.data)
+              ? payload.data
+              : [];
+
+        for (const item of list as AuditLogRow[]) {
+          const normalized = normalizeAuditLogToTraceEvent(item);
+          const key = String(
+            normalized.id ||
+              `${normalized.createdAt}:${normalized.action || normalized.sourceAction || normalized.eventType || "audit"}`
+          ).trim();
+          if (!merged.has(key)) {
+            merged.set(key, normalized);
           }
         }
       }
@@ -1621,6 +1682,57 @@ export default function Batches() {
     }
   };
 
+  const openBatchContextFromAllocationMap = async (batchId: string) => {
+    const targetBatchId = String(batchId || "").trim();
+    const mapSnapshot: any = allocationMap;
+    const sourceBatchIdFromMap = String(mapSnapshot?.sourceBatchId || mapSnapshot?.sourceBatch?.id || "").trim();
+
+    // Always close map first so navigation never happens behind a blocking overlay.
+    setAllocationMapOpen(false);
+    setAllocationMapLoading(false);
+
+    if (!targetBatchId && !sourceBatchIdFromMap) return;
+
+    const currentWorkspaceMatches =
+      workspaceBatch &&
+      (workspaceBatch.sourceBatchId === targetBatchId ||
+        workspaceBatch.sourceBatchRow?.id === targetBatchId ||
+        workspaceBatch.allocations.some((allocation) => allocation.batchId === targetBatchId));
+    if (currentWorkspaceMatches) {
+      return;
+    }
+
+    const matchWorkspaceByBatchId = (candidateId: string) =>
+      stableRows.find(
+        (row) =>
+          row.sourceBatchId === candidateId ||
+          row.sourceBatchRow?.id === candidateId ||
+          row.allocations.some((allocation) => allocation.batchId === candidateId)
+      ) || null;
+
+    const matchedWorkspace =
+      (targetBatchId ? matchWorkspaceByBatchId(targetBatchId) : null) ||
+      (sourceBatchIdFromMap ? matchWorkspaceByBatchId(sourceBatchIdFromMap) : null);
+
+    if (matchedWorkspace) {
+      setAssignmentFilter("all");
+      setQ(matchedWorkspace.sourceBatchName);
+      await openWorkspace(matchedWorkspace);
+      return;
+    }
+
+    const fallbackRow =
+      (targetBatchId ? rows.find((row) => row.id === targetBatchId) : undefined) ||
+      (sourceBatchIdFromMap ? rows.find((row) => row.id === sourceBatchIdFromMap) : undefined);
+
+    setAssignmentFilter("all");
+    if (fallbackRow?.name) {
+      setQ(fallbackRow.name);
+      return;
+    }
+    setQ(targetBatchId || sourceBatchIdFromMap);
+  };
+
   useEffect(() => {
     if (!workspaceOpen || !workspaceBatch) return;
     const timer = window.setInterval(() => {
@@ -1641,6 +1753,7 @@ export default function Batches() {
     }
     setWorkspaceBatch(refreshed);
     setAssignBatch(refreshed.sourceBatchRow || null);
+    void fetchWorkspaceHistory(refreshed, { silent: true });
   }, [stableRows, workspaceBatch, workspaceOpen]);
 
   const downloadAuditPackage = async (batch: BatchRow) => {
@@ -2460,11 +2573,7 @@ export default function Batches() {
           loading={allocationMapLoading}
           payload={allocationMap}
           onOpenBatches={(batchId) => {
-            const found = rows.find((row) => row.id === batchId);
-            if (found) {
-              setQ(found.name);
-              setAllocationMapOpen(false);
-            }
+            void openBatchContextFromAllocationMap(batchId);
           }}
         />
 

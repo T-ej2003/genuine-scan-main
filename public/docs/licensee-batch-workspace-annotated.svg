@@ -38,7 +38,7 @@
   <rect x="470" y="676" width="280" height="40" rx="10" fill="#F8FAFC" stroke="#CBD5E1"/>
   <text x="495" y="703" fill="#475569" font-family="Arial, sans-serif" font-size="20">Allocate to manufacturer</text>
   <rect x="780" y="676" width="230" height="40" rx="10" fill="#F8FAFC" stroke="#CBD5E1"/>
-  <text x="805" y="703" fill="#475569" font-family="Arial, sans-serif" font-size="20">Allocation structure + audit</text>
+  <text x="805" y="703" fill="#475569" font-family="Arial, sans-serif" font-size="20">View allocation structure</text>
 
   <defs>
     <marker id="arrow" markerWidth="14" markerHeight="14" refX="10" refY="7" orient="auto">
@@ -56,5 +56,5 @@
 
   <path d="M1115 690C1180 700 1230 705 1260 700" stroke="#DC2626" stroke-width="5" marker-end="url(#arrow)"/>
   <text x="1035" y="742" fill="#DC2626" font-family="Arial, sans-serif" font-size="28" font-weight="700">3. Operations</text>
-  <text x="975" y="776" fill="#DC2626" font-family="Arial, sans-serif" font-size="22">Allocate more quantity, rename, export audit.</text>
+  <text x="955" y="776" fill="#DC2626" font-family="Arial, sans-serif" font-size="22">Allocate, rename, open structure, export audit.</text>
 </svg>

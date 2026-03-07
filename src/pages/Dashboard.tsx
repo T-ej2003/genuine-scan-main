@@ -5,7 +5,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { StatsCard } from "@/components/dashboard/StatsCard";
 import { QRStatusChart } from "@/components/dashboard/QRStatusChart";
 import { RecentActivityCard } from "@/components/dashboard/RecentActivityCard";
-import { QrCode, Building2, Factory, FileText, RefreshCw, ArrowRight } from "lucide-react";
+import { QrCode, Building2, Factory, FileText, RefreshCw, ArrowRight, Boxes } from "lucide-react";
 import apiClient from "@/lib/api-client";
 import { onMutationEvent } from "@/lib/mutation-events";
 import { Button } from "@/components/ui/button";
@@ -260,11 +260,42 @@ export default function Dashboard() {
       user?.role === "super_admin" ? "/qr-codes" : "/qr-tracking";
     const totalQrCta =
       user?.role === "super_admin" ? "Inspect master inventory" : "Inspect tenant inventory";
-    const scopeHref = user?.role === "super_admin" ? "/licensees" : "/dashboard";
-    const scopeCta = user?.role === "super_admin" ? "Manage licensees" : "Open scope details";
     const manufacturersHref = user?.role === "manufacturer" ? "/qr-tracking" : "/manufacturers";
     const manufacturersCta =
       user?.role === "manufacturer" ? "View manufacturer telemetry" : "Manage manufacturers";
+    const scopeCard =
+      user?.role === "manufacturer"
+        ? {
+            title: "My Licensee Scope",
+            value: user?.licenseeId ? 1 : 0,
+            icon: Building2,
+            variant: "info" as const,
+            subtitle: "Current assigned tenant",
+            href: "/dashboard",
+            ctaLabel: "Open scope details",
+            action: "scope" as const,
+          }
+        : user?.role === "licensee_admin"
+          ? {
+              title: "Unassigned Inventory",
+              value: qrStatusData.dormant,
+              icon: Boxes,
+              variant: "info" as const,
+              subtitle: "Codes still waiting for manufacturer allocation",
+              href: "/batches",
+              ctaLabel: "Review source batches",
+              action: "navigate" as const,
+            }
+          : {
+              title: "Active Licensees",
+              value: activeLicenseesCount,
+              icon: Building2,
+              variant: "info" as const,
+              subtitle: "Currently enabled tenants",
+              href: "/licensees",
+              ctaLabel: "Manage licensees",
+              action: "navigate" as const,
+            };
 
     const items = [
       {
@@ -276,17 +307,7 @@ export default function Dashboard() {
         href: totalQrHref,
         ctaLabel: totalQrCta,
       },
-      {
-        title: user?.role === "manufacturer" ? "My Licensee Scope" : "Active Licensees",
-        value: user?.role === "manufacturer" ? (user?.licenseeId ? 1 : 0) : activeLicenseesCount,
-        icon: Building2,
-        variant: "info" as const,
-        subtitle:
-          user?.role === "manufacturer" ? "Current assigned tenant" : "Currently enabled tenants",
-        href: scopeHref,
-        ctaLabel: scopeCta,
-        action: user?.role === "manufacturer" ? "scope" : "navigate",
-      },
+      scopeCard,
       {
         title: "Manufacturers",
         value: manufacturersCount,

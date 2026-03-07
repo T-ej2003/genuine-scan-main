@@ -70,6 +70,11 @@ export function BatchAllocationMapDialog({
   const source = payload?.sourceBatch || null;
   const selected = payload?.selectedBatch || null;
   const allocations = payload?.allocations || [];
+  const handleOpenBatches = (batchId: string) => {
+    // Close the allocation map before routing so users never end up with stacked overlays.
+    onOpenChange(false);
+    onOpenBatches?.(batchId);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -116,7 +121,7 @@ export function BatchAllocationMapDialog({
                   <p className="font-mono text-[11px] text-slate-500">{source.id}</p>
                 </div>
                 {onOpenBatches ? (
-                  <Button type="button" variant="outline" size="sm" onClick={() => onOpenBatches(source.id)}>
+                  <Button type="button" variant="outline" size="sm" onClick={() => handleOpenBatches(source.id)}>
                     Open in batches
                   </Button>
                 ) : null}
@@ -176,7 +181,7 @@ export function BatchAllocationMapDialog({
                             </p>
                           </div>
                           {onOpenBatches ? (
-                            <Button type="button" variant="outline" size="sm" onClick={() => onOpenBatches(row.id)}>
+                            <Button type="button" variant="outline" size="sm" onClick={() => handleOpenBatches(row.id)}>
                               Open in batches
                             </Button>
                           ) : null}

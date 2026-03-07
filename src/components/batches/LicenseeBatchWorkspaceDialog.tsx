@@ -183,7 +183,7 @@ export function LicenseeBatchWorkspaceDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[980px] max-h-[90vh] overflow-hidden p-0">
+      <DialogContent className="flex h-[90vh] max-h-[90vh] flex-col overflow-hidden p-0 sm:max-w-[980px]">
         {!workspace ? null : (
           <>
             <DialogHeader className="border-b px-6 py-5">
@@ -225,8 +225,8 @@ export function LicenseeBatchWorkspaceDialog({
                 </TabsList>
               </div>
 
-              <ScrollArea className="min-h-0 flex-1">
-                <div className="px-6 py-5">
+              <ScrollArea type="always" scrollHideDelay={0} className="min-h-0 flex-1">
+                <div className="px-6 py-5 pr-8">
                   <TabsContent value="overview" className="mt-0 space-y-6">
                     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                       <div className="rounded-2xl border bg-muted/20 p-4">

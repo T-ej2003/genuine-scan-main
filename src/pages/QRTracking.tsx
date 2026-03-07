@@ -498,10 +498,17 @@ export default function QRTracking() {
                               <TableRow key={b.id}>
                                 <TableCell className="font-medium text-slate-900">{b.name}</TableCell>
                                 <TableCell className="font-mono text-xs text-slate-600">
-                                  <div className="flex items-center gap-2">
-                                    <span>{b.id}</span>
-                                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyBatchId(b.id)}>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="break-all">{b.id}</span>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-9 gap-2 whitespace-nowrap px-3 text-xs font-medium"
+                                      onClick={() => copyBatchId(b.id)}
+                                    >
                                       <Copy className="h-3.5 w-3.5" />
+                                      Copy ID
                                     </Button>
                                   </div>
                                   <Button type="button" variant="link" className="h-auto px-0 text-xs" onClick={() => openAllocationMap(b.id)}>
