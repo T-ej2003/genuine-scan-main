@@ -532,6 +532,13 @@ export const resendLicenseeAdminInvite = async (req: AuthRequest, res: Response)
       userAgent: normalizeUserAgent(req.get("user-agent")),
     });
 
+    if (!invite.inviteId) {
+      return res.status(409).json({
+        success: false,
+        error: "Invite could not be created for this licensee admin.",
+      });
+    }
+
     await createAuditLog({
       userId: req.user!.userId,
       licenseeId: id,
