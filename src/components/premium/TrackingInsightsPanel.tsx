@@ -111,9 +111,8 @@ export function TrackingInsightsPanel({ totals, trend, loading, className }: Tra
               key={entry.key}
               type="button"
               onClick={() => setMode(entry.key)}
-              data-tooltip={`Switch tracking analytics to ${entry.label.toLowerCase()} view.`}
               className={cn(
-                "app-tooltip inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
+                "inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
                 mode === entry.key ? "bg-white text-[#4f5b75] shadow-sm" : "text-slate-600 hover:bg-white/70"
               )}
             >

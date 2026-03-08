@@ -3,10 +3,9 @@ import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
-import { resolveTooltipText } from "@/lib/tooltip-text";
 
 const buttonVariants = cva(
-  "app-tooltip relative isolate inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-transparent text-sm font-medium tracking-[0.01em] ring-offset-background transition-all duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 disabled:saturate-50 active:scale-[0.985] backdrop-blur-md before:pointer-events-none before:absolute before:inset-0 before:rounded-[inherit] before:bg-[linear-gradient(180deg,rgba(255,255,255,0.28),rgba(255,255,255,0.08)_48%,rgba(255,255,255,0))] before:opacity-60 before:transition-opacity before:duration-200 hover:before:opacity-90 active:before:opacity-35 motion-reduce:transition-none motion-reduce:active:scale-100 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "relative isolate inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-transparent text-sm font-medium tracking-[0.01em] ring-offset-background transition-all duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 disabled:saturate-50 active:scale-[0.985] backdrop-blur-md before:pointer-events-none before:absolute before:inset-0 before:rounded-[inherit] before:bg-[linear-gradient(180deg,rgba(255,255,255,0.28),rgba(255,255,255,0.08)_48%,rgba(255,255,255,0))] before:opacity-60 before:transition-opacity before:duration-200 hover:before:opacity-90 active:before:opacity-35 motion-reduce:transition-none motion-reduce:active:scale-100 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -41,29 +40,18 @@ export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
   asChild?: boolean;
-  tooltip?: string | false;
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, tooltip, title, children, ...props }, ref) => {
+  ({ className, variant, size, asChild = false, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
-    const tooltipText = resolveTooltipText({
-      tooltip,
-      title,
-      ariaLabel: props["aria-label"],
-      children,
-    });
 
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
-        data-tooltip={tooltipText}
-        title={tooltipText ? undefined : title}
         ref={ref}
         {...props}
-      >
-        {children}
-      </Comp>
+      />
     );
   },
 );

@@ -405,8 +405,7 @@ export default function Dashboard() {
                   key={action.href}
                   type="button"
                   onClick={() => navigate(action.href)}
-                  data-tooltip={`${action.label}. ${action.description}`}
-                  className="app-tooltip rounded-lg border p-3 text-left transition-colors hover:bg-muted/60"
+                  className="rounded-lg border p-3 text-left transition-colors hover:bg-muted/60"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-medium">{action.label}</span>
@@ -444,9 +443,8 @@ export default function Dashboard() {
                     key={row.key}
                     type="button"
                     onClick={() => setStatusFocus((prev) => (prev === row.key ? "all" : row.key))}
-                    data-tooltip={`Focus ${row.label.toLowerCase()} inventory. Current count: ${row.value.toLocaleString()} QR codes.`}
                     className={cn(
-                      "app-tooltip w-full rounded-md border px-3 py-2 text-left transition-colors",
+                      "w-full rounded-md border px-3 py-2 text-left transition-colors",
                       statusFocus === row.key ? "border-primary/40 bg-primary/5" : "hover:bg-muted/60"
                     )}
                   >
@@ -521,8 +519,7 @@ export default function Dashboard() {
               <div className="grid gap-3 sm:grid-cols-3">
                 <button
                   type="button"
-                  data-tooltip="Open your assigned batches workspace for printing and allocation review."
-                  className="app-tooltip rounded-xl border p-4 text-left hover:bg-slate-50"
+                  className="rounded-xl border p-4 text-left hover:bg-slate-50"
                   onClick={() => navigate("/batches")}
                 >
                   <p className="font-medium text-slate-900">Batches</p>
@@ -530,8 +527,7 @@ export default function Dashboard() {
                 </button>
                 <button
                   type="button"
-                  data-tooltip="Open QR Tracking for scan analytics and lifecycle review within your current manufacturer scope."
-                  className="app-tooltip rounded-xl border p-4 text-left hover:bg-slate-50"
+                  className="rounded-xl border p-4 text-left hover:bg-slate-50"
                   onClick={() => navigate("/qr-tracking")}
                 >
                   <p className="font-medium text-slate-900">QR Tracking</p>
@@ -539,8 +535,7 @@ export default function Dashboard() {
                 </button>
                 <button
                   type="button"
-                  data-tooltip="Open the role guide and operator instructions for batch, tracking, and support workflows."
-                  className="app-tooltip rounded-xl border p-4 text-left hover:bg-slate-50"
+                  className="rounded-xl border p-4 text-left hover:bg-slate-50"
                   onClick={() => navigate("/help/licensee-admin")}
                 >
                   <p className="font-medium text-slate-900">Help</p>
