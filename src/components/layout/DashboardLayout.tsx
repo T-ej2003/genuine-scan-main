@@ -1161,8 +1161,9 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         <header className="sticky top-0 z-30 h-16 bg-card border-b border-border flex items-center justify-between px-4 lg:px-6">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="lg:hidden p-2 rounded-md hover:bg-muted"
+            className="app-tooltip lg:hidden p-2 rounded-md hover:bg-muted"
             aria-label="Open sidebar"
+            data-tooltip="Open the navigation sidebar"
           >
             <Menu className="h-6 w-6" />
           </button>
@@ -1175,6 +1176,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                 variant="ghost"
                 size="icon"
                 className="relative mr-1 overflow-visible rounded-full border-white/50 bg-white/65 shadow-[0_12px_22px_-18px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-white/5"
+                aria-label="Open notifications"
+                tooltip={unreadNotifications > 0 ? `Open notifications. ${unreadNotifications} unread alert${unreadNotifications === 1 ? "" : "s"}.` : "Open notifications"}
               >
                 <Bell className="h-4 w-4 text-muted-foreground" />
                 {unreadNotifications > 0 ? (
@@ -1646,8 +1649,9 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                             <div className="flex items-start justify-between gap-3">
                               <button
                                 type="button"
-                                className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                                className="app-tooltip flex min-w-0 flex-1 items-start gap-3 text-left"
                                 onClick={() => setSelectedLocalPrinterId(row.printerId)}
+                                data-tooltip={`Select ${row.printerName || row.selectedPrinterName || row.printerId} for printer setup and switching.`}
                               >
                                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white bg-white text-sm font-semibold tracking-[0.2em] text-slate-700">
                                   {rowIdentity.monogram}

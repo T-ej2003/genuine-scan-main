@@ -147,8 +147,9 @@ export default function Login() {
             />
             <button
               type="button"
-              className="absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center text-muted-foreground hover:text-foreground"
+              className="app-tooltip absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center text-muted-foreground hover:text-foreground"
               aria-label={showPassword ? "Hide password" : "Show password"}
+              data-tooltip={showPassword ? "Hide password characters" : "Show password characters"}
               onClick={() => setShowPassword((prev) => !prev)}
               disabled={submitting}
             >
