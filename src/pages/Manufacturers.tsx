@@ -718,9 +718,8 @@ export default function Manufacturers() {
                             <div>
                               <button
                                 type="button"
-                                className="app-tooltip font-medium text-left hover:underline"
+                                className="font-medium text-left hover:underline"
                                 onClick={() => openDetails(m)}
-                                data-tooltip={`Open full manufacturer details for ${m.name}.`}
                               >
                                 {m.name}
                               </button>
@@ -766,18 +765,16 @@ export default function Manufacturers() {
                           <div className="flex flex-wrap gap-2">
                             <button
                               type="button"
-                              className="app-tooltip inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs text-emerald-700"
+                              className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs text-emerald-700"
                               onClick={() => openManufacturerBatches(m, "printed")}
-                              data-tooltip={`Open printed batches for ${m.name}.`}
                             >
                               <Activity className="h-3.5 w-3.5" />
                               {manufacturerStats[m.id]?.printedBatches || 0} printed
                             </button>
                             <button
                               type="button"
-                              className="app-tooltip inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs text-amber-700"
+                              className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs text-amber-700"
                               onClick={() => openManufacturerBatches(m, "pending")}
-                              data-tooltip={`Open pending print batches for ${m.name}.`}
                             >
                               <Activity className="h-3.5 w-3.5" />
                               {manufacturerStats[m.id]?.pendingPrintBatches || 0} pending
@@ -805,7 +802,7 @@ export default function Manufacturers() {
                             </Button>
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" tooltip={`Open actions for ${m.name}`}>
+                                <Button variant="ghost" size="icon">
                                   <MoreHorizontal className="h-4 w-4" />
                                 </Button>
                               </DropdownMenuTrigger>

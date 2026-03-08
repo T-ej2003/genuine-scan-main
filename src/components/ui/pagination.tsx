@@ -3,7 +3,6 @@ import { ChevronLeft, ChevronRight, MoreHorizontal } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { ButtonProps, buttonVariants } from "@/components/ui/button";
-import { resolveTooltipText } from "@/lib/tooltip-text";
 
 const Pagination = ({ className, ...props }: React.ComponentProps<"nav">) => (
   <nav
@@ -32,32 +31,19 @@ type PaginationLinkProps = {
 } & Pick<ButtonProps, "size"> &
   React.ComponentProps<"a">;
 
-const PaginationLink = ({ className, isActive, size = "icon", title, children, ...props }: PaginationLinkProps) => {
-  const tooltipText = resolveTooltipText({
-    title,
-    ariaLabel: props["aria-label"],
-    children,
-  });
-
-  return (
-    <a
-      aria-current={isActive ? "page" : undefined}
-      className={cn(
-        buttonVariants({
-          variant: isActive ? "outline" : "ghost",
-          size,
-        }),
-        "app-tooltip",
-        className,
-      )}
-      data-tooltip={tooltipText}
-      title={tooltipText ? undefined : title}
-      {...props}
-    >
-      {children}
-    </a>
-  );
-};
+const PaginationLink = ({ className, isActive, size = "icon", ...props }: PaginationLinkProps) => (
+  <a
+    aria-current={isActive ? "page" : undefined}
+    className={cn(
+      buttonVariants({
+        variant: isActive ? "outline" : "ghost",
+        size,
+      }),
+      className,
+    )}
+    {...props}
+  />
+);
 PaginationLink.displayName = "PaginationLink";
 
 const PaginationPrevious = ({ className, ...props }: React.ComponentProps<typeof PaginationLink>) => (
