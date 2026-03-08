@@ -88,8 +88,9 @@ export default function Index() {
                 type="button"
                 onClick={() => focusSection(item.id)}
                 aria-current={activeSection === item.id ? "true" : undefined}
+                data-tooltip={`Jump to ${item.label}. ${item.helper}.`}
                 className={cn(
-                  "rounded-full border px-3 py-2 text-sm transition",
+                  "app-tooltip rounded-full border px-3 py-2 text-sm transition",
                   activeSection === item.id
                     ? "border-emerald-300/40 bg-emerald-300/10 text-white shadow-[0_0_0_1px_rgba(110,231,183,0.16)_inset]"
                     : "border-transparent text-slate-300 hover:border-white/10 hover:bg-white/5 hover:text-white"
@@ -180,8 +181,9 @@ export default function Index() {
                   key={`jump-${item.id}`}
                   type="button"
                   onClick={() => focusSection(item.id)}
+                  data-tooltip={`Open the ${item.label} section. Route: ${item.routeLabel}.`}
                   className={cn(
-                    "rounded-2xl border px-4 py-4 text-left transition",
+                    "app-tooltip rounded-2xl border px-4 py-4 text-left transition",
                     activeSection === item.id
                       ? "border-emerald-300/35 bg-emerald-300/10 shadow-[0_16px_36px_-28px_rgba(16,185,129,0.85)]"
                       : "border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.05]"

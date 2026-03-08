@@ -71,8 +71,9 @@ export function QRStatusChart({ data, selectedStatus = "all", onStatusSelect }: 
           <button
             type="button"
             onClick={() => onStatusSelect?.("all")}
+            data-tooltip={`Show all QR lifecycle states. Total tracked items: ${total.toLocaleString()}.`}
             className={cn(
-              "rounded-md border px-2 py-1 text-xs transition-colors",
+              "app-tooltip rounded-md border px-2 py-1 text-xs transition-colors",
               selectedStatus === "all"
                 ? "bg-primary/10 border-primary/40 text-primary"
                 : "text-muted-foreground hover:text-foreground"
@@ -88,8 +89,9 @@ export function QRStatusChart({ data, selectedStatus = "all", onStatusSelect }: 
                 key={item.key}
                 type="button"
                 onClick={() => onStatusSelect?.(active ? "all" : item.key)}
+                data-tooltip={`Filter the chart to ${item.name.toLowerCase()} items. Current count: ${item.value.toLocaleString()} (${pct}%).`}
                 className={cn(
-                  "rounded-md border px-2 py-1 text-xs transition-colors",
+                  "app-tooltip rounded-md border px-2 py-1 text-xs transition-colors",
                   active
                     ? "bg-primary/10 border-primary/40 text-primary"
                     : "text-muted-foreground hover:text-foreground"

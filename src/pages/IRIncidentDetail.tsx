@@ -388,7 +388,7 @@ export default function IRIncidentDetail() {
       <div className="space-y-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
-            <Button variant="outline" size="icon" onClick={() => navigate("/ir")}>
+            <Button variant="outline" size="icon" tooltip="Back to the incident response queue" onClick={() => navigate("/ir")}>
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div>
