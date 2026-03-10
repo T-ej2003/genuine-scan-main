@@ -2329,6 +2329,19 @@ export default function Batches() {
 
                 <div className="space-y-3 rounded-md border p-3">
                   <div className="text-sm font-medium">Printer profile and dispatch mode</div>
+                  {registeredPrinters.length === 0 && (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                      No registered printer profiles yet. Open Printer Diagnostics and use the network-direct setup first, then return here and refresh this dialog.
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Button size="sm" variant="outline" onClick={() => navigate("/printer-diagnostics")}>
+                          Open Printer Diagnostics
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => void loadPrinterStatus()}>
+                          Refresh printers
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div className="space-y-1">
                       <Label className="text-xs">Registered printer profile</Label>

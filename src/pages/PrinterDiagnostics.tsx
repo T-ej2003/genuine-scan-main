@@ -50,6 +50,15 @@ type RegisteredPrinterRow = {
   } | null;
 };
 
+const buildEmptyNetworkPrinterForm = () => ({
+  name: "",
+  vendor: "",
+  model: "",
+  ipAddress: "",
+  port: "9100",
+  commandLanguage: "AUTO" as RegisteredPrinterRow["commandLanguage"],
+});
+
 export default function PrinterDiagnostics() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -65,14 +74,10 @@ export default function PrinterDiagnostics() {
   const [savingNetworkPrinter, setSavingNetworkPrinter] = useState(false);
   const [testingPrinterId, setTestingPrinterId] = useState<string | null>(null);
   const [editingPrinterId, setEditingPrinterId] = useState<string | null>(null);
-  const [networkPrinterForm, setNetworkPrinterForm] = useState({
-    name: "",
-    vendor: "",
-    model: "",
-    ipAddress: "",
-    port: "9100",
-    commandLanguage: "AUTO" as RegisteredPrinterRow["commandLanguage"],
-  });
+  const [networkPrinterForm, setNetworkPrinterForm] = useState(buildEmptyNetworkPrinterForm);
+
+  const sameHostMockPrinterHost = "127.0.0.1";
+  const dockerMockPrinterHost = "mock-printer";
 
   const loadRegisteredPrinters = async () => {
     if (user?.role !== "manufacturer") return;
@@ -229,12 +234,128 @@ export default function PrinterDiagnostics() {
     [detectedPrinters, localAgent, remoteStatus, selectedPrinterId]
   );
 
+  const networkDirectPrinters = useMemo(
+    () => registeredPrinters.filter((printer) => printer.connectionType === "NETWORK_DIRECT" && printer.isActive),
+    [registeredPrinters]
+  );
+
+  const effectiveLicenseeId = useMemo(() => {
+    const directLicenseeId = String(user?.licenseeId || "").trim();
+    if (directLicenseeId) return directLicenseeId;
+
+    const primaryLinkedLicensee = user?.linkedLicensees?.find((entry) => entry.isPrimary)?.id;
+    const fallbackLinkedLicensee = user?.linkedLicensees?.[0]?.id;
+    const linkedLicenseeId = String(primaryLinkedLicensee || fallbackLinkedLicensee || "").trim();
+    return linkedLicenseeId || undefined;
+  }, [user?.licenseeId, user?.linkedLicensees]);
+
+  const preferredNetworkDirectPrinter = useMemo(
+    () =>
+      networkDirectPrinters.find((printer) => printer.isDefault) ||
+      networkDirectPrinters.find((printer) => printer.registryStatus?.state === "READY") ||
+      networkDirectPrinters[0] ||
+      null,
+    [networkDirectPrinters]
+  );
+
+  const effectiveSummary = useMemo(() => {
+    if (!preferredNetworkDirectPrinter) return summary;
+
+    const hostLabel = `${preferredNetworkDirectPrinter.ipAddress || "—"}:${preferredNetworkDirectPrinter.port || 9100}`;
+    const pseudoPrinter: PrinterInventoryRow = {
+      printerId: preferredNetworkDirectPrinter.id,
+      printerName: preferredNetworkDirectPrinter.name,
+      model: preferredNetworkDirectPrinter.model || null,
+      connection: "NETWORK_DIRECT",
+      online: preferredNetworkDirectPrinter.registryStatus?.state !== "OFFLINE",
+      isDefault: Boolean(preferredNetworkDirectPrinter.isDefault),
+      protocols: [],
+      languages: [preferredNetworkDirectPrinter.commandLanguage],
+      mediaSizes: [],
+      dpi: null,
+    };
+
+    if (preferredNetworkDirectPrinter.registryStatus?.state === "READY") {
+      return {
+        state: "compatibility_ready" as const,
+        badgeLabel: "Network-direct",
+        title: "Network printer ready",
+        summary: `${preferredNetworkDirectPrinter.name} is registered and reachable for server-side dispatch.`,
+        detail:
+          preferredNetworkDirectPrinter.registryStatus.detail ||
+          `Backend connectivity to ${hostLabel} has already been validated.`,
+        tone: "success" as const,
+        nextSteps: [
+          "Open the batch workflow and choose the registered network-direct printer profile.",
+          "Use the mock printer control panel to switch ready, paper-out, head-open, and offline states while testing.",
+        ],
+        selectedPrinter: pseudoPrinter,
+      };
+    }
+
+    if (preferredNetworkDirectPrinter.registryStatus?.state === "ATTENTION") {
+      return {
+        state: "server_sync_pending" as const,
+        badgeLabel: "Needs validation",
+        title: "Network printer profile needs validation",
+        summary: `${preferredNetworkDirectPrinter.name} is registered, but connectivity has not been validated yet.`,
+        detail:
+          preferredNetworkDirectPrinter.registryStatus.detail ||
+          `Run Test against ${hostLabel} to confirm the raw socket is reachable.`,
+        tone: "warning" as const,
+        nextSteps: [
+          "Use the Test button under Registered printer profiles.",
+          "If you are using the mock printer on this machine, use the one-click mock setup below.",
+        ],
+        selectedPrinter: pseudoPrinter,
+      };
+    }
+
+    if (preferredNetworkDirectPrinter.registryStatus?.state === "BLOCKED") {
+      return {
+        state: "trust_blocked" as const,
+        badgeLabel: "Blocked",
+        title: "Network printer profile is blocked",
+        summary: `${preferredNetworkDirectPrinter.name} cannot be used for network-direct dispatch in its current configuration.`,
+        detail:
+          preferredNetworkDirectPrinter.registryStatus.detail ||
+          "Check the command language and host/port values, then validate again.",
+        tone: "danger" as const,
+        nextSteps: [
+          "Set the printer language to ZPL, TSPL, EPL, or CPCL.",
+          "Retest after correcting the profile.",
+        ],
+        selectedPrinter: pseudoPrinter,
+      };
+    }
+
+    if (preferredNetworkDirectPrinter.registryStatus?.state === "OFFLINE") {
+      return {
+        state: "printer_offline" as const,
+        badgeLabel: "Offline",
+        title: "Network printer is unreachable",
+        summary: `${preferredNetworkDirectPrinter.name} is registered, but ${hostLabel} is not accepting TCP connections right now.`,
+        detail:
+          preferredNetworkDirectPrinter.registryStatus.detail ||
+          "Bring the printer online and run the validation test again.",
+        tone: "danger" as const,
+        nextSteps: [
+          "Start the printer or mock server and confirm the raw socket is listening on port 9100.",
+          "Run Test again after the socket is reachable.",
+        ],
+        selectedPrinter: pseudoPrinter,
+      };
+    }
+
+    return summary;
+  }, [preferredNetworkDirectPrinter, summary]);
+
   const statusClasses =
-    summary.tone === "success"
+    effectiveSummary.tone === "success"
       ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-      : summary.tone === "warning"
+      : effectiveSummary.tone === "warning"
         ? "border-amber-200 bg-amber-50 text-amber-800"
-        : summary.tone === "neutral"
+        : effectiveSummary.tone === "neutral"
           ? "border-slate-200 bg-slate-50 text-slate-700"
           : "border-red-200 bg-red-50 text-red-800";
 
@@ -244,60 +365,135 @@ export default function PrinterDiagnostics() {
 
   const resetNetworkPrinterForm = () => {
     setEditingPrinterId(null);
-    setNetworkPrinterForm({
-      name: "",
-      vendor: "",
-      model: "",
-      ipAddress: "",
-      port: "9100",
-      commandLanguage: "AUTO",
-    });
+    setNetworkPrinterForm(buildEmptyNetworkPrinterForm());
   };
 
-  const saveNetworkPrinter = async () => {
-    const name = networkPrinterForm.name.trim();
-    const ipAddress = networkPrinterForm.ipAddress.trim();
-    const port = Number(networkPrinterForm.port || 0);
+  const persistNetworkPrinter = async (params?: {
+    printerId?: string | null;
+    formOverride?: typeof networkPrinterForm;
+    successTitle?: string;
+    resetAfterSave?: boolean;
+  }) => {
+    const source = params?.formOverride || networkPrinterForm;
+    const name = source.name.trim();
+    const ipAddress = source.ipAddress.trim();
+    const port = Number(source.port || 0);
 
     if (!name || !ipAddress || !Number.isFinite(port) || port <= 0) {
       toast({
         title: "Incomplete printer profile",
-        description: "Name, IP address, and TCP port are required.",
+        description: "Name, host or IP address, and TCP port are required.",
         variant: "destructive",
       });
-      return;
+      return null;
     }
 
     setSavingNetworkPrinter(true);
     try {
+      const hasActiveDefault = registeredPrinters.some((printer) => printer.isActive && printer.isDefault && printer.id !== params?.printerId);
       const payload = {
         name,
-        vendor: networkPrinterForm.vendor.trim() || undefined,
-        model: networkPrinterForm.model.trim() || undefined,
+        vendor: source.vendor.trim() || undefined,
+        model: source.model.trim() || undefined,
+        licenseeId: effectiveLicenseeId,
         ipAddress,
         port,
-        commandLanguage: networkPrinterForm.commandLanguage,
+        commandLanguage: source.commandLanguage,
+        isDefault: params?.printerId ? undefined : !hasActiveDefault,
       };
-      const response = editingPrinterId
-        ? await apiClient.updateNetworkPrinter(editingPrinterId, payload)
+
+      const response = params?.printerId
+        ? await apiClient.updateNetworkPrinter(params.printerId, payload)
         : await apiClient.createNetworkPrinter(payload);
       if (!response.success) {
         toast({
-          title: editingPrinterId ? "Update failed" : "Create failed",
+          title: params?.printerId ? "Update failed" : "Create failed",
           description: response.error || "Could not save printer profile.",
           variant: "destructive",
         });
-        return;
+        return null;
       }
+
+      const savedPrinter = (response.data || {}) as RegisteredPrinterRow;
+      const savedPrinterId = String(savedPrinter.id || params?.printerId || "").trim();
+      let validated = false;
+      let detail = "Printer profile saved.";
+
+      if (savedPrinterId) {
+        setTestingPrinterId(savedPrinterId);
+        const validation = await apiClient.testRegisteredPrinter(savedPrinterId);
+        if (validation.success) {
+          validated = true;
+          detail =
+            (validation.data as any)?.registryStatus?.detail ||
+            (validation.data as any)?.registryStatus?.summary ||
+            "Printer profile saved and validated.";
+        } else {
+          detail = validation.error || "Printer profile saved, but connectivity validation failed.";
+        }
+      }
+
       toast({
-        title: editingPrinterId ? "Printer updated" : "Printer registered",
-        description: `${name} is ready for validation.`,
+        title:
+          params?.successTitle ||
+          (validated
+            ? params?.printerId
+              ? "Printer updated and validated"
+              : "Printer registered and validated"
+            : params?.printerId
+              ? "Printer updated"
+              : "Printer registered"),
+        description: detail,
+        variant: validated ? "default" : "destructive",
       });
-      resetNetworkPrinterForm();
+
+      if (params?.resetAfterSave !== false) {
+        resetNetworkPrinterForm();
+      }
       await loadDiagnostics();
+      return { savedPrinterId, validated };
     } finally {
+      setTestingPrinterId(null);
       setSavingNetworkPrinter(false);
     }
+  };
+
+  const saveNetworkPrinter = async () => {
+    await persistNetworkPrinter({
+      printerId: editingPrinterId,
+      resetAfterSave: true,
+    });
+  };
+
+  const seedMockNetworkPrinterForm = (host = sameHostMockPrinterHost) => {
+    const seeded = {
+      name: "Mock Zebra Printer",
+      vendor: "Zebra",
+      model: "9100 Test Socket",
+      ipAddress: host,
+      port: "9100",
+      commandLanguage: "ZPL" as RegisteredPrinterRow["commandLanguage"],
+    };
+    setEditingPrinterId(null);
+    setNetworkPrinterForm(seeded);
+    return seeded;
+  };
+
+  const registerMockNetworkPrinter = async (host = sameHostMockPrinterHost) => {
+    const seeded = seedMockNetworkPrinterForm(host);
+    const existing = registeredPrinters.find(
+      (printer) =>
+        printer.connectionType === "NETWORK_DIRECT" &&
+        String(printer.ipAddress || "").trim() === seeded.ipAddress &&
+        Number(printer.port || 9100) === Number(seeded.port || 9100)
+    );
+
+    await persistNetworkPrinter({
+      printerId: existing?.id || null,
+      formOverride: seeded,
+      successTitle: existing ? "Mock printer updated" : "Mock printer registered",
+      resetAfterSave: false,
+    });
   };
 
   const editNetworkPrinter = (printer: RegisteredPrinterRow) => {
@@ -372,11 +568,11 @@ export default function PrinterDiagnostics() {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className="text-lg font-semibold">{summary.title}</div>
-                  <Badge variant={summary.tone === "danger" ? "destructive" : "secondary"}>{summary.badgeLabel}</Badge>
+                  <div className="text-lg font-semibold">{effectiveSummary.title}</div>
+                  <Badge variant={effectiveSummary.tone === "danger" ? "destructive" : "secondary"}>{effectiveSummary.badgeLabel}</Badge>
                 </div>
-                <p className="text-sm leading-6">{summary.summary}</p>
-                <p className="text-xs leading-5 opacity-90">{summary.detail}</p>
+                <p className="text-sm leading-6">{effectiveSummary.summary}</p>
+                <p className="text-xs leading-5 opacity-90">{effectiveSummary.detail}</p>
               </div>
 
               <div className="grid gap-2 text-xs lg:min-w-[16rem]">
@@ -386,7 +582,7 @@ export default function PrinterDiagnostics() {
                 </div>
                 <div className="rounded-xl border border-white/60 bg-white/60 px-3 py-2">
                   <div className="font-medium opacity-70">Selected printer</div>
-                  <div className="mt-1 font-semibold">{summary.selectedPrinter?.printerName || remoteStatus?.selectedPrinterName || "—"}</div>
+                  <div className="mt-1 font-semibold">{effectiveSummary.selectedPrinter?.printerName || remoteStatus?.selectedPrinterName || "—"}</div>
                 </div>
               </div>
             </div>
@@ -450,7 +646,7 @@ export default function PrinterDiagnostics() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
-              {summary.nextSteps.map((step) => (
+              {effectiveSummary.nextSteps.map((step) => (
                 <div key={step} className="rounded-lg border bg-muted/40 px-3 py-2">
                   {step}
                 </div>
@@ -483,6 +679,19 @@ export default function PrinterDiagnostics() {
                   <li>If it succeeds but this page still shows blocked, copy diagnostics and send them to support.</li>
                 </ol>
               </div>
+              {preferredNetworkDirectPrinter && (
+                <div className="rounded-xl border bg-muted/30 p-4">
+                  <div className="font-medium text-foreground">Network-direct shortcut</div>
+                  <div className="mt-3 text-sm leading-6 text-muted-foreground">
+                    Registered profile: <span className="font-medium text-foreground">{preferredNetworkDirectPrinter.name}</span>
+                    <br />
+                    Socket target: <span className="font-mono text-foreground">{preferredNetworkDirectPrinter.ipAddress || "—"}:{preferredNetworkDirectPrinter.port || 9100}</span>
+                  </div>
+                  <div className="mt-3 text-xs text-muted-foreground">
+                    Network-direct printing does not depend on the local print agent inventory. If this profile validates, the batch workflow can print directly through the backend even when no workstation printer is attached.
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="space-y-3 text-sm text-muted-foreground">
@@ -546,7 +755,18 @@ export default function PrinterDiagnostics() {
             <CardContent className="space-y-3">
               {registeredPrinters.length === 0 ? (
                 <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
-                  No printer profiles are registered yet. Local-agent printers appear after a trusted heartbeat. Network-direct printers can be added here.
+                  <div>No printer profiles are registered yet. Local-agent printers appear after a trusted heartbeat. Network-direct printers can be added here.</div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={() => void registerMockNetworkPrinter(dockerMockPrinterHost)} disabled={savingNetworkPrinter}>
+                      {savingNetworkPrinter ? "Connecting..." : `Use Docker mock-printer (${dockerMockPrinterHost}:9100)`}
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => void registerMockNetworkPrinter(sameHostMockPrinterHost)} disabled={savingNetworkPrinter}>
+                      {savingNetworkPrinter ? "Connecting..." : `Use same-host mock printer (${sameHostMockPrinterHost}:9100)`}
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => seedMockNetworkPrinterForm(dockerMockPrinterHost)}>
+                      Fill Docker settings only
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -605,6 +825,24 @@ export default function PrinterDiagnostics() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
+              <div className="rounded-xl border bg-muted/20 p-3 text-xs text-muted-foreground">
+                <div className="font-medium text-foreground">Fast setup for the mock printer</div>
+                <div className="mt-1 leading-5">
+                  Use <span className="font-mono text-foreground">{dockerMockPrinterHost}:9100</span> when backend and mock printer run together in Docker on Lightsail.
+                  Use <span className="mx-1 font-mono text-foreground">{sameHostMockPrinterHost}:9100</span> only when the mock printer runs on the exact same host as the backend process.
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" onClick={() => void registerMockNetworkPrinter(dockerMockPrinterHost)} disabled={savingNetworkPrinter}>
+                    {savingNetworkPrinter ? "Connecting..." : `Use Docker mock-printer (${dockerMockPrinterHost}:9100)`}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => void registerMockNetworkPrinter(sameHostMockPrinterHost)} disabled={savingNetworkPrinter}>
+                    {savingNetworkPrinter ? "Connecting..." : `Use same-host mock printer (${sameHostMockPrinterHost}:9100)`}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => seedMockNetworkPrinterForm(dockerMockPrinterHost)}>
+                    Fill Docker form only
+                  </Button>
+                </div>
+              </div>
               <div className="space-y-1">
                 <Label className="text-xs">Name</Label>
                 <Input value={networkPrinterForm.name} onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Factory line printer" />
@@ -621,8 +859,12 @@ export default function PrinterDiagnostics() {
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1">
-                  <Label className="text-xs">IP address</Label>
-                  <Input value={networkPrinterForm.ipAddress} onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, ipAddress: e.target.value }))} placeholder="192.168.1.50" />
+                  <Label className="text-xs">IP address or host</Label>
+                  <Input
+                    value={networkPrinterForm.ipAddress}
+                    onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, ipAddress: e.target.value }))}
+                    placeholder={`mock-printer or ${sameHostMockPrinterHost}`}
+                  />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">TCP port</Label>
@@ -709,7 +951,15 @@ export default function PrinterDiagnostics() {
 
             {detectedPrinters.length === 0 ? (
               <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
-                No printers were reported by the local agent.
+                {preferredNetworkDirectPrinter ? (
+                  <>
+                    No local-agent printers were reported. The registered network-direct printer
+                    <span className="mx-1 font-medium text-foreground">{preferredNetworkDirectPrinter.name}</span>
+                    can still be used from batch operations once it validates successfully.
+                  </>
+                ) : (
+                  "No printers were reported by the local agent."
+                )}
               </div>
             ) : (
               <div className="grid gap-3 md:grid-cols-2">
