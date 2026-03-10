@@ -941,6 +941,24 @@ export default function Batches() {
     void loadRecentPrintJobs(b.id);
   };
 
+  useEffect(() => {
+    if (!printProgressOpen || printing || printProgressError) return;
+
+    const normalizedPhase = String(printProgressPhase || "").trim().toLowerCase();
+    const isCompleted =
+      normalizedPhase === "completed" ||
+      normalizedPhase === "print job completed" ||
+      normalizedPhase === "print session completed";
+
+    if (!isCompleted) return;
+
+    const timer = window.setTimeout(() => {
+      setPrintProgressOpen(false);
+    }, 900);
+
+    return () => window.clearTimeout(timer);
+  }, [printProgressError, printProgressOpen, printProgressPhase, printing]);
+
   const switchSelectedPrinter = async () => {
     if (!selectedPrinterId) return;
     setSwitchingPrinter(true);

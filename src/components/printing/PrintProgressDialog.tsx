@@ -1,5 +1,5 @@
 import React from "react";
-import { Loader2, Printer } from "lucide-react";
+import { CircleCheckBig, Loader2, Printer } from "lucide-react";
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
@@ -23,6 +23,8 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
   const safePrinted = Math.max(0, Number(props.printed || 0));
   const safeRemaining = Math.max(0, Number(props.remaining || Math.max(0, safeTotal - safePrinted)));
   const progressValue = safeTotal > 0 ? Math.max(0, Math.min(100, Math.round((safePrinted / safeTotal) * 100))) : 0;
+  const normalizedPhase = String(props.phase || "").trim().toLowerCase();
+  const isCompleted = !props.error && normalizedPhase.includes("complete");
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
@@ -61,10 +63,17 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            Keep this window open until all labels are confirmed.
-          </div>
+          {isCompleted ? (
+            <div className="flex items-center gap-2 text-xs text-emerald-700">
+              <CircleCheckBig className="h-3.5 w-3.5" />
+              All labels confirmed. Closing automatically.
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Keep this window open until all labels are confirmed.
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>
