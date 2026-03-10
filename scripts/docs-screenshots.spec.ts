@@ -15,9 +15,13 @@ type OverlaySpec = {
 const OUT_DIR = path.join(process.cwd(), "public", "docs");
 
 const BASE_URL = process.env.DOCS_BASE_URL || "http://localhost:8080";
+const OPERATIONS_BASE_URL = process.env.DOCS_OPERATIONS_BASE_URL || BASE_URL;
+const MANUFACTURER_BASE_URL = process.env.DOCS_MANUFACTURER_BASE_URL || BASE_URL;
 
-const SUPERADMIN_EMAIL = process.env.DOCS_SUPERADMIN_EMAIL || "admin@authenticqr.com";
+const SUPERADMIN_EMAIL = process.env.DOCS_SUPERADMIN_EMAIL || "administration@mscqr.com";
+const SUPERADMIN_LOGIN_EMAIL = process.env.DOCS_SUPERADMIN_LOGIN_EMAIL || SUPERADMIN_EMAIL;
 const SUPERADMIN_PASSWORD = process.env.DOCS_SUPERADMIN_PASSWORD || "admin123";
+const SUPERADMIN_ACCESS_TOKEN = String(process.env.DOCS_SUPERADMIN_ACCESS_TOKEN || "").trim();
 
 const LICENSEE_ADMIN_EMAIL = process.env.DOCS_LICENSEE_ADMIN_EMAIL || "admin@acme.com";
 const LICENSEE_ADMIN_PASSWORD = process.env.DOCS_LICENSEE_ADMIN_PASSWORD || "licensee123";
@@ -26,6 +30,19 @@ const MANUFACTURER_EMAIL = process.env.DOCS_MANUFACTURER_EMAIL || "factory1@acme
 const MANUFACTURER_PASSWORD = process.env.DOCS_MANUFACTURER_PASSWORD || "manufacturer123";
 
 const DOCS_CODE = process.env.DOCS_QR_CODE || "A0000000051";
+const DOCS_BATCH_NAME =
+  process.env.DOCS_BATCH_NAME ||
+  `Docs Batch ${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}`;
+const RESUME_STAGE = String(process.env.DOCS_RESUME_FROM || "setup").trim().toLowerCase();
+const STAGE_ORDER = {
+  setup: 0,
+  manufacturer: 1,
+  customer: 2,
+  ir: 3,
+} as const;
+
+const activeResumeStage = (RESUME_STAGE in STAGE_ORDER ? RESUME_STAGE : "setup") as keyof typeof STAGE_ORDER;
+const shouldRunStage = (stage: keyof typeof STAGE_ORDER) => STAGE_ORDER[activeResumeStage] <= STAGE_ORDER[stage];
 
 const disableMotion = async (page: Page) => {
   await page.addStyleTag({
@@ -45,13 +62,49 @@ const goto = async (page: Page, url: string) => {
   await page.waitForTimeout(250);
 };
 
-const login = async (page: Page, email: string, password: string) => {
-  await goto(page, `${BASE_URL}/login`);
+const login = async (page: Page, baseUrl: string, email: string, password: string) => {
+  await goto(page, `${baseUrl}/login`);
   await page.locator("#email").fill(email);
   await page.locator("#password").fill(password);
   await page.getByRole("button", { name: /^sign in$/i }).click();
-  // Remote DB + first-load bundles can be slow; keep this generous for docs capture stability.
-  await page.waitForURL("**/dashboard", { timeout: 60_000 });
+  // Remote DB + first-load bundles can be slow; wait for any authenticated app route.
+  await page.waitForFunction(
+    () => {
+      const publicAuthRoutes = new Set([
+        "/login",
+        "/forgot-password",
+        "/reset-password",
+        "/accept-invite",
+      ]);
+      return !publicAuthRoutes.has(window.location.pathname);
+    },
+    undefined,
+    { timeout: 60_000 },
+  );
+  await expect(page.locator("main")).toBeVisible({ timeout: 15_000 });
+};
+
+const authenticateSuperAdmin = async (page: Page, baseUrl: string) => {
+  if (!SUPERADMIN_ACCESS_TOKEN) {
+    await login(page, baseUrl, SUPERADMIN_LOGIN_EMAIL, SUPERADMIN_PASSWORD);
+    return;
+  }
+
+  const host = new URL(baseUrl).hostname;
+  await page.context().setExtraHTTPHeaders({
+    Authorization: `Bearer ${SUPERADMIN_ACCESS_TOKEN}`,
+  });
+  await page.context().addCookies([
+    {
+      name: "aq_csrf",
+      value: "docs-csrf",
+      domain: host,
+      path: "/",
+      httpOnly: false,
+      secure: false,
+      sameSite: "Lax",
+    },
+  ]);
 };
 
 const clearOverlay = async (page: Page) => {
@@ -212,25 +265,35 @@ const screenshot = async (page: Page, filename: string, overlay?: OverlaySpec) =
   await clearOverlay(page);
 };
 
-const openAssignManufacturerDialog = async (page: Page) => {
-  // Try a few rows until we find one with Assign manufacturer enabled
-  const actionButtons = page.getByRole("button", { name: /^actions$/i });
-  await expect(actionButtons.first()).toBeVisible({ timeout: 20_000 });
-  const count = await actionButtons.count();
+const openLicenseeBatchWorkspace = async (page: Page, batchName: string) => {
+  const namedRow = page.locator("tr", { hasText: batchName }).first();
+  const row =
+    (await namedRow.count()) > 0
+      ? namedRow
+      : page
+          .locator("tr")
+          .filter({ has: page.getByRole("button", { name: /^open$/i }) })
+          .first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.getByRole("button", { name: /^open$/i }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("tab", { name: /^overview$/i })).toBeVisible({ timeout: 15_000 });
+  return dialog;
+};
 
-  for (let i = 0; i < Math.min(count, 8); i++) {
-    await actionButtons.nth(i).click();
-    const item = page.getByRole("menuitem", { name: /assign manufacturer/i });
-    const disabled = await item.getAttribute("data-disabled");
-    if (!disabled) {
-      await item.click();
-      return;
-    }
-    // close menu by clicking elsewhere
-    await page.mouse.click(20, 20);
+const selectFirstEnabledPrintJobButton = async (page: Page) => {
+  const buttons = page.getByRole("button", { name: /create print job/i });
+  await expect(buttons.first()).toBeVisible({ timeout: 20_000 });
+  const count = await buttons.count();
+
+  for (let i = 0; i < Math.min(count, 12); i++) {
+    const candidate = buttons.nth(i);
+    if (await candidate.isDisabled()) continue;
+    await candidate.click();
+    return;
   }
 
-  throw new Error("Could not find an unassigned batch to open Assign Manufacturer dialog.");
+  throw new Error("Could not find an enabled Create Print Job button.");
 };
 
 test.describe.configure({ mode: "serial" });
@@ -239,335 +302,347 @@ test.setTimeout(20 * 60_000);
 test("capture help screenshots", async ({ browser }) => {
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
-  // Public: login + onboarding screens (no submission required)
-  {
-    const ctx = await browser.newContext({ viewport: { width: 1300, height: 780 } });
-    const page = await ctx.newPage();
-    await disableMotion(page);
+  if (shouldRunStage("setup")) {
+    // Public: login + onboarding screens (no submission required)
+    {
+      const ctx = await browser.newContext({ viewport: { width: 1300, height: 780 } });
+      const page = await ctx.newPage();
+      await disableMotion(page);
 
-    await goto(page, `${BASE_URL}/login`);
-    await page.locator("#email").fill(SUPERADMIN_EMAIL);
-    await page.locator("#password").fill("********");
-    await screenshot(page, "access-super-admin-login.png", {
-      title: "Documentation Capture - Super Admin Access",
+      await goto(page, `${OPERATIONS_BASE_URL}/login`);
+      await page.locator("#email").fill(SUPERADMIN_EMAIL);
+      await page.locator("#password").fill("********");
+      await screenshot(page, "access-super-admin-login.png", {
+        title: "Documentation Capture - Super Admin Access",
+        callouts: [
+          { locator: page.locator("#email"), text: "Enter your email address" },
+          { locator: page.locator("#password"), text: "Enter your password" },
+          { locator: page.getByRole("button", { name: /^sign in$/i }), text: "Sign in with provided credentials" },
+        ],
+      });
+
+      await goto(page, `${OPERATIONS_BASE_URL}/accept-invite?token=docs-token`);
+      await page.locator("#password").fill("********");
+      await page.locator("#confirm").fill("********");
+      await screenshot(page, "password-accept-invite.png", {
+        title: "Documentation Capture - Accept Invite",
+        callouts: [
+          { locator: page.locator("#password"), text: "Set your new password" },
+          { locator: page.getByRole("button", { name: /activate account/i }), text: "Activate to finish onboarding" },
+        ],
+      });
+
+      await goto(page, `${OPERATIONS_BASE_URL}/forgot-password`);
+      await page.locator("#email").fill(SUPERADMIN_EMAIL);
+      await screenshot(page, "password-forgot-password.png", {
+        title: "Documentation Capture - Forgot Password",
+        callouts: [
+          { locator: page.locator("#email"), text: "Enter your account email" },
+          { locator: page.getByRole("button", { name: /send reset link/i }), text: "Request a reset link" },
+        ],
+      });
+
+      await goto(page, `${OPERATIONS_BASE_URL}/reset-password?token=docs-token`);
+      await page.locator("#password").fill("********");
+      await page.locator("#confirm").fill("********");
+      await screenshot(page, "password-reset-password.png", {
+        title: "Documentation Capture - Reset Password",
+        callouts: [
+          { locator: page.locator("#password"), text: "Enter your new password" },
+          { locator: page.getByRole("button", { name: /update password/i }), text: "Update password" },
+        ],
+      });
+
+      await ctx.close();
+    }
+
+    // Licensee admin: request inventory, open assign dialog, create manufacturer modal
+    const licenseeCtx = await browser.newContext({ viewport: { width: 1500, height: 820 } });
+    const licenseePage = await licenseeCtx.newPage();
+    await disableMotion(licenseePage);
+    await login(licenseePage, OPERATIONS_BASE_URL, LICENSEE_ADMIN_EMAIL, LICENSEE_ADMIN_PASSWORD);
+
+    await goto(licenseePage, `${OPERATIONS_BASE_URL}/qr-requests`);
+    const qtyInput = licenseePage.locator('input[type="number"]').first();
+    const batchNameInput = licenseePage.getByPlaceholder("Example: March Retail Rollout");
+    const noteInput = licenseePage.locator("input").nth(2);
+    await qtyInput.fill("250");
+    await batchNameInput.fill(DOCS_BATCH_NAME);
+    await noteInput.fill("Docs capture request");
+    await screenshot(licenseePage, "licensee-request-qr-inventory.png", {
+      title: "Documentation Capture - Licensee/Admin - Request QR Inventory",
       callouts: [
-        { locator: page.locator("#email"), text: "Enter your email address" },
-        { locator: page.locator("#password"), text: "Enter your password" },
-        { locator: page.getByRole("button", { name: /^sign in$/i }), text: "Sign in with provided credentials" },
+        { locator: qtyInput, text: "Enter the quantity you need" },
+        { locator: batchNameInput, text: "Add a request reference to help the approver identify this request" },
+        { locator: licenseePage.getByRole("button", { name: /submit request/i }), text: "Submit quantity request" },
+      ],
+    });
+    await licenseePage.getByRole("button", { name: /submit request/i }).click();
+    await licenseePage.waitForTimeout(800);
+
+    await goto(licenseePage, `${OPERATIONS_BASE_URL}/manufacturers`);
+    await licenseePage.getByRole("button", { name: /add manufacturer/i }).click();
+    const manufacturerDialog = licenseePage.getByRole("dialog");
+    await screenshot(licenseePage, "licensee-create-manufacturer.png", {
+      title: "Documentation Capture - Licensee/Admin - Create Manufacturer",
+      callouts: [
+        { locator: manufacturerDialog.getByPlaceholder("Factory A"), text: "Enter the manufacturer name" },
+        { locator: manufacturerDialog.getByPlaceholder("factory@example.com"), text: "Manufacturer login email" },
+        { locator: manufacturerDialog.getByText(/invite link only/i).first(), text: "User onboarding is handled through a one-time invite link" },
+      ],
+    });
+    // Close dialog
+    await licenseePage.getByRole("button", { name: /^cancel$/i }).click();
+
+    // Super admin: approve the pending request + capture licensee creation modal + IR dashboard
+    const superCtx = await browser.newContext({ viewport: { width: 1500, height: 820 } });
+    const superPage = await superCtx.newPage();
+    await disableMotion(superPage);
+    await authenticateSuperAdmin(superPage, OPERATIONS_BASE_URL);
+
+    await goto(superPage, `${OPERATIONS_BASE_URL}/licensees`);
+    await superPage.getByRole("button", { name: /add licensee/i }).click();
+    await screenshot(superPage, "superadmin-create-licensee.png", {
+      title: "Documentation Capture - Super Admin - Create Licensee",
+      callouts: [
+        {
+          locator: superPage.getByRole("dialog").getByRole("heading", { name: /create new licensee/i }),
+          text: "Create a new licensee (tenant)",
+        },
+        {
+          locator: superPage.getByRole("dialog").getByPlaceholder("Acme Corp"),
+          text: "Enter the organization name",
+        },
+      ],
+    });
+    // Close dialog (X button)
+    await superPage.keyboard.press("Escape");
+
+    await goto(superPage, `${OPERATIONS_BASE_URL}/qr-requests`);
+    const pendingRow = superPage.locator("tr", { hasText: DOCS_BATCH_NAME }).first();
+    await expect(pendingRow).toBeVisible({ timeout: 15_000 });
+    await pendingRow.getByRole("button", { name: /^approve$/i }).click();
+    await screenshot(superPage, "superadmin-approve-qr-request.png", {
+      title: "Documentation Capture - Super Admin - QR Request Approval",
+      callouts: [
+        { locator: superPage.getByRole("dialog").getByRole("button", { name: /^approve$/i }), text: "Approve and allocate the request" },
+        { locator: superPage.getByRole("dialog"), text: "Review request details" },
+      ],
+    });
+    await superPage.getByRole("dialog").getByRole("button", { name: /^approve$/i }).click();
+    await superPage.waitForTimeout(900);
+
+    await goto(superPage, `${OPERATIONS_BASE_URL}/ir`);
+    await screenshot(superPage, "ir-dashboard.png", {
+      title: "Documentation Capture - IR Center",
+      callouts: [
+        { locator: superPage.getByRole("tab", { name: /incidents/i }), text: "Incidents queue" },
+        { locator: superPage.getByRole("tab", { name: /alerts/i }), text: "Policy alerts" },
+        { locator: superPage.getByRole("tab", { name: /policies/i }), text: "Policy rules" },
       ],
     });
 
-    await goto(page, `${BASE_URL}/accept-invite?token=docs-token`);
-    await page.locator("#password").fill("********");
-    await page.locator("#confirm").fill("********");
-    await screenshot(page, "password-accept-invite.png", {
-      title: "Documentation Capture - Accept Invite",
+    // Policy create modal
+    await superPage.getByRole("tab", { name: /policies/i }).click();
+    await superPage.getByRole("button", { name: /new policy/i }).click();
+    await screenshot(superPage, "ir-policy-create.png", {
+      title: "Documentation Capture - Policy Alerts - Create Rule",
       callouts: [
-        { locator: page.locator("#password"), text: "Set your new password" },
-        { locator: page.getByRole("button", { name: /activate account/i }), text: "Activate to finish onboarding" },
+        { locator: superPage.getByRole("dialog"), text: "Create policy rule" },
+        { locator: superPage.getByRole("dialog").getByText(/rule type/i), text: "Choose a rule type and thresholds" },
       ],
     });
+    await superPage.keyboard.press("Escape");
 
-    await goto(page, `${BASE_URL}/forgot-password`);
-    await page.locator("#email").fill(SUPERADMIN_EMAIL);
-    await screenshot(page, "password-forgot-password.png", {
-      title: "Documentation Capture - Forgot Password",
+    await superCtx.close();
+
+    // Licensee admin: capture Assign Manufacturer dialog after approval creates a received batch
+    await goto(licenseePage, `${OPERATIONS_BASE_URL}/batches`);
+    const assignDialog = await openLicenseeBatchWorkspace(licenseePage, DOCS_BATCH_NAME);
+    await assignDialog.getByRole("tab", { name: /^operations$/i }).click();
+    await expect(assignDialog.getByRole("button", { name: /allocate quantity/i })).toBeVisible({ timeout: 15_000 });
+    await screenshot(licenseePage, "licensee-assign-batch.png", {
+      title: "Documentation Capture - Licensee/Admin - Source Batch Workspace",
       callouts: [
-        { locator: page.locator("#email"), text: "Enter your account email" },
-        { locator: page.getByRole("button", { name: /send reset link/i }), text: "Request a reset link" },
+        { locator: assignDialog.getByRole("tab", { name: /^operations$/i }), text: "Open Operations to manage source-batch actions" },
+        { locator: assignDialog.getByRole("combobox").first(), text: "Choose the manufacturer receiving the allocation" },
+        { locator: assignDialog.getByPlaceholder("Enter quantity").first(), text: "Enter quantity" },
+        { locator: assignDialog.getByRole("button", { name: /allocate quantity/i }), text: "Create the manufacturer allocation from the source batch" },
       ],
     });
+    const manufacturerTrigger = assignDialog.getByRole("combobox").first();
+    await manufacturerTrigger.click();
+    // Radix Select portals options outside the dialog subtree.
+    const manufacturerOption = licenseePage.getByRole("option", { name: new RegExp(MANUFACTURER_EMAIL, "i") });
+    if (await manufacturerOption.count()) {
+      await manufacturerOption.first().click();
+    } else {
+      await expect(licenseePage.getByRole("option").first()).toBeVisible({ timeout: 15_000 });
+      await licenseePage.getByRole("option").first().click();
+    }
+    await assignDialog.getByPlaceholder("Enter quantity").fill("2");
+    await assignDialog.getByRole("button", { name: /allocate quantity/i }).click();
+    await licenseePage.waitForTimeout(1200);
+    await licenseePage.keyboard.press("Escape");
 
-    await goto(page, `${BASE_URL}/reset-password?token=docs-token`);
-    await page.locator("#password").fill("********");
-    await page.locator("#confirm").fill("********");
-    await screenshot(page, "password-reset-password.png", {
-      title: "Documentation Capture - Reset Password",
-      callouts: [
-        { locator: page.locator("#password"), text: "Enter your new password" },
-        { locator: page.getByRole("button", { name: /update password/i }), text: "Update password" },
-      ],
-    });
-
-    await ctx.close();
+    await licenseeCtx.close();
   }
 
-  // Licensee admin: request inventory, open assign dialog, create manufacturer modal
-  const licenseeCtx = await browser.newContext({ viewport: { width: 1500, height: 820 } });
-  const licenseePage = await licenseeCtx.newPage();
-  await disableMotion(licenseePage);
-  await login(licenseePage, LICENSEE_ADMIN_EMAIL, LICENSEE_ADMIN_PASSWORD);
+  if (shouldRunStage("manufacturer")) {
+    // Manufacturer: create print job + direct dispatch + capture status
+    const manuCtx = await browser.newContext({ viewport: { width: 1500, height: 820 } });
+    const manuPage = await manuCtx.newPage();
+    await disableMotion(manuPage);
+    await login(manuPage, MANUFACTURER_BASE_URL, MANUFACTURER_EMAIL, MANUFACTURER_PASSWORD);
 
-  await goto(licenseePage, `${BASE_URL}/qr-requests`);
-  const qtyInput = licenseePage.locator('input[type="number"]').first();
-  await qtyInput.fill("250");
-  const noteInput = licenseePage.getByRole("textbox").first();
-  await noteInput.fill("Docs capture request");
-  await screenshot(licenseePage, "licensee-request-qr-inventory.png", {
-    title: "Documentation Capture - Licensee/Admin - Request QR Inventory",
-    callouts: [
-      { locator: qtyInput, text: "Enter the quantity you need" },
-      { locator: licenseePage.getByRole("button", { name: /submit request/i }), text: "Submit quantity request" },
-    ],
-  });
-  await licenseePage.getByRole("button", { name: /submit request/i }).click();
-  await licenseePage.waitForTimeout(800);
-
-  await goto(licenseePage, `${BASE_URL}/manufacturers`);
-  await licenseePage.getByRole("button", { name: /add manufacturer/i }).click();
-  const manufacturerDialog = licenseePage.getByRole("dialog");
-  await screenshot(licenseePage, "licensee-create-manufacturer.png", {
-    title: "Documentation Capture - Licensee/Admin - Create Manufacturer",
-    callouts: [
-      { locator: manufacturerDialog.getByPlaceholder("factory@example.com"), text: "Manufacturer login email" },
-      { locator: manufacturerDialog.getByRole("combobox").first(), text: "Invite link is recommended" },
-    ],
-  });
-  // Close dialog
-  await licenseePage.getByRole("button", { name: /^cancel$/i }).click();
-
-  // Super admin: approve the pending request + capture licensee creation modal + IR dashboard
-  const superCtx = await browser.newContext({ viewport: { width: 1500, height: 820 } });
-  const superPage = await superCtx.newPage();
-  await disableMotion(superPage);
-  await login(superPage, SUPERADMIN_EMAIL, SUPERADMIN_PASSWORD);
-
-  await goto(superPage, `${BASE_URL}/licensees`);
-  await superPage.getByRole("button", { name: /add licensee/i }).click();
-  await screenshot(superPage, "superadmin-create-licensee.png", {
-    title: "Documentation Capture - Super Admin - Create Licensee",
-    callouts: [
-      {
-        locator: superPage.getByRole("dialog").getByRole("heading", { name: /create new licensee/i }),
-        text: "Create a new licensee (tenant)",
-      },
-      {
-        locator: superPage.getByRole("dialog").getByPlaceholder("Acme Corp"),
-        text: "Enter the organization name",
-      },
-    ],
-  });
-  // Close dialog (X button)
-  await superPage.keyboard.press("Escape");
-
-  await goto(superPage, `${BASE_URL}/qr-requests`);
-  const pendingRow = superPage.locator("tr", { hasText: "Docs capture request" }).first();
-  await expect(pendingRow).toBeVisible({ timeout: 15_000 });
-  await pendingRow.getByRole("button", { name: /^approve$/i }).click();
-  await screenshot(superPage, "superadmin-approve-qr-request.png", {
-    title: "Documentation Capture - Super Admin - QR Request Approval",
-    callouts: [
-      { locator: superPage.getByRole("dialog").getByRole("button", { name: /^approve$/i }), text: "Approve and allocate the request" },
-      { locator: superPage.getByRole("dialog"), text: "Review request details" },
-    ],
-  });
-  await superPage.getByRole("dialog").getByRole("button", { name: /^approve$/i }).click();
-  await superPage.waitForTimeout(900);
-
-  await goto(superPage, `${BASE_URL}/ir`);
-  await screenshot(superPage, "ir-dashboard.png", {
-    title: "Documentation Capture - IR Center",
-    callouts: [
-      { locator: superPage.getByRole("tab", { name: /incidents/i }), text: "Incidents queue" },
-      { locator: superPage.getByRole("tab", { name: /alerts/i }), text: "Policy alerts" },
-      { locator: superPage.getByRole("tab", { name: /policies/i }), text: "Policy rules" },
-    ],
-  });
-
-  // Policy create modal
-  await superPage.getByRole("tab", { name: /policies/i }).click();
-  await superPage.getByRole("button", { name: /new policy/i }).click();
-  await screenshot(superPage, "ir-policy-create.png", {
-    title: "Documentation Capture - Policy Alerts - Create Rule",
-    callouts: [
-      { locator: superPage.getByRole("dialog"), text: "Create policy rule" },
-      { locator: superPage.getByRole("dialog").getByText(/rule type/i), text: "Choose a rule type and thresholds" },
-    ],
-  });
-  await superPage.keyboard.press("Escape");
-
-  await superCtx.close();
-
-  // Licensee admin: capture Assign Manufacturer dialog after approval creates a received batch
-  await goto(licenseePage, `${BASE_URL}/batches`);
-
-  // Best-effort: ensure at least one unassigned batch exists so the Assign Manufacturer flow is available.
-  // Some environments may have all existing batches already assigned.
-  try {
-    await licenseePage.request.post(`${BASE_URL}/api/qr/batches`, {
-      data: {
-        name: `Docs Received ${new Date().toISOString().slice(0, 10)}`,
-        quantity: 10,
-      },
+    await goto(manuPage, `${MANUFACTURER_BASE_URL}/printer-diagnostics`);
+    const sameHostMockButton = manuPage.getByRole("button", { name: /use same-host mock printer/i }).first();
+    await expect(sameHostMockButton).toBeVisible({ timeout: 20_000 });
+    await sameHostMockButton.click();
+    await expect(manuPage.getByText(/mock zebra printer/i).first()).toBeVisible({ timeout: 20_000 });
+    await manuPage.waitForTimeout(1200);
+    await screenshot(manuPage, "manufacturer-printer-diagnostics.png", {
+      title: "Documentation Capture - Manufacturer - Printer Diagnostics",
+      callouts: [
+        { locator: manuPage.getByRole("heading", { name: /printer diagnostics/i }), text: "Validate printer readiness before opening the print dialog" },
+        { locator: manuPage.getByText(/mock zebra printer/i).first(), text: "Registered network-direct printer profile" },
+        { locator: sameHostMockButton, text: "Quick setup for same-host mock printer testing" },
+      ],
     });
-  } catch {
-    // ignore
-  }
-  await goto(licenseePage, `${BASE_URL}/batches`);
 
-  await openAssignManufacturerDialog(licenseePage);
-  const assignDialog = licenseePage.getByRole("dialog");
-  await screenshot(licenseePage, "licensee-assign-batch.png", {
-    title: "Documentation Capture - Licensee/Admin - Assign Batch",
-    callouts: [
-      { locator: assignDialog.getByText("Select manufacturer").first(), text: "Select manufacturer" },
-      { locator: assignDialog.getByPlaceholder("Enter quantity").first(), text: "Enter quantity" },
-    ],
-  });
-  await licenseePage.keyboard.press("Escape");
+    await goto(manuPage, `${MANUFACTURER_BASE_URL}/batches`);
+    await selectFirstEnabledPrintJobButton(manuPage);
+    const printDialog = manuPage.getByRole("dialog");
+    const qtyToPrintInput = printDialog.getByPlaceholder("Enter quantity").first();
+    const printerProfileTrigger = printDialog.getByRole("combobox").first();
+    await qtyToPrintInput.fill("1");
+    if (!/mock zebra printer/i.test((await printerProfileTrigger.innerText()).trim())) {
+      await printerProfileTrigger.click();
+      await manuPage.getByRole("option", { name: /mock zebra printer/i }).first().click();
+    }
+    await screenshot(manuPage, "manufacturer-create-print-job.png", {
+      title: "Documentation Capture - Manufacturer - Create Print Job",
+      callouts: [
+        { locator: qtyToPrintInput, text: "Select quantity to print" },
+        { locator: printerProfileTrigger, text: "Use the validated registered printer profile" },
+        { locator: printDialog.getByRole("button", { name: /create print job & start dispatch/i }), text: "Start controlled direct-print dispatch" },
+      ],
+    });
+    await printDialog.getByRole("button", { name: /create print job & start dispatch/i }).click();
+    await expect(printDialog.getByText(/recent print jobs/i)).toBeVisible({ timeout: 20_000 });
+    await screenshot(manuPage, "manufacturer-print-status.png", {
+      title: "Documentation Capture - Manufacturer - Print Confirmation",
+      callouts: [
+        { locator: printDialog.getByText(/active print job/i).first(), text: "Current job stays visible in the batch dialog" },
+        { locator: printDialog.getByText(/recent print jobs/i).first(), text: "Recent jobs confirm status and printed counts" },
+      ],
+    });
 
-  await licenseeCtx.close();
-
-  // Manufacturer: create print job + download pack + capture status
-  const manuCtx = await browser.newContext({ viewport: { width: 1500, height: 820 } });
-  const manuPage = await manuCtx.newPage();
-  await disableMotion(manuPage);
-  await login(manuPage, MANUFACTURER_EMAIL, MANUFACTURER_PASSWORD);
-
-  await goto(manuPage, `${BASE_URL}/batches`);
-  const createBtn = manuPage.getByRole("button", { name: /create print job/i }).first();
-  await expect(createBtn).toBeVisible({ timeout: 15_000 });
-  await createBtn.click();
-  const printDialog = manuPage.getByRole("dialog");
-  const qtyToPrintInput = printDialog.getByPlaceholder("Enter quantity").first();
-  await qtyToPrintInput.fill("1");
-  await screenshot(manuPage, "manufacturer-create-print-job.png", {
-    title: "Documentation Capture - Manufacturer - Create Print Job",
-    callouts: [
-      { locator: qtyToPrintInput, text: "Select quantity to print" },
-      { locator: manuPage.getByRole("button", { name: /^create print job$/i }), text: "Generate tokens" },
-    ],
-  });
-  await manuPage.getByRole("button", { name: /^create print job$/i }).click();
-  await manuPage.waitForTimeout(900);
-
-  await screenshot(manuPage, "manufacturer-download-print-pack.png", {
-    title: "Documentation Capture - Manufacturer - Download Print Pack",
-    callouts: [
-      { locator: manuPage.getByRole("button", { name: /download zip/i }), text: "Download secure print ZIP" },
-    ],
-  });
-
-  const [download] = await Promise.all([
-    manuPage.waitForEvent("download", { timeout: 25_000 }),
-    manuPage.getByRole("button", { name: /download zip/i }).click(),
-  ]);
-  const tmpZipPath = path.join(OUT_DIR, "__tmp_print_pack.zip");
-  await download.saveAs(tmpZipPath);
-  try {
-    fs.unlinkSync(tmpZipPath);
-  } catch {
-    // ignore
+    await manuCtx.close();
   }
 
-  // Capture printed status from fresh list view.
-  // We intentionally navigate directly instead of relying on modal-close clicks,
-  // because dialog animations/state changes can be flaky across environments.
-  await goto(manuPage, `${BASE_URL}/batches`);
+  if (shouldRunStage("customer")) {
+    // Customer (public): verify outcomes + report
+    const customerCtx = await browser.newContext({ viewport: { width: 1200, height: 800 } });
+    const customerPage = await customerCtx.newPage();
+    await disableMotion(customerPage);
 
-  const printedStatusCell = manuPage.locator("tbody tr").first().locator("td").nth(7);
-  await screenshot(manuPage, "manufacturer-print-status.png", {
-    title: "Documentation Capture - Manufacturer - Print Confirmation",
-    callouts: [
-      { locator: printedStatusCell, text: "Status updates after print workflow" },
-    ],
-  });
+    // First scan
+    await goto(customerPage, `${OPERATIONS_BASE_URL}/verify/${encodeURIComponent(DOCS_CODE)}`);
+    await customerPage.waitForTimeout(900);
+    await screenshot(customerPage, "customer-first-verification.png", {
+      title: "Documentation Capture - Customer - First Verification",
+      callouts: [
+        { locator: customerPage.getByText(/verified authentic/i).first(), text: "First scan confirms authenticity" },
+      ],
+    });
 
-  await manuCtx.close();
+    // Second scan: verified again
+    await goto(customerPage, `${OPERATIONS_BASE_URL}/verify/${encodeURIComponent(DOCS_CODE)}`);
+    await customerPage.waitForTimeout(800);
+    await screenshot(customerPage, "customer-verified-again.png", {
+      title: "Documentation Capture - Customer - Legit Repeat Verification",
+      callouts: [
+        { locator: customerPage.getByText(/verified again/i).first(), text: "Same buyer can verify again safely" },
+      ],
+    });
 
-  // Customer (public): verify outcomes + report
-  const customerCtx = await browser.newContext({ viewport: { width: 1200, height: 800 } });
-  const customerPage = await customerCtx.newPage();
-  await disableMotion(customerPage);
+    // Switch to a fresh browser context so later scans simulate a different device.
+    const duplicateCtx = await browser.newContext({ viewport: { width: 1200, height: 800 } });
+    const duplicatePage = await duplicateCtx.newPage();
+    await disableMotion(duplicatePage);
 
-  // First scan
-  await goto(customerPage, `${BASE_URL}/verify/${encodeURIComponent(DOCS_CODE)}`);
-  await customerPage.waitForTimeout(900);
-  await screenshot(customerPage, "customer-first-verification.png", {
-    title: "Documentation Capture - Customer - First Verification",
-    callouts: [
-      { locator: customerPage.getByText(/verified authentic/i).first(), text: "First scan confirms authenticity" },
-    ],
-  });
+    await goto(duplicatePage, `${OPERATIONS_BASE_URL}/verify/${encodeURIComponent(DOCS_CODE)}`);
+    await duplicatePage.waitForTimeout(600);
+    await goto(duplicatePage, `${OPERATIONS_BASE_URL}/verify/${encodeURIComponent(DOCS_CODE)}`);
+    await duplicatePage.waitForTimeout(900);
+    await screenshot(duplicatePage, "customer-possible-duplicate.png", {
+      title: "Documentation Capture - Customer - Possible Duplicate",
+      callouts: [
+        { locator: duplicatePage.getByText(/suspicious duplicate/i).first(), text: "Unusual scan patterns may indicate copying" },
+        { locator: duplicatePage.getByText(/risk explanation/i).first(), text: "Reasons and summary help you decide" },
+      ],
+    });
 
-  // Second scan: verified again
-  await goto(customerPage, `${BASE_URL}/verify/${encodeURIComponent(DOCS_CODE)}`);
-  await customerPage.waitForTimeout(800);
-  await screenshot(customerPage, "customer-verified-again.png", {
-    title: "Documentation Capture - Customer - Legit Repeat Verification",
-    callouts: [
-      { locator: customerPage.getByText(/verified again/i).first(), text: "Same buyer can verify again safely" },
-    ],
-  });
+    // Report dialog
+    await duplicatePage.getByRole("button", { name: /open incident drawer|report suspected counterfeit/i }).first().click();
+    await duplicatePage.getByPlaceholder("Describe what looked suspicious.").fill("Docs capture: possible duplicate label observed.");
+    await screenshot(duplicatePage, "customer-report-dialog.png", {
+      title: "Documentation Capture - Customer - Fraud Report",
+      callouts: [
+        { locator: duplicatePage.getByRole("dialog"), text: "Structured report with metadata" },
+        { locator: duplicatePage.getByRole("button", { name: /submit report/i }), text: "Submit to incident response" },
+      ],
+    });
 
-  // Third scan (still verified again), then 4th scan (possible duplicate based on high count)
-  await goto(customerPage, `${BASE_URL}/verify/${encodeURIComponent(DOCS_CODE)}`);
-  await customerPage.waitForTimeout(600);
-  await goto(customerPage, `${BASE_URL}/verify/${encodeURIComponent(DOCS_CODE)}`);
-  await customerPage.waitForTimeout(900);
-  await screenshot(customerPage, "customer-possible-duplicate.png", {
-    title: "Documentation Capture - Customer - Possible Duplicate",
-    callouts: [
-      { locator: customerPage.getByText(/possible duplicate/i).first(), text: "Unusual scan patterns may indicate copying" },
-      { locator: customerPage.getByText(/why this was flagged/i).first(), text: "Reasons and summary help you decide" },
-    ],
-  });
+    // Submit report to ensure an incident exists for IR detail screenshots (best-effort).
+    await duplicatePage.getByRole("button", { name: /submit report/i }).click();
+    await duplicatePage.waitForTimeout(1200);
 
-  // Report dialog
-  await customerPage.getByRole("button", { name: /report suspected counterfeit/i }).first().click();
-  await customerPage.getByPlaceholder("Describe what looked suspicious.").fill("Docs capture: possible duplicate label observed.");
-  await screenshot(customerPage, "customer-report-dialog.png", {
-    title: "Documentation Capture - Customer - Fraud Report",
-    callouts: [
-      { locator: customerPage.getByRole("dialog"), text: "Structured report with metadata" },
-      { locator: customerPage.getByRole("button", { name: /submit report/i }), text: "Submit to incident response" },
-    ],
-  });
+    await duplicateCtx.close();
+    await customerCtx.close();
+  }
 
-  // Submit report to ensure an incident exists for IR detail screenshots (best-effort).
-  await customerPage.getByRole("button", { name: /submit report/i }).click();
-  await customerPage.waitForTimeout(1200);
+  if (shouldRunStage("ir")) {
+    // IR incident detail screenshots (open latest incident)
+    const irCtx = await browser.newContext({ viewport: { width: 1500, height: 820 } });
+    const irPage = await irCtx.newPage();
+    await disableMotion(irPage);
+    await authenticateSuperAdmin(irPage, OPERATIONS_BASE_URL);
+    await goto(irPage, `${OPERATIONS_BASE_URL}/ir`);
+    await irPage.getByPlaceholder(/search qr/i).fill(DOCS_CODE);
+    await irPage.keyboard.press("Enter");
+    await irPage.waitForTimeout(1200);
 
-  await customerCtx.close();
+    const firstIncidentRow = irPage.locator("tbody tr").first();
+    await expect(firstIncidentRow).toBeVisible({ timeout: 15_000 });
+    await firstIncidentRow.click();
+    await irPage.waitForURL("**/ir/incidents/**", { timeout: 15_000 });
 
-  // IR incident detail screenshots (open latest incident)
-  const irCtx = await browser.newContext({ viewport: { width: 1500, height: 820 } });
-  const irPage = await irCtx.newPage();
-  await disableMotion(irPage);
-  await login(irPage, SUPERADMIN_EMAIL, SUPERADMIN_PASSWORD);
-  await goto(irPage, `${BASE_URL}/ir`);
-  await irPage.getByPlaceholder(/search qr/i).fill(DOCS_CODE);
-  await irPage.keyboard.press("Enter");
-  await irPage.waitForTimeout(1200);
+    // Open an action dialog
+    await irPage.getByRole("button", { name: /^flag qr$/i }).click();
+    await screenshot(irPage, "ir-incident-actions.png", {
+      title: "Documentation Capture - Incident Actions",
+      callouts: [
+        { locator: irPage.getByRole("dialog"), text: "Containment action requires a reason" },
+        { locator: irPage.getByRole("button", { name: /^confirm$/i }), text: "Apply action (reversible)" },
+      ],
+    });
+    await irPage.keyboard.press("Escape");
 
-  const firstIncidentRow = irPage.locator("tbody tr").first();
-  await expect(firstIncidentRow).toBeVisible({ timeout: 15_000 });
-  await firstIncidentRow.click();
-  await irPage.waitForURL("**/ir/incidents/**", { timeout: 15_000 });
+    // Communications compose section
+    const subjectInput = irPage.locator("label", { hasText: "Subject" }).locator("..").locator("input");
+    const messageTextarea = irPage.locator("label", { hasText: "Message" }).locator("..").locator("textarea");
+    await subjectInput.fill("Investigation update");
+    await messageTextarea.fill("Docs capture message to demonstrate incident communications.");
+    await screenshot(irPage, "ir-communication-compose.png", {
+      title: "Documentation Capture - Incident Communications",
+      callouts: [
+        { locator: irPage.getByText(/communications/i).first(), text: "Email is logged in the timeline" },
+        { locator: irPage.getByRole("button", { name: /send email/i }), text: "Send email" },
+      ],
+    });
 
-  // Open an action dialog
-  await irPage.getByRole("button", { name: /^flag qr$/i }).click();
-  await screenshot(irPage, "ir-incident-actions.png", {
-    title: "Documentation Capture - Incident Actions",
-    callouts: [
-      { locator: irPage.getByRole("dialog"), text: "Containment action requires a reason" },
-      { locator: irPage.getByRole("button", { name: /^confirm$/i }), text: "Apply action (reversible)" },
-    ],
-  });
-  await irPage.keyboard.press("Escape");
-
-  // Communications compose section
-  const subjectInput = irPage.locator("label", { hasText: "Subject" }).locator("..").locator("input");
-  const messageTextarea = irPage.locator("label", { hasText: "Message" }).locator("..").locator("textarea");
-  await subjectInput.fill("Investigation update");
-  await messageTextarea.fill("Docs capture message to demonstrate incident communications.");
-  await screenshot(irPage, "ir-communication-compose.png", {
-    title: "Documentation Capture - Incident Communications",
-    callouts: [
-      { locator: irPage.getByText(/communications/i).first(), text: "Email is logged in the timeline" },
-      { locator: irPage.getByRole("button", { name: /send email/i }), text: "Send email" },
-    ],
-  });
-
-  await irCtx.close();
+    await irCtx.close();
+  }
 });
