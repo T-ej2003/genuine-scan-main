@@ -538,6 +538,7 @@ class ApiClient {
     name: string;
     vendor?: string;
     model?: string;
+    licenseeId?: string;
     connectionType?: "NETWORK_DIRECT";
     commandLanguage?: "AUTO" | "ZPL" | "TSPL" | "SBPL" | "EPL" | "CPCL" | "ESC_POS" | "OTHER";
     ipAddress: string;

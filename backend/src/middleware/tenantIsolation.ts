@@ -30,6 +30,17 @@ function extractRouteLicenseeId(req: AuthRequest): string | null {
   return pick(fromParams) || pick(fromBody) || pick(fromQuery);
 }
 
+function extractDefaultManufacturerLicenseeId(req: AuthRequest): string | null {
+  const fromUser = typeof req.user?.licenseeId === "string" ? req.user.licenseeId.trim() : "";
+  if (fromUser.length > 0) return fromUser;
+
+  const fromLinked = Array.isArray(req.user?.linkedLicenseeIds)
+    ? req.user.linkedLicenseeIds.find((value) => typeof value === "string" && value.trim().length > 0)
+    : null;
+
+  return typeof fromLinked === "string" ? fromLinked.trim() : null;
+}
+
 /**
  * Blocks non-super admins from accessing another licensee scope.
  * If a route doesn't carry licenseeId at all, it just passes (tenant filtering should happen in controllers/services).
@@ -69,6 +80,7 @@ export const enforceTenantIsolation = async (req: AuthRequest, res: Response, ne
 /**
  * Returns the effective licenseeId to be used by controllers for scoping queries.
  * - super_admin: may provide licenseeId via params/body/query; otherwise null = no tenant scope.
+ * - manufacturer roles: request-scoped licenseeId when provided; otherwise their default linked licensee.
  * - others: always their own licenseeId (guaranteed by enforceTenantIsolation).
  */
 export const getEffectiveLicenseeId = (req: AuthRequest): string | null => {
@@ -79,7 +91,7 @@ export const getEffectiveLicenseeId = (req: AuthRequest): string | null => {
   }
 
   if (isManufacturerRole(req.user.role)) {
-    return extractRouteLicenseeId(req);
+    return extractRouteLicenseeId(req) || extractDefaultManufacturerLicenseeId(req);
   }
 
   return req.user.licenseeId || null;
