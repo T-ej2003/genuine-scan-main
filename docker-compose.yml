@@ -34,46 +34,6 @@ services:
     networks:
       - app
 
-  mock-printer:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: genuine-scan-mock-printer
-    restart: unless-stopped
-    init: true
-    environment:
-      NODE_ENV: production
-      MOCK_PRINTER_HOST: 0.0.0.0
-      MOCK_PRINTER_PORT: 9100
-      MOCK_PRINTER_CONTROL_HOST: 0.0.0.0
-      MOCK_PRINTER_CONTROL_PORT: 3001
-    expose:
-      - "9100"
-      - "3001"
-    ports:
-      - "${MOCK_PRINTER_CONTROL_PORT:-3001}:3001"
-    command: ["node", "mock-printer/server.js"]
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "require('http').get('http://127.0.0.1:3001/status', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));",
-        ]
-      interval: 15s
-      timeout: 10s
-      retries: 8
-      start_period: 10s
-    stop_grace_period: 15s
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
-    networks:
-      - app
-
   frontend:
     build:
       context: .

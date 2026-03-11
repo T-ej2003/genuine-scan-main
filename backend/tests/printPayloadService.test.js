@@ -9,7 +9,14 @@ const run = () => {
   assert(resolvePayloadType({ commandLanguage: "TSPL" }) === "TSPL", "TSPL printers should resolve to TSPL payloads");
   assert(resolvePayloadType({ commandLanguage: "EPL" }) === "EPL", "EPL printers should resolve to EPL payloads");
   assert(resolvePayloadType({ commandLanguage: "CPCL" }) === "CPCL", "CPCL printers should resolve to CPCL payloads");
-  assert(resolvePayloadType({ commandLanguage: "AUTO" }) === "ZPL", "AUTO printers should default to ZPL payloads");
+  assert(
+    resolvePayloadType({ connectionType: "LOCAL_AGENT", commandLanguage: "AUTO" }) === "JSON",
+    "Local-agent AUTO printers should resolve to JSON payloads for workstation rendering"
+  );
+  assert(
+    resolvePayloadType({ connectionType: "NETWORK_DIRECT", commandLanguage: "AUTO" }) === "ZPL",
+    "Network-direct AUTO printers should still default to ZPL payloads"
+  );
 
   assert(supportsNetworkDirectPayloadType("ZPL"), "ZPL should be allowed for network-direct dispatch");
   assert(supportsNetworkDirectPayloadType("TSPL"), "TSPL should be allowed for network-direct dispatch");

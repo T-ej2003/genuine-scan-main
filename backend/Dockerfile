@@ -28,7 +28,6 @@ RUN apt-get update \
 
 COPY package*.json ./
 COPY prisma ./prisma
-COPY mock-printer ./mock-printer
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 RUN npx prisma generate \

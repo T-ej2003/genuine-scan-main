@@ -316,6 +316,12 @@ const buildAgentJsonPayload = (params: {
 };
 
 export const resolvePayloadType = (printer: PrinterPayloadProfile): PrintPayloadType => {
+  if (
+    printer.connectionType === PrinterConnectionType.LOCAL_AGENT &&
+    (printer.commandLanguage === PrinterCommandLanguage.AUTO || !printer.commandLanguage)
+  ) {
+    return PrintPayloadType.JSON;
+  }
   if (printer.commandLanguage === PrinterCommandLanguage.ZPL || printer.commandLanguage === PrinterCommandLanguage.AUTO) {
     return PrintPayloadType.ZPL;
   }
