@@ -1,7 +1,7 @@
 # Security Architecture Baseline (v2026-03-05)
 
 ## Scope
-- Platform: Genuine Scan / Authentic QR backend + direct-print workflow.
+- Platform: Genuine Scan / MSCQR backend + direct-print workflow.
 - Environment: Multi-tenant, licensee/manufacturer scoped operations.
 - Baseline objective: cryptographically trusted print issuance, fail-stop controls, adaptive duplicate detection, and forensic-grade evidence.
 

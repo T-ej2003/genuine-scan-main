@@ -12,10 +12,10 @@ async function main() {
   // -----------------------------
   const superAdminPassword = await argon2.hash("admin123", { type: argon2.argon2id });
   const superAdmin = await prisma.user.upsert({
-    where: { email: 'admin@authenticqr.com' },
+    where: { email: 'admin@mscqr.com' },
     update: { status: UserStatus.ACTIVE, isActive: true },
     create: {
-      email: 'admin@authenticqr.com',
+      email: 'admin@mscqr.com',
       passwordHash: superAdminPassword,
       name: 'Super Admin',
       role: UserRole.SUPER_ADMIN,
@@ -224,7 +224,7 @@ async function main() {
 
   console.log('\n📋 Seed completed! Login credentials:');
   console.log('------------------------------------------');
-  console.log('Super Admin:     admin@authenticqr.com / admin123');
+  console.log('Super Admin:     admin@mscqr.com / admin123');
   console.log('Licensee Admin:  admin@acme.com / licensee123');
   console.log('Licensee Admin:  admin@beta.com / licensee123');
   console.log('Manufacturer:    factory1@acme.com / manufacturer123');

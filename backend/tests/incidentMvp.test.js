@@ -127,14 +127,14 @@ const run = async () => {
     if (where.id !== "admin-1") return null;
     return {
       id: "admin-1",
-      email: "superadmin.profile@authenticqr.com",
+      email: "superadmin.profile@mscqr.com",
       name: "Super Admin",
       role: UserRole.SUPER_ADMIN,
       isActive: true,
       deletedAt: null,
     };
   };
-  prisma.user.findFirst = async () => ({ email: "primary-superadmin@authenticqr.com" });
+  prisma.user.findFirst = async () => ({ email: "primary-superadmin@mscqr.com" });
   auditService.createAuditLog = async () => ({ id: "audit-1" });
 
   const oldEnv = {
@@ -194,7 +194,7 @@ const run = async () => {
   );
   assert(communicationRow && communicationRow.status === "SENT", "Communication row should be persisted as SENT");
   assert(
-    communicationRow.attemptedFrom === "superadmin.profile@authenticqr.com",
+    communicationRow.attemptedFrom === "superadmin.profile@mscqr.com",
     "Communication row should store attempted sender"
   );
   assert(
@@ -202,7 +202,7 @@ const run = async () => {
     "Communication row should store fallback used sender"
   );
   assert(
-    communicationRow.replyTo === "superadmin.profile@authenticqr.com",
+    communicationRow.replyTo === "superadmin.profile@mscqr.com",
     "Communication row should store reply-to admin email"
   );
   assert(

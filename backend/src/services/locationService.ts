@@ -56,7 +56,7 @@ const getNominatimLocation = async (lat: number, lon: number): Promise<LocationL
     `&lon=${encodeURIComponent(String(lon))}` +
     `&zoom=13&addressdetails=1`;
 
-  const appName = String(process.env.APP_NAME || "AuthenticQR");
+  const appName = String(process.env.APP_NAME || "MSCQR");
   const resp = await withTimeout(
     fetch(url, {
       headers: {

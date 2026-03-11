@@ -1,6 +1,6 @@
-# Authentic QR Backend
+# MSCQR Backend
 
-Backend API for Genuine Scan / Authentic QR.
+Backend API for Genuine Scan / MSCQR.
 
 This file is deployment-focused. For product features and UI workflows, see `/README.md`.
 

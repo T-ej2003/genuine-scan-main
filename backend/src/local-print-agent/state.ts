@@ -20,9 +20,9 @@ export type AgentState = {
   calibrationProfiles: Record<string, CalibrationProfile>;
 };
 
-const STATE_FILE =
-  process.env.PRINT_AGENT_STATE_FILE ||
-  path.join(os.homedir(), ".authenticqr", "local-print-agent-state.json");
+const DEFAULT_STATE_FILE = path.join(os.homedir(), ".mscqr", "local-print-agent-state.json");
+const LEGACY_STATE_FILE = path.join(os.homedir(), ".authenticqr", "local-print-agent-state.json");
+const STATE_FILE = process.env.PRINT_AGENT_STATE_FILE || DEFAULT_STATE_FILE;
 
 const sha256Hex = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -57,7 +57,13 @@ const buildDefaultState = (): AgentState => {
 
 export const loadAgentState = async (): Promise<AgentState> => {
   try {
-    const raw = await fs.readFile(STATE_FILE, "utf8");
+    let raw;
+    try {
+      raw = await fs.readFile(STATE_FILE, "utf8");
+    } catch (error: any) {
+      if (process.env.PRINT_AGENT_STATE_FILE || error?.code !== "ENOENT") throw error;
+      raw = await fs.readFile(LEGACY_STATE_FILE, "utf8");
+    }
     const parsed = JSON.parse(raw);
     const fallback = buildDefaultState();
     return {

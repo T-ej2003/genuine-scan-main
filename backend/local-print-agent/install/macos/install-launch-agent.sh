@@ -15,7 +15,7 @@ cd "$BACKEND_DIR"
 "$NPM_BIN" ci
 "$NPM_BIN" run build
 
-AGENT_HOME="$HOME/.authenticqr/local-print-agent"
+AGENT_HOME="$HOME/.mscqr/local-print-agent"
 BIN_DIR="$AGENT_HOME/bin"
 LOG_DIR="$AGENT_HOME/logs"
 WRAPPER="$BIN_DIR/start-local-print-agent.sh"

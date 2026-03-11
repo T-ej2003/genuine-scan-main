@@ -1,14 +1,15 @@
-# Genuine Scan (AuthenticQR)
+# Genuine Scan (MSCQR)
 
 Production-grade, multi-tenant QR authenticity platform for secure code issuance, controlled print operations, consumer verification, anomaly detection, and auditability.
 
 ## 1. What This System Is
 
-AuthenticQR is designed for anti-counterfeit operations across three user types:
+MSCQR is designed for anti-counterfeit operations across four user types:
 
 - Super Admin: platform owner across all licensees.
 - Licensee Admin: tenant operator for one licensee/brand.
 - Manufacturer: scoped production user who prints assigned batches.
+- Customer: public verifier who checks product authenticity and can report suspicious products.
 
 Core outcome:
 
@@ -94,7 +95,11 @@ Open app:
 │   ├── scripts/                      # Ops/dev scripts
 │   └── tests/                        # Lightweight backend tests
 ├── docs/
-│   └── USER_MANUAL.md                # Role-based user SOPs
+│   ├── SUPER_ADMIN_GUIDE.md          # Super Admin manual source
+│   ├── LICENSEE_ADMIN_GUIDE.md       # Licensee Admin manual source
+│   ├── MANUFACTURER_GUIDE.md         # Manufacturer manual source
+│   ├── CUSTOMER_VERIFICATION_GUIDE.md # Customer manual source
+├── DOCUMENTS/                        # Generated DOCX copies of repo markdown
 ├── docker-compose.yml
 ├── Dockerfile                        # Frontend image
 ├── backend/Dockerfile                # Backend image
@@ -135,16 +140,23 @@ Backend roles (`backend/prisma/schema.prisma`):
 
 Frontend route access (`src/App.tsx`):
 
+- `/login`, `/accept-invite`, `/forgot-password`, `/reset-password`: public auth flows
 - `/dashboard`: all authenticated roles
 - `/licensees`: super admin
-- `/qr-codes`: super admin
 - `/qr-requests`: super admin, licensee admin
 - `/batches`: super admin, licensee admin, manufacturer
+- `/printer-diagnostics`: manufacturer
 - `/manufacturers`: super admin, licensee admin
 - `/qr-tracking`: super admin, licensee admin, manufacturer
 - `/audit-logs`: super admin, licensee admin, manufacturer
+- `/support`: super admin
+- `/ir`, `/ir/incidents/:id`: super admin
+- `/incidents`: super admin
+- `/governance`: super admin
 - `/account`: all authenticated roles
-- `/verify`, `/verify/:code`, `/scan`: public
+- `/qr-codes`: authenticated redirect to `/qr-tracking`
+- `/product-batches`: redirect to `/batches`
+- `/verify`, `/verify/:code`, `/scan`, `/help/*`: public
 
 RBAC middleware (`backend/src/middleware/rbac.ts`):
 
@@ -520,7 +532,7 @@ npm --prefix backend run prisma:seed
 
 Seeded users (`backend/prisma/seed.ts`):
 
-- `admin@authenticqr.com` / `admin123` (super admin)
+- `admin@mscqr.com` / `admin123` (super admin)
 - `admin@acme.com` / `licensee123` (licensee admin)
 - `admin@beta.com` / `licensee123` (licensee admin)
 - `factory1@acme.com` / `manufacturer123` (manufacturer)
@@ -713,7 +725,7 @@ If you are onboarding and want the fastest deep understanding, read these in ord
 7. `src/pages/Dashboard.tsx` (main UX entry point)
 8. `src/pages/QRTracking.tsx` (ops tracking UX)
 9. `src/lib/api-client.ts` (frontend API contract)
-10. `docs/USER_MANUAL.md` (operator SOP)
+10. `docs/SUPER_ADMIN_GUIDE.md` (role-accurate admin SOP)
 
 ## 19. Connectivity and Export Throughput Notes
 
@@ -753,7 +765,7 @@ Local machine (`localhost`) note:
 
 ## 20. Help Assistant (Free)
 
-AuthenticQR now includes a fully local, no-cost in-app assistant:
+MSCQR now includes a fully local, no-cost in-app assistant:
 
 - Floating widget: **Help** button at bottom-right on all pages.
 - Assistant panel: local KB search + role-aware suggestions.
@@ -806,29 +818,29 @@ Supported environment variables for capture script:
 - `DOCS_MANUFACTURER_EMAIL`, `DOCS_MANUFACTURER_PASSWORD`
 - `DOCS_QR_CODE`
 
-Generate consolidated DOCX manual from markdown:
+Generate DOCX copies for every markdown file in the repo:
 
 ```bash
 npm run docs:docx
 ```
 
-Generated outputs (current):
+Generated outputs are written under `DOCUMENTS/` using the same relative paths as the source markdown.
 
-- `docs/USER_MANUAL_v2.docx`
-- `docs/SUPER_ADMIN_GUIDE.docx`
-- `docs/LICENSEE_ADMIN_GUIDE.docx`
-- `docs/MANUFACTURER_GUIDE.docx`
-- `docs/CUSTOMER_VERIFICATION_GUIDE.docx`
+Examples:
 
-Optional legacy generator:
-
-```bash
-npm run docs:docx:roles
-```
+- `DOCUMENTS/README.docx`
+- `DOCUMENTS/backend/README.docx`
+- `DOCUMENTS/docs/SUPER_ADMIN_GUIDE.docx`
+- `DOCUMENTS/docs/LICENSEE_ADMIN_GUIDE.docx`
+- `DOCUMENTS/docs/MANUFACTURER_GUIDE.docx`
+- `DOCUMENTS/docs/CUSTOMER_VERIFICATION_GUIDE.docx`
 
 ---
 
 Source documentation in repo:
 
-- `docs/USER_MANUAL.md`
+- `docs/SUPER_ADMIN_GUIDE.md`
+- `docs/LICENSEE_ADMIN_GUIDE.md`
+- `docs/MANUFACTURER_GUIDE.md`
+- `docs/CUSTOMER_VERIFICATION_GUIDE.md`
 - `/help/*` pages in the web app

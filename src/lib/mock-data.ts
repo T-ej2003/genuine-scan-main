@@ -4,7 +4,7 @@ import { User, Licensee, QRCode, Batch, Manufacturer, AuditLog } from '@/types';
 export const mockUsers: User[] = [
   {
     id: '1',
-    email: 'admin@authenticqr.com',
+    email: 'admin@mscqr.com',
     name: 'Super Admin',
     role: 'super_admin',
     createdAt: '2024-01-01T00:00:00Z',

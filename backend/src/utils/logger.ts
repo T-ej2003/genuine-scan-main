@@ -14,7 +14,7 @@ const minLevel = LOG_LEVELS[configuredLevel] ?? LOG_LEVELS.info;
 const useJson = process.env.LOG_FORMAT === "json" || process.env.LOG_JSON === "true" || process.env.LOG_JSON === "1";
 
 const baseFields = {
-  service: process.env.SERVICE_NAME || "authentic-qr-backend",
+  service: process.env.SERVICE_NAME || "mscqr-backend",
   env: process.env.NODE_ENV || "development",
 };
 

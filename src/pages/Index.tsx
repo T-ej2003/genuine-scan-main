@@ -74,7 +74,7 @@ export default function Index() {
       <header className="sticky top-0 z-50 border-b border-white/10 bg-slate-950/80 backdrop-blur">
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-3">
           <Link to="/" className="flex items-center gap-3">
-            <img src="/brand/authenticqr-mark.svg" alt="MSCQR logo" className="h-10 w-10 rounded-xl border border-emerald-300/20 bg-slate-900 p-1" />
+            <img src="/brand/mscqr-mark.svg" alt="MSCQR logo" className="h-10 w-10 rounded-xl border border-emerald-300/20 bg-slate-900 p-1" />
             <div>
               <div className="text-sm font-semibold tracking-wide text-emerald-300">MSCQR</div>
               <div className="text-xs text-slate-300">Secure product verification</div>
@@ -118,7 +118,7 @@ export default function Index() {
           <div>
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-emerald-300/25 bg-emerald-300/10 px-3 py-1 text-xs font-medium text-emerald-200">
               <ShieldCheck className="h-3.5 w-3.5" />
-              MSCQR powered by AuthenticQR platform
+              MSCQR secure verification platform
             </div>
 
             <div className="mb-5 flex flex-wrap items-center gap-3">
@@ -285,7 +285,7 @@ export default function Index() {
             <div>
               <h2 className="text-3xl font-semibold text-white md:text-4xl">Authentication and control posture</h2>
               <p className="mt-4 max-w-2xl leading-7 text-slate-300">
-                MSCQR uses the AuthenticQR platform for public verification and authenticated back-office operations.
+                MSCQR is the platform for public verification and authenticated back-office operations.
                 Security still depends on production deployment and operating procedures, but the application ships with
                 role-aware access control, auditable workflows, notification trails, and tenant-separated operational
                 paths.
@@ -387,7 +387,7 @@ export default function Index() {
       >
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-8 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
-            <img src="/brand/authenticqr-mark.svg" alt="MSCQR logo" className="h-9 w-9 rounded-lg border border-white/10 bg-slate-900 p-1" />
+            <img src="/brand/mscqr-mark.svg" alt="MSCQR logo" className="h-9 w-9 rounded-lg border border-white/10 bg-slate-900 p-1" />
             <div>
               <div className="text-sm font-semibold text-white">MSCQR</div>
               <div className="text-xs text-slate-400">Secure QR verification and product trust</div>
@@ -401,7 +401,7 @@ export default function Index() {
             <a href={`mailto:${CONTACT_EMAIL}`} className="hover:text-white">{CONTACT_EMAIL}</a>
           </div>
 
-          <p className="text-xs text-slate-500">© 2026 MSCQR. Built on AuthenticQR.</p>
+          <p className="text-xs text-slate-500">© 2026 MSCQR. All rights reserved.</p>
         </div>
       </footer>
     </div>

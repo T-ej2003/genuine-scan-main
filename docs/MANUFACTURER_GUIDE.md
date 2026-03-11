@@ -1,4 +1,4 @@
-# AuthenticQR (MSCQR) Manufacturer User Manual
+# MSCQR Manufacturer User Manual
 
 Document ID: AQR-SOP-MF-002  
 Version: 2.0  

@@ -11,7 +11,7 @@ export default function GettingAccess() {
   return (
     <HelpShell
       title="Getting access"
-      subtitle="How each user type gets access to AuthenticQR (invite-based onboarding)."
+      subtitle="How each user type gets access to MSCQR (invite-based onboarding)."
     >
       <div className="space-y-6">
         <Card>

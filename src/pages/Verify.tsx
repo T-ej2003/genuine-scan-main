@@ -194,10 +194,13 @@ const INCIDENT_TYPE_OPTIONS = [
   { value: "other", label: "Other" },
 ] as const;
 
-const CUSTOMER_TOKEN_KEY = "authenticqr_verify_customer_token";
-const CUSTOMER_EMAIL_KEY = "authenticqr_verify_customer_email";
-const TRANSFER_TOKEN_KEY_PREFIX = "authenticqr_verify_transfer_token:";
-const APP_NAME = "AUTHENTIC QR";
+const CUSTOMER_TOKEN_KEY = "mscqr_verify_customer_token";
+const LEGACY_CUSTOMER_TOKEN_KEY = "authenticqr_verify_customer_token";
+const CUSTOMER_EMAIL_KEY = "mscqr_verify_customer_email";
+const LEGACY_CUSTOMER_EMAIL_KEY = "authenticqr_verify_customer_email";
+const TRANSFER_TOKEN_KEY_PREFIX = "mscqr_verify_transfer_token:";
+const LEGACY_TRANSFER_TOKEN_KEY_PREFIX = "authenticqr_verify_transfer_token:";
+const APP_NAME = "MSCQR";
 
 const DEFAULT_OWNERSHIP_STATUS: OwnershipStatus = {
   isClaimed: false,
@@ -383,10 +386,14 @@ const getTransferTokenStorageKey = (value?: string | null) => {
   return normalized ? `${TRANSFER_TOKEN_KEY_PREFIX}${normalized}` : "";
 };
 
-const readStoredValue = (key: string) => {
+const readStoredValue = (...keys: string[]) => {
   if (typeof window === "undefined") return "";
   try {
-    return window.localStorage.getItem(key) || "";
+    for (const key of keys) {
+      const value = window.localStorage.getItem(key);
+      if (value) return value;
+    }
+    return "";
   } catch {
     return "";
   }
@@ -411,9 +418,14 @@ export default function Verify() {
       return raw.trim();
     }
   })();
-  const initialCustomerToken = readStoredValue(CUSTOMER_TOKEN_KEY);
-  const initialCustomerEmail = readStoredValue(CUSTOMER_EMAIL_KEY);
-  const initialPersistedTransferToken = transferToken ? "" : readStoredValue(getTransferTokenStorageKey(codeParam));
+  const initialCustomerToken = readStoredValue(CUSTOMER_TOKEN_KEY, LEGACY_CUSTOMER_TOKEN_KEY);
+  const initialCustomerEmail = readStoredValue(CUSTOMER_EMAIL_KEY, LEGACY_CUSTOMER_EMAIL_KEY);
+  const initialPersistedTransferToken = transferToken
+    ? ""
+    : readStoredValue(
+        getTransferTokenStorageKey(codeParam),
+        normalizeVerifyCode(codeParam) ? `${LEGACY_TRANSFER_TOKEN_KEY_PREFIX}${normalizeVerifyCode(codeParam)}` : ""
+      );
 
   const [result, setResult] = useState<VerifyPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -467,6 +479,10 @@ export default function Verify() {
   const [loadingStage, setLoadingStage] = useState<0 | 1>(0);
 
   const transferStorageKey = useMemo(() => getTransferTokenStorageKey(result?.code || codeParam), [codeParam, result?.code]);
+  const legacyTransferStorageKey = useMemo(() => {
+    const normalized = normalizeVerifyCode(result?.code || codeParam);
+    return normalized ? `${LEGACY_TRANSFER_TOKEN_KEY_PREFIX}${normalized}` : "";
+  }, [codeParam, result?.code]);
   const activeTransferToken = useMemo(
     () => transferToken || (customerToken ? persistedTransferToken : ""),
     [customerToken, persistedTransferToken, transferToken]
@@ -589,19 +605,21 @@ export default function Verify() {
       const normalized = String(nextToken || "").trim();
       setPersistedTransferToken(normalized);
 
-      if (!transferStorageKey || transferToken) return;
+      if ((!transferStorageKey && !legacyTransferStorageKey) || transferToken) return;
 
       try {
         if (normalized) {
-          window.localStorage.setItem(transferStorageKey, normalized);
+          if (transferStorageKey) window.localStorage.setItem(transferStorageKey, normalized);
+          if (legacyTransferStorageKey) window.localStorage.removeItem(legacyTransferStorageKey);
         } else {
-          window.localStorage.removeItem(transferStorageKey);
+          if (transferStorageKey) window.localStorage.removeItem(transferStorageKey);
+          if (legacyTransferStorageKey) window.localStorage.removeItem(legacyTransferStorageKey);
         }
       } catch {
         // ignore storage issues
       }
     },
-    [transferStorageKey, transferToken]
+    [legacyTransferStorageKey, transferStorageKey, transferToken]
   );
 
   const fetchVerification = useCallback(async () => {
@@ -759,6 +777,21 @@ export default function Verify() {
   }, [transferStorageKey, transferToken]);
 
   useEffect(() => {
+    if (!transferStorageKey || !legacyTransferStorageKey || transferToken) return;
+    try {
+      const nextValue = window.localStorage.getItem(transferStorageKey);
+      if (nextValue) return;
+      const legacyValue = window.localStorage.getItem(legacyTransferStorageKey);
+      if (!legacyValue) return;
+      window.localStorage.setItem(transferStorageKey, legacyValue);
+      window.localStorage.removeItem(legacyTransferStorageKey);
+      setPersistedTransferToken(legacyValue);
+    } catch {
+      // ignore storage issues
+    }
+  }, [legacyTransferStorageKey, transferStorageKey, transferToken]);
+
+  useEffect(() => {
     fetchVerification();
   }, [fetchVerification]);
 
@@ -907,6 +940,8 @@ export default function Verify() {
       try {
         window.localStorage.setItem(CUSTOMER_TOKEN_KEY, tokenValue);
         window.localStorage.setItem(CUSTOMER_EMAIL_KEY, emailValue);
+        window.localStorage.removeItem(LEGACY_CUSTOMER_TOKEN_KEY);
+        window.localStorage.removeItem(LEGACY_CUSTOMER_EMAIL_KEY);
       } catch {
         // ignore storage issues
       }
@@ -927,6 +962,8 @@ export default function Verify() {
     try {
       window.localStorage.removeItem(CUSTOMER_TOKEN_KEY);
       window.localStorage.removeItem(CUSTOMER_EMAIL_KEY);
+      window.localStorage.removeItem(LEGACY_CUSTOMER_TOKEN_KEY);
+      window.localStorage.removeItem(LEGACY_CUSTOMER_EMAIL_KEY);
     } catch {
       // ignore storage issues
     }

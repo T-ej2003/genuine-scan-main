@@ -1,4 +1,4 @@
-# AuthenticQR (MSCQR) Licensee Admin User Manual
+# MSCQR Licensee Admin User Manual
 
 Document ID: AQR-SOP-LA-002  
 Version: 2.0  

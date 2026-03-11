@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 
-const hashSalt = String(process.env.INCIDENT_HASH_SALT || process.env.JWT_SECRET || "authenticqr-salt");
+const hashSalt = String(process.env.INCIDENT_HASH_SALT || process.env.JWT_SECRET || "mscqr-salt");
 
 const normalize = (value?: string | null) => String(value || "").trim().toLowerCase();
 

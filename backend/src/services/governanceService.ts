@@ -688,7 +688,7 @@ export const generateComplianceReport = async (params: {
 
   const report = {
     generatedAt: new Date().toISOString(),
-    appName: process.env.APP_NAME || "AUTHENTIC QR",
+    appName: process.env.APP_NAME || "MSCQR",
     scope: {
       licenseeId: scopedLicenseeId,
       from: params.from?.toISOString() || null,
@@ -698,7 +698,7 @@ export const generateComplianceReport = async (params: {
       ukGdpr: {
         statement:
           "Personal data is processed in accordance with UK GDPR and the Data Protection Act 2018.",
-        contact: process.env.DPO_EMAIL || process.env.SUPER_ADMIN_EMAIL || "support@authenticqr.local",
+        contact: process.env.DPO_EMAIL || process.env.SUPER_ADMIN_EMAIL || "support@mscqr.local",
       },
       securityAccess: {
         roleBasedAccess: ["Super Admin", "Licensee", "Manufacturer"],
