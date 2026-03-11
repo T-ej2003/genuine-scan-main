@@ -121,6 +121,7 @@ const NOTIFICATION_FETCH_LIMIT = 24;
 const NOTIFICATION_WINDOW_SIZE = 4;
 const NOTIFICATION_CLEAR_ANIMATION_MS = 260;
 const PRINTER_FAILURE_REPORT_COOLDOWN_MS = 3 * 60 * 1000;
+const PRINTER_ONBOARDING_STORAGE_VERSION = "v1";
 
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["super_admin", "licensee_admin", "manufacturer"] },
@@ -263,6 +264,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     error: "No trusted printer heartbeat yet",
   });
   const [printerDialogOpen, setPrinterDialogOpen] = useState(false);
+  const [printerOnboardingOpen, setPrinterOnboardingOpen] = useState(false);
   const [printerSwitching, setPrinterSwitching] = useState(false);
   const [printerStatusLive, setPrinterStatusLive] = useState(false);
   const [printerStatusUpdatedAt, setPrinterStatusUpdatedAt] = useState<string | null>(null);
@@ -1090,12 +1092,61 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const printerTransportLabel = capability?.transports?.join(", ") || selectedPrinter?.connection || "Auto-detect";
   const printerProtocolLabel = capability?.protocols?.join(", ") || selectedPrinter?.protocols?.join(", ") || "Auto-detect";
   const printerLanguageLabel = capability?.languages?.join(", ") || selectedPrinter?.languages?.join(", ") || "AUTO";
+  const printerOnboardingStorageKey =
+    user?.role === "manufacturer" && user?.id
+      ? `manufacturer-printer-onboarding:${PRINTER_ONBOARDING_STORAGE_VERSION}:${user.id}`
+      : null;
   const openPrinterConnectionDialog = () => {
     setPrinterDialogOpen(true);
     void syncManufacturerPrinterStatus({ silent: true });
   };
   const refreshPrinterConnectionStatus = () => {
     void syncManufacturerPrinterStatus({ silent: true });
+  };
+
+  useEffect(() => {
+    if (!printerOnboardingStorageKey) return;
+    if (printerReady) {
+      try {
+        window.localStorage.setItem(printerOnboardingStorageKey, "completed");
+      } catch {
+        // ignore storage failures
+      }
+      setPrinterOnboardingOpen(false);
+      return;
+    }
+
+    let stored = "";
+    try {
+      stored = String(window.localStorage.getItem(printerOnboardingStorageKey) || "").trim().toLowerCase();
+    } catch {
+      stored = "";
+    }
+    if (!stored) {
+      setPrinterOnboardingOpen(true);
+    }
+  }, [printerOnboardingStorageKey, printerReady]);
+
+  const dismissPrinterOnboarding = () => {
+    if (printerOnboardingStorageKey) {
+      try {
+        window.localStorage.setItem(printerOnboardingStorageKey, "dismissed");
+      } catch {
+        // ignore storage failures
+      }
+    }
+    setPrinterOnboardingOpen(false);
+  };
+
+  const reopenPrinterOnboarding = () => {
+    if (printerOnboardingStorageKey) {
+      try {
+        window.localStorage.removeItem(printerOnboardingStorageKey);
+      } catch {
+        // ignore storage failures
+      }
+    }
+    setPrinterOnboardingOpen(true);
   };
 
   return (
@@ -1158,6 +1209,72 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="lg:pl-64">
+        {user?.role === "manufacturer" && (
+          <Dialog open={printerOnboardingOpen} onOpenChange={setPrinterOnboardingOpen}>
+            <DialogContent className="sm:max-w-[680px]">
+              <DialogHeader>
+                <DialogTitle>Set up printing on this workstation</DialogTitle>
+                <DialogDescription>
+                  Printing becomes ready automatically after this device already has a working OS printer and the local print agent is running.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4 text-sm text-slate-700">
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <div className="font-semibold text-slate-950">What this does not do</div>
+                  <p className="mt-2 leading-6">
+                    The browser cannot install printers, drivers, or native apps by itself. Those remain workstation setup steps.
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="font-semibold text-slate-950">What the manufacturer should do once per device</div>
+                  <ol className="mt-3 list-decimal space-y-2 pl-5">
+                    <li>Install or connect the printer in the operating system first.</li>
+                    <li>Start the MSCQR local print agent on that same workstation.</li>
+                    <li>Return here and use <strong>Check again</strong>.</li>
+                    <li>If the OS can see the printer, MSCQR will detect it and it will appear automatically.</li>
+                  </ol>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="font-semibold text-slate-950">Current live status</div>
+                  <ul className="mt-3 list-disc space-y-2 pl-5">
+                    <li>Agent reachable: {localPrinterAgent.reachable ? "Yes" : "No"}</li>
+                    <li>Printer detected: {printerHasInventory ? "Yes" : "No"}</li>
+                    <li>Selected printer: {printerStatus.selectedPrinterName || printerStatus.printerName || "None yet"}</li>
+                  </ul>
+                </div>
+
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    onClick={() => {
+                      void syncManufacturerPrinterStatus({ silent: true });
+                    }}
+                  >
+                    Check again
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setPrinterOnboardingOpen(false);
+                      openPrinterConnectionDialog();
+                    }}
+                  >
+                    Open Printer Diagnostics
+                  </Button>
+                  <Button variant="ghost" onClick={() => navigate(contextualHelpRoute)}>
+                    Open Help
+                  </Button>
+                  <Button variant="ghost" onClick={dismissPrinterOnboarding}>
+                    Close for now
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
+
         <header className="sticky top-0 z-30 h-16 bg-card border-b border-border flex items-center justify-between px-4 lg:px-6">
           <button
             onClick={() => setSidebarOpen(true)}
@@ -1420,6 +1537,12 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                 {`Printer ${printerModeLabel}`}
               </span>
               <span className="md:hidden">{printerModeLabel}</span>
+            </Button>
+          )}
+
+          {user?.role === "manufacturer" && !printerReady && (
+            <Button variant="ghost" size="sm" onClick={reopenPrinterOnboarding} className="mr-1 hidden md:inline-flex">
+              Setup printing
             </Button>
           )}
 
