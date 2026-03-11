@@ -74,9 +74,19 @@ Register the printer in the app as:
 - language: `ZPL`
 
 ### Workstation printers now use the local print agent
-Run this on the manufacturer workstation, not on Lightsail:
+Run this on the manufacturer workstation, not on Lightsail. The agent now supports the normal OS-managed printer path on macOS, Linux, and Windows.
+
+macOS or Linux:
 ```bash
 cd /path/to/genuine-scan-main/backend
+npm ci
+npm run build
+npm run print:agent
+```
+
+Windows PowerShell:
+```powershell
+cd C:\path\to\genuine-scan-main\backend
 npm ci
 npm run build
 npm run print:agent

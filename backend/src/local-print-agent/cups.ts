@@ -41,6 +41,14 @@ type ParsedLpoptions = {
   dpiOptions: number[];
 };
 
+type ParsedWindowsPrinter = {
+  name: string;
+  driverName: string | null;
+  portName: string | null;
+  online: boolean;
+  isDefault: boolean;
+};
+
 const COMMAND_TIMEOUT_MS = 1500;
 const MAX_BUFFER = 1024 * 1024 * 2;
 
@@ -166,6 +174,29 @@ export const parseSystemProfilerPrinters = (stdout: string): ParsedSystemProfile
   return printers;
 };
 
+export const parseWindowsPrinters = (stdout: string): ParsedWindowsPrinter[] => {
+  const raw = JSON.parse(String(stdout || "[]"));
+  const rows = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  const printers: ParsedWindowsPrinter[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const name = toCleanString((row as any).Name || (row as any).name);
+    if (!name) continue;
+    const workOffline = Boolean((row as any).WorkOffline);
+    const printerStatus = Number((row as any).PrinterStatus);
+    const extendedStatus = Number((row as any).ExtendedPrinterStatus);
+    const online = !workOffline && ![7].includes(printerStatus) && ![7].includes(extendedStatus);
+    printers.push({
+      name,
+      driverName: toCleanString((row as any).DriverName || (row as any).driverName) || null,
+      portName: toCleanString((row as any).PortName || (row as any).portName, 180) || null,
+      online,
+      isDefault: Boolean((row as any).Default),
+    });
+  }
+  return printers;
+};
+
 const inferProtocols = (uri: string | null) => {
   const normalized = toCleanString(uri, 512).toLowerCase();
   const values: string[] = [];
@@ -207,6 +238,43 @@ const inferLanguages = (profiler: ParsedSystemProfilerPrinter | null) => {
   );
 };
 
+const inferWindowsConnection = (portName: string | null) => {
+  const normalized = toCleanString(portName, 180).toUpperCase();
+  if (!normalized) return "spooler";
+  if (normalized.startsWith("USB")) return "usb";
+  if (normalized.startsWith("WSD")) return "network";
+  if (normalized.startsWith("IP_")) return "network";
+  if (normalized.includes("IPP")) return "ipp";
+  if (normalized.includes("IPPS")) return "ipps";
+  if (normalized.startsWith("\\\\")) return "shared";
+  return "spooler";
+};
+
+const inferWindowsProtocols = (portName: string | null) => {
+  const normalized = toCleanString(portName, 180).toUpperCase();
+  const protocols: string[] = [];
+  if (!normalized) return protocols;
+  if (normalized.startsWith("USB")) protocols.push("usb");
+  if (normalized.startsWith("WSD")) protocols.push("wsd");
+  if (normalized.startsWith("IP_")) protocols.push("tcp");
+  if (normalized.includes("IPP")) protocols.push("ipp");
+  if (normalized.includes("IPPS")) protocols.push("ipps");
+  if (normalized.startsWith("\\\\")) protocols.push("shared");
+  return uniqueStrings(protocols, 8);
+};
+
+const inferWindowsLanguages = (driverName: string | null, printerName: string) => {
+  const combined = `${driverName || ""} ${printerName}`.toUpperCase();
+  const languages: string[] = [];
+  if (combined.includes("ZPL")) languages.push("ZPL");
+  if (combined.includes("TSPL")) languages.push("TSPL");
+  if (combined.includes("SBPL") || combined.includes("SATO")) languages.push("SBPL");
+  if (combined.includes("EPL")) languages.push("EPL");
+  if (combined.includes("CPCL")) languages.push("CPCL");
+  if (combined.includes("ESC/POS") || combined.includes("ESC_POS") || combined.includes("RECEIPT")) languages.push("ESC_POS");
+  return uniqueStrings(languages, 8);
+};
+
 export const buildCapabilitySummary = (
   printers: LocalAgentPrinter[],
   selectedPrinterId: string | null
@@ -232,6 +300,58 @@ export const listLocalPrinters = async (): Promise<{
   printers: LocalAgentPrinter[];
   error: string | null;
 }> => {
+  if (process.platform === "win32") {
+    const script = [
+      "$ErrorActionPreference='Stop'",
+      "$printers = Get-CimInstance Win32_Printer | Select-Object Name,DriverName,PortName,WorkOffline,Default,PrinterStatus,ExtendedPrinterStatus",
+      "$printers | ConvertTo-Json -Compress",
+    ].join("; ");
+    const result = await maybeExecFile("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      script,
+    ]);
+
+    let rows: ParsedWindowsPrinter[] = [];
+    try {
+      rows = result.stdout ? parseWindowsPrinters(result.stdout) : [];
+    } catch {
+      rows = [];
+    }
+
+    const printers = rows
+      .map((row) => ({
+        printerId: row.name,
+        printerName: row.name,
+        model: row.driverName,
+        connection: inferWindowsConnection(row.portName),
+        online: row.online,
+        isDefault: row.isDefault,
+        protocols: inferWindowsProtocols(row.portName),
+        languages: inferWindowsLanguages(row.driverName, row.name),
+        mediaSizes: [],
+        dpi: null,
+      }))
+      .sort((a, b) => {
+        if (a.isDefault && !b.isDefault) return -1;
+        if (!a.isDefault && b.isDefault) return 1;
+        return a.printerName.localeCompare(b.printerName);
+      });
+
+    if (printers.length > 0) {
+      return { printers, error: null };
+    }
+
+    const stderr = String(result.stderr || "").trim();
+    return {
+      printers: [],
+      error: stderr || "No printers detected by the Windows print spooler.",
+    };
+  }
+
   const [lpstatPrintersRes, lpstatUrisRes, profilerRes] = await Promise.all([
     maybeExecFile("/usr/bin/lpstat", ["-p", "-d"]),
     maybeExecFile("/usr/bin/lpstat", ["-v"]),

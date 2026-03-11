@@ -34,6 +34,7 @@ type PrintResult = {
 
 const TMP_DIR = path.join(os.tmpdir(), "authenticqr-local-print-agent");
 const PDF_TIMEOUT_MS = 7000;
+const WINDOWS_PRINT_TIMEOUT_MS = 15000;
 
 const mmToPoints = (mm: number) => (mm * 72) / 25.4;
 
@@ -64,6 +65,16 @@ const writeFileEnsured = async (filename: string, content: string | Buffer) => {
   const filePath = path.join(TMP_DIR, filename);
   await fs.writeFile(filePath, content);
   return filePath;
+};
+
+const renderQrImage = async (scanUrl: string, size = 768) => {
+  const buffer = await QRCode.toBuffer(scanUrl, {
+    type: "png",
+    margin: 0,
+    width: Math.max(256, size),
+    errorCorrectionLevel: "M",
+  });
+  return writeFileEnsured(`qr-${Date.now()}-${sha256Hex(scanUrl).slice(0, 8)}.png`, buffer);
 };
 
 const renderPdfLabel = async (params: {
@@ -167,6 +178,124 @@ const tryRawLabelLanguage = async (params: {
   }
 };
 
+const printWithWindowsSpooler = async (params: {
+  printerId: string;
+  copies: number;
+  code: string;
+  scanUrl: string;
+  previewLabel: string;
+  calibrationProfile?: CalibrationProfile | null;
+}) => {
+  const calibration = normalizeCalibration(params.calibrationProfile);
+  const qrPath = await renderQrImage(params.scanUrl, 900);
+  const scriptPath = await writeFileEnsured(
+    `print-${Date.now()}-${sha256Hex(params.printerId).slice(0, 8)}.ps1`,
+    [
+      "param(",
+      "  [string]$PrinterName,",
+      "  [string]$QrPath,",
+      "  [string]$Title,",
+      "  [string]$Code,",
+      "  [string]$ScanUrl,",
+      "  [int]$Copies = 1,",
+      "  [double]$WidthMm = 50,",
+      "  [double]$HeightMm = 50,",
+      "  [double]$OffsetXmm = 0,",
+      "  [double]$OffsetYmm = 0",
+      ")",
+      "$ErrorActionPreference = 'Stop'",
+      "Add-Type -AssemblyName System.Drawing",
+      "$doc = New-Object System.Drawing.Printing.PrintDocument",
+      "$doc.PrinterSettings.PrinterName = $PrinterName",
+      "if (-not $doc.PrinterSettings.IsValid) { throw \"Printer '$PrinterName' is not installed.\" }",
+      "$doc.PrinterSettings.Copies = [Math]::Max(1, [Math]::Min(5, $Copies))",
+      "$paperWidth = [int][Math]::Round(($WidthMm / 25.4) * 100)",
+      "$paperHeight = [int][Math]::Round(($HeightMm / 25.4) * 100)",
+      "$doc.DefaultPageSettings.PaperSize = New-Object System.Drawing.Printing.PaperSize('MSCQR', $paperWidth, $paperHeight)",
+      "$doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)",
+      "$doc.DefaultPageSettings.Landscape = $false",
+      "$offsetX = ($OffsetXmm / 25.4) * 100",
+      "$offsetY = ($OffsetYmm / 25.4) * 100",
+      "$qrImage = [System.Drawing.Image]::FromFile($QrPath)",
+      "$titleFont = New-Object System.Drawing.Font('Arial', 10, [System.Drawing.FontStyle]::Bold)",
+      "$codeFont = New-Object System.Drawing.Font('Arial', 9, [System.Drawing.FontStyle]::Bold)",
+      "$urlFont = New-Object System.Drawing.Font('Arial', 6)",
+      "$blackBrush = [System.Drawing.Brushes]::Black",
+      "$grayBrush = [System.Drawing.Brushes]::DimGray",
+      "$doc.add_PrintPage({",
+      "  param($sender, $e)",
+      "  $g = $e.Graphics",
+      "  $g.Clear([System.Drawing.Color]::White)",
+      "  $pageWidth = $e.PageBounds.Width",
+      "  $pageHeight = $e.PageBounds.Height",
+      "  $startX = 8 + $offsetX",
+      "  $startY = 8 + $offsetY",
+      "  $usableWidth = [Math]::Max(120, $pageWidth - 16)",
+      "  $g.DrawString($Title, $titleFont, $blackBrush, [float]$startX, [float]$startY)",
+      "  $qrTop = $startY + 20",
+      "  $qrSize = [Math]::Min($usableWidth, [Math]::Max(120, $pageHeight * 0.58))",
+      "  $g.DrawImage($qrImage, [int]$startX, [int]$qrTop, [int]$qrSize, [int]$qrSize)",
+      "  $codeTop = $qrTop + $qrSize + 6",
+      "  $g.DrawString($Code, $codeFont, $blackBrush, [float]$startX, [float]$codeTop)",
+      "  $stringFormat = New-Object System.Drawing.StringFormat",
+      "  $stringFormat.Trimming = [System.Drawing.StringTrimming]::EllipsisCharacter",
+      "  $stringFormat.FormatFlags = [System.Drawing.StringFormatFlags]::LineLimit",
+      "  $urlRect = New-Object System.Drawing.RectangleF([float]$startX, [float]($codeTop + 16), [float]$usableWidth, [float]40)",
+      "  $g.DrawString($ScanUrl, $urlFont, $grayBrush, $urlRect, $stringFormat)",
+      "  $e.HasMorePages = $false",
+      "})",
+      "$doc.Print()",
+      "$qrImage.Dispose()",
+      "$titleFont.Dispose()",
+      "$codeFont.Dispose()",
+      "$urlFont.Dispose()",
+      "Write-Output 'PRINTED'",
+    ].join(os.EOL)
+  );
+
+  try {
+    await execFileAsync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        scriptPath,
+        "-PrinterName",
+        params.printerId,
+        "-QrPath",
+        qrPath,
+        "-Title",
+        params.previewLabel,
+        "-Code",
+        params.code,
+        "-ScanUrl",
+        params.scanUrl,
+        "-Copies",
+        String(Math.max(1, Math.min(5, params.copies || 1))),
+        "-WidthMm",
+        String(calibration.labelWidthMm),
+        "-HeightMm",
+        String(calibration.labelHeightMm),
+        "-OffsetXmm",
+        String(calibration.offsetXmm),
+        "-OffsetYmm",
+        String(calibration.offsetYmm),
+      ],
+      {
+        timeout: WINDOWS_PRINT_TIMEOUT_MS,
+        maxBuffer: 1024 * 1024,
+      }
+    );
+    return `winspool-${Date.now()}`;
+  } finally {
+    await fs.unlink(scriptPath).catch(() => undefined);
+    await fs.unlink(qrPath).catch(() => undefined);
+  }
+};
+
 export const printLabel = async (params: {
   printerId: string;
   printerName: string;
@@ -187,6 +316,7 @@ export const printLabel = async (params: {
   const requestedLanguage = String(params.request.labelLanguage || params.request.payloadType || "AUTO").trim().toUpperCase();
   const languages = Array.isArray(params.printerLanguages) ? params.printerLanguages.map((value) => String(value || "").trim().toUpperCase()) : [];
   const rawEligible =
+    process.platform !== "win32" &&
     Boolean(payloadContent) &&
     ["LABEL-LANGUAGE", "RAW-9100"].includes(requestedPath.toUpperCase()) &&
     languages.includes(requestedLanguage);
@@ -202,6 +332,23 @@ export const printLabel = async (params: {
       jobRef,
       printPath: "label-language",
       labelLanguage: requestedLanguage,
+    };
+  }
+
+  if (process.platform === "win32") {
+    const jobRef = await printWithWindowsSpooler({
+      printerId: params.printerId,
+      copies: Math.max(1, Number(params.request.copies || 1) || 1),
+      code: params.request.code,
+      scanUrl: params.request.scanUrl,
+      previewLabel: String(params.request.previewLabel || "MSCQR Secure Label"),
+      calibrationProfile: params.calibrationProfile || null,
+    });
+    return {
+      printerName: params.printerName,
+      jobRef,
+      printPath: "windows-spooler",
+      labelLanguage: requestedLanguage || "AUTO",
     };
   }
 
