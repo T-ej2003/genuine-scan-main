@@ -50,13 +50,21 @@ type RegisteredPrinterRow = {
   } | null;
 };
 
+const NETWORK_DIRECT_SUPPORTED_LANGUAGES = ["ZPL", "TSPL", "EPL", "CPCL"] as const;
+type NetworkDirectCommandLanguage = (typeof NETWORK_DIRECT_SUPPORTED_LANGUAGES)[number];
+
+const isSupportedNetworkDirectLanguage = (
+  value: RegisteredPrinterRow["commandLanguage"] | string | null | undefined
+): value is NetworkDirectCommandLanguage =>
+  NETWORK_DIRECT_SUPPORTED_LANGUAGES.includes(String(value || "").trim().toUpperCase() as NetworkDirectCommandLanguage);
+
 const buildEmptyNetworkPrinterForm = () => ({
   name: "",
   vendor: "",
   model: "",
   ipAddress: "",
   port: "9100",
-  commandLanguage: "AUTO" as RegisteredPrinterRow["commandLanguage"],
+  commandLanguage: "ZPL" as RegisteredPrinterRow["commandLanguage"],
 });
 
 export default function PrinterDiagnostics() {
@@ -78,6 +86,7 @@ export default function PrinterDiagnostics() {
 
   const sameHostMockPrinterHost = "127.0.0.1";
   const dockerMockPrinterHost = "mock-printer";
+  const networkPrinterLanguageSupported = isSupportedNetworkDirectLanguage(networkPrinterForm.commandLanguage);
 
   const loadRegisteredPrinters = async () => {
     if (user?.role !== "manufacturer") return;
@@ -383,6 +392,15 @@ export default function PrinterDiagnostics() {
       toast({
         title: "Incomplete printer profile",
         description: "Name, host or IP address, and TCP port are required.",
+        variant: "destructive",
+      });
+      return null;
+    }
+
+    if (!isSupportedNetworkDirectLanguage(source.commandLanguage)) {
+      toast({
+        title: "Unsupported network-direct language",
+        description: "Choose ZPL, TSPL, EPL, or CPCL. Use the local-agent path for AUTO, SBPL, ESC/POS, or other languages.",
         variant: "destructive",
       });
       return null;
@@ -883,29 +901,37 @@ export default function PrinterDiagnostics() {
                     <SelectValue placeholder="Command language" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="AUTO">Auto</SelectItem>
-                    <SelectItem value="ZPL">ZPL</SelectItem>
-                    <SelectItem value="TSPL">TSPL</SelectItem>
-                    <SelectItem value="SBPL">SBPL</SelectItem>
-                    <SelectItem value="EPL">EPL</SelectItem>
-                    <SelectItem value="CPCL">CPCL</SelectItem>
-                    <SelectItem value="ESC_POS">ESC/POS</SelectItem>
-                    <SelectItem value="OTHER">Other</SelectItem>
+                    {!networkPrinterLanguageSupported && networkPrinterForm.commandLanguage ? (
+                      <SelectItem value={networkPrinterForm.commandLanguage} disabled>
+                        {networkPrinterForm.commandLanguage} (legacy unsupported)
+                      </SelectItem>
+                    ) : null}
+                    {NETWORK_DIRECT_SUPPORTED_LANGUAGES.map((language) => (
+                      <SelectItem key={language} value={language}>
+                        {language}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
+              {!networkPrinterLanguageSupported && (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                  This profile currently uses <strong>{networkPrinterForm.commandLanguage}</strong>, which is not allowed for
+                  network-direct dispatch. Change it to ZPL, TSPL, EPL, or CPCL before saving or testing.
+                </div>
+              )}
               <div className="flex flex-wrap justify-end gap-2">
                 {editingPrinterId && (
                   <Button variant="outline" onClick={resetNetworkPrinterForm}>
                     Cancel edit
                   </Button>
                 )}
-                <Button onClick={() => void saveNetworkPrinter()} disabled={savingNetworkPrinter}>
+                <Button onClick={() => void saveNetworkPrinter()} disabled={savingNetworkPrinter || !networkPrinterLanguageSupported}>
                   {savingNetworkPrinter ? "Saving..." : editingPrinterId ? "Update printer" : "Register printer"}
                 </Button>
               </div>
               <div className="text-xs text-muted-foreground">
-                Network-direct printing is restricted to registered IP/port targets only. Freeform socket destinations are not allowed. Direct dispatch currently supports ZPL, TSPL, EPL, and CPCL.
+                Network-direct printing is restricted to registered IP/port targets only. Freeform socket destinations are not allowed. Direct dispatch accepts only ZPL, TSPL, EPL, and CPCL; use the local agent for other printer languages.
               </div>
             </CardContent>
           </Card>

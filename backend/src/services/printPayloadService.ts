@@ -59,6 +59,15 @@ const NETWORK_DIRECT_PAYLOAD_TYPES = new Set<PrintPayloadType>([
   PrintPayloadType.CPCL,
 ]);
 
+export const NETWORK_DIRECT_COMMAND_LANGUAGES = [
+  PrinterCommandLanguage.ZPL,
+  PrinterCommandLanguage.TSPL,
+  PrinterCommandLanguage.EPL,
+  PrinterCommandLanguage.CPCL,
+] as const;
+
+const NETWORK_DIRECT_COMMAND_LANGUAGE_SET = new Set<PrinterCommandLanguage>(NETWORK_DIRECT_COMMAND_LANGUAGES);
+
 const safeNumber = (value: unknown, fallback: number) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -320,6 +329,9 @@ export const resolvePayloadType = (printer: PrinterPayloadProfile): PrintPayload
 
 export const supportsNetworkDirectPayloadType = (payloadType: PrintPayloadType) => NETWORK_DIRECT_PAYLOAD_TYPES.has(payloadType);
 
+export const supportsNetworkDirectCommandLanguage = (language: PrinterCommandLanguage | null | undefined) =>
+  Boolean(language && NETWORK_DIRECT_COMMAND_LANGUAGE_SET.has(language));
+
 export const buildApprovedPrintPayload = (params: {
   printer: PrinterPayloadProfile;
   qr: PrintPayloadQr;
@@ -390,5 +402,5 @@ export const buildApprovedPrintPayload = (params: {
 };
 
 export const supportsNetworkDirectPayload = (printer: PrinterPayloadProfile) => {
-  return supportsNetworkDirectPayloadType(resolvePayloadType(printer));
+  return supportsNetworkDirectCommandLanguage(printer.commandLanguage) && supportsNetworkDirectPayloadType(resolvePayloadType(printer));
 };

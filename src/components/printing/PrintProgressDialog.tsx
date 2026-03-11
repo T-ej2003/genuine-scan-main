@@ -25,6 +25,12 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
   const progressValue = safeTotal > 0 ? Math.max(0, Math.min(100, Math.round((safePrinted / safeTotal) * 100))) : 0;
   const normalizedPhase = String(props.phase || "").trim().toLowerCase();
   const isCompleted = !props.error && normalizedPhase.includes("complete");
+  const dialogTitle = props.error ? "Print needs attention" : isCompleted ? "Print completed" : "Printing in progress";
+  const dialogDescription = props.error
+    ? "Review the failure details before retrying or closing this session."
+    : isCompleted
+      ? "All labels for the current secure print session were confirmed."
+      : "Live direct-print status for your current secure print session.";
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
@@ -32,11 +38,9 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Printer className="h-4 w-4" />
-            Printing in progress
+            {dialogTitle}
           </DialogTitle>
-          <DialogDescription>
-            Live direct-print status for your current secure print session.
-          </DialogDescription>
+          <DialogDescription>{dialogDescription}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">

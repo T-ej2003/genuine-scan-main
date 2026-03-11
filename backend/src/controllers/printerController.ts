@@ -14,14 +14,10 @@ import { createAuditLog } from "../services/auditService";
 import { isManufacturerRole, resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
 
 const NETWORK_DIRECT_LANGUAGE_OPTIONS = [
-  PrinterCommandLanguage.AUTO,
   PrinterCommandLanguage.ZPL,
   PrinterCommandLanguage.TSPL,
-  PrinterCommandLanguage.SBPL,
   PrinterCommandLanguage.EPL,
   PrinterCommandLanguage.CPCL,
-  PrinterCommandLanguage.ESC_POS,
-  PrinterCommandLanguage.OTHER,
 ] as const;
 
 const networkPrinterSchema = z.object({
@@ -29,7 +25,7 @@ const networkPrinterSchema = z.object({
   vendor: z.string().trim().max(180).optional(),
   model: z.string().trim().max(180).optional(),
   connectionType: z.literal(PrinterConnectionType.NETWORK_DIRECT).default(PrinterConnectionType.NETWORK_DIRECT),
-  commandLanguage: z.enum(NETWORK_DIRECT_LANGUAGE_OPTIONS).default(PrinterCommandLanguage.AUTO),
+  commandLanguage: z.enum(NETWORK_DIRECT_LANGUAGE_OPTIONS).default(PrinterCommandLanguage.ZPL),
   ipAddress: z.string().trim().min(3).max(120),
   port: z.number().int().min(1).max(65535).default(9100),
   capabilitySummary: z.record(z.any()).optional(),

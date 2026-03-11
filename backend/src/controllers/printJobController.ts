@@ -27,8 +27,14 @@ import { getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../
 import { createAuditLog } from "../services/auditService";
 import { createRoleNotifications, createUserNotification } from "../services/notificationService";
 import { getPrinterConnectionStatusForUser } from "../services/printerConnectionService";
-import { buildApprovedPrintPayload, resolvePayloadType, supportsNetworkDirectPayloadType } from "../services/printPayloadService";
+import {
+  buildApprovedPrintPayload,
+  resolvePayloadType,
+  supportsNetworkDirectPayload,
+  supportsNetworkDirectPayloadType,
+} from "../services/printPayloadService";
 import { getRegisteredPrinterForManufacturer } from "../services/printerRegistryService";
+import { testNetworkPrinterConnectivity } from "../services/networkPrinterSocketService";
 import { getPrintJobOperationalView, listPrintJobsForManufacturer, startNetworkDirectDispatch } from "../services/networkDirectPrintService";
 import {
   beginIdempotentAction,
@@ -183,6 +189,50 @@ const ensureSelectedPrinterReady = async (params: {
     if (!printer.ipAddress || !printer.port) {
       throw new Error("PRINTER_NETWORK_CONFIG_INVALID");
     }
+
+    if (!supportsNetworkDirectPayload(printer as any)) {
+      const detail =
+        "Network-direct printing currently supports only ZPL, TSPL, EPL, and CPCL. Use the local agent for other printer languages.";
+      await prisma.printer.update({
+        where: { id: printer.id },
+        data: {
+          lastValidatedAt: new Date(),
+          lastValidationStatus: "BLOCKED",
+          lastValidationMessage: detail,
+        },
+      });
+      throw Object.assign(new Error("PRINTER_NETWORK_LANGUAGE_UNSUPPORTED"), { reason: detail, printer });
+    }
+
+    try {
+      const result = await testNetworkPrinterConnectivity({
+        ipAddress: printer.ipAddress,
+        port: printer.port,
+      });
+      await prisma.printer.update({
+        where: { id: printer.id },
+        data: {
+          lastValidatedAt: new Date(),
+          lastValidationStatus: "READY",
+          lastValidationMessage: `TCP connectivity validated in ${result.latencyMs}ms`,
+        },
+      });
+    } catch (error: any) {
+      const detail = error?.message || `Could not reach ${printer.ipAddress}:${printer.port}`;
+      await prisma.printer.update({
+        where: { id: printer.id },
+        data: {
+          lastValidatedAt: new Date(),
+          lastValidationStatus: "OFFLINE",
+          lastValidationMessage: detail,
+        },
+      });
+      throw Object.assign(new Error("PRINTER_NETWORK_UNREACHABLE"), {
+        reason: detail,
+        printer,
+      });
+    }
+
     return {
       printer,
       printerStatus: null,
@@ -954,6 +1004,19 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
     }
     if (msg.includes("PRINTER_NETWORK_CONFIG_INVALID")) {
       return res.status(409).json({ success: false, error: "Selected network printer is missing IP address or TCP port." });
+    }
+    if (msg.includes("PRINTER_NETWORK_LANGUAGE_UNSUPPORTED")) {
+      return res.status(409).json({
+        success: false,
+        error:
+          "Selected network printer uses a language that is not available for network-direct dispatch. Use ZPL, TSPL, EPL, or CPCL, or switch to the local agent path.",
+      });
+    }
+    if (msg.includes("PRINTER_NETWORK_UNREACHABLE")) {
+      return res.status(409).json({
+        success: false,
+        error: (e as any)?.reason || "Selected network printer is not reachable on its saved host and port.",
+      });
     }
     return res.status(400).json({ success: false, error: e?.message || "Bad request" });
   }
