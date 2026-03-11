@@ -84,8 +84,6 @@ export default function PrinterDiagnostics() {
   const [editingPrinterId, setEditingPrinterId] = useState<string | null>(null);
   const [networkPrinterForm, setNetworkPrinterForm] = useState(buildEmptyNetworkPrinterForm);
 
-  const sameHostMockPrinterHost = "127.0.0.1";
-  const dockerMockPrinterHost = "mock-printer";
   const networkPrinterLanguageSupported = isSupportedNetworkDirectLanguage(networkPrinterForm.commandLanguage);
 
   const loadRegisteredPrinters = async () => {
@@ -483,37 +481,6 @@ export default function PrinterDiagnostics() {
     });
   };
 
-  const seedMockNetworkPrinterForm = (host = sameHostMockPrinterHost) => {
-    const seeded = {
-      name: "Mock Zebra Printer",
-      vendor: "Zebra",
-      model: "9100 Test Socket",
-      ipAddress: host,
-      port: "9100",
-      commandLanguage: "ZPL" as RegisteredPrinterRow["commandLanguage"],
-    };
-    setEditingPrinterId(null);
-    setNetworkPrinterForm(seeded);
-    return seeded;
-  };
-
-  const registerMockNetworkPrinter = async (host = sameHostMockPrinterHost) => {
-    const seeded = seedMockNetworkPrinterForm(host);
-    const existing = registeredPrinters.find(
-      (printer) =>
-        printer.connectionType === "NETWORK_DIRECT" &&
-        String(printer.ipAddress || "").trim() === seeded.ipAddress &&
-        Number(printer.port || 9100) === Number(seeded.port || 9100)
-    );
-
-    await persistNetworkPrinter({
-      printerId: existing?.id || null,
-      formOverride: seeded,
-      successTitle: existing ? "Mock printer updated" : "Mock printer registered",
-      resetAfterSave: false,
-    });
-  };
-
   const editNetworkPrinter = (printer: RegisteredPrinterRow) => {
     setEditingPrinterId(printer.id);
     setNetworkPrinterForm({
@@ -685,6 +652,7 @@ export default function PrinterDiagnostics() {
                   <li>The local MSCQR print agent must be installed and running on the workstation.</li>
                   <li>The operating system must already see the printer in its printer list.</li>
                   <li>The printer driver or spooler path must be working before the browser can show a ready state.</li>
+                  <li>Start the agent on that workstation with <code>npm --prefix backend run print:agent</code>.</li>
                   <li>The local agent must answer <code>http://127.0.0.1:17866/status</code> from the same device.</li>
                 </ul>
               </div>
@@ -774,17 +742,6 @@ export default function PrinterDiagnostics() {
               {registeredPrinters.length === 0 ? (
                 <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
                   <div>No printer profiles are registered yet. Local-agent printers appear after a trusted heartbeat. Network-direct printers can be added here.</div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Button variant="outline" size="sm" onClick={() => void registerMockNetworkPrinter(dockerMockPrinterHost)} disabled={savingNetworkPrinter}>
-                      {savingNetworkPrinter ? "Connecting..." : `Use Docker mock-printer (${dockerMockPrinterHost}:9100)`}
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => void registerMockNetworkPrinter(sameHostMockPrinterHost)} disabled={savingNetworkPrinter}>
-                      {savingNetworkPrinter ? "Connecting..." : `Use same-host mock printer (${sameHostMockPrinterHost}:9100)`}
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => seedMockNetworkPrinterForm(dockerMockPrinterHost)}>
-                      Fill Docker settings only
-                    </Button>
-                  </div>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -844,21 +801,10 @@ export default function PrinterDiagnostics() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="rounded-xl border bg-muted/20 p-3 text-xs text-muted-foreground">
-                <div className="font-medium text-foreground">Fast setup for the mock printer</div>
+                <div className="font-medium text-foreground">Network-direct registration</div>
                 <div className="mt-1 leading-5">
-                  Use <span className="font-mono text-foreground">{dockerMockPrinterHost}:9100</span> when backend and mock printer run together in Docker on Lightsail.
-                  Use <span className="mx-1 font-mono text-foreground">{sameHostMockPrinterHost}:9100</span> only when the mock printer runs on the exact same host as the backend process.
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button variant="outline" size="sm" onClick={() => void registerMockNetworkPrinter(dockerMockPrinterHost)} disabled={savingNetworkPrinter}>
-                    {savingNetworkPrinter ? "Connecting..." : `Use Docker mock-printer (${dockerMockPrinterHost}:9100)`}
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => void registerMockNetworkPrinter(sameHostMockPrinterHost)} disabled={savingNetworkPrinter}>
-                    {savingNetworkPrinter ? "Connecting..." : `Use same-host mock printer (${sameHostMockPrinterHost}:9100)`}
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => seedMockNetworkPrinterForm(dockerMockPrinterHost)}>
-                    Fill Docker form only
-                  </Button>
+                  Register only real LAN printers here. Workstation printers like your Canon should use <strong>LOCAL_AGENT</strong>,
+                  not a TCP host entry.
                 </div>
               </div>
               <div className="space-y-1">
@@ -881,7 +827,7 @@ export default function PrinterDiagnostics() {
                   <Input
                     value={networkPrinterForm.ipAddress}
                     onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, ipAddress: e.target.value }))}
-                    placeholder={`mock-printer or ${sameHostMockPrinterHost}`}
+                    placeholder="192.168.1.50 or printer-lan-01"
                   />
                 </div>
                 <div className="space-y-1">

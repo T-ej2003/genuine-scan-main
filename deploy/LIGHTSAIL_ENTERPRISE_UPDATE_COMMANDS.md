@@ -35,14 +35,13 @@ docker compose up -d --build
 docker compose ps
 docker compose logs backend --tail 120
 docker compose logs frontend --tail 120
-docker compose logs mock-printer --tail 120
 ```
 
-### Mock printer for network-direct testing on Docker Compose
+### Optional mock printer for isolated network-direct testing
 ```bash
 cd /home/ubuntu/genuine-scan-main
-docker compose up -d --build mock-printer
-docker compose ps mock-printer
+docker compose -f docker-compose.yml -f docker-compose.mock-printer.yml up -d --build mock-printer
+docker compose -f docker-compose.yml -f docker-compose.mock-printer.yml ps mock-printer
 curl -sS http://127.0.0.1:3001/status
 ```
 
@@ -62,7 +61,7 @@ pm2 restart genuine-scan-frontend
 pm2 save
 ```
 
-### Mock printer for network-direct testing on PM2/systemd
+### Optional mock printer for isolated network-direct testing
 ```bash
 cd /home/ubuntu/genuine-scan-main/backend
 nohup node mock-printer/server.js > /tmp/mock-printer.log 2>&1 &
@@ -73,6 +72,20 @@ Register the printer in the app as:
 - host: `127.0.0.1`
 - port: `9100`
 - language: `ZPL`
+
+### Workstation printers now use the local print agent
+Run this on the manufacturer workstation, not on Lightsail:
+```bash
+cd /path/to/genuine-scan-main/backend
+npm ci
+npm run build
+npm run print:agent
+```
+
+The browser on that same workstation should then load:
+```bash
+curl -sS http://127.0.0.1:17866/status
+```
 
 ## 5) Smoke checks
 ```bash
