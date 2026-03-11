@@ -1,11 +1,22 @@
 type RiskBand = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
 type ScanSignals = {
+  scanCount24h?: number;
   distinctDeviceCount24h?: number;
   recentScanCount10m?: number;
   distinctCountryCount24h?: number;
   seenOnCurrentDeviceBefore?: boolean;
   previousScanSameDevice?: boolean | null;
+  currentActorTrustedOwnerContext?: boolean;
+  seenByCurrentTrustedActorBefore?: boolean;
+  previousScanSameTrustedActor?: boolean | null;
+  trustedOwnerScanCount24h?: number;
+  trustedOwnerScanCount10m?: number;
+  untrustedScanCount24h?: number;
+  untrustedScanCount10m?: number;
+  distinctTrustedActorCount24h?: number;
+  distinctUntrustedDeviceCount24h?: number;
+  distinctUntrustedCountryCount24h?: number;
   ipVelocityCount10m?: number;
   ipReputationScore?: number;
   deviceGraphOverlap24h?: number;
@@ -41,16 +52,40 @@ export type DuplicateRiskInput = {
   productRiskLevel?: RiskBand | null;
 };
 
+export type VerificationActivitySummary = {
+  state: "first_scan" | "trusted_repeat" | "mixed_repeat" | "external_activity" | "normal_repeat";
+  summary: string;
+  trustedOwnerScanCount24h: number;
+  trustedOwnerScanCount10m: number;
+  untrustedScanCount24h: number;
+  untrustedScanCount10m: number;
+  distinctTrustedActorCount24h: number;
+  distinctUntrustedDeviceCount24h: number;
+  currentActorTrustedOwnerContext: boolean;
+};
+
 export type DuplicateRiskAssessment = {
   riskScore: number;
   classification: "LEGIT_REPEAT" | "SUSPICIOUS_DUPLICATE";
   reasons: string[];
   threshold: number;
+  activitySummary: VerificationActivitySummary;
   signals: {
     scanCount: number;
+    scanCount24h: number;
     distinctDeviceCount24h: number;
     recentScanCount10m: number;
     distinctCountryCount24h: number;
+    currentActorTrustedOwnerContext: boolean;
+    seenByCurrentTrustedActorBefore: boolean;
+    previousScanSameTrustedActor: boolean;
+    trustedOwnerScanCount24h: number;
+    trustedOwnerScanCount10m: number;
+    untrustedScanCount24h: number;
+    untrustedScanCount10m: number;
+    distinctTrustedActorCount24h: number;
+    distinctUntrustedDeviceCount24h: number;
+    distinctUntrustedCountryCount24h: number;
     hasCustomerIdentity: boolean;
     ownershipConflict: boolean;
     ownedByRequester: boolean;
@@ -108,19 +143,99 @@ const adaptiveThreshold = (tenantRisk: RiskBand, productRisk: RiskBand) => {
   return clamp(60 + adjustment, 45, 75);
 };
 
+const countPhrase = (count: number, singular: string, plural?: string) => {
+  const safeCount = Math.max(0, Math.round(Number(count || 0)));
+  return `${safeCount} ${safeCount === 1 ? singular : plural || `${singular}s`}`;
+};
+
+const wasWere = (count: number) => (Math.round(Number(count || 0)) === 1 ? "was" : "were");
+
+const buildActivitySummary = (input: {
+  scanCount: number;
+  currentActorTrustedOwnerContext: boolean;
+  trustedOwnerScanCount24h: number;
+  trustedOwnerScanCount10m: number;
+  untrustedScanCount24h: number;
+  untrustedScanCount10m: number;
+  distinctTrustedActorCount24h: number;
+  distinctUntrustedDeviceCount24h: number;
+}): VerificationActivitySummary => {
+  const summaryBase = {
+    trustedOwnerScanCount24h: input.trustedOwnerScanCount24h,
+    trustedOwnerScanCount10m: input.trustedOwnerScanCount10m,
+    untrustedScanCount24h: input.untrustedScanCount24h,
+    untrustedScanCount10m: input.untrustedScanCount10m,
+    distinctTrustedActorCount24h: input.distinctTrustedActorCount24h,
+    distinctUntrustedDeviceCount24h: input.distinctUntrustedDeviceCount24h,
+    currentActorTrustedOwnerContext: input.currentActorTrustedOwnerContext,
+  };
+
+  if (input.scanCount <= 1) {
+    return {
+      state: "first_scan",
+      summary: "First successful verification recorded.",
+      ...summaryBase,
+    };
+  }
+
+  if (input.currentActorTrustedOwnerContext && input.untrustedScanCount24h === 0) {
+    return {
+      state: "trusted_repeat",
+      summary:
+        input.trustedOwnerScanCount24h > 0
+          ? `${countPhrase(input.trustedOwnerScanCount24h, "recent scan")} matched the same owner or trusted device in the last 24 hours.`
+          : "Recent activity matches the same owner or trusted device.",
+      ...summaryBase,
+    };
+  }
+
+  if (input.currentActorTrustedOwnerContext && input.untrustedScanCount24h > 0) {
+    return {
+      state: "mixed_repeat",
+      summary: `${countPhrase(input.trustedOwnerScanCount24h, "trusted scan")} and ${countPhrase(input.untrustedScanCount24h, "additional external scan")} were recorded in the last 24 hours.`,
+      ...summaryBase,
+    };
+  }
+
+  if (input.trustedOwnerScanCount24h > 0 && input.untrustedScanCount24h === 0) {
+    return {
+      state: "trusted_repeat",
+      summary: `${countPhrase(input.trustedOwnerScanCount24h, "trusted scan")} ${wasWere(input.trustedOwnerScanCount24h)} recorded in the last 24 hours with no external scan activity.`,
+      ...summaryBase,
+    };
+  }
+
+  if (input.untrustedScanCount24h > 0) {
+    return {
+      state: "external_activity",
+      summary: `${countPhrase(input.untrustedScanCount24h, "external scan")} across ${countPhrase(Math.max(input.distinctUntrustedDeviceCount24h, 1), "new device")} ${wasWere(input.untrustedScanCount24h)} recorded in the last 24 hours.`,
+      ...summaryBase,
+    };
+  }
+
+  return {
+    state: "normal_repeat",
+    summary: "Repeat scans alone do not indicate a fake product.",
+    ...summaryBase,
+  };
+};
+
 export const deriveAnomalyModelScore = (input: {
   scanSignals?: ScanSignals | null;
   policy?: PolicySignal | null;
 }) => {
   const scanSignals = input.scanSignals || {};
   const policyTriggered = input.policy?.triggered || {};
+  const suspiciousCountryCount = Number(
+    scanSignals.distinctUntrustedCountryCount24h ?? scanSignals.distinctCountryCount24h ?? 0
+  );
 
   let score = 0;
   score += clamp(Number(scanSignals.ipReputationScore || 0), 0, 100) * 0.45;
   score += Math.min(25, Math.max(0, Number(scanSignals.ipVelocityCount10m || 0) - 2) * 3);
   score += Math.min(22, Math.max(0, Number(scanSignals.deviceGraphOverlap24h || 0) - 1) * 4);
   score += Math.min(18, Math.max(0, Number(scanSignals.crossCodeCorrelation24h || 0) - 1) * 3);
-  score += Math.min(22, Math.max(0, Number(scanSignals.distinctCountryCount24h || 0) - 1) * 10);
+  score += Math.min(22, Math.max(0, suspiciousCountryCount - 1) * 10);
 
   if (policyTriggered.geoDrift) score += 12;
   if (policyTriggered.velocitySpike) score += 14;
@@ -136,11 +251,29 @@ export const assessDuplicateRisk = (input: DuplicateRiskInput): DuplicateRiskAss
   const policyTriggered = policy?.triggered || {};
   const policyAlerts = Array.isArray(policy?.alerts) ? policy!.alerts! : [];
 
+  const scanCount24h = Math.max(0, Number(signals?.scanCount24h ?? 0));
   const distinctDeviceCount24h = Math.max(0, Number(signals?.distinctDeviceCount24h ?? 0));
   const recentScanCount10m = Math.max(0, Number(signals?.recentScanCount10m ?? 0));
   const distinctCountryCount24h = Math.max(0, Number(signals?.distinctCountryCount24h ?? 0));
+  const currentActorTrustedOwnerContext =
+    bool(signals?.currentActorTrustedOwnerContext) || bool(input.ownershipStatus?.isOwnedByRequester);
   const seenOnCurrentDeviceBefore = bool(signals?.seenOnCurrentDeviceBefore);
   const previousScanSameDevice = bool(signals?.previousScanSameDevice === true);
+  const seenByCurrentTrustedActorBefore = bool(signals?.seenByCurrentTrustedActorBefore);
+  const previousScanSameTrustedActor = bool(signals?.previousScanSameTrustedActor === true);
+  const trustedOwnerScanCount24h = Math.max(0, Number(signals?.trustedOwnerScanCount24h ?? 0));
+  const trustedOwnerScanCount10m = Math.max(0, Number(signals?.trustedOwnerScanCount10m ?? 0));
+  const untrustedScanCount24h = Math.max(0, Number(signals?.untrustedScanCount24h ?? scanCount24h ?? 0));
+  const untrustedScanCount10m = Math.max(0, Number(signals?.untrustedScanCount10m ?? recentScanCount10m ?? 0));
+  const distinctTrustedActorCount24h = Math.max(0, Number(signals?.distinctTrustedActorCount24h ?? 0));
+  const distinctUntrustedDeviceCount24h = Math.max(
+    0,
+    Number(signals?.distinctUntrustedDeviceCount24h ?? distinctDeviceCount24h ?? 0)
+  );
+  const distinctUntrustedCountryCount24h = Math.max(
+    0,
+    Number(signals?.distinctUntrustedCountryCount24h ?? distinctCountryCount24h ?? 0)
+  );
   const ipVelocityCount10m = Math.max(0, Number(signals?.ipVelocityCount10m ?? 0));
   const ipReputationScore = clamp(Number(signals?.ipReputationScore ?? 0), 0, 100);
   const deviceGraphOverlap24h = Math.max(0, Number(signals?.deviceGraphOverlap24h ?? 0));
@@ -164,6 +297,17 @@ export const assessDuplicateRisk = (input: DuplicateRiskInput): DuplicateRiskAss
   const suspiciousReasons: string[] = [];
   const reassuranceReasons: string[] = [];
 
+  const activitySummary = buildActivitySummary({
+    scanCount,
+    currentActorTrustedOwnerContext,
+    trustedOwnerScanCount24h,
+    trustedOwnerScanCount10m,
+    untrustedScanCount24h,
+    untrustedScanCount10m,
+    distinctTrustedActorCount24h,
+    distinctUntrustedDeviceCount24h,
+  });
+
   // Repeat count is intentionally a weak signal to reduce false positives.
   if (scanCount > 1) {
     score += Math.min(5, (scanCount - 1) * 0.8);
@@ -175,17 +319,26 @@ export const assessDuplicateRisk = (input: DuplicateRiskInput): DuplicateRiskAss
     score += 6;
   }
 
-  if (distinctDeviceCount24h >= 2) {
-    score += clamp(14 + (distinctDeviceCount24h - 2) * 7, 14, 32);
-    uniquePush(suspiciousReasons, "Multiple devices scanned this code in a short period.");
+  if (distinctUntrustedDeviceCount24h >= 2) {
+    score += clamp(14 + (distinctUntrustedDeviceCount24h - 2) * 7, 14, 32);
+    uniquePush(
+      suspiciousReasons,
+      `${countPhrase(distinctUntrustedDeviceCount24h, "new device")} scanned this code in the last 24 hours.`
+    );
   }
-  if (recentScanCount10m >= 3) {
-    score += clamp(9 + (recentScanCount10m - 3) * 4, 9, 28);
-    uniquePush(suspiciousReasons, "Rapid burst scans were detected in the last 10 minutes.");
+  if (untrustedScanCount10m >= 3) {
+    score += clamp(9 + (untrustedScanCount10m - 3) * 4, 9, 28);
+    uniquePush(
+      suspiciousReasons,
+      `${countPhrase(untrustedScanCount10m, "untrusted scan")} ${wasWere(untrustedScanCount10m)} recorded in the last 10 minutes.`
+    );
   }
-  if (distinctCountryCount24h >= 2) {
-    score += clamp(20 + (distinctCountryCount24h - 2) * 10, 20, 40);
-    uniquePush(suspiciousReasons, "Recent scans came from multiple countries.");
+  if (distinctUntrustedCountryCount24h >= 2) {
+    score += clamp(20 + (distinctUntrustedCountryCount24h - 2) * 10, 20, 40);
+    uniquePush(
+      suspiciousReasons,
+      `Recent external scans came from ${countPhrase(distinctUntrustedCountryCount24h, "country")}.`
+    );
   }
 
   if (ipVelocityCount10m >= 5) {
@@ -224,11 +377,11 @@ export const assessDuplicateRisk = (input: DuplicateRiskInput): DuplicateRiskAss
     uniquePush(suspiciousReasons, "Travel pattern between consecutive scans is unusually fast.");
   }
 
-  if (distinctDeviceCount24h >= 2 && recentScanCount10m >= 3) {
+  if (distinctUntrustedDeviceCount24h >= 2 && untrustedScanCount10m >= 3) {
     score += 12;
-    uniquePush(suspiciousReasons, "Multiple devices are scanning this code rapidly.");
+    uniquePush(suspiciousReasons, "New devices are scanning this code rapidly.");
   }
-  if (distinctCountryCount24h >= 2 && recentScanCount10m >= 3) {
+  if (distinctUntrustedCountryCount24h >= 2 && untrustedScanCount10m >= 3) {
     score += 16;
     uniquePush(suspiciousReasons, "Cross-country burst activity indicates possible cloning.");
   }
@@ -245,6 +398,21 @@ export const assessDuplicateRisk = (input: DuplicateRiskInput): DuplicateRiskAss
   if (ownedByRequester) {
     score -= 20;
     uniquePush(reassuranceReasons, "Ownership matches your account or trusted device.");
+  }
+  if (currentActorTrustedOwnerContext) {
+    score -= 12;
+    uniquePush(reassuranceReasons, "This scan matches the recorded owner context.");
+  }
+  if (trustedOwnerScanCount24h >= 2) {
+    score -= clamp(6 + (trustedOwnerScanCount24h - 2) * 1.2, 6, 16);
+    uniquePush(
+      reassuranceReasons,
+      `${countPhrase(trustedOwnerScanCount24h, "recent trusted scan")} matched the same owner context in the last 24 hours.`
+    );
+  }
+  if (seenByCurrentTrustedActorBefore || previousScanSameTrustedActor) {
+    score -= seenByCurrentTrustedActorBefore && previousScanSameTrustedActor ? 12 : 8;
+    uniquePush(reassuranceReasons, "Recent scans are consistent with the same signed-in owner or claimed device.");
   }
   if (seenOnCurrentDeviceBefore || previousScanSameDevice) {
     score -= seenOnCurrentDeviceBefore && previousScanSameDevice ? 12 : 8;
@@ -265,17 +433,18 @@ export const assessDuplicateRisk = (input: DuplicateRiskInput): DuplicateRiskAss
     score += Math.round(anomalyModelScore * 0.22);
   }
 
-  // If we have strong trust signals and no hard anomaly triggers, keep risk in the low band.
   const hasHardAnomaly =
     ownershipConflict ||
     possibleImpossibleTravel ||
-    distinctCountryCount24h >= 2 ||
+    distinctUntrustedCountryCount24h >= 2 ||
     ipReputationScore >= 70 ||
     deviceGraphOverlap24h >= 4 ||
-    (distinctDeviceCount24h >= 2 && recentScanCount10m >= 3) ||
+    (distinctUntrustedDeviceCount24h >= 2 && untrustedScanCount10m >= 3) ||
     bool(policyTriggered.velocitySpike);
 
-  if (!hasHardAnomaly && (ownedByRequester || seenOnCurrentDeviceBefore || hasCustomerIdentity)) {
+  if (!hasHardAnomaly && currentActorTrustedOwnerContext && untrustedScanCount24h === 0) {
+    score = Math.min(score, 24);
+  } else if (!hasHardAnomaly && (ownedByRequester || seenOnCurrentDeviceBefore || hasCustomerIdentity)) {
     score = Math.min(score, 34);
   }
 
@@ -288,12 +457,17 @@ export const assessDuplicateRisk = (input: DuplicateRiskInput): DuplicateRiskAss
 
   let reasons: string[];
   if (classification === "SUSPICIOUS_DUPLICATE") {
-    reasons = suspiciousReasons.slice(0, 6);
+    reasons = [];
+    if (currentActorTrustedOwnerContext && untrustedScanCount24h > 0) {
+      reasons.push("Your current scan matches the recorded owner, but additional external scan activity is also present.");
+    }
+    reasons.push(...suspiciousReasons.slice(0, 6));
     if (!reasons.length) {
       reasons = ["Composite anomaly signals suggest this code may be duplicated or misused."];
     }
   } else {
     reasons = [];
+    if (activitySummary.summary) reasons.push(activitySummary.summary);
     if (reassuranceReasons.length) reasons.push(...reassuranceReasons.slice(0, 3));
     if (!reasons.length && scanCount > 1) {
       reasons.push("Repeat scans alone do not indicate a fake product.");
@@ -308,11 +482,23 @@ export const assessDuplicateRisk = (input: DuplicateRiskInput): DuplicateRiskAss
     classification,
     reasons,
     threshold,
+    activitySummary,
     signals: {
       scanCount,
+      scanCount24h,
       distinctDeviceCount24h,
       recentScanCount10m,
       distinctCountryCount24h,
+      currentActorTrustedOwnerContext,
+      seenByCurrentTrustedActorBefore,
+      previousScanSameTrustedActor,
+      trustedOwnerScanCount24h,
+      trustedOwnerScanCount10m,
+      untrustedScanCount24h,
+      untrustedScanCount10m,
+      distinctTrustedActorCount24h,
+      distinctUntrustedDeviceCount24h,
+      distinctUntrustedCountryCount24h,
       hasCustomerIdentity,
       ownershipConflict,
       ownedByRequester,

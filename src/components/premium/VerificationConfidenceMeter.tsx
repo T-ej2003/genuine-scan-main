@@ -15,6 +15,9 @@ type ConfidenceSignalInput = {
   distinctDeviceCount24h?: number | null;
   recentScanCount10m?: number | null;
   distinctCountryCount24h?: number | null;
+  distinctUntrustedDeviceCount24h?: number | null;
+  untrustedScanCount10m?: number | null;
+  trustedOwnerScanCount24h?: number | null;
   warningMessage?: string | null;
 };
 
@@ -30,13 +33,19 @@ export const deriveVerificationConfidence = (input: ConfidenceSignalInput) => {
   };
 
   let score = byClass[input.classification];
+  const suspiciousDeviceCount = Number(input.distinctUntrustedDeviceCount24h ?? input.distinctDeviceCount24h ?? 0);
+  const suspiciousBurstCount = Number(input.untrustedScanCount10m ?? input.recentScanCount10m ?? 0);
+  const trustedRepeatCount = Number(input.trustedOwnerScanCount24h ?? 0);
 
   if (input.classification === "LEGIT_REPEAT") {
     score -= Math.min(4, Math.max(0, (input.totalScans || 0) - 1));
+    if (trustedRepeatCount > 0 && suspiciousDeviceCount === 0 && suspiciousBurstCount === 0) {
+      score += Math.min(6, trustedRepeatCount);
+    }
   }
 
-  score -= Math.min(16, Number(input.distinctDeviceCount24h || 0) * 3);
-  score -= Math.min(18, Number(input.recentScanCount10m || 0) * 2);
+  score -= Math.min(16, suspiciousDeviceCount * 3);
+  score -= Math.min(18, suspiciousBurstCount * 2);
   score -= Math.min(16, Number(input.distinctCountryCount24h || 0) * 8);
   if (input.warningMessage) score -= 8;
 
@@ -56,6 +65,9 @@ type VerificationConfidenceMeterProps = {
   distinctDeviceCount24h?: number | null;
   recentScanCount10m?: number | null;
   distinctCountryCount24h?: number | null;
+  distinctUntrustedDeviceCount24h?: number | null;
+  untrustedScanCount10m?: number | null;
+  trustedOwnerScanCount24h?: number | null;
   warningMessage?: string | null;
   className?: string;
 };
@@ -69,6 +81,9 @@ export function VerificationConfidenceMeter(props: VerificationConfidenceMeterPr
         distinctDeviceCount24h: props.distinctDeviceCount24h,
         recentScanCount10m: props.recentScanCount10m,
         distinctCountryCount24h: props.distinctCountryCount24h,
+        distinctUntrustedDeviceCount24h: props.distinctUntrustedDeviceCount24h,
+        untrustedScanCount10m: props.untrustedScanCount10m,
+        trustedOwnerScanCount24h: props.trustedOwnerScanCount24h,
         warningMessage: props.warningMessage,
       }),
     [
@@ -77,6 +92,9 @@ export function VerificationConfidenceMeter(props: VerificationConfidenceMeterPr
       props.distinctDeviceCount24h,
       props.recentScanCount10m,
       props.distinctCountryCount24h,
+      props.distinctUntrustedDeviceCount24h,
+      props.untrustedScanCount10m,
+      props.trustedOwnerScanCount24h,
       props.warningMessage,
     ]
   );

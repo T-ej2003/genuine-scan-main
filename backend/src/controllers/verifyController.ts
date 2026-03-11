@@ -20,7 +20,11 @@ import { getScanInsight } from "../services/scanInsightService";
 import { resolveDuplicateRiskProfile, resolveVerifyUxPolicy } from "../services/governanceService";
 import { runTamperEvidenceChecks, summarizeTamperFindings } from "../services/tamperEvidenceService";
 import { ticketSlaSnapshot } from "../services/supportWorkflowService";
-import { assessDuplicateRisk, deriveAnomalyModelScore } from "../services/duplicateRiskService";
+import {
+  assessDuplicateRisk,
+  deriveAnomalyModelScore,
+  type VerificationActivitySummary,
+} from "../services/duplicateRiskService";
 import { verifyCaptchaToken } from "../services/captchaService";
 import { enforceIncidentRateLimit } from "../services/incidentRateLimitService";
 import { hashIp, hashToken, normalizeUserAgent, randomOpaqueToken } from "../utils/security";
@@ -376,11 +380,15 @@ const buildRiskExplanation = (params: {
   reasons: string[];
   scanSummary: ScanSummary;
   ownershipStatus: OwnershipStatus;
+  activitySummary?: VerificationActivitySummary | null;
 }) => {
   if (params.classification === "SUSPICIOUS_DUPLICATE") {
     return {
       level: "elevated",
-      title: "Duplicate risk signals detected",
+      title:
+        params.activitySummary?.currentActorTrustedOwnerContext && (params.activitySummary?.untrustedScanCount24h || 0) > 0
+          ? "External scan activity needs review"
+          : "Duplicate risk signals detected",
       details: params.reasons,
       recommendedAction: "Review seller source and report suspected counterfeit if this is unexpected.",
     };
@@ -406,10 +414,48 @@ const buildRiskExplanation = (params: {
 
   return {
     level: "low",
-    title: "No high-risk anomaly detected",
+    title:
+      params.activitySummary?.state === "trusted_repeat"
+        ? "Repeat checks match the same owner context"
+        : params.activitySummary?.state === "mixed_repeat"
+          ? "Repeat activity is mixed but not high risk"
+          : "No high-risk anomaly detected",
     details: params.reasons,
-    recommendedAction: params.scanSummary.totalScans > 1 ? "Keep purchase proof and monitor future scans." : "No action required.",
+    recommendedAction:
+      params.activitySummary?.state === "trusted_repeat"
+        ? "Normal re-checks are fine. Keep purchase proof and monitor future scans."
+        : params.scanSummary.totalScans > 1
+          ? "Keep purchase proof and monitor future scans."
+          : "No action required.",
   };
+};
+
+const buildRepeatWarningMessage = (params: {
+  blockedByPolicy: boolean;
+  hasContainment: boolean;
+  isFirstScan: boolean;
+  firstVerifiedAt: string | null;
+  activitySummary?: VerificationActivitySummary | null;
+}) => {
+  if (params.blockedByPolicy) {
+    return "This code has been auto-blocked by security policy due to anomaly detection.";
+  }
+  if (params.hasContainment) {
+    return "This product is currently under investigation. Please review details and contact support if needed.";
+  }
+  if (params.isFirstScan || !params.firstVerifiedAt) {
+    return null;
+  }
+
+  if (params.activitySummary?.state === "trusted_repeat") {
+    return "Already verified before. Recent checks match the same owner or trusted device.";
+  }
+
+  if (params.activitySummary?.state === "mixed_repeat") {
+    return "Already verified before. Some recent checks match the owner context, but additional external activity was also recorded.";
+  }
+
+  return `Already verified before. First verification was on ${params.firstVerifiedAt}.`;
 };
 
 const buildOwnershipStatus = (params: {
@@ -1047,16 +1093,6 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
     const deviceTokenHash = deviceClaimToken ? hashToken(deviceClaimToken) : null;
     const requesterIpHash = hashIp(req.ip);
     const containment = buildContainment(qrCode);
-    const scanInsight = await getScanInsight(qrCode.id, requestDeviceFingerprint, {
-      currentIpAddress: req.ip || null,
-      licenseeId: qrCode.licenseeId || null,
-    });
-    const baseScanSummary = buildScanSummary({
-      scanCount: Number(qrCode.scanCount || 0),
-      scannedAt: qrCode.scannedAt,
-      scanInsight,
-    });
-
     const qrBlocked = qrCode.status === QRStatus.BLOCKED;
     const qrReady = isQrReadyForCustomerUse(qrCode.status);
     const baseOwnership = await loadOwnershipByQrCodeId(qrCode.id);
@@ -1068,6 +1104,18 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       isReady: qrReady,
       isBlocked: qrBlocked,
       allowClaim: verifyUxPolicy.allowOwnershipClaim,
+    });
+    const scanInsight = await getScanInsight(qrCode.id, requestDeviceFingerprint, {
+      currentIpAddress: req.ip || null,
+      licenseeId: qrCode.licenseeId || null,
+      currentCustomerUserId: customerUserId,
+      currentOwnershipId: baseOwnership?.id || null,
+      currentActorTrustedOwnerContext: baseOwnershipStatus.isOwnedByRequester,
+    });
+    const baseScanSummary = buildScanSummary({
+      scanCount: Number(qrCode.scanCount || 0),
+      scannedAt: qrCode.scannedAt,
+      scanInsight,
     });
     const baseOwnershipTransfer = createOwnershipTransferView({
       code: qrCode.code,
@@ -1187,7 +1235,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       });
     }
 
-    const toNum = (v: any) => {
+    const toNum = (v: unknown) => {
       const n = parseFloat(String(v));
       return Number.isFinite(n) ? n : null;
     };
@@ -1203,6 +1251,10 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       latitude,
       longitude,
       accuracy,
+      customerUserId,
+      ownershipId: baseOwnershipStatus.isOwnedByRequester ? baseOwnership?.id || null : null,
+      ownershipMatchMethod: baseOwnershipStatus.isOwnedByRequester ? baseOwnershipStatus.matchMethod || null : null,
+      isTrustedOwnerContext: baseOwnershipStatus.isOwnedByRequester,
     });
 
     await createAuditLog({
@@ -1239,6 +1291,9 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
     const postScanInsight = await getScanInsight(updated.id, requestDeviceFingerprint, {
       currentIpAddress: req.ip || null,
       licenseeId: updated.licenseeId || null,
+      currentCustomerUserId: customerUserId,
+      currentOwnershipId: baseOwnership?.id || null,
+      currentActorTrustedOwnerContext: baseOwnershipStatus.isOwnedByRequester,
     });
     const postScanSummary = buildScanSummary({
       scanCount: Number(updated.scanCount || 0),
@@ -1252,14 +1307,6 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       Boolean(runtimeContainment.qrUnderInvestigation) ||
       Boolean(runtimeContainment.batchSuspended) ||
       Boolean(runtimeContainment.orgSuspended);
-
-    const warningMessage = blockedByPolicy
-      ? "This code has been auto-blocked by security policy due to anomaly detection."
-      : hasContainment
-        ? "This product is currently under investigation. Please review details and contact support if needed."
-        : !isFirstScan && postScanSummary.firstVerifiedAt
-          ? `Already verified before. First verification was on ${postScanSummary.firstVerifiedAt}.`
-          : null;
 
     const ownership = await loadOwnershipByQrCodeId(updated.id);
 
@@ -1306,7 +1353,8 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
     let classification: VerifyClassification;
     let reasons: string[];
     let riskScore = duplicateRisk.riskScore;
-    let riskSignals: Record<string, any> | null = duplicateRisk.signals;
+    let riskSignals: Record<string, unknown> | null = duplicateRisk.signals;
+    const activitySummary = isFirstScan ? null : duplicateRisk.activitySummary;
 
     if (isBlocked) {
       classification = "BLOCKED_BY_SECURITY";
@@ -1341,11 +1389,19 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       classification,
       reasons,
     });
+    const warningMessage = buildRepeatWarningMessage({
+      blockedByPolicy,
+      hasContainment,
+      isFirstScan,
+      firstVerifiedAt: postScanSummary.firstVerifiedAt,
+      activitySummary,
+    });
     const riskExplanation = buildRiskExplanation({
       classification,
       reasons,
       scanSummary: postScanSummary,
       ownershipStatus,
+      activitySummary,
     });
     const stepUpRequired = classification === "SUSPICIOUS_DUPLICATE" && !customerUserId;
 
@@ -1381,6 +1437,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
 
         classification,
         reasons,
+        activitySummary,
         scanSummary: postScanSummary,
         ownershipStatus,
         ownershipTransfer,

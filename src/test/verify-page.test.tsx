@@ -163,6 +163,47 @@ describe("Verify page", () => {
     expect(screen.getByRole("button", { name: "Sign in to continue" })).toBeInTheDocument();
   });
 
+  it("keeps trusted repeat activity out of the suspicious duplicate state", async () => {
+    vi.mocked(apiClient.verifyQRCode).mockResolvedValue(
+      buildVerifyResponse({
+        classification: undefined,
+        isFirstScan: false,
+        status: "SCANNED",
+        activitySummary: {
+          state: "trusted_repeat",
+          summary: "9 recent scans matched the same owner or trusted device in the last 24 hours.",
+          trustedOwnerScanCount24h: 9,
+          trustedOwnerScanCount10m: 6,
+          untrustedScanCount24h: 0,
+          untrustedScanCount10m: 0,
+          distinctTrustedActorCount24h: 1,
+          distinctUntrustedDeviceCount24h: 0,
+          currentActorTrustedOwnerContext: true,
+        },
+        scanSignals: {
+          distinctDeviceCount24h: 4,
+          recentScanCount10m: 6,
+          distinctCountryCount24h: 1,
+          currentActorTrustedOwnerContext: true,
+          trustedOwnerScanCount24h: 9,
+          trustedOwnerScanCount10m: 6,
+          untrustedScanCount24h: 0,
+          untrustedScanCount10m: 0,
+          distinctTrustedActorCount24h: 1,
+          distinctUntrustedDeviceCount24h: 0,
+          distinctUntrustedCountryCount24h: 0,
+        },
+      }) as unknown as Awaited<ReturnType<typeof apiClient.verifyQRCode>>
+    );
+
+    renderVerifyPage();
+
+    expect(await screen.findByText("Verified Again")).toBeInTheDocument();
+    expect(screen.queryByText("Suspicious Duplicate")).toBeNull();
+    expect(screen.getByText("Trusted repeat activity (24h)")).toBeInTheDocument();
+    expect(screen.getAllByText("9 recent scans matched the same owner or trusted device in the last 24 hours.").length).toBeGreaterThan(0);
+  });
+
   it("reuses a saved transfer token so the owner can recover the transfer link after refresh", async () => {
     window.localStorage.setItem(CUSTOMER_TOKEN_KEY, "cust-session-token");
     window.localStorage.setItem(TRANSFER_TOKEN_KEY, "saved-transfer-token");
