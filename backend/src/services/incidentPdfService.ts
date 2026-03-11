@@ -30,9 +30,9 @@ export const buildIncidentPdfBuffer = async (incident: any) => {
     margin: 42,
     info: {
       Title: `Incident ${text(incident?.id)}`,
-      Author: "Authentic QR",
+      Author: "MSCQR",
       Subject: "Incident response export",
-      Creator: "Authentic QR backend",
+      Creator: "MSCQR backend",
     },
   });
 

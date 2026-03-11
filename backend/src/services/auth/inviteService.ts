@@ -305,9 +305,9 @@ export const createInvite = async (input: {
   const baseUrl = resolveWebAppBaseUrl();
   const acceptUrl = `${baseUrl}/accept-invite?token=${encodeURIComponent(rawToken)}`;
 
-  const subject = "You have been invited to AuthenticQR";
+  const subject = "You have been invited to MSCQR";
   const text =
-    `You have been invited to AuthenticQR.\n\n` +
+    `You have been invited to MSCQR.\n\n` +
     `To set your password and activate your account, open this link (expires in 24 hours):\n` +
     `${acceptUrl}\n\n` +
     `If you were not expecting this email, you can ignore it.`;

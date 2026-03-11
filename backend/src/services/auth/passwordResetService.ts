@@ -60,7 +60,7 @@ export const requestPasswordReset = async (input: {
   const baseUrl = resolveWebAppBaseUrl();
   const resetUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(rawToken)}`;
 
-  const subject = "Reset your AuthenticQR password";
+  const subject = "Reset your MSCQR password";
   const text =
     `We received a request to reset your password.\n\n` +
     `Open this link to set a new password (expires in ${getResetTtlMinutes()} minutes):\n` +

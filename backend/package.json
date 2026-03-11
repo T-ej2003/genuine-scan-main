@@ -1,7 +1,7 @@
 {
-  "name": "authentic-qr-backend",
+  "name": "mscqr-backend",
   "version": "1.0.0",
-  "description": "Backend API for Authentic QR Licensee Platform",
+  "description": "Backend API for MSCQR Licensee Platform",
   "main": "dist/index.js",
   "scripts": {
     "dev": "prisma generate && tsx watch src/index.ts",

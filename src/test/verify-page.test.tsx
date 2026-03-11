@@ -24,8 +24,8 @@ vi.mock("@/lib/api-client", () => ({
 }));
 
 const CODE = "AADS0000006007";
-const CUSTOMER_TOKEN_KEY = "authenticqr_verify_customer_token";
-const TRANSFER_TOKEN_KEY = `authenticqr_verify_transfer_token:${CODE}`;
+const CUSTOMER_TOKEN_KEY = "mscqr_verify_customer_token";
+const TRANSFER_TOKEN_KEY = `mscqr_verify_transfer_token:${CODE}`;
 const localStorageStore = new Map<string, string>();
 
 Object.defineProperty(window, "localStorage", {

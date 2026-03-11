@@ -13,7 +13,7 @@ const parseIntEnv = (key: string, fallback: number) => {
   return Number.isFinite(raw) ? Math.floor(raw) : fallback;
 };
 
-const issuer = () => String(process.env.MFA_TOTP_ISSUER || process.env.APP_NAME || "AUTHENTIC QR").trim();
+const issuer = () => String(process.env.MFA_TOTP_ISSUER || process.env.APP_NAME || "MSCQR").trim();
 
 const encryptionKey = () => {
   const seed = String(process.env.AUTH_MFA_ENCRYPTION_KEY || process.env.JWT_SECRET || "").trim();

@@ -23,7 +23,7 @@ export default function AuthOverview() {
           </CardHeader>
           <CardContent className="space-y-2 text-sm text-muted-foreground">
             <ul className="list-disc pl-5">
-              <li>Which parts of AuthenticQR require sign-in.</li>
+              <li>Which parts of MSCQR require sign-in.</li>
               <li>How your session is stored (secure cookies) and why you should not share tokens.</li>
               <li>Common login issues (invites not accepted, lockouts).</li>
             </ul>

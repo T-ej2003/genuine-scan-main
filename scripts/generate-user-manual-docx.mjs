@@ -305,7 +305,7 @@ const generateDocx = async (inputPath) => {
 
   const doc = new Document({
     title: extractTitle(markdown, fallbackTitle),
-    creator: "AuthenticQR",
+    creator: "MSCQR",
     sections: [
       {
         properties: {},

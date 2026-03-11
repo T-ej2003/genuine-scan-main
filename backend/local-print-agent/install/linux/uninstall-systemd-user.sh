@@ -2,7 +2,7 @@
 set -eu
 
 SERVICE_FILE="$HOME/.config/systemd/user/mscqr-local-print-agent.service"
-WRAPPER="$HOME/.authenticqr/local-print-agent/bin/start-local-print-agent.sh"
+WRAPPER="$HOME/.mscqr/local-print-agent/bin/start-local-print-agent.sh"
 
 systemctl --user disable --now mscqr-local-print-agent.service >/dev/null 2>&1 || true
 rm -f "$SERVICE_FILE" "$WRAPPER"

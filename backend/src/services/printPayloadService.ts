@@ -163,23 +163,17 @@ const buildZplPayload = (params: {
   reprintLabel?: string | null;
 }) => {
   const layout = getResolvedLayout(params.printer);
-  const qrTop = Math.max(56, 84 + layout.offsetYDots);
-  const qrLeft = Math.max(26, 32 + layout.offsetXDots);
+  const qrSizeDots = Math.max(240, Math.min(layout.widthDots, layout.heightDots) - 40);
+  const qrTop = Math.max(12, Math.round((layout.heightDots - qrSizeDots) / 2) + layout.offsetYDots);
+  const qrLeft = Math.max(12, Math.round((layout.widthDots - qrSizeDots) / 2) + layout.offsetXDots);
   const qrScale = Math.max(4, Math.min(10, Math.round(layout.widthDots / 75)));
-  const textTop = layout.heightDots - 70;
-  const heading = escapeZplText(params.reprintLabel || "MSCQR Secure Product");
-  const refLine = params.jobNumber ? `JOB ${escapeZplText(params.jobNumber)}` : "SERVER CONTROLLED";
-  const codeLine = escapeZplText(params.code);
   return [
     "^XA",
     `^PW${layout.widthDots}`,
     `^LL${layout.heightDots}`,
     "^LH0,0",
     "^CI28",
-    `^FO${24 + layout.offsetXDots},${24 + layout.offsetYDots}^A0N,30,30^FD${heading}^FS`,
-    `^FO${24 + layout.offsetXDots},${56 + layout.offsetYDots}^A0N,24,24^FD${refLine}^FS`,
     `^FO${qrLeft},${qrTop}^BQN,2,${qrScale}^FDLA,${params.scanUrl}^FS`,
-    `^FO${24 + layout.offsetXDots},${textTop}^A0N,28,28^FD${codeLine}^FS`,
     "^XZ",
   ].join("\n");
 };
@@ -193,11 +187,9 @@ const buildTsplPayload = (params: {
 }) => {
   const layout = getResolvedLayout(params.printer);
   const qrCell = Math.max(4, Math.min(10, Math.round(layout.widthDots / 90)));
-  const qrX = Math.max(24, 28 + layout.offsetXDots);
-  const qrY = Math.max(52, 74 + layout.offsetYDots);
-  const title = escapeQuotedText(params.reprintLabel || "MSCQR Secure Product");
-  const refLine = escapeQuotedText(params.jobNumber ? `JOB ${params.jobNumber}` : "SERVER CONTROLLED");
-  const codeLine = escapeQuotedText(params.code);
+  const qrSizeDots = Math.max(240, Math.min(layout.widthDots, layout.heightDots) - 40);
+  const qrX = Math.max(12, Math.round((layout.widthDots - qrSizeDots) / 2) + layout.offsetXDots);
+  const qrY = Math.max(12, Math.round((layout.heightDots - qrSizeDots) / 2) + layout.offsetYDots);
   const density = Math.max(1, Math.min(15, layout.darkness ?? 8));
   const speed = Math.max(1, Math.min(6, Math.round(layout.speed ?? 4)));
 
@@ -209,10 +201,7 @@ const buildTsplPayload = (params: {
     "DIRECTION 1",
     "REFERENCE 0,0",
     "CLS",
-    `TEXT ${24 + layout.offsetXDots},${20 + layout.offsetYDots},\"0\",0,1,1,\"${title}\"`,
-    `TEXT ${24 + layout.offsetXDots},${48 + layout.offsetYDots},\"0\",0,1,1,\"${refLine}\"`,
     `QRCODE ${qrX},${qrY},L,${qrCell},A,0,M2,S7,\"${params.scanUrl}\"`,
-    `TEXT ${24 + layout.offsetXDots},${layout.heightDots - 36},\"0\",0,1,1,\"${codeLine}\"`,
     "PRINT 1,1",
   ].join("\n");
 };
@@ -225,21 +214,16 @@ const buildEplPayload = (params: {
   reprintLabel?: string | null;
 }) => {
   const layout = getResolvedLayout(params.printer);
-  const qrX = Math.max(24, 30 + layout.offsetXDots);
-  const qrY = Math.max(54, 72 + layout.offsetYDots);
+  const qrSizeDots = Math.max(240, Math.min(layout.widthDots, layout.heightDots) - 40);
+  const qrX = Math.max(12, Math.round((layout.widthDots - qrSizeDots) / 2) + layout.offsetXDots);
+  const qrY = Math.max(12, Math.round((layout.heightDots - qrSizeDots) / 2) + layout.offsetYDots);
   const qrScale = Math.max(3, Math.min(8, Math.round(layout.widthDots / 95)));
-  const title = escapeQuotedText(params.reprintLabel || "MSCQR Secure Product");
-  const refLine = escapeQuotedText(params.jobNumber ? `JOB ${params.jobNumber}` : "SERVER CONTROLLED");
-  const codeLine = escapeQuotedText(params.code);
 
   return [
     "N",
     `q${layout.widthDots}`,
     `Q${layout.heightDots},24`,
-    `A${24 + layout.offsetXDots},${16 + layout.offsetYDots},0,3,1,1,N,\"${title}\"`,
-    `A${24 + layout.offsetXDots},${40 + layout.offsetYDots},0,2,1,1,N,\"${refLine}\"`,
     `b${qrX},${qrY},Q,m2,s${qrScale},eM,A,\"${params.scanUrl}\"`,
-    `A${24 + layout.offsetXDots},${layout.heightDots - 28},0,2,1,1,N,\"${codeLine}\"`,
     "P1",
   ].join("\n");
 };
@@ -252,22 +236,17 @@ const buildCpclPayload = (params: {
   reprintLabel?: string | null;
 }) => {
   const layout = getResolvedLayout(params.printer);
-  const qrX = Math.max(24, 28 + layout.offsetXDots);
-  const qrY = Math.max(72, 96 + layout.offsetYDots);
+  const qrSizeDots = Math.max(240, Math.min(layout.widthDots, layout.heightDots) - 40);
+  const qrX = Math.max(12, Math.round((layout.widthDots - qrSizeDots) / 2) + layout.offsetXDots);
+  const qrY = Math.max(12, Math.round((layout.heightDots - qrSizeDots) / 2) + layout.offsetYDots);
   const qrScale = Math.max(4, Math.min(10, Math.round(layout.widthDots / 90)));
-  const title = escapeCpclText(params.reprintLabel || "MSCQR Secure Product");
-  const refLine = escapeCpclText(params.jobNumber ? `JOB ${params.jobNumber}` : "SERVER CONTROLLED");
-  const codeLine = escapeCpclText(params.code);
 
   return [
     `! 0 200 200 ${layout.heightDots} 1`,
     `PW ${layout.widthDots}`,
-    `TEXT 7 0 ${24 + layout.offsetXDots} ${18 + layout.offsetYDots} ${title}`,
-    `TEXT 7 0 ${24 + layout.offsetXDots} ${42 + layout.offsetYDots} ${refLine}`,
     `B QR ${qrX} ${qrY} M 2 U ${qrScale}`,
     `MA,${params.scanUrl}`,
     "ENDQR",
-    `TEXT 7 0 ${24 + layout.offsetXDots} ${layout.heightDots - 28} ${codeLine}`,
     "FORM",
     "PRINT",
   ].join("\n");
@@ -403,7 +382,7 @@ export const buildApprovedPrintPayload = (params: {
     scanToken,
     scanUrl,
     commandLanguage: params.printer.commandLanguage,
-    previewLabel: reprintLabel || "ORIGINAL SERVER-ISSUED LABEL",
+    previewLabel: reprintLabel || "MSCQR QR LABEL",
   };
 };
 

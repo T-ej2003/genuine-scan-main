@@ -868,7 +868,7 @@ export const requestCustomerEmailOtp = async (req: Request, res: Response) => {
 
     const challenge = createCustomerOtpChallenge(parsed.data.email);
 
-    const subject = "Your AuthenticQR sign-in code";
+    const subject = "Your MSCQR sign-in code";
     const text =
       `Use this one-time code to continue product protection sign-in: ${challenge.otp}\n\n` +
       `This code expires in 10 minutes. If you did not request this code, you can ignore this message.`;

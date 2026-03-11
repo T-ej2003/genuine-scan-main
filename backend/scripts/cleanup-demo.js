@@ -8,7 +8,7 @@ const uniq = (arr) => Array.from(new Set(arr));
 
 async function main() {
   const demoEmails = [
-    "admin@authenticqr.com",
+    "admin@mscqr.com",
     "admin@acme.com",
     "admin@beta.com",
     "factory1@acme.com",

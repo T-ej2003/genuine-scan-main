@@ -1,4 +1,4 @@
-# AuthenticQR (MSCQR) Super Admin User Manual
+# MSCQR Super Admin User Manual
 
 Document ID: AQR-SOP-SA-002  
 Version: 2.0  

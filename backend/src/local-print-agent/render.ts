@@ -32,7 +32,7 @@ type PrintResult = {
   labelLanguage: string;
 };
 
-const TMP_DIR = path.join(os.tmpdir(), "authenticqr-local-print-agent");
+const TMP_DIR = path.join(os.tmpdir(), "mscqr-local-print-agent");
 const PDF_TIMEOUT_MS = 7000;
 const WINDOWS_PRINT_TIMEOUT_MS = 15000;
 
@@ -88,10 +88,10 @@ const renderPdfLabel = async (params: {
   const heightPts = mmToPoints(calibration.labelHeightMm);
   const offsetXPts = mmToPoints(calibration.offsetXmm);
   const offsetYPts = mmToPoints(calibration.offsetYmm);
-  const margin = Math.max(10, Math.min(widthPts, heightPts) * 0.08);
+  const margin = Math.max(6, Math.min(widthPts, heightPts) * 0.04);
   const usableWidth = Math.max(120, widthPts - margin * 2);
   const usableHeight = Math.max(120, heightPts - margin * 2);
-  const qrSize = Math.min(usableWidth, usableHeight * 0.62);
+  const qrSize = Math.min(usableWidth, usableHeight);
   const qrBuffer = await QRCode.toBuffer(params.scanUrl, {
     type: "png",
     margin: 0,
@@ -118,32 +118,11 @@ const renderPdfLabel = async (params: {
     const startY = margin + offsetYPts;
 
     doc.rect(0, 0, widthPts, heightPts).fill("#ffffff");
-    doc.fillColor("#111827");
-    doc.font("Helvetica-Bold").fontSize(Math.max(12, Math.min(18, widthPts * 0.12)));
-    doc.text(params.previewLabel || "MSCQR Secure Label", startX, startY, {
-      width: usableWidth,
-      align: "left",
-      ellipsis: true,
-    });
-
-    const qrTop = startY + 22;
+    const qrTop = startY;
     doc.image(qrBuffer, startX, qrTop, {
       fit: [qrSize, qrSize],
-    });
-
-    const codeTop = qrTop + qrSize + 8;
-    doc.font("Helvetica-Bold").fontSize(Math.max(11, Math.min(16, widthPts * 0.11)));
-    doc.text(params.code, startX, codeTop, {
-      width: usableWidth,
-      align: "left",
-    });
-
-    doc.font("Helvetica").fontSize(Math.max(7, Math.min(10, widthPts * 0.065)));
-    doc.fillColor("#4b5563");
-    doc.text(params.scanUrl, startX, codeTop + 18, {
-      width: usableWidth,
-      align: "left",
-      ellipsis: true,
+      align: "center",
+      valign: "center",
     });
 
     doc.end();
@@ -194,9 +173,6 @@ const printWithWindowsSpooler = async (params: {
       "param(",
       "  [string]$PrinterName,",
       "  [string]$QrPath,",
-      "  [string]$Title,",
-      "  [string]$Code,",
-      "  [string]$ScanUrl,",
       "  [int]$Copies = 1,",
       "  [double]$WidthMm = 50,",
       "  [double]$HeightMm = 50,",
@@ -217,38 +193,23 @@ const printWithWindowsSpooler = async (params: {
       "$offsetX = ($OffsetXmm / 25.4) * 100",
       "$offsetY = ($OffsetYmm / 25.4) * 100",
       "$qrImage = [System.Drawing.Image]::FromFile($QrPath)",
-      "$titleFont = New-Object System.Drawing.Font('Arial', 10, [System.Drawing.FontStyle]::Bold)",
-      "$codeFont = New-Object System.Drawing.Font('Arial', 9, [System.Drawing.FontStyle]::Bold)",
-      "$urlFont = New-Object System.Drawing.Font('Arial', 6)",
-      "$blackBrush = [System.Drawing.Brushes]::Black",
-      "$grayBrush = [System.Drawing.Brushes]::DimGray",
       "$doc.add_PrintPage({",
       "  param($sender, $e)",
       "  $g = $e.Graphics",
       "  $g.Clear([System.Drawing.Color]::White)",
       "  $pageWidth = $e.PageBounds.Width",
       "  $pageHeight = $e.PageBounds.Height",
-      "  $startX = 8 + $offsetX",
-      "  $startY = 8 + $offsetY",
-      "  $usableWidth = [Math]::Max(120, $pageWidth - 16)",
-      "  $g.DrawString($Title, $titleFont, $blackBrush, [float]$startX, [float]$startY)",
-      "  $qrTop = $startY + 20",
-      "  $qrSize = [Math]::Min($usableWidth, [Math]::Max(120, $pageHeight * 0.58))",
+      "  $startX = 4 + $offsetX",
+      "  $startY = 4 + $offsetY",
+      "  $usableWidth = [Math]::Max(120, $pageWidth - 8)",
+      "  $usableHeight = [Math]::Max(120, $pageHeight - 8)",
+      "  $qrTop = $startY",
+      "  $qrSize = [Math]::Min($usableWidth, $usableHeight)",
       "  $g.DrawImage($qrImage, [int]$startX, [int]$qrTop, [int]$qrSize, [int]$qrSize)",
-      "  $codeTop = $qrTop + $qrSize + 6",
-      "  $g.DrawString($Code, $codeFont, $blackBrush, [float]$startX, [float]$codeTop)",
-      "  $stringFormat = New-Object System.Drawing.StringFormat",
-      "  $stringFormat.Trimming = [System.Drawing.StringTrimming]::EllipsisCharacter",
-      "  $stringFormat.FormatFlags = [System.Drawing.StringFormatFlags]::LineLimit",
-      "  $urlRect = New-Object System.Drawing.RectangleF([float]$startX, [float]($codeTop + 16), [float]$usableWidth, [float]40)",
-      "  $g.DrawString($ScanUrl, $urlFont, $grayBrush, $urlRect, $stringFormat)",
       "  $e.HasMorePages = $false",
       "})",
       "$doc.Print()",
       "$qrImage.Dispose()",
-      "$titleFont.Dispose()",
-      "$codeFont.Dispose()",
-      "$urlFont.Dispose()",
       "Write-Output 'PRINTED'",
     ].join(os.EOL)
   );
@@ -267,12 +228,6 @@ const printWithWindowsSpooler = async (params: {
         params.printerId,
         "-QrPath",
         qrPath,
-        "-Title",
-        params.previewLabel,
-        "-Code",
-        params.code,
-        "-ScanUrl",
-        params.scanUrl,
         "-Copies",
         String(Math.max(1, Math.min(5, params.copies || 1))),
         "-WidthMm",

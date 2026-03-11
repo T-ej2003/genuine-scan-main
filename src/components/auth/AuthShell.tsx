@@ -43,7 +43,7 @@ export function AuthShell({ title, description, sideTitle, sideDescription, chil
             <div className="space-y-8">
               <div className="flex items-center gap-3">
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-400/15 ring-1 ring-emerald-300/30">
-                  <img src="/brand/authenticqr-mark.svg" alt="MSCQR logo" className="h-7 w-7" />
+                  <img src="/brand/mscqr-mark.svg" alt="MSCQR logo" className="h-7 w-7" />
                 </div>
                 <div>
                   <div className="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">MSCQR</div>
@@ -93,7 +93,7 @@ export function AuthShell({ title, description, sideTitle, sideDescription, chil
               <div className="rounded-[1.25rem] border border-slate-200/70 bg-white text-slate-900 shadow-[0_24px_80px_rgba(5,15,30,0.16)] dark:border-white/10 dark:bg-slate-950/78 dark:text-slate-100 dark:shadow-[0_24px_80px_rgba(5,15,30,0.35)]">
                 <div className="border-b border-slate-100 px-6 py-6 dark:border-white/10 sm:px-8">
                   <div className="flex items-center gap-3 lg:hidden">
-                    <img src="/brand/authenticqr-mark.svg" alt="MSCQR logo" className="h-8 w-8" />
+                    <img src="/brand/mscqr-mark.svg" alt="MSCQR logo" className="h-8 w-8" />
                     <div>
                       <div className="text-base font-semibold text-slate-900 dark:text-white">MSCQR</div>
                       <div className="text-xs text-slate-500 dark:text-slate-400">Secure QR Operations</div>
