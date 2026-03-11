@@ -943,6 +943,10 @@ model QrScanLog {
   scannedAt  DateTime @default(now())
   isFirstScan Boolean @default(false)
   scanCount  Int?
+  customerUserId String?
+  ownershipId String?
+  ownershipMatchMethod String?
+  isTrustedOwnerContext Boolean @default(false)
 
   ipAddress String?
   userAgent String?
@@ -961,6 +965,8 @@ model QrScanLog {
   @@index([batchId])
   @@index([code])
   @@index([scannedAt])
+  @@index([qrCodeId, scannedAt])
+  @@index([qrCodeId, isTrustedOwnerContext, scannedAt])
 }
 
 model BatchPrintPackToken {

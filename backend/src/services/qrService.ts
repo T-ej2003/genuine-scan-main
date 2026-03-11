@@ -120,6 +120,10 @@ export const recordScan = async (
     latitude?: number | null;
     longitude?: number | null;
     accuracy?: number | null;
+    customerUserId?: string | null;
+    ownershipId?: string | null;
+    ownershipMatchMethod?: string | null;
+    isTrustedOwnerContext?: boolean;
   }
 ) => {
   const existing = await prisma.qRCode.findUnique({
@@ -170,6 +174,10 @@ export const recordScan = async (
         status: qr.status,
         isFirstScan,
         scanCount: qr.scanCount ?? 0,
+        customerUserId: meta?.customerUserId ?? null,
+        ownershipId: meta?.ownershipId ?? null,
+        ownershipMatchMethod: meta?.ownershipMatchMethod ?? null,
+        isTrustedOwnerContext: meta?.isTrustedOwnerContext === true,
         ipAddress: meta?.ipAddress ?? null,
         userAgent: meta?.userAgent ?? null,
         device: meta?.device ?? null,

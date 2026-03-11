@@ -11,6 +11,16 @@ const run = () => {
       distinctDeviceCount24h: 1,
       recentScanCount10m: 2,
       distinctCountryCount24h: 1,
+      currentActorTrustedOwnerContext: true,
+      seenByCurrentTrustedActorBefore: true,
+      previousScanSameTrustedActor: true,
+      trustedOwnerScanCount24h: 4,
+      trustedOwnerScanCount10m: 2,
+      untrustedScanCount24h: 0,
+      untrustedScanCount10m: 0,
+      distinctTrustedActorCount24h: 1,
+      distinctUntrustedDeviceCount24h: 0,
+      distinctUntrustedCountryCount24h: 0,
       seenOnCurrentDeviceBefore: true,
       previousScanSameDevice: true,
     },
@@ -27,6 +37,47 @@ const run = () => {
   assert(
     repeatOnly.classification === "LEGIT_REPEAT",
     "Expected normal 4x repeat scans on same trusted context to remain LEGIT_REPEAT"
+  );
+  assert(
+    repeatOnly.activitySummary.state === "trusted_repeat",
+    "Expected owner-repeat activity summary to be marked as trusted_repeat"
+  );
+
+  const trustedOwnerMultiDevice = assessDuplicateRisk({
+    scanCount: 9,
+    scanSignals: {
+      scanCount24h: 9,
+      distinctDeviceCount24h: 4,
+      recentScanCount10m: 6,
+      distinctCountryCount24h: 1,
+      currentActorTrustedOwnerContext: true,
+      seenByCurrentTrustedActorBefore: true,
+      previousScanSameTrustedActor: true,
+      trustedOwnerScanCount24h: 9,
+      trustedOwnerScanCount10m: 6,
+      untrustedScanCount24h: 0,
+      untrustedScanCount10m: 0,
+      distinctTrustedActorCount24h: 1,
+      distinctUntrustedDeviceCount24h: 0,
+      distinctUntrustedCountryCount24h: 0,
+    },
+    customerUserId: "cust_123",
+    ownershipStatus: {
+      isClaimed: true,
+      isOwnedByRequester: true,
+      isClaimedByAnother: false,
+      matchMethod: "user",
+    },
+    latestScanAt: "2026-02-28T10:15:00.000Z",
+    previousScanAt: "2026-02-28T10:10:00.000Z",
+  });
+  assert(
+    trustedOwnerMultiDevice.classification === "LEGIT_REPEAT",
+    "Expected repeated scans from the same signed-in owner across devices to remain LEGIT_REPEAT"
+  );
+  assert(
+    trustedOwnerMultiDevice.riskScore < trustedOwnerMultiDevice.threshold,
+    "Trusted owner multi-device repeats should stay below the suspicious threshold"
   );
 
   const countOnly = assessDuplicateRisk({
@@ -47,6 +98,10 @@ const run = () => {
       distinctDeviceCount24h: 3,
       recentScanCount10m: 6,
       distinctCountryCount24h: 2,
+      untrustedScanCount24h: 5,
+      untrustedScanCount10m: 6,
+      distinctUntrustedDeviceCount24h: 3,
+      distinctUntrustedCountryCount24h: 2,
       seenOnCurrentDeviceBefore: false,
       previousScanSameDevice: false,
     },

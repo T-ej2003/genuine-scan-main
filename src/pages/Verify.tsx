@@ -74,6 +74,18 @@ type ScanSummary = {
   latestVerifiedLocation?: string | null;
 };
 
+type VerificationActivitySummary = {
+  state?: "first_scan" | "trusted_repeat" | "mixed_repeat" | "external_activity" | "normal_repeat";
+  summary?: string;
+  trustedOwnerScanCount24h?: number;
+  trustedOwnerScanCount10m?: number;
+  untrustedScanCount24h?: number;
+  untrustedScanCount10m?: number;
+  distinctTrustedActorCount24h?: number;
+  distinctUntrustedDeviceCount24h?: number;
+  currentActorTrustedOwnerContext?: boolean;
+};
+
 type VerifyPayload = {
   isAuthentic: boolean;
   message?: string;
@@ -84,6 +96,7 @@ type VerifyPayload = {
 
   classification?: VerificationClassification;
   reasons?: string[];
+  activitySummary?: VerificationActivitySummary | null;
   scanSummary?: ScanSummary;
   ownershipStatus?: OwnershipStatus;
   ownershipTransfer?: OwnershipTransferView | null;
@@ -123,11 +136,22 @@ type VerifyPayload = {
 
   policy?: Record<string, unknown> | null;
   scanSignals?: {
+    scanCount24h?: number;
     distinctDeviceCount24h?: number;
     recentScanCount10m?: number;
     distinctCountryCount24h?: number;
     seenOnCurrentDeviceBefore?: boolean;
     previousScanSameDevice?: boolean | null;
+    currentActorTrustedOwnerContext?: boolean;
+    seenByCurrentTrustedActorBefore?: boolean;
+    previousScanSameTrustedActor?: boolean | null;
+    trustedOwnerScanCount24h?: number;
+    trustedOwnerScanCount10m?: number;
+    untrustedScanCount24h?: number;
+    untrustedScanCount10m?: number;
+    distinctTrustedActorCount24h?: number;
+    distinctUntrustedDeviceCount24h?: number;
+    distinctUntrustedCountryCount24h?: number;
   } | null;
 
   licensee?: {
@@ -258,11 +282,17 @@ const inferClassification = (result: VerifyPayload | null): VerificationClassifi
 
   if (Boolean(result?.isAuthentic) && Boolean(result?.isFirstScan)) return "FIRST_SCAN";
 
+  const trustedRepeatContext =
+    (result?.activitySummary?.state === "trusted_repeat" ||
+      (Boolean(result?.scanSignals?.currentActorTrustedOwnerContext) &&
+        Number(result?.scanSignals?.untrustedScanCount24h ?? 0) === 0)) &&
+    Boolean(result?.isAuthentic);
   const duplicateSignals =
-    Number(result?.scanSignals?.distinctDeviceCount24h ?? 0) > 1 ||
-    Number(result?.scanSignals?.recentScanCount10m ?? 0) >= 3 ||
-    Number(result?.scanSignals?.distinctCountryCount24h ?? 0) > 1;
+    Number(result?.scanSignals?.distinctUntrustedDeviceCount24h ?? result?.scanSignals?.distinctDeviceCount24h ?? 0) > 1 ||
+    Number(result?.scanSignals?.untrustedScanCount10m ?? result?.scanSignals?.recentScanCount10m ?? 0) >= 3 ||
+    Number(result?.scanSignals?.distinctUntrustedCountryCount24h ?? result?.scanSignals?.distinctCountryCount24h ?? 0) > 1;
 
+  if (trustedRepeatContext) return "LEGIT_REPEAT";
   if (Boolean(result?.isAuthentic) && duplicateSignals) return "SUSPICIOUS_DUPLICATE";
   if (result?.isAuthentic) return "LEGIT_REPEAT";
 
@@ -277,6 +307,12 @@ const deriveReasons = (result: VerifyPayload | null, classification: Verificatio
   }
 
   if (classification === "LEGIT_REPEAT") {
+    if (result?.activitySummary?.summary) {
+      return [result.activitySummary.summary];
+    }
+    if (result?.scanSignals?.currentActorTrustedOwnerContext) {
+      return ["Recent scans match the same owner or trusted device."];
+    }
     return ["Repeat verification behavior appears normal."];
   }
 
@@ -286,9 +322,18 @@ const deriveReasons = (result: VerifyPayload | null, classification: Verificatio
 
   if (classification === "SUSPICIOUS_DUPLICATE") {
     const reasons: string[] = [];
-    if (Number(result?.scanSignals?.distinctDeviceCount24h ?? 0) > 1) reasons.push("Multiple devices scanned this code recently.");
-    if (Number(result?.scanSignals?.recentScanCount10m ?? 0) >= 3) reasons.push("High short-window scan burst detected.");
-    if (Number(result?.scanSignals?.distinctCountryCount24h ?? 0) > 1) reasons.push("Recent scans came from multiple countries.");
+    if (Boolean(result?.scanSignals?.currentActorTrustedOwnerContext) && Number(result?.scanSignals?.untrustedScanCount24h ?? 0) > 0) {
+      reasons.push("Your current scan matches the recorded owner, but additional external scan activity is also present.");
+    }
+    if (Number(result?.scanSignals?.distinctUntrustedDeviceCount24h ?? result?.scanSignals?.distinctDeviceCount24h ?? 0) > 1) {
+      reasons.push("New external devices scanned this code recently.");
+    }
+    if (Number(result?.scanSignals?.untrustedScanCount10m ?? result?.scanSignals?.recentScanCount10m ?? 0) >= 3) {
+      reasons.push("High short-window external scan burst detected.");
+    }
+    if (Number(result?.scanSignals?.distinctUntrustedCountryCount24h ?? result?.scanSignals?.distinctCountryCount24h ?? 0) > 1) {
+      reasons.push("Recent external scans came from multiple countries.");
+    }
     return reasons.length ? reasons : ["Unusual scan pattern requires caution."];
   }
 
@@ -431,6 +476,7 @@ export default function Verify() {
   const classMeta = CLASS_META[classification];
   const reasons = useMemo(() => deriveReasons(result, classification), [classification, result]);
   const scanSummary = useMemo(() => deriveScanSummary(result), [result]);
+  const activitySummary = result?.activitySummary || null;
   const ownershipStatus = result?.ownershipStatus || DEFAULT_OWNERSHIP_STATUS;
   const ownershipTransfer = result?.ownershipTransfer || null;
   const verifyUxPolicy = { ...DEFAULT_VERIFY_POLICY, ...(result?.verifyUxPolicy || {}) };
@@ -459,6 +505,9 @@ export default function Verify() {
         distinctDeviceCount24h: result?.scanSignals?.distinctDeviceCount24h,
         recentScanCount10m: result?.scanSignals?.recentScanCount10m,
         distinctCountryCount24h: result?.scanSignals?.distinctCountryCount24h,
+        distinctUntrustedDeviceCount24h: result?.scanSignals?.distinctUntrustedDeviceCount24h,
+        untrustedScanCount10m: result?.scanSignals?.untrustedScanCount10m,
+        trustedOwnerScanCount24h: result?.scanSignals?.trustedOwnerScanCount24h,
         warningMessage: result?.warningMessage || null,
       }),
     [
@@ -467,6 +516,9 @@ export default function Verify() {
       result?.scanSignals?.distinctDeviceCount24h,
       result?.scanSignals?.recentScanCount10m,
       result?.scanSignals?.distinctCountryCount24h,
+      result?.scanSignals?.distinctUntrustedDeviceCount24h,
+      result?.scanSignals?.untrustedScanCount10m,
+      result?.scanSignals?.trustedOwnerScanCount24h,
       result?.warningMessage,
     ]
   );
@@ -494,16 +546,27 @@ export default function Verify() {
     level: classification === "SUSPICIOUS_DUPLICATE" ? "elevated" : classification === "BLOCKED_BY_SECURITY" ? "high" : "low",
     title:
       classification === "SUSPICIOUS_DUPLICATE"
-        ? "Duplicate risk indicators detected"
+        ? activitySummary?.currentActorTrustedOwnerContext && Number(activitySummary?.untrustedScanCount24h ?? 0) > 0
+          ? "External scan activity needs review"
+          : "Duplicate risk indicators detected"
         : classification === "BLOCKED_BY_SECURITY"
           ? "Security controls blocked this code"
+          : activitySummary?.state === "trusted_repeat"
+            ? "Repeat checks match the same owner context"
           : "No high-risk anomaly detected",
     details: reasons,
     recommendedAction:
       classification === "SUSPICIOUS_DUPLICATE" || classification === "BLOCKED_BY_SECURITY"
         ? "Review purchase source and report suspicious activity."
-        : "Keep proof of purchase for future verification.",
+        : activitySummary?.state === "trusted_repeat"
+          ? "Normal re-checks are fine. Keep proof of purchase for future verification."
+          : "Keep proof of purchase for future verification.",
   };
+  const trustedRepeatCount = Number(activitySummary?.trustedOwnerScanCount24h ?? result?.scanSignals?.trustedOwnerScanCount24h ?? 0);
+  const externalScanCount = Number(activitySummary?.untrustedScanCount24h ?? result?.scanSignals?.untrustedScanCount24h ?? 0);
+  const externalDeviceCount = Number(
+    activitySummary?.distinctUntrustedDeviceCount24h ?? result?.scanSignals?.distinctUntrustedDeviceCount24h ?? 0
+  );
 
   const googleOauthUrl = String(import.meta.env.VITE_GOOGLE_OAUTH_URL || "").trim();
   const showSkeleton = loading && !result && !error;
@@ -1388,6 +1451,9 @@ export default function Verify() {
                             distinctDeviceCount24h={result?.scanSignals?.distinctDeviceCount24h}
                             recentScanCount10m={result?.scanSignals?.recentScanCount10m}
                             distinctCountryCount24h={result?.scanSignals?.distinctCountryCount24h}
+                            distinctUntrustedDeviceCount24h={result?.scanSignals?.distinctUntrustedDeviceCount24h}
+                            untrustedScanCount10m={result?.scanSignals?.untrustedScanCount10m}
+                            trustedOwnerScanCount24h={result?.scanSignals?.trustedOwnerScanCount24h}
                             warningMessage={result?.warningMessage || null}
                             className="w-[182px]"
                           />
@@ -1469,10 +1535,34 @@ export default function Verify() {
 
                   <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                     <p className="text-sm font-semibold text-slate-900">Scan summary</p>
-                    <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    {activitySummary?.summary ? (
+                      <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
+                        {activitySummary.summary}
+                      </div>
+                    ) : null}
+                    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                       <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
                         <p className="text-xs uppercase tracking-wide text-slate-500">Total scans</p>
                         <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{scanSummary.totalScans}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
+                        <p className="text-xs uppercase tracking-wide text-slate-500">Trusted repeat activity (24h)</p>
+                        <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{trustedRepeatCount}</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {activitySummary?.currentActorTrustedOwnerContext
+                            ? "Matches your owner or trusted device context"
+                            : "Trusted owner-linked checks in the last 24 hours"}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
+                        <p className="text-xs uppercase tracking-wide text-slate-500">External scans (24h)</p>
+                        <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{externalScanCount}</p>
+                        <p className="mt-1 text-xs text-slate-500">Scans outside the trusted owner context</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
+                        <p className="text-xs uppercase tracking-wide text-slate-500">New external devices (24h)</p>
+                        <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{externalDeviceCount}</p>
+                        <p className="mt-1 text-xs text-slate-500">Distinct devices not matched to the trusted owner</p>
                       </div>
                       <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
                         <p className="text-xs uppercase tracking-wide text-slate-500">First verified</p>
