@@ -81,7 +81,9 @@ macOS or Linux:
 cd /path/to/genuine-scan-main/backend
 npm ci
 npm run build
-npm run print:agent
+npm run print:agent:install:macos
+# or:
+npm run print:agent:install:linux
 ```
 
 Windows PowerShell:
@@ -89,13 +91,26 @@ Windows PowerShell:
 cd C:\path\to\genuine-scan-main\backend
 npm ci
 npm run build
-npm run print:agent
+npm run print:agent:install:windows
 ```
 
 The browser on that same workstation should then load:
 ```bash
 curl -sS http://127.0.0.1:17866/status
 ```
+
+Manual developer fallback only:
+```bash
+cd /path/to/genuine-scan-main/backend
+npm run print:agent
+```
+
+Installer assets live in:
+```text
+backend/local-print-agent/install/
+```
+
+For enterprise rollout, wrap the install scripts in Jamf, Intune, Kandji, or the manufacturer's normal MDM tooling. Signed `.pkg` / `.msi` output still requires your organization's code-signing certificates outside source control.
 
 ## 5) Smoke checks
 ```bash

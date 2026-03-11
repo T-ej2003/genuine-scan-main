@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
-import { Activity, Copy, RefreshCw, ShieldAlert, Wifi, Wrench } from "lucide-react";
+import { Activity, Copy, RefreshCw, ShieldAlert, Trash2, Wifi, Wrench } from "lucide-react";
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,7 @@ import apiClient from "@/lib/api-client";
 import {
   getPrinterDiagnosticSummary,
   normalizePrinterInventoryRows,
+  shouldPreferNetworkDirectSummary,
   type LocalPrinterAgentSnapshot,
   type PrinterConnectionStatusLike,
   type PrinterInventoryRow,
@@ -81,6 +82,7 @@ export default function PrinterDiagnostics() {
   const [registeredPrinters, setRegisteredPrinters] = useState<RegisteredPrinterRow[]>([]);
   const [savingNetworkPrinter, setSavingNetworkPrinter] = useState(false);
   const [testingPrinterId, setTestingPrinterId] = useState<string | null>(null);
+  const [deletingPrinterId, setDeletingPrinterId] = useState<string | null>(null);
   const [editingPrinterId, setEditingPrinterId] = useState<string | null>(null);
   const [networkPrinterForm, setNetworkPrinterForm] = useState(buildEmptyNetworkPrinterForm);
 
@@ -88,7 +90,7 @@ export default function PrinterDiagnostics() {
 
   const loadRegisteredPrinters = async () => {
     if (user?.role !== "manufacturer") return;
-    const response = await apiClient.listRegisteredPrinters(true);
+    const response = await apiClient.listRegisteredPrinters(false);
     if (!response.success) {
       setRegisteredPrinters([]);
       return;
@@ -265,8 +267,13 @@ export default function PrinterDiagnostics() {
     [networkDirectPrinters]
   );
 
+  const preferNetworkDirectSummary = shouldPreferNetworkDirectSummary({
+    printers: detectedPrinters,
+    networkPrinter: preferredNetworkDirectPrinter,
+  });
+
   const effectiveSummary = useMemo(() => {
-    if (!preferredNetworkDirectPrinter) return summary;
+    if (!preferredNetworkDirectPrinter || !preferNetworkDirectSummary) return summary;
 
     const hostLabel = `${preferredNetworkDirectPrinter.ipAddress || "—"}:${preferredNetworkDirectPrinter.port || 9100}`;
     const pseudoPrinter: PrinterInventoryRow = {
@@ -294,7 +301,7 @@ export default function PrinterDiagnostics() {
         tone: "success" as const,
         nextSteps: [
           "Open the batch workflow and choose the registered network-direct printer profile.",
-          "Use the mock printer control panel to switch ready, paper-out, head-open, and offline states while testing.",
+          "Use Test again whenever you change the target host, port, or printer language.",
         ],
         selectedPrinter: pseudoPrinter,
       };
@@ -312,7 +319,7 @@ export default function PrinterDiagnostics() {
         tone: "warning" as const,
         nextSteps: [
           "Use the Test button under Registered printer profiles.",
-          "If you are using the mock printer on this machine, use the one-click mock setup below.",
+          "Confirm the printer is reachable on the configured host and raw TCP port.",
         ],
         selectedPrinter: pseudoPrinter,
       };
@@ -355,7 +362,7 @@ export default function PrinterDiagnostics() {
     }
 
     return summary;
-  }, [preferredNetworkDirectPrinter, summary]);
+  }, [preferNetworkDirectSummary, preferredNetworkDirectPrinter, summary]);
 
   const statusClasses =
     effectiveSummary.tone === "success"
@@ -519,6 +526,36 @@ export default function PrinterDiagnostics() {
     }
   };
 
+  const removeNetworkPrinter = async (printer: RegisteredPrinterRow) => {
+    if (printer.connectionType !== "NETWORK_DIRECT") return;
+    const confirmed = window.confirm(
+      `Remove ${printer.name}? This deletes the saved network-direct profile and frees ${printer.ipAddress || "this host"}:${printer.port || 9100} for a new connection.`
+    );
+    if (!confirmed) return;
+
+    setDeletingPrinterId(printer.id);
+    try {
+      const response = await apiClient.deleteRegisteredPrinter(printer.id);
+      if (!response.success) {
+        toast({
+          title: "Could not remove printer",
+          description: response.error || "The network-direct printer profile could not be removed.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      toast({
+        title: "Printer removed",
+        description: `${printer.name} was removed. Its saved host and port can now be reused.`,
+      });
+      if (editingPrinterId === printer.id) resetNetworkPrinterForm();
+      await loadDiagnostics();
+    } finally {
+      setDeletingPrinterId(null);
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -649,10 +686,11 @@ export default function PrinterDiagnostics() {
               <div className="rounded-xl border bg-muted/30 p-4">
                 <div className="font-medium text-foreground">What must exist on the client machine</div>
                 <ul className="mt-3 list-disc space-y-2 pl-5">
-                  <li>The local MSCQR print agent must be installed and running on the workstation.</li>
+                  <li>The local MSCQR print agent service must be installed and running on the workstation.</li>
                   <li>The operating system must already see the printer in its printer list.</li>
                   <li>The printer driver or spooler path must be working before the browser can show a ready state.</li>
-                  <li>Start the agent on that workstation with <code>npm --prefix backend run print:agent</code>.</li>
+                  <li>Install it once with <code>npm --prefix backend run print:agent:install:macos</code>, <code>...:linux</code>, or <code>...:windows</code>.</li>
+                  <li>For manual developer runs only, start it with <code>npm --prefix backend run print:agent</code>.</li>
                   <li>The local agent must answer <code>http://127.0.0.1:17866/status</code> from the same device.</li>
                 </ul>
               </div>
@@ -785,6 +823,17 @@ export default function PrinterDiagnostics() {
                             Edit
                           </Button>
                         )}
+                        {printer.connectionType === "NETWORK_DIRECT" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={deletingPrinterId === printer.id}
+                            onClick={() => void removeNetworkPrinter(printer)}
+                          >
+                            <Trash2 className="mr-1 h-4 w-4" />
+                            {deletingPrinterId === printer.id ? "Removing..." : "Remove"}
+                          </Button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -877,7 +926,7 @@ export default function PrinterDiagnostics() {
                 </Button>
               </div>
               <div className="text-xs text-muted-foreground">
-                Network-direct printing is restricted to registered IP/port targets only. Freeform socket destinations are not allowed. Direct dispatch accepts only ZPL, TSPL, EPL, and CPCL; use the local agent for other printer languages.
+                Network-direct printing is restricted to registered IP/port targets only. Freeform socket destinations are not allowed. Direct dispatch accepts only ZPL, TSPL, EPL, and CPCL; use the local agent for other printer languages. Removing a saved profile frees that host and port for a new registered connection.
               </div>
             </CardContent>
           </Card>

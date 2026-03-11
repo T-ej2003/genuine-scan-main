@@ -578,6 +578,12 @@ class ApiClient {
     });
   }
 
+  async deleteRegisteredPrinter(printerId: string) {
+    return this.request(`/manufacturer/printers/${encodeURIComponent(printerId)}`, {
+      method: "DELETE",
+    });
+  }
+
   async listPrintJobs(options?: { batchId?: string; limit?: number }) {
     const params = new URLSearchParams();
     if (options?.batchId) params.append("batchId", options.batchId);

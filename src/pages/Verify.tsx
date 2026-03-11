@@ -383,6 +383,15 @@ const getTransferTokenStorageKey = (value?: string | null) => {
   return normalized ? `${TRANSFER_TOKEN_KEY_PREFIX}${normalized}` : "";
 };
 
+const readStoredValue = (key: string) => {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+};
+
 const SkeletonBlock = ({ className }: { className?: string }) => (
   <div aria-hidden className={cn("premium-shimmer rounded-md bg-[#bccad6]/45", className)} />
 );
@@ -392,6 +401,20 @@ export default function Verify() {
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
 
+  const token = searchParams.get("t")?.trim() || "";
+  const transferToken = searchParams.get("transfer")?.trim() || "";
+  const codeParam = (() => {
+    const raw = String(code || "");
+    try {
+      return decodeURIComponent(raw).trim();
+    } catch {
+      return raw.trim();
+    }
+  })();
+  const initialCustomerToken = readStoredValue(CUSTOMER_TOKEN_KEY);
+  const initialCustomerEmail = readStoredValue(CUSTOMER_EMAIL_KEY);
+  const initialPersistedTransferToken = transferToken ? "" : readStoredValue(getTransferTokenStorageKey(codeParam));
+
   const [result, setResult] = useState<VerifyPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -399,10 +422,10 @@ export default function Verify() {
   const [retryAttempt, setRetryAttempt] = useState(0);
   const [retryNotice, setRetryNotice] = useState<string>("");
 
-  const [customerToken, setCustomerToken] = useState<string>("");
-  const [customerEmail, setCustomerEmail] = useState<string>("");
+  const [customerToken, setCustomerToken] = useState<string>(initialCustomerToken);
+  const [customerEmail, setCustomerEmail] = useState<string>(initialCustomerEmail);
 
-  const [otpEmail, setOtpEmail] = useState("");
+  const [otpEmail, setOtpEmail] = useState(initialCustomerEmail);
   const [otpChallengeToken, setOtpChallengeToken] = useState("");
   const [otpMaskedEmail, setOtpMaskedEmail] = useState("");
   const [otpCode, setOtpCode] = useState("");
@@ -418,7 +441,7 @@ export default function Verify() {
   const [transferAccepting, setTransferAccepting] = useState(false);
   const [transferCancelling, setTransferCancelling] = useState(false);
   const [issuedTransferLink, setIssuedTransferLink] = useState<string | null>(null);
-  const [persistedTransferToken, setPersistedTransferToken] = useState("");
+  const [persistedTransferToken, setPersistedTransferToken] = useState(initialPersistedTransferToken);
   const [queueTransferDialogAfterSignIn, setQueueTransferDialogAfterSignIn] = useState(false);
 
   const [reportOpen, setReportOpen] = useState(false);
@@ -442,17 +465,6 @@ export default function Verify() {
   const [reportEmail, setReportEmail] = useState("");
   const [reportPhotos, setReportPhotos] = useState<File[]>([]);
   const [loadingStage, setLoadingStage] = useState<0 | 1>(0);
-
-  const token = useMemo(() => searchParams.get("t")?.trim() || "", [searchParams]);
-  const transferToken = useMemo(() => searchParams.get("transfer")?.trim() || "", [searchParams]);
-  const codeParam = useMemo(() => {
-    const raw = String(code || "");
-    try {
-      return decodeURIComponent(raw).trim();
-    } catch {
-      return raw.trim();
-    }
-  }, [code]);
 
   const transferStorageKey = useMemo(() => getTransferTokenStorageKey(result?.code || codeParam), [codeParam, result?.code]);
   const activeTransferToken = useMemo(
@@ -726,19 +738,6 @@ export default function Verify() {
       setLoading(false);
     }
   }, [activeTransferToken, codeParam, customerToken, deviceId, requestKey, token]);
-
-  useEffect(() => {
-    try {
-      const savedToken = window.localStorage.getItem(CUSTOMER_TOKEN_KEY) || "";
-      const savedEmail = window.localStorage.getItem(CUSTOMER_EMAIL_KEY) || "";
-      setCustomerToken(savedToken);
-      setCustomerEmail(savedEmail);
-      if (!otpEmail && savedEmail) setOtpEmail(savedEmail);
-    } catch {
-      // ignore storage access issues
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   useEffect(() => {
     setIssuedTransferLink(null);

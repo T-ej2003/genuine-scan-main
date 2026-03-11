@@ -454,6 +454,69 @@ export const upsertNetworkDirectPrinter = async (params: {
   return prisma.printer.create({ data });
 };
 
+export const deleteNetworkDirectPrinter = async (params: {
+  printerId: string;
+  replacementDefaultPrinterId?: string | null;
+}) => {
+  const printer = await prisma.printer.findUnique({
+    where: { id: params.printerId },
+  });
+
+  if (!printer) {
+    throw new Error("Printer not found");
+  }
+
+  if (printer.connectionType !== PrinterConnectionType.NETWORK_DIRECT) {
+    throw new Error("Local-agent printers are managed automatically from the workstation agent.");
+  }
+
+  const replacementId = toNullableString(params.replacementDefaultPrinterId, 64);
+
+  return prisma.$transaction(async (tx) => {
+    await tx.printer.delete({
+      where: { id: printer.id },
+    });
+
+    const remainingNetworkPrinters = await tx.printer.findMany({
+      where: {
+        connectionType: PrinterConnectionType.NETWORK_DIRECT,
+        isActive: true,
+        licenseeId: printer.licenseeId || null,
+        ...(printer.orgId ? { orgId: printer.orgId } : {}),
+      },
+      orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }],
+    });
+
+    if (remainingNetworkPrinters.length === 0) {
+      return printer;
+    }
+
+    const nextDefault =
+      (replacementId && remainingNetworkPrinters.find((entry) => entry.id === replacementId)) ||
+      remainingNetworkPrinters.find((entry) => entry.isDefault) ||
+      remainingNetworkPrinters[0];
+
+    await tx.printer.updateMany({
+      where: {
+        connectionType: PrinterConnectionType.NETWORK_DIRECT,
+        isActive: true,
+        licenseeId: printer.licenseeId || null,
+        ...(printer.orgId ? { orgId: printer.orgId } : {}),
+      },
+      data: {
+        isDefault: false,
+      },
+    });
+
+    await tx.printer.update({
+      where: { id: nextDefault.id },
+      data: { isDefault: true },
+    });
+
+    return printer;
+  });
+};
+
 export const testRegisteredPrinterConnection = async (params: {
   printer: RegisteredPrinterRecord;
   userId: string;

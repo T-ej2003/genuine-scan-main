@@ -5,6 +5,7 @@ import { z } from "zod";
 import { AuthRequest } from "../middleware/auth";
 import { getEffectiveLicenseeId } from "../middleware/tenantIsolation";
 import {
+  deleteNetworkDirectPrinter as deleteNetworkDirectPrinterRecord,
   getRegisteredPrinterForManufacturer,
   listRegisteredPrintersForManufacturer,
   testRegisteredPrinterConnection,
@@ -231,6 +232,62 @@ export const testPrinter = async (req: AuthRequest, res: Response) => {
     return res.json({ success: true, data: result });
   } catch (error: any) {
     console.error("testPrinter error:", error);
+    return res.status(400).json({ success: false, error: error?.message || "Bad request" });
+  }
+};
+
+export const deleteNetworkPrinter = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || !isOpsRole(req.user.role)) {
+      return res.status(403).json({ success: false, error: "Access denied" });
+    }
+
+    const printerId = String(req.params.id || "").trim();
+    if (!printerId) return res.status(400).json({ success: false, error: "Missing printer id" });
+
+    const scope = await resolveScope(req);
+    const printer = await getRegisteredPrinterForManufacturer({
+      printerId,
+      userId: scope.userId,
+      orgId: scope.orgId,
+      licenseeId: scope.licenseeId,
+      licenseeIds: scope.licenseeIds,
+      includeInactive: true,
+    });
+    if (!printer) return res.status(404).json({ success: false, error: "Printer not found" });
+    if (printer.connectionType !== PrinterConnectionType.NETWORK_DIRECT) {
+      return res.status(400).json({ success: false, error: "Local-agent printers are managed automatically from the workstation agent." });
+    }
+
+    const deletedPrinter = await deleteNetworkDirectPrinterRecord({
+      printerId: printer.id,
+    });
+
+    await createAuditLog({
+      userId: scope.userId,
+      licenseeId: scope.licenseeId || deletedPrinter.licenseeId || undefined,
+      action: "PRINTER_REMOVED",
+      entityType: "Printer",
+      entityId: deletedPrinter.id,
+      details: {
+        connectionType: deletedPrinter.connectionType,
+        commandLanguage: deletedPrinter.commandLanguage,
+        ipAddress: deletedPrinter.ipAddress,
+        port: deletedPrinter.port,
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || undefined,
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        id: deletedPrinter.id,
+        removed: true,
+      },
+    });
+  } catch (error: any) {
+    console.error("deleteNetworkPrinter error:", error);
     return res.status(400).json({ success: false, error: error?.message || "Bad request" });
   }
 };

@@ -1215,7 +1215,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               <DialogHeader>
                 <DialogTitle>Set up printing on this workstation</DialogTitle>
                 <DialogDescription>
-                  Printing becomes ready automatically after this device already has a working OS printer and the local print agent is running.
+                  Printing becomes ready automatically after this device already has a working OS printer and the installed MSCQR local print agent service is running.
                 </DialogDescription>
               </DialogHeader>
 
@@ -1231,7 +1231,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                   <div className="font-semibold text-slate-950">What the manufacturer should do once per device</div>
                   <ol className="mt-3 list-decimal space-y-2 pl-5">
                     <li>Install or connect the printer in the operating system first.</li>
-                    <li>Start the MSCQR local print agent on that same workstation.</li>
+                    <li>Install the MSCQR local print agent package or workstation service on that same device.</li>
                     <li>Return here and use <strong>Check again</strong>.</li>
                     <li>If the OS can see the printer, MSCQR will detect it and it will appear automatically.</li>
                   </ol>
@@ -1726,7 +1726,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                     <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6">
                       <div className="text-base font-semibold text-slate-950">No printer connection detected</div>
                       <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                        The local print agent did not report a connected printer. Start the agent on this device, pair a USB or network printer, then use Try again (Refresh) to reload live metadata and readiness checks.
+                        The local print agent did not report a connected printer. Install or start the agent service on this device, pair a USB or network printer, then use Try again (Refresh) to reload live metadata and readiness checks.
                       </p>
                       <div className="mt-4 flex flex-wrap gap-3">
                         <Button onClick={refreshPrinterConnectionStatus} disabled={printerSwitching}>
