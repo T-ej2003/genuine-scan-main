@@ -121,7 +121,7 @@ type VerifyPayload = {
   previousScanAt?: string | null;
   previousScanLocation?: string | null;
 
-  policy?: any;
+  policy?: Record<string, unknown> | null;
   scanSignals?: {
     distinctDeviceCount24h?: number;
     recentScanCount10m?: number;
@@ -172,6 +172,7 @@ const INCIDENT_TYPE_OPTIONS = [
 
 const CUSTOMER_TOKEN_KEY = "authenticqr_verify_customer_token";
 const CUSTOMER_EMAIL_KEY = "authenticqr_verify_customer_email";
+const TRANSFER_TOKEN_KEY_PREFIX = "authenticqr_verify_transfer_token:";
 const APP_NAME = "AUTHENTIC QR";
 
 const DEFAULT_OWNERSHIP_STATUS: OwnershipStatus = {
@@ -263,7 +264,7 @@ const inferClassification = (result: VerifyPayload | null): VerificationClassifi
     Number(result?.scanSignals?.distinctCountryCount24h ?? 0) > 1;
 
   if (Boolean(result?.isAuthentic) && duplicateSignals) return "SUSPICIOUS_DUPLICATE";
-  if (Boolean(result?.isAuthentic)) return "LEGIT_REPEAT";
+  if (result?.isAuthentic) return "LEGIT_REPEAT";
 
   return "NOT_READY_FOR_CUSTOMER_USE";
 };
@@ -330,6 +331,13 @@ const toLabel = (value?: string | null) =>
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
+const normalizeVerifyCode = (value?: string | null) => String(value || "").trim().toUpperCase();
+
+const getTransferTokenStorageKey = (value?: string | null) => {
+  const normalized = normalizeVerifyCode(value);
+  return normalized ? `${TRANSFER_TOKEN_KEY_PREFIX}${normalized}` : "";
+};
+
 const SkeletonBlock = ({ className }: { className?: string }) => (
   <div aria-hidden className={cn("premium-shimmer rounded-md bg-[#bccad6]/45", className)} />
 );
@@ -365,6 +373,8 @@ export default function Verify() {
   const [transferAccepting, setTransferAccepting] = useState(false);
   const [transferCancelling, setTransferCancelling] = useState(false);
   const [issuedTransferLink, setIssuedTransferLink] = useState<string | null>(null);
+  const [persistedTransferToken, setPersistedTransferToken] = useState("");
+  const [queueTransferDialogAfterSignIn, setQueueTransferDialogAfterSignIn] = useState(false);
 
   const [reportOpen, setReportOpen] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -399,16 +409,22 @@ export default function Verify() {
     }
   }, [code]);
 
+  const transferStorageKey = useMemo(() => getTransferTokenStorageKey(result?.code || codeParam), [codeParam, result?.code]);
+  const activeTransferToken = useMemo(
+    () => transferToken || (customerToken ? persistedTransferToken : ""),
+    [customerToken, persistedTransferToken, transferToken]
+  );
   const requestKey = useMemo(() => {
     if (token) return `token:${token}|cust:${customerToken.slice(-10)}`;
-    if (codeParam) return `code:${codeParam.toUpperCase()}|transfer:${transferToken.slice(-10)}|cust:${customerToken.slice(-10)}`;
+    if (codeParam) return `code:${codeParam.toUpperCase()}|transfer:${activeTransferToken.slice(-10)}|cust:${customerToken.slice(-10)}`;
     return "";
-  }, [codeParam, customerToken, token, transferToken]);
+  }, [activeTransferToken, codeParam, customerToken, token]);
 
   const deviceId = useMemo(() => getOrCreateAnonDeviceId(), []);
-  const inFlightRef = useRef(new Map<string, Promise<any>>());
+  const inFlightRef = useRef(new Map<string, Promise<unknown>>());
   const verifyStartedAtRef = useRef<number>(0);
   const sentDroppedMetricRef = useRef(false);
+  const protectionSignInRef = useRef<HTMLDivElement | null>(null);
 
   const displayedCode = result?.code || codeParam || "—";
   const classification = useMemo(() => inferClassification(result), [result]);
@@ -418,8 +434,22 @@ export default function Verify() {
   const ownershipStatus = result?.ownershipStatus || DEFAULT_OWNERSHIP_STATUS;
   const ownershipTransfer = result?.ownershipTransfer || null;
   const verifyUxPolicy = { ...DEFAULT_VERIFY_POLICY, ...(result?.verifyUxPolicy || {}) };
+  const shareableTransferLink = issuedTransferLink || ownershipTransfer?.acceptUrl || "";
   const showLinkClaim =
     Boolean(customerToken) && ownershipStatus.isOwnedByRequester && ownershipStatus.matchMethod && ownershipStatus.matchMethod !== "user";
+  const transferLinkIsInvalid = ownershipTransfer?.state === "invalid";
+  const showOwnerTransferSignInPrompt = ownershipStatus.isOwnedByRequester && !customerToken;
+  const showRecipientTransferSignInPrompt = Boolean(transferToken) && !customerToken && !transferLinkIsInvalid;
+  const signInCardTitle = showRecipientTransferSignInPrompt
+    ? "Sign in to accept transfer"
+    : queueTransferDialogAfterSignIn
+      ? "Sign in to start transfer"
+      : "Sign in for better protection (optional)";
+  const signInCardDescription = showRecipientTransferSignInPrompt
+    ? "Accepting a transfer links this product to your signed-in customer account."
+    : queueTransferDialogAfterSignIn
+      ? "Complete sign-in below. The resale transfer form will open automatically."
+      : "Sign-in makes ownership portable across devices. Device-only claim may be less reliable if your network changes.";
   const showAuthenticStamp = classification === "FIRST_SCAN" || classification === "LEGIT_REPEAT";
   const confidenceScore = useMemo(
     () =>
@@ -479,6 +509,26 @@ export default function Verify() {
   const showSkeleton = loading && !result && !error;
   const motionButtonClass = "transition-transform duration-200 hover:scale-[1.02] active:scale-[0.99]";
 
+  const syncPersistedTransferToken = useCallback(
+    (nextToken: string | null) => {
+      const normalized = String(nextToken || "").trim();
+      setPersistedTransferToken(normalized);
+
+      if (!transferStorageKey || transferToken) return;
+
+      try {
+        if (normalized) {
+          window.localStorage.setItem(transferStorageKey, normalized);
+        } else {
+          window.localStorage.removeItem(transferStorageKey);
+        }
+      } catch {
+        // ignore storage issues
+      }
+    },
+    [transferStorageKey, transferToken]
+  );
+
   const fetchVerification = useCallback(async () => {
     if (!requestKey) {
       setLoading(false);
@@ -531,7 +581,7 @@ export default function Verify() {
             lon: geo.lon,
             acc: geo.acc,
             customerToken: customerToken || undefined,
-            transferToken: transferToken || undefined,
+            transferToken: activeTransferToken || undefined,
           });
         })();
 
@@ -540,7 +590,7 @@ export default function Verify() {
       };
 
       const maxAttempts = 4;
-      let response: any = null;
+      let response: Awaited<ReturnType<typeof apiClient.verifyQRCode>> | Awaited<ReturnType<typeof apiClient.scanToken>> | null = null;
       let lastError = "";
 
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -605,14 +655,14 @@ export default function Verify() {
         .catch(() => {
           // best effort telemetry
         });
-    } catch (err: any) {
+    } catch (err: unknown) {
       inFlightRef.current.delete(requestKey);
-      setError(err?.message || "Verification failed");
+      setError(err instanceof Error ? err.message : "Verification failed");
       setResult(null);
     } finally {
       setLoading(false);
     }
-  }, [codeParam, customerToken, deviceId, requestKey, token]);
+  }, [activeTransferToken, codeParam, customerToken, deviceId, requestKey, token]);
 
   useEffect(() => {
     try {
@@ -628,8 +678,52 @@ export default function Verify() {
   }, []);
 
   useEffect(() => {
+    setIssuedTransferLink(null);
+    setQueueTransferDialogAfterSignIn(false);
+    setTransferRecipientEmail("");
+  }, [transferStorageKey]);
+
+  useEffect(() => {
+    if (!transferStorageKey || transferToken) {
+      setPersistedTransferToken("");
+      return;
+    }
+
+    try {
+      setPersistedTransferToken(window.localStorage.getItem(transferStorageKey) || "");
+    } catch {
+      setPersistedTransferToken("");
+    }
+  }, [transferStorageKey, transferToken]);
+
+  useEffect(() => {
     fetchVerification();
   }, [fetchVerification]);
+
+  useEffect(() => {
+    if (ownershipTransfer?.acceptUrl) {
+      setIssuedTransferLink(ownershipTransfer.acceptUrl);
+    }
+  }, [ownershipTransfer?.acceptUrl]);
+
+  useEffect(() => {
+    if (!customerToken || transferToken) return;
+    const state = String(ownershipTransfer?.state || "");
+    if (!["accepted", "cancelled", "expired", "invalid"].includes(state)) return;
+    if (!persistedTransferToken && !issuedTransferLink) return;
+
+    syncPersistedTransferToken(null);
+    setIssuedTransferLink(null);
+  }, [customerToken, issuedTransferLink, ownershipTransfer?.state, persistedTransferToken, syncPersistedTransferToken, transferToken]);
+
+  useEffect(() => {
+    if (!queueTransferDialogAfterSignIn) return;
+    if (!customerToken) return;
+    if (!ownershipTransfer?.canCreate) return;
+
+    setTransferOpen(true);
+    setQueueTransferDialogAfterSignIn(false);
+  }, [customerToken, ownershipTransfer?.canCreate, queueTransferDialogAfterSignIn]);
 
   useEffect(() => {
     const onOnline = () => {
@@ -756,7 +850,6 @@ export default function Verify() {
       }
 
       toast({ title: "Signed in", description: "Protection sign-in is active for this device." });
-      await fetchVerification();
     } finally {
       setOtpVerifying(false);
     }
@@ -767,6 +860,7 @@ export default function Verify() {
     setCustomerEmail("");
     setOtpChallengeToken("");
     setOtpCode("");
+    setQueueTransferDialogAfterSignIn(false);
 
     try {
       window.localStorage.removeItem(CUSTOMER_TOKEN_KEY);
@@ -774,8 +868,6 @@ export default function Verify() {
     } catch {
       // ignore storage issues
     }
-
-    await fetchVerification();
   };
 
   const handleClaimProduct = async () => {
@@ -880,7 +972,8 @@ export default function Verify() {
         return;
       }
 
-      setIssuedTransferLink(response.data.transferLink || null);
+      setIssuedTransferLink(response.data.transferLink || response.data.ownershipTransfer?.acceptUrl || null);
+      syncPersistedTransferToken(response.data.transferToken || null);
       setResult((prev) =>
         prev
           ? {
@@ -894,6 +987,7 @@ export default function Verify() {
         title: "Transfer ready",
         description: response.data.message || "Share the secure transfer link with the next owner.",
       });
+      setQueueTransferDialogAfterSignIn(false);
       setTransferOpen(false);
     } finally {
       setTransferSubmitting(false);
@@ -918,7 +1012,16 @@ export default function Verify() {
         return;
       }
       toast({ title: "Transfer cancelled", description: response.data?.message || "Pending resale transfer cancelled." });
-      await fetchVerification();
+      syncPersistedTransferToken(null);
+      setIssuedTransferLink(null);
+      setResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              ownershipTransfer: response.data?.ownershipTransfer || prev.ownershipTransfer,
+            }
+          : prev
+      );
     } finally {
       setTransferCancelling(false);
     }
@@ -944,14 +1047,24 @@ export default function Verify() {
         title: "Ownership transferred",
         description: response.data?.message || "This product is now linked to your account.",
       });
-      await fetchVerification();
+      setIssuedTransferLink(null);
+      setResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              code: response.data?.code || prev.code,
+              ownershipStatus: response.data?.ownershipStatus || prev.ownershipStatus,
+              ownershipTransfer: response.data?.ownershipTransfer || prev.ownershipTransfer,
+            }
+          : prev
+      );
     } finally {
       setTransferAccepting(false);
     }
   };
 
   const handleCopyTransferLink = async () => {
-    const link = issuedTransferLink || ownershipTransfer?.acceptUrl || "";
+    const link = shareableTransferLink;
     if (!link) return;
     try {
       await navigator.clipboard.writeText(link);
@@ -959,6 +1072,11 @@ export default function Verify() {
     } catch {
       toast({ title: "Copy failed", description: "Could not copy the transfer link.", variant: "destructive" });
     }
+  };
+
+  const handleTransferSignInIntent = () => {
+    setQueueTransferDialogAfterSignIn(true);
+    protectionSignInRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
   const handleSubmitReport = async () => {
@@ -998,7 +1116,13 @@ export default function Verify() {
         return;
       }
 
-      const payload: any = response.data || {};
+      const payload = (response.data || {}) as {
+        reportId?: string;
+        supportTicketRef?: string;
+        supportTicketStatus?: string;
+        supportTicketSla?: { dueAt?: string } | null;
+        tamperChecks?: { summary?: string | null } | null;
+      };
       setReportReference(payload.reportId || null);
       setReportSupportRef(payload.supportTicketRef || null);
       setReportSupportStatus(payload.supportTicketStatus || null);
@@ -1012,7 +1136,10 @@ export default function Verify() {
       if (payload.supportTicketRef) {
         const tracking = await apiClient.trackSupportTicket(payload.supportTicketRef, reportEmail.trim() || undefined);
         if (tracking.success) {
-          const trackData: any = tracking.data || {};
+          const trackData = (tracking.data || {}) as {
+            status?: string;
+            sla?: { dueAt?: string } | null;
+          };
           setReportSupportStatus(trackData.status || payload.supportTicketStatus || null);
           if (trackData?.sla?.dueAt) {
             setReportSupportSla(new Date(trackData.sla.dueAt).toLocaleString());
@@ -1042,7 +1169,16 @@ export default function Verify() {
         return;
       }
 
-      setTrackedTicket((response.data as any) || null);
+      setTrackedTicket(
+        (response.data as
+          | {
+              referenceCode?: string;
+              status?: string;
+              handoffStage?: string;
+              sla?: { dueAt?: string; isBreached?: boolean; remainingMinutes?: number } | null;
+            }
+          | null) || null
+      );
     } finally {
       setTrackingTicket(false);
     }
@@ -1542,6 +1678,33 @@ export default function Verify() {
                             </div>
                           ) : null}
 
+                          {showOwnerTransferSignInPrompt ? (
+                            <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+                              <p className="font-medium">
+                                {ownershipTransfer?.active
+                                  ? "Sign in below to manage or resend your active resale transfer."
+                                  : "Sign in below to start a secure resale transfer."}
+                              </p>
+                              <p className="mt-1">
+                                Resale transfer runs from a signed-in customer session so the next owner can accept from a secure link.
+                              </p>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={handleTransferSignInIntent}
+                                className="mt-3 border-sky-300 bg-white text-sky-900 hover:bg-sky-100"
+                              >
+                                Sign in to continue
+                              </Button>
+                            </div>
+                          ) : null}
+
+                          {showRecipientTransferSignInPrompt ? (
+                            <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+                              Sign in below, then accept the transfer to link this product to your account.
+                            </div>
+                          ) : null}
+
                           {ownershipTransfer?.active ? (
                             <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
                               <p>Started: {formatDateTime(ownershipTransfer.initiatedAt)}</p>
@@ -1563,28 +1726,53 @@ export default function Verify() {
                             </div>
                           ) : null}
 
+                          {ownershipTransfer?.canCreate && ownershipStatus.matchMethod && ownershipStatus.matchMethod !== "user" ? (
+                            <p className="text-xs text-slate-600">
+                              Starting a transfer will also link this device claim to your signed-in account automatically.
+                            </p>
+                          ) : null}
+
                           {ownershipTransfer?.canCancel ? (
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Button type="button" variant="outline" onClick={handleCopyTransferLink} disabled={!ownershipTransfer?.acceptUrl && !issuedTransferLink}>
-                                Copy transfer link
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={handleCancelTransfer}
-                                disabled={transferCancelling}
-                                className="border-rose-300 text-rose-800 hover:bg-rose-50"
-                              >
-                                {transferCancelling ? (
-                                  <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Cancelling
-                                  </>
-                                ) : (
-                                  "Cancel transfer"
-                                )}
-                              </Button>
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Button type="button" variant="outline" onClick={handleCopyTransferLink} disabled={!shareableTransferLink}>
+                                  Copy transfer link
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={handleCancelTransfer}
+                                  disabled={transferCancelling}
+                                  className="border-rose-300 text-rose-800 hover:bg-rose-50"
+                                >
+                                  {transferCancelling ? (
+                                    <>
+                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                      Cancelling
+                                    </>
+                                  ) : (
+                                    "Cancel transfer"
+                                  )}
+                                </Button>
+                              </div>
+                              {!shareableTransferLink ? (
+                                <p className="text-xs text-slate-600">
+                                  The secure link is only available on the device that created it or in the transfer email. Cancel and create a fresh transfer if you need a new link.
+                                </p>
+                              ) : null}
                             </div>
+                          ) : null}
+
+                          {ownershipTransfer?.state === "accepted" && ownershipTransfer?.acceptedAt ? (
+                            <p className="text-xs text-slate-600">Accepted: {formatDateTime(ownershipTransfer.acceptedAt)}</p>
+                          ) : null}
+
+                          {ownershipTransfer?.state === "expired" ? (
+                            <p className="text-xs text-slate-600">This transfer expired. Start a new one if you still need to hand over ownership.</p>
+                          ) : null}
+
+                          {ownershipTransfer?.state === "cancelled" ? (
+                            <p className="text-xs text-slate-600">This transfer was cancelled. You can create a fresh transfer when you are ready.</p>
                           ) : null}
 
                           {ownershipTransfer?.canAccept ? (
@@ -1611,11 +1799,14 @@ export default function Verify() {
                       </div>
 
                       {!customerToken ? (
-                        <div className="space-y-3 rounded-lg border border-slate-200 p-3">
-                          <p className="text-sm font-medium text-slate-900">Sign in for better protection (optional)</p>
-                          <p className="text-xs text-slate-600">
-                            Sign-in makes ownership portable across devices. Device-only claim may be less reliable if your network changes.
-                          </p>
+                        <div ref={protectionSignInRef} className="space-y-3 rounded-lg border border-slate-200 p-3">
+                          <p className="text-sm font-medium text-slate-900">{signInCardTitle}</p>
+                          <p className="text-xs text-slate-600">{signInCardDescription}</p>
+                          {googleOauthUrl ? (
+                            <Button asChild variant="outline" className={motionButtonClass}>
+                              <a href={googleOauthUrl}>Continue with Google</a>
+                            </Button>
+                          ) : null}
                           <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
                             <div className="space-y-2">
                               <Label>Email OTP sign-in</Label>
