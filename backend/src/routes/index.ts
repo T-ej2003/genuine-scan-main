@@ -11,6 +11,7 @@ import {
 } from "../middleware/rbac";
 import { requireCsrf } from "../middleware/csrf";
 import rateLimit from "express-rate-limit";
+import { buildPublicVerifyRateLimitKey } from "../middleware/publicVerifyRateLimit";
 
 import {
   beginMfaSetupController,
@@ -120,6 +121,7 @@ import {
 } from "../controllers/printerAgentController";
 import {
   createNetworkPrinter,
+  deleteNetworkPrinter,
   listPrinters,
   testPrinter,
   updateNetworkPrinter,
@@ -231,14 +233,16 @@ const verifyClaimLimiter = rateLimit({
 
 const verifyCodeLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: parsePositiveIntEnv("PUBLIC_VERIFY_RATE_LIMIT_PER_MIN", 45, 5, 500),
+  max: parsePositiveIntEnv("PUBLIC_VERIFY_RATE_LIMIT_PER_MIN", 120, 20, 1000),
+  keyGenerator: (req) => buildPublicVerifyRateLimitKey(req, "verify"),
   standardHeaders: true,
   legacyHeaders: false,
 });
 
 const scanLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: parsePositiveIntEnv("SCAN_RATE_LIMIT_PER_MIN", 60, 5, 500),
+  max: parsePositiveIntEnv("SCAN_RATE_LIMIT_PER_MIN", 120, 20, 1000),
+  keyGenerator: (req) => buildPublicVerifyRateLimitKey(req, "scan"),
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -456,6 +460,14 @@ router.patch(
   enforceTenantIsolation,
   requireCsrf,
   updateNetworkPrinter
+);
+router.delete(
+  "/manufacturer/printers/:id",
+  authenticate,
+  requireManufacturer,
+  enforceTenantIsolation,
+  requireCsrf,
+  deleteNetworkPrinter
 );
 router.post(
   "/manufacturer/printers/:id/test",

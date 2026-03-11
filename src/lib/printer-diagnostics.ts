@@ -62,6 +62,14 @@ export type PrinterDiagnosticSummary = {
   selectedPrinter: PrinterInventoryRow | null;
 };
 
+export type NetworkDirectPrinterSummaryLike = {
+  registryStatus?: {
+    state: "READY" | "ATTENTION" | "OFFLINE" | "BLOCKED";
+    summary: string;
+    detail?: string | null;
+  } | null;
+} | null;
+
 const hasAny = (value: string, needles: string[]) => needles.some((needle) => value.includes(needle));
 
 export const normalizePrinterInventoryRows = (rows: unknown): PrinterInventoryRow[] => {
@@ -253,4 +261,12 @@ export const getPrinterDiagnosticSummary = (params: {
     ],
     selectedPrinter,
   };
+};
+
+export const shouldPreferNetworkDirectSummary = (params: {
+  printers?: PrinterInventoryRow[];
+  networkPrinter?: NetworkDirectPrinterSummaryLike;
+}) => {
+  const printers = Array.isArray(params.printers) ? params.printers : [];
+  return Boolean(params.networkPrinter) && printers.length === 0;
 };

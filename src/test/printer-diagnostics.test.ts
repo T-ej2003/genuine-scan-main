@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getPrinterDiagnosticSummary } from "@/lib/printer-diagnostics";
+import { getPrinterDiagnosticSummary, shouldPreferNetworkDirectSummary } from "@/lib/printer-diagnostics";
 
 describe("printer diagnostics summary", () => {
   it("flags agent unreachable when local agent cannot be reached", () => {
@@ -91,5 +91,39 @@ describe("printer diagnostics summary", () => {
 
     expect(summary.state).toBe("trust_blocked");
     expect(summary.badgeLabel).toBe("Trust blocked");
+  });
+
+  it("keeps the live local printer summary primary when local inventory exists", () => {
+    expect(
+      shouldPreferNetworkDirectSummary({
+        printers: [
+          {
+            printerId: "canon-1",
+            printerName: "Canon TS4100i series",
+            online: true,
+          },
+        ],
+        networkPrinter: {
+          registryStatus: {
+            state: "READY",
+            summary: "Network printer validated",
+          },
+        },
+      })
+    ).toBe(false);
+  });
+
+  it("allows the network-direct summary when there is no local printer inventory", () => {
+    expect(
+      shouldPreferNetworkDirectSummary({
+        printers: [],
+        networkPrinter: {
+          registryStatus: {
+            state: "READY",
+            summary: "Network printer validated",
+          },
+        },
+      })
+    ).toBe(true);
   });
 });

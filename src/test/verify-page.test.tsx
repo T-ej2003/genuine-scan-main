@@ -50,6 +50,7 @@ const renderVerifyPage = (path = `/verify/${CODE}`) =>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/verify/:code" element={<Verify />} />
+          <Route path="/scan" element={<Verify />} />
         </Routes>
       </MemoryRouter>
     </React.StrictMode>
@@ -244,5 +245,28 @@ describe("Verify page", () => {
     });
 
     expect(await screen.findByRole("button", { name: "Copy transfer link" })).toBeInTheDocument();
+  });
+
+  it("hydrates stored customer auth before the first scan request so refresh does not double-hit the public endpoint", async () => {
+    window.localStorage.setItem(CUSTOMER_TOKEN_KEY, "cust-session-token");
+    vi.mocked(apiClient.scanToken).mockResolvedValue(
+      buildVerifyResponse({
+        code: CODE,
+      }) as unknown as Awaited<ReturnType<typeof apiClient.scanToken>>
+    );
+
+    renderVerifyPage("/scan?t=signed-scan-token");
+
+    await waitFor(() => {
+      expect(vi.mocked(apiClient.scanToken)).toHaveBeenCalledTimes(1);
+    });
+
+    expect(vi.mocked(apiClient.scanToken)).toHaveBeenCalledWith(
+      "signed-scan-token",
+      expect.objectContaining({
+        customerToken: "cust-session-token",
+      })
+    );
+    expect(await screen.findByText("Verified Authentic")).toBeInTheDocument();
   });
 });
