@@ -13,17 +13,16 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 const repoRoot = path.resolve(__dirname, "..");
-const docsRoot = path.join(repoRoot, "docs");
+const outputRoot = path.join(repoRoot, "DOCUMENTS");
 
-const DOC_TASKS = [
-  { input: "USER_MANUAL.md", output: "USER_MANUAL_v2.docx" },
-  { input: "SUPER_ADMIN_GUIDE.md", output: "SUPER_ADMIN_GUIDE.docx" },
-  { input: "LICENSEE_ADMIN_GUIDE.md", output: "LICENSEE_ADMIN_GUIDE.docx" },
-  { input: "MANUFACTURER_GUIDE.md", output: "MANUFACTURER_GUIDE.docx" },
-  { input: "CUSTOMER_VERIFICATION_GUIDE.md", output: "CUSTOMER_VERIFICATION_GUIDE.docx" },
-];
+const SKIP_DIRS = new Set([
+  ".git",
+  "node_modules",
+  "dist",
+  "DOCUMENTS",
+  "test-results",
+]);
 
 const stripInlineMd = (value) =>
   String(value)
@@ -105,13 +104,78 @@ const imageParagraphs = (imageSpec, markdownDir) => {
   ];
 };
 
+const codeBlockParagraphs = (lines, language) => {
+  const children = [];
+  if (language) {
+    children.push(
+      new Paragraph({
+        spacing: { before: 140, after: 60 },
+        children: [
+          new TextRun({
+            text: `${language.toUpperCase()} code`,
+            size: 18,
+            color: "6b7280",
+            italics: true,
+          }),
+        ],
+      })
+    );
+  }
+
+  for (const line of lines) {
+    children.push(
+      new Paragraph({
+        spacing: { after: 20 },
+        children: [
+          new TextRun({
+            text: line || " ",
+            font: "Menlo",
+            size: 20,
+            color: "111827",
+          }),
+        ],
+      })
+    );
+  }
+
+  children.push(new Paragraph({ children: [new TextRun("")] }));
+  return children;
+};
+
 const markdownToParagraphs = (markdown, markdownDir) => {
   const lines = String(markdown).split(/\r?\n/);
   const paragraphs = [];
+  let inCodeBlock = false;
+  let codeLanguage = "";
+  let codeLines = [];
+
+  const flushCodeBlock = () => {
+    if (!inCodeBlock) return;
+    paragraphs.push(...codeBlockParagraphs(codeLines, codeLanguage));
+    inCodeBlock = false;
+    codeLanguage = "";
+    codeLines = [];
+  };
 
   for (const rawLine of lines) {
     const line = rawLine.trimEnd();
     const trimmed = line.trim();
+
+    if (trimmed.startsWith("```")) {
+      if (inCodeBlock) {
+        flushCodeBlock();
+      } else {
+        inCodeBlock = true;
+        codeLanguage = trimmed.slice(3).trim();
+        codeLines = [];
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeLines.push(rawLine);
+      continue;
+    }
 
     if (!trimmed) {
       paragraphs.push(new Paragraph({ children: [new TextRun("")] }));
@@ -124,6 +188,16 @@ const markdownToParagraphs = (markdown, markdownDir) => {
         paragraphs.push(...imageParagraphs(parsed, markdownDir));
         continue;
       }
+    }
+
+    if (trimmed === "---" || trimmed === "***") {
+      paragraphs.push(
+        new Paragraph({
+          spacing: { before: 120, after: 120 },
+          children: [new TextRun({ text: "________________________________________", color: "9ca3af" })],
+        })
+      );
+      continue;
     }
 
     if (trimmed.startsWith("# ")) {
@@ -188,22 +262,49 @@ const markdownToParagraphs = (markdown, markdownDir) => {
     );
   }
 
+  flushCodeBlock();
   return paragraphs;
 };
 
-const generateDocx = async ({ input, output }) => {
-  const inputPath = path.join(docsRoot, input);
-  const outputPath = path.join(docsRoot, output);
+const collectMarkdownFiles = (dir, result = []) => {
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
 
-  if (!fs.existsSync(inputPath)) {
-    throw new Error(`Markdown source not found: ${path.relative(repoRoot, inputPath)}`);
+  for (const entry of entries) {
+    if (entry.name.startsWith(".") && entry.name !== ".github") continue;
+    if (SKIP_DIRS.has(entry.name)) continue;
+
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      collectMarkdownFiles(fullPath, result);
+      continue;
+    }
+
+    if (entry.isFile() && entry.name.endsWith(".md")) {
+      result.push(fullPath);
+    }
   }
 
+  return result;
+};
+
+const extractTitle = (markdown, fallback) => {
+  const match = String(markdown).match(/^#\s+(.+)$/m);
+  return match ? stripInlineMd(match[1]) : fallback;
+};
+
+const toOutputPath = (inputPath) => {
+  const relative = path.relative(repoRoot, inputPath).replace(/\.md$/i, ".docx");
+  return path.join(outputRoot, relative);
+};
+
+const generateDocx = async (inputPath) => {
   const markdown = fs.readFileSync(inputPath, "utf8");
   const paragraphs = markdownToParagraphs(markdown, path.dirname(inputPath));
+  const outputPath = toOutputPath(inputPath);
+  const fallbackTitle = path.basename(inputPath, ".md");
 
   const doc = new Document({
-    title: path.basename(output, ".docx"),
+    title: extractTitle(markdown, fallbackTitle),
     creator: "AuthenticQR",
     sections: [
       {
@@ -214,14 +315,25 @@ const generateDocx = async ({ input, output }) => {
   });
 
   const buffer = await Packer.toBuffer(doc);
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, buffer);
-  console.log(`Wrote ${path.relative(repoRoot, outputPath)}`);
+  return path.relative(repoRoot, outputPath);
 };
 
 async function main() {
-  for (const task of DOC_TASKS) {
-    await generateDocx(task);
+  fs.rmSync(outputRoot, { recursive: true, force: true });
+  fs.mkdirSync(outputRoot, { recursive: true });
+
+  const markdownFiles = collectMarkdownFiles(repoRoot).sort((a, b) => a.localeCompare(b));
+  const created = [];
+
+  for (const inputPath of markdownFiles) {
+    // eslint-disable-next-line no-await-in-loop
+    const written = await generateDocx(inputPath);
+    created.push(written);
   }
+
+  console.log(`Created ${created.length} DOCX files in DOCUMENTS:\n${created.map((p) => `- ${p}`).join("\n")}`);
 }
 
 main().catch((error) => {

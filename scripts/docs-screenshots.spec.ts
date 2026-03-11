@@ -96,6 +96,15 @@ const authenticateSuperAdmin = async (page: Page, baseUrl: string) => {
   });
   await page.context().addCookies([
     {
+      name: "aq_access",
+      value: SUPERADMIN_ACCESS_TOKEN,
+      domain: host,
+      path: "/",
+      httpOnly: true,
+      secure: false,
+      sameSite: "Lax",
+    },
+    {
       name: "aq_csrf",
       value: "docs-csrf",
       domain: host,

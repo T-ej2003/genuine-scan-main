@@ -190,6 +190,15 @@ type RegisteredPrinterRow = {
   } | null;
 };
 
+type PrinterNoticeTone = "success" | "warning" | "neutral" | "danger";
+
+type PrinterSelectionNotice = {
+  title: string;
+  summary: string;
+  detail: string;
+  tone: PrinterNoticeTone;
+};
+
 type PrintJobRow = {
   id: string;
   jobNumber?: string | null;
@@ -223,6 +232,89 @@ type PrintJobRow = {
 
 const LARGE_ALLOCATION_THRESHOLD = 25_000;
 const PRINTER_FAILURE_AUTO_REPORT_COOLDOWN_MS = 3 * 60 * 1000;
+
+const formatDispatchModeLabel = (mode?: string | null) => {
+  if (mode === "NETWORK_DIRECT") return "Network-direct";
+  if (mode === "LOCAL_AGENT") return "Local agent";
+  return "Direct print";
+};
+
+const normalizePrintProgressPhase = (phase?: string | null) => String(phase || "").trim().toLowerCase();
+
+const isCompletedPrintProgressPhase = (phase?: string | null) => {
+  const normalized = normalizePrintProgressPhase(phase);
+  return (
+    normalized === "completed" ||
+    normalized === "print job completed" ||
+    normalized === "print session completed"
+  );
+};
+
+const isTerminalPrintProgressPhase = (phase?: string | null) => {
+  const normalized = normalizePrintProgressPhase(phase);
+  return (
+    isCompletedPrintProgressPhase(normalized) ||
+    normalized === "print job failed" ||
+    normalized === "print job cancelled"
+  );
+};
+
+const buildNetworkDirectPrinterNotice = (
+  printer: RegisteredPrinterRow | null
+): PrinterSelectionNotice => {
+  if (!printer) {
+    return {
+      title: "Select a registered network printer",
+      summary: "Choose a network-direct printer profile before starting a server-side dispatch.",
+      detail: "Only validated registered targets can receive network-direct jobs.",
+      tone: "neutral",
+    };
+  }
+
+  const hostLabel = `${printer.ipAddress || "—"}:${printer.port || 9100}`;
+  const state = printer.registryStatus?.state || "ATTENTION";
+
+  if (state === "READY") {
+    return {
+      title: "Network printer ready",
+      summary: `${printer.name} is validated and ready for server-side dispatch.`,
+      detail:
+        printer.registryStatus?.detail || `Backend connectivity to ${hostLabel} was validated successfully.`,
+      tone: "success",
+    };
+  }
+
+  if (state === "OFFLINE") {
+    return {
+      title: "Network printer offline",
+      summary: `${printer.name} is registered, but ${hostLabel} is not reachable right now.`,
+      detail:
+        printer.registryStatus?.detail ||
+        "Bring the printer online and run validation again before creating a job.",
+      tone: "danger",
+    };
+  }
+
+  if (state === "BLOCKED") {
+    return {
+      title: "Network printer blocked",
+      summary: `${printer.name} cannot be used for network-direct dispatch in its current configuration.`,
+      detail:
+        printer.registryStatus?.detail ||
+        "Use a supported command language and confirm the saved host and port.",
+      tone: "danger",
+    };
+  }
+
+  return {
+    title: "Network printer needs validation",
+    summary: `${printer.name} is registered, but readiness has not been confirmed yet.`,
+    detail:
+      printer.registryStatus?.detail ||
+      "Open Printer Diagnostics and validate this registered target before printing.",
+    tone: "warning",
+  };
+};
 
 const inferTraceEventTypeFromAudit = (log: AuditLogRow): TraceEventType | undefined => {
   const action = String(log.action || "").trim().toUpperCase();
@@ -311,6 +403,8 @@ export default function Batches() {
   const [printProgressRemaining, setPrintProgressRemaining] = useState(0);
   const [printProgressCurrentCode, setPrintProgressCurrentCode] = useState<string | null>(null);
   const [printProgressError, setPrintProgressError] = useState<string | null>(null);
+  const [printProgressPrinterName, setPrintProgressPrinterName] = useState<string | null>(null);
+  const [printProgressDispatchMode, setPrintProgressDispatchMode] = useState<"LOCAL_AGENT" | "NETWORK_DIRECT" | null>(null);
   const printerFailureReportRef = useRef<{ signature: string; at: number }>({ signature: "", at: 0 });
   const printerFailureInFlightRef = useRef(false);
   const [localPrinterAgent, setLocalPrinterAgent] = useState<LocalPrinterAgentSnapshot>({
@@ -385,9 +479,25 @@ export default function Batches() {
     selectedPrinterProfile &&
       selectedPrinterProfile.isActive &&
       (selectedPrinterProfile.connectionType === "NETWORK_DIRECT"
-        ? selectedPrinterProfile.registryStatus?.state !== "BLOCKED"
+        ? selectedPrinterProfile.registryStatus?.state === "READY"
         : printerReady && selectedLocalProfileMatchesAgent)
   );
+  const selectedPrinterNotice = useMemo<PrinterSelectionNotice>(() => {
+    if (selectedPrinterProfile?.connectionType === "NETWORK_DIRECT") {
+      return buildNetworkDirectPrinterNotice(selectedPrinterProfile);
+    }
+
+    return {
+      title: printerDiagnostics.title,
+      summary: printerReady
+        ? `${printerStatus.selectedPrinterName || printerStatus.printerName || "Authenticated print agent"} is ready.`
+        : printerDiagnostics.summary,
+      detail: !printerReady
+        ? printerDiagnostics.detail
+        : "Server-approved payloads only. Browser print fallback is disabled.",
+      tone: printerDiagnostics.tone as PrinterNoticeTone,
+    };
+  }, [printerDiagnostics.detail, printerDiagnostics.summary, printerDiagnostics.title, printerDiagnostics.tone, printerReady, printerStatus.printerName, printerStatus.selectedPrinterName, selectedPrinterProfile]);
 
   const normalizePrinterRows = (rows: unknown): LocalPrinterRow[] => {
     if (!Array.isArray(rows)) return [];
@@ -936,6 +1046,8 @@ export default function Batches() {
     setPrintProgressRemaining(0);
     setPrintProgressCurrentCode(null);
     setPrintProgressError(null);
+    setPrintProgressPrinterName(null);
+    setPrintProgressDispatchMode(null);
     setPrintOpen(true);
     void loadPrinterStatus();
     void loadRecentPrintJobs(b.id);
@@ -943,14 +1055,7 @@ export default function Batches() {
 
   useEffect(() => {
     if (!printProgressOpen || printing || printProgressError) return;
-
-    const normalizedPhase = String(printProgressPhase || "").trim().toLowerCase();
-    const isCompleted =
-      normalizedPhase === "completed" ||
-      normalizedPhase === "print job completed" ||
-      normalizedPhase === "print session completed";
-
-    if (!isCompleted) return;
+    if (!isCompletedPrintProgressPhase(printProgressPhase)) return;
 
     const timer = window.setTimeout(() => {
       setPrintProgressOpen(false);
@@ -1021,6 +1126,11 @@ export default function Batches() {
     setPrintProgressPrinted(confirmed);
     setPrintProgressRemaining(remaining);
     setDirectRemainingToPrint(remaining);
+    setPrintProgressDispatchMode((prev) => job.printMode || prev || null);
+    setPrintProgressPrinterName((prev) => {
+      const resolvedName = String(job.printer?.name || "").trim();
+      return resolvedName || prev || null;
+    });
 
     if (job.status === "CONFIRMED") {
       setPrintProgressPhase("Print job completed");
@@ -1043,6 +1153,47 @@ export default function Batches() {
       setPrintProgressPhase("Local print session active");
     }
   };
+
+  useEffect(() => {
+    if (printing) return;
+    if (!printJobId || printProgressDispatchMode !== "NETWORK_DIRECT") return;
+    if (isTerminalPrintProgressPhase(printProgressPhase)) return;
+
+    let cancelled = false;
+    let inFlight = false;
+
+    const syncLatest = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      try {
+        const response = await apiClient.getPrintJobStatus(printJobId);
+        if (!response.success || !response.data || cancelled) return;
+
+        const job = response.data as PrintJobRow;
+        syncProgressFromPrintJob(job);
+        if (
+          job.status === "CONFIRMED" ||
+          job.status === "FAILED" ||
+          job.status === "CANCELLED"
+        ) {
+          void loadRecentPrintJobs(printBatch?.id);
+          void fetchBatches();
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    void syncLatest();
+    const timer = window.setInterval(() => {
+      void syncLatest();
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [printBatch?.id, printJobId, printProgressDispatchMode, printProgressPhase, printing]);
 
   const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
@@ -1412,8 +1563,10 @@ export default function Batches() {
       setPrintProgressError(null);
       setPrintProgressCurrentCode(null);
       setPrintProgressPrinted(0);
-      setPrintProgressTotal(qty);
-      setPrintProgressRemaining(qty);
+    setPrintProgressTotal(qty);
+    setPrintProgressRemaining(qty);
+    setPrintProgressPrinterName(selectedPrinterProfile.name);
+    setPrintProgressDispatchMode(selectedPrinterProfile.connectionType);
 
       const res = await apiClient.createPrintJob({
         batchId: printBatch.id,
@@ -1450,6 +1603,8 @@ export default function Batches() {
       const createdJobId = String(data.printJobId || "").trim();
       const createdLockToken = String(data.printLockToken || "").trim();
       const createdMode = String(data.mode || selectedPrinterProfile.connectionType).trim();
+      setPrintProgressPrinterName(String(data.printer?.name || selectedPrinterProfile.name || "").trim() || null);
+      setPrintProgressDispatchMode(createdMode === "NETWORK_DIRECT" ? "NETWORK_DIRECT" : "LOCAL_AGENT");
       if (!createdJobId) {
         toast({
           title: "Print job setup incomplete",
@@ -2277,8 +2432,14 @@ export default function Batches() {
             if (!v) {
               setPrintBatch(null);
               setDirectRemainingToPrint(null);
-              if (!printing) {
+              const keepNetworkDirectProgress =
+                !printing &&
+                printProgressDispatchMode === "NETWORK_DIRECT" &&
+                !isTerminalPrintProgressPhase(printProgressPhase);
+              if (!printing && !keepNetworkDirectProgress) {
                 setPrintProgressOpen(false);
+                setPrintProgressPrinterName(null);
+                setPrintProgressDispatchMode(null);
               }
             }
           }}
@@ -2298,29 +2459,19 @@ export default function Batches() {
               <div className="space-y-4 mt-2">
                 <div
                   className={
-                    printerDiagnostics.tone === "success"
+                    selectedPrinterNotice.tone === "success"
                       ? "rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800"
-                      : printerDiagnostics.tone === "warning"
+                      : selectedPrinterNotice.tone === "warning"
                         ? "rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
-                      : printerDiagnostics.tone === "neutral"
+                      : selectedPrinterNotice.tone === "neutral"
                         ? "rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"
                         : "rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800"
                   }
                 >
-                  <div className="font-medium">{printerDiagnostics.title}</div>
-                  <div className="text-xs">
-                    {selectedPrinterProfile?.connectionType === "NETWORK_DIRECT"
-                      ? selectedPrinterProfile.registryStatus?.summary || "Registered network printer selected."
-                      : printerReady
-                        ? `${printerStatus.selectedPrinterName || printerStatus.printerName || "Authenticated print agent"} is ready.`
-                        : printerDiagnostics.summary}
-                  </div>
+                  <div className="font-medium">{selectedPrinterNotice.title}</div>
+                  <div className="text-xs">{selectedPrinterNotice.summary}</div>
                   <div className="mt-2 text-[11px]">
-                    {selectedPrinterProfile?.connectionType === "NETWORK_DIRECT"
-                      ? selectedPrinterProfile.registryStatus?.detail || "Server will dispatch directly to the selected registered printer."
-                      : !printerReady
-                        ? printerDiagnostics.detail
-                        : "Server-approved payloads only. Browser print fallback is disabled."}
+                    {selectedPrinterNotice.detail}
                   </div>
                 </div>
 
@@ -2529,7 +2680,8 @@ export default function Batches() {
                       {friendlyReferenceLabel(printJobId, "Job")} · #{shortRawReference(printJobId, 8)}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      Target printer: {selectedPrinterProfile?.name || "—"} · {selectedPrinterProfile?.connectionType === "NETWORK_DIRECT" ? "Network-direct" : "Local agent"}
+                      Target printer: {printProgressPrinterName || selectedPrinterProfile?.name || "—"} ·{" "}
+                      {formatDispatchModeLabel(printProgressDispatchMode || selectedPrinterProfile?.connectionType || null)}
                     </div>
                     {directRemainingToPrint != null && (
                       <div className="text-xs text-muted-foreground">Remaining to print: {directRemainingToPrint}</div>
@@ -2625,8 +2777,8 @@ export default function Batches() {
           printed={printProgressPrinted}
           remaining={printProgressRemaining}
           currentCode={printProgressCurrentCode}
-          printerName={printerStatus.selectedPrinterName || printerStatus.printerName || null}
-          modeLabel={printerStatus.trusted ? "Trusted mode" : printerStatus.compatibilityMode ? "Compatibility mode" : "Blocked"}
+          printerName={printProgressPrinterName}
+          modeLabel={formatDispatchModeLabel(printProgressDispatchMode)}
           error={printProgressError}
           onOpenChange={(open) => {
             if (!printing) setPrintProgressOpen(open);

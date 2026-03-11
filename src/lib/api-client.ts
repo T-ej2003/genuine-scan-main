@@ -540,7 +540,7 @@ class ApiClient {
     model?: string;
     licenseeId?: string;
     connectionType?: "NETWORK_DIRECT";
-    commandLanguage?: "AUTO" | "ZPL" | "TSPL" | "SBPL" | "EPL" | "CPCL" | "ESC_POS" | "OTHER";
+    commandLanguage?: "ZPL" | "TSPL" | "EPL" | "CPCL";
     ipAddress: string;
     port?: number;
     capabilitySummary?: Record<string, unknown>;
@@ -557,7 +557,7 @@ class ApiClient {
       name: string;
       vendor: string;
       model: string;
-      commandLanguage: "AUTO" | "ZPL" | "TSPL" | "SBPL" | "EPL" | "CPCL" | "ESC_POS" | "OTHER";
+      commandLanguage: "ZPL" | "TSPL" | "EPL" | "CPCL";
       ipAddress: string;
       port: number;
       capabilitySummary: Record<string, unknown>;
