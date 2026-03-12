@@ -49,6 +49,7 @@ const releaseRoot = () => path.resolve(process.cwd(), "local-print-agent", "rele
 const manifestPath = () => path.join(releaseRoot(), "manifest.json");
 
 const normalizeBaseUrl = (value?: string | null) => String(value || "").trim().replace(/\/+$/, "");
+const stripTrailingApiSegment = (value: string) => value.replace(/\/api$/, "");
 
 const ensureReleaseFileExists = (relativePath: string) => {
   const resolved = path.resolve(releaseRoot(), relativePath);
@@ -62,7 +63,13 @@ const ensureReleaseFileExists = (relativePath: string) => {
 };
 
 const buildDownloadPath = (version: string, platform: ConnectorPlatformKey) =>
-  `/public/connector/download/${encodeURIComponent(version)}/${encodeURIComponent(platform)}`;
+  `/api/public/connector/download/${encodeURIComponent(version)}/${encodeURIComponent(platform)}`;
+
+const buildAbsoluteAppUrl = (baseUrl: string | null | undefined, relativePath: string) => {
+  const normalizedBase = normalizeBaseUrl(baseUrl);
+  if (!normalizedBase) return relativePath;
+  return `${stripTrailingApiSegment(normalizedBase)}${relativePath}`;
+};
 
 const toPublicPlatform = (
   version: string,
@@ -83,7 +90,7 @@ const toPublicPlatform = (
     notes: platform.notes || [],
     contentType: platform.contentType,
     downloadPath,
-    downloadUrl: normalizedBase ? `${normalizedBase}${downloadPath}` : downloadPath,
+    downloadUrl: buildAbsoluteAppUrl(normalizedBase, downloadPath),
   };
 };
 
@@ -184,9 +191,9 @@ export const resolveConnectorDownload = (version: string, platformKey: Connector
 export const buildConnectorDownloadUrls = (baseUrl?: string | null) => {
   const latest = getLatestConnectorRelease(baseUrl);
   return {
-    helpUrl: normalizeBaseUrl(baseUrl) ? `${normalizeBaseUrl(baseUrl)}${latest.helpPath}` : latest.helpPath,
-    supportUrl: normalizeBaseUrl(baseUrl) ? `${normalizeBaseUrl(baseUrl)}${latest.supportPath}` : latest.supportPath,
-    setupGuideUrl: normalizeBaseUrl(baseUrl) ? `${normalizeBaseUrl(baseUrl)}${latest.setupGuidePath}` : latest.setupGuidePath,
+    helpUrl: buildAbsoluteAppUrl(baseUrl, latest.helpPath),
+    supportUrl: buildAbsoluteAppUrl(baseUrl, latest.supportPath),
+    setupGuideUrl: buildAbsoluteAppUrl(baseUrl, latest.setupGuidePath),
     latestVersion: latest.latestVersion,
     downloads: latest.release.platforms,
   };

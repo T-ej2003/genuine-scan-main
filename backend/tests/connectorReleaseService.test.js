@@ -6,7 +6,16 @@ const assert = (condition, message) => {
 
 const run = () => {
   const latest = getLatestConnectorRelease("https://mscqr.example.com/api");
+  const latestFromWebOrigin = getLatestConnectorRelease("https://mscqr.example.com");
   assert(latest.latestVersion === "2026.3.12", "Latest connector version should come from manifest.json");
+  assert(
+    latest.release.platforms.macos.downloadPath === "/api/public/connector/download/2026.3.12/macos",
+    "macOS download path should route through the API prefix"
+  );
+  assert(
+    latest.release.platforms.windows.downloadPath === "/api/public/connector/download/2026.3.12/windows",
+    "Windows download path should route through the API prefix"
+  );
   assert(
     latest.release.platforms.macos.downloadUrl ===
       "https://mscqr.example.com/api/public/connector/download/2026.3.12/macos",
@@ -16,6 +25,11 @@ const run = () => {
     latest.release.platforms.windows.downloadUrl ===
       "https://mscqr.example.com/api/public/connector/download/2026.3.12/windows",
     "Windows download URL should be based on the public API base"
+  );
+  assert(
+    latestFromWebOrigin.release.platforms.windows.downloadUrl ===
+      "https://mscqr.example.com/api/public/connector/download/2026.3.12/windows",
+    "Windows download URL should still resolve from the web origin"
   );
 
   const windowsPackage = resolveConnectorDownload("2026.3.12", "windows");
