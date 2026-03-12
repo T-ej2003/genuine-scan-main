@@ -24,6 +24,48 @@ const macReleaseDir = path.join(releaseVersionRoot, "macos");
 const windowsReleaseDir = path.join(releaseVersionRoot, "windows");
 const macPackageName = `MSCQR-Connector-macOS-${version}.pkg`;
 const windowsPackageName = `MSCQR-Connector-Windows-${version}.zip`;
+const normalizeEnv = (value) => String(value || "").trim();
+const isTruthy = (value) => /^(1|true|yes|on)$/i.test(normalizeEnv(value));
+const macSigningIdentity = normalizeEnv(process.env.MACOS_CONNECTOR_SIGN_IDENTITY);
+const requireMacNotarization = isTruthy(process.env.MACOS_CONNECTOR_REQUIRE_NOTARIZATION);
+
+const resolveMacNotaryConfig = () => {
+  const profile = normalizeEnv(process.env.MACOS_CONNECTOR_NOTARY_PROFILE);
+  const appleId = normalizeEnv(process.env.MACOS_CONNECTOR_NOTARY_APPLE_ID);
+  const teamId = normalizeEnv(process.env.MACOS_CONNECTOR_NOTARY_TEAM_ID);
+  const password = normalizeEnv(process.env.MACOS_CONNECTOR_NOTARY_PASSWORD);
+
+  if (profile) {
+    return {
+      mode: "profile",
+      label: `keychain profile "${profile}"`,
+      args: ["--keychain-profile", profile],
+    };
+  }
+
+  const providedDirectValues = [appleId, teamId, password].filter(Boolean).length;
+  if (providedDirectValues === 0) {
+    return null;
+  }
+
+  if (!appleId || !teamId || !password) {
+    throw new Error(
+      "macOS notarization is partially configured. Set MACOS_CONNECTOR_NOTARY_PROFILE or all of MACOS_CONNECTOR_NOTARY_APPLE_ID, MACOS_CONNECTOR_NOTARY_TEAM_ID, and MACOS_CONNECTOR_NOTARY_PASSWORD."
+    );
+  }
+
+  return {
+    mode: "apple-id",
+    label: `Apple ID "${appleId}"`,
+    args: ["--apple-id", appleId, "--team-id", teamId, "--password", password],
+  };
+};
+
+const macNotaryConfig = resolveMacNotaryConfig();
+
+if (macNotaryConfig && !macSigningIdentity) {
+  throw new Error("MACOS_CONNECTOR_SIGN_IDENTITY is required when macOS notarization is configured.");
+}
 
 const ensureDir = (dirPath) => {
   fs.mkdirSync(dirPath, { recursive: true });
@@ -311,6 +353,39 @@ const run = (command, args, cwd = backendRoot) => {
   });
 };
 
+const notarizeMacPackage = (pkgPath) => {
+  if (!macNotaryConfig) {
+    if (requireMacNotarization) {
+      throw new Error(
+        "MACOS_CONNECTOR_REQUIRE_NOTARIZATION is enabled, but notarization credentials are missing. Configure MACOS_CONNECTOR_NOTARY_PROFILE or the Apple ID / team ID / app-specific password variables."
+      );
+    }
+
+    return {
+      notarized: false,
+      stapled: false,
+      validated: false,
+      mode: null,
+    };
+  }
+
+  console.log(`Submitting macOS package for notarization using ${macNotaryConfig.label}...`);
+  run("xcrun", ["notarytool", "submit", pkgPath, ...macNotaryConfig.args, "--wait"]);
+
+  console.log("Stapling macOS notarization ticket...");
+  run("xcrun", ["stapler", "staple", pkgPath]);
+
+  console.log("Validating stapled macOS package...");
+  run("xcrun", ["stapler", "validate", pkgPath]);
+
+  return {
+    notarized: true,
+    stapled: true,
+    validated: true,
+    mode: macNotaryConfig.mode,
+  };
+};
+
 const buildSelfContainedBinaries = (binariesDir) => {
   if (!fs.existsSync(pkgBinary)) {
     throw new Error("Connector packaging dependency is missing. Run npm install in backend first.");
@@ -371,6 +446,7 @@ const buildMacPackage = (binaries, stagingRoot) => {
   const unsignedPkg = path.join(stagingRoot, `${macPackageName.replace(/\.pkg$/, "")}-unsigned.pkg`);
   const finalPkg = path.join(macReleaseDir, macPackageName);
   fs.rmSync(unsignedPkg, { force: true });
+  fs.rmSync(finalPkg, { force: true });
 
   run("pkgbuild", [
     "--root",
@@ -386,20 +462,36 @@ const buildMacPackage = (binaries, stagingRoot) => {
     unsignedPkg,
   ]);
 
-  const signingIdentity = String(process.env.MACOS_CONNECTOR_SIGN_IDENTITY || "").trim();
-  if (signingIdentity) {
+  let signed = false;
+  if (macSigningIdentity) {
     run("productbuild", [
       "--package",
       unsignedPkg,
       "--sign",
-      signingIdentity,
+      macSigningIdentity,
       finalPkg,
     ]);
+    signed = true;
   } else {
     fs.copyFileSync(unsignedPkg, finalPkg);
   }
 
-  return finalPkg;
+  const notarization = signed ? notarizeMacPackage(finalPkg) : {
+    notarized: false,
+    stapled: false,
+    validated: false,
+    mode: null,
+  };
+
+  if (!signed && requireMacNotarization) {
+    throw new Error("MACOS_CONNECTOR_REQUIRE_NOTARIZATION is enabled, but the macOS package was not signed.");
+  }
+
+  return {
+    pkgPath: finalPkg,
+    signed,
+    ...notarization,
+  };
 };
 
 const buildWindowsPackage = async (binaries, stagingRoot) => {
@@ -509,17 +601,24 @@ const main = async () => {
   ensureDir(binariesDir);
 
   const binaries = buildSelfContainedBinaries(binariesDir);
-  const macPkgPath = buildMacPackage(binaries, stagingRoot);
+  const macArtifact = buildMacPackage(binaries, stagingRoot);
   const windowsZipPath = await buildWindowsPackage(binaries, stagingRoot);
 
-  updateManifest(macPkgPath, windowsZipPath);
+  updateManifest(macArtifact.pkgPath, windowsZipPath);
 
   console.log("");
-  console.log(`Created macOS package: ${macPkgPath}`);
+  console.log(`Created macOS package: ${macArtifact.pkgPath}`);
   console.log(`Created Windows package: ${windowsZipPath}`);
   console.log(`Updated manifest: ${path.join(releaseRoot, "manifest.json")}`);
-  if (!String(process.env.MACOS_CONNECTOR_SIGN_IDENTITY || "").trim()) {
+
+  if (!macArtifact.signed) {
     console.log("macOS signing identity not configured. The package target is ready, but the generated pkg is unsigned.");
+  } else if (!macArtifact.notarized) {
+    console.log(
+      "macOS package was signed, but notarization was not configured. Gatekeeper may still warn until MACOS_CONNECTOR_NOTARY_PROFILE or Apple notary credentials are provided."
+    );
+  } else {
+    console.log("macOS package was signed, notarized, stapled, and validated.");
   }
 };
 
