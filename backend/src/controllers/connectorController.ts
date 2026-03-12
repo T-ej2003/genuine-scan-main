@@ -12,17 +12,24 @@ const downloadParamsSchema = z.object({
   platform: z.enum(["macos", "windows"]),
 });
 
-const resolvePublicBaseUrl = (req: Request) => {
-  const explicit = String(process.env.WEB_APP_BASE_URL || "").trim();
-  if (explicit) return explicit.replace(/\/+$/, "");
+const normalizeBaseUrl = (value?: string | null) => String(value || "").trim().replace(/\/+$/, "");
+
+const resolveConnectorBaseUrl = (req: Request) => {
+  const explicitApi = normalizeBaseUrl(process.env.PUBLIC_API_BASE_URL);
+  if (explicitApi) return explicitApi;
+
+  const explicitWeb = normalizeBaseUrl(process.env.WEB_APP_BASE_URL);
+  if (explicitWeb) return explicitWeb;
+
   const origin = req.get("origin");
-  if (origin) return String(origin).trim().replace(/\/+$/, "");
+  if (origin) return normalizeBaseUrl(origin);
+
   return `${req.protocol}://${req.get("host") || "localhost"}`;
 };
 
 export const listConnectorReleasesController = async (req: Request, res: Response) => {
   try {
-    const baseUrl = resolvePublicBaseUrl(req);
+    const baseUrl = resolveConnectorBaseUrl(req);
     const manifest = getConnectorReleaseManifest(baseUrl);
     return res.json({ success: true, data: manifest });
   } catch (error: any) {
@@ -36,7 +43,7 @@ export const listConnectorReleasesController = async (req: Request, res: Respons
 
 export const getLatestConnectorReleaseController = async (req: Request, res: Response) => {
   try {
-    const baseUrl = resolvePublicBaseUrl(req);
+    const baseUrl = resolveConnectorBaseUrl(req);
     const release = getLatestConnectorRelease(baseUrl);
     return res.json({ success: true, data: release });
   } catch (error: any) {

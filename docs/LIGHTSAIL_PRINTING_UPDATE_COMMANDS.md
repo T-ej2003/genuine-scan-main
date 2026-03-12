@@ -1,4 +1,4 @@
-# Lightsail Printing Update Commands
+# Lightsail Printing Update Commands (2026-03-12)
 
 ## Purpose
 
@@ -28,8 +28,8 @@ After you push to GitHub, open Lightsail `Connect using SSH` and run:
 ```bash
 cd ~/genuine-scan-main
 git fetch origin
-git checkout codex/printing-architecture-ipp-gateway
-git pull --ff-only origin codex/printing-architecture-ipp-gateway
+git checkout <YOUR_BRANCH>
+git pull --ff-only origin <YOUR_BRANCH>
 git rev-parse HEAD
 git status --short
 
@@ -59,7 +59,23 @@ Expected result:
 - `git status --short` is empty
 - `docker compose ps` shows `backend` healthy and `frontend` running
 
-## 4. Full container refresh
+## 4. Connector download smoke checks
+
+Run this after the deploy to confirm the installer page and real download routes are healthy:
+
+```bash
+curl -fsS https://www.mscqr.com/api/public/connector/releases/latest
+curl -I https://www.mscqr.com/api/public/connector/download/2026.3.12/macos
+curl -I https://www.mscqr.com/api/public/connector/download/2026.3.12/windows
+```
+
+Expected result:
+
+- the release endpoint returns `success: true`
+- the Mac and Windows download requests return `HTTP/2 200`
+- `Content-Disposition` is present for both installer downloads
+
+## 5. Full container refresh
 
 Use this only when you want a full rebuild and clean container recreate:
 
@@ -72,7 +88,7 @@ docker compose up -d backend frontend
 docker compose ps
 ```
 
-## 5. Connector release checks
+## 6. Connector release checks
 
 The packaged connector artifacts now live inside the repo under:
 
@@ -94,7 +110,7 @@ You should see:
 - the Mac installer package
 - the Windows installer package
 
-## 6. If a site connector workstation is used
+## 7. If a site connector workstation is used
 
 If a private factory network uses the connector as a site gateway:
 

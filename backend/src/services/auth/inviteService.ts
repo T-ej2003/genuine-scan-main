@@ -64,12 +64,6 @@ const resolveWebAppBaseUrl = () => {
   return "http://localhost:8080";
 };
 
-const resolveApiBaseUrl = () => {
-  const explicit = String(process.env.PUBLIC_API_BASE_URL || "").trim();
-  if (explicit) return explicit.replace(/\/+$/, "");
-  return `${resolveWebAppBaseUrl()}/api`;
-};
-
 const inviteHtmlTemplate = (params: {
   acceptUrl: string;
   connectorUrl: string | null;
@@ -381,12 +375,11 @@ export const createInvite = async (input: {
 
   // Send email outside the transaction (delivery should not block DB state).
   const baseUrl = resolveWebAppBaseUrl();
-  const apiBaseUrl = resolveApiBaseUrl();
   const acceptUrl = `${baseUrl}/accept-invite?token=${encodeURIComponent(rawToken)}`;
   const connectorLandingUrl = isManufacturerRole(role)
     ? `${baseUrl}/connector-download?inviteToken=${encodeURIComponent(rawToken)}`
     : null;
-  const connectorDistribution = isManufacturerRole(role) ? buildConnectorDownloadUrls(apiBaseUrl) : null;
+  const connectorDistribution = isManufacturerRole(role) ? buildConnectorDownloadUrls(baseUrl) : null;
 
   const subject = "You have been invited to MSCQR";
   const text =

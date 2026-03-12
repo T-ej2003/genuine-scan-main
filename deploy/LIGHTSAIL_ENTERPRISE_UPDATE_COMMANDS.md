@@ -104,6 +104,9 @@ For enterprise rollout, distribute the packaged connector through Jamf, Intune, 
 ```bash
 curl -sS https://www.mscqr.com/api/healthz
 curl -sS https://www.mscqr.com/api/version
+curl -sS https://www.mscqr.com/api/public/connector/releases/latest
+curl -I https://www.mscqr.com/api/public/connector/download/2026.3.12/macos
+curl -I https://www.mscqr.com/api/public/connector/download/2026.3.12/windows
 ```
 
 ## 6) DB verify (new tables)

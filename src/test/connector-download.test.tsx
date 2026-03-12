@@ -40,7 +40,7 @@ describe("ConnectorDownload", () => {
               sha256: "a".repeat(64),
               notes: ["Double-click the pkg file once."],
               contentType: "application/octet-stream",
-              downloadPath: "/public/connector/download/2026.3.12/macos",
+              downloadPath: "/api/public/connector/download/2026.3.12/macos",
               downloadUrl: "https://example.test/api/public/connector/download/2026.3.12/macos",
             },
             windows: {
@@ -53,7 +53,7 @@ describe("ConnectorDownload", () => {
               sha256: "b".repeat(64),
               notes: ["Run Install Connector.cmd once."],
               contentType: "application/zip",
-              downloadPath: "/public/connector/download/2026.3.12/windows",
+              downloadPath: "/api/public/connector/download/2026.3.12/windows",
               downloadUrl: "https://example.test/api/public/connector/download/2026.3.12/windows",
             },
           },
@@ -86,8 +86,81 @@ describe("ConnectorDownload", () => {
 
     expect(screen.getByText("Install MSCQR Connector")).toBeInTheDocument();
     expect(screen.getByText(/Acme Factory 1/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /download for mac/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /download for windows/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /download for mac/i })).toHaveAttribute(
+      "href",
+      "https://example.test/api/public/connector/download/2026.3.12/macos",
+    );
+    expect(screen.getByRole("link", { name: /download for windows/i })).toHaveAttribute(
+      "href",
+      "https://example.test/api/public/connector/download/2026.3.12/windows",
+    );
     expect(screen.getByText(/Run the installer once/i)).toBeInTheDocument();
+  });
+
+  it("repairs legacy connector links that still point at /public instead of /api/public", async () => {
+    vi.mocked(apiClient.getInvitePreview).mockResolvedValue({ success: false, error: "No invite" } as any);
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue({
+      success: true,
+      data: {
+        productName: "MSCQR Connector",
+        latestVersion: "2026.3.12",
+        supportPath: "/help/manufacturer",
+        helpPath: "/connector-download",
+        setupGuidePath: "/help/manufacturer",
+        release: {
+          version: "2026.3.12",
+          publishedAt: "2026-03-12T20:00:00.000Z",
+          summary: "Install once and print without manual startup.",
+          notes: [],
+          platforms: {
+            macos: {
+              platform: "macos",
+              label: "macOS installer",
+              installerKind: "pkg",
+              filename: "MSCQR-Connector-macOS-2026.3.12.pkg",
+              architecture: "universal (arm64 + x64)",
+              bytes: 1024,
+              sha256: "a".repeat(64),
+              notes: ["Double-click the pkg file once."],
+              contentType: "application/octet-stream",
+              downloadPath: "/public/connector/download/2026.3.12/macos",
+              downloadUrl: "https://example.test/public/connector/download/2026.3.12/macos",
+            },
+            windows: {
+              platform: "windows",
+              label: "Windows package",
+              installerKind: "zip",
+              filename: "MSCQR-Connector-Windows-2026.3.12.zip",
+              architecture: "x64",
+              bytes: 2048,
+              sha256: "b".repeat(64),
+              notes: ["Run Install Connector.cmd once."],
+              contentType: "application/zip",
+              downloadPath: "/public/connector/download/2026.3.12/windows",
+              downloadUrl: "https://example.test/public/connector/download/2026.3.12/windows",
+            },
+          },
+        },
+      },
+    } as any);
+
+    render(
+      <MemoryRouter initialEntries={["/connector-download"]}>
+        <ConnectorDownload />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(vi.mocked(apiClient.getLatestConnectorRelease)).toHaveBeenCalled();
+    });
+
+    expect(screen.getByRole("link", { name: /download for mac/i })).toHaveAttribute(
+      "href",
+      "https://example.test/api/public/connector/download/2026.3.12/macos",
+    );
+    expect(screen.getByRole("link", { name: /download for windows/i })).toHaveAttribute(
+      "href",
+      "https://example.test/api/public/connector/download/2026.3.12/windows",
+    );
   });
 });
