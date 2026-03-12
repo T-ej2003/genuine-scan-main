@@ -1,0 +1,49 @@
+{
+  "productName": "MSCQR Connector",
+  "latestVersion": "2026.3.12",
+  "supportPath": "/help/manufacturer",
+  "helpPath": "/connector-download",
+  "setupGuidePath": "/help/manufacturer",
+  "releases": [
+    {
+      "version": "2026.3.12",
+      "publishedAt": "2026-03-12T19:42:08.582Z",
+      "summary": "Install once on the printing computer, then the MSCQR Connector starts automatically in the background.",
+      "notes": [
+        "Use the Mac package on the Mac that is connected to the printer.",
+        "Use the Windows package on the Windows PC that is connected to the printer.",
+        "After installation, open Printer Setup in MSCQR and confirm the printer shows as ready."
+      ],
+      "platforms": {
+        "macos": {
+          "label": "macOS installer",
+          "installerKind": "pkg",
+          "filename": "MSCQR-Connector-macOS-2026.3.12.pkg",
+          "relativePath": "2026.3.12/macos/MSCQR-Connector-macOS-2026.3.12.pkg",
+          "contentType": "application/octet-stream",
+          "architecture": "universal (arm64 + x64)",
+          "bytes": 44452890,
+          "sha256": "c704c80cf8bb62f70cd5b111b58a7f4e55c9254ff9f224d385e363edfee45f7a",
+          "notes": [
+            "Double-click the pkg file to install it on the Mac that will print.",
+            "The connector registers a LaunchAgent and starts automatically at sign-in."
+          ]
+        },
+        "windows": {
+          "label": "Windows package",
+          "installerKind": "zip",
+          "filename": "MSCQR-Connector-Windows-2026.3.12.zip",
+          "relativePath": "2026.3.12/windows/MSCQR-Connector-Windows-2026.3.12.zip",
+          "contentType": "application/zip",
+          "architecture": "x64",
+          "bytes": 20775200,
+          "sha256": "93029bd75b097d71d606f6fd4d66b867f6693a963264ed32a6831c910d8b1935",
+          "notes": [
+            "Extract the ZIP package on the Windows computer that will print.",
+            "Run Install Connector.cmd once to install and auto-start the connector."
+          ]
+        }
+      }
+    }
+  ]
+}

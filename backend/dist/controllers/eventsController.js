@@ -8,6 +8,7 @@ const database_1 = __importDefault(require("../config/database"));
 const tenantIsolation_1 = require("../middleware/tenantIsolation");
 const auditService_1 = require("../services/auditService");
 const client_1 = require("@prisma/client");
+const manufacturerScopeService_1 = require("../services/manufacturerScopeService");
 function writeSse(res, event, data) {
     res.write(`event: ${event}\n`);
     res.write(`data: ${JSON.stringify(data)}\n\n`);
@@ -34,17 +35,25 @@ async function computeDashboard(req) {
     else if (scopedLicenseeId) {
         qrWhere.licenseeId = scopedLicenseeId;
         batchWhere.licenseeId = scopedLicenseeId;
-        manufacturersWhere.licenseeId = scopedLicenseeId;
+        manufacturersWhere.OR = [
+            { licenseeId: scopedLicenseeId },
+            { manufacturerLicenseeLinks: { some: { licenseeId: scopedLicenseeId } } },
+        ];
     }
+    const linkedLicenseeIds = role === client_1.UserRole.MANUFACTURER || role === client_1.UserRole.MANUFACTURER_ADMIN || role === client_1.UserRole.MANUFACTURER_USER
+        ? await (0, manufacturerScopeService_1.resolveAccessibleLicenseeIdsForUser)(req.user)
+        : [];
     const [totalQRCodes, totalBatches, manufacturers, activeLicensees, qrGrouped, qrTotal] = await Promise.all([
         database_1.default.qRCode.count({ where: qrWhere }),
         database_1.default.batch.count({ where: batchWhere }),
         database_1.default.user.count({ where: manufacturersWhere }),
         role === client_1.UserRole.SUPER_ADMIN || role === client_1.UserRole.PLATFORM_SUPER_ADMIN
             ? database_1.default.licensee.count({ where: { isActive: true } })
-            : scopedLicenseeId
-                ? database_1.default.licensee.count({ where: { id: scopedLicenseeId, isActive: true } })
-                : 0,
+            : linkedLicenseeIds.length > 0
+                ? database_1.default.licensee.count({ where: { id: { in: linkedLicenseeIds }, isActive: true } })
+                : scopedLicenseeId
+                    ? database_1.default.licensee.count({ where: { id: scopedLicenseeId, isActive: true } })
+                    : 0,
         database_1.default.qRCode.groupBy({
             by: ["status"],
             where: qrWhere,
@@ -84,6 +93,9 @@ const dashboardEvents = async (req, res) => {
         writeSse(res, "stats", initial);
         const scopedLicenseeId = (0, tenantIsolation_1.getEffectiveLicenseeId)(req);
         const role = req.user.role;
+        const linkedLicenseeIds = role === client_1.UserRole.MANUFACTURER || role === client_1.UserRole.MANUFACTURER_ADMIN || role === client_1.UserRole.MANUFACTURER_USER
+            ? await (0, manufacturerScopeService_1.resolveAccessibleLicenseeIdsForUser)(req.user)
+            : [];
         // Keepalive ping (prevents proxies killing connection)
         const keepAlive = setInterval(() => {
             res.write(": ping\n\n");
@@ -93,10 +105,16 @@ const dashboardEvents = async (req, res) => {
             try {
                 // Tenant filter
                 if (role !== client_1.UserRole.SUPER_ADMIN && role !== client_1.UserRole.PLATFORM_SUPER_ADMIN) {
-                    if (!scopedLicenseeId)
-                        return;
-                    if (log.licenseeId !== scopedLicenseeId)
-                        return;
+                    if (linkedLicenseeIds.length > 0) {
+                        if (!log.licenseeId || !linkedLicenseeIds.includes(log.licenseeId))
+                            return;
+                    }
+                    else {
+                        if (!scopedLicenseeId)
+                            return;
+                        if (log.licenseeId !== scopedLicenseeId)
+                            return;
+                    }
                 }
                 else {
                     // super admin can optionally scope via ?licenseeId= (supported by getEffectiveLicenseeId)

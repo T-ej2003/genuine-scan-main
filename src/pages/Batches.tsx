@@ -1540,7 +1540,7 @@ export default function Batches() {
           title: "Printer unavailable",
           description: sanitizePrinterUiError(
             livePrinterStatus.error,
-            "Reconnect the workstation connector or choose a ready workstation printer before creating a job."
+            "Reconnect the MSCQR Connector or choose a ready workstation printer before creating a job."
           ),
           variant: "destructive",
         });

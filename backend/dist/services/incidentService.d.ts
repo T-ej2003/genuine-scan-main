@@ -49,8 +49,8 @@ export declare const recordIncidentEvent: (input: {
     eventType: IncidentEventType;
     eventPayload?: any;
 }) => Promise<{
-    id: string;
     createdAt: Date;
+    id: string;
     eventType: import(".prisma/client").$Enums.IncidentEventType;
     incidentId: string;
     actorType: import(".prisma/client").$Enums.IncidentActorType;
@@ -62,14 +62,14 @@ export declare const createIncidentFromReport: (payload: IncidentReportInput, ac
     storageKey?: string | null;
     fileType?: string | null;
 }>) => Promise<{
-    id: string;
     licenseeId: string | null;
-    status: import(".prisma/client").$Enums.IncidentStatus;
     createdAt: Date;
     updatedAt: Date;
+    id: string;
+    description: string;
+    status: import(".prisma/client").$Enums.IncidentStatus;
     qrCodeId: string | null;
     ipHash: string | null;
-    description: string;
     priority: import(".prisma/client").$Enums.IncidentPriority;
     userAgentHash: string | null;
     locationName: string | null;
@@ -106,31 +106,16 @@ export declare const getIncidentByIdScoped: (incidentId: string, actor: {
     role: UserRole;
     licenseeId?: string | null;
 }) => Promise<({
-    events: ({
-        actorUser: {
-            id: string;
-            email: string;
-            name: string;
-        } | null;
-    } & {
-        id: string;
-        createdAt: Date;
-        eventType: import(".prisma/client").$Enums.IncidentEventType;
-        incidentId: string;
-        actorType: import(".prisma/client").$Enums.IncidentActorType;
-        eventPayload: import("@prisma/client/runtime/library").JsonValue | null;
-        actorUserId: string | null;
-    })[];
     supportTicket: ({
         messages: ({
             actorUser: {
                 id: string;
-                email: string;
                 name: string;
+                email: string;
             } | null;
         } & {
-            id: string;
             createdAt: Date;
+            id: string;
             message: string;
             actorType: import(".prisma/client").$Enums.IncidentActorType;
             actorUserId: string | null;
@@ -138,11 +123,11 @@ export declare const getIncidentByIdScoped: (incidentId: string, actor: {
             ticketId: string;
         })[];
     } & {
-        id: string;
         licenseeId: string | null;
-        status: import(".prisma/client").$Enums.SupportTicketStatus;
         createdAt: Date;
         updatedAt: Date;
+        id: string;
+        status: import(".prisma/client").$Enums.SupportTicketStatus;
         subject: string;
         priority: import(".prisma/client").$Enums.IncidentPriority;
         incidentId: string;
@@ -153,15 +138,30 @@ export declare const getIncidentByIdScoped: (incidentId: string, actor: {
         firstResponseAt: Date | null;
         resolvedAt: Date | null;
     }) | null;
+    events: ({
+        actorUser: {
+            id: string;
+            name: string;
+            email: string;
+        } | null;
+    } & {
+        createdAt: Date;
+        id: string;
+        eventType: import(".prisma/client").$Enums.IncidentEventType;
+        incidentId: string;
+        actorType: import(".prisma/client").$Enums.IncidentActorType;
+        eventPayload: import("@prisma/client/runtime/library").JsonValue | null;
+        actorUserId: string | null;
+    })[];
     assignedToUser: {
         id: string;
-        email: string;
         name: string;
+        email: string;
     } | null;
     communications: {
+        createdAt: Date;
         id: string;
         status: import(".prisma/client").$Enums.IncidentCommStatus;
-        createdAt: Date;
         replyTo: string | null;
         subject: string;
         attemptedFrom: string | null;
@@ -175,8 +175,8 @@ export declare const getIncidentByIdScoped: (incidentId: string, actor: {
         incidentId: string;
     }[];
     evidence: {
-        id: string;
         createdAt: Date;
+        id: string;
         incidentId: string;
         fileUrl: string | null;
         storageKey: string | null;
@@ -185,9 +185,9 @@ export declare const getIncidentByIdScoped: (incidentId: string, actor: {
         uploadedBy: import(".prisma/client").$Enums.IncidentActorType;
     }[];
     handoff: {
-        id: string;
         createdAt: Date;
         updatedAt: Date;
+        id: string;
         incidentId: string;
         slaDueAt: Date;
         reviewAt: Date | null;
@@ -199,14 +199,14 @@ export declare const getIncidentByIdScoped: (incidentId: string, actor: {
         intakeAt: Date;
     } | null;
 } & {
-    id: string;
     licenseeId: string | null;
-    status: import(".prisma/client").$Enums.IncidentStatus;
     createdAt: Date;
     updatedAt: Date;
+    id: string;
+    description: string;
+    status: import(".prisma/client").$Enums.IncidentStatus;
     qrCodeId: string | null;
     ipHash: string | null;
-    description: string;
     priority: import(".prisma/client").$Enums.IncidentPriority;
     userAgentHash: string | null;
     locationName: string | null;
@@ -264,12 +264,12 @@ export declare const listIncidentsScoped: (input: {
         } | null;
         assignedToUser: {
             id: string;
-            email: string;
             name: string;
+            email: string;
         } | null;
         evidence: {
-            id: string;
             createdAt: Date;
+            id: string;
             incidentId: string;
             fileUrl: string | null;
             storageKey: string | null;
@@ -278,9 +278,9 @@ export declare const listIncidentsScoped: (input: {
             uploadedBy: import(".prisma/client").$Enums.IncidentActorType;
         }[];
         handoff: {
-            id: string;
             createdAt: Date;
             updatedAt: Date;
+            id: string;
             incidentId: string;
             slaDueAt: Date;
             reviewAt: Date | null;
@@ -292,14 +292,14 @@ export declare const listIncidentsScoped: (input: {
             intakeAt: Date;
         } | null;
     } & {
-        id: string;
         licenseeId: string | null;
-        status: import(".prisma/client").$Enums.IncidentStatus;
         createdAt: Date;
         updatedAt: Date;
+        id: string;
+        description: string;
+        status: import(".prisma/client").$Enums.IncidentStatus;
         qrCodeId: string | null;
         ipHash: string | null;
-        description: string;
         priority: import(".prisma/client").$Enums.IncidentPriority;
         userAgentHash: string | null;
         locationName: string | null;

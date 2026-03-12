@@ -13,6 +13,7 @@ import RouteMetricsTracker from "@/components/RouteMetricsTracker";
 
 const Login = lazy(() => import("@/pages/Login"));
 const AcceptInvite = lazy(() => import("@/pages/AcceptInvite"));
+const ConnectorDownload = lazy(() => import("@/pages/ConnectorDownload"));
 const ForgotPassword = lazy(() => import("@/pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
@@ -141,6 +142,7 @@ function AppRoutes() {
         <Route path="/verify" element={<VerifyLanding />} />
         <Route path="/verify/:code" element={<Verify />} />
         <Route path="/scan" element={<Verify />} />
+        <Route path="/connector-download" element={<ConnectorDownload />} />
         <Route path="/help" element={<HelpHub />} />
         <Route
           path="/help/auth-overview"
@@ -195,7 +197,7 @@ function AppRoutes() {
         <Route
           path="/help/manufacturer"
           element={
-            <HelpRoleRoute allowedRoles={["manufacturer"]} allowPublic={false}>
+            <HelpRoleRoute allowedRoles={["manufacturer"]} allowPublic={true}>
               <HelpManufacturer />
             </HelpRoleRoute>
           }

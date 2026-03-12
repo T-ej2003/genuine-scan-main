@@ -4,6 +4,18 @@ These scripts install the workstation print agent as a login-time service so man
 
 They are maintainer and packaging assets, not end-user instructions. Production rollout should use a signed installer, MDM, or IT packaging flow so operators never run terminal commands themselves.
 
+The repository now also includes packaged connector release output under:
+
+```text
+backend/local-print-agent/releases/
+```
+
+Build the latest packaged connector artifacts from the `backend` folder with:
+
+```bash
+npm run connector:release
+```
+
 Supported rollout paths:
 
 - macOS LaunchAgent

@@ -634,6 +634,91 @@ const createJobMarkup = () =>
     `
   );
 
+const connectorDownloadMarkup = () =>
+  shell(
+    "Install MSCQR Connector",
+    "",
+    `
+      <div class="frame" style="grid-template-columns: 1fr;">
+        <main class="main" style="padding: 28px 34px 34px;">
+          <section class="hero">
+            <div>
+              <div class="pill green">Latest connector 2026.3.12</div>
+              <h2 style="margin-top: 14px;">Install once on the computer that will print.</h2>
+              <p>The connector starts automatically in the background after installation, so manufacturer users do not run technical setup steps each day.</p>
+            </div>
+            <div class="grid" style="min-width: 280px;">
+              <div class="card soft">
+                <div class="label">Invite status</div>
+                <div style="margin-top: 8px; font-size: 18px; font-weight: 800;">Factory team onboarding ready</div>
+              </div>
+              <div class="card soft">
+                <div class="label">Recommended</div>
+                <div style="margin-top: 8px; font-size: 18px; font-weight: 800;">Download for Mac on this device</div>
+              </div>
+            </div>
+          </section>
+
+          <div class="grid cols-2" style="margin-top: 18px;">
+            <div class="card">
+              <div class="profile-head">
+                <div>
+                  <div class="profile-title">Mac installer</div>
+                  <div class="profile-meta">Double-click the pkg file once on the Mac that is connected to the printer.</div>
+                </div>
+                <span class="pill green">Recommended</span>
+              </div>
+              <div class="profile-meta" style="margin-top: 12px;">Universal package · auto-start enabled · Mac user does not need terminal commands</div>
+              <ul class="list">
+                <li>Install on the same computer that already sees the printer in macOS.</li>
+                <li>The connector will auto-start every time that user signs in.</li>
+              </ul>
+              <div class="profile-actions">
+                <div class="btn primary">Download for Mac</div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="profile-head">
+                <div>
+                  <div class="profile-title">Windows installer</div>
+                  <div class="profile-meta">Download the Windows package, extract it, and run Install Connector once.</div>
+                </div>
+                <span class="pill slate">Windows x64</span>
+              </div>
+              <div class="profile-meta" style="margin-top: 12px;">Scheduled Task auto-start · install once on the printing PC</div>
+              <ul class="list">
+                <li>Install on the same Windows computer that already sees the printer.</li>
+                <li>Open Printer Setup in MSCQR after installation to confirm readiness.</li>
+              </ul>
+              <div class="profile-actions">
+                <div class="btn">Download for Windows</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid main-content" style="margin-top: 18px;">
+            <div class="card">
+              <h3>Simple setup steps</h3>
+              <ul class="list">
+                <li>Open this page on the computer that is physically connected to the printer.</li>
+                <li>Download the Mac or Windows installer that matches that computer.</li>
+                <li>Run the installer once.</li>
+                <li>Open MSCQR and confirm the printer shows as ready in Printer Setup.</li>
+                <li>Return to Batches and create the print job.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>After installation</h3>
+              <div class="setup-note">The connector starts automatically at sign-in and keeps MSCQR connected to the operating-system printer list in the background.</div>
+              <div class="profile-meta" style="margin-top: 14px;">AirPrint / IPP printers can also be registered as managed office printers when they are reachable as approved network devices.</div>
+            </div>
+          </div>
+        </main>
+      </div>
+    `
+  );
+
 const printStatusMarkup = () =>
   shell(
     "Print Status",
@@ -695,6 +780,7 @@ const printStatusMarkup = () =>
 
 const captures = [
   { filename: "manufacturer-printer-diagnostics.png", html: diagnosticsMarkup() },
+  { filename: "manufacturer-connector-download.png", html: connectorDownloadMarkup() },
   { filename: "manufacturer-create-print-job.png", html: createJobMarkup() },
   { filename: "manufacturer-print-status.png", html: printStatusMarkup() },
 ];

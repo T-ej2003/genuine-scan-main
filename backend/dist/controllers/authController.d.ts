@@ -12,4 +12,5 @@ export declare const forgotPassword: (req: Request, res: Response) => Promise<Re
 export declare const resetPassword: (req: Request, res: Response) => Promise<Response<any, Record<string, any>>>;
 export declare const invite: (req: Request, res: Response) => Promise<Response<any, Record<string, any>>>;
 export declare const acceptInviteController: (req: Request, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const invitePreviewController: (req: Request, res: Response) => Promise<Response<any, Record<string, any>>>;
 //# sourceMappingURL=authController.d.ts.map

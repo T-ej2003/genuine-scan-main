@@ -73,44 +73,32 @@ Register the printer in the app as:
 - port: `9100`
 - language: `ZPL`
 
-### Workstation printers now use the local print agent
-Run this on the manufacturer workstation, not on Lightsail. The agent now supports the normal OS-managed printer path on macOS, Linux, and Windows.
+### Workstation printers now use the MSCQR Connector
+Run this on the manufacturer workstation, not on Lightsail.
 
-macOS or Linux:
-```bash
-cd /path/to/genuine-scan-main/backend
-npm ci
-npm run build
-npm run print:agent:install:macos
-# or:
-npm run print:agent:install:linux
-```
+Standard rollout:
 
-Windows PowerShell:
-```powershell
-cd C:\path\to\genuine-scan-main\backend
-npm ci
-npm run build
-npm run print:agent:install:windows
-```
+- open the `Install Connector` page in MSCQR
+- download the Mac or Windows package for that workstation
+- run the installer once
+- confirm the printer already appears in the operating-system printer list
+- open `Printer Setup` in MSCQR and confirm the printer shows as ready
 
-The browser on that same workstation should then load:
-```bash
-curl -sS http://127.0.0.1:17866/status
-```
+Versioned connector packages now live in:
 
-Manual developer fallback only:
-```bash
-cd /path/to/genuine-scan-main/backend
-npm run print:agent
-```
-
-Installer assets live in:
 ```text
-backend/local-print-agent/install/
+backend/local-print-agent/releases/
 ```
 
-For enterprise rollout, wrap the install scripts in Jamf, Intune, Kandji, or the manufacturer's normal MDM tooling. Signed `.pkg` / `.msi` output still requires your organization's code-signing certificates outside source control.
+On Lightsail, you can verify the packaged connector files with:
+
+```bash
+cd ~/genuine-scan-main
+find backend/local-print-agent/releases -maxdepth 3 -type f | sort
+cat backend/local-print-agent/releases/manifest.json
+```
+
+For enterprise rollout, distribute the packaged connector through Jamf, Intune, Kandji, or the manufacturer's normal software deployment process. The repository now includes the signed-package target for macOS, but a real production signature still requires your organization's Developer ID certificate outside source control.
 
 ## 5) Smoke checks
 ```bash

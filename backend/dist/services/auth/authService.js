@@ -12,6 +12,7 @@ const refreshTokenService_1 = require("./refreshTokenService");
 const auditService_1 = require("../auditService");
 const sessionRiskService_1 = require("./sessionRiskService");
 const mfaService_1 = require("./mfaService");
+const manufacturerScopeService_1 = require("../manufacturerScopeService");
 const parseIntEnv = (key, fallback) => {
     const raw = String(process.env[key] || "").trim();
     const n = Number(raw);
@@ -37,25 +38,40 @@ const buildJwtPayloadForUser = (u) => ({
     role: u.role,
     licenseeId: u.licenseeId,
     orgId: u.orgId,
+    linkedLicenseeIds: u.linkedLicenseeIds || null,
 });
 exports.buildJwtPayloadForUser = buildJwtPayloadForUser;
+const mapLinkedLicenseesForSession = async (userId) => {
+    const links = await (0, manufacturerScopeService_1.listManufacturerLicenseeLinks)(userId, database_1.default).catch(() => []);
+    const linkedLicensees = (0, manufacturerScopeService_1.normalizeLinkedLicensees)(links);
+    const linkedLicenseeIds = linkedLicensees.map((row) => row.id);
+    return { linkedLicensees, linkedLicenseeIds };
+};
 const issueSessionForUser = async (input) => {
     const now = input.now || new Date();
     const user = await database_1.default.user.findUnique({
         where: { id: input.userId },
-        include: { licensee: { select: { id: true, name: true, prefix: true } } },
+        include: { licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } } },
     });
     if (!user)
         throw new Error("User not found");
     if (isDisabledUser(user)) {
         throw new Error("Account is disabled");
     }
+    const linkedScope = (0, exports.isManufacturerRole)(user.role)
+        ? await mapLinkedLicenseesForSession(user.id)
+        : { linkedLicensees: [], linkedLicenseeIds: [] };
+    const primaryLicensee = user.licensee ||
+        linkedScope.linkedLicensees.find((row) => row.isPrimary) ||
+        linkedScope.linkedLicensees[0] ||
+        null;
     const payload = (0, exports.buildJwtPayloadForUser)({
         id: user.id,
         email: user.email,
         role: user.role,
-        licenseeId: user.licenseeId,
-        orgId: user.orgId,
+        licenseeId: primaryLicensee?.id || user.licenseeId,
+        orgId: user.orgId || primaryLicensee?.orgId || null,
+        linkedLicenseeIds: linkedScope.linkedLicenseeIds,
     });
     const accessToken = (0, tokenService_1.signAccessToken)(payload);
     const refreshToken = (0, tokenService_1.newRefreshToken)();
@@ -78,11 +94,17 @@ const issueSessionForUser = async (input) => {
             email: user.email,
             name: user.name,
             role: user.role,
-            licenseeId: user.licenseeId,
-            orgId: user.orgId,
-            licensee: user.licensee
-                ? { id: user.licensee.id, name: user.licensee.name, prefix: user.licensee.prefix }
+            licenseeId: primaryLicensee?.id || user.licenseeId,
+            orgId: user.orgId || primaryLicensee?.orgId || null,
+            licensee: primaryLicensee
+                ? {
+                    id: primaryLicensee.id,
+                    name: primaryLicensee.name,
+                    prefix: primaryLicensee.prefix,
+                    brandName: "brandName" in primaryLicensee ? primaryLicensee.brandName ?? null : null,
+                }
                 : null,
+            linkedLicensees: linkedScope.linkedLicensees,
         },
     };
 };

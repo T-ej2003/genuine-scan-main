@@ -65,6 +65,7 @@ const routeLabel = (route: string) => {
     "/account": "Account settings",
     "/login": "Sign in",
     "/accept-invite": "Accept invite",
+    "/connector-download": "Install Connector",
     "/forgot-password": "Forgot password",
     "/reset-password": "Reset password",
   };

@@ -319,6 +319,105 @@ class ApiClient {
     return res;
   }
 
+  async getInvitePreview(token: string) {
+    const query = `?token=${encodeURIComponent(token)}`;
+    return this.request<{
+      email: string;
+      role: string;
+      expiresAt: string;
+      licenseeName: string | null;
+      requiresConnector: boolean;
+    }>(`/auth/invite-preview${query}`);
+  }
+
+  async getConnectorReleaseManifest() {
+    return this.request<{
+      productName: string;
+      latestVersion: string;
+      supportPath: string;
+      helpPath: string;
+      setupGuidePath: string;
+      releases: Array<{
+        version: string;
+        publishedAt: string;
+        summary: string;
+        notes: string[];
+        platforms: {
+          macos: null | {
+            platform: "macos";
+            label: string;
+            installerKind: "pkg" | "zip" | "exe";
+            filename: string;
+            architecture: string;
+            bytes: number;
+            sha256: string;
+            notes: string[];
+            contentType: string;
+            downloadPath: string;
+            downloadUrl: string;
+          };
+          windows: null | {
+            platform: "windows";
+            label: string;
+            installerKind: "pkg" | "zip" | "exe";
+            filename: string;
+            architecture: string;
+            bytes: number;
+            sha256: string;
+            notes: string[];
+            contentType: string;
+            downloadPath: string;
+            downloadUrl: string;
+          };
+        };
+      }>;
+    }>("/public/connector/releases");
+  }
+
+  async getLatestConnectorRelease() {
+    return this.request<{
+      productName: string;
+      latestVersion: string;
+      supportPath: string;
+      helpPath: string;
+      setupGuidePath: string;
+      release: {
+        version: string;
+        publishedAt: string;
+        summary: string;
+        notes: string[];
+        platforms: {
+          macos: null | {
+            platform: "macos";
+            label: string;
+            installerKind: "pkg" | "zip" | "exe";
+            filename: string;
+            architecture: string;
+            bytes: number;
+            sha256: string;
+            notes: string[];
+            contentType: string;
+            downloadPath: string;
+            downloadUrl: string;
+          };
+          windows: null | {
+            platform: "windows";
+            label: string;
+            installerKind: "pkg" | "zip" | "exe";
+            filename: string;
+            architecture: string;
+            bytes: number;
+            sha256: string;
+            notes: string[];
+            contentType: string;
+            downloadPath: string;
+            downloadUrl: string;
+          };
+        };
+      };
+    }>("/public/connector/releases/latest");
+  }
+
   async inviteUser(payload: {
     email: string;
     role: string;

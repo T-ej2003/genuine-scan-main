@@ -16,60 +16,64 @@ export declare const recordScan: (code: string, meta?: {
     latitude?: number | null;
     longitude?: number | null;
     accuracy?: number | null;
+    customerUserId?: string | null;
+    ownershipId?: string | null;
+    ownershipMatchMethod?: string | null;
+    isTrustedOwnerContext?: boolean;
 }) => Promise<{
     qrCode: {
         licensee: {
-            id: string;
-            name: string;
-            location: string | null;
-            website: string | null;
-            orgId: string;
-            isActive: boolean;
             createdAt: Date;
             updatedAt: Date;
-            suspendedAt: Date | null;
-            suspendedReason: string | null;
+            id: string;
+            orgId: string;
+            name: string;
             prefix: string;
             description: string | null;
             brandName: string | null;
+            location: string | null;
+            website: string | null;
             supportEmail: string | null;
             supportPhone: string | null;
+            isActive: boolean;
+            suspendedAt: Date | null;
+            suspendedReason: string | null;
         };
         batch: ({
             manufacturer: {
                 id: string;
-                email: string;
                 name: string;
                 location: string | null;
                 website: string | null;
+                email: string;
             } | null;
         } & {
-            id: string;
-            name: string;
+            manufacturerId: string | null;
             licenseeId: string;
             createdAt: Date;
             updatedAt: Date;
-            manufacturerId: string | null;
+            id: string;
+            name: string;
+            suspendedAt: Date | null;
+            suspendedReason: string | null;
             parentBatchId: string | null;
             rootBatchId: string | null;
             startCode: string;
             endCode: string;
             totalCodes: number;
             printedAt: Date | null;
-            suspendedAt: Date | null;
-            suspendedReason: string | null;
             printPackDownloadedAt: Date | null;
             printPackDownloadedByUserId: string | null;
         }) | null;
     } & {
-        id: string;
         licenseeId: string;
-        status: import(".prisma/client").$Enums.QRStatus;
         createdAt: Date;
         updatedAt: Date;
+        id: string;
+        status: import(".prisma/client").$Enums.QRStatus;
+        code: string;
         batchId: string | null;
         printedAt: Date | null;
-        code: string;
         scannedAt: Date | null;
         scanCount: number;
         printedByUserId: string | null;

@@ -2,11 +2,28 @@
 
 ## Purpose
 
-Use these commands on the AWS Lightsail instance after your printing and printer UX changes are pushed to GitHub.
+Use these commands in the AWS Lightsail browser terminal opened with `Connect using SSH`.
 
-These commands are written for the Lightsail browser terminal opened with `Connect using SSH`.
+This deployment uses Docker Compose. Do not use `systemctl restart mscqr-backend` for the MSCQR app containers.
 
-## Standard Docker Compose update
+## 1. Confirm your local repository is ready
+
+Run this on your local machine before you connect to Lightsail:
+
+```bash
+cd /Users/abhiramteja/Downloads/genuine-scan-main
+git rev-parse HEAD
+git status --short
+```
+
+Expected result:
+
+- `git rev-parse HEAD` prints the commit you are about to deploy
+- `git status --short` is empty before you push
+
+## 2. Standard Lightsail Docker update
+
+After you push to GitHub, open Lightsail `Connect using SSH` and run:
 
 ```bash
 cd ~/genuine-scan-main
@@ -25,14 +42,7 @@ docker compose logs frontend --tail=80
 curl -fsS http://127.0.0.1/healthz
 ```
 
-## Verify the server matches your local commit
-
-Run this locally:
-
-```bash
-git rev-parse HEAD
-git status --short
-```
+## 3. Verify Lightsail matches local
 
 Run this on Lightsail:
 
@@ -40,17 +50,18 @@ Run this on Lightsail:
 cd ~/genuine-scan-main
 git rev-parse HEAD
 git status --short
+docker compose ps
 ```
 
 Expected result:
 
-- `git rev-parse HEAD` matches the local commit hash
-- `git status --short` is empty on the server after the deploy
+- the Lightsail `git rev-parse HEAD` value matches the commit from your local machine
+- `git status --short` is empty
 - `docker compose ps` shows `backend` healthy and `frontend` running
 
-## Full container refresh
+## 4. Full container refresh
 
-Use this only when you want a completely fresh recreate of the app containers:
+Use this only when you want a full rebuild and clean container recreate:
 
 ```bash
 cd ~/genuine-scan-main
@@ -61,6 +72,40 @@ docker compose up -d backend frontend
 docker compose ps
 ```
 
-## If a site connector workstation is used
+## 5. Connector release checks
 
-Redeploy the updated signed workstation connector package or refresh its `agent.env` values so the site gateway can continue polling outbound.
+The packaged connector artifacts now live inside the repo under:
+
+```text
+backend/local-print-agent/releases/
+```
+
+To confirm the latest packaged connector files exist on Lightsail after pull:
+
+```bash
+cd ~/genuine-scan-main
+find backend/local-print-agent/releases -maxdepth 3 -type f | sort
+cat backend/local-print-agent/releases/manifest.json
+```
+
+You should see:
+
+- the latest `manifest.json`
+- the Mac installer package
+- the Windows installer package
+
+## 6. If a site connector workstation is used
+
+If a private factory network uses the connector as a site gateway:
+
+1. Pull the new code on Lightsail with the commands above.
+2. Redeploy the latest connector package to the site workstation.
+3. If needed, refresh the workstation `agent.env` values:
+
+```dotenv
+PRINT_GATEWAY_BACKEND_URL=https://your-mscqr-host/api
+PRINT_GATEWAY_ID=<gateway-id>
+PRINT_GATEWAY_SECRET=<bootstrap-secret>
+```
+
+4. Re-open `Printer Setup` in MSCQR and confirm the site gateway returns to `online`.

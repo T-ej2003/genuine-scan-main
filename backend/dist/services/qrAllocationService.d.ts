@@ -15,10 +15,10 @@ export type AllocateQrRangeParams = {
 };
 export declare const allocateQrRange: (params: AllocateQrRangeParams) => Promise<{
     range: {
-        id: string;
         licenseeId: string;
         createdAt: Date;
         updatedAt: Date;
+        id: string;
         startCode: string;
         endCode: string;
         totalCodes: number;

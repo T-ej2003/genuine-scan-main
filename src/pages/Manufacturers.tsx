@@ -428,7 +428,7 @@ export default function Manufacturers() {
       } else {
         toast({
           title: "Invite sent",
-          description: `An invite link was emailed to ${email}. It expires in 24 hours.`,
+          description: `Activation and connector download links were emailed to ${email}. They expire in 24 hours.`,
         });
       }
 
@@ -576,7 +576,7 @@ export default function Manufacturers() {
                   </div>
 
                   <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
-                    Access setup: invite link only. We’ll email a one-time activation link (expires in 24 hours).
+                    Access setup: invite link only. We’ll email a one-time activation link and the MSCQR Connector download page (expires in 24 hours).
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">

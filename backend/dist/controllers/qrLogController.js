@@ -8,6 +8,7 @@ const database_1 = __importDefault(require("../config/database"));
 const client_1 = require("@prisma/client");
 const locationService_1 = require("../services/locationService");
 const qrTrackingAnalyticsService_1 = require("../services/qrTrackingAnalyticsService");
+const manufacturerScopeService_1 = require("../services/manufacturerScopeService");
 const getScanLogs = async (req, res) => {
     try {
         if (!req.user)
@@ -27,9 +28,8 @@ const getScanLogs = async (req, res) => {
         }
         const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 1000);
         const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
-        const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
-            ? req.query.licenseeId || undefined
-            : req.user.licenseeId || undefined;
+        const scope = await (0, manufacturerScopeService_1.resolveScopedLicenseeAccess)(req.user, req.query.licenseeId || null);
+        const licenseeId = scope.scopeLicenseeId || undefined;
         const batchId = req.query.batchId || undefined;
         const code = req.query.code?.trim() || undefined;
         const statusRaw = String(req.query.status || "").trim().toUpperCase();
@@ -119,9 +119,8 @@ const getBatchSummary = async (req, res) => {
             req.user.role !== client_1.UserRole.MANUFACTURER_USER) {
             return res.status(403).json({ success: false, error: "Access denied" });
         }
-        const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
-            ? req.query.licenseeId || undefined
-            : req.user.licenseeId || undefined;
+        const scope = await (0, manufacturerScopeService_1.resolveScopedLicenseeAccess)(req.user, req.query.licenseeId || null);
+        const licenseeId = scope.scopeLicenseeId || undefined;
         const manufacturerId = req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
             ? req.query.manufacturerId || undefined
             : undefined;
@@ -191,9 +190,8 @@ const getQrTrackingAnalyticsController = async (req, res) => {
         };
         const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 500);
         const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
-        const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
-            ? req.query.licenseeId || undefined
-            : req.user.licenseeId || undefined;
+        const scope = await (0, manufacturerScopeService_1.resolveScopedLicenseeAccess)(req.user, req.query.licenseeId || null);
+        const licenseeId = scope.scopeLicenseeId || undefined;
         const statusRaw = String(req.query.status || "").trim().toUpperCase();
         const validStatuses = new Set(["DORMANT", "ACTIVE", "ALLOCATED", "ACTIVATED", "PRINTED", "REDEEMED", "BLOCKED", "SCANNED"]);
         const status = validStatuses.has(statusRaw) ? statusRaw : undefined;

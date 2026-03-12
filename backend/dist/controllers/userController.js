@@ -11,6 +11,7 @@ const database_1 = __importDefault(require("../config/database"));
 const auditService_1 = require("../services/auditService");
 const passwordService_1 = require("../services/auth/passwordService");
 const email_1 = require("../utils/email");
+const manufacturerScopeService_1 = require("../services/manufacturerScopeService");
 /**
  * Notes:
  * - Manufacturers are Users with role=MANUFACTURER
@@ -67,12 +68,6 @@ const canonicalizeRole = (role) => {
     }
     return role;
 };
-const MANUFACTURER_ROLES = [
-    client_1.UserRole.MANUFACTURER,
-    client_1.UserRole.MANUFACTURER_ADMIN,
-    client_1.UserRole.MANUFACTURER_USER,
-];
-const isManufacturerRole = (role) => MANUFACTURER_ROLES.includes(role);
 const ensureAuth = (req) => {
     const role = req.user?.role;
     const userId = req.user?.userId;
@@ -80,21 +75,45 @@ const ensureAuth = (req) => {
         return null;
     return { role, userId };
 };
-const isPlatform = (role) => role === client_1.UserRole.SUPER_ADMIN || role === client_1.UserRole.PLATFORM_SUPER_ADMIN;
+const isPlatform = (role) => (0, manufacturerScopeService_1.isPlatformRole)(role);
 const getTenantLicenseeId = (req) => {
     // if your middleware sets (req as any).licenseeId you can support it
     return req.licenseeId || req.user?.licenseeId || null;
 };
-const enforceTenantForTarget = (actorRole, actorLicenseeId, targetLicenseeId) => {
-    if (isPlatform(actorRole))
-        return { ok: true };
-    if (!actorLicenseeId) {
-        return { ok: false, status: 403, error: "No licensee association found" };
-    }
-    if (!targetLicenseeId || String(actorLicenseeId) !== String(targetLicenseeId)) {
-        return { ok: false, status: 403, error: "Access denied to this tenant" };
-    }
-    return { ok: true };
+const serializeScopedUser = (row, scopedLicenseeId) => {
+    const linkedLicensees = (0, manufacturerScopeService_1.normalizeLinkedLicensees)(row.manufacturerLicenseeLinks || []);
+    const scopedLicensee = linkedLicensees.find((entry) => entry.id === scopedLicenseeId) ||
+        linkedLicensees.find((entry) => entry.isPrimary) ||
+        linkedLicensees[0] ||
+        (row.licensee
+            ? {
+                id: row.licensee.id || row.licenseeId || "",
+                name: row.licensee.name,
+                prefix: row.licensee.prefix,
+                brandName: row.licensee.brandName ?? null,
+            }
+            : null);
+    return {
+        id: row.id,
+        email: row.email,
+        name: row.name,
+        role: row.role,
+        licenseeId: scopedLicensee?.id || row.licenseeId,
+        isActive: row.isActive,
+        deletedAt: row.deletedAt,
+        createdAt: row.createdAt,
+        location: row.location ?? null,
+        website: row.website ?? null,
+        licensee: scopedLicensee
+            ? {
+                id: scopedLicensee.id,
+                name: scopedLicensee.name,
+                prefix: scopedLicensee.prefix,
+                brandName: scopedLicensee.brandName ?? null,
+            }
+            : null,
+        linkedLicensees: linkedLicensees.length ? linkedLicensees : undefined,
+    };
 };
 const assertManufacturerTarget = async (id) => {
     const target = await database_1.default.user.findUnique({
@@ -108,14 +127,38 @@ const assertManufacturerTarget = async (id) => {
             isActive: true,
             deletedAt: true,
             createdAt: true,
+            orgId: true,
+            location: true,
+            website: true,
+            manufacturerLicenseeLinks: {
+                include: {
+                    licensee: {
+                        select: {
+                            id: true,
+                            name: true,
+                            prefix: true,
+                            brandName: true,
+                            orgId: true,
+                        },
+                    },
+                },
+                orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+            },
         },
     });
     if (!target)
         return { ok: false, status: 404, error: "User not found" };
-    if (!isManufacturerRole(target.role)) {
+    if (!(0, manufacturerScopeService_1.isManufacturerRole)(target.role)) {
         return { ok: false, status: 400, error: "Target must be a manufacturer user" };
     }
     return { ok: true, target };
+};
+const targetHasLicenseeLink = (target, licenseeId) => {
+    const normalized = String(licenseeId || "").trim();
+    if (!normalized)
+        return false;
+    return (target.licenseeId === normalized ||
+        target.manufacturerLicenseeLinks.some((row) => row.licenseeId === normalized));
 };
 /* ===================== CREATE USER ===================== */
 const createUser = async (req, res) => {
@@ -149,7 +192,7 @@ const createUser = async (req, res) => {
             }
             effectiveLicenseeId = actorLicenseeId;
             // non-super cannot create licensee users
-            if (!isManufacturerRole(role)) {
+            if (!(0, manufacturerScopeService_1.isManufacturerRole)(role)) {
                 return res.status(403).json({ success: false, error: "Only super users can create licensee users" });
             }
         }
@@ -163,31 +206,53 @@ const createUser = async (req, res) => {
             return res.status(500).json({ success: false, error: "Licensee org not configured" });
         const passwordHash = await (0, passwordService_1.hashPassword)(password);
         const licenseeId = effectiveLicenseeId || undefined;
-        const created = await database_1.default.user.create({
-            data: {
-                email,
-                passwordHash,
-                name,
-                role,
-                licenseeId,
-                orgId: lic.orgId,
-                isActive: true,
-                deletedAt: null,
-                location: parsed.data.location?.trim() ? parsed.data.location.trim() : null,
-                website: parsed.data.website?.trim() ? parsed.data.website.trim() : null,
-            },
-            select: {
-                id: true,
-                email: true,
-                name: true,
-                role: true,
-                licenseeId: true,
-                isActive: true,
-                deletedAt: true,
-                createdAt: true,
-                location: true,
-                website: true,
-            },
+        const created = await database_1.default.$transaction(async (tx) => {
+            const row = await tx.user.create({
+                data: {
+                    email,
+                    passwordHash,
+                    name,
+                    role,
+                    licenseeId,
+                    orgId: lic.orgId,
+                    isActive: true,
+                    deletedAt: null,
+                    location: parsed.data.location?.trim() ? parsed.data.location.trim() : null,
+                    website: parsed.data.website?.trim() ? parsed.data.website.trim() : null,
+                },
+                select: {
+                    id: true,
+                    email: true,
+                    name: true,
+                    role: true,
+                    licenseeId: true,
+                    isActive: true,
+                    deletedAt: true,
+                    createdAt: true,
+                    location: true,
+                    website: true,
+                    licensee: { select: { id: true, name: true, prefix: true, brandName: true } },
+                    manufacturerLicenseeLinks: {
+                        include: {
+                            licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
+                        },
+                    },
+                },
+            });
+            if ((0, manufacturerScopeService_1.isManufacturerRole)(role) && licenseeId) {
+                await (0, manufacturerScopeService_1.upsertManufacturerLicenseeLink)(tx, {
+                    manufacturerId: row.id,
+                    licenseeId,
+                    makePrimary: true,
+                });
+                row.manufacturerLicenseeLinks = await tx.manufacturerLicenseeLink.findMany({
+                    where: { manufacturerId: row.id },
+                    include: {
+                        licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
+                    },
+                });
+            }
+            return row;
         });
         await (0, auditService_1.createAuditLog)({
             userId: auth.userId,
@@ -197,7 +262,7 @@ const createUser = async (req, res) => {
             details: { email, name, role, licenseeId },
             ipAddress: req.ip,
         });
-        return res.status(201).json({ success: true, data: created });
+        return res.status(201).json({ success: true, data: serializeScopedUser(created, licenseeId || null) });
     }
     catch (e) {
         // nice error for unique constraint (email)
@@ -220,10 +285,21 @@ const getUsers = async (req, res) => {
         const roleFilter = req.query.role || undefined;
         const effectiveLicenseeId = isPlatform(auth.role) ? queryLicenseeId : getTenantLicenseeId(req) || undefined;
         const where = {};
-        if (effectiveLicenseeId)
-            where.licenseeId = effectiveLicenseeId;
-        if (roleFilter)
-            where.role = roleFilter;
+        if (roleFilter && (0, manufacturerScopeService_1.isManufacturerRole)(roleFilter)) {
+            where.role = { in: manufacturerScopeService_1.MANUFACTURER_ROLES };
+            if (effectiveLicenseeId) {
+                where.OR = [
+                    { licenseeId: effectiveLicenseeId },
+                    { manufacturerLicenseeLinks: { some: { licenseeId: effectiveLicenseeId } } },
+                ];
+            }
+        }
+        else {
+            if (effectiveLicenseeId)
+                where.licenseeId = effectiveLicenseeId;
+            if (roleFilter)
+                where.role = roleFilter;
+        }
         if (!includeInactive)
             where.isActive = true;
         const users = await database_1.default.user.findMany({
@@ -239,11 +315,20 @@ const getUsers = async (req, res) => {
                 createdAt: true,
                 location: true,
                 website: true,
-                licensee: { select: { name: true, prefix: true } },
+                licensee: { select: { id: true, name: true, prefix: true, brandName: true } },
+                manufacturerLicenseeLinks: {
+                    include: {
+                        licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
+                    },
+                    orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+                },
             },
             orderBy: { createdAt: "desc" },
         });
-        return res.json({ success: true, data: users });
+        return res.json({
+            success: true,
+            data: users.map((row) => serializeScopedUser(row, effectiveLicenseeId || null)),
+        });
     }
     catch (e) {
         console.error("getUsers error:", e);
@@ -253,19 +338,21 @@ const getUsers = async (req, res) => {
 exports.getUsers = getUsers;
 /* ===================== GET MANUFACTURERS ===================== */
 const getManufacturers = async (req, res) => {
-    let includeInactive = false;
-    let licenseeId;
     try {
         const auth = ensureAuth(req);
         if (!auth)
             return res.status(401).json({ success: false, error: "Not authenticated" });
-        includeInactive = String(req.query.includeInactive || "false").toLowerCase() === "true";
-        licenseeId = isPlatform(auth.role)
+        const includeInactive = String(req.query.includeInactive || "false").toLowerCase() === "true";
+        const licenseeId = isPlatform(auth.role)
             ? (req.query.licenseeId || undefined)
             : (getTenantLicenseeId(req) || undefined);
-        const where = { role: { in: [client_1.UserRole.MANUFACTURER, client_1.UserRole.MANUFACTURER_ADMIN, client_1.UserRole.MANUFACTURER_USER] } };
-        if (licenseeId)
-            where.licenseeId = licenseeId;
+        const where = { role: { in: manufacturerScopeService_1.MANUFACTURER_ROLES } };
+        if (licenseeId) {
+            where.OR = [
+                { licenseeId },
+                { manufacturerLicenseeLinks: { some: { licenseeId } } },
+            ];
+        }
         if (!includeInactive)
             where.isActive = true;
         const manufacturers = await database_1.default.user.findMany({
@@ -281,42 +368,24 @@ const getManufacturers = async (req, res) => {
                 createdAt: true,
                 location: true,
                 website: true,
-                licensee: { select: { name: true, prefix: true } },
+                licensee: { select: { id: true, name: true, prefix: true, brandName: true } },
+                manufacturerLicenseeLinks: {
+                    include: {
+                        licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
+                    },
+                    orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+                },
             },
             orderBy: { name: "asc" },
         });
-        return res.json({ success: true, data: manufacturers });
+        return res.json({
+            success: true,
+            data: manufacturers.map((row) => serializeScopedUser(row, licenseeId || null)),
+        });
     }
     catch (e) {
         console.error("getManufacturers error:", e);
-        try {
-            // Fallback for schema mismatch or older DB: return minimal fields
-            const fallbackWhere = { role: { in: [client_1.UserRole.MANUFACTURER, client_1.UserRole.MANUFACTURER_ADMIN, client_1.UserRole.MANUFACTURER_USER] } };
-            if (licenseeId)
-                fallbackWhere.licenseeId = licenseeId;
-            if (!includeInactive)
-                fallbackWhere.isActive = true;
-            const fallback = await database_1.default.user.findMany({
-                where: fallbackWhere,
-                select: {
-                    id: true,
-                    email: true,
-                    name: true,
-                    role: true,
-                    licenseeId: true,
-                    isActive: true,
-                    deletedAt: true,
-                    createdAt: true,
-                    licensee: { select: { name: true, prefix: true } },
-                },
-                orderBy: { name: "asc" },
-            });
-            return res.json({ success: true, data: fallback });
-        }
-        catch (fallbackErr) {
-            console.error("getManufacturers fallback error:", fallbackErr);
-            return res.status(500).json({ success: false, error: "Internal server error" });
-        }
+        return res.status(500).json({ success: false, error: "Internal server error" });
     }
 };
 exports.getManufacturers = getManufacturers;
@@ -334,9 +403,16 @@ const updateUser = async (req, res) => {
         const t = await assertManufacturerTarget(targetId);
         if (!t.ok)
             return res.status(t.status).json({ success: false, error: t.error });
-        const tenantCheck = enforceTenantForTarget(auth.role, getTenantLicenseeId(req), t.target.licenseeId || null);
-        if (!tenantCheck.ok)
-            return res.status(tenantCheck.status).json({ success: false, error: tenantCheck.error });
+        const actorLicenseeId = getTenantLicenseeId(req);
+        if (!isPlatform(auth.role)) {
+            if (!actorLicenseeId) {
+                return res.status(403).json({ success: false, error: "No licensee association found" });
+            }
+            const allowed = await (0, manufacturerScopeService_1.assertUserCanAccessLicensee)(req.user, actorLicenseeId);
+            if (!allowed || !targetHasLicenseeLink(t.target, actorLicenseeId)) {
+                return res.status(403).json({ success: false, error: "Access denied to this tenant" });
+            }
+        }
         const data = { ...parsed.data };
         // only super can change tenant
         if (!isPlatform(auth.role))
@@ -353,21 +429,48 @@ const updateUser = async (req, res) => {
         // normalize email
         if (data.email)
             data.email = String(data.email).trim().toLowerCase();
-        const updated = await database_1.default.user.update({
-            where: { id: targetId },
-            data,
-            select: {
-                id: true,
-                email: true,
-                name: true,
-                role: true,
-                licenseeId: true,
-                isActive: true,
-                deletedAt: true,
-                createdAt: true,
-                location: true,
-                website: true,
-            },
+        const updated = await database_1.default.$transaction(async (tx) => {
+            let nextLicenseeId = t.target.licenseeId;
+            if (isPlatform(auth.role) && data.licenseeId) {
+                const nextLicensee = await tx.licensee.findUnique({
+                    where: { id: data.licenseeId },
+                    select: { id: true, orgId: true },
+                });
+                if (!nextLicensee) {
+                    throw new Error("Licensee not found");
+                }
+                await (0, manufacturerScopeService_1.upsertManufacturerLicenseeLink)(tx, {
+                    manufacturerId: targetId,
+                    licenseeId: nextLicensee.id,
+                    makePrimary: true,
+                });
+                data.orgId = nextLicensee.orgId;
+                nextLicenseeId = nextLicensee.id;
+            }
+            const row = await tx.user.update({
+                where: { id: targetId },
+                data,
+                select: {
+                    id: true,
+                    email: true,
+                    name: true,
+                    role: true,
+                    licenseeId: true,
+                    isActive: true,
+                    deletedAt: true,
+                    createdAt: true,
+                    location: true,
+                    website: true,
+                    licensee: { select: { id: true, name: true, prefix: true, brandName: true } },
+                    manufacturerLicenseeLinks: {
+                        include: {
+                            licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
+                        },
+                        orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+                    },
+                },
+            });
+            return serializeScopedUser(row, actorLicenseeId || nextLicenseeId || null);
         });
         await (0, auditService_1.createAuditLog)({
             userId: auth.userId,
@@ -399,9 +502,12 @@ const deleteUser = async (req, res) => {
         const t = await assertManufacturerTarget(targetId);
         if (!t.ok)
             return res.status(t.status).json({ success: false, error: t.error });
-        const tenantCheck = enforceTenantForTarget(auth.role, getTenantLicenseeId(req), t.target.licenseeId || null);
-        if (!tenantCheck.ok)
-            return res.status(tenantCheck.status).json({ success: false, error: tenantCheck.error });
+        const actorLicenseeId = getTenantLicenseeId(req);
+        if (!isPlatform(auth.role)) {
+            if (!actorLicenseeId || !targetHasLicenseeLink(t.target, actorLicenseeId)) {
+                return res.status(403).json({ success: false, error: "Access denied to this tenant" });
+            }
+        }
         if (hard) {
             if (!isPlatform(auth.role)) {
                 return res.status(403).json({ success: false, error: "Only super admin can hard delete" });
@@ -423,6 +529,59 @@ const deleteUser = async (req, res) => {
                 ipAddress: req.ip,
             });
             return res.json({ success: true, data: { deletedId: targetId, hard: true, ...tx } });
+        }
+        if (!isPlatform(auth.role) && actorLicenseeId) {
+            const scopedBatchCount = await database_1.default.batch.count({
+                where: { manufacturerId: targetId, licenseeId: actorLicenseeId },
+            });
+            if (scopedBatchCount > 0) {
+                return res.status(409).json({
+                    success: false,
+                    error: "This manufacturer still has batches assigned under your licensee. Reassign or close those batches before unlinking.",
+                });
+            }
+            const updated = await database_1.default.$transaction(async (tx) => {
+                await tx.manufacturerLicenseeLink.delete({
+                    where: {
+                        manufacturerId_licenseeId: {
+                            manufacturerId: targetId,
+                            licenseeId: actorLicenseeId,
+                        },
+                    },
+                });
+                const remainingLinks = await tx.manufacturerLicenseeLink.findMany({
+                    where: { manufacturerId: targetId },
+                    orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+                });
+                if (remainingLinks.length === 0) {
+                    await tx.user.update({
+                        where: { id: targetId },
+                        data: { isActive: false, deletedAt: new Date(), licenseeId: null },
+                    });
+                }
+                else if (!remainingLinks.some((row) => row.isPrimary)) {
+                    await (0, manufacturerScopeService_1.upsertManufacturerLicenseeLink)(tx, {
+                        manufacturerId: targetId,
+                        licenseeId: remainingLinks[0].licenseeId,
+                        makePrimary: true,
+                    });
+                    await tx.user.update({
+                        where: { id: targetId },
+                        data: { licenseeId: remainingLinks[0].licenseeId },
+                    });
+                }
+                return { deletedId: targetId, hard: false, unlinkedLicenseeId: actorLicenseeId };
+            });
+            await (0, auditService_1.createAuditLog)({
+                userId: auth.userId,
+                licenseeId: actorLicenseeId,
+                action: "UNLINK_MANUFACTURER_FROM_LICENSEE",
+                entityType: "User",
+                entityId: targetId,
+                details: { email: t.target.email, name: t.target.name, licenseeId: actorLicenseeId },
+                ipAddress: req.ip,
+            });
+            return res.json({ success: true, data: updated });
         }
         const updated = await database_1.default.user.update({
             where: { id: targetId },
@@ -460,9 +619,34 @@ const restoreManufacturer = async (req, res) => {
         const t = await assertManufacturerTarget(targetId);
         if (!t.ok)
             return res.status(t.status).json({ success: false, error: t.error });
-        const tenantCheck = enforceTenantForTarget(auth.role, getTenantLicenseeId(req), t.target.licenseeId || null);
-        if (!tenantCheck.ok)
-            return res.status(tenantCheck.status).json({ success: false, error: tenantCheck.error });
+        const actorLicenseeId = getTenantLicenseeId(req);
+        if (!isPlatform(auth.role)) {
+            if (!actorLicenseeId) {
+                return res.status(403).json({ success: false, error: "No licensee association found" });
+            }
+            const updated = await database_1.default.$transaction(async (tx) => {
+                await (0, manufacturerScopeService_1.upsertManufacturerLicenseeLink)(tx, {
+                    manufacturerId: targetId,
+                    licenseeId: actorLicenseeId,
+                    makePrimary: !t.target.licenseeId,
+                });
+                return tx.user.update({
+                    where: { id: targetId },
+                    data: { isActive: true, deletedAt: null, licenseeId: t.target.licenseeId || actorLicenseeId },
+                    select: { id: true, isActive: true, deletedAt: true },
+                });
+            });
+            await (0, auditService_1.createAuditLog)({
+                userId: auth.userId,
+                licenseeId: actorLicenseeId,
+                action: "RESTORE_MANUFACTURER_LINK",
+                entityType: "User",
+                entityId: targetId,
+                details: { email: t.target.email, name: t.target.name, licenseeId: actorLicenseeId },
+                ipAddress: req.ip,
+            });
+            return res.json({ success: true, data: updated });
+        }
         const updated = await database_1.default.user.update({
             where: { id: targetId },
             data: { isActive: true, deletedAt: null },

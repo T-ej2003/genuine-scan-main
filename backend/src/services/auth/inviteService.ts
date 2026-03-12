@@ -7,6 +7,7 @@ import { sendAuthEmail } from "./authEmailService";
 import { createAuditLog } from "../auditService";
 import { normalizeEmailAddress } from "../../utils/email";
 import { isManufacturerRole, listManufacturerLicenseeLinks, upsertManufacturerLicenseeLink } from "../manufacturerScopeService";
+import { buildConnectorDownloadUrls } from "../connectorReleaseService";
 
 const addHours = (d: Date, hours: number) => new Date(d.getTime() + hours * 60 * 60 * 1000);
 
@@ -61,6 +62,83 @@ const resolveWebAppBaseUrl = () => {
   const cors = String(process.env.CORS_ORIGIN || "").split(",")[0]?.trim() || "";
   if (cors) return cors.replace(/\/+$/, "");
   return "http://localhost:8080";
+};
+
+const resolveApiBaseUrl = () => {
+  const explicit = String(process.env.PUBLIC_API_BASE_URL || "").trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+  return `${resolveWebAppBaseUrl()}/api`;
+};
+
+const inviteHtmlTemplate = (params: {
+  acceptUrl: string;
+  connectorUrl: string | null;
+  connectorDownloads:
+    | {
+        macos: { label: string; downloadUrl: string } | null;
+        windows: { label: string; downloadUrl: string } | null;
+      }
+    | null;
+  role: UserRole;
+  expiresLabel: string;
+}) => {
+  const isManufacturerInvite = isManufacturerRole(params.role);
+  const connectorDownloads = params.connectorDownloads;
+
+  return `
+    <div style="background:#eef2f7;padding:24px 0;font-family:Inter,Segoe UI,Arial,sans-serif;color:#10253f;">
+      <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #d8e2ef;border-radius:24px;overflow:hidden;box-shadow:0 24px 60px rgba(15,23,42,0.08);">
+        <div style="padding:28px 32px;background:linear-gradient(135deg,#10253f 0%,#17385b 100%);color:#ffffff;">
+          <div style="font-size:12px;letter-spacing:0.22em;text-transform:uppercase;opacity:0.78;">MSCQR onboarding</div>
+          <h1 style="margin:12px 0 8px;font-size:30px;line-height:1.15;">Activate your MSCQR account</h1>
+          <p style="margin:0;color:rgba(255,255,255,0.82);line-height:1.6;">Set your password, then follow the guided printing setup for your workstation if you are printing from the factory floor.</p>
+        </div>
+        <div style="padding:28px 32px;">
+          <p style="margin:0 0 16px;line-height:1.7;">Use the secure activation button below. This invite expires in <strong>${params.expiresLabel}</strong>.</p>
+          <div style="margin:0 0 22px;">
+            <a href="${params.acceptUrl}" style="display:inline-block;padding:14px 22px;border-radius:999px;background:#10b981;color:#ffffff;text-decoration:none;font-weight:700;">Activate account</a>
+          </div>
+          ${
+            isManufacturerInvite
+              ? `
+                <div style="border:1px solid #b7e4d1;background:#f2fcf7;border-radius:20px;padding:18px 18px 8px;margin-bottom:18px;">
+                  <div style="font-size:18px;font-weight:800;margin-bottom:6px;color:#166534;">Install MSCQR Connector on the printing computer</div>
+                  <p style="margin:0 0 12px;line-height:1.6;color:#24554a;">Download the connector on the Mac or Windows computer that is physically connected to the printer. Install once and it will start automatically every time that user signs in.</p>
+                  ${
+                    params.connectorUrl
+                      ? `<div style="margin:0 0 12px;"><a href="${params.connectorUrl}" style="display:inline-block;padding:12px 18px;border-radius:999px;background:#ffffff;color:#10253f;text-decoration:none;font-weight:700;border:1px solid #c6d7eb;">Open connector download page</a></div>`
+                      : ""
+                  }
+                  <ul style="margin:0 0 10px;padding-left:18px;line-height:1.8;color:#24554a;">
+                    <li>Choose the installer that matches that computer: Mac or Windows.</li>
+                    <li>Run the installer once.</li>
+                    <li>Open MSCQR and use Printer Setup to confirm the printer shows as ready.</li>
+                  </ul>
+                  ${
+                    connectorDownloads
+                      ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                          ${
+                            connectorDownloads.macos
+                              ? `<a href="${connectorDownloads.macos.downloadUrl}" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#10253f;color:#ffffff;text-decoration:none;font-weight:700;">Download for Mac</a>`
+                              : ""
+                          }
+                          ${
+                            connectorDownloads.windows
+                              ? `<a href="${connectorDownloads.windows.downloadUrl}" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#ffffff;color:#10253f;text-decoration:none;font-weight:700;border:1px solid #c6d7eb;">Download for Windows</a>`
+                              : ""
+                          }
+                        </div>`
+                      : ""
+                  }
+                </div>
+              `
+              : ""
+          }
+          <p style="margin:0;color:#5f7287;line-height:1.7;">If you were not expecting this email, you can safely ignore it.</p>
+        </div>
+      </div>
+    </div>
+  `;
 };
 
 const PLATFORM_ORG_ID = "00000000-0000-0000-0000-000000000000";
@@ -303,19 +381,50 @@ export const createInvite = async (input: {
 
   // Send email outside the transaction (delivery should not block DB state).
   const baseUrl = resolveWebAppBaseUrl();
+  const apiBaseUrl = resolveApiBaseUrl();
   const acceptUrl = `${baseUrl}/accept-invite?token=${encodeURIComponent(rawToken)}`;
+  const connectorLandingUrl = isManufacturerRole(role)
+    ? `${baseUrl}/connector-download?inviteToken=${encodeURIComponent(rawToken)}`
+    : null;
+  const connectorDistribution = isManufacturerRole(role) ? buildConnectorDownloadUrls(apiBaseUrl) : null;
 
   const subject = "You have been invited to MSCQR";
   const text =
     `You have been invited to MSCQR.\n\n` +
     `To set your password and activate your account, open this link (expires in 24 hours):\n` +
     `${acceptUrl}\n\n` +
+    (isManufacturerRole(role)
+      ? `Before printing, install the MSCQR Connector on the computer connected to the printer:\n${connectorLandingUrl}\n\n`
+      : "") +
     `If you were not expecting this email, you can ignore it.`;
+  const html = inviteHtmlTemplate({
+    acceptUrl,
+    connectorUrl: connectorLandingUrl,
+    connectorDownloads: connectorDistribution
+      ? {
+          macos: connectorDistribution.downloads.macos
+            ? {
+                label: connectorDistribution.downloads.macos.label,
+                downloadUrl: connectorDistribution.downloads.macos.downloadUrl,
+              }
+            : null,
+          windows: connectorDistribution.downloads.windows
+            ? {
+                label: connectorDistribution.downloads.windows.label,
+                downloadUrl: connectorDistribution.downloads.windows.downloadUrl,
+              }
+            : null,
+        }
+      : null,
+    role,
+    expiresLabel: "24 hours",
+  });
 
   const delivery = await sendAuthEmail({
     toAddress: email,
     subject,
     text,
+    html,
     template: "invite",
     orgId: result.createdUser.orgId,
     licenseeId: result.createdUser.licenseeId,
@@ -354,6 +463,8 @@ export const createInvite = async (input: {
     email: result.invite.email,
     role: result.invite.role,
     inviteLink: acceptUrl,
+    connectorDownloadUrl: connectorLandingUrl,
+    connectorDownloads: connectorDistribution?.downloads || null,
     emailDelivered: delivery.delivered,
     deliveryError: delivery.error || null,
     providerMessageId: delivery.providerMessageId || null,
@@ -445,4 +556,41 @@ export const acceptInvite = async (input: {
   } as any);
 
   return result.user;
+};
+
+export const getInvitePreview = async (rawToken: string) => {
+  const tokenHash = hashToken(rawToken);
+  const now = new Date();
+
+  const invite = await prisma.invite.findUnique({
+    where: { tokenHash },
+    select: {
+      id: true,
+      email: true,
+      role: true,
+      expiresAt: true,
+      usedAt: true,
+      licenseeId: true,
+    },
+  });
+
+  if (!invite) throw new Error("Invalid or expired invite token");
+  if (invite.usedAt) throw new Error("Invite already used");
+  if (invite.expiresAt.getTime() <= now.getTime()) throw new Error("Invite expired");
+
+  const licensee =
+    invite.licenseeId
+      ? await prisma.licensee.findUnique({
+          where: { id: invite.licenseeId },
+          select: { id: true, name: true },
+        })
+      : null;
+
+  return {
+    email: invite.email,
+    role: invite.role,
+    expiresAt: invite.expiresAt,
+    licenseeName: licensee?.name || null,
+    requiresConnector: isManufacturerRole(invite.role),
+  };
 };

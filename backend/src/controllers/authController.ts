@@ -3,7 +3,7 @@ import { z } from "zod";
 import prisma from "../config/database";
 import { hashIp, normalizeUserAgent } from "../utils/security";
 import { ACCESS_TOKEN_COOKIE, CSRF_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE, getAccessTokenTtlMinutes, getRefreshTokenTtlDays, newCsrfToken } from "../services/auth/tokenService";
-import { acceptInvite, createInvite } from "../services/auth/inviteService";
+import { acceptInvite, createInvite, getInvitePreview } from "../services/auth/inviteService";
 import { issueSessionForUser, loginWithPassword, logoutSession, refreshSession } from "../services/auth/authService";
 import { requestPasswordReset, resetPasswordWithToken } from "../services/auth/passwordResetService";
 import { isValidEmailAddress, normalizeEmailAddress } from "../utils/email";
@@ -40,6 +40,10 @@ const acceptInviteSchema = z.object({
   token: z.string().trim().min(10),
   password: z.string().min(8).max(200),
   name: z.string().trim().min(2).max(120).optional(),
+});
+
+const invitePreviewQuerySchema = z.object({
+  token: z.string().trim().min(10),
 });
 
 const forgotPasswordSchema = z.object({
@@ -531,5 +535,19 @@ export const acceptInviteController = async (req: Request, res: Response) => {
     return res.status(200).json({ success: true, data: { token: session.accessToken, user: session.user } });
   } catch (e: any) {
     return res.status(400).json({ success: false, error: e?.message || "Invite acceptance failed" });
+  }
+};
+
+export const invitePreviewController = async (req: Request, res: Response) => {
+  const parsed = invitePreviewQuerySchema.safeParse(req.query || {});
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: "Missing invite token." });
+  }
+
+  try {
+    const preview = await getInvitePreview(parsed.data.token);
+    return res.json({ success: true, data: preview });
+  } catch (e: any) {
+    return res.status(400).json({ success: false, error: e?.message || "Invite preview unavailable" });
   }
 };

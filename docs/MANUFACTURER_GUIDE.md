@@ -1,8 +1,8 @@
 # MSCQR Manufacturer User Manual
 
 Document ID: AQR-SOP-MF-002  
-Version: 2.0  
-Last Updated: 2026-03-10
+Version: 2.1  
+Last Updated: 2026-03-12
 
 ## 1. Purpose
 This manual is the current operating guide for the Manufacturer role. It is written so a manufacturer user can:
@@ -30,14 +30,20 @@ The `Printer Setup & Support` page is not in the left menu. Open it from the `Pr
 
 ## 3. Access, Onboarding, and Sign-In
 ### 3.1 First-time access from an invite
-1. Open the invite link from email.
-2. On `Activate your account`, enter your name if needed.
-3. Enter a password with at least 8 characters.
-4. Enter the same password again in `Confirm password`.
-5. Select `Activate account`.
-6. Wait for the redirect to the dashboard.
+1. Open the invite email from your Licensee/Admin.
+2. If this computer will print labels, open the `Install Connector` link in that email first.
+3. Download the Mac or Windows installer that matches that computer.
+4. Run the installer once.
+5. Return to the `Activate your account` link in the same email.
+6. Enter your name if needed.
+7. Enter a password with at least 8 characters.
+8. Enter the same password again in `Confirm password`.
+9. Select `Activate account`.
+10. Wait for the redirect to the dashboard.
 
 ![Accept Invite](../public/docs/password-accept-invite.png)
+
+![Install Connector](../public/docs/manufacturer-connector-download.png)
 
 ### 3.2 Standard sign-in
 1. Open the login page.
@@ -104,7 +110,7 @@ Purpose: make sure the selected printer is valid before you start a print job.
 
 ### 6.2 For workstation-managed printers
 Check these items in order:
-1. The MSCQR Workstation Connector is installed once on the workstation and auto-starting at login.
+1. The MSCQR Connector is installed once on the workstation and auto-starting at login.
 2. The operating system already sees the printer.
 3. The panel shows at least one discovered printer.
 4. Select the active workstation printer if needed.
@@ -210,6 +216,7 @@ Use this order for every production run:
 ## 11. Troubleshooting
 - If `Create Print Job` is disabled, confirm the batch still has quantity ready to print.
 - If the printer panel shows no connection, open `Printer Setup` and verify the workstation connector or saved printer profile first.
+- If the connector is not installed yet, open `Install Connector` and complete the Mac or Windows setup on the printing computer first.
 - If the wrong workstation printer is selected, switch the active printer before starting the job.
 - If dispatch fails, do not keep retrying blindly. Re-open readiness, validate the profile, and then start a fresh attempt.
 - If the app errors while you are working, use the top-bar `Support` button so diagnostics and a screenshot are attached automatically.

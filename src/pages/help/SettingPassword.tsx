@@ -45,6 +45,7 @@ export default function SettingPassword() {
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">
                   <li>Open the invite email.</li>
+                  <li>If you are a manufacturer using a workstation printer, install the connector from the same email before your first print run.</li>
                   <li>Select the invite link (it expires in 24 hours).</li>
                   <li>Set a password and confirm.</li>
                   <li>After success, sign in normally.</li>
@@ -153,4 +154,3 @@ export default function SettingPassword() {
     </HelpShell>
   );
 }
-

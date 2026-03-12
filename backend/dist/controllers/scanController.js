@@ -41,6 +41,29 @@ const buildOwnershipStatus = (params) => {
         canClaim: false,
     };
 };
+const buildRepeatWarningMessage = (params) => {
+    if (params.effectiveOutcome === "SUSPICIOUS") {
+        return "This code was generated but not confirmed as printed. Treat with suspicion.";
+    }
+    if (params.effectiveOutcome === "BLOCKED") {
+        return params.blockedByPolicy
+            ? "This code has been auto-blocked by security policy due to anomaly detection."
+            : "This code has been blocked due to fraud or recall.";
+    }
+    if (params.hasContainment) {
+        return "This product is currently under investigation. Please review details and contact support if needed.";
+    }
+    if (params.effectiveOutcome !== "ALREADY_REDEEMED") {
+        return null;
+    }
+    if (params.activitySummary?.state === "trusted_repeat") {
+        return "Already verified before. Recent checks match the same owner or trusted device.";
+    }
+    if (params.activitySummary?.state === "mixed_repeat") {
+        return "Already verified before. Some recent checks match the owner context, but additional external activity was also recorded.";
+    }
+    return `Already verified before. First verification was at ${params.firstScanAt || "unknown time"}.`;
+};
 const scanToken = async (req, res) => {
     try {
         const token = String(req.query.t || "").trim();
@@ -51,7 +74,7 @@ const scanToken = async (req, res) => {
         try {
             payload = (0, qrTokenService_1.verifyQrToken)(token).payload;
         }
-        catch (e) {
+        catch {
             return res.status(400).json({
                 success: true,
                 data: {
@@ -200,6 +223,16 @@ const scanToken = async (req, res) => {
         const longitude = toNum(req.query.lon);
         const accuracy = toNum(req.query.acc);
         const location = await (0, locationService_1.reverseGeocode)(latitude, longitude);
+        const customerUserId = req.customer?.userId || null;
+        const ownershipBeforeScan = await database_1.default.ownership.findUnique({
+            where: { qrCodeId: qr.id },
+            select: {
+                id: true,
+                userId: true,
+                claimedAt: true,
+            },
+        });
+        const currentScanTrustedOwnerContext = Boolean(customerUserId) && ownershipBeforeScan?.userId === customerUserId;
         const updated = await database_1.default.$transaction(async (tx) => {
             const updatedQr = await tx.qRCode.update({
                 where: { id: qr.id },
@@ -227,6 +260,10 @@ const scanToken = async (req, res) => {
                     status: updatedQr.status,
                     isFirstScan: decision.allowRedeem,
                     scanCount: updatedQr.scanCount ?? 0,
+                    customerUserId,
+                    ownershipId: currentScanTrustedOwnerContext ? ownershipBeforeScan?.id || null : null,
+                    ownershipMatchMethod: currentScanTrustedOwnerContext ? "user" : null,
+                    isTrustedOwnerContext: currentScanTrustedOwnerContext,
                     ipAddress: req.ip,
                     userAgent: req.get("user-agent") || null,
                     device: fp,
@@ -269,11 +306,21 @@ const scanToken = async (req, res) => {
         });
         const finalStatus = policy.autoBlockedQr || policy.autoBlockedBatch ? client_1.QRStatus.BLOCKED : updated.status;
         const effectiveOutcome = finalStatus === client_1.QRStatus.BLOCKED ? "BLOCKED" : decision.outcome;
+        const isBlocked = finalStatus === client_1.QRStatus.BLOCKED;
+        const isReady = isQrReadyForCustomerUse(finalStatus);
+        const ownershipStatus = buildOwnershipStatus({
+            ownership: ownershipBeforeScan,
+            customerUserId,
+            isReady,
+            isBlocked,
+        });
         const scanInsight = await (0, scanInsightService_1.getScanInsight)(updated.id, fp || null, {
             currentIpAddress: req.ip || null,
             licenseeId: updated.licenseeId,
+            currentCustomerUserId: customerUserId,
+            currentOwnershipId: ownershipBeforeScan?.id || null,
+            currentActorTrustedOwnerContext: ownershipStatus.isOwnedByRequester,
         });
-        const customerUserId = req.customer?.userId || null;
         const containment = {
             qrUnderInvestigation: updated.underInvestigationAt
                 ? { at: new Date(updated.underInvestigationAt).toISOString(), reason: updated.underInvestigationReason || null }
@@ -288,17 +335,6 @@ const scanToken = async (req, res) => {
         const hasContainment = Boolean(containment.qrUnderInvestigation) ||
             Boolean(containment.batchSuspended) ||
             Boolean(containment.orgSuspended);
-        const warningMessage = effectiveOutcome === "ALREADY_REDEEMED"
-            ? `Already verified before. First verification was at ${scanInsight.firstScanAt || updated.redeemedAt?.toISOString?.() || "unknown time"}.`
-            : effectiveOutcome === "SUSPICIOUS"
-                ? "This code was generated but not confirmed as printed. Treat with suspicion."
-                : effectiveOutcome === "BLOCKED"
-                    ? policy.autoBlockedQr || policy.autoBlockedBatch
-                        ? "This code has been auto-blocked by security policy due to anomaly detection."
-                        : "This code has been blocked due to fraud or recall."
-                    : hasContainment
-                        ? "This product is currently under investigation. Please review details and contact support if needed."
-                        : null;
         const message = effectiveOutcome === "VALID"
             ? "Authentic item. First-time verification successful."
             : effectiveOutcome === "ALREADY_REDEEMED"
@@ -308,26 +344,11 @@ const scanToken = async (req, res) => {
                     : effectiveOutcome === "BLOCKED"
                         ? "Blocked code."
                         : "This code is not active.";
-        const isBlocked = finalStatus === client_1.QRStatus.BLOCKED;
-        const isReady = isQrReadyForCustomerUse(finalStatus);
         const totalScans = Number(updated.scanCount ?? 0);
         const firstVerifiedAt = scanInsight.firstScanAt || (updated.scannedAt ? new Date(updated.scannedAt).toISOString() : null);
         const latestVerifiedAt = scanInsight.latestScanAt ||
             scanInsight.firstScanAt ||
             (updated.scannedAt ? new Date(updated.scannedAt).toISOString() : null);
-        const ownership = await database_1.default.ownership.findUnique({
-            where: { qrCodeId: updated.id },
-            select: {
-                userId: true,
-                claimedAt: true,
-            },
-        });
-        const ownershipStatus = buildOwnershipStatus({
-            ownership,
-            customerUserId,
-            isReady,
-            isBlocked,
-        });
         const riskProfile = await (0, governanceService_1.resolveDuplicateRiskProfile)(updated.licenseeId || null);
         const anomalyModelScore = (0, duplicateRiskService_1.deriveAnomalyModelScore)({
             scanSignals: scanInsight.signals,
@@ -348,7 +369,8 @@ const scanToken = async (req, res) => {
         let classification;
         let reasons;
         let riskScore = 0;
-        let riskSignals = duplicateRisk.signals;
+        const riskSignals = duplicateRisk.signals;
+        const activitySummary = decision.allowRedeem ? null : duplicateRisk.activitySummary;
         if (isBlocked) {
             classification = "BLOCKED_BY_SECURITY";
             reasons = ["Code is blocked by security policy or containment controls."];
@@ -376,6 +398,13 @@ const scanToken = async (req, res) => {
             }
             riskScore = Math.max(riskScore, 70);
         }
+        const warningMessage = buildRepeatWarningMessage({
+            effectiveOutcome,
+            blockedByPolicy: Boolean(policy.autoBlockedQr || policy.autoBlockedBatch),
+            hasContainment,
+            firstScanAt: scanInsight.firstScanAt || updated.redeemedAt?.toISOString?.() || null,
+            activitySummary,
+        });
         return res.json({
             success: true,
             data: {
@@ -420,6 +449,7 @@ const scanToken = async (req, res) => {
                 scanSignals: scanInsight.signals,
                 classification,
                 reasons,
+                activitySummary,
                 riskScore,
                 riskThreshold: duplicateRisk.threshold,
                 riskSignals,

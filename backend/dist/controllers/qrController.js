@@ -15,6 +15,7 @@ const qrTokenService_1 = require("../services/qrTokenService");
 const qrZipStreamService_1 = require("../services/qrZipStreamService");
 const notificationService_1 = require("../services/notificationService");
 const batchAllocationService_1 = require("../services/batchAllocationService");
+const manufacturerScopeService_1 = require("../services/manufacturerScopeService");
 /* ===================== SCHEMAS ===================== */
 const allocateRangeSchema = zod_1.z
     .object({
@@ -326,8 +327,8 @@ const createBatch = async (req, res) => {
                 where: {
                     id: manufacturerId,
                     role: { in: [client_1.UserRole.MANUFACTURER, client_1.UserRole.MANUFACTURER_ADMIN, client_1.UserRole.MANUFACTURER_USER] },
-                    licenseeId,
                     isActive: true,
+                    OR: [{ licenseeId }, { manufacturerLicenseeLinks: { some: { licenseeId } } }],
                 },
                 select: { id: true },
             });
@@ -599,8 +600,11 @@ const assignManufacturer = async (req, res) => {
             where: {
                 id: parsed.data.manufacturerId,
                 role: { in: [client_1.UserRole.MANUFACTURER, client_1.UserRole.MANUFACTURER_ADMIN, client_1.UserRole.MANUFACTURER_USER] },
-                licenseeId: batch.licenseeId,
                 isActive: true,
+                OR: [
+                    { licenseeId: batch.licenseeId },
+                    { manufacturerLicenseeLinks: { some: { licenseeId: batch.licenseeId } } },
+                ],
             },
             select: { id: true, name: true },
         });
@@ -1171,15 +1175,13 @@ exports.blockBatch = blockBatch;
 /* ===================== READ ===================== */
 const getBatches = async (req, res) => {
     try {
-        const where = {};
-        if (req.user?.role !== client_1.UserRole.SUPER_ADMIN && req.user?.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN) {
-            if (req.user?.licenseeId)
-                where.licenseeId = req.user.licenseeId;
+        if (!req.user) {
+            return res.status(401).json({ success: false, error: "Not authenticated" });
         }
-        else {
-            const qLicenseeId = req.query.licenseeId || undefined;
-            if (qLicenseeId)
-                where.licenseeId = qLicenseeId;
+        const where = {};
+        const scope = await (0, manufacturerScopeService_1.resolveScopedLicenseeAccess)(req.user, req.query.licenseeId || null);
+        if (scope.scopeLicenseeId) {
+            where.licenseeId = scope.scopeLicenseeId;
         }
         if (isManufacturerRole(req.user?.role)) {
             where.manufacturerId = req.user.userId;
@@ -1257,16 +1259,17 @@ const getQRCodes = async (req, res) => {
     try {
         const role = req.user?.role;
         const userId = req.user?.userId;
+        if (!role || !userId || !req.user) {
+            return res.status(401).json({ success: false, error: "Not authenticated" });
+        }
         const q = req.query.q?.trim();
         const status = req.query.status || undefined;
         const limit = Math.min(parseInt(String(req.query.limit ?? "500"), 10) || 500, 2000);
         const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
-        const licenseeId = role === client_1.UserRole.SUPER_ADMIN || role === client_1.UserRole.PLATFORM_SUPER_ADMIN
-            ? (req.query.licenseeId || undefined)
-            : (req.user?.licenseeId ?? undefined) || undefined;
+        const scope = await (0, manufacturerScopeService_1.resolveScopedLicenseeAccess)(req.user, req.query.licenseeId || null);
         const where = {};
-        if (licenseeId)
-            where.licenseeId = licenseeId;
+        if (scope.scopeLicenseeId)
+            where.licenseeId = scope.scopeLicenseeId;
         if (status)
             where.status = status;
         if (q)
@@ -1422,9 +1425,11 @@ const getStats = async (req, res) => {
     try {
         const role = req.user?.role;
         const userId = req.user?.userId;
-        const licenseeId = role === client_1.UserRole.SUPER_ADMIN || role === client_1.UserRole.PLATFORM_SUPER_ADMIN
-            ? (req.query.licenseeId || undefined)
-            : (req.user?.licenseeId ?? undefined) || undefined;
+        if (!role || !userId || !req.user) {
+            return res.status(401).json({ success: false, error: "Not authenticated" });
+        }
+        const scope = await (0, manufacturerScopeService_1.resolveScopedLicenseeAccess)(req.user, req.query.licenseeId || null);
+        const licenseeId = scope.scopeLicenseeId || undefined;
         if ((role === client_1.UserRole.MANUFACTURER ||
             role === client_1.UserRole.MANUFACTURER_ADMIN ||
             role === client_1.UserRole.MANUFACTURER_USER) &&
@@ -1464,13 +1469,12 @@ const exportQRCodesCsv = async (req, res) => {
     try {
         const role = req.user?.role;
         const userId = req.user?.userId;
-        if (!role || !userId)
+        if (!role || !userId || !req.user)
             return res.status(401).json({ success: false, error: "Not authenticated" });
         const q = req.query.q?.trim();
         const status = req.query.status || undefined;
-        const licenseeId = role === client_1.UserRole.SUPER_ADMIN || role === client_1.UserRole.PLATFORM_SUPER_ADMIN
-            ? (req.query.licenseeId || undefined)
-            : req.user?.licenseeId;
+        const scope = await (0, manufacturerScopeService_1.resolveScopedLicenseeAccess)(req.user, req.query.licenseeId || null);
+        const licenseeId = scope.scopeLicenseeId || undefined;
         const where = {};
         if (licenseeId)
             where.licenseeId = licenseeId;

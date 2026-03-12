@@ -492,10 +492,16 @@ const resendLicenseeAdminInvite = async (req, res) => {
             ipHash: (0, security_1.hashIp)(req.ip),
             userAgent: (0, security_1.normalizeUserAgent)(req.get("user-agent")),
         });
+        if (!invite.inviteId) {
+            return res.status(409).json({
+                success: false,
+                error: "Invite could not be created for this licensee admin.",
+            });
+        }
         await (0, auditService_1.createAuditLog)({
             userId: req.user.userId,
             licenseeId: id,
-            orgId: licensee.orgId,
+            orgId: licensee.orgId || undefined,
             action: "RESEND_LICENSEE_ADMIN_INVITE",
             entityType: "Invite",
             entityId: invite.inviteId,

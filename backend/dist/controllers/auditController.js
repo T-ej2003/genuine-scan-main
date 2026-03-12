@@ -8,6 +8,7 @@ const auditService_1 = require("../services/auditService");
 const database_1 = __importDefault(require("../config/database"));
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
+const manufacturerScopeService_1 = require("../services/manufacturerScopeService");
 const hiddenActionsForNonSuper = ["CUSTOMER_FRAUD_REPORT", "CUSTOMER_FRAUD_REPORT_RESPONSE"];
 const fraudResponseSchema = zod_1.z.object({
     status: zod_1.z.enum(["REVIEWED", "RESOLVED", "DISMISSED"]).default("REVIEWED"),
@@ -38,13 +39,20 @@ const getLogs = async (req, res) => {
         const entityType = req.query.entityType;
         const entityId = req.query.entityId;
         const action = req.query.action;
-        const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
-            ? req.query.licenseeId
-            : req.user.licenseeId ?? undefined;
+        const isSuper = req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN;
+        const isManufacturer = req.user.role === client_1.UserRole.MANUFACTURER ||
+            req.user.role === client_1.UserRole.MANUFACTURER_ADMIN ||
+            req.user.role === client_1.UserRole.MANUFACTURER_USER;
+        const licenseeId = isSuper ? req.query.licenseeId : isManufacturer ? undefined : req.user.licenseeId ?? undefined;
         let userIds;
-        if (req.user.role !== client_1.UserRole.SUPER_ADMIN && req.user.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN && licenseeId) {
+        if (isManufacturer) {
+            userIds = [req.user.userId];
+        }
+        else if (!isSuper && licenseeId) {
             const users = await database_1.default.user.findMany({
-                where: { licenseeId },
+                where: {
+                    OR: [{ licenseeId }, { manufacturerLicenseeLinks: { some: { licenseeId } } }],
+                },
                 select: { id: true },
             });
             userIds = users.map((u) => u.id);
@@ -59,9 +67,7 @@ const getLogs = async (req, res) => {
             entityType,
             entityId,
             action,
-            excludeActions: req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
-                ? undefined
-                : hiddenActionsForNonSuper,
+            excludeActions: isSuper ? undefined : hiddenActionsForNonSuper,
             licenseeId,
             userIds,
             limit,
@@ -97,13 +103,20 @@ const exportLogsCsv = async (req, res) => {
         const entityType = req.query.entityType;
         const entityId = req.query.entityId;
         const action = req.query.action;
-        const licenseeId = req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
-            ? req.query.licenseeId
-            : req.user.licenseeId ?? undefined;
+        const isSuper = req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN;
+        const isManufacturer = req.user.role === client_1.UserRole.MANUFACTURER ||
+            req.user.role === client_1.UserRole.MANUFACTURER_ADMIN ||
+            req.user.role === client_1.UserRole.MANUFACTURER_USER;
+        const licenseeId = isSuper ? req.query.licenseeId : isManufacturer ? undefined : req.user.licenseeId ?? undefined;
         let userIds;
-        if (req.user.role !== client_1.UserRole.SUPER_ADMIN && req.user.role !== client_1.UserRole.PLATFORM_SUPER_ADMIN && licenseeId) {
+        if (isManufacturer) {
+            userIds = [req.user.userId];
+        }
+        else if (!isSuper && licenseeId) {
             const users = await database_1.default.user.findMany({
-                where: { licenseeId },
+                where: {
+                    OR: [{ licenseeId }, { manufacturerLicenseeLinks: { some: { licenseeId } } }],
+                },
                 select: { id: true },
             });
             userIds = users.map((u) => u.id);
@@ -120,9 +133,7 @@ const exportLogsCsv = async (req, res) => {
             entityType,
             entityId,
             action,
-            excludeActions: req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN
-                ? undefined
-                : hiddenActionsForNonSuper,
+            excludeActions: isSuper ? undefined : hiddenActionsForNonSuper,
             licenseeId,
             userIds,
             limit,
@@ -194,12 +205,24 @@ const streamLogs = async (req, res) => {
         res.write(`event: ping\ndata: {}\n\n`);
     }, 20000);
     const isSuper = req.user.role === client_1.UserRole.SUPER_ADMIN || req.user.role === client_1.UserRole.PLATFORM_SUPER_ADMIN;
+    const linkedLicenseeIds = req.user.role === client_1.UserRole.MANUFACTURER ||
+        req.user.role === client_1.UserRole.MANUFACTURER_ADMIN ||
+        req.user.role === client_1.UserRole.MANUFACTURER_USER
+        ? await (0, manufacturerScopeService_1.resolveAccessibleLicenseeIdsForUser)(req.user)
+        : [];
     const tenantId = req.user.licenseeId;
     const unsubscribe = (0, auditService_1.onAuditLog)((log) => {
         if (!isSuper && hiddenActionsForNonSuper.includes(String(log.action || "")))
             return;
-        if (!isSuper && log.licenseeId !== tenantId)
-            return;
+        if (!isSuper) {
+            if (linkedLicenseeIds.length > 0) {
+                if (!log.licenseeId || !linkedLicenseeIds.includes(log.licenseeId))
+                    return;
+            }
+            else if (log.licenseeId !== tenantId) {
+                return;
+            }
+        }
         res.write(`event: audit\ndata: ${JSON.stringify(log)}\n\n`);
     });
     req.on("close", () => {

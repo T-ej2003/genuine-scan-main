@@ -653,6 +653,9 @@ export default function PrinterDiagnostics() {
           </div>
 
           <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => navigate("/connector-download")}>
+              Install Connector
+            </Button>
             <Button variant="outline" onClick={() => void loadDiagnostics()} disabled={loading} className="gap-2">
               <RefreshCw className="h-4 w-4" />
               {loading ? "Refreshing..." : "Refresh status"}
@@ -775,10 +778,10 @@ export default function PrinterDiagnostics() {
               <div className="rounded-xl border bg-muted/30 p-4">
                 <div className="font-medium text-foreground">What must be ready on this workstation</div>
                 <ul className="mt-3 list-disc space-y-2 pl-5">
-                  <li>The signed MSCQR Workstation Connector must be installed once on the workstation.</li>
+                  <li>The MSCQR Connector must be installed once on the workstation.</li>
                   <li>The operating system must already see the printer in its printer list.</li>
                   <li>The printer driver or spooler path must be working before the browser can show a ready state.</li>
-                  <li>The workstation connector should auto-start at login and stay in the background.</li>
+                  <li>The connector should auto-start at login and stay in the background.</li>
                   <li>Use MDM or your IT rollout process for fleet installs. End users should never need terminal commands to print.</li>
                 </ul>
               </div>
@@ -786,10 +789,16 @@ export default function PrinterDiagnostics() {
                 <div className="font-medium text-foreground">Quick readiness check</div>
                 <ol className="mt-3 list-decimal space-y-2 pl-5">
                   <li>Confirm the printer is visible in the operating system first.</li>
+                  <li>Use <strong>Install Connector</strong> if this computer does not already have the MSCQR Connector.</li>
                   <li>Return here and use <strong>Refresh status</strong>.</li>
-                  <li>If the printer still does not appear, restart the workstation connector or printer.</li>
+                  <li>If the printer still does not appear, restart the connector or printer.</li>
                   <li>If the issue continues, copy the support summary and send it to support.</li>
                 </ol>
+                <div className="mt-4">
+                  <Button variant="outline" size="sm" onClick={() => navigate("/connector-download")}>
+                    Install Connector
+                  </Button>
+                </div>
               </div>
               {preferredManagedNetworkPrinter && (
                 <div className="rounded-xl border bg-muted/30 p-4">

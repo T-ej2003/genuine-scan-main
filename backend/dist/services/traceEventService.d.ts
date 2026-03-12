@@ -15,16 +15,16 @@ export declare const deriveTraceEventTypeFromAudit: (log: {
     details?: any;
 }) => TraceEventType | null;
 export declare const createTraceEvent: (data: TraceEventInput) => Promise<{
-    id: string;
+    manufacturerId: string | null;
     licenseeId: string;
     createdAt: Date;
+    id: string;
     userId: string | null;
     eventType: import(".prisma/client").$Enums.TraceEventType;
     sourceAction: string | null;
     details: import("@prisma/client/runtime/library").JsonValue | null;
     batchId: string | null;
     qrCodeId: string | null;
-    manufacturerId: string | null;
 }>;
 export declare const createTraceEventFromAuditLog: (log: {
     id: string;
@@ -36,16 +36,16 @@ export declare const createTraceEventFromAuditLog: (log: {
     details: any;
     createdAt: Date;
 }) => Promise<{
-    id: string;
+    manufacturerId: string | null;
     licenseeId: string;
     createdAt: Date;
+    id: string;
     userId: string | null;
     eventType: import(".prisma/client").$Enums.TraceEventType;
     sourceAction: string | null;
     details: import("@prisma/client/runtime/library").JsonValue | null;
     batchId: string | null;
     qrCodeId: string | null;
-    manufacturerId: string | null;
 } | null>;
 export declare const backfillTraceEventsFromAuditLogs: (opts?: {
     licenseeId?: string;
@@ -64,33 +64,33 @@ export declare const getTraceTimeline: (opts: {
     events: ({
         user: {
             id: string;
-            email: string;
             name: string;
+            email: string;
         } | null;
         batch: {
             id: string;
             name: string;
         } | null;
+        manufacturer: {
+            id: string;
+            name: string;
+            email: string;
+        } | null;
         qrCode: {
             id: string;
             code: string;
         } | null;
-        manufacturer: {
-            id: string;
-            email: string;
-            name: string;
-        } | null;
     } & {
-        id: string;
+        manufacturerId: string | null;
         licenseeId: string;
         createdAt: Date;
+        id: string;
         userId: string | null;
         eventType: import(".prisma/client").$Enums.TraceEventType;
         sourceAction: string | null;
         details: import("@prisma/client/runtime/library").JsonValue | null;
         batchId: string | null;
         qrCodeId: string | null;
-        manufacturerId: string | null;
     })[];
     total: number;
 }>;

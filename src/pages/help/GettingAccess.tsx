@@ -1,8 +1,10 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import { HelpShell } from "@/pages/help/HelpShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { DocScreenshot } from "@/components/help/DocScreenshot";
 import { ScreenshotChecklist } from "@/components/help/ScreenshotChecklist";
 import { Mail, UserPlus, ScanLine } from "lucide-react";
@@ -71,8 +73,9 @@ export default function GettingAccess() {
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">
                   <li>A Licensee/Admin creates or invites the manufacturer user.</li>
-                  <li>You receive an invite email.</li>
-                  <li>Open the invite link to set your password.</li>
+                  <li>You receive an invite email with the password-setup link.</li>
+                  <li>The same email also includes the MSCQR Connector download page for Mac and Windows.</li>
+                  <li>Install the connector once on the computer that will print, then open the invite link to set your password.</li>
                   <li>Sign in and you will only see batches assigned to your account.</li>
                 </ol>
               </CardContent>
@@ -97,6 +100,11 @@ export default function GettingAccess() {
 
         <section className="space-y-3">
           <h2 className="text-lg font-semibold text-foreground">Screenshots</h2>
+          <div className="flex flex-wrap gap-3">
+            <Button asChild variant="outline">
+              <Link to="/connector-download">Open connector download page</Link>
+            </Button>
+          </div>
           <div className="grid gap-4 md:grid-cols-2">
             <DocScreenshot
               filename="superadmin-create-licensee.png"
@@ -156,7 +164,7 @@ export default function GettingAccess() {
                 <ul className="list-disc pl-5">
                   <li>Check spam/junk folders.</li>
                   <li>Confirm the invite was sent to the correct email address.</li>
-                  <li>Ask the admin to resend a new invite (old links expire).</li>
+                  <li>Ask the admin to resend the invite if the activation link or connector link has expired.</li>
                 </ul>
               </CardContent>
             </Card>
@@ -181,4 +189,3 @@ export default function GettingAccess() {
     </HelpShell>
   );
 }
-
