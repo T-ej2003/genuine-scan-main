@@ -52,6 +52,13 @@ type ResolvedLayout = {
   speed: number | null;
 };
 
+export type ApprovedPrintContext = {
+  scanToken: string;
+  scanUrl: string;
+  previewLabel: string;
+  reprintLabel: string | null;
+};
+
 const NETWORK_DIRECT_PAYLOAD_TYPES = new Set<PrintPayloadType>([
   PrintPayloadType.ZPL,
   PrintPayloadType.TSPL,
@@ -295,6 +302,9 @@ const buildAgentJsonPayload = (params: {
 };
 
 export const resolvePayloadType = (printer: PrinterPayloadProfile): PrintPayloadType => {
+  if (printer.connectionType === PrinterConnectionType.NETWORK_IPP) {
+    return PrintPayloadType.PDF;
+  }
   if (
     printer.connectionType === PrinterConnectionType.LOCAL_AGENT &&
     (printer.commandLanguage === PrinterCommandLanguage.AUTO || !printer.commandLanguage)
@@ -317,6 +327,23 @@ export const supportsNetworkDirectPayloadType = (payloadType: PrintPayloadType) 
 export const supportsNetworkDirectCommandLanguage = (language: PrinterCommandLanguage | null | undefined) =>
   Boolean(language && NETWORK_DIRECT_COMMAND_LANGUAGE_SET.has(language));
 
+export const buildApprovedPrintContext = (params: {
+  qr: PrintPayloadQr;
+  manufacturerId: string;
+  reprintOfJobId?: string | null;
+}): ApprovedPrintContext => {
+  const scanToken = toQrToken({ qr: params.qr, manufacturerId: params.manufacturerId });
+  const scanUrl = buildScanUrl(scanToken);
+  const reprintLabel = params.reprintOfJobId ? "REPRINT - SERVER AUTHORIZED" : null;
+
+  return {
+    scanToken,
+    scanUrl,
+    previewLabel: reprintLabel || "MSCQR QR LABEL",
+    reprintLabel,
+  };
+};
+
 export const buildApprovedPrintPayload = (params: {
   printer: PrinterPayloadProfile;
   qr: PrintPayloadQr;
@@ -326,63 +353,65 @@ export const buildApprovedPrintPayload = (params: {
   jobNumber?: string | null;
   reprintOfJobId?: string | null;
 }): BuiltPrintPayload => {
-  const scanToken = toQrToken({ qr: params.qr, manufacturerId: params.manufacturerId });
-  const scanUrl = buildScanUrl(scanToken);
-  const reprintLabel = params.reprintOfJobId ? "REPRINT - SERVER AUTHORIZED" : null;
+  const context = buildApprovedPrintContext({
+    qr: params.qr,
+    manufacturerId: params.manufacturerId,
+    reprintOfJobId: params.reprintOfJobId,
+  });
   const preferredType = resolvePayloadType(params.printer);
 
   const payloadContent =
     preferredType === PrintPayloadType.ZPL
       ? buildZplPayload({
           code: params.qr.code,
-          scanUrl,
+          scanUrl: context.scanUrl,
           printer: params.printer,
           jobNumber: params.jobNumber,
-          reprintLabel,
+          reprintLabel: context.reprintLabel,
         })
       : preferredType === PrintPayloadType.TSPL
       ? buildTsplPayload({
           code: params.qr.code,
-          scanUrl,
+          scanUrl: context.scanUrl,
           printer: params.printer,
           jobNumber: params.jobNumber,
-          reprintLabel,
+          reprintLabel: context.reprintLabel,
         })
       : preferredType === PrintPayloadType.EPL
       ? buildEplPayload({
           code: params.qr.code,
-          scanUrl,
+          scanUrl: context.scanUrl,
           printer: params.printer,
           jobNumber: params.jobNumber,
-          reprintLabel,
+          reprintLabel: context.reprintLabel,
         })
       : preferredType === PrintPayloadType.CPCL
       ? buildCpclPayload({
           code: params.qr.code,
-          scanUrl,
+          scanUrl: context.scanUrl,
           printer: params.printer,
           jobNumber: params.jobNumber,
-          reprintLabel,
+          reprintLabel: context.reprintLabel,
         })
       : buildAgentJsonPayload({
           code: params.qr.code,
-          scanUrl,
-          scanToken,
+          scanUrl: context.scanUrl,
+          scanToken: context.scanToken,
           printer: params.printer,
           jobNumber: params.jobNumber,
           printJobId: params.printJobId,
           printItemId: params.printItemId,
-          reprintLabel,
+          reprintLabel: context.reprintLabel,
         });
 
   return {
     payloadType: preferredType,
     payloadContent,
     payloadHash: createHash("sha256").update(payloadContent).digest("hex"),
-    scanToken,
-    scanUrl,
+    scanToken: context.scanToken,
+    scanUrl: context.scanUrl,
     commandLanguage: params.printer.commandLanguage,
-    previewLabel: reprintLabel || "MSCQR QR LABEL",
+    previewLabel: context.previewLabel,
   };
 };
 

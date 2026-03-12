@@ -3,11 +3,15 @@ import {
   Printer,
   PrinterCommandLanguage,
   PrinterConnectionType,
+  PrinterDeliveryMode,
   PrinterTrustStatus,
 } from "@prisma/client";
+import { createHash, randomBytes } from "crypto";
 
 import prisma from "../config/database";
+import { inspectIppPrinter } from "../printing/ippClient";
 import { testNetworkPrinterConnectivity } from "./networkPrinterSocketService";
+import { isGatewayFresh } from "./networkIppPrintService";
 import { getPrinterConnectionStatusForUser, type PrinterConnectionStatus } from "./printerConnectionService";
 import { supportsNetworkDirectCommandLanguage, supportsNetworkDirectPayload } from "./printPayloadService";
 
@@ -64,6 +68,33 @@ const deriveCommandLanguageFromInventory = (row: any) => {
   return PrinterCommandLanguage.AUTO;
 };
 
+const GATEWAY_OFFLINE_DETAIL =
+  "Site gateway has not checked in recently. The on-prem print service must be installed once and kept online for private-LAN printers.";
+
+export const hashGatewaySecret = (secret: string) => createHash("sha256").update(secret).digest("hex");
+
+const normalizeIppPath = (value: string | null | undefined) => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "/ipp/print";
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+};
+
+const buildStoredPrinterUri = (params: {
+  printerUri?: string | null;
+  host?: string | null;
+  port?: number | null;
+  resourcePath?: string | null;
+  tlsEnabled?: boolean | null;
+}) => {
+  const explicit = toNullableString(params.printerUri, 512);
+  if (explicit) return explicit;
+  const host = toNullableString(params.host, 180);
+  if (!host) return null;
+  const port = Number(params.port || 631) || 631;
+  const tlsEnabled = Boolean(params.tlsEnabled ?? true);
+  return `${tlsEnabled ? "ipps" : "ipp"}://${host}:${port}${normalizeIppPath(params.resourcePath)}`;
+};
+
 export type RegisteredPrinterRecord = Printer & {
   printerRegistration?: {
     id: string;
@@ -114,7 +145,7 @@ const buildNetworkPrinterStatus = (printer: RegisteredPrinterRecord): PrinterReg
   if (validationState === "READY") {
     return {
       state: "READY",
-      summary: "Network printer validated",
+      summary: printer.connectionType === PrinterConnectionType.NETWORK_IPP ? "IPP printer validated" : "Network printer validated",
       detail: printer.lastValidationMessage || null,
     };
   }
@@ -122,7 +153,7 @@ const buildNetworkPrinterStatus = (printer: RegisteredPrinterRecord): PrinterReg
   if (validationState === "OFFLINE" || validationState === "FAILED") {
     return {
       state: "OFFLINE",
-      summary: "Network printer offline",
+      summary: printer.connectionType === PrinterConnectionType.NETWORK_IPP ? "IPP printer offline" : "Network printer offline",
       detail: printer.lastValidationMessage || "The last connectivity check could not reach this printer.",
     };
   }
@@ -130,17 +161,68 @@ const buildNetworkPrinterStatus = (printer: RegisteredPrinterRecord): PrinterReg
   if (validationState === "BLOCKED") {
     return {
       state: "BLOCKED",
-      summary: "Language not available for network-direct dispatch",
+      summary:
+        printer.connectionType === PrinterConnectionType.NETWORK_IPP
+          ? "IPP printer configuration blocked"
+          : "Language not available for network-direct dispatch",
       detail:
         printer.lastValidationMessage ||
-        "Network-direct printing currently supports ZPL, TSPL, EPL, and CPCL. Use the local agent for other printer languages.",
+        (printer.connectionType === PrinterConnectionType.NETWORK_IPP
+          ? "Network IPP printing requires a valid printer URI and PDF-capable IPP endpoint."
+          : "Network-direct printing currently supports ZPL, TSPL, EPL, and CPCL. Use the local agent for other printer languages."),
     };
   }
 
   return {
     state: "ATTENTION",
-    summary: "Network printer needs validation",
-    detail: printer.lastValidationMessage || "Run printer validation before dispatching a server-side job.",
+    summary: printer.connectionType === PrinterConnectionType.NETWORK_IPP ? "IPP printer needs validation" : "Network printer needs validation",
+    detail:
+      printer.lastValidationMessage ||
+      (printer.connectionType === PrinterConnectionType.NETWORK_IPP
+        ? "Run printer validation before dispatching a server-side IPP job."
+        : "Run printer validation before dispatching a server-side job."),
+  };
+};
+
+const buildGatewayPrinterStatus = (printer: RegisteredPrinterRecord): PrinterRegistryStatus => {
+  if (!printer.gatewayId || !printer.gatewaySecretHash) {
+    return {
+      state: "BLOCKED",
+      summary: "Gateway enrollment incomplete",
+      detail: "Gateway-backed printers require a generated gateway credential before jobs can be claimed on site.",
+    };
+  }
+
+  if (!printer.isActive) {
+    return {
+      state: "OFFLINE",
+      summary: "Printer disabled",
+      detail: printer.gatewayLastError || "Gateway-backed printer profile is inactive.",
+    };
+  }
+
+  if (!isGatewayFresh(printer.gatewayLastSeenAt)) {
+    return {
+      state: "OFFLINE",
+      summary: "Site gateway offline",
+      detail: printer.gatewayLastError || GATEWAY_OFFLINE_DETAIL,
+    };
+  }
+
+  if (String(printer.gatewayStatus || "").trim().toUpperCase() === "ERROR") {
+    return {
+      state: "ATTENTION",
+      summary: "Site gateway needs attention",
+      detail: printer.gatewayLastError || "Gateway reported an error on its last poll cycle.",
+    };
+  }
+
+  return {
+    state: "READY",
+    summary: "Site gateway online",
+    detail:
+      printer.gatewayLastError ||
+      "Gateway heartbeat is current. Secure outbound pull dispatch is ready for private-LAN jobs.",
   };
 };
 
@@ -168,6 +250,36 @@ export const buildPrinterRegistryStatus = async (
         state: "OFFLINE",
         summary: "Printer disabled",
         detail: printer.lastValidationMessage || "Network printer profile is inactive.",
+      };
+    }
+    return buildNetworkPrinterStatus(printer);
+  }
+
+  if (printer.connectionType === PrinterConnectionType.NETWORK_IPP) {
+    if (printer.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY) {
+      return buildGatewayPrinterStatus(printer);
+    }
+
+    const host = toNullableString(printer.host, 180);
+    const printerUri = buildStoredPrinterUri({
+      printerUri: printer.printerUri,
+      host: printer.host,
+      port: printer.port,
+      resourcePath: printer.resourcePath,
+      tlsEnabled: printer.tlsEnabled,
+    });
+    if (!host || !printerUri) {
+      return {
+        state: "BLOCKED",
+        summary: "IPP printer config incomplete",
+        detail: "Host/FQDN or printer URI is missing.",
+      };
+    }
+    if (!printer.isActive) {
+      return {
+        state: "OFFLINE",
+        summary: "Printer disabled",
+        detail: printer.lastValidationMessage || "IPP printer profile is inactive.",
       };
     }
     return buildNetworkPrinterStatus(printer);
@@ -336,6 +448,10 @@ const printerListWhere = (params: {
       connectionType: PrinterConnectionType.NETWORK_DIRECT,
       ...networkScope,
     },
+    {
+      connectionType: PrinterConnectionType.NETWORK_IPP,
+      ...networkScope,
+    },
   ],
 });
 };
@@ -405,6 +521,138 @@ export const getRegisteredPrinterForManufacturer = async (params: {
   })) as RegisteredPrinterRecord | null;
 };
 
+export const upsertManagedNetworkPrinter = async (params: {
+  printerId?: string;
+  userId: string;
+  orgId?: string | null;
+  licenseeId?: string | null;
+  name: string;
+  vendor?: string | null;
+  model?: string | null;
+  connectionType: PrinterConnectionType;
+  commandLanguage?: PrinterCommandLanguage;
+  ipAddress?: string | null;
+  host?: string | null;
+  port?: number | null;
+  resourcePath?: string | null;
+  tlsEnabled?: boolean | null;
+  printerUri?: string | null;
+  deliveryMode?: PrinterDeliveryMode;
+  rotateGatewaySecret?: boolean;
+  capabilitySummary?: Record<string, unknown> | null;
+  calibrationProfile?: Record<string, unknown> | null;
+  isActive?: boolean;
+  isDefault?: boolean;
+}) => {
+  const current = params.printerId
+    ? await prisma.printer.findUnique({
+        where: { id: params.printerId },
+      })
+    : null;
+  if (params.connectionType === PrinterConnectionType.NETWORK_DIRECT) {
+    if (!supportsNetworkDirectCommandLanguage(params.commandLanguage || null)) {
+      throw new Error(
+        "Network-direct printing currently supports only ZPL, TSPL, EPL, and CPCL. Use the local agent for other printer languages."
+      );
+    }
+  }
+
+  const deliveryMode = params.connectionType === PrinterConnectionType.NETWORK_IPP
+    ? params.deliveryMode || PrinterDeliveryMode.DIRECT
+    : PrinterDeliveryMode.DIRECT;
+  const nextGatewaySecret =
+    params.connectionType === PrinterConnectionType.NETWORK_IPP &&
+    deliveryMode === PrinterDeliveryMode.SITE_GATEWAY &&
+    (!params.printerId || params.rotateGatewaySecret)
+      ? randomBytes(24).toString("base64url")
+      : null;
+  const gatewayId =
+    params.connectionType === PrinterConnectionType.NETWORK_IPP && deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
+      ? toNullableString(current?.gatewayId, 64) || `gw-${randomBytes(9).toString("hex")}`
+      : null;
+  const data = {
+    name: toCleanString(params.name, 180),
+    vendor: toNullableString(params.vendor, 180) || detectVendor(params.name, params.model || null),
+    model: toNullableString(params.model, 180),
+    connectionType: params.connectionType,
+    commandLanguage:
+      params.connectionType === PrinterConnectionType.NETWORK_DIRECT
+        ? params.commandLanguage || PrinterCommandLanguage.ZPL
+        : PrinterCommandLanguage.AUTO,
+    ipAddress:
+      params.connectionType === PrinterConnectionType.NETWORK_DIRECT
+        ? toNullableString(params.ipAddress, 120)
+        : null,
+    host:
+      params.connectionType === PrinterConnectionType.NETWORK_IPP
+        ? toNullableString(params.host, 180)
+        : null,
+    port: Number(params.port || (params.connectionType === PrinterConnectionType.NETWORK_IPP ? 631 : 9100)) || (params.connectionType === PrinterConnectionType.NETWORK_IPP ? 631 : 9100),
+    resourcePath:
+      params.connectionType === PrinterConnectionType.NETWORK_IPP
+        ? normalizeIppPath(params.resourcePath)
+        : null,
+    tlsEnabled:
+      params.connectionType === PrinterConnectionType.NETWORK_IPP
+        ? Boolean(params.tlsEnabled ?? true)
+        : false,
+    printerUri:
+      params.connectionType === PrinterConnectionType.NETWORK_IPP
+        ? buildStoredPrinterUri({
+            printerUri: params.printerUri || null,
+            host: params.host || null,
+            port: params.port || 631,
+            resourcePath: params.resourcePath || null,
+            tlsEnabled: params.tlsEnabled ?? true,
+          })
+        : null,
+    deliveryMode,
+    gatewayId,
+    gatewaySecretHash:
+      params.connectionType === PrinterConnectionType.NETWORK_IPP && deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
+        ? nextGatewaySecret
+          ? hashGatewaySecret(nextGatewaySecret)
+          : current?.gatewaySecretHash || undefined
+        : null,
+    gatewayStatus:
+      params.connectionType === PrinterConnectionType.NETWORK_IPP && deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
+        ? "PENDING"
+        : null,
+    gatewayLastError:
+      params.connectionType === PrinterConnectionType.NETWORK_IPP && deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
+        ? "Gateway has not checked in yet."
+        : null,
+    gatewayLastSeenAt:
+      params.connectionType === PrinterConnectionType.NETWORK_IPP && deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
+        ? null
+        : undefined,
+    orgId: params.orgId || null,
+    licenseeId: params.licenseeId || null,
+    createdByUserId: params.userId,
+    isActive: params.isActive ?? true,
+    isDefault: params.isDefault ?? false,
+    capabilitySummary: toNullableJsonValue(params.capabilitySummary || null),
+    calibrationProfile: toNullableJsonValue(params.calibrationProfile || null),
+  };
+
+  if (params.printerId) {
+    const updated = await prisma.printer.update({
+      where: { id: params.printerId },
+      data,
+    });
+    return {
+      printer: updated,
+      gatewayProvisioningSecret: nextGatewaySecret,
+    };
+  }
+
+  const created = await prisma.printer.create({ data });
+  return {
+    printer: created,
+    gatewayProvisioningSecret: nextGatewaySecret,
+  };
+};
+
 export const upsertNetworkDirectPrinter = async (params: {
   printerId?: string;
   userId: string;
@@ -421,37 +669,11 @@ export const upsertNetworkDirectPrinter = async (params: {
   isActive?: boolean;
   isDefault?: boolean;
 }) => {
-  if (!supportsNetworkDirectCommandLanguage(params.commandLanguage)) {
-    throw new Error(
-      "Network-direct printing currently supports only ZPL, TSPL, EPL, and CPCL. Use the local agent for other printer languages."
-    );
-  }
-
-  const data = {
-    name: toCleanString(params.name, 180),
-    vendor: toNullableString(params.vendor, 180) || detectVendor(params.name, params.model || null),
-    model: toNullableString(params.model, 180),
+  const result = await upsertManagedNetworkPrinter({
+    ...params,
     connectionType: PrinterConnectionType.NETWORK_DIRECT,
-    commandLanguage: params.commandLanguage,
-    ipAddress: toCleanString(params.ipAddress, 120),
-    port: Number(params.port),
-    orgId: params.orgId || null,
-    licenseeId: params.licenseeId || null,
-    createdByUserId: params.userId,
-    isActive: params.isActive ?? true,
-    isDefault: params.isDefault ?? false,
-    capabilitySummary: toNullableJsonValue(params.capabilitySummary || null),
-    calibrationProfile: toNullableJsonValue(params.calibrationProfile || null),
-  };
-
-  if (params.printerId) {
-    return prisma.printer.update({
-      where: { id: params.printerId },
-      data,
-    });
-  }
-
-  return prisma.printer.create({ data });
+  });
+  return result.printer;
 };
 
 export const deleteNetworkDirectPrinter = async (params: {
@@ -466,7 +688,7 @@ export const deleteNetworkDirectPrinter = async (params: {
     throw new Error("Printer not found");
   }
 
-  if (printer.connectionType !== PrinterConnectionType.NETWORK_DIRECT) {
+  if (printer.connectionType === PrinterConnectionType.LOCAL_AGENT) {
     throw new Error("Local-agent printers are managed automatically from the workstation agent.");
   }
 
@@ -479,7 +701,7 @@ export const deleteNetworkDirectPrinter = async (params: {
 
     const remainingNetworkPrinters = await tx.printer.findMany({
       where: {
-        connectionType: PrinterConnectionType.NETWORK_DIRECT,
+        connectionType: printer.connectionType,
         isActive: true,
         licenseeId: printer.licenseeId || null,
         ...(printer.orgId ? { orgId: printer.orgId } : {}),
@@ -498,7 +720,7 @@ export const deleteNetworkDirectPrinter = async (params: {
 
     await tx.printer.updateMany({
       where: {
-        connectionType: PrinterConnectionType.NETWORK_DIRECT,
+        connectionType: printer.connectionType,
         isActive: true,
         licenseeId: printer.licenseeId || null,
         ...(printer.orgId ? { orgId: printer.orgId } : {}),
@@ -538,69 +760,155 @@ export const testRegisteredPrinterConnection = async (params: {
     };
   }
 
-  if (!supportsNetworkDirectCommandLanguage(params.printer.commandLanguage)) {
-    const validationMessage =
-      "Network-direct printing currently supports only ZPL, TSPL, EPL, and CPCL. Use the local agent for other printer languages.";
+  if (params.printer.connectionType === PrinterConnectionType.NETWORK_DIRECT) {
+    if (!supportsNetworkDirectCommandLanguage(params.printer.commandLanguage)) {
+      const validationMessage =
+        "Network-direct printing currently supports only ZPL, TSPL, EPL, and CPCL. Use the local agent for other printer languages.";
+      await prisma.printer.update({
+        where: { id: params.printer.id },
+        data: {
+          lastValidatedAt: new Date(),
+          lastValidationStatus: "BLOCKED",
+          lastValidationMessage: validationMessage,
+        },
+      });
+      return {
+        ok: false,
+        registryStatus: buildNetworkPrinterStatus({
+          ...params.printer,
+          lastValidationStatus: "BLOCKED",
+          lastValidationMessage: validationMessage,
+        } as RegisteredPrinterRecord),
+      };
+    }
+
+    if (!params.printer.ipAddress || !params.printer.port) {
+      throw new Error("Network printer IP address or port is missing");
+    }
+
+    const result = await testNetworkPrinterConnectivity({
+      ipAddress: params.printer.ipAddress,
+      port: params.printer.port,
+    }).catch(async (error: any) => {
+      const detail = error?.message || `Could not reach ${params.printer.ipAddress}:${params.printer.port}`;
+      await prisma.printer.update({
+        where: { id: params.printer.id },
+        data: {
+          lastValidatedAt: new Date(),
+          lastValidationStatus: "OFFLINE",
+          lastValidationMessage: detail,
+        },
+      });
+      throw error;
+    });
+
+    const networkDirectSupported = supportsNetworkDirectPayload(params.printer as any);
+    const validationStatus = networkDirectSupported ? "READY" : "BLOCKED";
+    const validationMessage = networkDirectSupported
+      ? `TCP connectivity validated in ${result.latencyMs}ms`
+      : `TCP connectivity validated in ${result.latencyMs}ms, but network-direct printing currently supports only ZPL, TSPL, EPL, and CPCL.`;
+
     await prisma.printer.update({
       where: { id: params.printer.id },
       data: {
         lastValidatedAt: new Date(),
-        lastValidationStatus: "BLOCKED",
+        lastValidationStatus: validationStatus,
         lastValidationMessage: validationMessage,
       },
     });
+
     return {
-      ok: false,
+      ok: networkDirectSupported,
+      latencyMs: result.latencyMs,
       registryStatus: buildNetworkPrinterStatus({
         ...params.printer,
-        lastValidationStatus: "BLOCKED",
+        lastValidationStatus: validationStatus,
         lastValidationMessage: validationMessage,
       } as RegisteredPrinterRecord),
     };
   }
 
-  if (!params.printer.ipAddress || !params.printer.port) {
-    throw new Error("Network printer IP address or port is missing");
-  }
+  if (params.printer.connectionType === PrinterConnectionType.NETWORK_IPP) {
+    if (params.printer.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY) {
+      const registryStatus = buildGatewayPrinterStatus(params.printer);
+      await prisma.printer.update({
+        where: { id: params.printer.id },
+        data: {
+          lastValidatedAt: new Date(),
+          lastValidationStatus: registryStatus.state,
+          lastValidationMessage: registryStatus.detail || registryStatus.summary,
+        },
+      });
+      return {
+        ok: registryStatus.state === "READY",
+        registryStatus,
+      };
+    }
 
-  const result = await testNetworkPrinterConnectivity({
-    ipAddress: params.printer.ipAddress,
-    port: params.printer.port,
-  }).catch(async (error: any) => {
-    const detail = error?.message || `Could not reach ${params.printer.ipAddress}:${params.printer.port}`;
+    const inspection = await inspectIppPrinter({
+      host: params.printer.host,
+      port: params.printer.port,
+      resourcePath: params.printer.resourcePath,
+      tlsEnabled: params.printer.tlsEnabled,
+      printerUri: params.printer.printerUri,
+    }).catch(async (error: any) => {
+      const detail =
+        error?.message ||
+        `Could not reach ${params.printer.printerUri || buildStoredPrinterUri(params.printer as any) || "IPP printer"}`;
+      await prisma.printer.update({
+        where: { id: params.printer.id },
+        data: {
+          lastValidatedAt: new Date(),
+          lastValidationStatus: "OFFLINE",
+          lastValidationMessage: detail,
+          capabilitySummary: toNullableJsonValue({
+            ...(params.printer.capabilitySummary as Record<string, unknown> | null),
+            documentFormats: [],
+          }),
+        },
+      });
+      throw error;
+    });
+
+    const validationStatus = inspection.pdfSupported ? "READY" : "BLOCKED";
+    const validationMessage = inspection.pdfSupported
+      ? `IPP attributes validated at ${inspection.printerUri}. PDF document format supported.`
+      : `IPP endpoint is reachable at ${inspection.printerUri}, but application/pdf is not advertised by the printer.`;
+
+    const nextCapabilitySummary = {
+      ...((params.printer.capabilitySummary as Record<string, unknown> | null) || {}),
+      printerUri: inspection.printerUri,
+      endpointUrl: inspection.endpointUrl,
+      documentFormats: inspection.documentFormats,
+      uriSecurity: inspection.uriSecurity,
+      ippVersions: inspection.ippVersions,
+      printerState: inspection.printerState,
+      printerName: inspection.printerName,
+    };
+
     await prisma.printer.update({
       where: { id: params.printer.id },
       data: {
+        host: inspection.endpointUrl ? new URL(inspection.endpointUrl).hostname : params.printer.host,
+        printerUri: inspection.printerUri,
         lastValidatedAt: new Date(),
-        lastValidationStatus: "OFFLINE",
-        lastValidationMessage: detail,
+        lastValidationStatus: validationStatus,
+        lastValidationMessage: validationMessage,
+        capabilitySummary: toNullableJsonValue(nextCapabilitySummary),
       },
     });
-    throw error;
-  });
 
-  const networkDirectSupported = supportsNetworkDirectPayload(params.printer as any);
-  const validationStatus = networkDirectSupported ? "READY" : "BLOCKED";
-  const validationMessage = networkDirectSupported
-    ? `TCP connectivity validated in ${result.latencyMs}ms`
-    : `TCP connectivity validated in ${result.latencyMs}ms, but network-direct printing currently supports only ZPL, TSPL, EPL, and CPCL.`;
+    return {
+      ok: inspection.pdfSupported,
+      registryStatus: buildNetworkPrinterStatus({
+        ...params.printer,
+        printerUri: inspection.printerUri,
+        lastValidationStatus: validationStatus,
+        lastValidationMessage: validationMessage,
+        capabilitySummary: nextCapabilitySummary as any,
+      } as RegisteredPrinterRecord),
+    };
+  }
 
-  await prisma.printer.update({
-    where: { id: params.printer.id },
-    data: {
-      lastValidatedAt: new Date(),
-      lastValidationStatus: validationStatus,
-      lastValidationMessage: validationMessage,
-    },
-  });
-
-  return {
-    ok: networkDirectSupported,
-    latencyMs: result.latencyMs,
-    registryStatus: buildNetworkPrinterStatus({
-      ...params.printer,
-      lastValidationStatus: validationStatus,
-      lastValidationMessage: validationMessage,
-    } as RegisteredPrinterRecord),
-  };
+  throw new Error("Unsupported printer connection type");
 };

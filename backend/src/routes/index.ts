@@ -126,6 +126,12 @@ import {
   testPrinter,
   updateNetworkPrinter,
 } from "../controllers/printerController";
+import {
+  claimGatewayIppJob,
+  confirmGatewayIppJob,
+  failGatewayIppJob,
+  gatewayHeartbeat,
+} from "../controllers/printerGatewayController";
 import auditRoutes from "./auditRoutes";
 import { updateMyProfile, changeMyPassword } from "../controllers/accountController";
 import {
@@ -408,6 +414,11 @@ router.post("/qr/batches/bulk-delete", authenticate, requireAnyAdmin, enforceTen
 router.delete("/qr/codes", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, bulkDeleteQRCodes);
 
 // ==================== MANUFACTURER PRINT JOBS ====================
+router.post("/print-gateway/heartbeat", gatewayHeartbeat);
+router.post("/print-gateway/ipp/claim", claimGatewayIppJob);
+router.post("/print-gateway/ipp/confirm", confirmGatewayIppJob);
+router.post("/print-gateway/ipp/fail", failGatewayIppJob);
+
 router.post(
   "/manufacturer/printer-agent/heartbeat",
   authenticate,

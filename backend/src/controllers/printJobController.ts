@@ -16,6 +16,7 @@ import {
   PrintPayloadType,
   PrintSessionStatus,
   PrinterConnectionType,
+  PrinterDeliveryMode,
   QRStatus,
   UserRole,
 } from "@prisma/client";
@@ -36,6 +37,8 @@ import {
 import { getRegisteredPrinterForManufacturer } from "../services/printerRegistryService";
 import { testNetworkPrinterConnectivity } from "../services/networkPrinterSocketService";
 import { getPrintJobOperationalView, listPrintJobsForManufacturer, startNetworkDirectDispatch } from "../services/networkDirectPrintService";
+import { inspectIppPrinter } from "../printing/ippClient";
+import { startNetworkIppDispatch } from "../services/networkIppPrintService";
 import {
   beginIdempotentAction,
   completeIdempotentAction,
@@ -115,6 +118,12 @@ const parsePositiveIntEnv = (name: string, fallback: number, hardMax: number) =>
 const DIRECT_PRINT_LOCK_TTL_MINUTES = parsePositiveIntEnv("PRINT_JOB_LOCK_TTL_MINUTES", 45, 24 * 60);
 const DIRECT_PRINT_RENDER_TOKEN_TTL_SECONDS = parsePositiveIntEnv("DIRECT_PRINT_TOKEN_TTL_SECONDS", 90, 900);
 const DIRECT_PRINT_MAX_BATCH = parsePositiveIntEnv("DIRECT_PRINT_MAX_BATCH", 250, 500);
+
+const describePrintDispatchMode = (mode: PrintDispatchMode) => {
+  if (mode === PrintDispatchMode.NETWORK_DIRECT) return "Network-direct";
+  if (mode === PrintDispatchMode.NETWORK_IPP) return "Network IPP";
+  return "Local-agent";
+};
 
 const getLockExpiresAt = (createdAt: Date) =>
   new Date(createdAt.getTime() + DIRECT_PRINT_LOCK_TTL_MINUTES * 60 * 1000);
@@ -239,6 +248,97 @@ const ensureSelectedPrinterReady = async (params: {
       printMode: PrintDispatchMode.NETWORK_DIRECT,
       payloadType: resolvePayloadType(printer as any),
     };
+  }
+
+  if (printer.connectionType === PrinterConnectionType.NETWORK_IPP) {
+    if (printer.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY) {
+      if (!printer.gatewayId || !printer.gatewaySecretHash) {
+        throw Object.assign(new Error("PRINTER_GATEWAY_CONFIG_INVALID"), { printer });
+      }
+      const lastSeenAt = printer.gatewayLastSeenAt ? new Date(printer.gatewayLastSeenAt) : null;
+      const stale =
+        !lastSeenAt ||
+        Number.isNaN(lastSeenAt.getTime()) ||
+        Date.now() - lastSeenAt.getTime() > (Math.max(10_000, Number(process.env.PRINT_GATEWAY_HEARTBEAT_TTL_MS || 45_000) || 45_000));
+      if (stale) {
+        throw Object.assign(new Error("PRINTER_GATEWAY_OFFLINE"), { reason: printer.gatewayLastError || "Site gateway is offline.", printer });
+      }
+      return {
+        printer,
+        printerStatus: null,
+        printMode: PrintDispatchMode.NETWORK_IPP,
+        payloadType: PrintPayloadType.PDF,
+      };
+    }
+
+    try {
+      const inspection = await inspectIppPrinter({
+        host: printer.host,
+        port: printer.port,
+        resourcePath: printer.resourcePath,
+        tlsEnabled: printer.tlsEnabled,
+        printerUri: printer.printerUri,
+      });
+      if (!inspection.pdfSupported) {
+        const detail = `IPP endpoint ${inspection.printerUri} is reachable, but application/pdf is not advertised by the printer.`;
+        await prisma.printer.update({
+          where: { id: printer.id },
+          data: {
+            lastValidatedAt: new Date(),
+            lastValidationStatus: "BLOCKED",
+            lastValidationMessage: detail,
+            printerUri: inspection.printerUri,
+            capabilitySummary: {
+              ...(printer.capabilitySummary as Record<string, unknown> | null),
+              documentFormats: inspection.documentFormats,
+              uriSecurity: inspection.uriSecurity,
+              ippVersions: inspection.ippVersions,
+              printerState: inspection.printerState,
+            } as any,
+          },
+        });
+        throw Object.assign(new Error("PRINTER_IPP_FORMAT_UNSUPPORTED"), { reason: detail, printer });
+      }
+      await prisma.printer.update({
+        where: { id: printer.id },
+        data: {
+          lastValidatedAt: new Date(),
+          lastValidationStatus: "READY",
+          lastValidationMessage: `IPP printer validated at ${inspection.printerUri}`,
+          printerUri: inspection.printerUri,
+          capabilitySummary: {
+            ...(printer.capabilitySummary as Record<string, unknown> | null),
+            documentFormats: inspection.documentFormats,
+            uriSecurity: inspection.uriSecurity,
+            ippVersions: inspection.ippVersions,
+            printerState: inspection.printerState,
+          } as any,
+        },
+      });
+      return {
+        printer: {
+          ...printer,
+          printerUri: inspection.printerUri,
+        },
+        printerStatus: null,
+        printMode: PrintDispatchMode.NETWORK_IPP,
+        payloadType: PrintPayloadType.PDF,
+      };
+    } catch (error: any) {
+      if (String(error?.message || "").includes("PRINTER_IPP_FORMAT_UNSUPPORTED")) {
+        throw error;
+      }
+      const detail = error?.message || "IPP printer validation failed.";
+      await prisma.printer.update({
+        where: { id: printer.id },
+        data: {
+          lastValidatedAt: new Date(),
+          lastValidationStatus: "OFFLINE",
+          lastValidationMessage: detail,
+        },
+      });
+      throw Object.assign(new Error("PRINTER_IPP_UNREACHABLE"), { reason: detail, printer });
+    }
   }
 
   throw new Error("PRINTER_MODE_UNSUPPORTED");
@@ -904,7 +1004,13 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
           connectionType: printerSelection.printer.connectionType,
           commandLanguage: printerSelection.printer.commandLanguage,
           ipAddress: printerSelection.printer.ipAddress,
+          host: (printerSelection.printer as any).host || null,
           port: printerSelection.printer.port,
+          resourcePath: (printerSelection.printer as any).resourcePath || null,
+          tlsEnabled: (printerSelection.printer as any).tlsEnabled ?? null,
+          printerUri: (printerSelection.printer as any).printerUri || null,
+          deliveryMode: (printerSelection.printer as any).deliveryMode || null,
+          gatewayId: (printerSelection.printer as any).gatewayId || null,
           nativePrinterId: printerSelection.printer.nativePrinterId,
         },
         printerStatus: printerSelection.printerStatus,
@@ -922,8 +1028,13 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
         userId: user.userId,
         licenseeId: batch.licenseeId,
         type: "manufacturer_print_job_created",
-        title: printerSelection.printMode === PrintDispatchMode.NETWORK_DIRECT ? "Network-direct job prepared" : "Direct-print job prepared",
-        body: `${printerSelection.printMode === PrintDispatchMode.NETWORK_DIRECT ? "Network-direct" : "Local-agent"} session ready for ${batch.name} (${quantity} codes).`,
+        title:
+          printerSelection.printMode === PrintDispatchMode.NETWORK_DIRECT
+            ? "Network-direct job prepared"
+            : printerSelection.printMode === PrintDispatchMode.NETWORK_IPP
+              ? "Network IPP job prepared"
+              : "Direct-print job prepared",
+        body: `${describePrintDispatchMode(printerSelection.printMode)} session ready for ${batch.name} (${quantity} codes).`,
         data: {
           printJobId: created.job.id,
           printSessionId: created.session.id,
@@ -941,7 +1052,7 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
         orgId: user.orgId || null,
         type: "system_print_job_created",
         title: "System print job created",
-        body: `${printerSelection.printMode === PrintDispatchMode.NETWORK_DIRECT ? "Network-direct" : "Local-agent"} print job created for ${batch.name} (${quantity} codes).`,
+        body: `${describePrintDispatchMode(printerSelection.printMode)} print job created for ${batch.name} (${quantity} codes).`,
         data: {
           printJobId: created.job.id,
           printSessionId: created.session.id,
@@ -960,6 +1071,11 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
 
     if (printerSelection.printMode === PrintDispatchMode.NETWORK_DIRECT) {
       await startNetworkDirectDispatch({
+        jobId: created.job.id,
+        actorUserId: user.userId,
+      });
+    } else if (printerSelection.printMode === PrintDispatchMode.NETWORK_IPP) {
+      await startNetworkIppDispatch({
         jobId: created.job.id,
         actorUserId: user.userId,
       });
@@ -1016,6 +1132,32 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
       return res.status(409).json({
         success: false,
         error: (e as any)?.reason || "Selected network printer is not reachable on its saved host and port.",
+      });
+    }
+    if (msg.includes("PRINTER_GATEWAY_CONFIG_INVALID")) {
+      return res.status(409).json({
+        success: false,
+        error: "Selected gateway-backed IPP printer is missing gateway credentials. Re-save the printer profile and provision the site gateway.",
+      });
+    }
+    if (msg.includes("PRINTER_GATEWAY_OFFLINE")) {
+      return res.status(409).json({
+        success: false,
+        error: (e as any)?.reason || "Selected site gateway is offline. Bring the on-prem print service online and retry.",
+      });
+    }
+    if (msg.includes("PRINTER_IPP_FORMAT_UNSUPPORTED")) {
+      return res.status(409).json({
+        success: false,
+        error:
+          (e as any)?.reason ||
+          "Selected IPP printer is reachable, but it does not advertise PDF support. Use a PDF-capable AirPrint/IPP Everywhere device or switch to the local agent path.",
+      });
+    }
+    if (msg.includes("PRINTER_IPP_UNREACHABLE")) {
+      return res.status(409).json({
+        success: false,
+        error: (e as any)?.reason || "Selected IPP printer is not reachable at its saved URI.",
       });
     }
     return res.status(400).json({ success: false, error: e?.message || "Bad request" });

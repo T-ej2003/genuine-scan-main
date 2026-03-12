@@ -2,13 +2,15 @@
 
 These scripts install the workstation print agent as a login-time service so manufacturers do not need to start it manually on every device.
 
+They are maintainer and packaging assets, not end-user instructions. Production rollout should use a signed installer, MDM, or IT packaging flow so operators never run terminal commands themselves.
+
 Supported rollout paths:
 
 - macOS LaunchAgent
 - Linux systemd user service
 - Windows Scheduled Task at user logon
 
-From the `backend` folder:
+For engineering and release packaging from the `backend` folder:
 
 ```bash
 npm run print:agent:install:macos
@@ -42,6 +44,23 @@ npm run print:agent:uninstall:windows
 4. Starts the agent immediately.
 
 The agent still depends on the workstation OS already seeing the printer.
+
+## Optional site-gateway configuration
+
+Each installer creates an optional `agent.env` file under the agent home:
+
+- macOS / Linux: `~/.mscqr/local-print-agent/agent.env`
+- Windows: `%LOCALAPPDATA%\MSCQR\local-print-agent\agent.env`
+
+This file can be provisioned by MDM, installer logic, or IT automation. Supported values include:
+
+- `PRINT_AGENT_HOST`
+- `PRINT_AGENT_PORT`
+- `PRINT_GATEWAY_BACKEND_URL`
+- `PRINT_GATEWAY_ID`
+- `PRINT_GATEWAY_SECRET`
+
+Use that file when an installed workstation connector must act as a private-LAN site gateway for `NETWORK_IPP` printers.
 
 ## Signed package rollout
 

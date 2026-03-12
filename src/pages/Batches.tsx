@@ -176,10 +176,15 @@ type RegisteredPrinterRow = {
   name: string;
   vendor?: string | null;
   model?: string | null;
-  connectionType: "LOCAL_AGENT" | "NETWORK_DIRECT";
+  connectionType: "LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP";
   commandLanguage: "AUTO" | "ZPL" | "TSPL" | "SBPL" | "EPL" | "CPCL" | "ESC_POS" | "OTHER";
   ipAddress?: string | null;
+  host?: string | null;
   port?: number | null;
+  resourcePath?: string | null;
+  tlsEnabled?: boolean | null;
+  printerUri?: string | null;
+  deliveryMode?: "DIRECT" | "SITE_GATEWAY";
   nativePrinterId?: string | null;
   isActive: boolean;
   isDefault?: boolean;
@@ -203,7 +208,7 @@ type PrintJobRow = {
   id: string;
   jobNumber?: string | null;
   status: "PENDING" | "SENT" | "CONFIRMED" | "FAILED" | "CANCELLED";
-  printMode: "LOCAL_AGENT" | "NETWORK_DIRECT";
+  printMode: "LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP";
   quantity: number;
   itemCount?: number | null;
   failureReason?: string | null;
@@ -215,7 +220,7 @@ type PrintJobRow = {
   printer?: {
     id: string;
     name: string;
-    connectionType: "LOCAL_AGENT" | "NETWORK_DIRECT";
+    connectionType: "LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP";
     commandLanguage: string;
   } | null;
   session?: {
@@ -235,6 +240,7 @@ const PRINTER_FAILURE_AUTO_REPORT_COOLDOWN_MS = 3 * 60 * 1000;
 
 const formatDispatchModeLabel = (mode?: string | null) => {
   if (mode === "NETWORK_DIRECT") return "Network-direct";
+  if (mode === "NETWORK_IPP") return "Network IPP";
   if (mode === "LOCAL_AGENT") return "Local agent";
   return "Direct print";
 };
@@ -259,24 +265,34 @@ const isTerminalPrintProgressPhase = (phase?: string | null) => {
   );
 };
 
-const buildNetworkDirectPrinterNotice = (
+const buildManagedNetworkPrinterNotice = (
   printer: RegisteredPrinterRow | null
 ): PrinterSelectionNotice => {
   if (!printer) {
     return {
       title: "Select a registered network printer",
-      summary: "Choose a network-direct printer profile before starting a server-side dispatch.",
-      detail: "Only validated registered targets can receive network-direct jobs.",
+      summary: "Choose a managed network printer profile before starting a server-side dispatch.",
+      detail: "Only validated registered targets can receive backend-direct or site-gateway jobs.",
       tone: "neutral",
     };
   }
 
-  const hostLabel = `${printer.ipAddress || "—"}:${printer.port || 9100}`;
+  const hostLabel =
+    printer.connectionType === "NETWORK_IPP"
+      ? printer.printerUri ||
+        `${printer.tlsEnabled === false ? "ipp" : "ipps"}://${printer.host || "—"}:${printer.port || 631}${printer.resourcePath || "/ipp/print"}`
+      : `${printer.ipAddress || "—"}:${printer.port || 9100}`;
   const state = printer.registryStatus?.state || "ATTENTION";
+  const profileLabel =
+    printer.connectionType === "NETWORK_IPP"
+      ? printer.deliveryMode === "SITE_GATEWAY"
+        ? "Gateway IPP"
+        : "Network IPP"
+      : "Network-direct";
 
   if (state === "READY") {
     return {
-      title: "Network printer ready",
+      title: `${profileLabel} printer ready`,
       summary: `${printer.name} is validated and ready for server-side dispatch.`,
       detail:
         printer.registryStatus?.detail || `Backend connectivity to ${hostLabel} was validated successfully.`,
@@ -298,10 +314,10 @@ const buildNetworkDirectPrinterNotice = (
   if (state === "BLOCKED") {
     return {
       title: "Network printer blocked",
-      summary: `${printer.name} cannot be used for network-direct dispatch in its current configuration.`,
+      summary: `${printer.name} cannot be used in its current configuration.`,
       detail:
         printer.registryStatus?.detail ||
-        "Use a supported command language and confirm the saved host and port.",
+        "Use a supported endpoint configuration and confirm the saved host or URI.",
       tone: "danger",
     };
   }
@@ -404,7 +420,7 @@ export default function Batches() {
   const [printProgressCurrentCode, setPrintProgressCurrentCode] = useState<string | null>(null);
   const [printProgressError, setPrintProgressError] = useState<string | null>(null);
   const [printProgressPrinterName, setPrintProgressPrinterName] = useState<string | null>(null);
-  const [printProgressDispatchMode, setPrintProgressDispatchMode] = useState<"LOCAL_AGENT" | "NETWORK_DIRECT" | null>(null);
+  const [printProgressDispatchMode, setPrintProgressDispatchMode] = useState<"LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP" | null>(null);
   const printerFailureReportRef = useRef<{ signature: string; at: number }>({ signature: "", at: 0 });
   const printerFailureInFlightRef = useRef(false);
   const [localPrinterAgent, setLocalPrinterAgent] = useState<LocalPrinterAgentSnapshot>({
@@ -478,13 +494,13 @@ export default function Batches() {
   const selectedPrinterCanPrint = Boolean(
     selectedPrinterProfile &&
       selectedPrinterProfile.isActive &&
-      (selectedPrinterProfile.connectionType === "NETWORK_DIRECT"
+      (selectedPrinterProfile.connectionType !== "LOCAL_AGENT"
         ? selectedPrinterProfile.registryStatus?.state === "READY"
         : printerReady && selectedLocalProfileMatchesAgent)
   );
   const selectedPrinterNotice = useMemo<PrinterSelectionNotice>(() => {
-    if (selectedPrinterProfile?.connectionType === "NETWORK_DIRECT") {
-      return buildNetworkDirectPrinterNotice(selectedPrinterProfile);
+    if (selectedPrinterProfile?.connectionType !== "LOCAL_AGENT") {
+      return buildManagedNetworkPrinterNotice(selectedPrinterProfile);
     }
 
     return {
@@ -796,7 +812,7 @@ export default function Batches() {
     if (!selectedPrinterId) return;
     setSelectedPrinterProfileId((prev) => {
       const current = registeredPrinters.find((row) => row.id === prev) || null;
-      if (current?.connectionType === "NETWORK_DIRECT") return prev;
+      if (current?.connectionType && current.connectionType !== "LOCAL_AGENT") return prev;
       const matchingLocal = registeredPrinters.find(
         (row) => row.connectionType === "LOCAL_AGENT" && row.nativePrinterId === selectedPrinterId && row.isActive
       );
@@ -1147,8 +1163,16 @@ export default function Batches() {
       setPrintProgressError(job.failureReason || "Print job cancelled");
       return;
     }
-    if (job.printMode === "NETWORK_DIRECT") {
-      setPrintProgressPhase(job.status === "SENT" ? "Dispatching to registered network printer" : "Preparing network printer dispatch");
+    if (job.printMode === "NETWORK_DIRECT" || job.printMode === "NETWORK_IPP") {
+      setPrintProgressPhase(
+        job.printMode === "NETWORK_IPP"
+          ? job.status === "SENT"
+            ? "Dispatching to registered IPP printer"
+            : "Preparing network IPP dispatch"
+          : job.status === "SENT"
+            ? "Dispatching to registered network printer"
+            : "Preparing network printer dispatch"
+      );
     } else {
       setPrintProgressPhase("Local print session active");
     }
@@ -1156,7 +1180,7 @@ export default function Batches() {
 
   useEffect(() => {
     if (printing) return;
-    if (!printJobId || printProgressDispatchMode !== "NETWORK_DIRECT") return;
+    if (!printJobId || (printProgressDispatchMode !== "NETWORK_DIRECT" && printProgressDispatchMode !== "NETWORK_IPP")) return;
     if (isTerminalPrintProgressPhase(printProgressPhase)) return;
 
     let cancelled = false;
@@ -1455,7 +1479,7 @@ export default function Batches() {
     if (!selectedPrinterProfile) {
       toast({
         title: "Select a printer profile",
-        description: "Choose a registered local-agent or network-direct printer before creating a job.",
+        description: "Choose a registered local-agent or managed network printer before creating a job.",
         variant: "destructive",
       });
       return;
@@ -1603,8 +1627,11 @@ export default function Batches() {
       const createdJobId = String(data.printJobId || "").trim();
       const createdLockToken = String(data.printLockToken || "").trim();
       const createdMode = String(data.mode || selectedPrinterProfile.connectionType).trim();
+      const isServerDispatchedMode = createdMode === "NETWORK_DIRECT" || createdMode === "NETWORK_IPP";
       setPrintProgressPrinterName(String(data.printer?.name || selectedPrinterProfile.name || "").trim() || null);
-      setPrintProgressDispatchMode(createdMode === "NETWORK_DIRECT" ? "NETWORK_DIRECT" : "LOCAL_AGENT");
+      setPrintProgressDispatchMode(
+        createdMode === "NETWORK_DIRECT" ? "NETWORK_DIRECT" : createdMode === "NETWORK_IPP" ? "NETWORK_IPP" : "LOCAL_AGENT"
+      );
       if (!createdJobId) {
         toast({
           title: "Print job setup incomplete",
@@ -1615,30 +1642,42 @@ export default function Batches() {
         return;
       }
 
-      if (createdMode === "NETWORK_DIRECT") {
+      if (isServerDispatchedMode) {
         toast({
-          title: "Network-direct job started",
-          description: `Dispatching ${qty} label${qty === 1 ? "" : "s"} to ${selectedPrinterProfile.name}.`,
+          title: createdMode === "NETWORK_IPP" ? "Network IPP job started" : "Network-direct job started",
+          description:
+            createdMode === "NETWORK_IPP"
+              ? `Dispatching ${qty} label${qty === 1 ? "" : "s"} to ${selectedPrinterProfile.name} over ${selectedPrinterProfile.deliveryMode === "SITE_GATEWAY" ? "the site gateway" : "IPP/IPPS"}.`
+              : `Dispatching ${qty} label${qty === 1 ? "" : "s"} to ${selectedPrinterProfile.name}.`,
         });
-        setPrintProgressPhase("Dispatching to registered network printer");
+        setPrintProgressPhase(
+          createdMode === "NETWORK_IPP"
+            ? selectedPrinterProfile.deliveryMode === "SITE_GATEWAY"
+              ? "Waiting for site gateway dispatch"
+              : "Dispatching to registered IPP printer"
+            : "Dispatching to registered network printer"
+        );
         const pollResult = await pollPrintJobUntilSettled(createdJobId);
         if (pollResult.settled && pollResult.job?.status === "CONFIRMED") {
           toast({
-            title: "Network print complete",
+            title: createdMode === "NETWORK_IPP" ? "Network IPP print complete" : "Network print complete",
             description: `${pollResult.job.session?.confirmedItems || qty} labels confirmed by the server.`,
           });
           setPrintProgressPhase("Completed");
           setPrintProgressError(null);
         } else if (pollResult.settled && pollResult.job?.status === "FAILED") {
-          const message = pollResult.job.failureReason || pollResult.job.session?.failedReason || "Network printer dispatch failed.";
+          const message =
+            pollResult.job.failureReason ||
+            pollResult.job.session?.failedReason ||
+            (createdMode === "NETWORK_IPP" ? "Network IPP dispatch failed." : "Network printer dispatch failed.");
           toast({
-            title: "Network print failed",
+            title: createdMode === "NETWORK_IPP" ? "Network IPP print failed" : "Network print failed",
             description: message,
             variant: "destructive",
           });
           setPrintProgressError(message);
           void autoReportPrinterFailure({
-            context: "network_direct_print",
+            context: createdMode === "NETWORK_IPP" ? "network_ipp_print" : "network_direct_print",
             reason: message,
             diagnostics: { printJobId: createdJobId, printerId: selectedPrinterProfile.id },
           });
@@ -1704,7 +1743,7 @@ export default function Batches() {
         }
       }
 
-      if (createdMode !== "NETWORK_DIRECT" && createdLockToken && directRemainingToPrint === 0) {
+      if (!isServerDispatchedMode && createdLockToken && directRemainingToPrint === 0) {
         toast({
           title: "Print session closed",
           description: "All remaining labels were processed.",
@@ -2432,11 +2471,11 @@ export default function Batches() {
             if (!v) {
               setPrintBatch(null);
               setDirectRemainingToPrint(null);
-              const keepNetworkDirectProgress =
+              const keepNetworkDispatchProgress =
                 !printing &&
-                printProgressDispatchMode === "NETWORK_DIRECT" &&
+                (printProgressDispatchMode === "NETWORK_DIRECT" || printProgressDispatchMode === "NETWORK_IPP") &&
                 !isTerminalPrintProgressPhase(printProgressPhase);
-              if (!printing && !keepNetworkDirectProgress) {
+              if (!printing && !keepNetworkDispatchProgress) {
                 setPrintProgressOpen(false);
                 setPrintProgressPrinterName(null);
                 setPrintProgressDispatchMode(null);
@@ -2500,7 +2539,7 @@ export default function Batches() {
                   <div className="text-sm font-medium">Printer profile and dispatch mode</div>
                   {registeredPrinters.length === 0 && (
                     <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                      No registered printer profiles yet. Open Printer Diagnostics and use the network-direct setup first, then return here and refresh this dialog.
+                      No registered printer profiles yet. Open Printer Diagnostics and register a managed printer profile first, then return here and refresh this dialog.
                       <div className="mt-2 flex flex-wrap gap-2">
                         <Button size="sm" variant="outline" onClick={() => navigate("/printer-diagnostics")}>
                           Open Printer Diagnostics
@@ -2529,6 +2568,7 @@ export default function Batches() {
                               <SelectItem key={row.id} value={row.id}>
                                 {row.name}
                                 {row.connectionType === "NETWORK_DIRECT" && row.ipAddress ? ` · ${row.ipAddress}:${row.port || 9100}` : ""}
+                                {row.connectionType === "NETWORK_IPP" && (row.printerUri || row.host) ? ` · ${row.printerUri || `${row.host}:${row.port || 631}${row.resourcePath || "/ipp/print"}`}` : ""}
                                 {row.connectionType === "LOCAL_AGENT" && row.nativePrinterId ? ` · ${row.nativePrinterId}` : ""}
                                 {!row.isActive ? " · inactive" : ""}
                               </SelectItem>
@@ -2540,13 +2580,13 @@ export default function Batches() {
                     <div className="space-y-1">
                       <Label className="text-xs">Dispatch mode</Label>
                       <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
-                        {selectedPrinterProfile?.connectionType === "NETWORK_DIRECT" ? "Network-direct" : "Local agent"}
+                        {formatDispatchModeLabel(selectedPrinterProfile?.connectionType || null)}
                       </div>
                     </div>
                     <div className="space-y-1">
                       <Label className="text-xs">Command language</Label>
                       <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
-                        {selectedPrinterProfile?.commandLanguage || "AUTO"}
+                        {selectedPrinterProfile?.connectionType === "NETWORK_IPP" ? "PDF over IPP" : selectedPrinterProfile?.commandLanguage || "AUTO"}
                       </div>
                     </div>
                   </div>
@@ -2646,12 +2686,22 @@ export default function Batches() {
                     <div className="rounded-md border bg-muted/20 p-3 text-sm">
                       <div className="font-medium">{selectedPrinterProfile?.name || "Network printer"}</div>
                       <div className="mt-1 text-xs text-muted-foreground">
-                        {selectedPrinterProfile?.ipAddress || "—"}:{selectedPrinterProfile?.port || 9100} ·{" "}
-                        {selectedPrinterProfile?.commandLanguage || "AUTO"}
+                        {selectedPrinterProfile?.connectionType === "NETWORK_IPP"
+                          ? selectedPrinterProfile?.printerUri ||
+                            `${selectedPrinterProfile?.host || "—"}:${selectedPrinterProfile?.port || 631}${selectedPrinterProfile?.resourcePath || "/ipp/print"}`
+                          : `${selectedPrinterProfile?.ipAddress || "—"}:${selectedPrinterProfile?.port || 9100}`}
+                        {" · "}
+                        {selectedPrinterProfile?.connectionType === "NETWORK_IPP"
+                          ? selectedPrinterProfile?.deliveryMode === "SITE_GATEWAY"
+                            ? "Site gateway"
+                            : "Backend direct"
+                          : selectedPrinterProfile?.commandLanguage || "AUTO"}
                       </div>
                       <div className="mt-2 text-xs text-muted-foreground">
                         {selectedPrinterProfile?.registryStatus?.detail ||
-                          "Server will open a controlled TCP connection only to this registered printer profile."}
+                          (selectedPrinterProfile?.connectionType === "NETWORK_IPP"
+                            ? "Server will dispatch standards-based PDF jobs to this registered printer or through its site gateway."
+                            : "Server will open a controlled TCP connection only to this registered printer profile.")}
                       </div>
                       <div className="mt-3 flex justify-end">
                         <Button variant="outline" size="sm" onClick={() => navigate("/printer-diagnostics")}>
@@ -2718,7 +2768,11 @@ export default function Batches() {
                             </Badge>
                           </div>
                           <div className="mt-1 text-xs text-muted-foreground">
-                            {job.printMode === "NETWORK_DIRECT" ? "Network-direct" : "Local agent"} ·{" "}
+                            {job.printMode === "NETWORK_DIRECT"
+                              ? "Network-direct"
+                              : job.printMode === "NETWORK_IPP"
+                                ? "Network IPP"
+                                : "Local agent"} ·{" "}
                             {job.printer?.name || "Unknown printer"} · {job.itemCount || job.quantity} labels
                           </div>
                           <div className="mt-1 text-xs text-muted-foreground">

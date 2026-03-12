@@ -35,10 +35,19 @@ type RegisteredPrinterRow = {
   name: string;
   vendor?: string | null;
   model?: string | null;
-  connectionType: "LOCAL_AGENT" | "NETWORK_DIRECT";
+  connectionType: "LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP";
   commandLanguage: "AUTO" | "ZPL" | "TSPL" | "SBPL" | "EPL" | "CPCL" | "ESC_POS" | "OTHER";
   ipAddress?: string | null;
+  host?: string | null;
   port?: number | null;
+  resourcePath?: string | null;
+  tlsEnabled?: boolean | null;
+  printerUri?: string | null;
+  deliveryMode?: "DIRECT" | "SITE_GATEWAY";
+  gatewayId?: string | null;
+  gatewayStatus?: string | null;
+  gatewayLastSeenAt?: string | null;
+  gatewayProvisioningSecret?: string | null;
   nativePrinterId?: string | null;
   isActive: boolean;
   isDefault?: boolean;
@@ -60,11 +69,18 @@ const isSupportedNetworkDirectLanguage = (
   NETWORK_DIRECT_SUPPORTED_LANGUAGES.includes(String(value || "").trim().toUpperCase() as NetworkDirectCommandLanguage);
 
 const buildEmptyNetworkPrinterForm = () => ({
+  connectionType: "NETWORK_DIRECT" as RegisteredPrinterRow["connectionType"],
   name: "",
   vendor: "",
   model: "",
   ipAddress: "",
+  host: "",
   port: "9100",
+  resourcePath: "/ipp/print",
+  tlsEnabled: true,
+  printerUri: "",
+  deliveryMode: "DIRECT" as NonNullable<RegisteredPrinterRow["deliveryMode"]>,
+  rotateGatewaySecret: false,
   commandLanguage: "ZPL" as RegisteredPrinterRow["commandLanguage"],
 });
 
@@ -85,6 +101,7 @@ export default function PrinterDiagnostics() {
   const [deletingPrinterId, setDeletingPrinterId] = useState<string | null>(null);
   const [editingPrinterId, setEditingPrinterId] = useState<string | null>(null);
   const [networkPrinterForm, setNetworkPrinterForm] = useState(buildEmptyNetworkPrinterForm);
+  const [gatewayProvisioningSecret, setGatewayProvisioningSecret] = useState<string | null>(null);
 
   const networkPrinterLanguageSupported = isSupportedNetworkDirectLanguage(networkPrinterForm.commandLanguage);
 
@@ -243,8 +260,8 @@ export default function PrinterDiagnostics() {
     [detectedPrinters, localAgent, remoteStatus, selectedPrinterId]
   );
 
-  const networkDirectPrinters = useMemo(
-    () => registeredPrinters.filter((printer) => printer.connectionType === "NETWORK_DIRECT" && printer.isActive),
+  const managedNetworkPrinters = useMemo(
+    () => registeredPrinters.filter((printer) => printer.connectionType !== "LOCAL_AGENT" && printer.isActive),
     [registeredPrinters]
   );
 
@@ -258,103 +275,119 @@ export default function PrinterDiagnostics() {
     return linkedLicenseeId || undefined;
   }, [user?.licenseeId, user?.linkedLicensees]);
 
-  const preferredNetworkDirectPrinter = useMemo(
+  const preferredManagedNetworkPrinter = useMemo(
     () =>
-      networkDirectPrinters.find((printer) => printer.isDefault) ||
-      networkDirectPrinters.find((printer) => printer.registryStatus?.state === "READY") ||
-      networkDirectPrinters[0] ||
+      managedNetworkPrinters.find((printer) => printer.isDefault) ||
+      managedNetworkPrinters.find((printer) => printer.registryStatus?.state === "READY") ||
+      managedNetworkPrinters[0] ||
       null,
-    [networkDirectPrinters]
+    [managedNetworkPrinters]
   );
 
   const preferNetworkDirectSummary = shouldPreferNetworkDirectSummary({
     printers: detectedPrinters,
-    networkPrinter: preferredNetworkDirectPrinter,
+    networkPrinter: preferredManagedNetworkPrinter,
   });
 
   const effectiveSummary = useMemo(() => {
-    if (!preferredNetworkDirectPrinter || !preferNetworkDirectSummary) return summary;
+    if (!preferredManagedNetworkPrinter || !preferNetworkDirectSummary) return summary;
 
-    const hostLabel = `${preferredNetworkDirectPrinter.ipAddress || "—"}:${preferredNetworkDirectPrinter.port || 9100}`;
+    const hostLabel =
+      preferredManagedNetworkPrinter.connectionType === "NETWORK_IPP"
+        ? preferredManagedNetworkPrinter.printerUri ||
+          `${preferredManagedNetworkPrinter.tlsEnabled === false ? "ipp" : "ipps"}://${preferredManagedNetworkPrinter.host || "—"}:${preferredManagedNetworkPrinter.port || 631}${preferredManagedNetworkPrinter.resourcePath || "/ipp/print"}`
+        : `${preferredManagedNetworkPrinter.ipAddress || "—"}:${preferredManagedNetworkPrinter.port || 9100}`;
+    const networkLabel =
+      preferredManagedNetworkPrinter.connectionType === "NETWORK_IPP"
+        ? preferredManagedNetworkPrinter.deliveryMode === "SITE_GATEWAY"
+          ? "Gateway IPP"
+          : "Network IPP"
+        : "Network-direct";
     const pseudoPrinter: PrinterInventoryRow = {
-      printerId: preferredNetworkDirectPrinter.id,
-      printerName: preferredNetworkDirectPrinter.name,
-      model: preferredNetworkDirectPrinter.model || null,
-      connection: "NETWORK_DIRECT",
-      online: preferredNetworkDirectPrinter.registryStatus?.state !== "OFFLINE",
-      isDefault: Boolean(preferredNetworkDirectPrinter.isDefault),
-      protocols: [],
-      languages: [preferredNetworkDirectPrinter.commandLanguage],
+      printerId: preferredManagedNetworkPrinter.id,
+      printerName: preferredManagedNetworkPrinter.name,
+      model: preferredManagedNetworkPrinter.model || null,
+      connection: preferredManagedNetworkPrinter.connectionType,
+      online: preferredManagedNetworkPrinter.registryStatus?.state !== "OFFLINE",
+      isDefault: Boolean(preferredManagedNetworkPrinter.isDefault),
+      protocols:
+        preferredManagedNetworkPrinter.connectionType === "NETWORK_IPP"
+          ? [preferredManagedNetworkPrinter.tlsEnabled === false ? "ipp" : "ipps"]
+          : [],
+      languages:
+        preferredManagedNetworkPrinter.connectionType === "NETWORK_IPP"
+          ? ["PDF"]
+          : [preferredManagedNetworkPrinter.commandLanguage],
       mediaSizes: [],
       dpi: null,
     };
 
-    if (preferredNetworkDirectPrinter.registryStatus?.state === "READY") {
+    if (preferredManagedNetworkPrinter.registryStatus?.state === "READY") {
       return {
         state: "compatibility_ready" as const,
-        badgeLabel: "Network-direct",
-        title: "Network printer ready",
-        summary: `${preferredNetworkDirectPrinter.name} is registered and reachable for server-side dispatch.`,
+        badgeLabel: networkLabel,
+        title: `${networkLabel} printer ready`,
+        summary: `${preferredManagedNetworkPrinter.name} is registered and ready for controlled dispatch.`,
         detail:
-          preferredNetworkDirectPrinter.registryStatus.detail ||
+          preferredManagedNetworkPrinter.registryStatus?.detail ||
           `Backend connectivity to ${hostLabel} has already been validated.`,
         tone: "success" as const,
         nextSteps: [
-          "Open the batch workflow and choose the registered network-direct printer profile.",
-          "Use Test again whenever you change the target host, port, or printer language.",
+          "Open the batch workflow and choose the registered network printer profile.",
+          "Use Test again whenever you change the target endpoint or delivery mode.",
         ],
         selectedPrinter: pseudoPrinter,
       };
     }
 
-    if (preferredNetworkDirectPrinter.registryStatus?.state === "ATTENTION") {
+    if (preferredManagedNetworkPrinter.registryStatus?.state === "ATTENTION") {
       return {
         state: "server_sync_pending" as const,
         badgeLabel: "Needs validation",
         title: "Network printer profile needs validation",
-        summary: `${preferredNetworkDirectPrinter.name} is registered, but connectivity has not been validated yet.`,
+        summary: `${preferredManagedNetworkPrinter.name} is registered, but readiness has not been validated yet.`,
         detail:
-          preferredNetworkDirectPrinter.registryStatus.detail ||
-          `Run Test against ${hostLabel} to confirm the raw socket is reachable.`,
+          preferredManagedNetworkPrinter.registryStatus?.detail ||
+          `Run Test against ${hostLabel} to confirm the endpoint or gateway is reachable.`,
         tone: "warning" as const,
         nextSteps: [
           "Use the Test button under Registered printer profiles.",
-          "Confirm the printer is reachable on the configured host and raw TCP port.",
+          "Confirm the printer is reachable on the configured path or that the site gateway is online.",
         ],
         selectedPrinter: pseudoPrinter,
       };
     }
 
-    if (preferredNetworkDirectPrinter.registryStatus?.state === "BLOCKED") {
+    if (preferredManagedNetworkPrinter.registryStatus?.state === "BLOCKED") {
       return {
         state: "trust_blocked" as const,
         badgeLabel: "Blocked",
         title: "Network printer profile is blocked",
-        summary: `${preferredNetworkDirectPrinter.name} cannot be used for network-direct dispatch in its current configuration.`,
+        summary: `${preferredManagedNetworkPrinter.name} cannot be used in its current configuration.`,
         detail:
-          preferredNetworkDirectPrinter.registryStatus.detail ||
-          "Check the command language and host/port values, then validate again.",
+          preferredManagedNetworkPrinter.registryStatus?.detail ||
+          "Check the printer profile settings, then validate again.",
         tone: "danger" as const,
         nextSteps: [
-          "Set the printer language to ZPL, TSPL, EPL, or CPCL.",
+          "Correct the printer profile settings or supported format.",
           "Retest after correcting the profile.",
         ],
         selectedPrinter: pseudoPrinter,
       };
     }
 
-    if (preferredNetworkDirectPrinter.registryStatus?.state === "OFFLINE") {
+    if (preferredManagedNetworkPrinter.registryStatus?.state === "OFFLINE") {
       return {
         state: "printer_offline" as const,
         badgeLabel: "Offline",
         title: "Network printer is unreachable",
-        summary: `${preferredNetworkDirectPrinter.name} is registered, but ${hostLabel} is not accepting TCP connections right now.`,
+        summary: `${preferredManagedNetworkPrinter.name} is registered, but ${hostLabel} is not reachable right now.`,
         detail:
-          preferredNetworkDirectPrinter.registryStatus.detail ||
+          preferredManagedNetworkPrinter.registryStatus?.detail ||
           "Bring the printer online and run the validation test again.",
         tone: "danger" as const,
         nextSteps: [
-          "Start the printer or mock server and confirm the raw socket is listening on port 9100.",
+          "Start the printer or site gateway and confirm the configured endpoint is reachable.",
           "Run Test again after the socket is reachable.",
         ],
         selectedPrinter: pseudoPrinter,
@@ -362,7 +395,7 @@ export default function PrinterDiagnostics() {
     }
 
     return summary;
-  }, [preferNetworkDirectSummary, preferredNetworkDirectPrinter, summary]);
+  }, [preferNetworkDirectSummary, preferredManagedNetworkPrinter, summary]);
 
   const statusClasses =
     effectiveSummary.tone === "success"
@@ -380,6 +413,7 @@ export default function PrinterDiagnostics() {
   const resetNetworkPrinterForm = () => {
     setEditingPrinterId(null);
     setNetworkPrinterForm(buildEmptyNetworkPrinterForm());
+    setGatewayProvisioningSecret(null);
   };
 
   const persistNetworkPrinter = async (params?: {
@@ -390,22 +424,43 @@ export default function PrinterDiagnostics() {
   }) => {
     const source = params?.formOverride || networkPrinterForm;
     const name = source.name.trim();
+    const isNetworkDirect = source.connectionType === "NETWORK_DIRECT";
     const ipAddress = source.ipAddress.trim();
+    const host = source.host.trim();
+    const printerUri = source.printerUri.trim();
     const port = Number(source.port || 0);
 
-    if (!name || !ipAddress || !Number.isFinite(port) || port <= 0) {
+    if (!name || !Number.isFinite(port) || port <= 0) {
       toast({
         title: "Incomplete printer profile",
-        description: "Name, host or IP address, and TCP port are required.",
+        description: "Name and port are required.",
         variant: "destructive",
       });
       return null;
     }
 
-    if (!isSupportedNetworkDirectLanguage(source.commandLanguage)) {
+    if (isNetworkDirect && !ipAddress) {
+      toast({
+        title: "Incomplete network-direct profile",
+        description: "A host or IP address is required for network-direct printers.",
+        variant: "destructive",
+      });
+      return null;
+    }
+
+    if (!isNetworkDirect && !host && !printerUri) {
+      toast({
+        title: "Incomplete IPP profile",
+        description: "Enter a host/FQDN or a full printer URI for IPP/AirPrint printers.",
+        variant: "destructive",
+      });
+      return null;
+    }
+
+    if (isNetworkDirect && !isSupportedNetworkDirectLanguage(source.commandLanguage)) {
       toast({
         title: "Unsupported network-direct language",
-        description: "Choose ZPL, TSPL, EPL, or CPCL. Use the local-agent path for AUTO, SBPL, ESC/POS, or other languages.",
+        description: "Choose ZPL, TSPL, EPL, or CPCL. Use the local-agent or IPP path for other printer types.",
         variant: "destructive",
       });
       return null;
@@ -419,9 +474,16 @@ export default function PrinterDiagnostics() {
         vendor: source.vendor.trim() || undefined,
         model: source.model.trim() || undefined,
         licenseeId: effectiveLicenseeId,
-        ipAddress,
+        connectionType: source.connectionType,
+        ipAddress: isNetworkDirect ? ipAddress : undefined,
+        host: !isNetworkDirect ? host || undefined : undefined,
         port,
-        commandLanguage: source.commandLanguage,
+        resourcePath: !isNetworkDirect ? source.resourcePath.trim() || "/ipp/print" : undefined,
+        tlsEnabled: !isNetworkDirect ? Boolean(source.tlsEnabled) : undefined,
+        printerUri: !isNetworkDirect ? printerUri || undefined : undefined,
+        deliveryMode: !isNetworkDirect ? source.deliveryMode : undefined,
+        rotateGatewaySecret: !isNetworkDirect ? Boolean(source.rotateGatewaySecret) : undefined,
+        commandLanguage: isNetworkDirect ? source.commandLanguage : undefined,
         isDefault: params?.printerId ? undefined : !hasActiveDefault,
       };
 
@@ -438,6 +500,7 @@ export default function PrinterDiagnostics() {
       }
 
       const savedPrinter = (response.data || {}) as RegisteredPrinterRow;
+      setGatewayProvisioningSecret(savedPrinter.gatewayProvisioningSecret || null);
       const savedPrinterId = String(savedPrinter.id || params?.printerId || "").trim();
       let validated = false;
       let detail = "Printer profile saved.";
@@ -471,7 +534,8 @@ export default function PrinterDiagnostics() {
       });
 
       if (params?.resetAfterSave !== false) {
-        resetNetworkPrinterForm();
+        setEditingPrinterId(null);
+        setNetworkPrinterForm(buildEmptyNetworkPrinterForm());
       }
       await loadDiagnostics();
       return { savedPrinterId, validated };
@@ -490,12 +554,20 @@ export default function PrinterDiagnostics() {
 
   const editNetworkPrinter = (printer: RegisteredPrinterRow) => {
     setEditingPrinterId(printer.id);
+    setGatewayProvisioningSecret(null);
     setNetworkPrinterForm({
+      connectionType: printer.connectionType,
       name: printer.name || "",
       vendor: printer.vendor || "",
       model: printer.model || "",
       ipAddress: printer.ipAddress || "",
-      port: String(printer.port || 9100),
+      host: printer.host || "",
+      port: String(printer.port || (printer.connectionType === "NETWORK_IPP" ? 631 : 9100)),
+      resourcePath: printer.resourcePath || "/ipp/print",
+      tlsEnabled: printer.tlsEnabled !== false,
+      printerUri: printer.printerUri || "",
+      deliveryMode: printer.deliveryMode || "DIRECT",
+      rotateGatewaySecret: false,
       commandLanguage: printer.commandLanguage || "AUTO",
     });
   };
@@ -527,9 +599,9 @@ export default function PrinterDiagnostics() {
   };
 
   const removeNetworkPrinter = async (printer: RegisteredPrinterRow) => {
-    if (printer.connectionType !== "NETWORK_DIRECT") return;
+    if (printer.connectionType === "LOCAL_AGENT") return;
     const confirmed = window.confirm(
-      `Remove ${printer.name}? This deletes the saved network-direct profile and frees ${printer.ipAddress || "this host"}:${printer.port || 9100} for a new connection.`
+      `Remove ${printer.name}? This deletes the saved printer profile and frees its registered endpoint for a new connection.`
     );
     if (!confirmed) return;
 
@@ -539,7 +611,7 @@ export default function PrinterDiagnostics() {
       if (!response.success) {
         toast({
           title: "Could not remove printer",
-          description: response.error || "The network-direct printer profile could not be removed.",
+          description: response.error || "The network printer profile could not be removed.",
           variant: "destructive",
         });
         return;
@@ -547,7 +619,7 @@ export default function PrinterDiagnostics() {
 
       toast({
         title: "Printer removed",
-        description: `${printer.name} was removed. Its saved host and port can now be reused.`,
+        description: `${printer.name} was removed. Its saved endpoint can now be reused.`,
       });
       if (editingPrinterId === printer.id) resetNetworkPrinterForm();
       await loadDiagnostics();
@@ -686,11 +758,11 @@ export default function PrinterDiagnostics() {
               <div className="rounded-xl border bg-muted/30 p-4">
                 <div className="font-medium text-foreground">What must exist on the client machine</div>
                 <ul className="mt-3 list-disc space-y-2 pl-5">
-                  <li>The local MSCQR print agent service must be installed and running on the workstation.</li>
+                  <li>The signed MSCQR Workstation Connector must be installed once on the workstation.</li>
                   <li>The operating system must already see the printer in its printer list.</li>
                   <li>The printer driver or spooler path must be working before the browser can show a ready state.</li>
-                  <li>Install it once with <code>npm --prefix backend run print:agent:install:macos</code>, <code>...:linux</code>, or <code>...:windows</code>.</li>
-                  <li>For manual developer runs only, start it with <code>npm --prefix backend run print:agent</code>.</li>
+                  <li>The workstation connector should auto-start at login and stay in the background.</li>
+                  <li>Use MDM or your IT rollout process for fleet installs. End users should never need terminal commands to print.</li>
                   <li>The local agent must answer <code>http://127.0.0.1:17866/status</code> from the same device.</li>
                 </ul>
               </div>
@@ -703,16 +775,23 @@ export default function PrinterDiagnostics() {
                   <li>If it succeeds but this page still shows blocked, copy diagnostics and send them to support.</li>
                 </ol>
               </div>
-              {preferredNetworkDirectPrinter && (
+              {preferredManagedNetworkPrinter && (
                 <div className="rounded-xl border bg-muted/30 p-4">
-                  <div className="font-medium text-foreground">Network-direct shortcut</div>
+                  <div className="font-medium text-foreground">Managed network printer shortcut</div>
                   <div className="mt-3 text-sm leading-6 text-muted-foreground">
-                    Registered profile: <span className="font-medium text-foreground">{preferredNetworkDirectPrinter.name}</span>
+                    Registered profile: <span className="font-medium text-foreground">{preferredManagedNetworkPrinter.name}</span>
                     <br />
-                    Socket target: <span className="font-mono text-foreground">{preferredNetworkDirectPrinter.ipAddress || "—"}:{preferredNetworkDirectPrinter.port || 9100}</span>
+                    Target:
+                    {" "}
+                    <span className="font-mono text-foreground">
+                      {preferredManagedNetworkPrinter.connectionType === "NETWORK_IPP"
+                        ? preferredManagedNetworkPrinter.printerUri ||
+                          `${preferredManagedNetworkPrinter.tlsEnabled === false ? "ipp" : "ipps"}://${preferredManagedNetworkPrinter.host || "—"}:${preferredManagedNetworkPrinter.port || 631}${preferredManagedNetworkPrinter.resourcePath || "/ipp/print"}`
+                        : `${preferredManagedNetworkPrinter.ipAddress || "—"}:${preferredManagedNetworkPrinter.port || 9100}`}
+                    </span>
                   </div>
                   <div className="mt-3 text-xs text-muted-foreground">
-                    Network-direct printing does not depend on the local print agent inventory. If this profile validates, the batch workflow can print directly through the backend even when no workstation printer is attached.
+                    Registered network printers do not depend on the local print agent inventory. If this profile validates, the batch workflow can dispatch through the backend or a site gateway even when no workstation printer is attached.
                   </div>
                 </div>
               )}
@@ -744,7 +823,7 @@ export default function PrinterDiagnostics() {
           <CardHeader>
             <CardTitle className="text-base">Printer compatibility matrix</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-4 lg:grid-cols-2">
+          <CardContent className="grid gap-4 lg:grid-cols-3">
             <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
               <div className="font-semibold text-foreground">LOCAL_AGENT</div>
               <p className="mt-2 leading-6">
@@ -768,6 +847,17 @@ export default function PrinterDiagnostics() {
                 <li>Use <strong>Test</strong> after registration to confirm connectivity and language readiness.</li>
               </ul>
             </div>
+            <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
+              <div className="font-semibold text-foreground">NETWORK_IPP</div>
+              <p className="mt-2 leading-6">
+                Best for AirPrint and IPP Everywhere office printers that accept standards-based PDF jobs over IPP/IPPS.
+              </p>
+              <ul className="mt-3 list-disc space-y-2 pl-5 text-xs">
+                <li>Use backend-direct when the application server can safely reach the printer URI.</li>
+                <li>Use site-gateway mode when the printer stays on a private manufacturer LAN.</li>
+                <li>Prefer TLS and a stable printer URI whenever the device supports it.</li>
+              </ul>
+            </div>
           </CardContent>
         </Card>
 
@@ -779,7 +869,7 @@ export default function PrinterDiagnostics() {
             <CardContent className="space-y-3">
               {registeredPrinters.length === 0 ? (
                 <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
-                  <div>No printer profiles are registered yet. Local-agent printers appear after a trusted heartbeat. Network-direct printers can be added here.</div>
+                  <div>No printer profiles are registered yet. Local-agent printers appear after a trusted heartbeat. Managed network printers can be added here.</div>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -791,14 +881,22 @@ export default function PrinterDiagnostics() {
                           <div className="mt-1 text-xs text-muted-foreground">
                             {printer.connectionType === "NETWORK_DIRECT"
                               ? `${printer.ipAddress || "—"}:${printer.port || 9100}`
-                              : printer.nativePrinterId || "Local agent printer"}
+                              : printer.connectionType === "NETWORK_IPP"
+                                ? printer.printerUri || `${printer.host || "—"}:${printer.port || 631}${printer.resourcePath || "/ipp/print"}`
+                                : printer.nativePrinterId || "Local agent printer"}
                             {" · "}
-                            {printer.commandLanguage}
+                            {printer.connectionType === "NETWORK_IPP" ? "PDF over IPP" : printer.commandLanguage}
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <Badge variant={printer.registryStatus?.state === "BLOCKED" ? "destructive" : "secondary"}>
-                            {printer.connectionType === "NETWORK_DIRECT" ? "Network-direct" : "Local agent"}
+                            {printer.connectionType === "NETWORK_DIRECT"
+                              ? "Network-direct"
+                              : printer.connectionType === "NETWORK_IPP"
+                                ? printer.deliveryMode === "SITE_GATEWAY"
+                                  ? "Network IPP gateway"
+                                  : "Network IPP"
+                                : "Local agent"}
                           </Badge>
                           <Badge variant={printer.isActive ? "default" : "secondary"}>
                             {printer.isActive ? "Active" : "Inactive"}
@@ -809,6 +907,11 @@ export default function PrinterDiagnostics() {
                       <div className="mt-3 text-xs text-muted-foreground">
                         {printer.registryStatus?.detail || printer.lastValidationMessage || "No validation details recorded yet."}
                       </div>
+                      {printer.connectionType === "NETWORK_IPP" && printer.deliveryMode === "SITE_GATEWAY" && printer.gatewayId && (
+                        <div className="mt-2 text-[11px] text-muted-foreground">
+                          Gateway ID: <span className="font-mono text-foreground">{printer.gatewayId}</span>
+                        </div>
+                      )}
                       <div className="mt-3 flex flex-wrap justify-end gap-2">
                         <Button
                           variant="outline"
@@ -818,12 +921,12 @@ export default function PrinterDiagnostics() {
                         >
                           {testingPrinterId === printer.id ? "Testing..." : "Test"}
                         </Button>
-                        {printer.connectionType === "NETWORK_DIRECT" && (
+                        {printer.connectionType !== "LOCAL_AGENT" && (
                           <Button variant="outline" size="sm" onClick={() => editNetworkPrinter(printer)}>
                             Edit
                           </Button>
                         )}
-                        {printer.connectionType === "NETWORK_DIRECT" && (
+                        {printer.connectionType !== "LOCAL_AGENT" && (
                           <Button
                             variant="outline"
                             size="sm"
@@ -845,15 +948,14 @@ export default function PrinterDiagnostics() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">
-                {editingPrinterId ? "Update network-direct printer" : "Add network-direct printer"}
+                {editingPrinterId ? "Update managed network printer" : "Add managed network printer"}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="rounded-xl border bg-muted/20 p-3 text-xs text-muted-foreground">
-                <div className="font-medium text-foreground">Network-direct registration</div>
+                <div className="font-medium text-foreground">Managed network registration</div>
                 <div className="mt-1 leading-5">
-                  Register only real LAN printers here. Workstation printers like your Canon should use <strong>LOCAL_AGENT</strong>,
-                  not a TCP host entry.
+                  Register backend-dispatched printers here. Workstation printers that depend on the local operating system should stay on <strong>LOCAL_AGENT</strong>.
                 </div>
               </div>
               <div className="space-y-1">
@@ -870,50 +972,157 @@ export default function PrinterDiagnostics() {
                   <Input value={networkPrinterForm.model} onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, model: e.target.value }))} placeholder="ZT411" />
                 </div>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">IP address or host</Label>
-                  <Input
-                    value={networkPrinterForm.ipAddress}
-                    onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, ipAddress: e.target.value }))}
-                    placeholder="192.168.1.50 or printer-lan-01"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">TCP port</Label>
-                  <Input value={networkPrinterForm.port} onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, port: e.target.value }))} placeholder="9100" />
-                </div>
-              </div>
               <div className="space-y-1">
-                <Label className="text-xs">Command language</Label>
+                <Label className="text-xs">Connection type</Label>
                 <Select
-                  value={networkPrinterForm.commandLanguage}
+                  value={networkPrinterForm.connectionType}
                   onValueChange={(value) =>
-                    setNetworkPrinterForm((prev) => ({ ...prev, commandLanguage: value as RegisteredPrinterRow["commandLanguage"] }))
+                    setNetworkPrinterForm((prev) => ({
+                      ...prev,
+                      connectionType: value as RegisteredPrinterRow["connectionType"],
+                      port: value === "NETWORK_IPP" ? "631" : "9100",
+                    }))
                   }
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Command language" />
+                    <SelectValue placeholder="Connection type" />
                   </SelectTrigger>
                   <SelectContent>
-                    {!networkPrinterLanguageSupported && networkPrinterForm.commandLanguage ? (
-                      <SelectItem value={networkPrinterForm.commandLanguage} disabled>
-                        {networkPrinterForm.commandLanguage} (legacy unsupported)
-                      </SelectItem>
-                    ) : null}
-                    {NETWORK_DIRECT_SUPPORTED_LANGUAGES.map((language) => (
-                      <SelectItem key={language} value={language}>
-                        {language}
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="NETWORK_DIRECT">NETWORK_DIRECT</SelectItem>
+                    <SelectItem value="NETWORK_IPP">NETWORK_IPP</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              {!networkPrinterLanguageSupported && (
-                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800">
-                  This profile currently uses <strong>{networkPrinterForm.commandLanguage}</strong>, which is not allowed for
-                  network-direct dispatch. Change it to ZPL, TSPL, EPL, or CPCL before saving or testing.
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label className="text-xs">
+                    {networkPrinterForm.connectionType === "NETWORK_IPP" ? "Host or FQDN" : "IP address or host"}
+                  </Label>
+                  {networkPrinterForm.connectionType === "NETWORK_IPP" ? (
+                    <Input
+                      value={networkPrinterForm.host}
+                      onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, host: e.target.value }))}
+                      placeholder="canon-office.local"
+                    />
+                  ) : (
+                    <Input
+                      value={networkPrinterForm.ipAddress}
+                      onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, ipAddress: e.target.value }))}
+                      placeholder="192.168.1.50 or printer-lan-01"
+                    />
+                  )}
                 </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">{networkPrinterForm.connectionType === "NETWORK_IPP" ? "IPP port" : "TCP port"}</Label>
+                  <Input value={networkPrinterForm.port} onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, port: e.target.value }))} placeholder={networkPrinterForm.connectionType === "NETWORK_IPP" ? "631" : "9100"} />
+                </div>
+              </div>
+              {networkPrinterForm.connectionType === "NETWORK_DIRECT" ? (
+                <>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Command language</Label>
+                    <Select
+                      value={networkPrinterForm.commandLanguage}
+                      onValueChange={(value) =>
+                        setNetworkPrinterForm((prev) => ({ ...prev, commandLanguage: value as RegisteredPrinterRow["commandLanguage"] }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Command language" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {!networkPrinterLanguageSupported && networkPrinterForm.commandLanguage ? (
+                          <SelectItem value={networkPrinterForm.commandLanguage} disabled>
+                            {networkPrinterForm.commandLanguage} (legacy unsupported)
+                          </SelectItem>
+                        ) : null}
+                        {NETWORK_DIRECT_SUPPORTED_LANGUAGES.map((language) => (
+                          <SelectItem key={language} value={language}>
+                            {language}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {!networkPrinterLanguageSupported && (
+                    <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                      This profile currently uses <strong>{networkPrinterForm.commandLanguage}</strong>, which is not allowed for
+                      network-direct dispatch. Change it to ZPL, TSPL, EPL, or CPCL before saving or testing.
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Resource path</Label>
+                      <Input
+                        value={networkPrinterForm.resourcePath}
+                        onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, resourcePath: e.target.value }))}
+                        placeholder="/ipp/print"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Printer URI (optional)</Label>
+                      <Input
+                        value={networkPrinterForm.printerUri}
+                        onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, printerUri: e.target.value }))}
+                        placeholder="ipps://canon.local:631/ipp/print"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Delivery mode</Label>
+                      <Select
+                        value={networkPrinterForm.deliveryMode}
+                        onValueChange={(value) =>
+                          setNetworkPrinterForm((prev) => ({ ...prev, deliveryMode: value as NonNullable<RegisteredPrinterRow["deliveryMode"]> }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Delivery mode" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="DIRECT">Backend direct</SelectItem>
+                          <SelectItem value="SITE_GATEWAY">Site gateway</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-end">
+                      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(networkPrinterForm.tlsEnabled)}
+                          onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, tlsEnabled: e.target.checked }))}
+                        />
+                        Prefer TLS / IPPS
+                      </label>
+                    </div>
+                  </div>
+                  {networkPrinterForm.deliveryMode === "SITE_GATEWAY" && (
+                    <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                      <div>Site-gateway mode keeps the printer on a private LAN. The install-once workstation service pulls jobs outbound and never requires inbound firewall holes.</div>
+                      {editingPrinterId && (
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(networkPrinterForm.rotateGatewaySecret)}
+                            onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, rotateGatewaySecret: e.target.checked }))}
+                          />
+                          Rotate gateway secret on save
+                        </label>
+                      )}
+                      {gatewayProvisioningSecret && (
+                        <div className="space-y-2 rounded-lg border border-amber-300 bg-white/70 p-3 text-[11px]">
+                          <div className="font-medium text-foreground">One-time gateway bootstrap secret</div>
+                          <div className="break-all font-mono text-foreground">{gatewayProvisioningSecret}</div>
+                          <div>Provision this secret into the workstation connector service once. It will not be shown again.</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
               <div className="flex flex-wrap justify-end gap-2">
                 {editingPrinterId && (
@@ -921,12 +1130,15 @@ export default function PrinterDiagnostics() {
                     Cancel edit
                   </Button>
                 )}
-                <Button onClick={() => void saveNetworkPrinter()} disabled={savingNetworkPrinter || !networkPrinterLanguageSupported}>
+                <Button
+                  onClick={() => void saveNetworkPrinter()}
+                  disabled={savingNetworkPrinter || (networkPrinterForm.connectionType === "NETWORK_DIRECT" && !networkPrinterLanguageSupported)}
+                >
                   {savingNetworkPrinter ? "Saving..." : editingPrinterId ? "Update printer" : "Register printer"}
                 </Button>
               </div>
               <div className="text-xs text-muted-foreground">
-                Network-direct printing is restricted to registered IP/port targets only. Freeform socket destinations are not allowed. Direct dispatch accepts only ZPL, TSPL, EPL, and CPCL; use the local agent for other printer languages. Removing a saved profile frees that host and port for a new registered connection.
+                NETWORK_DIRECT is restricted to registered IP/port targets only and supports ZPL, TSPL, EPL, and CPCL. NETWORK_IPP is for AirPrint and IPP Everywhere endpoints and can run either backend-direct or through a site gateway for private-LAN deployments.
               </div>
             </CardContent>
           </Card>
@@ -972,10 +1184,10 @@ export default function PrinterDiagnostics() {
 
             {detectedPrinters.length === 0 ? (
               <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
-                {preferredNetworkDirectPrinter ? (
+                {preferredManagedNetworkPrinter ? (
                   <>
-                    No local-agent printers were reported. The registered network-direct printer
-                    <span className="mx-1 font-medium text-foreground">{preferredNetworkDirectPrinter.name}</span>
+                    No local-agent printers were reported. The registered network printer
+                    <span className="mx-1 font-medium text-foreground">{preferredManagedNetworkPrinter.name}</span>
                     can still be used from batch operations once it validates successfully.
                   </>
                 ) : (
