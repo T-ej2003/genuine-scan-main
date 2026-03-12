@@ -104,7 +104,7 @@ Purpose: make sure the selected printer is valid before you start a print job.
 
 ### 6.2 For local-agent printers
 Check these items in order:
-1. The local print agent is running on the workstation.
+1. The MSCQR Workstation Connector is installed once on the workstation and auto-starting at login.
 2. The operating system already sees the printer.
 3. The panel shows at least one discovered printer.
 4. Select the active workstation printer if needed.
@@ -116,6 +116,14 @@ Check these items in order:
 2. Review the IP address, TCP port, and supported command language:
    `ZPL`, `TSPL`, `EPL`, or `CPCL`.
 3. If the profile shows `Needs validation`, `Offline`, or `Blocked`, open `Printer Diagnostics` and correct the profile before printing.
+
+### 6.4 For network IPP printers
+1. Confirm the selected profile uses `NETWORK_IPP`.
+2. Review the printer URI or host, port, and resource path.
+3. Prefer `ipps://` when the device supports TLS.
+4. Use `Backend direct` only when the MSCQR backend can safely reach the printer.
+5. Use `Site gateway` when the printer remains inside a private manufacturer LAN and should not be exposed inbound.
+6. If the profile shows `Offline`, `Blocked`, or `Gateway offline`, open `Printer Diagnostics` and re-run validation before printing.
 
 ![Printer Diagnostics](../public/docs/manufacturer-printer-diagnostics.png)
 
@@ -135,11 +143,12 @@ Purpose: create controlled print jobs for the batches assigned to your manufactu
 3. Enter `Quantity to print`.
 4. In `Registered printer profile`, select the correct printer profile.
 5. Confirm the dispatch mode shown by the system:
-   `Local agent` or `Network-direct`.
+   `Local agent`, `Network-direct`, or `Network IPP`.
 6. If the profile is `Local agent`, confirm:
    active workstation printer, print path, label language, and any optional calibration fields.
 7. If the profile is `Network-direct`, review the network printer summary and continue only when the registered profile status is `READY`.
-8. Select `Create Print Job & Start Dispatch`.
+8. If the profile is `Network IPP`, review whether it is using `Backend direct` or `Site gateway` and continue only when the profile status is `READY`.
+9. Select `Create Print Job & Start Dispatch`.
 
 Current system behavior:
 - secure direct-print is used

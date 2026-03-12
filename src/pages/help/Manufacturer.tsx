@@ -70,7 +70,7 @@ export default function ManufacturerHelp() {
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">
                   <li>After job creation, MSCQR dispatches approved payloads through the selected printer profile.</li>
-                  <li>Local-agent jobs stay tied to the workstation printer. Network-direct jobs are sent from the backend to the registered IP/port target.</li>
+                  <li>Local-agent jobs stay tied to the workstation printer. Network-direct jobs go to registered raw LAN label printers. Network IPP jobs send standards-based PDF jobs to AirPrint or IPP Everywhere printers.</li>
                   <li>Printed status updates as the job confirms on completion.</li>
                 </ol>
               </CardContent>
@@ -103,7 +103,8 @@ export default function ManufacturerHelp() {
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">
-                  <li>Install and start the local MSCQR print agent on the workstation that will print.</li>
+                  <li>Install the signed MSCQR Workstation Connector once on the workstation that will print.</li>
+                  <li>Confirm it is configured to auto-start at login and run in the background.</li>
                   <li>Make sure the operating system already lists the printer and driver correctly.</li>
                   <li>Open <Badge variant="outline">http://127.0.0.1:17866/status</Badge> on that workstation.</li>
                   <li>Confirm the response lists at least one printer before returning to MSCQR.</li>
@@ -131,7 +132,7 @@ export default function ManufacturerHelp() {
               <CardTitle className="text-base">Printer compatibility matrix</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted-foreground">
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-3 md:grid-cols-3">
                 <div className="rounded-xl border bg-muted/20 p-4">
                   <div className="font-semibold text-foreground">LOCAL_AGENT</div>
                   <p className="mt-2">
@@ -147,10 +148,17 @@ export default function ManufacturerHelp() {
                     and <strong>CPCL</strong>.
                   </p>
                 </div>
+                <div className="rounded-xl border bg-muted/20 p-4">
+                  <div className="font-semibold text-foreground">NETWORK_IPP</div>
+                  <p className="mt-2">
+                    Use this for AirPrint and IPP Everywhere printers. Choose backend-direct when the app server can
+                    reach the printer, or site gateway when the printer remains inside a private manufacturer LAN.
+                  </p>
+                </div>
               </div>
               <p className="text-xs">
-                If a printer uses SBPL, ESC/POS, or another language, keep it on the local-agent path until a direct
-                adapter is added.
+                If a printer uses SBPL, ESC/POS, or another driver-dependent path, keep it on LOCAL_AGENT. Pure browser
+                printing is intentionally not the production path because secure silent printer access is not exposed by the web platform.
               </p>
             </CardContent>
           </Card>
@@ -168,7 +176,7 @@ export default function ManufacturerHelp() {
             <DocScreenshot
               filename="manufacturer-printer-diagnostics-annotated.svg"
               alt="Printer diagnostics"
-              caption="Printer Diagnostics: choose LOCAL_AGENT vs NETWORK_DIRECT and validate registered profiles."
+              caption="Printer Diagnostics: choose LOCAL_AGENT, NETWORK_DIRECT, or NETWORK_IPP and validate registered profiles."
             />
             <DocScreenshot
               filename="manufacturer-print-status.png"

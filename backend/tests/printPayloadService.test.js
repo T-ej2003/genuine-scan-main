@@ -22,6 +22,10 @@ const run = () => {
     resolvePayloadType({ connectionType: "NETWORK_DIRECT", commandLanguage: "AUTO" }) === "ZPL",
     "Network-direct AUTO printers should still default to ZPL payloads"
   );
+  assert(
+    resolvePayloadType({ connectionType: "NETWORK_IPP", commandLanguage: "AUTO" }) === "PDF",
+    "Network IPP printers should resolve to PDF payloads"
+  );
 
   assert(supportsNetworkDirectPayloadType("ZPL"), "ZPL should be allowed for network-direct dispatch");
   assert(supportsNetworkDirectPayloadType("TSPL"), "TSPL should be allowed for network-direct dispatch");

@@ -75,7 +75,7 @@ export default function RolesPermissions() {
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  Operates production: create direct-print jobs, request one-time render tokens via print agent, and update print status for assigned batches only.
+                  Operates production: create controlled print jobs, request one-time render tokens through the workstation connector when needed, and update print status for assigned batches only.
                 </p>
                 <p className="text-xs">
                   Login role: <span className="font-mono">MANUFACTURER</span> (legacy aliases map to this role).

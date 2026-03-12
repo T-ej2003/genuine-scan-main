@@ -10,6 +10,7 @@ import { logger } from "./utils/logger";
 import { startSecurityEventOutboxWorker, stopSecurityEventOutboxWorker } from "./services/siemOutboxService";
 import { startCompliancePackScheduler, stopCompliancePackScheduler } from "./services/compliancePackService";
 import { resumePendingNetworkDirectJobs } from "./services/networkDirectPrintService";
+import { resumePendingNetworkIppJobs } from "./services/networkIppPrintService";
 
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -218,6 +219,9 @@ const server = app.listen(PORT, () => {
   startCompliancePackScheduler();
   void resumePendingNetworkDirectJobs().catch((error) => {
     logger.error("Failed to resume pending network-direct jobs", { error: error?.message || error });
+  });
+  void resumePendingNetworkIppJobs().catch((error) => {
+    logger.error("Failed to resume pending network IPP jobs", { error: error?.message || error });
   });
 });
 

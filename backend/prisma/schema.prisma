@@ -52,6 +52,7 @@ enum PrintJobStatus {
 enum PrinterConnectionType {
   LOCAL_AGENT
   NETWORK_DIRECT
+  NETWORK_IPP
 }
 
 enum PrinterCommandLanguage {
@@ -68,9 +69,11 @@ enum PrinterCommandLanguage {
 enum PrintDispatchMode {
   LOCAL_AGENT
   NETWORK_DIRECT
+  NETWORK_IPP
 }
 
 enum PrintPayloadType {
+  PDF
   ZPL
   TSPL
   SBPL
@@ -79,6 +82,11 @@ enum PrintPayloadType {
   ESC_POS
   JSON
   OTHER
+}
+
+enum PrinterDeliveryMode {
+  DIRECT
+  SITE_GATEWAY
 }
 
 enum PrintSessionStatus {
@@ -802,7 +810,17 @@ model Printer {
   commandLanguage PrinterCommandLanguage @default(AUTO)
 
   ipAddress String?
+  host String?
   port Int?
+  resourcePath String?
+  tlsEnabled Boolean @default(false)
+  printerUri String?
+  deliveryMode PrinterDeliveryMode @default(DIRECT)
+  gatewayId String?
+  gatewaySecretHash String?
+  gatewayLastSeenAt DateTime?
+  gatewayStatus String?
+  gatewayLastError String?
 
   nativePrinterId String?
   agentId String?
@@ -844,9 +862,12 @@ model Printer {
   @@unique([printerRegistrationId, nativePrinterId])
   @@unique([licenseeId, ipAddress, port])
   @@index([connectionType, isActive])
+  @@index([connectionType, deliveryMode, isActive])
   @@index([orgId, isActive])
   @@index([licenseeId, isActive])
+  @@index([licenseeId, host, port])
   @@index([assignedUserId, isActive])
+  @@index([gatewayId, isActive])
 }
 
 model PrinterAttestation {

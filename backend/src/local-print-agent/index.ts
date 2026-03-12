@@ -11,6 +11,7 @@ import {
   type AgentState,
   type CalibrationProfile,
 } from "./state";
+import { startGatewayWorker } from "./gateway";
 
 const app = express();
 
@@ -310,4 +311,5 @@ app.post("/print", async (req, res) => {
 
 app.listen(PORT, HOST, () => {
   console.log(`MSCQR local print agent listening on http://${HOST}:${PORT}`);
+  startGatewayWorker();
 });

@@ -5,22 +5,27 @@ import {
   PrintJobStatus,
   PrintItemEventType,
   PrintItemState,
-  PrintSessionStatus,
   PrintPayloadType,
+  PrintSessionStatus,
   PrinterConnectionType,
   QRStatus,
 } from "@prisma/client";
+import { createHash } from "crypto";
 
 import prisma from "../config/database";
+import { renderPdfLabelBuffer } from "../printing/pdfLabel";
+import { submitPdfToIppPrinter } from "../printing/ippClient";
 import { logger } from "../utils/logger";
-import { sendRawPayloadToNetworkPrinter } from "./networkPrinterSocketService";
-import { buildApprovedPrintPayload, supportsNetworkDirectPayload } from "./printPayloadService";
-import { failStopPrintSession, finalizePrintSessionIfReady, getOrCreatePrintSession, OPEN_PRINT_STATES } from "./printLifecycleService";
 import { createAuditLog } from "./auditService";
 import { createRoleNotifications, createUserNotification } from "./notificationService";
+import { buildApprovedPrintContext } from "./printPayloadService";
+import { failStopPrintSession, finalizePrintSessionIfReady, getOrCreatePrintSession, OPEN_PRINT_STATES } from "./printLifecycleService";
 
 const activeDispatches = new Set<string>();
-const NETWORK_DIRECT_CHUNK_SIZE = Math.max(1, Math.min(250, Number(process.env.NETWORK_DIRECT_CHUNK_SIZE || 25) || 25));
+const NETWORK_IPP_CHUNK_SIZE = Math.max(1, Math.min(100, Number(process.env.NETWORK_IPP_CHUNK_SIZE || 10) || 10));
+const GATEWAY_HEARTBEAT_TTL_MS = Math.max(10_000, Math.min(10 * 60_000, Number(process.env.PRINT_GATEWAY_HEARTBEAT_TTL_MS || 45_000) || 45_000));
+
+const sha256Hex = (value: Buffer | string) => createHash("sha256").update(value).digest("hex");
 
 const notifySystemPrintEvent = async (params: {
   licenseeId?: string | null;
@@ -70,7 +75,7 @@ const notifySystemPrintEvent = async (params: {
   ]);
 };
 
-const loadNetworkDispatchJob = async (jobId: string) => {
+const loadIppDispatchJob = async (jobId: string) => {
   return prisma.printJob.findUnique({
     where: { id: jobId },
     include: {
@@ -90,13 +95,12 @@ const markJobSent = async (jobId: string) => {
 };
 
 const ensureSafeResumeState = async (sessionId: string) => {
-  const ambiguous = await prisma.printItem.count({
+  return prisma.printItem.count({
     where: {
       printSessionId: sessionId,
       state: { in: [PrintItemState.ISSUED, PrintItemState.AGENT_ACKED, PrintItemState.PRINT_CONFIRMED] },
     },
   });
-  return ambiguous;
 };
 
 const reserveNextChunk = async (params: { sessionId: string; actorUserId: string; chunkSize: number }) => {
@@ -133,19 +137,14 @@ const reserveNextChunk = async (params: { sessionId: string; actorUserId: string
 
     for (const [index, row] of rows.entries()) {
       const updated = await tx.printItem.updateMany({
-        where: {
-          id: row.id,
-          state: PrintItemState.RESERVED,
-        },
+        where: { id: row.id, state: PrintItemState.RESERVED },
         data: {
           state: PrintItemState.ISSUED,
           issuedAt: now,
           issueSequence: startingSequence + index + 1,
         },
       });
-      if (updated.count === 0) {
-        throw new Error("PRINT_ITEM_RESERVE_CONFLICT");
-      }
+      if (updated.count === 0) throw new Error("PRINT_ITEM_RESERVE_CONFLICT");
     }
 
     await tx.printItemEvent.createMany({
@@ -156,7 +155,7 @@ const reserveNextChunk = async (params: { sessionId: string; actorUserId: string
         nextState: PrintItemState.ISSUED,
         actorUserId: params.actorUserId,
         details: {
-          dispatchMode: PrintDispatchMode.NETWORK_DIRECT,
+          dispatchMode: PrintDispatchMode.NETWORK_IPP,
         },
       })),
     });
@@ -172,7 +171,7 @@ const reserveNextChunk = async (params: { sessionId: string; actorUserId: string
   });
 };
 
-const confirmNetworkPrintedItem = async (params: {
+const confirmIppPrintedItem = async (params: {
   sessionId: string;
   jobId: string;
   batchId: string;
@@ -183,9 +182,10 @@ const confirmNetworkPrintedItem = async (params: {
     code: string;
     qrCode: { status: QRStatus };
   };
-  payloadType: PrintPayloadType;
   payloadHash: string;
   bytesWritten: number;
+  ippJobId?: number | null;
+  metadata?: Record<string, unknown>;
 }) => {
   const now = new Date();
   return prisma.$transaction(async (tx) => {
@@ -197,7 +197,7 @@ const confirmNetworkPrintedItem = async (params: {
         attemptCount: { increment: 1 },
       },
     });
-    if (acked.count === 0) throw new Error("NETWORK_DIRECT_ACK_CONFLICT");
+    if (acked.count === 0) throw new Error("NETWORK_IPP_ACK_CONFLICT");
 
     await tx.printItemEvent.create({
       data: {
@@ -207,10 +207,12 @@ const confirmNetworkPrintedItem = async (params: {
         nextState: PrintItemState.AGENT_ACKED,
         actorUserId: params.actorUserId,
         details: {
-          dispatchMode: PrintDispatchMode.NETWORK_DIRECT,
-          payloadType: params.payloadType,
+          dispatchMode: PrintDispatchMode.NETWORK_IPP,
+          payloadType: PrintPayloadType.PDF,
           payloadHash: params.payloadHash,
           bytesWritten: params.bytesWritten,
+          ippJobId: params.ippJobId || null,
+          ...(params.metadata || {}),
         },
       },
     });
@@ -222,7 +224,7 @@ const confirmNetworkPrintedItem = async (params: {
         printConfirmedAt: now,
       },
     });
-    if (confirmed.count === 0) throw new Error("NETWORK_DIRECT_CONFIRM_CONFLICT");
+    if (confirmed.count === 0) throw new Error("NETWORK_IPP_CONFIRM_CONFLICT");
 
     await tx.printItemEvent.create({
       data: {
@@ -232,10 +234,12 @@ const confirmNetworkPrintedItem = async (params: {
         nextState: PrintItemState.PRINT_CONFIRMED,
         actorUserId: params.actorUserId,
         details: {
-          dispatchMode: PrintDispatchMode.NETWORK_DIRECT,
-          payloadType: params.payloadType,
+          dispatchMode: PrintDispatchMode.NETWORK_IPP,
+          payloadType: PrintPayloadType.PDF,
           payloadHash: params.payloadHash,
           bytesWritten: params.bytesWritten,
+          ippJobId: params.ippJobId || null,
+          ...(params.metadata || {}),
         },
       },
     });
@@ -254,7 +258,7 @@ const confirmNetworkPrintedItem = async (params: {
     });
 
     if (qrUpdated.count === 0 && params.item.qrCode.status !== QRStatus.PRINTED) {
-      throw new Error("NETWORK_DIRECT_QR_NOT_PRINTABLE");
+      throw new Error("NETWORK_IPP_QR_NOT_PRINTABLE");
     }
 
     await tx.printSession.update({
@@ -275,128 +279,26 @@ const confirmNetworkPrintedItem = async (params: {
   });
 };
 
-export const getPrintJobOperationalView = async (params: { jobId: string; userId: string }) => {
-  const job = await prisma.printJob.findFirst({
-    where: {
-      id: params.jobId,
-      manufacturerId: params.userId,
-    },
-    include: {
-      batch: { select: { id: true, name: true, licenseeId: true } },
-      printer: {
-        select: {
-          id: true,
-          name: true,
-          connectionType: true,
-          commandLanguage: true,
-          ipAddress: true,
-          host: true,
-          port: true,
-          resourcePath: true,
-          tlsEnabled: true,
-          printerUri: true,
-          deliveryMode: true,
-          nativePrinterId: true,
-        },
-      },
-      printSession: {
-        select: {
-          id: true,
-          status: true,
-          totalItems: true,
-          issuedItems: true,
-          confirmedItems: true,
-          frozenItems: true,
-          failedReason: true,
-          startedAt: true,
-          completedAt: true,
-        },
-      },
-    },
-  });
-  if (!job) return null;
-
-  const stateCounts = await prisma.printItem.groupBy({
-    by: ["state"],
-    where: { printSessionId: job.printSession?.id || "__missing__" },
-    _count: { _all: true },
-  });
-  const counts = stateCounts.reduce<Record<string, number>>((acc, row) => {
-    acc[row.state] = row._count._all;
-    return acc;
-  }, {});
-  const remainingToPrint = job.printSession?.id ? await prisma.printItem.count({ where: { printSessionId: job.printSession.id, state: { in: OPEN_PRINT_STATES } } }) : 0;
-
-  return {
-    id: job.id,
-    jobNumber: job.jobNumber,
-    status: job.status,
-    printMode: job.printMode,
-    quantity: job.quantity,
-    itemCount: job.itemCount || job.quantity,
-    failureReason: job.failureReason,
-    createdAt: job.createdAt,
-    updatedAt: job.updatedAt,
-    sentAt: job.sentAt,
-    confirmedAt: job.confirmedAt,
-    completedAt: job.completedAt,
-    batch: job.batch,
-    printer: job.printer,
-    session: {
-      ...(job.printSession || null),
-      remainingToPrint,
-      counts,
-    },
-  };
+export const isGatewayFresh = (lastSeenAt?: Date | string | null) => {
+  if (!lastSeenAt) return false;
+  const parsed = new Date(lastSeenAt);
+  if (Number.isNaN(parsed.getTime())) return false;
+  return Date.now() - parsed.getTime() <= GATEWAY_HEARTBEAT_TTL_MS;
 };
 
-export const listPrintJobsForManufacturer = async (params: {
-  userId: string;
-  batchId?: string;
-  limit?: number;
-}) => {
-  const jobs = await prisma.printJob.findMany({
-    where: {
-      manufacturerId: params.userId,
-      ...(params.batchId ? { batchId: params.batchId } : {}),
-    },
-    include: {
-      batch: { select: { id: true, name: true } },
-      printer: {
-        select: {
-          id: true,
-          name: true,
-          connectionType: true,
-          commandLanguage: true,
-          ipAddress: true,
-          host: true,
-          port: true,
-          resourcePath: true,
-          tlsEnabled: true,
-          printerUri: true,
-          deliveryMode: true,
-        },
-      },
-      printSession: { select: { id: true, status: true, totalItems: true, confirmedItems: true, frozenItems: true, failedReason: true } },
-    },
-    orderBy: [{ createdAt: "desc" }],
-    take: Math.max(1, Math.min(100, params.limit || 20)),
-  });
-
-  return jobs;
-};
-
-const runNetworkDirectDispatch = async (jobId: string, actorUserId: string) => {
-  const job = await loadNetworkDispatchJob(jobId);
+const runNetworkIppDispatch = async (jobId: string, actorUserId: string) => {
+  const job = await loadIppDispatchJob(jobId);
   if (!job) throw new Error("PRINT_JOB_NOT_FOUND");
-  if (!job.printer || job.printer.connectionType !== PrinterConnectionType.NETWORK_DIRECT) {
-    throw new Error("PRINT_JOB_NOT_NETWORK_DIRECT");
+  if (!job.printer || job.printer.connectionType !== PrinterConnectionType.NETWORK_IPP) {
+    throw new Error("PRINT_JOB_NOT_NETWORK_IPP");
   }
-  if (!job.printer.ipAddress || !job.printer.port) {
-    throw new Error("NETWORK_PRINTER_CONFIGURATION_INVALID");
-  }
-  if (!supportsNetworkDirectPayload(job.printer as any)) {
-    throw new Error("NETWORK_DIRECT_LANGUAGE_NOT_SUPPORTED");
+  if (job.printer.deliveryMode === "SITE_GATEWAY") {
+    logger.info("Skipping direct NETWORK_IPP dispatch for gateway-backed printer", {
+      jobId,
+      printerId: job.printer.id,
+      gatewayId: job.printer.gatewayId || null,
+    });
+    return;
   }
 
   const session = await getOrCreatePrintSession({
@@ -410,7 +312,7 @@ const runNetworkDirectDispatch = async (jobId: string, actorUserId: string) => {
   });
 
   if (session.status !== PrintSessionStatus.ACTIVE) {
-    logger.info("Skipping network direct dispatch for inactive session", { jobId, sessionId: session.id, status: session.status });
+    logger.info("Skipping network IPP dispatch for inactive session", { jobId, sessionId: session.id, status: session.status });
     return;
   }
 
@@ -422,8 +324,8 @@ const runNetworkDirectDispatch = async (jobId: string, actorUserId: string) => {
       batchId: job.batchId,
       licenseeId: job.batch.licenseeId || null,
       actorUserId,
-      reason: `Network-direct dispatcher resumed with ${ambiguous} ambiguous in-flight items.`,
-      metadata: { dispatchMode: PrintDispatchMode.NETWORK_DIRECT },
+      reason: `Network IPP dispatcher resumed with ${ambiguous} ambiguous in-flight items.`,
+      metadata: { dispatchMode: PrintDispatchMode.NETWORK_IPP },
     });
     return;
   }
@@ -435,7 +337,7 @@ const runNetworkDirectDispatch = async (jobId: string, actorUserId: string) => {
     const reservedItems = await reserveNextChunk({
       sessionId: session.id,
       actorUserId,
-      chunkSize: NETWORK_DIRECT_CHUNK_SIZE,
+      chunkSize: NETWORK_IPP_CHUNK_SIZE,
     });
 
     if (!reservedItems.length) {
@@ -452,8 +354,8 @@ const runNetworkDirectDispatch = async (jobId: string, actorUserId: string) => {
         batchId: job.batchId,
         licenseeId: job.batch.licenseeId || null,
         actorUserId,
-        reason: `Network-direct dispatch stalled with ${remaining} remaining items but no reservable labels.`,
-        metadata: { dispatchMode: PrintDispatchMode.NETWORK_DIRECT },
+        reason: `Network IPP dispatch stalled with ${remaining} remaining items but no reservable labels.`,
+        metadata: { dispatchMode: PrintDispatchMode.NETWORK_IPP },
       });
       return;
     }
@@ -466,54 +368,48 @@ const runNetworkDirectDispatch = async (jobId: string, actorUserId: string) => {
           batchId: job.batchId,
           licenseeId: job.batch.licenseeId || null,
           actorUserId,
-          reason: `QR ${item.code} is not in ACTIVATED state for network direct printing.`,
+          reason: `QR ${item.code} is not in ACTIVATED state for network IPP printing.`,
           printItemId: item.id,
-          metadata: { dispatchMode: PrintDispatchMode.NETWORK_DIRECT },
+          metadata: { dispatchMode: PrintDispatchMode.NETWORK_IPP },
         });
         return;
       }
 
-      let payload;
       try {
-        payload = buildApprovedPrintPayload({
-          printer: job.printer as any,
+        const context = buildApprovedPrintContext({
           qr: item.qrCode,
           manufacturerId: job.manufacturerId,
-          printJobId: job.id,
-          printItemId: item.id,
-          jobNumber: job.jobNumber,
           reprintOfJobId: job.reprintOfJobId,
         });
-      } catch (error: any) {
-        await failStopPrintSession({
-          printSessionId: session.id,
-          printJobId: job.id,
-          batchId: job.batchId,
-          licenseeId: job.batch.licenseeId || null,
-          actorUserId,
-          reason: error?.message || `Payload generation failed for ${item.code}`,
-          printItemId: item.id,
-          metadata: { dispatchMode: PrintDispatchMode.NETWORK_DIRECT },
+        const pdf = await renderPdfLabelBuffer({
+          code: item.code,
+          scanUrl: context.scanUrl,
+          previewLabel: context.previewLabel,
+          calibrationProfile: (job.printer.calibrationProfile as Record<string, unknown> | null) || null,
         });
-        return;
-      }
-
-      try {
-        const socketResult = await sendRawPayloadToNetworkPrinter({
-          ipAddress: job.printer.ipAddress,
-          port: job.printer.port,
-          payload: payload.payloadContent,
+        const payloadHash = sha256Hex(pdf);
+        const ippResult = await submitPdfToIppPrinter({
+          profile: {
+            host: job.printer.host,
+            port: job.printer.port,
+            resourcePath: job.printer.resourcePath,
+            tlsEnabled: job.printer.tlsEnabled,
+            printerUri: job.printer.printerUri,
+          },
+          pdf,
+          jobName: `${job.jobNumber || "MSCQR"}-${item.code}`,
+          requestingUserName: job.manufacturerId,
         });
 
         await prisma.printJob.updateMany({
           where: { id: job.id, payloadHash: null },
           data: {
-            payloadType: payload.payloadType,
-            payloadHash: payload.payloadHash,
+            payloadType: PrintPayloadType.PDF,
+            payloadHash,
           },
         });
 
-        const finalize = await confirmNetworkPrintedItem({
+        const finalize = await confirmIppPrintedItem({
           sessionId: session.id,
           jobId: job.id,
           batchId: job.batchId,
@@ -524,9 +420,13 @@ const runNetworkDirectDispatch = async (jobId: string, actorUserId: string) => {
             code: item.code,
             qrCode: { status: item.qrCode.status },
           },
-          payloadType: payload.payloadType,
-          payloadHash: payload.payloadHash,
-          bytesWritten: socketResult.bytesWritten,
+          payloadHash,
+          bytesWritten: pdf.length,
+          ippJobId: ippResult.jobId,
+          metadata: {
+            printerUri: ippResult.printerUri,
+            endpointUrl: ippResult.endpointUrl,
+          },
         });
 
         await createAuditLog({
@@ -538,11 +438,12 @@ const runNetworkDirectDispatch = async (jobId: string, actorUserId: string) => {
           details: {
             printJobId: job.id,
             printSessionId: session.id,
-            dispatchMode: PrintDispatchMode.NETWORK_DIRECT,
+            dispatchMode: PrintDispatchMode.NETWORK_IPP,
             qrId: item.qrCodeId,
             code: item.code,
-            payloadType: payload.payloadType,
-            payloadHash: payload.payloadHash,
+            payloadType: PrintPayloadType.PDF,
+            payloadHash,
+            ippJobId: ippResult.jobId,
             remainingToPrint: finalize.remainingToPrint,
           },
         });
@@ -553,22 +454,21 @@ const runNetworkDirectDispatch = async (jobId: string, actorUserId: string) => {
           batchId: job.batchId,
           licenseeId: job.batch.licenseeId || null,
           actorUserId,
-          reason: error?.message || `Network printer dispatch failed for ${item.code}`,
+          reason: error?.message || `Network IPP dispatch failed for ${item.code}`,
           printItemId: item.id,
           metadata: {
-            dispatchMode: PrintDispatchMode.NETWORK_DIRECT,
+            dispatchMode: PrintDispatchMode.NETWORK_IPP,
             printerId: job.printer.id,
             printerName: job.printer.name,
           },
         });
 
-        const alertBody = `Network-direct fail-stop activated for ${job.batch.name}. Reason: ${error?.message || "Dispatch error"}`;
         await notifySystemPrintEvent({
           licenseeId: job.batch.licenseeId,
           orgId: job.printer.orgId || null,
           type: "system_print_job_failed",
-          title: "Network-direct fail-stop triggered",
-          body: alertBody,
+          title: "Network IPP fail-stop triggered",
+          body: `Network IPP fail-stop activated for ${job.batch.name}. Reason: ${error?.message || "Dispatch error"}`,
           data: {
             printJobId: job.id,
             printSessionId: session.id,
@@ -597,14 +497,14 @@ const runNetworkDirectDispatch = async (jobId: string, actorUserId: string) => {
         userId: actorUserId,
         licenseeId: job.batch.licenseeId,
         type: "manufacturer_print_job_confirmed",
-        title: "Network-direct job completed",
+        title: "Network IPP job completed",
         body: `All labels were sent and confirmed for ${job.batch.name}.`,
         data: {
           printJobId: job.id,
           batchId: job.batch.id,
           batchName: job.batch.name,
           printedCodes: job.quantity,
-          mode: PrintDispatchMode.NETWORK_DIRECT,
+          mode: PrintDispatchMode.NETWORK_IPP,
           targetRoute: "/batches",
         },
       }),
@@ -612,14 +512,14 @@ const runNetworkDirectDispatch = async (jobId: string, actorUserId: string) => {
         licenseeId: job.batch.licenseeId,
         orgId: job.printer.orgId || null,
         type: "system_print_job_completed",
-        title: "Network-direct print job completed",
-        body: `Network-direct job completed for ${job.batch.name}.`,
+        title: "Network IPP print job completed",
+        body: `Network IPP job completed for ${job.batch.name}.`,
         data: {
           printJobId: job.id,
           batchId: job.batch.id,
           batchName: job.batch.name,
           printedCodes: job.quantity,
-          mode: PrintDispatchMode.NETWORK_DIRECT,
+          mode: PrintDispatchMode.NETWORK_IPP,
           targetRoute: "/batches",
         },
       }),
@@ -627,7 +527,7 @@ const runNetworkDirectDispatch = async (jobId: string, actorUserId: string) => {
   }
 };
 
-export const startNetworkDirectDispatch = async (params: { jobId: string; actorUserId: string }) => {
+export const startNetworkIppDispatch = async (params: { jobId: string; actorUserId: string }) => {
   if (activeDispatches.has(params.jobId)) {
     return { started: false, reason: "already_running" as const };
   }
@@ -635,9 +535,9 @@ export const startNetworkDirectDispatch = async (params: { jobId: string; actorU
   activeDispatches.add(params.jobId);
   setImmediate(async () => {
     try {
-      await runNetworkDirectDispatch(params.jobId, params.actorUserId);
+      await runNetworkIppDispatch(params.jobId, params.actorUserId);
     } catch (error: any) {
-      logger.error("Unhandled network-direct dispatcher error", {
+      logger.error("Unhandled network IPP dispatcher error", {
         jobId: params.jobId,
         error: error?.message || error,
       });
@@ -649,14 +549,20 @@ export const startNetworkDirectDispatch = async (params: { jobId: string; actorU
   return { started: true };
 };
 
-export const resumePendingNetworkDirectJobs = async () => {
+export const resumePendingNetworkIppJobs = async () => {
   const jobs = await prisma.printJob.findMany({
     where: {
-      printMode: PrintDispatchMode.NETWORK_DIRECT,
+      printMode: PrintDispatchMode.NETWORK_IPP,
       status: { in: [PrintJobStatus.PENDING, PrintJobStatus.SENT] },
       printSession: {
         is: {
           status: PrintSessionStatus.ACTIVE,
+        },
+      },
+      printer: {
+        is: {
+          connectionType: PrinterConnectionType.NETWORK_IPP,
+          deliveryMode: "DIRECT",
         },
       },
     },
@@ -670,6 +576,6 @@ export const resumePendingNetworkDirectJobs = async () => {
 
   for (const job of jobs) {
     if (activeDispatches.has(job.id)) continue;
-    await startNetworkDirectDispatch({ jobId: job.id, actorUserId: job.manufacturerId });
+    await startNetworkIppDispatch({ jobId: job.id, actorUserId: job.manufacturerId });
   }
 };

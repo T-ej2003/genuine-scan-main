@@ -126,4 +126,19 @@ describe("printer diagnostics summary", () => {
       })
     ).toBe(true);
   });
+
+  it("also prefers the managed-network summary for NETWORK_IPP profiles when no local printer inventory exists", () => {
+    expect(
+      shouldPreferNetworkDirectSummary({
+        printers: [],
+        networkPrinter: {
+          registryStatus: {
+            state: "READY",
+            summary: "Site gateway online",
+            detail: "Gateway heartbeat is current.",
+          },
+        },
+      })
+    ).toBe(true);
+  });
 });
