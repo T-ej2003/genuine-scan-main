@@ -117,14 +117,14 @@ export const getPrinterDiagnosticSummary = (params: {
   if (remote?.connected && remote?.eligibleForPrinting && remote?.trusted) {
     return {
       state: "trusted_ready",
-      badgeLabel: "Trusted",
-      title: "Trusted printer ready",
-      summary: `${remote.selectedPrinterName || remote.printerName || selectedPrinter?.printerName || "Selected printer"} is connected and ready for direct-print.`,
-      detail: "The local agent is reporting a printer and the backend accepted the latest trust heartbeat.",
+      badgeLabel: "Ready",
+      title: "Printer ready",
+      summary: `${remote.selectedPrinterName || remote.printerName || selectedPrinter?.printerName || "Selected printer"} is connected and ready to print.`,
+      detail: "The workstation connector and MSCQR are both ready for this printer.",
       tone: "success",
       nextSteps: [
-        "Start the print job from the batch workflow.",
-        "Keep the diagnostics page open if you want to monitor heartbeat freshness.",
+        "Continue to the batch workflow when you are ready to print.",
+        "If output alignment changes, review printer setup before the next run.",
       ],
       selectedPrinter,
     };
@@ -133,14 +133,14 @@ export const getPrinterDiagnosticSummary = (params: {
   if (remote?.connected && remote?.eligibleForPrinting && remote?.compatibilityMode) {
     return {
       state: "compatibility_ready",
-      badgeLabel: "Compatibility",
-      title: "Printer ready in compatibility mode",
-      summary: `${remote.selectedPrinterName || remote.printerName || selectedPrinter?.printerName || "Selected printer"} is connected, but advanced trust enrollment is not complete.`,
-      detail: remote.compatibilityReason || remote.error || remote.trustReason || "Compatibility fallback is active.",
+      badgeLabel: "Ready",
+      title: "Printer ready",
+      summary: `${remote.selectedPrinterName || remote.printerName || selectedPrinter?.printerName || "Selected printer"} is connected and can be used.`,
+      detail: sanitizePrinterUiError(remote.compatibilityReason || remote.error || remote.trustReason, "The secure connection is still finishing setup."),
       tone: "warning",
       nextSteps: [
-        "You can print for testing now.",
-        "Enroll the printer identity and mTLS material before relying on this path for hardened production use.",
+        "You can continue printing if this is the expected setup.",
+        "If this state does not clear, ask your setup team to review the printer connection.",
       ],
       selectedPrinter,
     };
@@ -149,14 +149,14 @@ export const getPrinterDiagnosticSummary = (params: {
   if (!params.localAgent.reachable) {
     return {
       state: "agent_unreachable",
-      badgeLabel: "Agent offline",
-      title: "Local print agent is not reachable",
-      summary: "The browser could not reach the workstation print agent at 127.0.0.1:17866.",
-      detail: params.localAgent.error || "Local print agent is unavailable.",
+      badgeLabel: "Connector offline",
+      title: "Workstation connector is not available",
+      summary: "MSCQR could not reach the printing connector on this workstation.",
+      detail: sanitizePrinterUiError(params.localAgent.error, "The workstation connector is unavailable."),
       tone: "danger",
       nextSteps: [
-        "Start or install the local print agent on this workstation.",
-        "Confirm http://127.0.0.1:17866/status opens locally, then refresh diagnostics.",
+        "Make sure the workstation connector is installed and running on this device.",
+        "Refresh this page after the connector and printer are ready.",
       ],
       selectedPrinter,
     };
@@ -167,12 +167,12 @@ export const getPrinterDiagnosticSummary = (params: {
       state: "no_printers_detected",
       badgeLabel: "No printer",
       title: "No printer connection detected",
-      summary: "The local print agent is running, but it did not detect any attached printer.",
-      detail: params.localAgent.error || remote?.error || "No printers were returned by the local agent.",
+      summary: "MSCQR can reach the workstation connector, but no usable printer was detected.",
+      detail: sanitizePrinterUiError(params.localAgent.error || remote?.error, "No printers were reported by the workstation connector."),
       tone: "neutral",
       nextSteps: [
         "Check the operating system printer list and driver installation.",
-        "Reconnect the USB or network printer, then refresh diagnostics.",
+        "Reconnect or power on the printer, then refresh this page.",
       ],
       selectedPrinter,
     };
@@ -184,11 +184,11 @@ export const getPrinterDiagnosticSummary = (params: {
       badgeLabel: "Select printer",
       title: "Choose the active printer",
       summary: "Multiple printers are available and no active printer is selected yet.",
-      detail: "Select the printer you want the local agent to use, then refresh server status.",
+      detail: "Choose the printer you want MSCQR to use before starting a print job.",
       tone: "warning",
       nextSteps: [
-        "Pick the target printer from the diagnostics or batch dialog.",
-        "Apply the selection and refresh the connection state.",
+        "Pick the target printer from this page or from the print dialog.",
+        "Refresh status after selecting the correct printer.",
       ],
       selectedPrinter,
     };
@@ -200,11 +200,11 @@ export const getPrinterDiagnosticSummary = (params: {
       badgeLabel: "Printer offline",
       title: "Selected printer is offline",
       summary: `${selectedPrinter.printerName} is known to the local agent but is currently offline.`,
-      detail: remote?.error || remote?.trustReason || "The printer is attached in configuration but not online for active jobs.",
+      detail: sanitizePrinterUiError(remote?.error || remote?.trustReason, "The printer is configured but is not ready for active jobs."),
       tone: "danger",
       nextSteps: [
         "Power on the printer and clear any paper, toner, label, or queue issue.",
-        "Refresh diagnostics after the printer returns online.",
+        "Refresh this page after the printer returns online.",
       ],
       selectedPrinter,
     };
@@ -213,14 +213,14 @@ export const getPrinterDiagnosticSummary = (params: {
   if (remote?.stale) {
     return {
       state: "heartbeat_stale",
-      badgeLabel: "Heartbeat stale",
-      title: "Printer heartbeat is stale",
-      summary: "A printer was detected, but the backend heartbeat is too old to trust.",
-      detail: remote.error || remote.trustReason || "The server has not received a fresh attestation within the allowed window.",
+      badgeLabel: "Check connection",
+      title: "Printer status needs a refresh",
+      summary: "A printer was detected, but MSCQR needs a fresh connection update before printing.",
+      detail: sanitizePrinterUiError(remote.error || remote.trustReason, "MSCQR has not received a fresh printer update yet."),
       tone: "warning",
       nextSteps: [
-        "Keep the print agent running so it can send a fresh heartbeat.",
-        "Refresh diagnostics and confirm the heartbeat age resets.",
+        "Keep the workstation connector running on this device.",
+        "Refresh this page and confirm the printer becomes ready again.",
       ],
       selectedPrinter,
     };
@@ -235,14 +235,14 @@ export const getPrinterDiagnosticSummary = (params: {
   if (remotePending) {
     return {
       state: "server_sync_pending",
-      badgeLabel: "Sync pending",
-      title: "Printer detected locally, waiting for server readiness",
-      summary: `${selectedPrinter?.printerName || remote?.selectedPrinterName || remote?.printerName || "Printer"} is visible locally, but server registration or attestation is still pending.`,
-      detail: remote?.error || remote?.trustReason || "The backend has not accepted a complete identity heartbeat yet.",
+      badgeLabel: "Preparing",
+      title: "Printer detected, finishing setup",
+      summary: `${selectedPrinter?.printerName || remote?.selectedPrinterName || remote?.printerName || "Printer"} is visible on this device, but MSCQR is still finishing its setup.`,
+      detail: sanitizePrinterUiError(remote?.error || remote?.trustReason, "MSCQR is still syncing this printer connection."),
       tone: "warning",
       nextSteps: [
-        "Keep the local agent open and refresh diagnostics.",
-        "If this persists, verify the agent is sending heartbeat identity fields and selected printer metadata.",
+        "Keep the workstation connector running and refresh this page.",
+        "If this persists, contact your setup or support team.",
       ],
       selectedPrinter,
     };
@@ -250,14 +250,14 @@ export const getPrinterDiagnosticSummary = (params: {
 
   return {
     state: "trust_blocked",
-    badgeLabel: "Trust blocked",
-    title: "Printer trust or heartbeat validation is blocked",
-    summary: `${selectedPrinter?.printerName || remote?.selectedPrinterName || remote?.printerName || "Selected printer"} is visible, but the backend rejected the connection for direct-print.`,
-    detail: remote?.error || remote?.trustReason || "Heartbeat validation failed.",
+    badgeLabel: "Needs attention",
+    title: "Printer connection needs attention",
+    summary: `${selectedPrinter?.printerName || remote?.selectedPrinterName || remote?.printerName || "Selected printer"} is visible, but MSCQR cannot use it yet.`,
+    detail: sanitizePrinterUiError(remote?.error || remote?.trustReason, "This printer connection needs support attention before printing."),
     tone: "danger",
     nextSteps: [
-      "Check whether the agent is sending public key, signature, and certificate fingerprint material.",
-      "Refresh diagnostics after the local agent identity is corrected.",
+      "Review printer setup and connector status before retrying.",
+      "If needed, send a support summary to your support team.",
     ],
     selectedPrinter,
   };
@@ -270,3 +270,4 @@ export const shouldPreferNetworkDirectSummary = (params: {
   const printers = Array.isArray(params.printers) ? params.printers : [];
   return Boolean(params.networkPrinter) && printers.length === 0;
 };
+import { sanitizePrinterUiError } from "@/lib/printer-user-facing";

@@ -26,7 +26,7 @@ The top-right controls show:
 - `Help`
 - user menu with `Account` and `Log out`
 
-The `Printer Diagnostics` page is not in the left menu. Open it from the `Printer` button or from the print-job dialog.
+The `Printer Setup & Support` page is not in the left menu. Open it from the `Printer` button or from the print-job dialog.
 
 ## 3. Access, Onboarding, and Sign-In
 ### 3.1 First-time access from an invite
@@ -100,7 +100,7 @@ Purpose: make sure the selected printer is valid before you start a print job.
 ### 6.1 Open the printer panel
 1. Select the `Printer` button in the top bar.
 2. Review whether the current state says the printer is ready, needs attention, or is blocked.
-3. If the state is not ready, use `Try again (Refresh)`.
+3. If the state is not ready, use `Refresh status`.
 
 ### 6.2 For local-agent printers
 Check these items in order:
@@ -109,23 +109,21 @@ Check these items in order:
 3. The panel shows at least one discovered printer.
 4. Select the active workstation printer if needed.
 5. Use `Switch workstation printer` when you need another device.
-6. Use `Apply calibration` if label size, offsets, DPI, darkness, or speed need to change.
+6. Use `Open Printer Setup` if the workstation printer needs setup or alignment changes.
 
 ### 6.3 For network-direct printers
 1. Confirm the correct registered printer profile is selected.
-2. Review the IP address, TCP port, and supported command language:
-   `ZPL`, `TSPL`, `EPL`, or `CPCL`.
-3. If the profile shows `Needs validation`, `Offline`, or `Blocked`, open `Printer Diagnostics` and correct the profile before printing.
+2. Confirm the printer was saved as a factory label printer and checked successfully.
+3. If the profile shows `Needs validation`, `Offline`, or `Blocked`, open `Printer Setup` and correct the profile before printing.
 
 ### 6.4 For network IPP printers
-1. Confirm the selected profile uses `NETWORK_IPP`.
-2. Review the printer URI or host, port, and resource path.
-3. Prefer `ipps://` when the device supports TLS.
-4. Use `Backend direct` only when the MSCQR backend can safely reach the printer.
-5. Use `Site gateway` when the printer remains inside a private manufacturer LAN and should not be exposed inbound.
-6. If the profile shows `Offline`, `Blocked`, or `Gateway offline`, open `Printer Diagnostics` and re-run validation before printing.
+1. Confirm the selected profile is an office / AirPrint printer.
+2. Confirm the profile has already been checked successfully.
+3. Use `Backend direct` only when the MSCQR backend can safely reach the printer.
+4. Use `Site gateway` when the printer remains inside a private manufacturer LAN and should not be exposed inbound.
+5. If the profile shows `Offline`, `Blocked`, or `Gateway offline`, open `Printer Setup` and re-run the check before printing.
 
-![Printer Diagnostics](../public/docs/manufacturer-printer-diagnostics.png)
+![Printer Setup & Support](../public/docs/manufacturer-printer-diagnostics.png)
 
 ## 7. Batches
 Purpose: create controlled print jobs for the batches assigned to your manufacturer account.
@@ -135,20 +133,17 @@ Purpose: create controlled print jobs for the batches assigned to your manufactu
 2. Use search if needed.
 3. Use the printed filter to switch between `All batches`, `Printed`, and `Not printed`.
 4. Review the batch row for:
-   batch ID, code range, available inventory, printed count, redeemed count, and assigned manufacturer.
+   batch name, code range, available inventory, printed count, redeemed count, and assigned manufacturer.
 
 ### 7.2 Create a print job and start dispatch
 1. In `Batches`, select `Create Print Job` for the batch you need.
 2. Read the printer status panel at the top of the dialog.
 3. Enter `Quantity to print`.
 4. In `Registered printer profile`, select the correct printer profile.
-5. Confirm the dispatch mode shown by the system:
-   `Local agent`, `Network-direct`, or `Network IPP`.
-6. If the profile is `Local agent`, confirm:
-   active workstation printer, print path, label language, and any optional calibration fields.
-7. If the profile is `Network-direct`, review the network printer summary and continue only when the registered profile status is `READY`.
-8. If the profile is `Network IPP`, review whether it is using `Backend direct` or `Site gateway` and continue only when the profile status is `READY`.
-9. Select `Create Print Job & Start Dispatch`.
+5. Confirm the saved printer summary shown by MSCQR.
+6. If the profile is a workstation printer, confirm the active workstation printer is correct.
+7. If the profile is a factory label printer or office / AirPrint printer, continue only when the profile status is `READY`.
+8. Select `Start print`.
 
 Current system behavior:
 - secure direct-print is used
@@ -167,9 +162,9 @@ Current system behavior:
 
 ![Printed Status](../public/docs/manufacturer-print-status.png)
 
-### 7.4 Open diagnostics from the print-job dialog
+### 7.4 Open printer setup from the print-job dialog
 If the printer is not ready:
-1. Select `Open diagnostics` from the dialog.
+1. Select `Open Printer Setup` from the dialog.
 2. Validate the registered profile or workstation printer.
 3. Return to `Batches`.
 4. Start the print job again only after readiness is green or clearly valid.

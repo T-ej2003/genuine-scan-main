@@ -13,6 +13,7 @@ import {
 } from "../services/printerRegistryService";
 import { createAuditLog } from "../services/auditService";
 import { isManufacturerRole, resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
+import { sanitizePrinterActionError } from "../utils/printerUserFacingErrors";
 
 const NETWORK_DIRECT_LANGUAGE_OPTIONS = [
   PrinterCommandLanguage.ZPL,
@@ -99,7 +100,7 @@ export const listPrinters = async (req: AuthRequest, res: Response) => {
     return res.json({ success: true, data: rows });
   } catch (error: any) {
     console.error("listPrinters error:", error);
-    return res.status(500).json({ success: false, error: error?.message || "Internal server error" });
+    return res.status(500).json({ success: false, error: "Printer information is temporarily unavailable." });
   }
 };
 
@@ -151,7 +152,10 @@ export const createNetworkPrinter = async (req: AuthRequest, res: Response) => {
     });
   } catch (error: any) {
     console.error("createNetworkPrinter error:", error);
-    return res.status(400).json({ success: false, error: error?.message || "Bad request" });
+    return res.status(400).json({
+      success: false,
+      error: sanitizePrinterActionError(error?.message, "This printer setup could not be saved."),
+    });
   }
 };
 
@@ -256,7 +260,10 @@ export const updateNetworkPrinter = async (req: AuthRequest, res: Response) => {
     });
   } catch (error: any) {
     console.error("updateNetworkPrinter error:", error);
-    return res.status(400).json({ success: false, error: error?.message || "Bad request" });
+    return res.status(400).json({
+      success: false,
+      error: sanitizePrinterActionError(error?.message, "This printer setup could not be updated."),
+    });
   }
 };
 
@@ -299,7 +306,10 @@ export const testPrinter = async (req: AuthRequest, res: Response) => {
     return res.json({ success: true, data: result });
   } catch (error: any) {
     console.error("testPrinter error:", error);
-    return res.status(400).json({ success: false, error: error?.message || "Bad request" });
+    return res.status(400).json({
+      success: false,
+      error: sanitizePrinterActionError(error?.message, "This printer could not be checked right now."),
+    });
   }
 };
 
@@ -355,6 +365,9 @@ export const deleteNetworkPrinter = async (req: AuthRequest, res: Response) => {
     });
   } catch (error: any) {
     console.error("deleteNetworkPrinter error:", error);
-    return res.status(400).json({ success: false, error: error?.message || "Bad request" });
+    return res.status(400).json({
+      success: false,
+      error: sanitizePrinterActionError(error?.message, "This printer setup could not be removed."),
+    });
   }
 };

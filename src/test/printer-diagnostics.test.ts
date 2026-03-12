@@ -16,7 +16,7 @@ describe("printer diagnostics summary", () => {
     });
 
     expect(summary.state).toBe("agent_unreachable");
-    expect(summary.badgeLabel).toBe("Agent offline");
+    expect(summary.badgeLabel).toBe("Connector offline");
   });
 
   it("flags no printers detected when agent is reachable without printer inventory", () => {
@@ -90,7 +90,7 @@ describe("printer diagnostics summary", () => {
     });
 
     expect(summary.state).toBe("trust_blocked");
-    expect(summary.badgeLabel).toBe("Trust blocked");
+    expect(summary.badgeLabel).toBe("Needs attention");
   });
 
   it("keeps the live local printer summary primary when local inventory exists", () => {

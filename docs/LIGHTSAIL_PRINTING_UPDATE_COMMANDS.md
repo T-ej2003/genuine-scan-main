@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Use these commands on the Lightsail instance after the printing architecture changes are pushed to GitHub.
+Use these commands on the Lightsail instance after the printing architecture and production printer UX cleanup changes are pushed to GitHub.
 
 Update the branch name if you deploy from a branch other than the one shown below.
 

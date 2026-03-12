@@ -124,14 +124,14 @@ describe("DashboardLayout printer connection dialog", () => {
       expect(vi.mocked(apiClient.getLocalPrintAgentStatus)).toHaveBeenCalled();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /agent offline/i }));
+    fireEvent.click(screen.getByRole("button", { name: /connector offline/i }));
 
     await waitFor(() => {
-      expect(screen.getByText("Printer Connection Center")).toBeInTheDocument();
+      expect(screen.getByText("Printing Status")).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/The browser could not reach the workstation print agent/i)).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Try again (Refresh)" }).length).toBeGreaterThan(0);
+    expect(screen.getByText(/switch between connected printers when needed/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Refresh status" }).length).toBeGreaterThan(0);
   });
 
   it("shows first-run workstation printer onboarding for manufacturers", async () => {
@@ -150,6 +150,6 @@ describe("DashboardLayout printer connection dialog", () => {
     expect(screen.getByText("Set up printing on this workstation")).toBeInTheDocument();
     expect(screen.getByText(/The browser cannot install printers, drivers, or native apps by itself/i)).toBeInTheDocument();
     expect(screen.getByText(/If the OS can see the printer, MSCQR will detect it and it will appear automatically/i)).toBeInTheDocument();
-    expect(screen.getByText(/Install the MSCQR local print agent package or workstation service on that same device/i)).toBeInTheDocument();
+    expect(screen.getByText(/Install the MSCQR Workstation Connector on that same device/i)).toBeInTheDocument();
   });
 });

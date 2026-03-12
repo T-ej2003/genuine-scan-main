@@ -157,7 +157,7 @@ export const HELP_KB: HelpKbEntry[] = [
       "4. For **NETWORK_DIRECT**, the backend dispatches directly to the registered raw label printer over LAN/IP.",
       "5. For **NETWORK_IPP**, MSCQR submits standards-based PDF jobs over IPP/IPPS either directly or through a site gateway.",
       "",
-      "Supported network-direct languages today are **ZPL**, **TSPL**, **EPL**, and **CPCL**. Use **Printer Diagnostics** for compatibility, readiness checks, and gateway provisioning.",
+      "Supported network-direct languages today are **ZPL**, **TSPL**, **EPL**, and **CPCL**. Use **Printer Setup** for compatibility, readiness checks, and site connector setup.",
     ].join("\n"),
     linksToRoutes: ["/batches", "/printer-diagnostics", "/help/manufacturer"],
   },

@@ -106,8 +106,8 @@ export default function ManufacturerHelp() {
                   <li>Install the signed MSCQR Workstation Connector once on the workstation that will print.</li>
                   <li>Confirm it is configured to auto-start at login and run in the background.</li>
                   <li>Make sure the operating system already lists the printer and driver correctly.</li>
-                  <li>Open <Badge variant="outline">http://127.0.0.1:17866/status</Badge> on that workstation.</li>
-                  <li>Confirm the response lists at least one printer before returning to MSCQR.</li>
+                  <li>Open <Badge variant="outline">Printer Setup</Badge> in MSCQR and use <Badge variant="outline">Refresh status</Badge>.</li>
+                  <li>Confirm the workstation printer or saved network printer shows a ready state before returning to batches.</li>
                 </ol>
               </CardContent>
             </Card>
@@ -118,10 +118,10 @@ export default function ManufacturerHelp() {
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ul className="list-disc pl-5">
-                  <li><Badge variant="outline">Agent offline</Badge> means the browser cannot reach the local print agent.</li>
-                  <li><Badge variant="outline">No printer connection detected</Badge> means the agent is running but the OS exposed no printer.</li>
-                  <li><Badge variant="outline">Trust blocked</Badge> means the server rejected the latest heartbeat or identity material.</li>
-                  <li>Open <Badge variant="outline">Printer Diagnostics</Badge> to separate those cases and copy the diagnostic snapshot.</li>
+                  <li><Badge variant="outline">Connector unavailable</Badge> means MSCQR cannot detect the workstation connector on that device.</li>
+                  <li><Badge variant="outline">No printer detected</Badge> means the connector is running but the operating system is not exposing a usable printer yet.</li>
+                  <li><Badge variant="outline">Needs attention</Badge> means the saved printer setup or secure connection still needs review.</li>
+                  <li>Open <Badge variant="outline">Printer Setup</Badge> to separate those cases and copy the support summary.</li>
                 </ul>
               </CardContent>
             </Card>
@@ -143,7 +143,7 @@ export default function ManufacturerHelp() {
                 <div className="rounded-xl border bg-muted/20 p-4">
                   <div className="font-semibold text-foreground">NETWORK_DIRECT</div>
                   <p className="mt-2">
-                    Use this for controlled LAN label printers registered by IP and port in Printer Diagnostics.
+                    Use this for controlled LAN label printers saved in Printer Setup.
                     Current direct dispatch support: <strong>ZPL</strong>, <strong>TSPL</strong>, <strong>EPL</strong>,
                     and <strong>CPCL</strong>.
                   </p>
@@ -176,7 +176,7 @@ export default function ManufacturerHelp() {
             <DocScreenshot
               filename="manufacturer-printer-diagnostics-annotated.svg"
               alt="Printer diagnostics"
-              caption="Printer Diagnostics: choose LOCAL_AGENT, NETWORK_DIRECT, or NETWORK_IPP and validate registered profiles."
+              caption="Printer Setup & Support: choose the right printer path, review readiness, and validate saved printer profiles."
             />
             <DocScreenshot
               filename="manufacturer-print-status.png"
@@ -192,7 +192,7 @@ export default function ManufacturerHelp() {
               },
               {
                 filename: "manufacturer-printer-diagnostics-annotated.svg",
-                whereToCapture: "Printer Diagnostics page showing the compatibility matrix and registered printer validation controls.",
+                whereToCapture: "Printer Setup & Support page showing the compatibility matrix and saved printer validation controls.",
               },
               {
                 filename: "manufacturer-print-status.png",
