@@ -13,6 +13,14 @@ describe("printer user-facing helpers", () => {
     );
   });
 
+  it("redacts duplicate printer registration errors", () => {
+    expect(
+      sanitizePrinterUiError(
+        "Invalid `prisma.printer.create()` invocation: Unique constraint failed on the fields: (`licenseeId`, `ipAddress`, `port`)"
+      )
+    ).toBe("A saved printer profile already uses this connection. Open the existing setup to edit it or remove it first.");
+  });
+
   it("builds a redacted support summary", () => {
     const summary = buildPrinterSupportSummary({
       localAgent: {

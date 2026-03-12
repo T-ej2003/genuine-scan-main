@@ -471,7 +471,7 @@ export default function PrinterDiagnostics() {
     if (isNetworkDirect && !isSupportedNetworkDirectLanguage(source.commandLanguage)) {
       toast({
         title: "Unsupported network-direct language",
-        description: "Choose ZPL, TSPL, EPL, or CPCL. Use the local-agent or IPP path for other printer types.",
+        description: "Choose ZPL, TSPL, EPL, or CPCL. Use the workstation or office printer path for other printer types.",
         variant: "destructive",
       });
       return null;
@@ -503,7 +503,7 @@ export default function PrinterDiagnostics() {
         : await apiClient.createNetworkPrinter(payload);
       if (!response.success) {
         toast({
-          title: params?.printerId ? "Update failed" : "Create failed",
+          title: params?.printerId ? "Could not update printer setup" : "Could not save printer setup",
           description: sanitizePrinterUiError(response.error, "Could not save this printer profile."),
           variant: "destructive",
         });
@@ -1214,7 +1214,7 @@ export default function PrinterDiagnostics() {
                     can still be used from batch operations once it validates successfully.
                   </>
                 ) : (
-                  "No printers were reported by the local agent."
+                  "No workstation printers were reported by the connector."
                 )}
               </div>
             ) : (

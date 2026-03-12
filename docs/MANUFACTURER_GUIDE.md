@@ -102,7 +102,7 @@ Purpose: make sure the selected printer is valid before you start a print job.
 2. Review whether the current state says the printer is ready, needs attention, or is blocked.
 3. If the state is not ready, use `Refresh status`.
 
-### 6.2 For local-agent printers
+### 6.2 For workstation-managed printers
 Check these items in order:
 1. The MSCQR Workstation Connector is installed once on the workstation and auto-starting at login.
 2. The operating system already sees the printer.
@@ -209,7 +209,7 @@ Use this order for every production run:
 
 ## 11. Troubleshooting
 - If `Create Print Job` is disabled, confirm the batch still has quantity ready to print.
-- If the printer panel shows no connection, open diagnostics and verify the agent or registered printer profile first.
+- If the printer panel shows no connection, open `Printer Setup` and verify the workstation connector or saved printer profile first.
 - If the wrong workstation printer is selected, switch the active printer before starting the job.
 - If dispatch fails, do not keep retrying blindly. Re-open readiness, validate the profile, and then start a fresh attempt.
 - If the app errors while you are working, use the top-bar `Support` button so diagnostics and a screenshot are attached automatically.

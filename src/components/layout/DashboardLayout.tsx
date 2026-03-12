@@ -1196,7 +1196,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                       openPrinterConnectionDialog();
                     }}
                   >
-                    Open Printer Diagnostics
+                    Open Printer Setup
                   </Button>
                   <Button variant="ghost" onClick={() => navigate(contextualHelpRoute)}>
                     Open Help
@@ -1788,7 +1788,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="text-sm font-semibold text-slate-950">Need setup help?</div>
                   <p className="mt-1 text-sm text-slate-600">
-                    Use Printer Diagnostics for setup and validation. That page is intended for printer registration, guided checks, and support handoff.
+                    Use Printer Setup & Support for setup and validation. That page is intended for printer registration, guided checks, and support handoff.
                   </p>
                   <div className="mt-4 flex flex-wrap gap-2">
                     <Button variant="outline" onClick={() => navigate("/printer-diagnostics")}>

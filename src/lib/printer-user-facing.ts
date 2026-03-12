@@ -16,6 +16,17 @@ export const sanitizePrinterUiError = (raw?: string | null, fallback = "Printing
 
   const value = original.toLowerCase();
 
+  if (
+    hasAny(value, [
+      "unique constraint failed",
+      "duplicate key",
+      "already exists for this endpoint",
+      "already exists for this printer uri",
+      "p2002",
+    ])
+  ) {
+    return "A saved printer profile already uses this connection. Open the existing setup to edit it or remove it first.";
+  }
   if (hasAny(value, ["busy", "conflict", "please retry"])) {
     return "Another printing action is already using this batch. Please wait a moment and try again.";
   }

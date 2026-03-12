@@ -48,6 +48,8 @@ For `LOCAL_AGENT` and site-gateway deployments:
 
 Do not ask end users to run terminal commands to print.
 
+![Printer Setup & Support](../public/docs/manufacturer-printer-diagnostics.png)
+
 ## Register a raw LAN printer
 
 In `Printer Setup`:
@@ -76,6 +78,8 @@ Preferred defaults:
 - resource path `/ipp/print`
 - `ipps://` when supported
 
+![Create Print Job](../public/docs/manufacturer-create-print-job.png)
+
 ## Configure a site gateway
 
 Use this only when the printer is on a private LAN that the MSCQR backend cannot directly reach.
@@ -103,6 +107,16 @@ Before live printing:
 3. The workstation or gateway is online.
 4. A test job succeeds.
 5. The printed count updates in MSCQR.
+
+![Print progress](../public/docs/manufacturer-print-status.png)
+
+## Docker and Lightsail operations note
+
+If MSCQR is deployed on AWS Lightsail with Docker Compose:
+
+- restart and verification should be done with `docker compose`, not `systemctl`
+- the Lightsail browser terminal (`Connect using SSH`) is enough for the update steps
+- confirm the server commit matches your local commit before and after the container refresh
 
 ## Escalation checklist
 

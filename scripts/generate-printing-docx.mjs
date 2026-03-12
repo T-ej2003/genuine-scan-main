@@ -1,7 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
+import {
+  AlignmentType,
+  Document,
+  HeadingLevel,
+  ImageRun,
+  Packer,
+  Paragraph,
+  TextRun,
+} from "docx";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,6 +27,78 @@ const stripInlineMd = (value) =>
     .replace(/`/g, "")
     .replace(/\[(.*?)\]\((.*?)\)/g, "$1 ($2)")
     .trim();
+
+const isLikelyImageLine = (line) => /^!\[[^\]]*\]\([^\)]+\)\s*$/.test(line.trim());
+
+const parseImageLine = (line) => {
+  const match = line.trim().match(/^!\[([^\]]*)\]\(([^\)]+)\)$/);
+  if (!match) return null;
+  return {
+    alt: stripInlineMd(match[1] || "Screenshot"),
+    src: String(match[2] || "").trim(),
+  };
+};
+
+const isPng = (buffer) => {
+  if (!buffer || buffer.length < 24) return false;
+  return buffer.subarray(0, 8).toString("hex") === "89504e470d0a1a0a";
+};
+
+const pngDimensions = (buffer) => {
+  if (!isPng(buffer)) return null;
+  const width = buffer.readUInt32BE(16);
+  const height = buffer.readUInt32BE(20);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  return { width, height };
+};
+
+const fitDimensions = (width, height, maxWidth = 620, maxHeight = 380) => {
+  if (!width || !height) return { width: maxWidth, height: Math.round(maxWidth * 0.6) };
+  const scale = Math.min(maxWidth / width, maxHeight / height, 1);
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+};
+
+const imageParagraphs = (imageSpec, markdownDir) => {
+  const rawSrc = imageSpec.src;
+  const withoutQuery = rawSrc.split("?")[0].split("#")[0];
+  const absPath = path.resolve(markdownDir, withoutQuery);
+
+  if (!fs.existsSync(absPath)) {
+    throw new Error(`Image not found for DOCX generation: ${path.relative(repoRoot, absPath)}`);
+  }
+
+  const data = fs.readFileSync(absPath);
+  const dims = pngDimensions(data);
+  const transformed = fitDimensions(dims?.width, dims?.height);
+
+  return [
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 120, after: 80 },
+      children: [
+        new ImageRun({
+          data,
+          transformation: transformed,
+        }),
+      ],
+    }),
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 220 },
+      children: [
+        new TextRun({
+          text: imageSpec.alt || path.basename(withoutQuery),
+          size: 20,
+          color: "4b5563",
+          italics: true,
+        }),
+      ],
+    }),
+  ];
+};
 
 const codeBlockParagraphs = (lines, language) => {
   const paragraphs = [];
@@ -44,7 +124,7 @@ const codeBlockParagraphs = (lines, language) => {
   return paragraphs;
 };
 
-const markdownToParagraphs = (markdown) => {
+const markdownToParagraphs = (markdown, markdownDir) => {
   const lines = String(markdown).split(/\r?\n/);
   const paragraphs = [];
   let inCodeBlock = false;
@@ -80,6 +160,24 @@ const markdownToParagraphs = (markdown) => {
 
     if (!trimmed) {
       paragraphs.push(new Paragraph({ children: [new TextRun("")] }));
+      continue;
+    }
+
+    if (isLikelyImageLine(trimmed)) {
+      const parsed = parseImageLine(trimmed);
+      if (parsed) {
+        paragraphs.push(...imageParagraphs(parsed, markdownDir));
+        continue;
+      }
+    }
+
+    if (trimmed === "---" || trimmed === "***") {
+      paragraphs.push(
+        new Paragraph({
+          spacing: { before: 120, after: 120 },
+          children: [new TextRun({ text: "________________________________________", color: "9ca3af" })],
+        })
+      );
       continue;
     }
 
@@ -164,7 +262,7 @@ const generateDocx = async (inputPath) => {
   const doc = new Document({
     title: extractTitle(markdown, path.basename(inputPath, ".md")),
     creator: "MSCQR",
-    sections: [{ properties: {}, children: markdownToParagraphs(markdown) }],
+    sections: [{ properties: {}, children: markdownToParagraphs(markdown, path.dirname(inputPath)) }],
   });
   const outputPath = toOutputPath(inputPath);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
