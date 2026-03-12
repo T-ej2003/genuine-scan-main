@@ -22,11 +22,12 @@ import {
   type PrinterConnectionStatusLike,
   type PrinterInventoryRow,
 } from "@/lib/printer-diagnostics";
+import { buildPrinterSupportSummary, getPrinterDispatchLabel, sanitizePrinterUiError } from "@/lib/printer-user-facing";
 
 const EMPTY_LOCAL_AGENT: LocalPrinterAgentSnapshot = {
   reachable: false,
   connected: false,
-  error: "Local print agent has not been checked yet.",
+  error: "Workstation connector has not been checked yet.",
   checkedAt: null,
 };
 
@@ -84,6 +85,11 @@ const buildEmptyNetworkPrinterForm = () => ({
   commandLanguage: "ZPL" as RegisteredPrinterRow["commandLanguage"],
 });
 
+const getManagedSetupTypeLabel = (params: {
+  connectionType?: RegisteredPrinterRow["connectionType"] | null;
+  deliveryMode?: RegisteredPrinterRow["deliveryMode"] | null;
+}) => getPrinterDispatchLabel({ connectionType: params.connectionType, deliveryMode: params.deliveryMode });
+
 export default function PrinterDiagnostics() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -102,6 +108,7 @@ export default function PrinterDiagnostics() {
   const [editingPrinterId, setEditingPrinterId] = useState<string | null>(null);
   const [networkPrinterForm, setNetworkPrinterForm] = useState(buildEmptyNetworkPrinterForm);
   const [gatewayProvisioningSecret, setGatewayProvisioningSecret] = useState<string | null>(null);
+  const [setupFormOpen, setSetupFormOpen] = useState(false);
 
   const networkPrinterLanguageSupported = isSupportedNetworkDirectLanguage(networkPrinterForm.commandLanguage);
 
@@ -212,31 +219,31 @@ export default function PrinterDiagnostics() {
     if (!response.success) {
       toast({
         title: "Printer switch failed",
-        description: response.error || "Could not switch active printer.",
+        description: sanitizePrinterUiError(response.error, "Could not switch the workstation printer."),
         variant: "destructive",
       });
       return;
     }
     toast({
       title: "Printer switched",
-      description: "The local print agent updated the active printer.",
+      description: "The workstation printer has been updated.",
     });
     await loadDiagnostics();
   };
 
-  const copyDiagnostics = async () => {
-    const payload = {
+  const copySupportSummary = async () => {
+    const summary = buildPrinterSupportSummary({
       localAgent,
       remoteStatus,
-      detectedPrinters,
-      selectedPrinterId,
-      registeredPrinters,
-      copiedAt: new Date().toISOString(),
-    };
-    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      selectedPrinterName: effectiveSummary.selectedPrinter?.printerName || remoteStatus?.selectedPrinterName || remoteStatus?.printerName || null,
+      printerSummaryTitle: effectiveSummary.title,
+      printerSummaryBody: effectiveSummary.summary,
+      managedPrinter: preferredManagedNetworkPrinter,
+    });
+    await navigator.clipboard.writeText(summary);
     toast({
-      title: "Diagnostics copied",
-      description: "Printer diagnostics JSON is now in your clipboard.",
+      title: "Support summary copied",
+      description: "A redacted printer support summary is now in your clipboard.",
     });
   };
 
@@ -292,17 +299,12 @@ export default function PrinterDiagnostics() {
   const effectiveSummary = useMemo(() => {
     if (!preferredManagedNetworkPrinter || !preferNetworkDirectSummary) return summary;
 
-    const hostLabel =
-      preferredManagedNetworkPrinter.connectionType === "NETWORK_IPP"
-        ? preferredManagedNetworkPrinter.printerUri ||
-          `${preferredManagedNetworkPrinter.tlsEnabled === false ? "ipp" : "ipps"}://${preferredManagedNetworkPrinter.host || "—"}:${preferredManagedNetworkPrinter.port || 631}${preferredManagedNetworkPrinter.resourcePath || "/ipp/print"}`
-        : `${preferredManagedNetworkPrinter.ipAddress || "—"}:${preferredManagedNetworkPrinter.port || 9100}`;
     const networkLabel =
       preferredManagedNetworkPrinter.connectionType === "NETWORK_IPP"
         ? preferredManagedNetworkPrinter.deliveryMode === "SITE_GATEWAY"
-          ? "Gateway IPP"
-          : "Network IPP"
-        : "Network-direct";
+          ? "Private site printer"
+          : "Office printer"
+        : "Factory printer";
     const pseudoPrinter: PrinterInventoryRow = {
       printerId: preferredManagedNetworkPrinter.id,
       printerName: preferredManagedNetworkPrinter.name,
@@ -329,12 +331,14 @@ export default function PrinterDiagnostics() {
         title: `${networkLabel} printer ready`,
         summary: `${preferredManagedNetworkPrinter.name} is registered and ready for controlled dispatch.`,
         detail:
-          preferredManagedNetworkPrinter.registryStatus?.detail ||
-          `Backend connectivity to ${hostLabel} has already been validated.`,
+          sanitizePrinterUiError(
+            preferredManagedNetworkPrinter.registryStatus?.detail,
+            "This saved printer has already been checked and is ready."
+          ),
         tone: "success" as const,
         nextSteps: [
           "Open the batch workflow and choose the registered network printer profile.",
-          "Use Test again whenever you change the target endpoint or delivery mode.",
+          "Run a fresh check after any setup change.",
         ],
         selectedPrinter: pseudoPrinter,
       };
@@ -347,12 +351,14 @@ export default function PrinterDiagnostics() {
         title: "Network printer profile needs validation",
         summary: `${preferredManagedNetworkPrinter.name} is registered, but readiness has not been validated yet.`,
         detail:
-          preferredManagedNetworkPrinter.registryStatus?.detail ||
-          `Run Test against ${hostLabel} to confirm the endpoint or gateway is reachable.`,
+          sanitizePrinterUiError(
+            preferredManagedNetworkPrinter.registryStatus?.detail,
+            "Run a printer check to confirm this setup is ready."
+          ),
         tone: "warning" as const,
         nextSteps: [
-          "Use the Test button under Registered printer profiles.",
-          "Confirm the printer is reachable on the configured path or that the site gateway is online.",
+          "Use the Check button under Registered printer profiles.",
+          "Confirm the printer or site connector is online, then recheck.",
         ],
         selectedPrinter: pseudoPrinter,
       };
@@ -365,12 +371,14 @@ export default function PrinterDiagnostics() {
         title: "Network printer profile is blocked",
         summary: `${preferredManagedNetworkPrinter.name} cannot be used in its current configuration.`,
         detail:
-          preferredManagedNetworkPrinter.registryStatus?.detail ||
-          "Check the printer profile settings, then validate again.",
+          sanitizePrinterUiError(
+            preferredManagedNetworkPrinter.registryStatus?.detail,
+            "Review the printer setup, then run the check again."
+          ),
         tone: "danger" as const,
         nextSteps: [
-          "Correct the printer profile settings or supported format.",
-          "Retest after correcting the profile.",
+          "Review the printer setup or supported printer type.",
+          "Run the printer check again after updating the profile.",
         ],
         selectedPrinter: pseudoPrinter,
       };
@@ -381,14 +389,16 @@ export default function PrinterDiagnostics() {
         state: "printer_offline" as const,
         badgeLabel: "Offline",
         title: "Network printer is unreachable",
-        summary: `${preferredManagedNetworkPrinter.name} is registered, but ${hostLabel} is not reachable right now.`,
+        summary: `${preferredManagedNetworkPrinter.name} is registered, but it is not reachable right now.`,
         detail:
-          preferredManagedNetworkPrinter.registryStatus?.detail ||
-          "Bring the printer online and run the validation test again.",
+          sanitizePrinterUiError(
+            preferredManagedNetworkPrinter.registryStatus?.detail,
+            "Bring the printer or site connector online, then run the check again."
+          ),
         tone: "danger" as const,
         nextSteps: [
-          "Start the printer or site gateway and confirm the configured endpoint is reachable.",
-          "Run Test again after the socket is reachable.",
+          "Start the printer or site connector and confirm it is online.",
+          "Run the printer check again once the setup is available.",
         ],
         selectedPrinter: pseudoPrinter,
       };
@@ -414,6 +424,7 @@ export default function PrinterDiagnostics() {
     setEditingPrinterId(null);
     setNetworkPrinterForm(buildEmptyNetworkPrinterForm());
     setGatewayProvisioningSecret(null);
+    setSetupFormOpen(false);
   };
 
   const persistNetworkPrinter = async (params?: {
@@ -493,7 +504,7 @@ export default function PrinterDiagnostics() {
       if (!response.success) {
         toast({
           title: params?.printerId ? "Update failed" : "Create failed",
-          description: response.error || "Could not save printer profile.",
+          description: sanitizePrinterUiError(response.error, "Could not save this printer profile."),
           variant: "destructive",
         });
         return null;
@@ -515,7 +526,7 @@ export default function PrinterDiagnostics() {
             (validation.data as any)?.registryStatus?.summary ||
             "Printer profile saved and validated.";
         } else {
-          detail = validation.error || "Printer profile saved, but connectivity validation failed.";
+          detail = sanitizePrinterUiError(validation.error, "Printer profile saved, but the connection still needs attention.");
         }
       }
 
@@ -536,6 +547,7 @@ export default function PrinterDiagnostics() {
       if (params?.resetAfterSave !== false) {
         setEditingPrinterId(null);
         setNetworkPrinterForm(buildEmptyNetworkPrinterForm());
+        setSetupFormOpen(false);
       }
       await loadDiagnostics();
       return { savedPrinterId, validated };
@@ -555,6 +567,7 @@ export default function PrinterDiagnostics() {
   const editNetworkPrinter = (printer: RegisteredPrinterRow) => {
     setEditingPrinterId(printer.id);
     setGatewayProvisioningSecret(null);
+    setSetupFormOpen(true);
     setNetworkPrinterForm({
       connectionType: printer.connectionType,
       name: printer.name || "",
@@ -578,8 +591,8 @@ export default function PrinterDiagnostics() {
       const response = await apiClient.testRegisteredPrinter(printerId);
       if (!response.success) {
         toast({
-          title: "Printer test failed",
-          description: response.error || "Could not validate printer connectivity.",
+          title: "Printer check failed",
+          description: sanitizePrinterUiError(response.error, "Could not confirm this printer right now."),
           variant: "destructive",
         });
         return;
@@ -589,7 +602,7 @@ export default function PrinterDiagnostics() {
         (response.data as any)?.registryStatus?.summary ||
         "Printer validation completed.";
       toast({
-        title: "Printer test complete",
+        title: "Printer check complete",
         description: detail,
       });
       await loadRegisteredPrinters();
@@ -611,7 +624,7 @@ export default function PrinterDiagnostics() {
       if (!response.success) {
         toast({
           title: "Could not remove printer",
-          description: response.error || "The network printer profile could not be removed.",
+          description: sanitizePrinterUiError(response.error, "This printer profile could not be removed."),
           variant: "destructive",
         });
         return;
@@ -633,20 +646,20 @@ export default function PrinterDiagnostics() {
       <div className="space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-3xl font-bold">Printer Diagnostics</h1>
+            <h1 className="text-3xl font-bold">Printer Setup & Support</h1>
             <p className="text-muted-foreground">
-              Separate workstation agent issues, operating-system printer visibility, and backend trust or heartbeat failures.
+              Review printer readiness, guided setup steps, and support-safe status summaries for this workstation.
             </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => void loadDiagnostics()} disabled={loading} className="gap-2">
               <RefreshCw className="h-4 w-4" />
-              {loading ? "Refreshing..." : "Refresh diagnostics"}
+              {loading ? "Refreshing..." : "Refresh status"}
             </Button>
-            <Button variant="outline" onClick={copyDiagnostics} className="gap-2">
+            <Button variant="outline" onClick={copySupportSummary} className="gap-2">
               <Copy className="h-4 w-4" />
-              Copy diagnostics
+              Copy support summary
             </Button>
             <Button variant="outline" onClick={() => navigate("/batches")}>
               Open batches
@@ -688,7 +701,7 @@ export default function PrinterDiagnostics() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Activity className="h-4 w-4" />
-                Local agent
+                Workstation connector
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
@@ -701,8 +714,10 @@ export default function PrinterDiagnostics() {
                 <Badge variant={localAgent.connected ? "default" : "secondary"}>{localAgent.connected ? "Yes" : "No"}</Badge>
               </div>
               <div>
-                <div className="text-muted-foreground">Agent error</div>
-                <div className="mt-1 break-words text-xs">{localAgent.error || "None"}</div>
+                <div className="text-muted-foreground">Status note</div>
+                <div className="mt-1 break-words text-xs">
+                  {sanitizePrinterUiError(localAgent.error, localAgent.reachable ? "Connector is available." : "Connector is currently unavailable.")}
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -711,23 +726,25 @@ export default function PrinterDiagnostics() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <ShieldAlert className="h-4 w-4" />
-                Server trust
+                Cloud connection
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Connection class</span>
-                <Badge variant={remoteStatus?.connectionClass === "BLOCKED" ? "destructive" : "secondary"}>
-                  {remoteStatus?.connectionClass || "Unavailable"}
+                <span className="text-muted-foreground">Status</span>
+                <Badge variant={remoteStatus?.connected && remoteStatus?.eligibleForPrinting ? "default" : "secondary"}>
+                  {remoteStatus?.connected && remoteStatus?.eligibleForPrinting ? "Ready" : "Needs attention"}
                 </Badge>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Trust status</span>
-                <Badge variant="secondary">{remoteStatus?.trustStatus || "Unavailable"}</Badge>
+                <span className="text-muted-foreground">Last update</span>
+                <Badge variant="secondary">{remoteStatus?.lastHeartbeatAt ? formatDistanceToNow(new Date(remoteStatus.lastHeartbeatAt), { addSuffix: true }) : "Unavailable"}</Badge>
               </div>
               <div>
-                <div className="text-muted-foreground">Trust reason</div>
-                <div className="mt-1 break-words text-xs">{remoteStatus?.error || remoteStatus?.trustReason || "No remote trust message available."}</div>
+                <div className="text-muted-foreground">What to know</div>
+                <div className="mt-1 break-words text-xs">
+                  {sanitizePrinterUiError(remoteStatus?.error || remoteStatus?.trustReason, "MSCQR will update this status automatically when the connection is ready.")}
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -751,47 +768,39 @@ export default function PrinterDiagnostics() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Client workstation requirements</CardTitle>
+            <CardTitle className="text-base">Workstation requirements</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 lg:grid-cols-2">
             <div className="space-y-3 text-sm text-muted-foreground">
               <div className="rounded-xl border bg-muted/30 p-4">
-                <div className="font-medium text-foreground">What must exist on the client machine</div>
+                <div className="font-medium text-foreground">What must be ready on this workstation</div>
                 <ul className="mt-3 list-disc space-y-2 pl-5">
                   <li>The signed MSCQR Workstation Connector must be installed once on the workstation.</li>
                   <li>The operating system must already see the printer in its printer list.</li>
                   <li>The printer driver or spooler path must be working before the browser can show a ready state.</li>
                   <li>The workstation connector should auto-start at login and stay in the background.</li>
                   <li>Use MDM or your IT rollout process for fleet installs. End users should never need terminal commands to print.</li>
-                  <li>The local agent must answer <code>http://127.0.0.1:17866/status</code> from the same device.</li>
                 </ul>
               </div>
               <div className="rounded-xl border bg-muted/30 p-4">
-                <div className="font-medium text-foreground">Fast client-side test</div>
+                <div className="font-medium text-foreground">Quick readiness check</div>
                 <ol className="mt-3 list-decimal space-y-2 pl-5">
-                  <li>Open <code>http://127.0.0.1:17866/status</code> in the local browser.</li>
-                  <li>Confirm the response loads and lists at least one printer.</li>
-                  <li>If it fails, fix the agent or OS printer setup first.</li>
-                  <li>If it succeeds but this page still shows blocked, copy diagnostics and send them to support.</li>
+                  <li>Confirm the printer is visible in the operating system first.</li>
+                  <li>Return here and use <strong>Refresh status</strong>.</li>
+                  <li>If the printer still does not appear, restart the workstation connector or printer.</li>
+                  <li>If the issue continues, copy the support summary and send it to support.</li>
                 </ol>
               </div>
               {preferredManagedNetworkPrinter && (
                 <div className="rounded-xl border bg-muted/30 p-4">
-                  <div className="font-medium text-foreground">Managed network printer shortcut</div>
+                  <div className="font-medium text-foreground">Saved managed printer</div>
                   <div className="mt-3 text-sm leading-6 text-muted-foreground">
                     Registered profile: <span className="font-medium text-foreground">{preferredManagedNetworkPrinter.name}</span>
                     <br />
-                    Target:
-                    {" "}
-                    <span className="font-mono text-foreground">
-                      {preferredManagedNetworkPrinter.connectionType === "NETWORK_IPP"
-                        ? preferredManagedNetworkPrinter.printerUri ||
-                          `${preferredManagedNetworkPrinter.tlsEnabled === false ? "ipp" : "ipps"}://${preferredManagedNetworkPrinter.host || "—"}:${preferredManagedNetworkPrinter.port || 631}${preferredManagedNetworkPrinter.resourcePath || "/ipp/print"}`
-                        : `${preferredManagedNetworkPrinter.ipAddress || "—"}:${preferredManagedNetworkPrinter.port || 9100}`}
-                    </span>
+                    Type: <span className="font-medium text-foreground">{getPrinterDispatchLabel(preferredManagedNetworkPrinter)}</span>
                   </div>
                   <div className="mt-3 text-xs text-muted-foreground">
-                    Registered network printers do not depend on the local print agent inventory. If this profile validates, the batch workflow can dispatch through the backend or a site gateway even when no workstation printer is attached.
+                    Saved managed printers do not depend on the workstation printer list. Once checked, they can be used directly from the batch workflow.
                   </div>
                 </div>
               )}
@@ -801,18 +810,16 @@ export default function PrinterDiagnostics() {
               <div className="rounded-xl border bg-muted/30 p-4">
                 <div className="font-medium text-foreground">How to read the result</div>
                 <ul className="mt-3 list-disc space-y-2 pl-5">
-                  <li><strong>Agent offline</strong>: browser cannot reach the workstation print agent.</li>
-                  <li><strong>No printer connection detected</strong>: agent is running but did not find a printer.</li>
-                  <li><strong>Printer offline</strong>: a configured printer exists but is not online.</li>
-                  <li><strong>Sync pending</strong>: local printer exists, but server registration or heartbeat is not complete yet.</li>
-                  <li><strong>Trust blocked</strong>: server rejected the heartbeat or identity material.</li>
+                  <li><strong>Ready</strong>: the printer connection is good to use.</li>
+                  <li><strong>Preparing</strong>: MSCQR is still finishing setup for this printer.</li>
+                  <li><strong>Offline</strong>: the connector, printer, or site connector is not reachable right now.</li>
+                  <li><strong>Needs attention</strong>: the printer setup needs an update before printing.</li>
                 </ul>
               </div>
               <div className="rounded-xl border bg-muted/30 p-4">
                 <div className="font-medium text-foreground">Escalation path</div>
                 <p className="mt-3 leading-6">
-                  Use <strong>Copy diagnostics</strong> from this page and attach it to a support ticket. That payload contains
-                  the local agent view, discovered printers, and server trust response in one snapshot.
+                  Use <strong>Copy support summary</strong> from this page and attach it to a support ticket. The copied text is redacted for business-safe support handoff.
                 </p>
               </div>
             </div>
@@ -844,7 +851,7 @@ export default function PrinterDiagnostics() {
               <ul className="mt-3 list-disc space-y-2 pl-5 text-xs">
                 <li>Current direct-dispatch languages: ZPL, TSPL, EPL, and CPCL.</li>
                 <li>Printer must be registered here first. Freeform IP/port entry during print is not allowed.</li>
-                <li>Use <strong>Test</strong> after registration to confirm connectivity and language readiness.</li>
+                <li>Use <strong>Check</strong> after registration to confirm connectivity and language readiness.</li>
               </ul>
             </div>
             <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
@@ -869,7 +876,7 @@ export default function PrinterDiagnostics() {
             <CardContent className="space-y-3">
               {registeredPrinters.length === 0 ? (
                 <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
-                  <div>No printer profiles are registered yet. Local-agent printers appear after a trusted heartbeat. Managed network printers can be added here.</div>
+                  <div>No printer profiles are registered yet. Managed printer setups can be added here, and workstation-managed printers appear automatically after the connector is ready.</div>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -879,24 +886,14 @@ export default function PrinterDiagnostics() {
                         <div>
                           <div className="font-semibold">{printer.name}</div>
                           <div className="mt-1 text-xs text-muted-foreground">
-                            {printer.connectionType === "NETWORK_DIRECT"
-                              ? `${printer.ipAddress || "—"}:${printer.port || 9100}`
-                              : printer.connectionType === "NETWORK_IPP"
-                                ? printer.printerUri || `${printer.host || "—"}:${printer.port || 631}${printer.resourcePath || "/ipp/print"}`
-                                : printer.nativePrinterId || "Local agent printer"}
-                            {" · "}
-                            {printer.connectionType === "NETWORK_IPP" ? "PDF over IPP" : printer.commandLanguage}
+                            {getPrinterDispatchLabel(printer)}
+                            {printer.vendor || printer.model ? ` · ${[printer.vendor, printer.model].filter(Boolean).join(" ")}` : ""}
+                            {printer.connectionType === "LOCAL_AGENT" ? " · Managed on the workstation" : ""}
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <Badge variant={printer.registryStatus?.state === "BLOCKED" ? "destructive" : "secondary"}>
-                            {printer.connectionType === "NETWORK_DIRECT"
-                              ? "Network-direct"
-                              : printer.connectionType === "NETWORK_IPP"
-                                ? printer.deliveryMode === "SITE_GATEWAY"
-                                  ? "Network IPP gateway"
-                                  : "Network IPP"
-                                : "Local agent"}
+                            {getPrinterDispatchLabel(printer)}
                           </Badge>
                           <Badge variant={printer.isActive ? "default" : "secondary"}>
                             {printer.isActive ? "Active" : "Inactive"}
@@ -905,11 +902,14 @@ export default function PrinterDiagnostics() {
                         </div>
                       </div>
                       <div className="mt-3 text-xs text-muted-foreground">
-                        {printer.registryStatus?.detail || printer.lastValidationMessage || "No validation details recorded yet."}
+                        {sanitizePrinterUiError(
+                          printer.registryStatus?.detail || printer.lastValidationMessage,
+                          "No readiness note has been recorded yet."
+                        )}
                       </div>
-                      {printer.connectionType === "NETWORK_IPP" && printer.deliveryMode === "SITE_GATEWAY" && printer.gatewayId && (
+                      {printer.connectionType === "NETWORK_IPP" && printer.deliveryMode === "SITE_GATEWAY" && (
                         <div className="mt-2 text-[11px] text-muted-foreground">
-                          Gateway ID: <span className="font-mono text-foreground">{printer.gatewayId}</span>
+                          Site connector mode keeps this printer on a private network while MSCQR dispatches jobs securely.
                         </div>
                       )}
                       <div className="mt-3 flex flex-wrap justify-end gap-2">
@@ -919,7 +919,7 @@ export default function PrinterDiagnostics() {
                           disabled={testingPrinterId === printer.id}
                           onClick={() => void runPrinterTest(printer.id)}
                         >
-                          {testingPrinterId === printer.id ? "Testing..." : "Test"}
+                          {testingPrinterId === printer.id ? "Checking..." : "Check"}
                         </Button>
                         {printer.connectionType !== "LOCAL_AGENT" && (
                           <Button variant="outline" size="sm" onClick={() => editNetworkPrinter(printer)}>
@@ -946,200 +946,223 @@ export default function PrinterDiagnostics() {
           </Card>
 
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between gap-3">
               <CardTitle className="text-base">
-                {editingPrinterId ? "Update managed network printer" : "Add managed network printer"}
+                {editingPrinterId ? "Update managed printer setup" : "Managed printer setup"}
               </CardTitle>
+              {setupFormOpen || editingPrinterId ? (
+                <Button variant="outline" size="sm" onClick={resetNetworkPrinterForm}>
+                  {editingPrinterId ? "Close edit" : "Close setup"}
+                </Button>
+              ) : (
+                <Button variant="outline" size="sm" onClick={() => setSetupFormOpen(true)}>
+                  Add printer setup
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="rounded-xl border bg-muted/20 p-3 text-xs text-muted-foreground">
-                <div className="font-medium text-foreground">Managed network registration</div>
-                <div className="mt-1 leading-5">
-                  Register backend-dispatched printers here. Workstation printers that depend on the local operating system should stay on <strong>LOCAL_AGENT</strong>.
+              {!setupFormOpen && !editingPrinterId ? (
+                <div className="space-y-3">
+                  <div className="rounded-xl border bg-muted/20 p-3 text-xs text-muted-foreground">
+                    <div className="font-medium text-foreground">Setup only</div>
+                    <div className="mt-1 leading-5">
+                      Use this area to save factory label printers and office / AirPrint printers for controlled dispatch. Workstation printers should remain managed by the workstation connector.
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-dashed bg-muted/10 p-4 text-sm text-muted-foreground">
+                    Open setup only when you need to add, edit, or recheck a managed printer profile.
+                  </div>
                 </div>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Name</Label>
-                <Input value={networkPrinterForm.name} onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Factory line printer" />
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">Vendor</Label>
-                  <Input value={networkPrinterForm.vendor} onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, vendor: e.target.value }))} placeholder="Zebra" />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Model</Label>
-                  <Input value={networkPrinterForm.model} onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, model: e.target.value }))} placeholder="ZT411" />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Connection type</Label>
-                <Select
-                  value={networkPrinterForm.connectionType}
-                  onValueChange={(value) =>
-                    setNetworkPrinterForm((prev) => ({
-                      ...prev,
-                      connectionType: value as RegisteredPrinterRow["connectionType"],
-                      port: value === "NETWORK_IPP" ? "631" : "9100",
-                    }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Connection type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="NETWORK_DIRECT">NETWORK_DIRECT</SelectItem>
-                    <SelectItem value="NETWORK_IPP">NETWORK_IPP</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">
-                    {networkPrinterForm.connectionType === "NETWORK_IPP" ? "Host or FQDN" : "IP address or host"}
-                  </Label>
-                  {networkPrinterForm.connectionType === "NETWORK_IPP" ? (
-                    <Input
-                      value={networkPrinterForm.host}
-                      onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, host: e.target.value }))}
-                      placeholder="canon-office.local"
-                    />
-                  ) : (
-                    <Input
-                      value={networkPrinterForm.ipAddress}
-                      onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, ipAddress: e.target.value }))}
-                      placeholder="192.168.1.50 or printer-lan-01"
-                    />
-                  )}
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">{networkPrinterForm.connectionType === "NETWORK_IPP" ? "IPP port" : "TCP port"}</Label>
-                  <Input value={networkPrinterForm.port} onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, port: e.target.value }))} placeholder={networkPrinterForm.connectionType === "NETWORK_IPP" ? "631" : "9100"} />
-                </div>
-              </div>
-              {networkPrinterForm.connectionType === "NETWORK_DIRECT" ? (
+              ) : (
                 <>
+                  <div className="rounded-xl border bg-muted/20 p-3 text-xs text-muted-foreground">
+                    <div className="font-medium text-foreground">Managed network setup</div>
+                    <div className="mt-1 leading-5">
+                      Save a controlled printer route for <strong>{getManagedSetupTypeLabel(networkPrinterForm)}</strong>. This setup surface is for deployment and printer administration, not everyday print operations.
+                    </div>
+                  </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Command language</Label>
+                    <Label className="text-xs">Name</Label>
+                    <Input value={networkPrinterForm.name} onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Factory line printer" />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Vendor</Label>
+                      <Input value={networkPrinterForm.vendor} onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, vendor: e.target.value }))} placeholder="Zebra" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Model</Label>
+                      <Input value={networkPrinterForm.model} onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, model: e.target.value }))} placeholder="ZT411" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Printer type</Label>
                     <Select
-                      value={networkPrinterForm.commandLanguage}
+                      value={networkPrinterForm.connectionType}
                       onValueChange={(value) =>
-                        setNetworkPrinterForm((prev) => ({ ...prev, commandLanguage: value as RegisteredPrinterRow["commandLanguage"] }))
+                        setNetworkPrinterForm((prev) => ({
+                          ...prev,
+                          connectionType: value as RegisteredPrinterRow["connectionType"],
+                          port: value === "NETWORK_IPP" ? "631" : "9100",
+                        }))
                       }
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Command language" />
+                        <SelectValue placeholder="Printer type" />
                       </SelectTrigger>
                       <SelectContent>
-                        {!networkPrinterLanguageSupported && networkPrinterForm.commandLanguage ? (
-                          <SelectItem value={networkPrinterForm.commandLanguage} disabled>
-                            {networkPrinterForm.commandLanguage} (legacy unsupported)
-                          </SelectItem>
-                        ) : null}
-                        {NETWORK_DIRECT_SUPPORTED_LANGUAGES.map((language) => (
-                          <SelectItem key={language} value={language}>
-                            {language}
-                          </SelectItem>
-                        ))}
+                        <SelectItem value="NETWORK_DIRECT">Factory label printer (LAN)</SelectItem>
+                        <SelectItem value="NETWORK_IPP">Office / AirPrint printer</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-                  {!networkPrinterLanguageSupported && (
-                    <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800">
-                      This profile currently uses <strong>{networkPrinterForm.commandLanguage}</strong>, which is not allowed for
-                      network-direct dispatch. Change it to ZPL, TSPL, EPL, or CPCL before saving or testing.
-                    </div>
-                  )}
-                </>
-              ) : (
-                <>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="space-y-1">
-                      <Label className="text-xs">Resource path</Label>
-                      <Input
-                        value={networkPrinterForm.resourcePath}
-                        onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, resourcePath: e.target.value }))}
-                        placeholder="/ipp/print"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Printer URI (optional)</Label>
-                      <Input
-                        value={networkPrinterForm.printerUri}
-                        onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, printerUri: e.target.value }))}
-                        placeholder="ipps://canon.local:631/ipp/print"
-                      />
-                    </div>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Delivery mode</Label>
-                      <Select
-                        value={networkPrinterForm.deliveryMode}
-                        onValueChange={(value) =>
-                          setNetworkPrinterForm((prev) => ({ ...prev, deliveryMode: value as NonNullable<RegisteredPrinterRow["deliveryMode"]> }))
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Delivery mode" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="DIRECT">Backend direct</SelectItem>
-                          <SelectItem value="SITE_GATEWAY">Site gateway</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex items-end">
-                      <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(networkPrinterForm.tlsEnabled)}
-                          onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, tlsEnabled: e.target.checked }))}
+                      <Label className="text-xs">
+                        {networkPrinterForm.connectionType === "NETWORK_IPP" ? "Host or printer name" : "IP address or host"}
+                      </Label>
+                      {networkPrinterForm.connectionType === "NETWORK_IPP" ? (
+                        <Input
+                          value={networkPrinterForm.host}
+                          onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, host: e.target.value }))}
+                          placeholder="canon-office.local"
                         />
-                        Prefer TLS / IPPS
-                      </label>
+                      ) : (
+                        <Input
+                          value={networkPrinterForm.ipAddress}
+                          onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, ipAddress: e.target.value }))}
+                          placeholder="192.168.1.50 or printer-lan-01"
+                        />
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">{networkPrinterForm.connectionType === "NETWORK_IPP" ? "IPP port" : "TCP port"}</Label>
+                      <Input value={networkPrinterForm.port} onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, port: e.target.value }))} placeholder={networkPrinterForm.connectionType === "NETWORK_IPP" ? "631" : "9100"} />
                     </div>
                   </div>
-                  {networkPrinterForm.deliveryMode === "SITE_GATEWAY" && (
-                    <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-                      <div>Site-gateway mode keeps the printer on a private LAN. The install-once workstation service pulls jobs outbound and never requires inbound firewall holes.</div>
-                      {editingPrinterId && (
-                        <label className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(networkPrinterForm.rotateGatewaySecret)}
-                            onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, rotateGatewaySecret: e.target.checked }))}
-                          />
-                          Rotate gateway secret on save
-                        </label>
-                      )}
-                      {gatewayProvisioningSecret && (
-                        <div className="space-y-2 rounded-lg border border-amber-300 bg-white/70 p-3 text-[11px]">
-                          <div className="font-medium text-foreground">One-time gateway bootstrap secret</div>
-                          <div className="break-all font-mono text-foreground">{gatewayProvisioningSecret}</div>
-                          <div>Provision this secret into the workstation connector service once. It will not be shown again.</div>
+                  {networkPrinterForm.connectionType === "NETWORK_DIRECT" ? (
+                    <>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Printer language</Label>
+                        <Select
+                          value={networkPrinterForm.commandLanguage}
+                          onValueChange={(value) =>
+                            setNetworkPrinterForm((prev) => ({ ...prev, commandLanguage: value as RegisteredPrinterRow["commandLanguage"] }))
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Printer language" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {!networkPrinterLanguageSupported && networkPrinterForm.commandLanguage ? (
+                              <SelectItem value={networkPrinterForm.commandLanguage} disabled>
+                                {networkPrinterForm.commandLanguage} (legacy unsupported)
+                              </SelectItem>
+                            ) : null}
+                            {NETWORK_DIRECT_SUPPORTED_LANGUAGES.map((language) => (
+                              <SelectItem key={language} value={language}>
+                                {language}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {!networkPrinterLanguageSupported && (
+                        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                          This profile currently uses <strong>{networkPrinterForm.commandLanguage}</strong>, which is not allowed for
+                          factory label printer dispatch. Change it to ZPL, TSPL, EPL, or CPCL before saving or checking.
                         </div>
                       )}
-                    </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Resource path</Label>
+                          <Input
+                            value={networkPrinterForm.resourcePath}
+                            onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, resourcePath: e.target.value }))}
+                            placeholder="/ipp/print"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Printer URI (optional)</Label>
+                          <Input
+                            value={networkPrinterForm.printerUri}
+                            onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, printerUri: e.target.value }))}
+                            placeholder="ipps://canon.local:631/ipp/print"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Delivery mode</Label>
+                          <Select
+                            value={networkPrinterForm.deliveryMode}
+                            onValueChange={(value) =>
+                              setNetworkPrinterForm((prev) => ({ ...prev, deliveryMode: value as NonNullable<RegisteredPrinterRow["deliveryMode"]> }))
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Delivery mode" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="DIRECT">Backend direct</SelectItem>
+                              <SelectItem value="SITE_GATEWAY">Site connector</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex items-end">
+                          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(networkPrinterForm.tlsEnabled)}
+                              onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, tlsEnabled: e.target.checked }))}
+                            />
+                            Prefer TLS / IPPS
+                          </label>
+                        </div>
+                      </div>
+                      {networkPrinterForm.deliveryMode === "SITE_GATEWAY" && (
+                        <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                          <div>Site connector mode keeps the printer on a private network and uses secure outbound job pickup.</div>
+                          {editingPrinterId && (
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(networkPrinterForm.rotateGatewaySecret)}
+                                onChange={(e) => setNetworkPrinterForm((prev) => ({ ...prev, rotateGatewaySecret: e.target.checked }))}
+                              />
+                              Rotate connector secret on save
+                            </label>
+                          )}
+                          {gatewayProvisioningSecret && (
+                            <div className="space-y-2 rounded-lg border border-amber-300 bg-white/70 p-3 text-[11px]">
+                              <div className="font-medium text-foreground">One-time connector bootstrap secret</div>
+                              <div className="break-all font-mono text-foreground">{gatewayProvisioningSecret}</div>
+                              <div>Provision this secret into the workstation connector once. It will not be shown again.</div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
                   )}
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button variant="outline" onClick={resetNetworkPrinterForm}>
+                      {editingPrinterId ? "Cancel edit" : "Close setup"}
+                    </Button>
+                    <Button
+                      onClick={() => void saveNetworkPrinter()}
+                      disabled={savingNetworkPrinter || (networkPrinterForm.connectionType === "NETWORK_DIRECT" && !networkPrinterLanguageSupported)}
+                    >
+                      {savingNetworkPrinter ? "Saving..." : editingPrinterId ? "Update setup" : "Save setup"}
+                    </Button>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Factory label printers use approved saved LAN targets only. Office / AirPrint printers use standards-based IPP/IPPS and can run directly or through a site connector.
+                  </div>
                 </>
               )}
-              <div className="flex flex-wrap justify-end gap-2">
-                {editingPrinterId && (
-                  <Button variant="outline" onClick={resetNetworkPrinterForm}>
-                    Cancel edit
-                  </Button>
-                )}
-                <Button
-                  onClick={() => void saveNetworkPrinter()}
-                  disabled={savingNetworkPrinter || (networkPrinterForm.connectionType === "NETWORK_DIRECT" && !networkPrinterLanguageSupported)}
-                >
-                  {savingNetworkPrinter ? "Saving..." : editingPrinterId ? "Update printer" : "Register printer"}
-                </Button>
-              </div>
-              <div className="text-xs text-muted-foreground">
-                NETWORK_DIRECT is restricted to registered IP/port targets only and supports ZPL, TSPL, EPL, and CPCL. NETWORK_IPP is for AirPrint and IPP Everywhere endpoints and can run either backend-direct or through a site gateway for private-LAN deployments.
-              </div>
             </CardContent>
           </Card>
         </div>
@@ -1215,35 +1238,15 @@ export default function PrinterDiagnostics() {
                         </div>
                       </div>
                       <div className="mt-3 text-xs text-muted-foreground">
-                        {printer.languages?.join(", ") || "AUTO"} · {printer.mediaSizes?.join(", ") || "Auto media"} ·{" "}
-                        {printer.dpi ? `${printer.dpi} dpi` : "Auto dpi"}
+                        {printer.online === false
+                          ? "This printer is currently unavailable on the workstation."
+                          : "Available on this workstation for printer selection and print jobs."}
                       </div>
                     </div>
                   );
                 })}
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Diagnostic snapshot</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <pre className="max-h-[26rem] overflow-auto rounded-xl border bg-muted/20 p-4 text-xs">
-              {JSON.stringify(
-                {
-                  localAgent,
-                  remoteStatus,
-                  detectedPrinters,
-                  selectedPrinterId,
-                  registeredPrinters,
-                },
-                null,
-                2
-              )}
-            </pre>
           </CardContent>
         </Card>
       </div>

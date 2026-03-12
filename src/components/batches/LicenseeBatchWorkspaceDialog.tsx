@@ -311,10 +311,6 @@ export function LicenseeBatchWorkspaceDialog({
                           <div className="font-semibold">Source batch details</div>
                           <div className="mt-3 space-y-2 text-muted-foreground">
                             <div className="flex items-start justify-between gap-3">
-                              <span>Batch ID</span>
-                              <span className="max-w-[16rem] break-all text-right font-mono text-xs text-foreground">{workspace.sourceBatchId}</span>
-                            </div>
-                            <div className="flex items-start justify-between gap-3">
                               <span>Licensee</span>
                               <span className="text-right text-foreground">{workspace.licensee?.name || "-"}</span>
                             </div>

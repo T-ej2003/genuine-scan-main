@@ -151,9 +151,9 @@ export const getPageGuidance = (pathname: string, role?: UserRole | null): PageG
   if (starts(pathname, "/printer-diagnostics")) {
     return {
       title: "Diagnose printer issues",
-      summary: "Separate workstation connector problems, operating-system printer visibility, backend trust failures, and managed network printer compatibility.",
+      summary: "Separate workstation connector problems, operating-system printer visibility, and saved printer readiness.",
       firstAction: "Start with the top status card, then inspect workstation connector reachability and discovered printers.",
-      note: "Use LOCAL_AGENT for workstation-managed printers, NETWORK_DIRECT for registered ZPL/TSPL/EPL/CPCL LAN printers, and NETWORK_IPP for AirPrint or IPP Everywhere devices.",
+      note: "Use workstation printing for printers installed on the computer, factory label printer profiles for controlled LAN devices, and office / AirPrint profiles for IPP printers.",
     };
   }
 

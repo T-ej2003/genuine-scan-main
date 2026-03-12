@@ -44,31 +44,31 @@ For `LOCAL_AGENT` and site-gateway deployments:
 2. Install it once on the target workstation.
 3. Confirm it auto-starts at login.
 4. Confirm the operating system already shows the printer.
-5. Open `Printer Diagnostics` in MSCQR and verify readiness.
+5. Open `Printer Setup` in MSCQR and verify readiness.
 
 Do not ask end users to run terminal commands to print.
 
 ## Register a raw LAN printer
 
-In `Printer Diagnostics`:
+In `Printer Setup`:
 
 1. Add a managed printer profile.
 2. Choose `NETWORK_DIRECT`.
 3. Enter the approved IP address or host and TCP port.
 4. Select the printer language.
-5. Save and run `Test`.
+5. Save and run `Check`.
 6. Use the profile only after it reports `READY`.
 
 ## Register an AirPrint / IPP printer
 
-In `Printer Diagnostics`:
+In `Printer Setup`:
 
 1. Add a managed printer profile.
 2. Choose `NETWORK_IPP`.
 3. Enter either the printer URI or the host, port, and resource path.
 4. Enable TLS when the printer supports IPPS.
 5. Choose the delivery mode.
-6. Save and run `Test`.
+6. Save and run `Check`.
 
 Preferred defaults:
 
@@ -92,14 +92,14 @@ PRINT_GATEWAY_SECRET=<one-time-bootstrap-secret>
 ```
 
 5. Restart or reinstall the connector through your signed installer or IT automation.
-6. Return to `Printer Diagnostics` and verify the profile changes to `Site gateway online`.
+6. Return to `Printer Setup` and verify the profile changes to `Site gateway online`.
 
 ## Print-job validation checklist
 
 Before live printing:
 
 1. The printer profile is `READY`.
-2. The correct dispatch mode appears in the print dialog.
+2. The correct saved printer appears in the print dialog.
 3. The workstation or gateway is online.
 4. A test job succeeds.
 5. The printed count updates in MSCQR.
@@ -108,7 +108,7 @@ Before live printing:
 
 If printing fails:
 
-1. Open `Printer Diagnostics`.
-2. Copy the diagnostic snapshot.
+1. Open `Printer Setup`.
+2. Copy the support summary.
 3. Note the printer profile name, job number, and timestamp.
-4. Confirm whether the issue is local workstation, network reachability, IPP validation, or gateway heartbeat.
+4. Confirm whether the issue is workstation availability, network reachability, IPP validation, or site connector availability.

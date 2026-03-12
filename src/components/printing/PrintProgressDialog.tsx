@@ -50,9 +50,7 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
               <Badge variant="outline">{props.printerName || "Default printer"}</Badge>
               <Badge variant={props.error ? "destructive" : "default"}>{props.phase}</Badge>
             </div>
-            {props.currentCode ? (
-              <div className="mt-2 text-xs text-muted-foreground">Current code: {props.currentCode}</div>
-            ) : null}
+            {props.currentCode ? <div className="mt-2 text-xs text-muted-foreground">Processing the next approved label.</div> : null}
             {props.error ? <div className="mt-2 text-xs text-destructive">{props.error}</div> : null}
           </div>
 

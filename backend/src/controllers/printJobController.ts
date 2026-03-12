@@ -45,6 +45,7 @@ import {
   extractIdempotencyKey,
   type IdempotencyBeginResult,
 } from "../services/idempotencyService";
+import { sanitizePrinterActionError } from "../utils/printerUserFacingErrors";
 
 const MANUFACTURER_ROLES: UserRole[] = [
   UserRole.MANUFACTURER,
@@ -1131,7 +1132,7 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
     if (msg.includes("PRINTER_NETWORK_UNREACHABLE")) {
       return res.status(409).json({
         success: false,
-        error: (e as any)?.reason || "Selected network printer is not reachable on its saved host and port.",
+        error: sanitizePrinterActionError((e as any)?.reason, "The saved factory printer could not be reached."),
       });
     }
     if (msg.includes("PRINTER_GATEWAY_CONFIG_INVALID")) {
@@ -1143,24 +1144,28 @@ export const createPrintJob = async (req: AuthRequest, res: Response) => {
     if (msg.includes("PRINTER_GATEWAY_OFFLINE")) {
       return res.status(409).json({
         success: false,
-        error: (e as any)?.reason || "Selected site gateway is offline. Bring the on-prem print service online and retry.",
+        error: sanitizePrinterActionError((e as any)?.reason, "The site print connector needs attention before this printer can be used."),
       });
     }
     if (msg.includes("PRINTER_IPP_FORMAT_UNSUPPORTED")) {
       return res.status(409).json({
         success: false,
-        error:
-          (e as any)?.reason ||
-          "Selected IPP printer is reachable, but it does not advertise PDF support. Use a PDF-capable AirPrint/IPP Everywhere device or switch to the local agent path.",
+        error: sanitizePrinterActionError(
+          (e as any)?.reason,
+          "This office printer does not support the required MSCQR print format."
+        ),
       });
     }
     if (msg.includes("PRINTER_IPP_UNREACHABLE")) {
       return res.status(409).json({
         success: false,
-        error: (e as any)?.reason || "Selected IPP printer is not reachable at its saved URI.",
+        error: sanitizePrinterActionError((e as any)?.reason, "The saved office printer could not be reached."),
       });
     }
-    return res.status(400).json({ success: false, error: e?.message || "Bad request" });
+    return res.status(400).json({
+      success: false,
+      error: sanitizePrinterActionError(e?.message, "This print job could not be created."),
+    });
   }
 };
 
