@@ -102,3 +102,4 @@ MSCQR routes printers by capability:
 - For workstation printing, the OS must already see the printer before MSCQR can use it.
 - For `NETWORK_IPP`, validate PDF support and URI reachability before the first live job.
 - For private-LAN sites, prefer `NETWORK_IPP` with site gateway over ad hoc workstation browser flows.
+- For Docker deployments on AWS Lightsail, standard operations are `docker compose build`, `docker compose run --rm backend npx prisma migrate deploy`, and `docker compose up -d --force-recreate`, not ad hoc `systemctl` restarts.

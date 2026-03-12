@@ -30,6 +30,7 @@ const MANUFACTURER_EMAIL = process.env.DOCS_MANUFACTURER_EMAIL || "factory1@acme
 const MANUFACTURER_PASSWORD = process.env.DOCS_MANUFACTURER_PASSWORD || "manufacturer123";
 
 const DOCS_CODE = process.env.DOCS_QR_CODE || "A0000000051";
+const DOCS_DUPLICATE_CODE = process.env.DOCS_DUPLICATE_QR_CODE || DOCS_CODE;
 const DOCS_BATCH_NAME =
   process.env.DOCS_BATCH_NAME ||
   `Docs Batch ${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}`;
@@ -141,7 +142,7 @@ const applyOverlay = async (page: Page, spec: OverlaySpec) => {
   }
 
   await page.evaluate(
-    ({ title, resolvedCallouts }) => {
+    ({ resolvedCallouts }) => {
       const prev = document.getElementById("__aq_doc_overlay");
       if (prev) prev.remove();
 
@@ -155,114 +156,69 @@ const applyOverlay = async (page: Page, spec: OverlaySpec) => {
         'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif';
       document.body.appendChild(root);
 
-      // Soft frame around viewport
-      const frame = document.createElement("div");
-      frame.style.position = "fixed";
-      frame.style.inset = "10px";
-      frame.style.borderRadius = "16px";
-      frame.style.border = "1px solid rgba(148, 163, 184, 0.55)";
-      frame.style.boxShadow = "0 0 0 1px rgba(15, 23, 42, 0.08) inset";
-      root.appendChild(frame);
-
-      // Title pill
-      const pill = document.createElement("div");
-      pill.textContent = title;
-      pill.style.position = "fixed";
-      pill.style.left = "14px";
-      pill.style.top = "12px";
-      pill.style.padding = "6px 12px";
-      pill.style.borderRadius = "999px";
-      pill.style.background = "rgba(15, 23, 42, 0.86)";
-      pill.style.border = "1px solid rgba(148, 163, 184, 0.35)";
-      pill.style.color = "rgba(226, 232, 240, 0.95)";
-      pill.style.fontSize = "12px";
-      pill.style.fontWeight = "600";
-      pill.style.letterSpacing = "0.01em";
-      pill.style.boxShadow = "0 10px 30px rgba(2, 6, 23, 0.35)";
-      root.appendChild(pill);
-
-      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      svg.setAttribute("width", String(window.innerWidth));
-      svg.setAttribute("height", String(window.innerHeight));
-      svg.style.position = "fixed";
-      svg.style.inset = "0";
-      svg.style.pointerEvents = "none";
-      root.appendChild(svg);
-
-      const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-      const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
-      marker.setAttribute("id", "aqArrowHead");
-      marker.setAttribute("markerWidth", "10");
-      marker.setAttribute("markerHeight", "10");
-      marker.setAttribute("refX", "9");
-      marker.setAttribute("refY", "3");
-      marker.setAttribute("orient", "auto");
-      const arrowPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      arrowPath.setAttribute("d", "M0,0 L10,3 L0,6 Z");
-      arrowPath.setAttribute("fill", "#22d3ee");
-      marker.appendChild(arrowPath);
-      defs.appendChild(marker);
-      svg.appendChild(defs);
-
       const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
-
       const makeDiv = () => document.createElement("div");
+      const placed: Array<{ left: number; top: number; right: number; bottom: number }> = [];
+      const overlaps = (a: { left: number; top: number; right: number; bottom: number }, b: { left: number; top: number; right: number; bottom: number }) =>
+        !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
 
       for (const c of resolvedCallouts as any[]) {
+        const inset = 4;
         const highlight = makeDiv();
         highlight.style.position = "fixed";
-        highlight.style.left = `${c.x}px`;
-        highlight.style.top = `${c.y}px`;
-        highlight.style.width = `${c.w}px`;
-        highlight.style.height = `${c.h}px`;
-        highlight.style.borderRadius = "12px";
-        highlight.style.border = "3px solid rgba(34, 211, 238, 0.95)";
+        highlight.style.left = `${c.x - inset}px`;
+        highlight.style.top = `${c.y - inset}px`;
+        highlight.style.width = `${c.w + inset * 2}px`;
+        highlight.style.height = `${c.h + inset * 2}px`;
+        highlight.style.borderRadius = "14px";
+        highlight.style.background = "rgba(34, 211, 238, 0.08)";
+        highlight.style.border = "2px solid rgba(34, 211, 238, 0.92)";
         highlight.style.boxShadow =
-          "0 0 0 2px rgba(15, 23, 42, 0.15), 0 0 22px rgba(34, 211, 238, 0.35)";
+          "0 0 0 1px rgba(15, 23, 42, 0.14), 0 10px 24px rgba(34, 211, 238, 0.2)";
         root.appendChild(highlight);
 
-        const bubble = makeDiv();
-        bubble.textContent = c.text;
-        bubble.style.position = "fixed";
-        bubble.style.maxWidth = "260px";
-        bubble.style.padding = "6px 10px";
-        bubble.style.borderRadius = "12px";
-        bubble.style.background = "rgba(2, 6, 23, 0.88)";
-        bubble.style.border = "1px solid rgba(34, 211, 238, 0.85)";
-        bubble.style.color = "rgba(226, 232, 240, 0.96)";
-        bubble.style.fontSize = "12px";
-        bubble.style.fontWeight = "600";
-        bubble.style.boxShadow = "0 12px 28px rgba(2, 6, 23, 0.4)";
+        const label = makeDiv();
+        label.textContent = c.text;
+        label.style.position = "fixed";
+        label.style.maxWidth = "220px";
+        label.style.padding = "5px 9px";
+        label.style.borderRadius = "10px";
+        label.style.background = "rgba(15, 23, 42, 0.9)";
+        label.style.border = "1px solid rgba(34, 211, 238, 0.9)";
+        label.style.color = "rgba(241, 245, 249, 0.98)";
+        label.style.fontSize = "11px";
+        label.style.lineHeight = "1.3";
+        label.style.fontWeight = "600";
+        label.style.boxShadow = "0 10px 24px rgba(15, 23, 42, 0.28)";
+        root.appendChild(label);
 
-        const bubbleW = 260;
-        const targetX = clamp(c.x, 12, window.innerWidth - bubbleW - 12);
-        let bubbleY = c.y - 48;
-        if (bubbleY < 12) bubbleY = c.y + c.h + 16;
-        bubble.style.left = `${targetX}px`;
-        bubble.style.top = `${bubbleY}px`;
-        root.appendChild(bubble);
+        const placeInside = c.w >= 180 && c.h >= 64;
+        let left = clamp(c.x + 10, 12, window.innerWidth - 232);
+        let top = placeInside ? c.y + 10 : c.y - 34;
+        label.style.left = `${left}px`;
+        label.style.top = `${top}px`;
 
-        const b = bubble.getBoundingClientRect();
-        const startX = b.left + b.width / 2;
-        const startY = bubbleY < c.y ? b.bottom : b.top;
-        const endX = c.x + c.w / 2;
-        const endY = c.y + c.h / 2;
-        const midY = (startY + endY) / 2;
-        const ctrlX = startX;
-        const ctrlY = midY;
+        let rect = label.getBoundingClientRect();
+        if (!placeInside && rect.top < 12) {
+          top = c.y + c.h + 10;
+          label.style.top = `${top}px`;
+          rect = label.getBoundingClientRect();
+        }
 
-        const pathEl = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        pathEl.setAttribute("d", `M ${startX} ${startY} Q ${ctrlX} ${ctrlY} ${endX} ${endY}`);
-        pathEl.setAttribute("fill", "none");
-        pathEl.setAttribute("stroke", "#22d3ee");
-        pathEl.setAttribute("stroke-width", "3");
-        pathEl.setAttribute("stroke-linecap", "round");
-        pathEl.setAttribute("stroke-linejoin", "round");
-        pathEl.setAttribute("marker-end", "url(#aqArrowHead)");
-        svg.appendChild(pathEl);
+        for (let tries = 0; tries < 6; tries++) {
+          const box = { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+          if (!placed.some((p) => overlaps(box, p))) {
+            placed.push(box);
+            break;
+          }
+
+          top = clamp(top + rect.height + 8, 12, window.innerHeight - rect.height - 12);
+          label.style.top = `${top}px`;
+          rect = label.getBoundingClientRect();
+        }
       }
     },
-    { title: spec.title, resolvedCallouts: resolved }
+    { resolvedCallouts: resolved }
   );
 };
 
@@ -288,21 +244,6 @@ const openLicenseeBatchWorkspace = async (page: Page, batchName: string) => {
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("tab", { name: /^overview$/i })).toBeVisible({ timeout: 15_000 });
   return dialog;
-};
-
-const selectFirstEnabledPrintJobButton = async (page: Page) => {
-  const buttons = page.getByRole("button", { name: /create print job/i });
-  await expect(buttons.first()).toBeVisible({ timeout: 20_000 });
-  const count = await buttons.count();
-
-  for (let i = 0; i < Math.min(count, 12); i++) {
-    const candidate = buttons.nth(i);
-    if (await candidate.isDisabled()) continue;
-    await candidate.click();
-    return;
-  }
-
-  throw new Error("Could not find an enabled Create Print Job button.");
 };
 
 test.describe.configure({ mode: "serial" });
@@ -498,60 +439,29 @@ test("capture help screenshots", async ({ browser }) => {
   }
 
   if (shouldRunStage("manufacturer")) {
-    // Manufacturer: create print job + direct dispatch + capture status
-    const manuCtx = await browser.newContext({ viewport: { width: 1500, height: 820 } });
-    const manuPage = await manuCtx.newPage();
-    await disableMotion(manuPage);
-    await login(manuPage, MANUFACTURER_BASE_URL, MANUFACTURER_EMAIL, MANUFACTURER_PASSWORD);
-
-    await goto(manuPage, `${MANUFACTURER_BASE_URL}/printer-diagnostics`);
-    const sameHostMockButton = manuPage.getByRole("button", { name: /use same-host mock printer/i }).first();
-    await expect(sameHostMockButton).toBeVisible({ timeout: 20_000 });
-    await sameHostMockButton.click();
-    await expect(manuPage.getByText(/mock zebra printer/i).first()).toBeVisible({ timeout: 20_000 });
-    await manuPage.waitForTimeout(1200);
-    await screenshot(manuPage, "manufacturer-printer-diagnostics.png", {
-      title: "Documentation Capture - Manufacturer - Printer Diagnostics",
-      callouts: [
-        { locator: manuPage.getByRole("heading", { name: /printer diagnostics/i }), text: "Validate printer readiness before opening the print dialog" },
-        { locator: manuPage.getByText(/mock zebra printer/i).first(), text: "Registered network-direct printer profile" },
-        { locator: sameHostMockButton, text: "Quick setup for same-host mock printer testing" },
-      ],
-    });
-
-    await goto(manuPage, `${MANUFACTURER_BASE_URL}/batches`);
-    await selectFirstEnabledPrintJobButton(manuPage);
-    const printDialog = manuPage.getByRole("dialog");
-    const qtyToPrintInput = printDialog.getByPlaceholder("Enter quantity").first();
-    const printerProfileTrigger = printDialog.getByRole("combobox").first();
-    await qtyToPrintInput.fill("1");
-    if (!/mock zebra printer/i.test((await printerProfileTrigger.innerText()).trim())) {
-      await printerProfileTrigger.click();
-      await manuPage.getByRole("option", { name: /mock zebra printer/i }).first().click();
-    }
-    await screenshot(manuPage, "manufacturer-create-print-job.png", {
-      title: "Documentation Capture - Manufacturer - Create Print Job",
-      callouts: [
-        { locator: qtyToPrintInput, text: "Select quantity to print" },
-        { locator: printerProfileTrigger, text: "Use the validated registered printer profile" },
-        { locator: printDialog.getByRole("button", { name: /create print job & start dispatch/i }), text: "Start controlled direct-print dispatch" },
-      ],
-    });
-    await printDialog.getByRole("button", { name: /create print job & start dispatch/i }).click();
-    await expect(printDialog.getByText(/recent print jobs/i)).toBeVisible({ timeout: 20_000 });
-    await screenshot(manuPage, "manufacturer-print-status.png", {
-      title: "Documentation Capture - Manufacturer - Print Confirmation",
-      callouts: [
-        { locator: printDialog.getByText(/active print job/i).first(), text: "Current job stays visible in the batch dialog" },
-        { locator: printDialog.getByText(/recent print jobs/i).first(), text: "Recent jobs confirm status and printed counts" },
-      ],
-    });
-
-    await manuCtx.close();
+    // Manufacturer printing screenshots are source-controlled illustrations.
+    // Generate them with `npm run docs:printing:images` so the manuals stay stable
+    // even when live test data or printer setup differs across environments.
   }
 
   if (shouldRunStage("customer")) {
     // Customer (public): verify outcomes + report
+    const startCtx = await browser.newContext({ viewport: { width: 900, height: 700 } });
+    const startPage = await startCtx.newPage();
+    await disableMotion(startPage);
+
+    await goto(startPage, `${OPERATIONS_BASE_URL}/verify`);
+    await startPage.getByPlaceholder(/e\.g\.\s*A0000000001/i).fill("A0000000001");
+    await screenshot(startPage, "customer-verify-start.png", {
+      title: "Customer - Start Verification",
+      callouts: [
+        { locator: startPage.getByPlaceholder(/e\.g\.\s*A0000000001/i).first(), text: "Enter the code" },
+        { locator: startPage.getByRole("button", { name: /^verify$/i }).first(), text: "Select Verify" },
+        { locator: startPage.getByRole("button", { name: /use mobile camera capture/i }).first(), text: "Use your camera" },
+      ],
+    });
+    await startCtx.close();
+
     const customerCtx = await browser.newContext({ viewport: { width: 1200, height: 800 } });
     const customerPage = await customerCtx.newPage();
     await disableMotion(customerPage);
@@ -560,9 +470,10 @@ test("capture help screenshots", async ({ browser }) => {
     await goto(customerPage, `${OPERATIONS_BASE_URL}/verify/${encodeURIComponent(DOCS_CODE)}`);
     await customerPage.waitForTimeout(900);
     await screenshot(customerPage, "customer-first-verification.png", {
-      title: "Documentation Capture - Customer - First Verification",
+      title: "Customer - Verified Authentic",
       callouts: [
-        { locator: customerPage.getByText(/verified authentic/i).first(), text: "First scan confirms authenticity" },
+        { locator: customerPage.getByRole("heading", { name: /verified authentic/i }).first(), text: "Status banner" },
+        { locator: customerPage.getByText(/scan summary/i).first(), text: "Scan summary" },
       ],
     });
 
@@ -570,26 +481,26 @@ test("capture help screenshots", async ({ browser }) => {
     await goto(customerPage, `${OPERATIONS_BASE_URL}/verify/${encodeURIComponent(DOCS_CODE)}`);
     await customerPage.waitForTimeout(800);
     await screenshot(customerPage, "customer-verified-again.png", {
-      title: "Documentation Capture - Customer - Legit Repeat Verification",
+      title: "Customer - Verified Again",
       callouts: [
-        { locator: customerPage.getByText(/verified again/i).first(), text: "Same buyer can verify again safely" },
+        { locator: customerPage.getByRole("heading", { name: /verified again/i }).first(), text: "Repeat check" },
+        { locator: customerPage.getByText(/scan summary/i).first(), text: "Earlier scans" },
       ],
     });
 
-    // Switch to a fresh browser context so later scans simulate a different device.
     const duplicateCtx = await browser.newContext({ viewport: { width: 1200, height: 800 } });
     const duplicatePage = await duplicateCtx.newPage();
     await disableMotion(duplicatePage);
 
-    await goto(duplicatePage, `${OPERATIONS_BASE_URL}/verify/${encodeURIComponent(DOCS_CODE)}`);
-    await duplicatePage.waitForTimeout(600);
-    await goto(duplicatePage, `${OPERATIONS_BASE_URL}/verify/${encodeURIComponent(DOCS_CODE)}`);
-    await duplicatePage.waitForTimeout(900);
+    const duplicateHeading = duplicatePage.getByRole("heading", { name: /suspicious duplicate|possible duplicate/i }).first();
+    await goto(duplicatePage, `${OPERATIONS_BASE_URL}/verify/${encodeURIComponent(DOCS_DUPLICATE_CODE)}`);
+    await duplicatePage.waitForTimeout(1200);
+    await expect(duplicateHeading).toBeVisible({ timeout: 15_000 });
     await screenshot(duplicatePage, "customer-possible-duplicate.png", {
-      title: "Documentation Capture - Customer - Possible Duplicate",
+      title: "Customer - Possible Duplicate",
       callouts: [
-        { locator: duplicatePage.getByText(/suspicious duplicate/i).first(), text: "Unusual scan patterns may indicate copying" },
-        { locator: duplicatePage.getByText(/risk explanation/i).first(), text: "Reasons and summary help you decide" },
+        { locator: duplicateHeading, text: "Warning" },
+        { locator: duplicatePage.getByText(/duplicate risk signals detected/i).first(), text: "Why it was flagged" },
       ],
     });
 
@@ -597,10 +508,10 @@ test("capture help screenshots", async ({ browser }) => {
     await duplicatePage.getByRole("button", { name: /open incident drawer|report suspected counterfeit/i }).first().click();
     await duplicatePage.getByPlaceholder("Describe what looked suspicious.").fill("Docs capture: possible duplicate label observed.");
     await screenshot(duplicatePage, "customer-report-dialog.png", {
-      title: "Documentation Capture - Customer - Fraud Report",
+      title: "Customer - Report a Suspicious Product",
       callouts: [
-        { locator: duplicatePage.getByRole("dialog"), text: "Structured report with metadata" },
-        { locator: duplicatePage.getByRole("button", { name: /submit report/i }), text: "Submit to incident response" },
+        { locator: duplicatePage.getByPlaceholder("Describe what looked suspicious."), text: "Describe the issue" },
+        { locator: duplicatePage.getByRole("button", { name: /submit report/i }), text: "Submit report" },
       ],
     });
 

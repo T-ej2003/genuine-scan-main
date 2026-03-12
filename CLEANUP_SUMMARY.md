@@ -9,6 +9,7 @@
 - Technical operator controls that exposed print path, command language, calibration, and other setup-only details inside everyday print flows.
 - Source batch UUIDs and other internal identifiers from manufacturer and licensee batch workspaces.
 - Raw backend printer failure messages surfaced directly in the UI.
+- Raw duplicate-printer database errors that exposed Prisma internals during printer setup.
 
 ## What remains intentionally visible by role
 
@@ -22,3 +23,4 @@
 - Everyday print workflows now focus on quantity, saved printer selection, readiness, and retry.
 - Printer setup and support guidance now routes technical setup into `Printer Setup & Support` instead of exposing internals inside batch operations.
 - Printer API responses are sanitized for common workstation, network, gateway, and IPP failure cases so business users do not receive raw infrastructure text.
+- Printing manuals and Lightsail deployment docs now use Docker Compose operations and source-controlled printer illustrations instead of stale mock-printer captures.

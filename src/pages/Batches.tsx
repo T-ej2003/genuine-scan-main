@@ -1663,23 +1663,23 @@ export default function Batches() {
 
       if (isServerDispatchedMode) {
         toast({
-          title: createdMode === "NETWORK_IPP" ? "Network IPP job started" : "Network-direct job started",
+          title: createdMode === "NETWORK_IPP" ? "Office printer job started" : "Factory printer job started",
           description:
             createdMode === "NETWORK_IPP"
-              ? `Dispatching ${qty} label${qty === 1 ? "" : "s"} to ${selectedPrinterProfile.name} over ${selectedPrinterProfile.deliveryMode === "SITE_GATEWAY" ? "the site gateway" : "IPP/IPPS"}.`
+              ? `Sending ${qty} label${qty === 1 ? "" : "s"} to ${selectedPrinterProfile.name} over ${selectedPrinterProfile.deliveryMode === "SITE_GATEWAY" ? "the site connector" : "the office printer route"}.`
               : `Dispatching ${qty} label${qty === 1 ? "" : "s"} to ${selectedPrinterProfile.name}.`,
         });
         setPrintProgressPhase(
           createdMode === "NETWORK_IPP"
             ? selectedPrinterProfile.deliveryMode === "SITE_GATEWAY"
-              ? "Waiting for site gateway dispatch"
-              : "Dispatching to registered IPP printer"
-            : "Dispatching to registered network printer"
+              ? "Waiting for site connector dispatch"
+              : "Sending to saved office printer"
+            : "Sending to saved factory printer"
         );
         const pollResult = await pollPrintJobUntilSettled(createdJobId);
         if (pollResult.settled && pollResult.job?.status === "CONFIRMED") {
           toast({
-            title: createdMode === "NETWORK_IPP" ? "Network IPP print complete" : "Network print complete",
+            title: createdMode === "NETWORK_IPP" ? "Office printer job complete" : "Factory printer job complete",
             description: `${pollResult.job.session?.confirmedItems || qty} labels confirmed by the server.`,
           });
           setPrintProgressPhase("Completed");

@@ -70,7 +70,7 @@ export default function ManufacturerHelp() {
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">
                   <li>After job creation, MSCQR dispatches approved payloads through the selected printer profile.</li>
-                  <li>Local-agent jobs stay tied to the workstation printer. Network-direct jobs go to registered raw LAN label printers. Network IPP jobs send standards-based PDF jobs to AirPrint or IPP Everywhere printers.</li>
+                  <li>Workstation printing stays tied to the selected workstation printer. Factory label printer jobs go to saved LAN printer profiles. Office printer jobs send standards-based PDF jobs to AirPrint or IPP Everywhere printers.</li>
                   <li>Printed status updates as the job confirms on completion.</li>
                 </ol>
               </CardContent>
@@ -168,14 +168,14 @@ export default function ManufacturerHelp() {
           <h2 className="text-lg font-semibold text-foreground">Screenshots</h2>
           <div className="grid gap-4 md:grid-cols-2">
             <DocScreenshot
-              filename="manufacturer-print-job-annotated.svg"
+              filename="manufacturer-create-print-job.png"
               alt="Create print job modal"
               caption="Batches: select the printer profile, validate readiness, and start controlled dispatch."
               eager
             />
             <DocScreenshot
-              filename="manufacturer-printer-diagnostics-annotated.svg"
-              alt="Printer diagnostics"
+              filename="manufacturer-printer-diagnostics.png"
+              alt="Printer setup and support"
               caption="Printer Setup & Support: choose the right printer path, review readiness, and validate saved printer profiles."
             />
             <DocScreenshot
@@ -187,16 +187,16 @@ export default function ManufacturerHelp() {
           <ScreenshotChecklist
             items={[
               {
-                filename: "manufacturer-print-job-annotated.svg",
-                whereToCapture: "Manufacturer Batches page showing printer profile selection, dispatch mode, and Create Print Job action.",
+                filename: "manufacturer-create-print-job.png",
+                whereToCapture: "Illustrative Create Print Job dialog showing quantity, saved printer profile, readiness summary, and Start print action.",
               },
               {
-                filename: "manufacturer-printer-diagnostics-annotated.svg",
-                whereToCapture: "Printer Setup & Support page showing the compatibility matrix and saved printer validation controls.",
+                filename: "manufacturer-printer-diagnostics.png",
+                whereToCapture: "Illustrative Printer Setup & Support page showing connector readiness, compatibility guidance, and saved printer checks.",
               },
               {
                 filename: "manufacturer-print-status.png",
-                whereToCapture: "Manufacturer Batches list showing Printed status updated.",
+                whereToCapture: "Illustrative print progress view showing current status and recent print confirmations.",
               },
             ]}
           />

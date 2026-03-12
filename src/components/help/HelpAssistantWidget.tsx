@@ -61,7 +61,7 @@ const routeLabel = (route: string) => {
     "/support": "Support tickets",
     "/governance": "Governance",
     "/ir": "IR Center",
-    "/printer-diagnostics": "Printer Diagnostics",
+    "/printer-diagnostics": "Printer Setup",
     "/account": "Account settings",
     "/login": "Sign in",
     "/accept-invite": "Accept invite",
@@ -103,7 +103,7 @@ const roleScopedIntro = (activeRole: HelpKbRole) => {
     return "Licensee/Admin mode: ask about inventory requests, the batch workspace, manufacturers, tracking, and account access.";
   }
   if (activeRole === "manufacturer") {
-    return "Manufacturer mode: ask about assigned batches, printer profiles, local-agent vs network-direct printing, and status updates.";
+    return "Manufacturer mode: ask about assigned batches, printer setup, workstation printing, saved factory printers, office printers, and status updates.";
   }
   return "Customer mode: ask about verification results, repeat scans, ownership claim, and counterfeit reporting.";
 };
