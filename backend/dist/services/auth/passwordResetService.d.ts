@@ -11,11 +11,11 @@ export declare const resetPasswordWithToken: (input: {
     ipHash: string | null;
     userAgent: string | null;
 }) => Promise<{
-    id: string;
-    email: string;
-    name: string;
-    role: import(".prisma/client").$Enums.UserRole;
-    orgId: string | null;
     licenseeId: string | null;
+    id: string;
+    orgId: string | null;
+    name: string;
+    email: string;
+    role: import(".prisma/client").$Enums.UserRole;
 }>;
 //# sourceMappingURL=passwordResetService.d.ts.map

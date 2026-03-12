@@ -27,7 +27,13 @@ import {
   resetPassword,
   invite,
   acceptInviteController,
+  invitePreviewController,
 } from "../controllers/authController";
+import {
+  downloadConnectorReleaseController,
+  getLatestConnectorReleaseController,
+  listConnectorReleasesController,
+} from "../controllers/connectorController";
 import {
   createLicensee,
   getLicensees,
@@ -270,8 +276,12 @@ const verifyFeedbackLimiter = rateLimit({
 // ==================== PUBLIC ====================
 router.post("/auth/login", loginLimiter, login);
 router.post("/auth/accept-invite", loginLimiter, acceptInviteController);
+router.get("/auth/invite-preview", loginLimiter, invitePreviewController);
 router.post("/auth/forgot-password", forgotPasswordLimiter, forgotPassword);
 router.post("/auth/reset-password", forgotPasswordLimiter, resetPassword);
+router.get("/public/connector/releases", listConnectorReleasesController);
+router.get("/public/connector/releases/latest", getLatestConnectorReleaseController);
+router.get("/public/connector/download/:version/:platform", downloadConnectorReleaseController);
 router.get("/verify/:code", verifyCodeLimiter, optionalCustomerVerifyAuth, verifyQRCode);
 router.post("/verify/auth/email-otp/request", verifyOtpRequestLimiter, requestCustomerEmailOtp);
 router.post("/verify/auth/email-otp/verify", verifyOtpVerifyLimiter, verifyCustomerEmailOtp);

@@ -58,6 +58,16 @@ const estimateIpReputationScore = (ip) => {
         return 15;
     return 5;
 };
+const normalizeActorId = (value) => String(value || "").trim();
+const trustedActorKey = (input) => {
+    if (input.isTrustedOwnerContext !== true)
+        return "";
+    const customerUserId = normalizeActorId(input.customerUserId);
+    if (customerUserId)
+        return `user:${customerUserId}`;
+    const ownershipId = normalizeActorId(input.ownershipId);
+    return ownershipId ? `ownership:${ownershipId}` : "";
+};
 const getScanInsight = async (qrCodeId, currentDevice, options) => {
     const now = Date.now();
     const lookback24h = new Date(now - 24 * 60 * 60 * 1000);
@@ -66,7 +76,15 @@ const getScanInsight = async (qrCodeId, currentDevice, options) => {
     const licenseeScope = String(options?.licenseeId || "").trim() || null;
     const sharedScopeWhere = licenseeScope ? { licenseeId: licenseeScope } : {};
     const normalizedCurrentDevice = String(currentDevice || "").trim();
-    const [first, latestTwo, recent24h, recent10mCount, ipVelocityCount10m, deviceCorrelatedCodes] = await Promise.all([
+    const currentActorTrustedOwnerContext = options?.currentActorTrustedOwnerContext === true;
+    const currentTrustedActorKey = currentActorTrustedOwnerContext
+        ? trustedActorKey({
+            isTrustedOwnerContext: true,
+            customerUserId: options?.currentCustomerUserId || null,
+            ownershipId: options?.currentOwnershipId || null,
+        })
+        : "";
+    const [first, latestTwo, recent24h, ipVelocityCount10m, deviceCorrelatedCodes] = await Promise.all([
         database_1.default.qrScanLog.findFirst({
             where: { qrCodeId },
             orderBy: [{ scannedAt: "asc" }, { id: "asc" }],
@@ -93,6 +111,9 @@ const getScanInsight = async (qrCodeId, currentDevice, options) => {
                 latitude: true,
                 longitude: true,
                 device: true,
+                customerUserId: true,
+                ownershipId: true,
+                isTrustedOwnerContext: true,
             },
         }),
         database_1.default.qrScanLog.findMany({
@@ -104,12 +125,9 @@ const getScanInsight = async (qrCodeId, currentDevice, options) => {
                 scannedAt: true,
                 device: true,
                 locationCountry: true,
-            },
-        }),
-        database_1.default.qrScanLog.count({
-            where: {
-                qrCodeId,
-                scannedAt: { gte: lookback10m },
+                customerUserId: true,
+                ownershipId: true,
+                isTrustedOwnerContext: true,
             },
         }),
         normalizedCurrentIp
@@ -137,10 +155,22 @@ const getScanInsight = async (qrCodeId, currentDevice, options) => {
     const latest = latestTwo[0] || null;
     const previous = latestTwo[1] || null;
     const latestTimestamp = latest?.scannedAt ? new Date(latest.scannedAt).getTime() : null;
+    const recent10m = recent24h.filter((row) => new Date(row.scannedAt).getTime() >= lookback10m.getTime());
     const distinctDevices = new Set(recent24h
         .map((row) => String(row.device || "").trim())
         .filter(Boolean));
     const distinctCountries = new Set(recent24h
+        .map((row) => String(row.locationCountry || "").trim().toUpperCase())
+        .filter(Boolean));
+    const trustedRecent24h = recent24h.filter((row) => row.isTrustedOwnerContext === true);
+    const untrustedRecent24h = recent24h.filter((row) => row.isTrustedOwnerContext !== true);
+    const trustedOwnerScanCount10m = recent10m.filter((row) => row.isTrustedOwnerContext === true).length;
+    const untrustedScanCount10m = recent10m.filter((row) => row.isTrustedOwnerContext !== true).length;
+    const distinctTrustedActors = new Set(trustedRecent24h.map((row) => trustedActorKey(row)).filter(Boolean));
+    const distinctUntrustedDevices = new Set(untrustedRecent24h
+        .map((row) => String(row.device || "").trim())
+        .filter(Boolean));
+    const distinctUntrustedCountries = new Set(untrustedRecent24h
         .map((row) => String(row.locationCountry || "").trim().toUpperCase())
         .filter(Boolean));
     const seenOnCurrentDeviceBefore = Boolean(normalizedCurrentDevice) &&
@@ -153,6 +183,13 @@ const getScanInsight = async (qrCodeId, currentDevice, options) => {
     const previousScanSameDevice = previous && normalizedCurrentDevice
         ? String(previous.device || "").trim() === normalizedCurrentDevice
         : null;
+    const seenByCurrentTrustedActorBefore = Boolean(currentTrustedActorKey) &&
+        recent24h.some((row) => {
+            if (!latestTimestamp)
+                return false;
+            return trustedActorKey(row) === currentTrustedActorKey && new Date(row.scannedAt).getTime() < latestTimestamp;
+        });
+    const previousScanSameTrustedActor = previous && currentTrustedActorKey ? trustedActorKey(previous) === currentTrustedActorKey : null;
     const correlatedCodeIds = deviceCorrelatedCodes.map((row) => row.qrCodeId).filter(Boolean);
     const crossCodeCorrelation24h = correlatedCodeIds.filter((id) => id !== qrCodeId).length;
     const deviceGraphOverlap24h = normalizedCurrentDevice && correlatedCodeIds.length > 0
@@ -177,11 +214,22 @@ const getScanInsight = async (qrCodeId, currentDevice, options) => {
         previousScanAt: previous?.scannedAt ? new Date(previous.scannedAt).toISOString() : null,
         previousScanLocation: previous ? await locationLabel(previous) : null,
         signals: {
+            scanCount24h: recent24h.length,
             distinctDeviceCount24h: distinctDevices.size,
-            recentScanCount10m: recent10mCount,
+            recentScanCount10m: recent10m.length,
             distinctCountryCount24h: distinctCountries.size,
             seenOnCurrentDeviceBefore,
             previousScanSameDevice,
+            currentActorTrustedOwnerContext,
+            seenByCurrentTrustedActorBefore,
+            previousScanSameTrustedActor,
+            trustedOwnerScanCount24h: trustedRecent24h.length,
+            trustedOwnerScanCount10m,
+            untrustedScanCount24h: untrustedRecent24h.length,
+            untrustedScanCount10m,
+            distinctTrustedActorCount24h: distinctTrustedActors.size,
+            distinctUntrustedDeviceCount24h: distinctUntrustedDevices.size,
+            distinctUntrustedCountryCount24h: distinctUntrustedCountries.size,
             ipVelocityCount10m,
             ipReputationScore,
             deviceGraphOverlap24h,

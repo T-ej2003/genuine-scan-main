@@ -1,5 +1,7 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import { HelpShell } from "@/pages/help/HelpShell";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -93,6 +95,14 @@ export default function ManufacturerHelp() {
 
         <section className="space-y-3">
           <h2 className="text-lg font-semibold text-foreground">Printer onboarding and diagnostics</h2>
+          <div className="flex flex-wrap gap-3">
+            <Button asChild variant="outline">
+              <Link to="/connector-download">Install Connector</Link>
+            </Button>
+            <Button asChild variant="ghost">
+              <Link to="/printer-diagnostics">Open Printer Setup</Link>
+            </Button>
+          </div>
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <CardHeader className="space-y-1">
@@ -103,7 +113,8 @@ export default function ManufacturerHelp() {
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">
-                  <li>Install the signed MSCQR Workstation Connector once on the workstation that will print.</li>
+                  <li>Open <Badge variant="outline">Install Connector</Badge> on the workstation that will print.</li>
+                  <li>Choose the Mac or Windows installer for that workstation and run it once.</li>
                   <li>Confirm it is configured to auto-start at login and run in the background.</li>
                   <li>Make sure the operating system already lists the printer and driver correctly.</li>
                   <li>Open <Badge variant="outline">Printer Setup</Badge> in MSCQR and use <Badge variant="outline">Refresh status</Badge>.</li>
@@ -121,6 +132,7 @@ export default function ManufacturerHelp() {
                   <li><Badge variant="outline">Connector unavailable</Badge> means MSCQR cannot detect the workstation connector on that device.</li>
                   <li><Badge variant="outline">No printer detected</Badge> means the connector is running but the operating system is not exposing a usable printer yet.</li>
                   <li><Badge variant="outline">Needs attention</Badge> means the saved printer setup or secure connection still needs review.</li>
+                  <li>If the connector is not installed yet, return to <Badge variant="outline">Install Connector</Badge> first.</li>
                   <li>Open <Badge variant="outline">Printer Setup</Badge> to separate those cases and copy the support summary.</li>
                 </ul>
               </CardContent>
@@ -168,6 +180,11 @@ export default function ManufacturerHelp() {
           <h2 className="text-lg font-semibold text-foreground">Screenshots</h2>
           <div className="grid gap-4 md:grid-cols-2">
             <DocScreenshot
+              filename="manufacturer-connector-download.png"
+              alt="Connector download page"
+              caption="Connector download page: choose the Mac or Windows installer for the computer that will print."
+            />
+            <DocScreenshot
               filename="manufacturer-create-print-job.png"
               alt="Create print job modal"
               caption="Batches: select the printer profile, validate readiness, and start controlled dispatch."
@@ -186,6 +203,10 @@ export default function ManufacturerHelp() {
           </div>
           <ScreenshotChecklist
             items={[
+              {
+                filename: "manufacturer-connector-download.png",
+                whereToCapture: "Illustrative connector download page showing Mac and Windows installer options plus the simple setup steps.",
+              },
               {
                 filename: "manufacturer-create-print-job.png",
                 whereToCapture: "Illustrative Create Print Job dialog showing quantity, saved printer profile, readiness summary, and Start print action.",

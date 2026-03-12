@@ -6,24 +6,24 @@ export declare function createUser(params: {
     role: UserRole;
     licenseeId?: string | null;
 }): Promise<{
+    licenseeId: string | null;
+    createdAt: Date;
+    updatedAt: Date;
     id: string;
-    email: string;
-    passwordHash: string | null;
+    orgId: string | null;
     name: string;
-    role: import(".prisma/client").$Enums.UserRole;
     location: string | null;
     website: string | null;
-    orgId: string | null;
-    licenseeId: string | null;
-    status: import(".prisma/client").$Enums.UserStatus;
     isActive: boolean;
+    email: string;
+    passwordHash: string | null;
+    role: import(".prisma/client").$Enums.UserRole;
+    status: import(".prisma/client").$Enums.UserStatus;
     disabledAt: Date | null;
     disabledReason: string | null;
     deletedAt: Date | null;
     failedLoginAttempts: number;
     lockedUntil: Date | null;
     lastLoginAt: Date | null;
-    createdAt: Date;
-    updatedAt: Date;
 }>;
 //# sourceMappingURL=userService.d.ts.map

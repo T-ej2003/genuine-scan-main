@@ -15,6 +15,7 @@ const logger_1 = require("./utils/logger");
 const siemOutboxService_1 = require("./services/siemOutboxService");
 const compliancePackService_1 = require("./services/compliancePackService");
 const networkDirectPrintService_1 = require("./services/networkDirectPrintService");
+const networkIppPrintService_1 = require("./services/networkIppPrintService");
 dotenv_1.default.config();
 dotenv_1.default.config({ path: path_1.default.resolve(__dirname, "../.env") });
 const missingRequiredEnv = ["DATABASE_URL", "JWT_SECRET"].filter((k) => !process.env[k]);
@@ -187,6 +188,9 @@ const server = app.listen(PORT, () => {
     (0, compliancePackService_1.startCompliancePackScheduler)();
     void (0, networkDirectPrintService_1.resumePendingNetworkDirectJobs)().catch((error) => {
         logger_1.logger.error("Failed to resume pending network-direct jobs", { error: error?.message || error });
+    });
+    void (0, networkIppPrintService_1.resumePendingNetworkIppJobs)().catch((error) => {
+        logger_1.logger.error("Failed to resume pending network IPP jobs", { error: error?.message || error });
     });
 });
 server.on("error", (err) => {

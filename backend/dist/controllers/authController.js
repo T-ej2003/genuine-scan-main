@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.acceptInviteController = exports.invite = exports.resetPassword = exports.forgotPassword = exports.logout = exports.refresh = exports.me = exports.completeMfaLoginController = exports.disableMfaController = exports.confirmMfaSetupController = exports.beginMfaSetupController = exports.getMfaStatusController = exports.login = void 0;
+exports.invitePreviewController = exports.acceptInviteController = exports.invite = exports.resetPassword = exports.forgotPassword = exports.logout = exports.refresh = exports.me = exports.completeMfaLoginController = exports.disableMfaController = exports.confirmMfaSetupController = exports.beginMfaSetupController = exports.getMfaStatusController = exports.login = void 0;
 const zod_1 = require("zod");
 const database_1 = __importDefault(require("../config/database"));
 const security_1 = require("../utils/security");
@@ -13,6 +13,7 @@ const authService_1 = require("../services/auth/authService");
 const passwordResetService_1 = require("../services/auth/passwordResetService");
 const email_1 = require("../utils/email");
 const mfaService_1 = require("../services/auth/mfaService");
+const manufacturerScopeService_1 = require("../services/manufacturerScopeService");
 const loginSchema = zod_1.z.object({
     email: zod_1.z.string().email("Invalid email format"),
     password: zod_1.z.string().min(6, "Password must be at least 6 characters"),
@@ -35,6 +36,9 @@ const acceptInviteSchema = zod_1.z.object({
     token: zod_1.z.string().trim().min(10),
     password: zod_1.z.string().min(8).max(200),
     name: zod_1.z.string().trim().min(2).max(120).optional(),
+});
+const invitePreviewQuerySchema = zod_1.z.object({
+    token: zod_1.z.string().trim().min(10),
 });
 const forgotPasswordSchema = zod_1.z.object({
     email: zod_1.z.string().trim().email(),
@@ -281,12 +285,38 @@ const me = async (req, res) => {
         if (!user) {
             return res.status(404).json({ success: false, error: "User not found" });
         }
+        const linkedLicensees = (0, manufacturerScopeService_1.isManufacturerRole)(user.role)
+            ? (0, manufacturerScopeService_1.normalizeLinkedLicensees)(await (0, manufacturerScopeService_1.listManufacturerLicenseeLinks)(user.id, database_1.default))
+            : [];
+        const primaryLicensee = user.licensee ||
+            linkedLicensees.find((row) => row.isPrimary) ||
+            linkedLicensees[0] ||
+            null;
         // Ensure CSRF cookie exists for cookie-auth flows.
         const hasCsrfCookie = Boolean(req.cookies?.[tokenService_1.CSRF_TOKEN_COOKIE]);
         if (!hasCsrfCookie) {
             res.cookie(tokenService_1.CSRF_TOKEN_COOKIE, (0, tokenService_1.newCsrfToken)(), { ...csrfCookieOptions(), maxAge: (0, tokenService_1.getRefreshTokenTtlDays)() * 24 * 60 * 60 * 1000 });
         }
-        return res.json({ success: true, data: { id: user.id, email: user.email, name: user.name, role: user.role, licenseeId: user.licenseeId, orgId: user.orgId, licensee: user.licensee ? { id: user.licensee.id, name: user.licensee.name, prefix: user.licensee.prefix } : null } });
+        return res.json({
+            success: true,
+            data: {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                role: user.role,
+                licenseeId: primaryLicensee?.id || user.licenseeId,
+                orgId: user.orgId || primaryLicensee?.orgId || null,
+                licensee: primaryLicensee
+                    ? {
+                        id: primaryLicensee.id,
+                        name: primaryLicensee.name,
+                        prefix: primaryLicensee.prefix,
+                        brandName: primaryLicensee.brandName ?? null,
+                    }
+                    : null,
+                linkedLicensees,
+            },
+        });
     }
     catch (error) {
         console.error("Me error:", error);
@@ -453,4 +483,18 @@ const acceptInviteController = async (req, res) => {
     }
 };
 exports.acceptInviteController = acceptInviteController;
+const invitePreviewController = async (req, res) => {
+    const parsed = invitePreviewQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+        return res.status(400).json({ success: false, error: "Missing invite token." });
+    }
+    try {
+        const preview = await (0, inviteService_1.getInvitePreview)(parsed.data.token);
+        return res.json({ success: true, data: preview });
+    }
+    catch (e) {
+        return res.status(400).json({ success: false, error: e?.message || "Invite preview unavailable" });
+    }
+};
+exports.invitePreviewController = invitePreviewController;
 //# sourceMappingURL=authController.js.map

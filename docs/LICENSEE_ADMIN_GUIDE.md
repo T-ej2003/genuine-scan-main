@@ -176,7 +176,10 @@ Purpose: invite and manage manufacturer users for your organization.
 3. Enter the manufacturer name and email.
 4. Enter location and website if required.
 5. Select `Send invite`.
-6. If the user cannot find the email, ask Super Admin to verify delivery settings or resend the invite later.
+6. The invite email now includes both:
+   the password activation link
+   and the `Install Connector` page for Mac and Windows
+7. If the user cannot find the email, ask Super Admin to verify delivery settings or resend the invite later.
 
 ![Create Manufacturer](../public/docs/licensee-create-manufacturer.png)
 

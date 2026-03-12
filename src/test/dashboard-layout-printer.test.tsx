@@ -150,6 +150,7 @@ describe("DashboardLayout printer connection dialog", () => {
     expect(screen.getByText("Set up printing on this workstation")).toBeInTheDocument();
     expect(screen.getByText(/The browser cannot install printers, drivers, or native apps by itself/i)).toBeInTheDocument();
     expect(screen.getByText(/If the OS can see the printer, MSCQR will detect it and it will appear automatically/i)).toBeInTheDocument();
-    expect(screen.getByText(/Install the MSCQR Workstation Connector on that same device/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /install connector/i })).toBeInTheDocument();
+    expect(screen.getByText(/download the Mac or Windows installer for that same device/i)).toBeInTheDocument();
   });
 });

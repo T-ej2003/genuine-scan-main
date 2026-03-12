@@ -5,6 +5,10 @@ dist
 dist/
 backend/dist
 backend/dist/
+backend/.connector-build
+backend/.connector-build/
+backend/.pkg-cache
+backend/.pkg-cache/
 playwright-report
 test-results
 coverage

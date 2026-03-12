@@ -7,9 +7,9 @@ export declare const createRefreshToken: (input: {
     now?: Date;
 }) => Promise<{
     row: {
+        createdAt: Date;
         id: string;
         orgId: string | null;
-        createdAt: Date;
         userId: string;
         tokenHash: string;
         expiresAt: Date;

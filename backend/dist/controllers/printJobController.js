@@ -14,8 +14,12 @@ const notificationService_1 = require("../services/notificationService");
 const printerConnectionService_1 = require("../services/printerConnectionService");
 const printPayloadService_1 = require("../services/printPayloadService");
 const printerRegistryService_1 = require("../services/printerRegistryService");
+const networkPrinterSocketService_1 = require("../services/networkPrinterSocketService");
 const networkDirectPrintService_1 = require("../services/networkDirectPrintService");
+const ippClient_1 = require("../printing/ippClient");
+const networkIppPrintService_1 = require("../services/networkIppPrintService");
 const idempotencyService_1 = require("../services/idempotencyService");
+const printerUserFacingErrors_1 = require("../utils/printerUserFacingErrors");
 const MANUFACTURER_ROLES = [
     client_1.UserRole.MANUFACTURER,
     client_1.UserRole.MANUFACTURER_ADMIN,
@@ -74,6 +78,13 @@ const parsePositiveIntEnv = (name, fallback, hardMax) => {
 const DIRECT_PRINT_LOCK_TTL_MINUTES = parsePositiveIntEnv("PRINT_JOB_LOCK_TTL_MINUTES", 45, 24 * 60);
 const DIRECT_PRINT_RENDER_TOKEN_TTL_SECONDS = parsePositiveIntEnv("DIRECT_PRINT_TOKEN_TTL_SECONDS", 90, 900);
 const DIRECT_PRINT_MAX_BATCH = parsePositiveIntEnv("DIRECT_PRINT_MAX_BATCH", 250, 500);
+const describePrintDispatchMode = (mode) => {
+    if (mode === client_1.PrintDispatchMode.NETWORK_DIRECT)
+        return "Network-direct";
+    if (mode === client_1.PrintDispatchMode.NETWORK_IPP)
+        return "Network IPP";
+    return "Local-agent";
+};
 const getLockExpiresAt = (createdAt) => new Date(createdAt.getTime() + DIRECT_PRINT_LOCK_TTL_MINUTES * 60 * 1000);
 const isLockExpired = (createdAt, now = new Date()) => getLockExpiresAt(createdAt).getTime() <= now.getTime();
 const ensureManufacturerUser = (req, res) => {
@@ -130,12 +141,142 @@ const ensureSelectedPrinterReady = async (params) => {
         if (!printer.ipAddress || !printer.port) {
             throw new Error("PRINTER_NETWORK_CONFIG_INVALID");
         }
+        if (!(0, printPayloadService_1.supportsNetworkDirectPayload)(printer)) {
+            const detail = "Network-direct printing currently supports only ZPL, TSPL, EPL, and CPCL. Use the local agent for other printer languages.";
+            await database_1.default.printer.update({
+                where: { id: printer.id },
+                data: {
+                    lastValidatedAt: new Date(),
+                    lastValidationStatus: "BLOCKED",
+                    lastValidationMessage: detail,
+                },
+            });
+            throw Object.assign(new Error("PRINTER_NETWORK_LANGUAGE_UNSUPPORTED"), { reason: detail, printer });
+        }
+        try {
+            const result = await (0, networkPrinterSocketService_1.testNetworkPrinterConnectivity)({
+                ipAddress: printer.ipAddress,
+                port: printer.port,
+            });
+            await database_1.default.printer.update({
+                where: { id: printer.id },
+                data: {
+                    lastValidatedAt: new Date(),
+                    lastValidationStatus: "READY",
+                    lastValidationMessage: `TCP connectivity validated in ${result.latencyMs}ms`,
+                },
+            });
+        }
+        catch (error) {
+            const detail = error?.message || `Could not reach ${printer.ipAddress}:${printer.port}`;
+            await database_1.default.printer.update({
+                where: { id: printer.id },
+                data: {
+                    lastValidatedAt: new Date(),
+                    lastValidationStatus: "OFFLINE",
+                    lastValidationMessage: detail,
+                },
+            });
+            throw Object.assign(new Error("PRINTER_NETWORK_UNREACHABLE"), {
+                reason: detail,
+                printer,
+            });
+        }
         return {
             printer,
             printerStatus: null,
             printMode: client_1.PrintDispatchMode.NETWORK_DIRECT,
             payloadType: (0, printPayloadService_1.resolvePayloadType)(printer),
         };
+    }
+    if (printer.connectionType === client_1.PrinterConnectionType.NETWORK_IPP) {
+        if (printer.deliveryMode === client_1.PrinterDeliveryMode.SITE_GATEWAY) {
+            if (!printer.gatewayId || !printer.gatewaySecretHash) {
+                throw Object.assign(new Error("PRINTER_GATEWAY_CONFIG_INVALID"), { printer });
+            }
+            const lastSeenAt = printer.gatewayLastSeenAt ? new Date(printer.gatewayLastSeenAt) : null;
+            const stale = !lastSeenAt ||
+                Number.isNaN(lastSeenAt.getTime()) ||
+                Date.now() - lastSeenAt.getTime() > (Math.max(10_000, Number(process.env.PRINT_GATEWAY_HEARTBEAT_TTL_MS || 45_000) || 45_000));
+            if (stale) {
+                throw Object.assign(new Error("PRINTER_GATEWAY_OFFLINE"), { reason: printer.gatewayLastError || "Site gateway is offline.", printer });
+            }
+            return {
+                printer,
+                printerStatus: null,
+                printMode: client_1.PrintDispatchMode.NETWORK_IPP,
+                payloadType: client_1.PrintPayloadType.PDF,
+            };
+        }
+        try {
+            const inspection = await (0, ippClient_1.inspectIppPrinter)({
+                host: printer.host,
+                port: printer.port,
+                resourcePath: printer.resourcePath,
+                tlsEnabled: printer.tlsEnabled,
+                printerUri: printer.printerUri,
+            });
+            if (!inspection.pdfSupported) {
+                const detail = `IPP endpoint ${inspection.printerUri} is reachable, but application/pdf is not advertised by the printer.`;
+                await database_1.default.printer.update({
+                    where: { id: printer.id },
+                    data: {
+                        lastValidatedAt: new Date(),
+                        lastValidationStatus: "BLOCKED",
+                        lastValidationMessage: detail,
+                        printerUri: inspection.printerUri,
+                        capabilitySummary: {
+                            ...printer.capabilitySummary,
+                            documentFormats: inspection.documentFormats,
+                            uriSecurity: inspection.uriSecurity,
+                            ippVersions: inspection.ippVersions,
+                            printerState: inspection.printerState,
+                        },
+                    },
+                });
+                throw Object.assign(new Error("PRINTER_IPP_FORMAT_UNSUPPORTED"), { reason: detail, printer });
+            }
+            await database_1.default.printer.update({
+                where: { id: printer.id },
+                data: {
+                    lastValidatedAt: new Date(),
+                    lastValidationStatus: "READY",
+                    lastValidationMessage: `IPP printer validated at ${inspection.printerUri}`,
+                    printerUri: inspection.printerUri,
+                    capabilitySummary: {
+                        ...printer.capabilitySummary,
+                        documentFormats: inspection.documentFormats,
+                        uriSecurity: inspection.uriSecurity,
+                        ippVersions: inspection.ippVersions,
+                        printerState: inspection.printerState,
+                    },
+                },
+            });
+            return {
+                printer: {
+                    ...printer,
+                    printerUri: inspection.printerUri,
+                },
+                printerStatus: null,
+                printMode: client_1.PrintDispatchMode.NETWORK_IPP,
+                payloadType: client_1.PrintPayloadType.PDF,
+            };
+        }
+        catch (error) {
+            if (String(error?.message || "").includes("PRINTER_IPP_FORMAT_UNSUPPORTED")) {
+                throw error;
+            }
+            const detail = error?.message || "IPP printer validation failed.";
+            await database_1.default.printer.update({
+                where: { id: printer.id },
+                data: {
+                    lastValidatedAt: new Date(),
+                    lastValidationStatus: "OFFLINE",
+                    lastValidationMessage: detail,
+                },
+            });
+            throw Object.assign(new Error("PRINTER_IPP_UNREACHABLE"), { reason: detail, printer });
+        }
     }
     throw new Error("PRINTER_MODE_UNSUPPORTED");
 };
@@ -166,6 +307,7 @@ const notifySystemPrintEvent = async (params) => {
         params.orgId
             ? (0, notificationService_1.createRoleNotifications)({
                 audience: client_1.NotificationAudience.MANUFACTURER,
+                licenseeId: params.licenseeId || null,
                 orgId: params.orgId,
                 type: params.type,
                 title: params.title,
@@ -535,11 +677,18 @@ const createPrintJob = async (req, res) => {
         if (replayIdempotentResponseIfAny(idempotency, res))
             return;
         const { batchId, printerId, quantity, rangeStart, rangeEnd, reprintOfJobId, reprintReason } = parsed.data;
+        const batch = await database_1.default.batch.findFirst({
+            where: { id: batchId, manufacturerId: user.userId },
+            select: { id: true, name: true, licenseeId: true, manufacturerId: true },
+        });
+        if (!batch) {
+            return res.status(404).json({ success: false, error: "Batch not found or not assigned to you" });
+        }
         const printerSelection = await ensureSelectedPrinterReady({
             printerId,
             userId: user.userId,
             orgId: user.orgId || null,
-            licenseeId: user.licenseeId || null,
+            licenseeId: batch.licenseeId || null,
         });
         if (printerSelection.printMode === client_1.PrintDispatchMode.NETWORK_DIRECT &&
             !(0, printPayloadService_1.supportsNetworkDirectPayloadType)(printerSelection.payloadType)) {
@@ -547,13 +696,6 @@ const createPrintJob = async (req, res) => {
                 success: false,
                 error: "Network-direct printing currently supports registered ZPL, TSPL, EPL, and CPCL printers only.",
             });
-        }
-        const batch = await database_1.default.batch.findFirst({
-            where: { id: batchId, manufacturerId: user.userId },
-            select: { id: true, name: true, licenseeId: true, manufacturerId: true },
-        });
-        if (!batch) {
-            return res.status(404).json({ success: false, error: "Batch not found or not assigned to you" });
         }
         const printLockToken = (0, crypto_1.randomBytes)(24).toString("base64url");
         const printLockTokenHash = hashLockToken(printLockToken);
@@ -692,7 +834,13 @@ const createPrintJob = async (req, res) => {
                     connectionType: printerSelection.printer.connectionType,
                     commandLanguage: printerSelection.printer.commandLanguage,
                     ipAddress: printerSelection.printer.ipAddress,
+                    host: printerSelection.printer.host || null,
                     port: printerSelection.printer.port,
+                    resourcePath: printerSelection.printer.resourcePath || null,
+                    tlsEnabled: printerSelection.printer.tlsEnabled ?? null,
+                    printerUri: printerSelection.printer.printerUri || null,
+                    deliveryMode: printerSelection.printer.deliveryMode || null,
+                    gatewayId: printerSelection.printer.gatewayId || null,
                     nativePrinterId: printerSelection.printer.nativePrinterId,
                 },
                 printerStatus: printerSelection.printerStatus,
@@ -708,8 +856,12 @@ const createPrintJob = async (req, res) => {
                 userId: user.userId,
                 licenseeId: batch.licenseeId,
                 type: "manufacturer_print_job_created",
-                title: printerSelection.printMode === client_1.PrintDispatchMode.NETWORK_DIRECT ? "Network-direct job prepared" : "Direct-print job prepared",
-                body: `${printerSelection.printMode === client_1.PrintDispatchMode.NETWORK_DIRECT ? "Network-direct" : "Local-agent"} session ready for ${batch.name} (${quantity} codes).`,
+                title: printerSelection.printMode === client_1.PrintDispatchMode.NETWORK_DIRECT
+                    ? "Network-direct job prepared"
+                    : printerSelection.printMode === client_1.PrintDispatchMode.NETWORK_IPP
+                        ? "Network IPP job prepared"
+                        : "Direct-print job prepared",
+                body: `${describePrintDispatchMode(printerSelection.printMode)} session ready for ${batch.name} (${quantity} codes).`,
                 data: {
                     printJobId: created.job.id,
                     printSessionId: created.session.id,
@@ -727,7 +879,7 @@ const createPrintJob = async (req, res) => {
                 orgId: user.orgId || null,
                 type: "system_print_job_created",
                 title: "System print job created",
-                body: `${printerSelection.printMode === client_1.PrintDispatchMode.NETWORK_DIRECT ? "Network-direct" : "Local-agent"} print job created for ${batch.name} (${quantity} codes).`,
+                body: `${describePrintDispatchMode(printerSelection.printMode)} print job created for ${batch.name} (${quantity} codes).`,
                 data: {
                     printJobId: created.job.id,
                     printSessionId: created.session.id,
@@ -746,6 +898,12 @@ const createPrintJob = async (req, res) => {
         }
         if (printerSelection.printMode === client_1.PrintDispatchMode.NETWORK_DIRECT) {
             await (0, networkDirectPrintService_1.startNetworkDirectDispatch)({
+                jobId: created.job.id,
+                actorUserId: user.userId,
+            });
+        }
+        else if (printerSelection.printMode === client_1.PrintDispatchMode.NETWORK_IPP) {
+            await (0, networkIppPrintService_1.startNetworkIppDispatch)({
                 jobId: created.job.id,
                 actorUserId: user.userId,
             });
@@ -790,7 +948,46 @@ const createPrintJob = async (req, res) => {
         if (msg.includes("PRINTER_NETWORK_CONFIG_INVALID")) {
             return res.status(409).json({ success: false, error: "Selected network printer is missing IP address or TCP port." });
         }
-        return res.status(400).json({ success: false, error: e?.message || "Bad request" });
+        if (msg.includes("PRINTER_NETWORK_LANGUAGE_UNSUPPORTED")) {
+            return res.status(409).json({
+                success: false,
+                error: "Selected network printer uses a language that is not available for network-direct dispatch. Use ZPL, TSPL, EPL, or CPCL, or switch to the local agent path.",
+            });
+        }
+        if (msg.includes("PRINTER_NETWORK_UNREACHABLE")) {
+            return res.status(409).json({
+                success: false,
+                error: (0, printerUserFacingErrors_1.sanitizePrinterActionError)(e?.reason, "The saved factory printer could not be reached."),
+            });
+        }
+        if (msg.includes("PRINTER_GATEWAY_CONFIG_INVALID")) {
+            return res.status(409).json({
+                success: false,
+                error: "Selected gateway-backed IPP printer is missing gateway credentials. Re-save the printer profile and provision the site gateway.",
+            });
+        }
+        if (msg.includes("PRINTER_GATEWAY_OFFLINE")) {
+            return res.status(409).json({
+                success: false,
+                error: (0, printerUserFacingErrors_1.sanitizePrinterActionError)(e?.reason, "The site print connector needs attention before this printer can be used."),
+            });
+        }
+        if (msg.includes("PRINTER_IPP_FORMAT_UNSUPPORTED")) {
+            return res.status(409).json({
+                success: false,
+                error: (0, printerUserFacingErrors_1.sanitizePrinterActionError)(e?.reason, "This office printer does not support the required MSCQR print format."),
+            });
+        }
+        if (msg.includes("PRINTER_IPP_UNREACHABLE")) {
+            return res.status(409).json({
+                success: false,
+                error: (0, printerUserFacingErrors_1.sanitizePrinterActionError)(e?.reason, "The saved office printer could not be reached."),
+            });
+        }
+        return res.status(400).json({
+            success: false,
+            error: (0, printerUserFacingErrors_1.sanitizePrinterActionError)(e?.message, "This print job could not be created."),
+        });
     }
 };
 exports.createPrintJob = createPrintJob;
@@ -846,7 +1043,7 @@ const issueDirectPrintTokens = async (req, res) => {
             printerId: job.printerId || "",
             userId: user.userId,
             orgId: user.orgId || null,
-            licenseeId: user.licenseeId || null,
+            licenseeId: job.batch.licenseeId || null,
         });
         const now = new Date();
         if (isLockExpired(job.createdAt, now)) {
@@ -1086,7 +1283,7 @@ const resolveDirectPrintToken = async (req, res) => {
             printerId: job.printerId || "",
             userId: user.userId,
             orgId: user.orgId || null,
-            licenseeId: user.licenseeId || null,
+            licenseeId: job.batch.licenseeId || null,
         });
         const renderTokenHash = (0, qrTokenService_1.hashToken)(parsed.data.renderToken);
         const renderTokenRow = await database_1.default.printRenderToken.findUnique({

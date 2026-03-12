@@ -226,7 +226,7 @@ const reportIncident = async (req, res) => {
         }
         if (incident.consentToContact && incident.customerEmail) {
             const subject = `We received your report (${incident.id})`;
-            const body = `Thanks for contacting AuthenticQR support.\n\n` +
+            const body = `Thanks for contacting MSCQR support.\n\n` +
                 `Reference ID: ${incident.id}\n` +
                 `Support Ticket: ${supportTicket?.referenceCode || "Pending assignment"}\n` +
                 `Current status: ${(0, incidentService_1.toHumanIncidentStatus)(incident.status)}\n` +

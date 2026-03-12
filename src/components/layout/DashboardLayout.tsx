@@ -1150,7 +1150,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               <DialogHeader>
                 <DialogTitle>Set up printing on this workstation</DialogTitle>
                 <DialogDescription>
-                  Printing becomes ready automatically after this device already has a working printer and the MSCQR Workstation Connector is running.
+                  Install the MSCQR Connector once on the printing computer. After that it starts automatically and MSCQR can detect the printer without any manual launch steps.
                 </DialogDescription>
               </DialogHeader>
 
@@ -1166,7 +1166,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                   <div className="font-semibold text-slate-950">What the manufacturer should do once per device</div>
                   <ol className="mt-3 list-decimal space-y-2 pl-5">
                     <li>Install or connect the printer in the operating system first.</li>
-                    <li>Install the MSCQR Workstation Connector on that same device.</li>
+                    <li>Open <strong>Install Connector</strong> and download the Mac or Windows installer for that same device.</li>
+                    <li>Run the installer once. The connector will auto-start at sign-in after that.</li>
                     <li>Return here and use <strong>Check again</strong>.</li>
                     <li>If the OS can see the printer, MSCQR will detect it and it will appear automatically.</li>
                   </ol>
@@ -1182,6 +1183,15 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                 </div>
 
                 <div className="flex flex-wrap gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setPrinterOnboardingOpen(false);
+                      navigate("/connector-download");
+                    }}
+                  >
+                    Install Connector
+                  </Button>
                   <Button
                     onClick={() => {
                       void syncManufacturerPrinterStatus({ silent: true });
@@ -1476,8 +1486,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           )}
 
           {user?.role === "manufacturer" && !printerReady && (
-            <Button variant="ghost" size="sm" onClick={reopenPrinterOnboarding} className="mr-1 hidden md:inline-flex">
-              Setup printing
+            <Button variant="ghost" size="sm" onClick={() => navigate("/connector-download")} className="mr-1 hidden md:inline-flex">
+              Install Connector
             </Button>
           )}
 
@@ -1788,9 +1798,12 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="text-sm font-semibold text-slate-950">Need setup help?</div>
                   <p className="mt-1 text-sm text-slate-600">
-                    Use Printer Setup & Support for setup and validation. That page is intended for printer registration, guided checks, and support handoff.
+                    Install Connector on the printing computer first, then use Printer Setup & Support for validation and support-safe checks.
                   </p>
                   <div className="mt-4 flex flex-wrap gap-2">
+                    <Button variant="outline" onClick={() => navigate("/connector-download")}>
+                      Install Connector
+                    </Button>
                     <Button variant="outline" onClick={() => navigate("/printer-diagnostics")}>
                       Open printer setup
                     </Button>

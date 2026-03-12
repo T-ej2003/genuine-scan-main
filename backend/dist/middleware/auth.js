@@ -8,6 +8,7 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const database_1 = __importDefault(require("../config/database"));
 const client_1 = require("@prisma/client");
 const tokenService_1 = require("../services/auth/tokenService");
+const manufacturerScopeService_1 = require("../services/manufacturerScopeService");
 const getBearerToken = (req) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer "))
@@ -24,14 +25,29 @@ async function hydrateTenantIfNeeded(payload) {
         return payload;
     if (payload.role === client_1.UserRole.SUPER_ADMIN || payload.role === client_1.UserRole.PLATFORM_SUPER_ADMIN)
         return payload;
-    if (payload.licenseeId && payload.orgId)
+    if ((0, manufacturerScopeService_1.isManufacturerRole)(payload.role) && Array.isArray(payload.linkedLicenseeIds) && payload.linkedLicenseeIds.length > 0) {
         return payload;
-    // fallback: lookup the user to get licenseeId
+    }
+    if (!(0, manufacturerScopeService_1.isManufacturerRole)(payload.role) && payload.licenseeId && payload.orgId)
+        return payload;
     const u = await database_1.default.user.findUnique({
         where: { id: payload.userId },
-        select: { licenseeId: true, orgId: true },
+        select: {
+            licenseeId: true,
+            orgId: true,
+        },
     });
-    return { ...payload, licenseeId: u?.licenseeId ?? null, orgId: u?.orgId ?? null };
+    const linkedLicenseeIds = (0, manufacturerScopeService_1.isManufacturerRole)(payload.role)
+        ? await (0, manufacturerScopeService_1.listManufacturerLinkedLicenseeIds)(payload.userId, database_1.default).catch(() => [])
+        : Array.isArray(payload.linkedLicenseeIds)
+            ? payload.linkedLicenseeIds
+            : [];
+    return {
+        ...payload,
+        licenseeId: u?.licenseeId ?? payload.licenseeId ?? linkedLicenseeIds?.[0] ?? null,
+        orgId: u?.orgId ?? payload.orgId ?? null,
+        linkedLicenseeIds: linkedLicenseeIds.length ? linkedLicenseeIds : payload.linkedLicenseeIds ?? null,
+    };
 }
 const authenticate = async (req, res, next) => {
     const bearer = getBearerToken(req);

@@ -8,12 +8,14 @@ export declare const buildJwtPayloadForUser: (u: {
     role: UserRole;
     licenseeId: string | null;
     orgId: string | null;
+    linkedLicenseeIds?: string[] | null;
 }) => {
     userId: string;
     email: string;
     role: import(".prisma/client").$Enums.UserRole;
     licenseeId: string | null;
     orgId: string | null;
+    linkedLicenseeIds: string[] | null;
 };
 export declare const issueSessionForUser: (input: {
     userId: string;
@@ -36,7 +38,16 @@ export declare const issueSessionForUser: (input: {
             id: string;
             name: string;
             prefix: string;
+            brandName: string | null;
         } | null;
+        linkedLicensees: {
+            id: string;
+            name: string;
+            prefix: string;
+            brandName: string | null;
+            orgId: string | null;
+            isPrimary: boolean;
+        }[];
     };
 }>;
 type SessionIssueResult = Awaited<ReturnType<typeof issueSessionForUser>>;
@@ -86,7 +97,16 @@ export declare const refreshSession: (input: {
             id: string;
             name: string;
             prefix: string;
+            brandName: string | null;
         } | null;
+        linkedLicensees: {
+            id: string;
+            name: string;
+            prefix: string;
+            brandName: string | null;
+            orgId: string | null;
+            isPrimary: boolean;
+        }[];
     };
     readonly reason?: undefined;
 }>;

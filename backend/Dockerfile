@@ -15,6 +15,7 @@ RUN npx prisma generate
 
 COPY tsconfig.json ./
 COPY src ./src
+COPY local-print-agent ./local-print-agent
 RUN npm run build
 
 FROM node:20-bookworm-slim AS runtime
@@ -28,6 +29,7 @@ RUN apt-get update \
 
 COPY package*.json ./
 COPY prisma ./prisma
+COPY local-print-agent ./local-print-agent
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 RUN npx prisma generate \

@@ -36,6 +36,7 @@ Operational standard:
 - auto-start at login
 - keep it running in the background
 - let the browser communicate only with the trusted local listener
+- distribute the connector through the in-app `Install Connector` page and versioned installer URLs
 
 ### 2. `NETWORK_DIRECT`
 
@@ -79,6 +80,24 @@ When the backend cannot directly reach a manufacturer-site printer, MSCQR uses a
 - gateway credentials are provisioned once through the printer profile bootstrap flow
 
 This is the approved pattern for private manufacturer networks.
+
+## Connector distribution standard
+
+MSCQR now distributes the workstation connector through one product-safe path:
+
+- invite email includes:
+  the activation link
+  and the `Install Connector` link
+- the public `Install Connector` page offers the latest Mac and Windows packages
+- versioned download URLs point to packaged artifacts stored under the connector release manifest
+- the app help pages and manufacturer onboarding flow point to the same download page
+
+This keeps manufacturer onboarding consistent across:
+
+- onboarding email
+- accept-invite page
+- dashboard printer onboarding
+- printer help documentation
 
 ## Dispatch routing standard
 

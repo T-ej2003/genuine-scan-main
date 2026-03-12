@@ -10,7 +10,9 @@ const tenantIsolation_1 = require("../middleware/tenantIsolation");
 const rbac_1 = require("../middleware/rbac");
 const csrf_1 = require("../middleware/csrf");
 const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
+const publicVerifyRateLimit_1 = require("../middleware/publicVerifyRateLimit");
 const authController_1 = require("../controllers/authController");
+const connectorController_1 = require("../controllers/connectorController");
 const licenseeController_1 = require("../controllers/licenseeController");
 const qrController_1 = require("../controllers/qrController");
 const qrRequestController_1 = require("../controllers/qrRequestController");
@@ -22,6 +24,7 @@ const scanController_1 = require("../controllers/scanController");
 const printJobController_1 = require("../controllers/printJobController");
 const printerAgentController_1 = require("../controllers/printerAgentController");
 const printerController_1 = require("../controllers/printerController");
+const printerGatewayController_1 = require("../controllers/printerGatewayController");
 const auditRoutes_1 = __importDefault(require("./auditRoutes"));
 const accountController_1 = require("../controllers/accountController");
 const incidentController_1 = require("../controllers/incidentController");
@@ -77,13 +80,15 @@ const verifyClaimLimiter = (0, express_rate_limit_1.default)({
 });
 const verifyCodeLimiter = (0, express_rate_limit_1.default)({
     windowMs: 60 * 1000,
-    max: parsePositiveIntEnv("PUBLIC_VERIFY_RATE_LIMIT_PER_MIN", 45, 5, 500),
+    max: parsePositiveIntEnv("PUBLIC_VERIFY_RATE_LIMIT_PER_MIN", 120, 20, 1000),
+    keyGenerator: (req) => (0, publicVerifyRateLimit_1.buildPublicVerifyRateLimitKey)(req, "verify"),
     standardHeaders: true,
     legacyHeaders: false,
 });
 const scanLimiter = (0, express_rate_limit_1.default)({
     windowMs: 60 * 1000,
-    max: parsePositiveIntEnv("SCAN_RATE_LIMIT_PER_MIN", 60, 5, 500),
+    max: parsePositiveIntEnv("SCAN_RATE_LIMIT_PER_MIN", 120, 20, 1000),
+    keyGenerator: (req) => (0, publicVerifyRateLimit_1.buildPublicVerifyRateLimitKey)(req, "scan"),
     standardHeaders: true,
     legacyHeaders: false,
 });
@@ -102,8 +107,12 @@ const verifyFeedbackLimiter = (0, express_rate_limit_1.default)({
 // ==================== PUBLIC ====================
 router.post("/auth/login", loginLimiter, authController_1.login);
 router.post("/auth/accept-invite", loginLimiter, authController_1.acceptInviteController);
+router.get("/auth/invite-preview", loginLimiter, authController_1.invitePreviewController);
 router.post("/auth/forgot-password", forgotPasswordLimiter, authController_1.forgotPassword);
 router.post("/auth/reset-password", forgotPasswordLimiter, authController_1.resetPassword);
+router.get("/public/connector/releases", connectorController_1.listConnectorReleasesController);
+router.get("/public/connector/releases/latest", connectorController_1.getLatestConnectorReleaseController);
+router.get("/public/connector/download/:version/:platform", connectorController_1.downloadConnectorReleaseController);
 router.get("/verify/:code", verifyCodeLimiter, customerVerifyAuth_1.optionalCustomerVerifyAuth, verifyController_1.verifyQRCode);
 router.post("/verify/auth/email-otp/request", verifyOtpRequestLimiter, verifyController_1.requestCustomerEmailOtp);
 router.post("/verify/auth/email-otp/verify", verifyOtpVerifyLimiter, verifyController_1.verifyCustomerEmailOtp);
@@ -184,6 +193,10 @@ router.delete("/qr/batches/:id", auth_1.authenticate, rbac_1.requireAnyAdmin, te
 router.post("/qr/batches/bulk-delete", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, qrController_1.bulkDeleteBatches);
 router.delete("/qr/codes", auth_1.authenticate, rbac_1.requireAnyAdmin, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, qrController_1.bulkDeleteQRCodes);
 // ==================== MANUFACTURER PRINT JOBS ====================
+router.post("/print-gateway/heartbeat", printerGatewayController_1.gatewayHeartbeat);
+router.post("/print-gateway/ipp/claim", printerGatewayController_1.claimGatewayIppJob);
+router.post("/print-gateway/ipp/confirm", printerGatewayController_1.confirmGatewayIppJob);
+router.post("/print-gateway/ipp/fail", printerGatewayController_1.failGatewayIppJob);
 router.post("/manufacturer/printer-agent/heartbeat", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, printerAgentController_1.reportPrinterHeartbeat);
 router.get("/manufacturer/printer-agent/status", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, printerAgentController_1.getPrinterConnectionStatus);
 router.get("/manufacturer/printer-agent/events", auth_1.authenticateSSE, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, printerAgentController_1.printerConnectionEvents);
@@ -191,6 +204,7 @@ router.post("/manufacturer/print-jobs", auth_1.authenticate, rbac_1.requireManuf
 router.get("/manufacturer/printers", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, printerController_1.listPrinters);
 router.post("/manufacturer/printers", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, printerController_1.createNetworkPrinter);
 router.patch("/manufacturer/printers/:id", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, printerController_1.updateNetworkPrinter);
+router.delete("/manufacturer/printers/:id", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, printerController_1.deleteNetworkPrinter);
 router.post("/manufacturer/printers/:id/test", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, csrf_1.requireCsrf, printerController_1.testPrinter);
 router.get("/manufacturer/print-jobs", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, printJobController_1.listManufacturerPrintJobs);
 router.get("/manufacturer/print-jobs/:id", auth_1.authenticate, rbac_1.requireManufacturer, tenantIsolation_1.enforceTenantIsolation, printJobController_1.getManufacturerPrintJobStatus);

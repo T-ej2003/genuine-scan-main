@@ -14,10 +14,10 @@ export interface AuditLogInput {
 type Listener = (log: any) => void;
 export declare const onAuditLog: (cb: Listener) => () => boolean;
 export declare const createAuditLog: (data: AuditLogInput) => Promise<{
-    id: string;
-    orgId: string | null;
     licenseeId: string | null;
     createdAt: Date;
+    id: string;
+    orgId: string | null;
     userId: string | null;
     details: Prisma.JsonValue | null;
     action: string;
@@ -39,10 +39,10 @@ export declare const getAuditLogs: (opts: {
     offset: number;
 }) => Promise<{
     logs: {
-        id: string;
-        orgId: string | null;
         licenseeId: string | null;
         createdAt: Date;
+        id: string;
+        orgId: string | null;
         userId: string | null;
         details: Prisma.JsonValue | null;
         action: string;

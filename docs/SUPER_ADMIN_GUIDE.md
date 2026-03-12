@@ -130,6 +130,7 @@ Purpose: create and manage tenant organizations, their admin access, and QR top-
 4. Select the role:
    `Manufacturer user` or `Licensee user`.
 5. Select `Send invite`.
+6. Manufacturer invites include the password activation link and the MSCQR Connector download page for Mac and Windows.
 
 ### 6.4 Edit or control an existing licensee
 From the licensee action menu you can:
