@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import prisma from "../config/database";
-import { QRStatus } from "@prisma/client";
+import { Prisma, QRStatus } from "@prisma/client";
 import { createAuditLog } from "../services/auditService";
 import { evaluateScanPolicy } from "../services/scanPolicy";
 import { hashToken, verifyQrToken } from "../services/qrTokenService";
@@ -15,6 +15,7 @@ import {
 } from "../services/duplicateRiskService";
 import { deriveRequestDeviceFingerprint } from "../utils/requestFingerprint";
 import { resolveDuplicateRiskProfile } from "../services/governanceService";
+import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
 
 const deviceFingerprint = (req: Request) => deriveRequestDeviceFingerprint(req);
 
@@ -81,6 +82,96 @@ const buildRepeatWarningMessage = (params: {
     return "Already verified before. Some recent checks match the owner context, but additional external activity was also recorded.";
   }
   return `Already verified before. First verification was at ${params.firstScanAt || "unknown time"}.`;
+};
+
+type ScanOwnershipRecord = {
+  id: string;
+  userId: string | null;
+  claimedAt: Date;
+};
+
+const loadOwnershipByQrCodeId = async (qrCodeId: string): Promise<ScanOwnershipRecord | null> => {
+  try {
+    return await prisma.ownership.findUnique({
+      where: { qrCodeId },
+      select: {
+        id: true,
+        userId: true,
+        claimedAt: true,
+      },
+    });
+  } catch (error) {
+    if (isPrismaMissingTableError(error, ["ownership"])) {
+      warnStorageUnavailableOnce(
+        "scan-ownership-storage",
+        "[scan] Ownership table is unavailable. Continuing public scan without ownership data."
+      );
+      return null;
+    }
+    throw error;
+  }
+};
+
+const maybeWriteScanLog = async (
+  tx: Prisma.TransactionClient,
+  input: {
+    updatedQr: {
+      code: string;
+      id: string;
+      licenseeId: string;
+      batchId: string | null;
+      status: QRStatus;
+      scanCount: number | null;
+    };
+    isFirstScan: boolean;
+    customerUserId: string | null;
+    ownershipId: string | null;
+    currentScanTrustedOwnerContext: boolean;
+    ipAddress?: string | null;
+    userAgent: string | null;
+    device: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    accuracy: number | null;
+    location: Awaited<ReturnType<typeof reverseGeocode>>;
+  }
+) => {
+  try {
+    await tx.qrScanLog.create({
+      data: {
+        code: input.updatedQr.code,
+        qrCodeId: input.updatedQr.id,
+        licenseeId: input.updatedQr.licenseeId,
+        batchId: input.updatedQr.batchId ?? null,
+        status: input.updatedQr.status,
+        isFirstScan: input.isFirstScan,
+        scanCount: input.updatedQr.scanCount ?? 0,
+        customerUserId: input.customerUserId,
+        ownershipId: input.currentScanTrustedOwnerContext ? input.ownershipId : null,
+        ownershipMatchMethod: input.currentScanTrustedOwnerContext ? "user" : null,
+        isTrustedOwnerContext: input.currentScanTrustedOwnerContext,
+        ipAddress: input.ipAddress,
+        userAgent: input.userAgent,
+        device: input.device,
+        latitude: input.latitude,
+        longitude: input.longitude,
+        accuracy: input.accuracy,
+        locationName: input.location?.name || null,
+        locationCountry: input.location?.country || null,
+        locationRegion: input.location?.region || null,
+        locationCity: input.location?.city || null,
+      },
+    });
+  } catch (error) {
+    if (isPrismaMissingTableError(error, ["qrscanlog"])) {
+      warnStorageUnavailableOnce(
+        "scan-qr-log-storage",
+        "[scan] QrScanLog storage is unavailable. Continuing public scan without scan log persistence."
+      );
+      return;
+    }
+    throw error;
+  }
 };
 
 export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
@@ -151,12 +242,6 @@ export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
             suspendedAt: true,
             suspendedReason: true,
             manufacturer: { select: { id: true, name: true, email: true, location: true, website: true } },
-          },
-        },
-        ownership: {
-          select: {
-            userId: true,
-            claimedAt: true,
           },
         },
       },
@@ -253,14 +338,7 @@ export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
     const accuracy = toNum(req.query.acc);
     const location = await reverseGeocode(latitude, longitude);
     const customerUserId = req.customer?.userId || null;
-    const ownershipBeforeScan = await prisma.ownership.findUnique({
-      where: { qrCodeId: qr.id },
-      select: {
-        id: true,
-        userId: true,
-        claimedAt: true,
-      },
-    });
+    const ownershipBeforeScan = await loadOwnershipByQrCodeId(qr.id);
     const currentScanTrustedOwnerContext =
       Boolean(customerUserId) && ownershipBeforeScan?.userId === customerUserId;
 
@@ -283,30 +361,19 @@ export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
         },
       });
 
-      await tx.qrScanLog.create({
-        data: {
-          code: updatedQr.code,
-          qrCodeId: updatedQr.id,
-          licenseeId: updatedQr.licenseeId,
-          batchId: updatedQr.batchId ?? null,
-          status: updatedQr.status,
-          isFirstScan: decision.allowRedeem,
-          scanCount: updatedQr.scanCount ?? 0,
-          customerUserId,
-          ownershipId: currentScanTrustedOwnerContext ? ownershipBeforeScan?.id || null : null,
-          ownershipMatchMethod: currentScanTrustedOwnerContext ? "user" : null,
-          isTrustedOwnerContext: currentScanTrustedOwnerContext,
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent") || null,
-          device: fp,
-          latitude,
-          longitude,
-          accuracy,
-          locationName: location?.name || null,
-          locationCountry: location?.country || null,
-          locationRegion: location?.region || null,
-          locationCity: location?.city || null,
-        },
+      await maybeWriteScanLog(tx, {
+        updatedQr,
+        isFirstScan: decision.allowRedeem,
+        customerUserId,
+        ownershipId: ownershipBeforeScan?.id || null,
+        currentScanTrustedOwnerContext,
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") || null,
+        device: fp,
+        latitude,
+        longitude,
+        accuracy,
+        location,
       });
 
       return updatedQr;
