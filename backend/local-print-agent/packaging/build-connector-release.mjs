@@ -26,8 +26,12 @@ const macPackageName = `MSCQR-Connector-macOS-${version}.pkg`;
 const windowsPackageName = `MSCQR-Connector-Windows-${version}.zip`;
 const normalizeEnv = (value) => String(value || "").trim();
 const isTruthy = (value) => /^(1|true|yes|on)$/i.test(normalizeEnv(value));
+const hasEnvOverride = (name) => Object.prototype.hasOwnProperty.call(process.env, name);
 const macSigningIdentity = normalizeEnv(process.env.MACOS_CONNECTOR_SIGN_IDENTITY);
-const requireMacNotarization = isTruthy(process.env.MACOS_CONNECTOR_REQUIRE_NOTARIZATION);
+const macApplicationSigningIdentity = normalizeEnv(process.env.MACOS_CONNECTOR_APP_SIGN_IDENTITY);
+const requireMacNotarization = hasEnvOverride("MACOS_CONNECTOR_REQUIRE_NOTARIZATION")
+  ? isTruthy(process.env.MACOS_CONNECTOR_REQUIRE_NOTARIZATION)
+  : true;
 
 const resolveMacNotaryConfig = () => {
   const profile = normalizeEnv(process.env.MACOS_CONNECTOR_NOTARY_PROFILE);
@@ -65,6 +69,30 @@ const macNotaryConfig = resolveMacNotaryConfig();
 
 if (macNotaryConfig && !macSigningIdentity) {
   throw new Error("MACOS_CONNECTOR_SIGN_IDENTITY is required when macOS notarization is configured.");
+}
+
+if (macNotaryConfig && !macApplicationSigningIdentity) {
+  throw new Error(
+    "MACOS_CONNECTOR_APP_SIGN_IDENTITY is required when macOS notarization is configured so the bundled executables can be signed before submission."
+  );
+}
+
+if (requireMacNotarization && !macSigningIdentity) {
+  throw new Error(
+    "MACOS_CONNECTOR_SIGN_IDENTITY is required for a distributable macOS connector release."
+  );
+}
+
+if (requireMacNotarization && !macApplicationSigningIdentity) {
+  throw new Error(
+    "MACOS_CONNECTOR_APP_SIGN_IDENTITY is required for a distributable macOS connector release so the packaged executables can be signed."
+  );
+}
+
+if (requireMacNotarization && !macNotaryConfig) {
+  throw new Error(
+    "MACOS_CONNECTOR_REQUIRE_NOTARIZATION is enabled, but notarization credentials are missing. Configure MACOS_CONNECTOR_NOTARY_PROFILE or the Apple ID / team ID / app-specific password variables."
+  );
 }
 
 const ensureDir = (dirPath) => {
@@ -353,6 +381,27 @@ const run = (command, args, cwd = backendRoot) => {
   });
 };
 
+const signMacExecutable = (binaryPath) => {
+  if (!macApplicationSigningIdentity) {
+    return false;
+  }
+
+  console.log(`Signing macOS executable ${path.basename(binaryPath)}...`);
+  run("codesign", [
+    "--force",
+    "--timestamp",
+    "--options",
+    "runtime",
+    "--sign",
+    macApplicationSigningIdentity,
+    binaryPath,
+  ]);
+
+  console.log(`Verifying executable signature ${path.basename(binaryPath)}...`);
+  run("codesign", ["--verify", "--verbose=2", binaryPath]);
+  return true;
+};
+
 const notarizeMacPackage = (pkgPath) => {
   if (!macNotaryConfig) {
     if (requireMacNotarization) {
@@ -435,6 +484,8 @@ const buildMacPackage = (binaries, stagingRoot) => {
   fs.copyFileSync(binaries.macX64, path.join(connectorBinDir, "mscqr-local-print-agent-x64"));
   fs.chmodSync(path.join(connectorBinDir, "mscqr-local-print-agent-arm64"), 0o755);
   fs.chmodSync(path.join(connectorBinDir, "mscqr-local-print-agent-x64"), 0o755);
+  signMacExecutable(path.join(connectorBinDir, "mscqr-local-print-agent-arm64"));
+  signMacExecutable(path.join(connectorBinDir, "mscqr-local-print-agent-x64"));
 
   writeAsciiFile(path.join(connectorBinDir, "start-local-print-agent.sh"), renderMacWrapper(), true);
   writeAsciiFile(path.join(connectorBinDir, "uninstall-connector.sh"), renderMacUninstallScript(), true);
@@ -490,6 +541,8 @@ const buildMacPackage = (binaries, stagingRoot) => {
   return {
     pkgPath: finalPkg,
     signed,
+    executablesSigned: Boolean(macApplicationSigningIdentity),
+    publishable: signed && notarization.notarized && notarization.stapled && notarization.validated,
     ...notarization,
   };
 };
@@ -512,7 +565,7 @@ const buildWindowsPackage = async (binaries, stagingRoot) => {
   return zipPath;
 };
 
-const updateManifest = (macPkgPath, windowsZipPath) => {
+const updateManifest = (macArtifact, windowsZipPath) => {
   ensureDir(releaseRoot);
   const manifestPath = path.join(releaseRoot, "manifest.json");
   let existing = {
@@ -528,8 +581,42 @@ const updateManifest = (macPkgPath, windowsZipPath) => {
     existing = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   }
 
-  const macRelativePath = path.relative(releaseRoot, macPkgPath).replace(/\\/g, "/");
   const windowsRelativePath = path.relative(releaseRoot, windowsZipPath).replace(/\\/g, "/");
+
+  const platforms = {
+    windows: {
+      label: "Windows package",
+      installerKind: "zip",
+      filename: path.basename(windowsZipPath),
+      relativePath: windowsRelativePath,
+      contentType: "application/zip",
+      architecture: "x64",
+      bytes: fs.statSync(windowsZipPath).size,
+      sha256: sha256ForFile(windowsZipPath),
+      notes: [
+        "Extract the ZIP package on the Windows computer that will print.",
+        "Run Install Connector.cmd once to install and auto-start the connector.",
+      ],
+    },
+  };
+
+  if (macArtifact?.publishable) {
+    const macRelativePath = path.relative(releaseRoot, macArtifact.pkgPath).replace(/\\/g, "/");
+    platforms.macos = {
+      label: "macOS installer",
+      installerKind: "pkg",
+      filename: path.basename(macArtifact.pkgPath),
+      relativePath: macRelativePath,
+      contentType: "application/octet-stream",
+      architecture: "universal (arm64 + x64)",
+      bytes: fs.statSync(macArtifact.pkgPath).size,
+      sha256: sha256ForFile(macArtifact.pkgPath),
+      notes: [
+        "Double-click the pkg file to install it on the Mac that will print.",
+        "The connector registers a LaunchAgent and starts automatically at sign-in.",
+      ],
+    };
+  }
 
   const nextRelease = {
     version,
@@ -540,36 +627,7 @@ const updateManifest = (macPkgPath, windowsZipPath) => {
       "Use the Windows package on the Windows PC that is connected to the printer.",
       "After installation, open Printer Setup in MSCQR and confirm the printer shows as ready.",
     ],
-    platforms: {
-      macos: {
-        label: "macOS installer",
-        installerKind: "pkg",
-        filename: path.basename(macPkgPath),
-        relativePath: macRelativePath,
-        contentType: "application/octet-stream",
-        architecture: "universal (arm64 + x64)",
-        bytes: fs.statSync(macPkgPath).size,
-        sha256: sha256ForFile(macPkgPath),
-        notes: [
-          "Double-click the pkg file to install it on the Mac that will print.",
-          "The connector registers a LaunchAgent and starts automatically at sign-in.",
-        ],
-      },
-      windows: {
-        label: "Windows package",
-        installerKind: "zip",
-        filename: path.basename(windowsZipPath),
-        relativePath: windowsRelativePath,
-        contentType: "application/zip",
-        architecture: "x64",
-        bytes: fs.statSync(windowsZipPath).size,
-        sha256: sha256ForFile(windowsZipPath),
-        notes: [
-          "Extract the ZIP package on the Windows computer that will print.",
-          "Run Install Connector.cmd once to install and auto-start the connector.",
-        ],
-      },
-    },
+    platforms,
   };
 
   const filteredReleases = Array.isArray(existing.releases)
@@ -604,7 +662,7 @@ const main = async () => {
   const macArtifact = buildMacPackage(binaries, stagingRoot);
   const windowsZipPath = await buildWindowsPackage(binaries, stagingRoot);
 
-  updateManifest(macArtifact.pkgPath, windowsZipPath);
+  updateManifest(macArtifact, windowsZipPath);
 
   console.log("");
   console.log(`Created macOS package: ${macArtifact.pkgPath}`);
@@ -619,6 +677,12 @@ const main = async () => {
     );
   } else {
     console.log("macOS package was signed, notarized, stapled, and validated.");
+  }
+
+  if (!macArtifact.publishable) {
+    console.log(
+      "macOS package was not added to manifest.json because it is not Gatekeeper-ready. Only signed, notarized, stapled, validated macOS releases are published."
+    );
   }
 };
 

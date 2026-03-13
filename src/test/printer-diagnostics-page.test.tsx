@@ -190,4 +190,22 @@ describe("PrinterDiagnostics managed printer controls", () => {
     expect(screen.getByDisplayValue("192.168.1.55")).toBeInTheDocument();
     expect(screen.getByDisplayValue("9100")).toBeInTheDocument();
   });
+
+  it("opens the managed printer dialog from the route query", async () => {
+    render(
+      <MemoryRouter initialEntries={["/printer-diagnostics?managedProfiles=open"]}>
+        <PrinterDiagnostics />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(vi.mocked(apiClient.listRegisteredPrinters)).toHaveBeenCalled();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Managed printer profiles")).toBeInTheDocument();
+    });
+
+    expect(screen.getAllByText("Line 1 Zebra").length).toBeGreaterThan(0);
+  });
 });

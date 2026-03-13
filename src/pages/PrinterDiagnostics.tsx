@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 import { Activity, Copy, RefreshCw, ShieldAlert, Trash2, Wifi, Wrench } from "lucide-react";
 
@@ -98,6 +98,7 @@ export default function PrinterDiagnostics() {
   const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const contextualHelpRoute = getContextualHelpRoute("/printer-diagnostics", user?.role);
 
   const [loading, setLoading] = useState(false);
@@ -389,6 +390,17 @@ export default function PrinterDiagnostics() {
 
     resetNetworkPrinterForm();
   };
+
+  useEffect(() => {
+    if (searchParams.get("managedProfiles") !== "open") return;
+
+    openManagedProfilesDialog();
+
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("managedProfiles");
+    setSearchParams(nextParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, setSearchParams]);
 
   const persistNetworkPrinter = async (params?: {
     printerId?: string | null;

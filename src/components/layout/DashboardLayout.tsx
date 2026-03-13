@@ -1106,6 +1106,20 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     setPrinterDialogOpen(true);
     void syncManufacturerPrinterStatus({ silent: true });
   };
+  const openPrinterSetup = (options?: { managedProfiles?: boolean }) => {
+    setPrinterDialogOpen(false);
+
+    if (options?.managedProfiles) {
+      navigate("/printer-diagnostics?managedProfiles=open");
+      return;
+    }
+
+    if (location.pathname === "/printer-diagnostics") {
+      return;
+    }
+
+    navigate("/printer-diagnostics");
+  };
   const refreshPrinterConnectionStatus = () => {
     void syncManufacturerPrinterStatus({ silent: true });
   };
@@ -1750,7 +1764,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                           These saved `NETWORK_DIRECT` and `NETWORK_IPP` routes print through MSCQR without depending on the workstation printer list.
                         </p>
                       </div>
-                      <Button variant="outline" onClick={() => navigate("/printer-diagnostics")}>
+                      <Button variant="outline" onClick={() => openPrinterSetup({ managedProfiles: true })}>
                         Manage profiles
                       </Button>
                     </div>
@@ -1819,7 +1833,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                         <Button variant="outline" onClick={() => navigate("/batches")}>
                           Open batches
                         </Button>
-                        <Button variant="outline" onClick={() => navigate("/printer-diagnostics")}>
+                        <Button variant="outline" onClick={openPrinterSetup}>
                           Open printer setup
                         </Button>
                         <Button variant="ghost" onClick={() => navigate(contextualHelpRoute)}>
@@ -1941,7 +1955,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                     Use Printer Setup & Support to validate managed network routes or workstation printers, then return here for live status and final checks before batch printing.
                   </p>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <Button variant="outline" onClick={() => navigate("/printer-diagnostics")}>
+                    <Button variant="outline" onClick={openPrinterSetup}>
                       Open printer setup
                     </Button>
                     {managedNetworkPrinters.length === 0 && (
@@ -1956,7 +1970,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                 </div>
 
                 <div className="flex flex-wrap justify-end gap-2">
-                  <Button variant="outline" onClick={() => navigate("/printer-diagnostics")}>
+                  <Button variant="outline" onClick={openPrinterSetup}>
                     Open printer setup
                   </Button>
                   <Button variant="outline" onClick={() => navigate(contextualHelpRoute)}>

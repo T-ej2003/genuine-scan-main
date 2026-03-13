@@ -15,20 +15,6 @@
         "After installation, open Printer Setup in MSCQR and confirm the printer shows as ready."
       ],
       "platforms": {
-        "macos": {
-          "label": "macOS installer",
-          "installerKind": "pkg",
-          "filename": "MSCQR-Connector-macOS-2026.3.12.pkg",
-          "relativePath": "2026.3.12/macos/MSCQR-Connector-macOS-2026.3.12.pkg",
-          "contentType": "application/octet-stream",
-          "architecture": "universal (arm64 + x64)",
-          "bytes": 44452890,
-          "sha256": "c704c80cf8bb62f70cd5b111b58a7f4e55c9254ff9f224d385e363edfee45f7a",
-          "notes": [
-            "Double-click the pkg file to install it on the Mac that will print.",
-            "The connector registers a LaunchAgent and starts automatically at sign-in."
-          ]
-        },
         "windows": {
           "label": "Windows package",
           "installerKind": "zip",
