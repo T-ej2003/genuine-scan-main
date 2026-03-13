@@ -1,5 +1,6 @@
 import prisma from "../config/database";
 import { reverseGeocode } from "./locationService";
+import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
 
 type ScanInsight = {
   firstScanAt: string | null;
@@ -39,6 +40,37 @@ type ScanInsightOptions = {
   currentOwnershipId?: string | null;
   currentActorTrustedOwnerContext?: boolean;
 };
+
+const emptyScanInsight = (currentActorTrustedOwnerContext: boolean): ScanInsight => ({
+  firstScanAt: null,
+  firstScanLocation: null,
+  latestScanAt: null,
+  latestScanLocation: null,
+  previousScanAt: null,
+  previousScanLocation: null,
+  signals: {
+    scanCount24h: 0,
+    distinctDeviceCount24h: 0,
+    recentScanCount10m: 0,
+    distinctCountryCount24h: 0,
+    seenOnCurrentDeviceBefore: false,
+    previousScanSameDevice: null,
+    currentActorTrustedOwnerContext,
+    seenByCurrentTrustedActorBefore: false,
+    previousScanSameTrustedActor: null,
+    trustedOwnerScanCount24h: 0,
+    trustedOwnerScanCount10m: 0,
+    untrustedScanCount24h: 0,
+    untrustedScanCount10m: 0,
+    distinctTrustedActorCount24h: 0,
+    distinctUntrustedDeviceCount24h: 0,
+    distinctUntrustedCountryCount24h: 0,
+    ipVelocityCount10m: 0,
+    ipReputationScore: 0,
+    deviceGraphOverlap24h: 0,
+    crossCodeCorrelation24h: 0,
+  },
+});
 
 const locationLabel = async (row: {
   locationName?: string | null;
@@ -131,180 +163,190 @@ export const getScanInsight = async (
         ownershipId: options?.currentOwnershipId || null,
       })
     : "";
-
-  const [first, latestTwo, recent24h, ipVelocityCount10m, deviceCorrelatedCodes] = await Promise.all([
-    prisma.qrScanLog.findFirst({
-      where: { qrCodeId },
-      orderBy: [{ scannedAt: "asc" }, { id: "asc" }],
-      select: {
-        scannedAt: true,
-        locationName: true,
-        locationCity: true,
-        locationRegion: true,
-        locationCountry: true,
-        latitude: true,
-        longitude: true,
-      },
-    }),
-    prisma.qrScanLog.findMany({
-      where: { qrCodeId },
-      orderBy: [{ scannedAt: "desc" }, { id: "desc" }],
-      take: 2,
-      select: {
-        scannedAt: true,
-        locationName: true,
-        locationCity: true,
-        locationRegion: true,
-        locationCountry: true,
-        latitude: true,
-        longitude: true,
-        device: true,
-        customerUserId: true,
-        ownershipId: true,
-        isTrustedOwnerContext: true,
-      },
-    }),
-    prisma.qrScanLog.findMany({
-      where: {
-        qrCodeId,
-        scannedAt: { gte: lookback24h },
-      },
-      select: {
-        scannedAt: true,
-        device: true,
-        locationCountry: true,
-        customerUserId: true,
-        ownershipId: true,
-        isTrustedOwnerContext: true,
-      },
-    }),
-    normalizedCurrentIp
-      ? prisma.qrScanLog.count({
-          where: {
-            ...sharedScopeWhere,
-            ipAddress: normalizedCurrentIp,
-            scannedAt: { gte: lookback10m },
-          },
-        })
-      : Promise.resolve(0),
-    normalizedCurrentDevice
-      ? prisma.qrScanLog.findMany({
-          where: {
-            ...sharedScopeWhere,
-            device: normalizedCurrentDevice,
-            scannedAt: { gte: lookback24h },
-          },
-          distinct: ["qrCodeId"],
-          select: { qrCodeId: true },
-          take: 120,
-        })
-      : Promise.resolve([] as Array<{ qrCodeId: string }>),
-  ]);
-
-  const latest = latestTwo[0] || null;
-  const previous = latestTwo[1] || null;
-  const latestTimestamp = latest?.scannedAt ? new Date(latest.scannedAt).getTime() : null;
-  const recent10m = recent24h.filter((row) => new Date(row.scannedAt).getTime() >= lookback10m.getTime());
-
-  const distinctDevices = new Set(
-    recent24h
-      .map((row) => String(row.device || "").trim())
-      .filter(Boolean)
-  );
-  const distinctCountries = new Set(
-    recent24h
-      .map((row) => String(row.locationCountry || "").trim().toUpperCase())
-      .filter(Boolean)
-  );
-  const trustedRecent24h = recent24h.filter((row) => row.isTrustedOwnerContext === true);
-  const untrustedRecent24h = recent24h.filter((row) => row.isTrustedOwnerContext !== true);
-  const trustedOwnerScanCount10m = recent10m.filter((row) => row.isTrustedOwnerContext === true).length;
-  const untrustedScanCount10m = recent10m.filter((row) => row.isTrustedOwnerContext !== true).length;
-  const distinctTrustedActors = new Set(trustedRecent24h.map((row) => trustedActorKey(row)).filter(Boolean));
-  const distinctUntrustedDevices = new Set(
-    untrustedRecent24h
-      .map((row) => String(row.device || "").trim())
-      .filter(Boolean)
-  );
-  const distinctUntrustedCountries = new Set(
-    untrustedRecent24h
-      .map((row) => String(row.locationCountry || "").trim().toUpperCase())
-      .filter(Boolean)
-  );
-
-  const seenOnCurrentDeviceBefore =
-    Boolean(normalizedCurrentDevice) &&
-    recent24h.some((row) => {
-      if (!latestTimestamp) return false;
-      return (
-        String(row.device || "").trim() === normalizedCurrentDevice &&
-        new Date(row.scannedAt).getTime() < latestTimestamp
-      );
-    });
-
-  const previousScanSameDevice =
-    previous && normalizedCurrentDevice
-      ? String(previous.device || "").trim() === normalizedCurrentDevice
-      : null;
-  const seenByCurrentTrustedActorBefore =
-    Boolean(currentTrustedActorKey) &&
-    recent24h.some((row) => {
-      if (!latestTimestamp) return false;
-      return trustedActorKey(row) === currentTrustedActorKey && new Date(row.scannedAt).getTime() < latestTimestamp;
-    });
-  const previousScanSameTrustedActor =
-    previous && currentTrustedActorKey ? trustedActorKey(previous) === currentTrustedActorKey : null;
-
-  const correlatedCodeIds = deviceCorrelatedCodes.map((row) => row.qrCodeId).filter(Boolean);
-  const crossCodeCorrelation24h = correlatedCodeIds.filter((id) => id !== qrCodeId).length;
-
-  const deviceGraphOverlap24h =
-    normalizedCurrentDevice && correlatedCodeIds.length > 0
-      ? (
-          await prisma.qrScanLog.findMany({
+  try {
+    const [first, latestTwo, recent24h, ipVelocityCount10m, deviceCorrelatedCodes] = await Promise.all([
+      prisma.qrScanLog.findFirst({
+        where: { qrCodeId },
+        orderBy: [{ scannedAt: "asc" }, { id: "asc" }],
+        select: {
+          scannedAt: true,
+          locationName: true,
+          locationCity: true,
+          locationRegion: true,
+          locationCountry: true,
+          latitude: true,
+          longitude: true,
+        },
+      }),
+      prisma.qrScanLog.findMany({
+        where: { qrCodeId },
+        orderBy: [{ scannedAt: "desc" }, { id: "desc" }],
+        take: 2,
+        select: {
+          scannedAt: true,
+          locationName: true,
+          locationCity: true,
+          locationRegion: true,
+          locationCountry: true,
+          latitude: true,
+          longitude: true,
+          device: true,
+          customerUserId: true,
+          ownershipId: true,
+          isTrustedOwnerContext: true,
+        },
+      }),
+      prisma.qrScanLog.findMany({
+        where: {
+          qrCodeId,
+          scannedAt: { gte: lookback24h },
+        },
+        select: {
+          scannedAt: true,
+          device: true,
+          locationCountry: true,
+          customerUserId: true,
+          ownershipId: true,
+          isTrustedOwnerContext: true,
+        },
+      }),
+      normalizedCurrentIp
+        ? prisma.qrScanLog.count({
             where: {
               ...sharedScopeWhere,
-              qrCodeId: { in: correlatedCodeIds },
-              scannedAt: { gte: lookback24h },
-              device: { not: normalizedCurrentDevice },
+              ipAddress: normalizedCurrentIp,
+              scannedAt: { gte: lookback10m },
             },
-            distinct: ["device"],
-            select: { device: true },
-            take: 200,
           })
-        ).length
-      : 0;
+        : Promise.resolve(0),
+      normalizedCurrentDevice
+        ? prisma.qrScanLog.findMany({
+            where: {
+              ...sharedScopeWhere,
+              device: normalizedCurrentDevice,
+              scannedAt: { gte: lookback24h },
+            },
+            distinct: ["qrCodeId"],
+            select: { qrCodeId: true },
+            take: 120,
+          })
+        : Promise.resolve([] as Array<{ qrCodeId: string }>),
+    ]);
 
-  const ipReputationScore = estimateIpReputationScore(normalizedCurrentIp);
+    const latest = latestTwo[0] || null;
+    const previous = latestTwo[1] || null;
+    const latestTimestamp = latest?.scannedAt ? new Date(latest.scannedAt).getTime() : null;
+    const recent10m = recent24h.filter((row) => new Date(row.scannedAt).getTime() >= lookback10m.getTime());
 
-  return {
-    firstScanAt: first?.scannedAt ? new Date(first.scannedAt).toISOString() : null,
-    firstScanLocation: first ? await locationLabel(first) : null,
-    latestScanAt: latest?.scannedAt ? new Date(latest.scannedAt).toISOString() : null,
-    latestScanLocation: latest ? await locationLabel(latest) : null,
-    previousScanAt: previous?.scannedAt ? new Date(previous.scannedAt).toISOString() : null,
-    previousScanLocation: previous ? await locationLabel(previous) : null,
-    signals: {
-      scanCount24h: recent24h.length,
-      distinctDeviceCount24h: distinctDevices.size,
-      recentScanCount10m: recent10m.length,
-      distinctCountryCount24h: distinctCountries.size,
-      seenOnCurrentDeviceBefore,
-      previousScanSameDevice,
-      currentActorTrustedOwnerContext,
-      seenByCurrentTrustedActorBefore,
-      previousScanSameTrustedActor,
-      trustedOwnerScanCount24h: trustedRecent24h.length,
-      trustedOwnerScanCount10m,
-      untrustedScanCount24h: untrustedRecent24h.length,
-      untrustedScanCount10m,
-      distinctTrustedActorCount24h: distinctTrustedActors.size,
-      distinctUntrustedDeviceCount24h: distinctUntrustedDevices.size,
-      distinctUntrustedCountryCount24h: distinctUntrustedCountries.size,
-      ipVelocityCount10m,
-      ipReputationScore,
-      deviceGraphOverlap24h,
-      crossCodeCorrelation24h,
-    },
-  };
+    const distinctDevices = new Set(
+      recent24h
+        .map((row) => String(row.device || "").trim())
+        .filter(Boolean)
+    );
+    const distinctCountries = new Set(
+      recent24h
+        .map((row) => String(row.locationCountry || "").trim().toUpperCase())
+        .filter(Boolean)
+    );
+    const trustedRecent24h = recent24h.filter((row) => row.isTrustedOwnerContext === true);
+    const untrustedRecent24h = recent24h.filter((row) => row.isTrustedOwnerContext !== true);
+    const trustedOwnerScanCount10m = recent10m.filter((row) => row.isTrustedOwnerContext === true).length;
+    const untrustedScanCount10m = recent10m.filter((row) => row.isTrustedOwnerContext !== true).length;
+    const distinctTrustedActors = new Set(trustedRecent24h.map((row) => trustedActorKey(row)).filter(Boolean));
+    const distinctUntrustedDevices = new Set(
+      untrustedRecent24h
+        .map((row) => String(row.device || "").trim())
+        .filter(Boolean)
+    );
+    const distinctUntrustedCountries = new Set(
+      untrustedRecent24h
+        .map((row) => String(row.locationCountry || "").trim().toUpperCase())
+        .filter(Boolean)
+    );
+
+    const seenOnCurrentDeviceBefore =
+      Boolean(normalizedCurrentDevice) &&
+      recent24h.some((row) => {
+        if (!latestTimestamp) return false;
+        return (
+          String(row.device || "").trim() === normalizedCurrentDevice &&
+          new Date(row.scannedAt).getTime() < latestTimestamp
+        );
+      });
+
+    const previousScanSameDevice =
+      previous && normalizedCurrentDevice
+        ? String(previous.device || "").trim() === normalizedCurrentDevice
+        : null;
+    const seenByCurrentTrustedActorBefore =
+      Boolean(currentTrustedActorKey) &&
+      recent24h.some((row) => {
+        if (!latestTimestamp) return false;
+        return trustedActorKey(row) === currentTrustedActorKey && new Date(row.scannedAt).getTime() < latestTimestamp;
+      });
+    const previousScanSameTrustedActor =
+      previous && currentTrustedActorKey ? trustedActorKey(previous) === currentTrustedActorKey : null;
+
+    const correlatedCodeIds = deviceCorrelatedCodes.map((row) => row.qrCodeId).filter(Boolean);
+    const crossCodeCorrelation24h = correlatedCodeIds.filter((id) => id !== qrCodeId).length;
+
+    const deviceGraphOverlap24h =
+      normalizedCurrentDevice && correlatedCodeIds.length > 0
+        ? (
+            await prisma.qrScanLog.findMany({
+              where: {
+                ...sharedScopeWhere,
+                qrCodeId: { in: correlatedCodeIds },
+                scannedAt: { gte: lookback24h },
+                device: { not: normalizedCurrentDevice },
+              },
+              distinct: ["device"],
+              select: { device: true },
+              take: 200,
+            })
+          ).length
+        : 0;
+
+    const ipReputationScore = estimateIpReputationScore(normalizedCurrentIp);
+
+    return {
+      firstScanAt: first?.scannedAt ? new Date(first.scannedAt).toISOString() : null,
+      firstScanLocation: first ? await locationLabel(first) : null,
+      latestScanAt: latest?.scannedAt ? new Date(latest.scannedAt).toISOString() : null,
+      latestScanLocation: latest ? await locationLabel(latest) : null,
+      previousScanAt: previous?.scannedAt ? new Date(previous.scannedAt).toISOString() : null,
+      previousScanLocation: previous ? await locationLabel(previous) : null,
+      signals: {
+        scanCount24h: recent24h.length,
+        distinctDeviceCount24h: distinctDevices.size,
+        recentScanCount10m: recent10m.length,
+        distinctCountryCount24h: distinctCountries.size,
+        seenOnCurrentDeviceBefore,
+        previousScanSameDevice,
+        currentActorTrustedOwnerContext,
+        seenByCurrentTrustedActorBefore,
+        previousScanSameTrustedActor,
+        trustedOwnerScanCount24h: trustedRecent24h.length,
+        trustedOwnerScanCount10m,
+        untrustedScanCount24h: untrustedRecent24h.length,
+        untrustedScanCount10m,
+        distinctTrustedActorCount24h: distinctTrustedActors.size,
+        distinctUntrustedDeviceCount24h: distinctUntrustedDevices.size,
+        distinctUntrustedCountryCount24h: distinctUntrustedCountries.size,
+        ipVelocityCount10m,
+        ipReputationScore,
+        deviceGraphOverlap24h,
+        crossCodeCorrelation24h,
+      },
+    };
+  } catch (error) {
+    if (isPrismaMissingTableError(error, ["qrscanlog"])) {
+      warnStorageUnavailableOnce(
+        "scan-insight-storage",
+        "[scan] QrScanLog storage is unavailable. Returning empty scan insight until scan-log migrations are applied."
+      );
+      return emptyScanInsight(currentActorTrustedOwnerContext);
+    }
+    throw error;
+  }
 };
