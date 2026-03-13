@@ -11,6 +11,21 @@ export type PrinterInventoryRow = {
   languages?: string[];
   mediaSizes?: string[];
   dpi?: number | null;
+  deviceUri?: string | null;
+  portName?: string | null;
+};
+
+export type ManagedPrinterAutoDetectSuggestion = {
+  routeType: "LOCAL_ONLY" | "NETWORK_DIRECT" | "NETWORK_IPP";
+  readiness: "READY" | "NEEDS_DETAILS";
+  summary: string;
+  detail: string;
+  host?: string | null;
+  port?: number | null;
+  resourcePath?: string | null;
+  tlsEnabled?: boolean | null;
+  printerUri?: string | null;
+  commandLanguage?: "ZPL" | "TSPL" | "EPL" | "CPCL" | null;
 };
 
 export type PrinterConnectionStatusLike = {
@@ -80,6 +95,81 @@ export type NetworkDirectPrinterSummaryLike = {
 } | null;
 
 const hasAny = (value: string, needles: string[]) => needles.some((needle) => value.includes(needle));
+const toUpperList = (values: string[] | null | undefined) =>
+  Array.isArray(values) ? values.map((value) => String(value || "").trim().toUpperCase()).filter(Boolean) : [];
+const toCleanString = (value: unknown, max = 512) => String(value || "").trim().slice(0, max);
+const SUPPORTED_NETWORK_DIRECT_LANGUAGES = ["ZPL", "TSPL", "EPL", "CPCL"] as const;
+
+const normalizeResourcePath = (value?: string | null) => {
+  const trimmed = toCleanString(value, 256);
+  if (!trimmed || trimmed === "/") return "/ipp/print";
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+};
+
+const parseSocketEndpoint = (value?: string | null) => {
+  const raw = toCleanString(value, 512);
+  if (!/^socket:\/\//i.test(raw)) return null;
+  try {
+    const parsed = new URL(raw);
+    if (!parsed.hostname) return null;
+    return {
+      host: parsed.hostname,
+      port: Number(parsed.port || 9100) || 9100,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const parseIppEndpoint = (value?: string | null) => {
+  const raw = toCleanString(value, 512);
+  if (!/^ipps?:\/\//i.test(raw)) return null;
+  try {
+    const parsed = new URL(raw.replace(/^ipp:\/\//i, "http://").replace(/^ipps:\/\//i, "https://"));
+    const tlsEnabled = raw.toLowerCase().startsWith("ipps://") || parsed.protocol === "https:";
+    const port = Number(parsed.port || 631) || 631;
+    const resourcePath = normalizeResourcePath(parsed.pathname);
+    const scheme = tlsEnabled ? "ipps" : "ipp";
+    return {
+      host: parsed.hostname,
+      port,
+      resourcePath,
+      tlsEnabled,
+      printerUri: `${scheme}://${parsed.hostname}:${port}${resourcePath}`,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const parseWindowsRawEndpoint = (value?: string | null) => {
+  const raw = toCleanString(value, 180);
+  if (!raw) return null;
+  if (/^ipps?:\/\//i.test(raw)) return null;
+  const direct = raw.match(/^IP_([^_]+)$/i);
+  if (direct) {
+    return {
+      host: direct[1],
+      port: 9100,
+    };
+  }
+  const embedded = raw.match(/^([^:]+):(\d{2,5})$/);
+  if (embedded) {
+    return {
+      host: embedded[1],
+      port: Number(embedded[2]) || 9100,
+    };
+  }
+  return null;
+};
+
+const pickSupportedNetworkLanguage = (printer: PrinterInventoryRow) => {
+  const languages = toUpperList(printer.languages);
+  return (
+    SUPPORTED_NETWORK_DIRECT_LANGUAGES.find((language) => languages.includes(language)) ||
+    null
+  );
+};
 
 export const normalizePrinterInventoryRows = (rows: unknown): PrinterInventoryRow[] => {
   if (!Array.isArray(rows)) return [];
@@ -100,10 +190,87 @@ export const normalizePrinterInventoryRows = (rows: unknown): PrinterInventoryRo
       languages: Array.isArray((row as any).languages) ? (row as any).languages : [],
       mediaSizes: Array.isArray((row as any).mediaSizes) ? (row as any).mediaSizes : [],
       dpi: Number.isFinite(Number((row as any).dpi)) ? Number((row as any).dpi) : null,
+      deviceUri: toCleanString((row as any).deviceUri, 512) || null,
+      portName: toCleanString((row as any).portName, 180) || null,
     });
     if (result.length >= 40) break;
   }
   return result;
+};
+
+export const deriveManagedPrinterAutoDetect = (
+  printer: PrinterInventoryRow
+): ManagedPrinterAutoDetectSuggestion => {
+  const protocols = toUpperList(printer.protocols);
+  const connection = toCleanString(printer.connection, 80).toLowerCase();
+  const deviceUri = toCleanString(printer.deviceUri, 512);
+  const portName = toCleanString(printer.portName, 180);
+  const supportedLanguage = pickSupportedNetworkLanguage(printer);
+
+  const ippEndpoint = parseIppEndpoint(deviceUri) || parseIppEndpoint(portName);
+  if (ippEndpoint) {
+    return {
+      routeType: "NETWORK_IPP",
+      readiness: "READY",
+      summary: "Detected as IPP/IPPS printer",
+      detail: `MSCQR can prefill a managed IPP route for ${printer.printerName}.`,
+      host: ippEndpoint.host,
+      port: ippEndpoint.port,
+      resourcePath: ippEndpoint.resourcePath,
+      tlsEnabled: ippEndpoint.tlsEnabled,
+      printerUri: ippEndpoint.printerUri,
+      commandLanguage: null,
+    };
+  }
+
+  const rawEndpoint = parseSocketEndpoint(deviceUri) || parseWindowsRawEndpoint(portName);
+  if (rawEndpoint) {
+    return {
+      routeType: "NETWORK_DIRECT",
+      readiness: supportedLanguage ? "READY" : "NEEDS_DETAILS",
+      summary: supportedLanguage ? "Detected as raw TCP label printer" : "Detected as raw TCP network printer",
+      detail: supportedLanguage
+        ? `MSCQR can prefill a managed ${supportedLanguage} route for ${printer.printerName}.`
+        : "The connector found a raw TCP endpoint, but you still need to confirm the printer language before saving.",
+      host: rawEndpoint.host,
+      port: rawEndpoint.port,
+      commandLanguage: supportedLanguage,
+    };
+  }
+
+  if (protocols.includes("IPP") || protocols.includes("IPPS") || connection === "ipp" || connection === "ipps" || connection === "bonjour") {
+    return {
+      routeType: "NETWORK_IPP",
+      readiness: "NEEDS_DETAILS",
+      summary: "Detected as AirPrint / IPP printer",
+      detail:
+        "The connector can see an IPP-capable printer, but MSCQR still needs a stable host or printer URI before it can save a managed route.",
+      tlsEnabled: protocols.includes("IPPS") || connection === "ipps",
+    };
+  }
+
+  if (
+    supportedLanguage &&
+    (protocols.includes("RAW-9100") || protocols.includes("TCP") || connection === "network")
+  ) {
+    return {
+      routeType: "NETWORK_DIRECT",
+      readiness: "NEEDS_DETAILS",
+      summary: "Detected as network label printer",
+      detail:
+        "The connector can see a supported label printer language, but you still need to confirm the raw TCP host or port before saving a managed route.",
+      commandLanguage: supportedLanguage,
+    };
+  }
+
+  return {
+    routeType: "LOCAL_ONLY",
+    readiness: "NEEDS_DETAILS",
+    summary: "Detected as workstation-managed printer",
+    detail:
+      "This printer is visible to the workstation connector, but it does not expose enough network details for a managed MSCQR route. Keep it on LOCAL_AGENT or enter a managed endpoint manually.",
+    commandLanguage: supportedLanguage,
+  };
 };
 
 export const getPrinterDiagnosticSummary = (params: {

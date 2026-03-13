@@ -141,4 +141,53 @@ describe("PrinterDiagnostics managed printer controls", () => {
     expect(screen.getByRole("button", { name: /save setup/i })).toBeInTheDocument();
     expect(screen.getByText(/Save a raw TCP endpoint for ZPL, TSPL, EPL, or CPCL dispatch/i)).toBeInTheDocument();
   });
+
+  it("can prefill the managed form from an auto-detected raw TCP printer", async () => {
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
+      success: true,
+      data: {
+        connected: true,
+        selectedPrinterId: "detected-zebra",
+        selectedPrinterName: "Dock Zebra",
+        printers: [
+          {
+            printerId: "detected-zebra",
+            printerName: "Dock Zebra",
+            model: "ZDesigner ZD421-203dpi ZPL",
+            connection: "network",
+            online: true,
+            isDefault: true,
+            protocols: ["raw-9100"],
+            languages: ["ZPL"],
+            deviceUri: "socket://192.168.1.55:9100",
+          },
+        ],
+      },
+    } as any);
+
+    render(
+      <MemoryRouter>
+        <PrinterDiagnostics />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(vi.mocked(apiClient.getLocalPrintAgentStatus)).toHaveBeenCalled();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /saved managed printer/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Auto-detected connected printers")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /use detected route/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Create factory label printer")).toBeInTheDocument();
+    });
+
+    expect(screen.getByDisplayValue("192.168.1.55")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("9100")).toBeInTheDocument();
+  });
 });
