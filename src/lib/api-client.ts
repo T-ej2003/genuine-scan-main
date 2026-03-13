@@ -17,6 +17,32 @@ type RequestOptions = RequestInit & {
   suppressMutationEvent?: boolean;
 };
 
+const stripHtmlError = (value: string) =>
+  value
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const normalizeErrorMessage = (status: number, payload: unknown) => {
+  if (payload && typeof payload === "object") {
+    const message = String((payload as any).error || (payload as any).message || "").trim();
+    if (message) return message;
+  }
+
+  const raw = typeof payload === "string" ? payload.trim() : "";
+  if (status === 413) return "Upload too large. Please retry with a smaller attachment.";
+  if (!raw) return `HTTP ${status}`;
+
+  const cleaned = stripHtmlError(raw);
+  return cleaned || `HTTP ${status}`;
+};
+
 class ApiClient {
   private token: string | null = null;
   private readonly getCache = new Map<string, unknown>();
@@ -178,10 +204,7 @@ class ApiClient {
       }
 
       if (!res.ok) {
-        const msg =
-          (payload && typeof payload === "object" && (payload.error || payload.message)) ||
-          (typeof payload === "string" && payload) ||
-          `HTTP ${res.status}`;
+        const msg = normalizeErrorMessage(res.status, payload);
         pushNetworkLog({ status: res.status, ok: false, error: msg });
         if (res.status >= 500) {
           reportSupportRuntimeIssue({

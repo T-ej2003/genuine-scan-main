@@ -7,6 +7,7 @@ import apiClient from "@/lib/api-client";
 import {
   buildSupportDiagnosticsPayload,
   captureSupportScreenshot,
+  formatSupportIssueSubmissionError,
   getSupportNetworkLogs,
   getSupportRuntimeIssues,
   onSupportIssue,
@@ -157,7 +158,11 @@ export function SupportIssueLauncher() {
 
       const res = await apiClient.createSupportIssueReport(form);
       if (!res.success) {
-        toast({ title: "Could not submit report", description: res.error || "Please try again.", variant: "destructive" });
+        toast({
+          title: "Could not submit report",
+          description: formatSupportIssueSubmissionError(res.error),
+          variant: "destructive",
+        });
         return;
       }
 
