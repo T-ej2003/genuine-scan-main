@@ -6,7 +6,8 @@ import { MemoryRouter } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import apiClient from "@/lib/api-client";
 
-const storage = new Map<string, string>();
+const localStorageState = new Map<string, string>();
+const sessionStorageState = new Map<string, string>();
 
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
@@ -49,19 +50,35 @@ vi.mock("@/lib/api-client", () => ({
 describe("DashboardLayout printer connection dialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    storage.clear();
+    localStorageState.clear();
+    sessionStorageState.clear();
     Object.defineProperty(window, "localStorage", {
       configurable: true,
       value: {
-        getItem: (key: string) => storage.get(key) ?? null,
+        getItem: (key: string) => localStorageState.get(key) ?? null,
         setItem: (key: string, value: string) => {
-          storage.set(key, String(value));
+          localStorageState.set(key, String(value));
         },
         removeItem: (key: string) => {
-          storage.delete(key);
+          localStorageState.delete(key);
         },
         clear: () => {
-          storage.clear();
+          localStorageState.clear();
+        },
+      },
+    });
+    Object.defineProperty(window, "sessionStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => sessionStorageState.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          sessionStorageState.set(key, String(value));
+        },
+        removeItem: (key: string) => {
+          sessionStorageState.delete(key);
+        },
+        clear: () => {
+          sessionStorageState.clear();
         },
       },
     });
@@ -115,7 +132,7 @@ describe("DashboardLayout printer connection dialog", () => {
   });
 
   it("opens the printer dialog even when the local agent is unreachable", async () => {
-    storage.set("manufacturer-printer-onboarding:v1:manufacturer-1", "dismissed");
+    localStorageState.set("manufacturer-printer-onboarding:v1:manufacturer-1", "dismissed");
 
     render(
       <MemoryRouter>
@@ -160,7 +177,7 @@ describe("DashboardLayout printer connection dialog", () => {
   });
 
   it("keeps managed network routes visible instead of pushing connector install when a saved route is ready", async () => {
-    storage.set("manufacturer-printer-onboarding:v1:manufacturer-1", "dismissed");
+    localStorageState.set("manufacturer-printer-onboarding:v1:manufacturer-1", "dismissed");
     vi.mocked(apiClient.listRegisteredPrinters).mockResolvedValue({
       success: true,
       data: [
@@ -196,5 +213,84 @@ describe("DashboardLayout printer connection dialog", () => {
     expect(screen.getByRole("button", { name: /printer ready/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /printer setup/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /install connector/i })).not.toBeInTheDocument();
+  });
+
+  it("only auto-opens the ready printer dialog once per manufacturer browser session", async () => {
+    localStorageState.set("manufacturer-printer-onboarding:v1:manufacturer-1", "dismissed");
+    vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValue({
+      success: true,
+      data: {
+        connected: true,
+        trusted: true,
+        compatibilityMode: false,
+        compatibilityReason: null,
+        eligibleForPrinting: true,
+        connectionClass: "TRUSTED",
+        stale: false,
+        requiredForPrinting: true,
+        trustStatus: "TRUSTED",
+        trustReason: "Trusted printer ready",
+        lastHeartbeatAt: "2026-03-13T19:23:36.000Z",
+        ageSeconds: 0,
+        registrationId: "printer-managed-1",
+        agentId: "agent-1",
+        deviceFingerprint: "device-fingerprint",
+        mtlsFingerprint: "mtls-fingerprint",
+        printerName: "Canon TS4100i series 2",
+        printerId: "printer-1",
+        selectedPrinterId: "printer-1",
+        selectedPrinterName: "Canon TS4100i series 2",
+        deviceName: "Factory Mac",
+        agentVersion: "2026.3.13",
+        capabilitySummary: null,
+        printers: [
+          {
+            printerId: "printer-1",
+            printerName: "Canon TS4100i series 2",
+            model: "TS4100i",
+            connection: "ipps",
+            online: true,
+            isDefault: true,
+            protocols: ["ipp"],
+            languages: ["pdf"],
+            mediaSizes: ["A4"],
+            dpi: 300,
+          },
+        ],
+        calibrationProfile: null,
+        error: null,
+      },
+    } as any);
+
+    const firstMount = render(
+      <MemoryRouter>
+        <DashboardLayout>
+          <div>Dashboard content</div>
+        </DashboardLayout>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Printing Status")).toBeInTheDocument();
+    });
+
+    expect(sessionStorageState.get("manufacturer-printer-dialog-opened:v1:manufacturer-1")).toBe("shown");
+
+    firstMount.unmount();
+
+    render(
+      <MemoryRouter>
+        <DashboardLayout>
+          <div>Dashboard content</div>
+        </DashboardLayout>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(vi.mocked(apiClient.getPrinterConnectionStatus)).toHaveBeenCalledTimes(2);
+    });
+
+    expect(screen.getByRole("button", { name: /printer ready/i })).toBeInTheDocument();
+    expect(screen.queryByText("Printing Status")).not.toBeInTheDocument();
   });
 });
