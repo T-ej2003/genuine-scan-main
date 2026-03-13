@@ -16,6 +16,7 @@ import { getContextualHelpRoute } from "@/help/contextual-help";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/api-client";
 import {
+  deriveManagedPrinterAutoDetect,
   getManagedPrinterDiagnosticSummary,
   getPrinterDiagnosticSummary,
   normalizePrinterInventoryRows,
@@ -317,6 +318,25 @@ export default function PrinterDiagnostics() {
     [managedNetworkPrinters]
   );
 
+  const autoDetectedManagedPrinters = useMemo(() => {
+    const rows = detectedPrinters.map((printer) => ({
+      printer,
+      suggestion: deriveManagedPrinterAutoDetect(printer),
+    }));
+
+    const routeRank = (value: "LOCAL_ONLY" | "NETWORK_DIRECT" | "NETWORK_IPP") =>
+      value === "NETWORK_DIRECT" ? 0 : value === "NETWORK_IPP" ? 1 : 2;
+    const readinessRank = (value: "READY" | "NEEDS_DETAILS") => (value === "READY" ? 0 : 1);
+
+    return rows.sort((left, right) => {
+      const readinessDelta = readinessRank(left.suggestion.readiness) - readinessRank(right.suggestion.readiness);
+      if (readinessDelta !== 0) return readinessDelta;
+      const routeDelta = routeRank(left.suggestion.routeType) - routeRank(right.suggestion.routeType);
+      if (routeDelta !== 0) return routeDelta;
+      return left.printer.printerName.localeCompare(right.printer.printerName);
+    });
+  }, [detectedPrinters]);
+
   const statusClasses =
     effectiveSummary.tone === "success"
       ? "border-emerald-200 bg-emerald-50 text-emerald-800"
@@ -526,6 +546,43 @@ export default function PrinterDiagnostics() {
       deliveryMode: printer.deliveryMode || "DIRECT",
       rotateGatewaySecret: false,
       commandLanguage: printer.commandLanguage || "AUTO",
+    });
+  };
+
+  const useAutoDetectedPrinter = (printer: PrinterInventoryRow) => {
+    const suggestion = deriveManagedPrinterAutoDetect(printer);
+    if (suggestion.routeType === "LOCAL_ONLY") {
+      toast({
+        title: "Detected as workstation-managed",
+        description: suggestion.detail,
+      });
+      return;
+    }
+
+    setEditingPrinterId(null);
+    setGatewayProvisioningSecret(null);
+    setSetupFormOpen(true);
+    setManagedProfilesDialogOpen(true);
+    setNetworkPrinterForm({
+      ...buildEmptyNetworkPrinterForm(),
+      connectionType: suggestion.routeType,
+      name: printer.printerName,
+      vendor: "",
+      model: printer.model || "",
+      ipAddress: suggestion.routeType === "NETWORK_DIRECT" ? suggestion.host || "" : "",
+      host: suggestion.routeType === "NETWORK_IPP" ? suggestion.host || "" : "",
+      port: String(suggestion.port || (suggestion.routeType === "NETWORK_IPP" ? 631 : 9100)),
+      resourcePath: suggestion.routeType === "NETWORK_IPP" ? suggestion.resourcePath || "/ipp/print" : "/ipp/print",
+      tlsEnabled: suggestion.routeType === "NETWORK_IPP" ? Boolean(suggestion.tlsEnabled ?? true) : true,
+      printerUri: suggestion.routeType === "NETWORK_IPP" ? suggestion.printerUri || "" : "",
+      deliveryMode: "DIRECT",
+      rotateGatewaySecret: false,
+      commandLanguage: suggestion.routeType === "NETWORK_DIRECT" ? suggestion.commandLanguage || "ZPL" : "ZPL",
+    });
+
+    toast({
+      title: suggestion.readiness === "READY" ? "Detected printer loaded" : "Detected printer template loaded",
+      description: suggestion.detail,
     });
   };
 
@@ -1257,6 +1314,75 @@ export default function PrinterDiagnostics() {
                     <div className="text-sm font-semibold text-foreground">New gateway route</div>
                     <div className="mt-2 text-xs leading-5 text-muted-foreground">Keep the printer private and validate it through the site connector flow.</div>
                   </button>
+                </div>
+
+                <div className="rounded-2xl border bg-background p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-foreground">Auto-detected connected printers</div>
+                      <div className="text-xs text-muted-foreground">
+                        The workstation connector can prefill managed routes when a connected printer exposes usable IPP/IPPS or raw TCP details.
+                      </div>
+                    </div>
+                    <Badge variant="secondary">
+                      {autoDetectedManagedPrinters.length === 1 ? "1 detected" : `${autoDetectedManagedPrinters.length} detected`}
+                    </Badge>
+                  </div>
+
+                  <div className="mt-4 space-y-3">
+                    {autoDetectedManagedPrinters.length === 0 ? (
+                      <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+                        No connected printers are available for auto-detect right now. Manual managed profile entry still works below.
+                      </div>
+                    ) : (
+                      autoDetectedManagedPrinters.map(({ printer, suggestion }) => {
+                        const routeLabel =
+                          suggestion.routeType === "NETWORK_DIRECT"
+                            ? "NETWORK_DIRECT"
+                            : suggestion.routeType === "NETWORK_IPP"
+                              ? "NETWORK_IPP"
+                              : "LOCAL_AGENT";
+
+                        return (
+                          <div key={printer.printerId} className="rounded-xl border bg-muted/20 p-4">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div>
+                                <div className="font-medium text-foreground">{printer.printerName}</div>
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  {printer.model || "Detected printer"}
+                                  {printer.connection ? ` · ${printer.connection}` : ""}
+                                  {printer.online === false ? " · offline" : ""}
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <Badge variant={suggestion.routeType === "LOCAL_ONLY" ? "secondary" : "outline"}>{routeLabel}</Badge>
+                                <Badge variant={suggestion.readiness === "READY" ? "default" : "secondary"}>
+                                  {suggestion.readiness === "READY" ? "Detected route ready" : "Needs manual review"}
+                                </Badge>
+                              </div>
+                            </div>
+                            <div className="mt-3 text-sm text-foreground">{suggestion.summary}</div>
+                            <div className="mt-1 text-xs leading-5 text-muted-foreground">{suggestion.detail}</div>
+                            <div className="mt-2 text-[11px] text-muted-foreground">
+                              Protocols: {(printer.protocols || []).join(", ") || "Unknown"} · Languages: {(printer.languages || []).join(", ") || "Unknown"}
+                            </div>
+                            {suggestion.routeType !== "LOCAL_ONLY" && (
+                              <div className="mt-3 flex justify-end">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={printer.online === false}
+                                  onClick={() => useAutoDetectedPrinter(printer)}
+                                >
+                                  {suggestion.readiness === "READY" ? "Use detected route" : "Use as template"}
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
 
                 <div className="rounded-2xl border bg-background p-4">

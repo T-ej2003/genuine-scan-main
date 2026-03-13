@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { getPrinterDiagnosticSummary, shouldPreferNetworkDirectSummary } from "@/lib/printer-diagnostics";
+import {
+  deriveManagedPrinterAutoDetect,
+  getPrinterDiagnosticSummary,
+  shouldPreferNetworkDirectSummary,
+} from "@/lib/printer-diagnostics";
 
 describe("printer diagnostics summary", () => {
   it("flags agent unreachable when local agent cannot be reached", () => {
@@ -140,5 +144,57 @@ describe("printer diagnostics summary", () => {
         },
       })
     ).toBe(true);
+  });
+
+  it("detects a raw TCP printer and prepares a network-direct route suggestion", () => {
+    const suggestion = deriveManagedPrinterAutoDetect({
+      printerId: "zebra-1",
+      printerName: "Zebra ZD421",
+      connection: "network",
+      protocols: ["raw-9100"],
+      languages: ["ZPL"],
+      deviceUri: "socket://192.168.1.55:9100",
+      online: true,
+    });
+
+    expect(suggestion.routeType).toBe("NETWORK_DIRECT");
+    expect(suggestion.readiness).toBe("READY");
+    expect(suggestion.host).toBe("192.168.1.55");
+    expect(suggestion.port).toBe(9100);
+    expect(suggestion.commandLanguage).toBe("ZPL");
+  });
+
+  it("detects an IPP printer and prepares a managed IPP suggestion", () => {
+    const suggestion = deriveManagedPrinterAutoDetect({
+      printerId: "canon-1",
+      printerName: "Canon Office Printer",
+      connection: "ipps",
+      protocols: ["ipp", "ipps"],
+      languages: [],
+      deviceUri: "ipps://canon-office.local:631/ipp/print",
+      online: true,
+    });
+
+    expect(suggestion.routeType).toBe("NETWORK_IPP");
+    expect(suggestion.readiness).toBe("READY");
+    expect(suggestion.host).toBe("canon-office.local");
+    expect(suggestion.printerUri).toBe("ipps://canon-office.local:631/ipp/print");
+    expect(suggestion.resourcePath).toBe("/ipp/print");
+  });
+
+  it("surfaces a template-only IPP suggestion when Bonjour is visible without a stable URI", () => {
+    const suggestion = deriveManagedPrinterAutoDetect({
+      printerId: "airprint-1",
+      printerName: "Canon TS4100i series",
+      connection: "bonjour",
+      protocols: ["dnssd", "ipps"],
+      languages: [],
+      deviceUri: "dnssd://Canon%20TS4100i%20series._ipps._tcp.local./?uuid=123",
+      online: true,
+    });
+
+    expect(suggestion.routeType).toBe("NETWORK_IPP");
+    expect(suggestion.readiness).toBe("NEEDS_DETAILS");
+    expect(suggestion.host || null).toBeNull();
   });
 });

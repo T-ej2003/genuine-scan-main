@@ -15,6 +15,8 @@ export type LocalAgentPrinter = {
   languages: string[];
   mediaSizes: string[];
   dpi: number | null;
+  deviceUri?: string | null;
+  portName?: string | null;
 };
 
 export type LocalAgentCapabilitySummary = {
@@ -334,6 +336,8 @@ export const listLocalPrinters = async (): Promise<{
         languages: inferWindowsLanguages(row.driverName, row.name),
         mediaSizes: [],
         dpi: null,
+        deviceUri: null,
+        portName: row.portName,
       }))
       .sort((a, b) => {
         if (a.isDefault && !b.isDefault) return -1;
@@ -400,6 +404,8 @@ export const listLocalPrinters = async (): Promise<{
         languages: inferLanguages(profiler),
         mediaSizes: parsedOptions.mediaSizes,
         dpi: parsedOptions.dpiOptions.length > 0 ? parsedOptions.dpiOptions[parsedOptions.dpiOptions.length - 1] : null,
+        deviceUri: uri,
+        portName: null,
       } satisfies LocalAgentPrinter;
     })
   );
