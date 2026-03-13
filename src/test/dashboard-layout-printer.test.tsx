@@ -38,6 +38,7 @@ vi.mock("@/lib/api-client", () => ({
   default: {
     getNotifications: vi.fn(),
     streamNotifications: vi.fn(),
+    listRegisteredPrinters: vi.fn(),
     getLocalPrintAgentStatus: vi.fn(),
     reportPrinterHeartbeat: vi.fn(),
     getPrinterConnectionStatus: vi.fn(),
@@ -71,6 +72,10 @@ describe("DashboardLayout printer connection dialog", () => {
     } as any);
     vi.mocked(apiClient.streamNotifications).mockImplementation(() => () => undefined);
     vi.mocked(apiClient.streamPrinterConnectionStatus).mockImplementation(() => () => undefined);
+    vi.mocked(apiClient.listRegisteredPrinters).mockResolvedValue({
+      success: true,
+      data: [],
+    } as any);
     vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
       success: false,
       error: "Local print agent is unavailable",
@@ -130,7 +135,7 @@ describe("DashboardLayout printer connection dialog", () => {
       expect(screen.getByText("Printing Status")).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/switch between connected printers when needed/i)).toBeInTheDocument();
+    expect(screen.getByText(/review live printer readiness/i)).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Refresh status" }).length).toBeGreaterThan(0);
   });
 
@@ -152,5 +157,44 @@ describe("DashboardLayout printer connection dialog", () => {
     expect(screen.getByText(/If the OS can see the printer, MSCQR will detect it and it will appear automatically/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /install connector/i })).toBeInTheDocument();
     expect(screen.getByText(/download the Mac or Windows installer for that same device/i)).toBeInTheDocument();
+  });
+
+  it("keeps managed network routes visible instead of pushing connector install when a saved route is ready", async () => {
+    storage.set("manufacturer-printer-onboarding:v1:manufacturer-1", "dismissed");
+    vi.mocked(apiClient.listRegisteredPrinters).mockResolvedValue({
+      success: true,
+      data: [
+        {
+          id: "printer-managed-1",
+          name: "Factory LAN Printer",
+          connectionType: "NETWORK_DIRECT",
+          commandLanguage: "ZPL",
+          isActive: true,
+          isDefault: true,
+          registryStatus: {
+            state: "READY",
+            summary: "Ready",
+            detail: "Raw TCP validation succeeded.",
+          },
+        },
+      ],
+    } as any);
+
+    render(
+      <MemoryRouter>
+        <DashboardLayout>
+          <div>Dashboard content</div>
+        </DashboardLayout>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(vi.mocked(apiClient.listRegisteredPrinters)).toHaveBeenCalled();
+    });
+
+    expect(screen.queryByText("Set up printing on this workstation")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /printer ready/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /printer setup/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /install connector/i })).not.toBeInTheDocument();
   });
 });

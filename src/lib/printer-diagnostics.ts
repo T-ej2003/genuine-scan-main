@@ -1,3 +1,5 @@
+import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
+
 export type PrinterInventoryRow = {
   printerId: string;
   printerName: string;
@@ -63,6 +65,13 @@ export type PrinterDiagnosticSummary = {
 };
 
 export type NetworkDirectPrinterSummaryLike = {
+  id?: string | null;
+  name?: string | null;
+  isActive?: boolean;
+  isDefault?: boolean;
+  connectionType?: "LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP" | string | null;
+  commandLanguage?: string | null;
+  deliveryMode?: "DIRECT" | "SITE_GATEWAY" | string | null;
   registryStatus?: {
     state: "READY" | "ATTENTION" | "OFFLINE" | "BLOCKED";
     summary: string;
@@ -270,4 +279,131 @@ export const shouldPreferNetworkDirectSummary = (params: {
   const printers = Array.isArray(params.printers) ? params.printers : [];
   return Boolean(params.networkPrinter) && printers.length === 0;
 };
-import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
+
+export const selectPreferredManagedPrinter = <T extends NetworkDirectPrinterSummaryLike>(printers?: T[] | null): T | null => {
+  const activePrinters = (Array.isArray(printers) ? printers : []).filter(
+    (printer) => printer && printer.connectionType !== "LOCAL_AGENT" && printer.isActive !== false
+  );
+  return (
+    activePrinters.find((printer) => printer.isDefault) ||
+    activePrinters.find((printer) => printer.registryStatus?.state === "READY") ||
+    activePrinters[0] ||
+    null
+  );
+};
+
+export const getManagedPrinterDiagnosticSummary = (
+  printer?: NetworkDirectPrinterSummaryLike | null
+): PrinterDiagnosticSummary | null => {
+  if (!printer) return null;
+
+  const networkLabel =
+    printer.connectionType === "NETWORK_IPP"
+      ? printer.deliveryMode === "SITE_GATEWAY"
+        ? "Private site printer"
+        : "Office printer"
+      : "Factory printer";
+  const printerName = String(printer.name || networkLabel).trim() || networkLabel;
+  const pseudoPrinter: PrinterInventoryRow = {
+    printerId: String(printer.id || printerName).trim() || printerName,
+    printerName,
+    model: null,
+    connection: String(printer.connectionType || "").trim() || null,
+    online: printer.registryStatus?.state !== "OFFLINE",
+    isDefault: Boolean(printer.isDefault),
+    protocols: printer.connectionType === "NETWORK_IPP" ? [printer.deliveryMode === "SITE_GATEWAY" ? "ipps" : "ipp"] : [],
+    languages: printer.connectionType === "NETWORK_IPP" ? ["PDF"] : [String(printer.commandLanguage || "AUTO")],
+    mediaSizes: [],
+    dpi: null,
+  };
+
+  if (printer.registryStatus?.state === "READY") {
+    return {
+      state: "compatibility_ready",
+      badgeLabel: "Ready",
+      title: `${networkLabel} ready`,
+      summary: `${printerName} is registered and ready for controlled dispatch.`,
+      detail: sanitizePrinterUiError(
+        printer.registryStatus?.detail,
+        "This saved printer has already been checked and is ready."
+      ),
+      tone: "success",
+      nextSteps: [
+        "Open the batch workflow and choose this managed printer profile.",
+        "Run Check again after any printer, network, or gateway change.",
+      ],
+      selectedPrinter: pseudoPrinter,
+    };
+  }
+
+  if (printer.registryStatus?.state === "ATTENTION") {
+    return {
+      state: "server_sync_pending",
+      badgeLabel: "Needs validation",
+      title: `${networkLabel} needs validation`,
+      summary: `${printerName} is registered, but readiness still needs a live check.`,
+      detail: sanitizePrinterUiError(
+        printer.registryStatus?.detail,
+        "Run a printer check to confirm this setup is ready."
+      ),
+      tone: "warning",
+      nextSteps: [
+        "Open the managed printer dialog and run Check.",
+        "Confirm the printer or site connector is online, then recheck.",
+      ],
+      selectedPrinter: pseudoPrinter,
+    };
+  }
+
+  if (printer.registryStatus?.state === "BLOCKED") {
+    return {
+      state: "trust_blocked",
+      badgeLabel: "Blocked",
+      title: `${networkLabel} is blocked`,
+      summary: `${printerName} cannot be used in its current configuration.`,
+      detail: sanitizePrinterUiError(
+        printer.registryStatus?.detail,
+        "Review the printer setup, then run Check again."
+      ),
+      tone: "danger",
+      nextSteps: [
+        "Update the managed printer profile.",
+        "Run Check again after correcting the endpoint or language.",
+      ],
+      selectedPrinter: pseudoPrinter,
+    };
+  }
+
+  if (printer.registryStatus?.state === "OFFLINE") {
+    return {
+      state: "printer_offline",
+      badgeLabel: "Offline",
+      title: `${networkLabel} is unreachable`,
+      summary: `${printerName} is registered, but it is not reachable right now.`,
+      detail: sanitizePrinterUiError(
+        printer.registryStatus?.detail,
+        "Bring the printer or site connector online, then run Check again."
+      ),
+      tone: "danger",
+      nextSteps: [
+        "Bring the printer or site connector online.",
+        "Run Check again once the managed route is reachable.",
+      ],
+      selectedPrinter: pseudoPrinter,
+    };
+  }
+
+  return {
+    state: "server_sync_pending",
+    badgeLabel: "Preparing",
+    title: `${networkLabel} setup in progress`,
+    summary: `${printerName} has been saved, but MSCQR still needs a live readiness check.`,
+    detail: "Open the managed printer dialog and run Check to confirm the route end to end.",
+    tone: "warning",
+    nextSteps: [
+      "Complete the profile details and run Check.",
+      "Use the batch workflow once the managed route shows Ready.",
+    ],
+    selectedPrinter: pseudoPrinter,
+  };
+};
