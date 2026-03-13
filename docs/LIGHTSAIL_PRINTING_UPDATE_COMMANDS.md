@@ -85,6 +85,9 @@ Run these browser checks after the deploy for the manufacturer console:
 4. Confirm the `NETWORK_DIRECT` card can open the factory-printer create flow
 5. Confirm the `NETWORK_IPP` card can open both backend-direct and site-gateway create flows
 6. Open `https://www.mscqr.com/dashboard` as a manufacturer and confirm the printer badge no longer forces `Install Connector` when a managed network route is already ready
+7. Log in as a manufacturer with a ready workstation printer and confirm `Printing Status` auto-opens once immediately after login
+8. Close `Printing Status`, then open `https://www.mscqr.com/batches` and `https://www.mscqr.com/audit-logs`
+9. Confirm the `Printing Status` dialog does not auto-open again during that same login session unless you click the printer badge manually
 
 ## 5. Full container refresh
 

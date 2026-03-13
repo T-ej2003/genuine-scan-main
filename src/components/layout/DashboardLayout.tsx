@@ -144,6 +144,7 @@ const NOTIFICATION_FETCH_LIMIT = 24;
 const NOTIFICATION_WINDOW_SIZE = 4;
 const NOTIFICATION_CLEAR_ANIMATION_MS = 260;
 const PRINTER_FAILURE_REPORT_COOLDOWN_MS = 3 * 60 * 1000;
+const PRINTER_DIALOG_SESSION_STORAGE_VERSION = "v1";
 const PRINTER_ONBOARDING_STORAGE_VERSION = "v1";
 
 const navItems: NavItem[] = [
@@ -317,6 +318,10 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
   const filteredNavItems = navItems.filter((item) => user && item.roles.includes(user.role));
   const contextualHelpRoute = getContextualHelpRoute(location.pathname, user?.role);
+  const printerDialogSessionKey =
+    user?.role === "manufacturer" && user?.id
+      ? `manufacturer-printer-dialog-opened:${PRINTER_DIALOG_SESSION_STORAGE_VERSION}:${user.id}`
+      : null;
 
   const applyNotificationSnapshot = (rows: DashboardNotification[], unread: number) => {
     setNotifications(rows);
@@ -411,6 +416,33 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     return result;
   };
 
+  const hasSeenPrinterDialogThisSession = () => {
+    if (!printerDialogSessionKey) return false;
+    try {
+      return String(window.sessionStorage.getItem(printerDialogSessionKey) || "").trim().toLowerCase() === "shown";
+    } catch {
+      return false;
+    }
+  };
+
+  const markPrinterDialogSeenThisSession = () => {
+    if (!printerDialogSessionKey) return;
+    try {
+      window.sessionStorage.setItem(printerDialogSessionKey, "shown");
+    } catch {
+      // ignore storage failures
+    }
+  };
+
+  const clearPrinterDialogSession = () => {
+    if (!printerDialogSessionKey) return;
+    try {
+      window.sessionStorage.removeItem(printerDialogSessionKey);
+    } catch {
+      // ignore storage failures
+    }
+  };
+
   const applyPrinterStatusSnapshot = (
     nextStatus: PrinterConnectionStatus,
     options?: {
@@ -451,8 +483,9 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     });
 
     const nowConnected = Boolean(nextStatus.connected && nextStatus.eligibleForPrinting);
-    if (nowConnected && !printerConnectedRef.current) {
+    if (nowConnected && !printerConnectedRef.current && !hasSeenPrinterDialogThisSession()) {
       setPrinterDialogOpen(true);
+      markPrinterDialogSeenThisSession();
     }
     printerConnectedRef.current = nowConnected;
   };
@@ -1007,6 +1040,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   };
 
   const handleLogout = () => {
+    clearPrinterDialogSession();
     logout();
     navigate("/login");
   };
