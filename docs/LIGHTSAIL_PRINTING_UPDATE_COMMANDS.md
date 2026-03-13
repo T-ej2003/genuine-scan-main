@@ -75,6 +75,17 @@ Expected result:
 - the Mac and Windows download requests return `HTTP/2 200`
 - `Content-Disposition` is present for both installer downloads
 
+## 4B. Managed printer UX smoke checks
+
+Run these browser checks after the deploy for the manufacturer console:
+
+1. Open `https://www.mscqr.com/printer-diagnostics`
+2. Confirm the `Saved managed printer` card is fully clickable
+3. Confirm clicking it opens the managed printer dialog with create, update, delete, and `Check`
+4. Confirm the `NETWORK_DIRECT` card can open the factory-printer create flow
+5. Confirm the `NETWORK_IPP` card can open both backend-direct and site-gateway create flows
+6. Open `https://www.mscqr.com/dashboard` as a manufacturer and confirm the printer badge no longer forces `Install Connector` when a managed network route is already ready
+
 ## 5. Full container refresh
 
 Use this only when you want a full rebuild and clean container recreate:

@@ -48,8 +48,14 @@ import { Slider } from "@/components/ui/slider";
 import { SupportIssueLauncher } from "@/components/support/SupportIssueLauncher";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { buildSupportDiagnosticsPayload, captureSupportScreenshot } from "@/lib/support-diagnostics";
-import { getPrinterDiagnosticSummary, type LocalPrinterAgentSnapshot } from "@/lib/printer-diagnostics";
-import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
+import {
+  getManagedPrinterDiagnosticSummary,
+  getPrinterDiagnosticSummary,
+  selectPreferredManagedPrinter,
+  shouldPreferNetworkDirectSummary,
+  type LocalPrinterAgentSnapshot,
+} from "@/lib/printer-diagnostics";
+import { getPrinterDispatchLabel, sanitizePrinterUiError } from "@/lib/printer-user-facing";
 
 interface NavItem {
   label: string;
@@ -115,6 +121,23 @@ type PrinterConnectionStatus = {
   }>;
   calibrationProfile?: Record<string, unknown> | null;
   error?: string | null;
+};
+
+type RegisteredManagedPrinter = {
+  id: string;
+  name: string;
+  vendor?: string | null;
+  model?: string | null;
+  connectionType: "LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP";
+  commandLanguage?: string | null;
+  deliveryMode?: "DIRECT" | "SITE_GATEWAY";
+  isActive: boolean;
+  isDefault?: boolean;
+  registryStatus?: {
+    state: "READY" | "ATTENTION" | "OFFLINE" | "BLOCKED";
+    summary: string;
+    detail?: string | null;
+  } | null;
 };
 
 const NOTIFICATION_FETCH_LIMIT = 24;
@@ -289,6 +312,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     }>
   >([]);
   const [selectedLocalPrinterId, setSelectedLocalPrinterId] = useState("");
+  const [managedPrinterProfiles, setManagedPrinterProfiles] = useState<RegisteredManagedPrinter[]>([]);
+  const [managedPrinterProfilesLoaded, setManagedPrinterProfilesLoaded] = useState(false);
 
   const filteredNavItems = navItems.filter((item) => user && item.roles.includes(user.role));
   const contextualHelpRoute = getContextualHelpRoute(location.pathname, user?.role);
@@ -521,8 +546,28 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const loadManagedPrinterProfiles = async () => {
+    if (!user || user.role !== "manufacturer") return;
+
+    const response = await apiClient.listRegisteredPrinters(false);
+    if (!response.success) {
+      setManagedPrinterProfiles([]);
+      setManagedPrinterProfilesLoaded(true);
+      return;
+    }
+
+    setManagedPrinterProfiles(
+      (Array.isArray(response.data) ? response.data : []).filter(
+        (row): row is RegisteredManagedPrinter => Boolean(row && typeof row === "object" && (row as any).id && (row as any).name)
+      )
+    );
+    setManagedPrinterProfilesLoaded(true);
+  };
+
   const syncManufacturerPrinterStatus = async (opts?: { silent?: boolean }) => {
     if (!user || user.role !== "manufacturer") return;
+
+    await loadManagedPrinterProfiles();
 
     const local = await apiClient.getLocalPrintAgentStatus();
     const localPrinters = normalizePrinterRows((local as any)?.data?.printers || []);
@@ -981,9 +1026,20 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   };
 
   const printerReady = printerStatus.connected && printerStatus.eligibleForPrinting;
+  const managedNetworkPrinters = useMemo(
+    () => managedPrinterProfiles.filter((printer) => printer.connectionType !== "LOCAL_AGENT" && printer.isActive),
+    [managedPrinterProfiles]
+  );
+  const preferredManagedNetworkPrinter = useMemo(
+    () => selectPreferredManagedPrinter(managedNetworkPrinters),
+    [managedNetworkPrinters]
+  );
+  const managedPrinterDiagnostics = useMemo(
+    () => getManagedPrinterDiagnosticSummary(preferredManagedNetworkPrinter),
+    [preferredManagedNetworkPrinter]
+  );
   const printerHasInventory =
     detectedPrinters.length > 0 || Boolean(printerStatus.selectedPrinterId || printerStatus.printerId);
-  const printerUnavailable = !printerReady && !printerHasInventory;
   const printerDiagnostics = useMemo(
     () =>
       getPrinterDiagnosticSummary({
@@ -994,16 +1050,27 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       }),
     [detectedPrinters, localPrinterAgent, printerStatus, selectedLocalPrinterId]
   );
-  const printerModeLabel = printerDiagnostics.badgeLabel;
+  const shouldUseManagedPrinterSummary = Boolean(
+    managedPrinterDiagnostics &&
+      (!printerReady ||
+        shouldPreferNetworkDirectSummary({
+          printers: detectedPrinters,
+          networkPrinter: preferredManagedNetworkPrinter,
+        }))
+  );
+  const effectivePrinterDiagnostics = shouldUseManagedPrinterSummary && managedPrinterDiagnostics ? managedPrinterDiagnostics : printerDiagnostics;
+  const effectivePrinterReady = printerReady || managedPrinterDiagnostics?.tone === "success";
+  const printerUnavailable = !effectivePrinterReady && !printerHasInventory && managedNetworkPrinters.length === 0;
+  const printerModeLabel = effectivePrinterDiagnostics.badgeLabel;
   const printerToneClass =
-    printerDiagnostics.tone === "success"
+    effectivePrinterDiagnostics.tone === "success"
       ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-      : printerDiagnostics.tone === "warning"
+      : effectivePrinterDiagnostics.tone === "warning"
         ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
-        : printerDiagnostics.tone === "neutral"
+        : effectivePrinterDiagnostics.tone === "neutral"
           ? "border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200"
           : "border-red-300 bg-red-50 text-red-700 hover:bg-red-100";
-  const printerTitle = printerDiagnostics.summary;
+  const printerTitle = effectivePrinterDiagnostics.summary;
   const selectedPrinter =
     detectedPrinters.find((row) => row.printerId === selectedLocalPrinterId) ||
     detectedPrinters.find((row) => row.printerId === printerStatus.selectedPrinterId) ||
@@ -1011,19 +1078,23 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     null;
   const activePrinterId = String(printerStatus.selectedPrinterId || printerStatus.printerId || "").trim();
   const printerIdentity = derivePrinterIdentity({
-    printerName: printerStatus.printerName,
-    selectedPrinterName: printerStatus.selectedPrinterName,
-    model: selectedPrinter?.model || null,
-    deviceName: printerStatus.deviceName,
+    printerName: shouldUseManagedPrinterSummary ? preferredManagedNetworkPrinter?.name : printerStatus.printerName,
+    selectedPrinterName: shouldUseManagedPrinterSummary ? preferredManagedNetworkPrinter?.name : printerStatus.selectedPrinterName,
+    model: shouldUseManagedPrinterSummary ? preferredManagedNetworkPrinter?.model || null : selectedPrinter?.model || null,
+    deviceName: shouldUseManagedPrinterSummary ? null : printerStatus.deviceName,
   });
   const printerFeedLabel = printerStatusLive ? "Live updates" : "Automatic refresh";
   const printerUpdatedLabel = formatPrinterTimestamp(printerStatusUpdatedAt || printerStatus.lastHeartbeatAt);
-  const printerSummaryMessage = printerReady
-    ? `${printerIdentity.displayName} is ready to print.`
-    : printerDiagnostics.summary;
-  const printerNextStep = printerReady
-    ? "You can continue to batch operations."
-    : printerDiagnostics.nextSteps[0] || "Refresh printer status before starting a print job.";
+  const printerSummaryMessage = effectivePrinterReady
+    ? shouldUseManagedPrinterSummary
+      ? effectivePrinterDiagnostics.summary
+      : `${printerIdentity.displayName} is ready to print.`
+    : effectivePrinterDiagnostics.summary;
+  const printerNextStep = effectivePrinterReady
+    ? shouldUseManagedPrinterSummary
+      ? "Open batches and choose the managed printer profile when you are ready to print."
+      : "You can continue to batch operations."
+    : effectivePrinterDiagnostics.nextSteps[0] || "Refresh printer status before starting a print job.";
   const selectedPrinterIsActive = Boolean(selectedPrinter && selectedPrinter.printerId === activePrinterId);
   const printerDiscoveryCountLabel =
     detectedPrinters.length === 1 ? "1 printer detected" : `${detectedPrinters.length} printers detected`;
@@ -1041,12 +1112,17 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!printerOnboardingStorageKey) return;
-    if (printerReady) {
+    if (!managedPrinterProfilesLoaded) return;
+    if (printerReady || managedPrinterDiagnostics?.tone === "success") {
       try {
         window.localStorage.setItem(printerOnboardingStorageKey, "completed");
       } catch {
         // ignore storage failures
       }
+      setPrinterOnboardingOpen(false);
+      return;
+    }
+    if (managedNetworkPrinters.length > 0) {
       setPrinterOnboardingOpen(false);
       return;
     }
@@ -1060,7 +1136,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     if (!stored) {
       setPrinterOnboardingOpen(true);
     }
-  }, [printerOnboardingStorageKey, printerReady]);
+  }, [managedNetworkPrinters.length, managedPrinterDiagnostics?.tone, managedPrinterProfilesLoaded, printerOnboardingStorageKey, printerReady]);
 
   const dismissPrinterOnboarding = () => {
     if (printerOnboardingStorageKey) {
@@ -1485,9 +1561,15 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             </Button>
           )}
 
-          {user?.role === "manufacturer" && !printerReady && (
+          {user?.role === "manufacturer" && !effectivePrinterReady && managedNetworkPrinters.length === 0 && (
             <Button variant="ghost" size="sm" onClick={() => navigate("/connector-download")} className="mr-1 hidden md:inline-flex">
               Install Connector
+            </Button>
+          )}
+
+          {user?.role === "manufacturer" && managedNetworkPrinters.length > 0 && (
+            <Button variant="ghost" size="sm" onClick={() => navigate("/printer-diagnostics")} className="mr-1 hidden md:inline-flex">
+              Printer Setup
             </Button>
           )}
 
@@ -1542,7 +1624,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               <DialogHeader>
                 <DialogTitle>Printing Status</DialogTitle>
                 <DialogDescription>
-                  Review printer readiness, switch between connected printers when needed, and confirm this workstation is ready before you print.
+                  Review live printer readiness, switch workstation printers when needed, and keep managed `NETWORK_DIRECT` and `NETWORK_IPP` routes visible before you print.
                 </DialogDescription>
               </DialogHeader>
 
@@ -1551,11 +1633,11 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                   <div
                     className={cn(
                       "rounded-2xl border p-4 shadow-sm",
-                      printerDiagnostics.tone === "success"
+                      effectivePrinterDiagnostics.tone === "success"
                         ? "border-emerald-200 bg-[linear-gradient(135deg,#ecfdf5_0%,#f8fffc_100%)]"
-                        : printerDiagnostics.tone === "warning"
+                        : effectivePrinterDiagnostics.tone === "warning"
                           ? "border-amber-200 bg-[linear-gradient(135deg,#fffbeb_0%,#fffdf7_100%)]"
-                          : printerDiagnostics.tone === "neutral"
+                          : effectivePrinterDiagnostics.tone === "neutral"
                             ? "border-slate-200 bg-[linear-gradient(135deg,#f8fafc_0%,#ffffff_100%)]"
                             : "border-red-200 bg-[linear-gradient(135deg,#fef2f2_0%,#fff8f8_100%)]"
                     )}
@@ -1570,16 +1652,19 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                             <span className="text-lg font-semibold text-slate-950">{printerIdentity.displayName}</span>
                             <Badge
                               variant={
-                                printerDiagnostics.tone === "success"
+                                effectivePrinterDiagnostics.tone === "success"
                                   ? "default"
-                                  : printerDiagnostics.tone === "warning" || printerDiagnostics.tone === "neutral"
+                                  : effectivePrinterDiagnostics.tone === "warning" || effectivePrinterDiagnostics.tone === "neutral"
                                     ? "secondary"
                                     : "destructive"
                               }
                             >
-                              {printerDiagnostics.badgeLabel}
+                              {effectivePrinterDiagnostics.badgeLabel}
                             </Badge>
-                            {selectedPrinter?.online === false && <Badge variant="destructive">Offline</Badge>}
+                            {selectedPrinter?.online === false && !shouldUseManagedPrinterSummary && <Badge variant="destructive">Offline</Badge>}
+                            {shouldUseManagedPrinterSummary && preferredManagedNetworkPrinter && (
+                              <Badge variant="secondary">{getPrinterDispatchLabel(preferredManagedNetworkPrinter)}</Badge>
+                            )}
                           </div>
                           <p className="mt-1 text-sm font-medium text-slate-700">
                             {printerIdentity.vendor}
@@ -1588,12 +1673,12 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                           <p
                             className={cn(
                               "mt-3 text-sm leading-6",
-                              printerUnavailable ? "text-slate-700" : printerReady ? "text-emerald-800" : "text-slate-700"
+                              printerUnavailable ? "text-slate-700" : effectivePrinterReady ? "text-emerald-800" : "text-slate-700"
                             )}
                           >
                             {printerSummaryMessage}
                           </p>
-                          <p className="mt-2 text-xs leading-5 text-slate-600">{printerDiagnostics.detail}</p>
+                          <p className="mt-2 text-xs leading-5 text-slate-600">{effectivePrinterDiagnostics.detail}</p>
                           <p className="mt-2 text-xs leading-5 text-slate-600">{printerNextStep}</p>
                         </div>
                       </div>
@@ -1601,7 +1686,11 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                       <div className="grid gap-2 text-xs text-slate-600 sm:min-w-[15rem]">
                         <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2">
                           <div className="font-medium text-slate-500">Active printer</div>
-                          <div className="mt-1 font-semibold text-slate-900">{printerStatus.selectedPrinterName || printerStatus.printerName || "Not selected"}</div>
+                          <div className="mt-1 font-semibold text-slate-900">
+                            {shouldUseManagedPrinterSummary
+                              ? preferredManagedNetworkPrinter?.name || "Managed printer"
+                              : printerStatus.selectedPrinterName || printerStatus.printerName || "Not selected"}
+                          </div>
                         </div>
                         <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2">
                           <div className="font-medium text-slate-500">Last checked</div>
@@ -1639,15 +1728,62 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                         </div>
                       </div>
                       <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-                        {printerReady ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" /> : <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-600" />}
+                        {effectivePrinterReady ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" /> : <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-600" />}
                         <div>
                           <div className="font-medium text-slate-900">Current state</div>
-                          <div className="text-xs text-slate-600">{printerDiagnostics.badgeLabel}</div>
+                          <div className="text-xs text-slate-600">{effectivePrinterDiagnostics.badgeLabel}</div>
                         </div>
                       </div>
                     </div>
                   </div>
                 </div>
+
+                {managedNetworkPrinters.length > 0 && (
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Managed network routes</div>
+                        <div className="mt-1 text-lg font-semibold text-slate-950">
+                          {managedNetworkPrinters.length === 1 ? "1 managed printer route" : `${managedNetworkPrinters.length} managed printer routes`}
+                        </div>
+                        <p className="mt-1 text-sm text-slate-600">
+                          These saved `NETWORK_DIRECT` and `NETWORK_IPP` routes print through MSCQR without depending on the workstation printer list.
+                        </p>
+                      </div>
+                      <Button variant="outline" onClick={() => navigate("/printer-diagnostics")}>
+                        Manage profiles
+                      </Button>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      {managedNetworkPrinters.slice(0, 4).map((printer) => {
+                        const statusState = printer.registryStatus?.state || "ATTENTION";
+                        const statusVariant = statusState === "READY" ? "default" : statusState === "BLOCKED" || statusState === "OFFLINE" ? "destructive" : "secondary";
+
+                        return (
+                          <div key={printer.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div>
+                                <div className="font-semibold text-slate-950">{printer.name}</div>
+                                <div className="mt-1 text-xs text-slate-600">
+                                  {getPrinterDispatchLabel(printer)}
+                                  {printer.vendor || printer.model ? ` · ${[printer.vendor, printer.model].filter(Boolean).join(" ")}` : ""}
+                                </div>
+                              </div>
+                              <Badge variant={statusVariant}>{printer.registryStatus?.summary || statusState}</Badge>
+                            </div>
+                            <div className="mt-3 text-xs leading-5 text-slate-600">
+                              {sanitizePrinterUiError(
+                                printer.registryStatus?.detail,
+                                "Open Printer Setup to check, update, or remove this managed route."
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1668,9 +1804,13 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
                   {detectedPrinters.length === 0 ? (
                     <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6">
-                      <div className="text-base font-semibold text-slate-950">No printer connection detected</div>
+                      <div className="text-base font-semibold text-slate-950">
+                        {managedNetworkPrinters.length > 0 ? "No workstation printer detected" : "No printer connection detected"}
+                      </div>
                       <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                        MSCQR could not find a ready printer on this workstation. Make sure the printer is available in the operating system, then refresh the connection status.
+                        {managedNetworkPrinters.length > 0
+                          ? "The workstation connector is not reporting a local printer right now, but your managed network routes are still available above and in Printer Setup."
+                          : "MSCQR could not find a ready printer on this workstation. Make sure the printer is available in the operating system, then refresh the connection status."}
                       </p>
                       <div className="mt-4 flex flex-wrap gap-3">
                         <Button onClick={refreshPrinterConnectionStatus} disabled={printerSwitching}>
@@ -1798,15 +1938,17 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="text-sm font-semibold text-slate-950">Need setup help?</div>
                   <p className="mt-1 text-sm text-slate-600">
-                    Install Connector on the printing computer first, then use Printer Setup & Support for validation and support-safe checks.
+                    Use Printer Setup & Support to validate managed network routes or workstation printers, then return here for live status and final checks before batch printing.
                   </p>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <Button variant="outline" onClick={() => navigate("/connector-download")}>
-                      Install Connector
-                    </Button>
                     <Button variant="outline" onClick={() => navigate("/printer-diagnostics")}>
                       Open printer setup
                     </Button>
+                    {managedNetworkPrinters.length === 0 && (
+                      <Button variant="outline" onClick={() => navigate("/connector-download")}>
+                        Install Connector
+                      </Button>
+                    )}
                     <Button variant="ghost" onClick={() => navigate(contextualHelpRoute)}>
                       Open help
                     </Button>
