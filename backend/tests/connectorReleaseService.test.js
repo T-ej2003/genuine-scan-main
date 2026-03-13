@@ -9,23 +9,27 @@ const run = () => {
   const latestFromWebOrigin = getLatestConnectorRelease("https://mscqr.example.com");
   assert(latest.latestVersion === "2026.3.12", "Latest connector version should come from manifest.json");
   assert(
-    latest.release.platforms.macos.downloadPath === "/api/public/connector/download/2026.3.12/macos",
-    "macOS download path should route through the API prefix"
-  );
-  assert(
     latest.release.platforms.windows.downloadPath === "/api/public/connector/download/2026.3.12/windows",
     "Windows download path should route through the API prefix"
-  );
-  assert(
-    latest.release.platforms.macos.downloadUrl ===
-      "https://mscqr.example.com/api/public/connector/download/2026.3.12/macos",
-    "macOS download URL should be based on the public API base"
   );
   assert(
     latest.release.platforms.windows.downloadUrl ===
       "https://mscqr.example.com/api/public/connector/download/2026.3.12/windows",
     "Windows download URL should be based on the public API base"
   );
+  if (latest.release.platforms.macos) {
+    assert(
+      latest.release.platforms.macos.downloadPath === "/api/public/connector/download/2026.3.12/macos",
+      "macOS download path should route through the API prefix"
+    );
+    assert(
+      latest.release.platforms.macos.downloadUrl ===
+        "https://mscqr.example.com/api/public/connector/download/2026.3.12/macos",
+      "macOS download URL should be based on the public API base"
+    );
+  } else {
+    assert(latest.release.platforms.macos === null, "macOS platform should be null when no notarized package is published");
+  }
   assert(
     latestFromWebOrigin.release.platforms.windows.downloadUrl ===
       "https://mscqr.example.com/api/public/connector/download/2026.3.12/windows",

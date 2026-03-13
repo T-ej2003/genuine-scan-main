@@ -19,15 +19,17 @@ npm run connector:release
 When the Apple release credentials are configured, that single command now:
 
 1. builds the backend and connector binaries
-2. creates the macOS installer package
-3. signs the macOS package with `MACOS_CONNECTOR_SIGN_IDENTITY`
-4. submits it to Apple notarization
-5. staples and validates the notarization ticket
-6. updates `backend/local-print-agent/releases/manifest.json`
+2. signs the bundled macOS executables with `MACOS_CONNECTOR_APP_SIGN_IDENTITY`
+3. creates the macOS installer package
+4. signs the macOS package with `MACOS_CONNECTOR_SIGN_IDENTITY`
+5. submits it to Apple notarization
+6. staples and validates the notarization ticket
+7. updates `backend/local-print-agent/releases/manifest.json`
 
 Recommended macOS release configuration:
 
 ```bash
+export MACOS_CONNECTOR_APP_SIGN_IDENTITY="Developer ID Application: Example Company (TEAMID1234)"
 export MACOS_CONNECTOR_SIGN_IDENTITY="Developer ID Installer: Example Company (TEAMID1234)"
 export MACOS_CONNECTOR_NOTARY_PROFILE="mscqr-connector"
 npm run connector:release
@@ -36,6 +38,7 @@ npm run connector:release
 Alternative direct notarization credentials:
 
 ```bash
+export MACOS_CONNECTOR_APP_SIGN_IDENTITY="Developer ID Application: Example Company (TEAMID1234)"
 export MACOS_CONNECTOR_SIGN_IDENTITY="Developer ID Installer: Example Company (TEAMID1234)"
 export MACOS_CONNECTOR_NOTARY_APPLE_ID="you@example.com"
 export MACOS_CONNECTOR_NOTARY_TEAM_ID="TEAMID1234"
@@ -106,6 +109,8 @@ Use that file when an installed workstation connector must act as a private-LAN 
 The repository now includes installer-ready service scripts, and the release script can perform signing plus notarization automatically when the Apple credentials are provided through environment variables. Those credentials and certificates still remain outside source control.
 
 - macOS signed package path: wrap `macos/install-launch-agent.sh` with `pkgbuild` and sign with `productsign`.
-- macOS notarized package path: set `MACOS_CONNECTOR_SIGN_IDENTITY` plus either `MACOS_CONNECTOR_NOTARY_PROFILE` or the Apple ID / team ID / password variables, then run `npm run connector:release`.
+- macOS notarized package path: set `MACOS_CONNECTOR_APP_SIGN_IDENTITY`, `MACOS_CONNECTOR_SIGN_IDENTITY`, plus either `MACOS_CONNECTOR_NOTARY_PROFILE` or the Apple ID / team ID / password variables, then run `npm run connector:release`.
 - Windows signed installer path: wrap `windows/install-startup-task.ps1` in MSI/Intune/Win32 packaging and sign with `signtool`.
 - MDM / IT rollout: Jamf, Kandji, Intune, or similar can run these same scripts directly.
+
+By default, `npm run connector:release` now treats macOS notarization as required for public distribution. If you explicitly set `MACOS_CONNECTOR_REQUIRE_NOTARIZATION=false`, the script can still build a local test package, but it keeps that Mac artifact out of `manifest.json` so the download page does not publish a Gatekeeper-blocked installer.
