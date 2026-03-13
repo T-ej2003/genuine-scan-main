@@ -473,6 +473,14 @@ export default function Batches() {
     detectedPrinters.length > 0 || Boolean(printerStatus.selectedPrinterId || printerStatus.printerId);
   const printerUnavailable = !printerReady && !printerHasInventory;
   const activeLocalPrinterId = String(selectedPrinterId || printerStatus.selectedPrinterId || printerStatus.printerId || "").trim();
+  const selectedDetectedPrinter = useMemo(
+    () =>
+      detectedPrinters.find((row) => row.printerId === activeLocalPrinterId) ||
+      detectedPrinters.find((row) => row.isDefault) ||
+      detectedPrinters[0] ||
+      null,
+    [activeLocalPrinterId, detectedPrinters]
+  );
   const printerDiagnostics = useMemo(
     () =>
       getPrinterDiagnosticSummary({
@@ -542,7 +550,11 @@ export default function Batches() {
   };
 
   const buildCalibrationPayload = () => ({
-    dpi: Number(calibrationProfile.dpi || 0) || undefined,
+    dpi:
+      Number(calibrationProfile.dpi || 0) ||
+      selectedDetectedPrinter?.dpi ||
+      (Array.isArray(printerStatus.capabilitySummary?.dpiOptions) ? printerStatus.capabilitySummary?.dpiOptions[0] : undefined) ||
+      undefined,
     labelWidthMm: Number(calibrationProfile.labelWidthMm || 0) || undefined,
     labelHeightMm: Number(calibrationProfile.labelHeightMm || 0) || undefined,
     offsetXmm: Number(calibrationProfile.offsetXmm || 0) || 0,

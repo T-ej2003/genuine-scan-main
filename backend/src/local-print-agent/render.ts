@@ -1,14 +1,16 @@
 import { createHash } from "crypto";
 import { execFile } from "child_process";
-import { createWriteStream, promises as fs } from "fs";
+import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 import { promisify } from "util";
 
-import PDFDocument from "pdfkit";
-import QRCode from "qrcode";
-
 import type { CalibrationProfile } from "./state";
+import {
+  normalizeLabelCalibration,
+  renderPdfLabelBuffer,
+  renderQrLabelImageBuffer,
+} from "../printing/pdfLabel";
 
 const execFileAsync = promisify(execFile);
 
@@ -36,23 +38,6 @@ const TMP_DIR = path.join(os.tmpdir(), "mscqr-local-print-agent");
 const PDF_TIMEOUT_MS = 7000;
 const WINDOWS_PRINT_TIMEOUT_MS = 15000;
 
-const mmToPoints = (mm: number) => (mm * 72) / 25.4;
-
-const safeNumber = (value: unknown, fallback: number) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-};
-
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-
-const normalizeCalibration = (profile?: CalibrationProfile | null) => ({
-  dpi: clamp(Math.round(safeNumber(profile?.dpi, 300)), 150, 600),
-  labelWidthMm: clamp(safeNumber(profile?.labelWidthMm, 50), 25, 210),
-  labelHeightMm: clamp(safeNumber(profile?.labelHeightMm, 50), 20, 297),
-  offsetXmm: clamp(safeNumber(profile?.offsetXmm, 0), -20, 20),
-  offsetYmm: clamp(safeNumber(profile?.offsetYmm, 0), -20, 20),
-});
-
 const sha256Hex = (value: string) => createHash("sha256").update(value).digest("hex");
 
 const parseLpJobRef = (output: string) => {
@@ -67,14 +52,15 @@ const writeFileEnsured = async (filename: string, content: string | Buffer) => {
   return filePath;
 };
 
-const renderQrImage = async (scanUrl: string, size = 768) => {
-  const buffer = await QRCode.toBuffer(scanUrl, {
-    type: "png",
-    margin: 0,
-    width: Math.max(256, size),
-    errorCorrectionLevel: "M",
+const renderQrImage = async (params: {
+  scanUrl: string;
+  calibrationProfile?: CalibrationProfile | null;
+}) => {
+  const { buffer } = await renderQrLabelImageBuffer({
+    scanUrl: params.scanUrl,
+    calibrationProfile: params.calibrationProfile || null,
   });
-  return writeFileEnsured(`qr-${Date.now()}-${sha256Hex(scanUrl).slice(0, 8)}.png`, buffer);
+  return writeFileEnsured(`qr-${Date.now()}-${sha256Hex(params.scanUrl).slice(0, 8)}.png`, buffer);
 };
 
 const renderPdfLabel = async (params: {
@@ -83,51 +69,14 @@ const renderPdfLabel = async (params: {
   previewLabel: string;
   calibrationProfile?: CalibrationProfile | null;
 }) => {
-  const calibration = normalizeCalibration(params.calibrationProfile);
-  const widthPts = mmToPoints(calibration.labelWidthMm);
-  const heightPts = mmToPoints(calibration.labelHeightMm);
-  const offsetXPts = mmToPoints(calibration.offsetXmm);
-  const offsetYPts = mmToPoints(calibration.offsetYmm);
-  const margin = Math.max(6, Math.min(widthPts, heightPts) * 0.04);
-  const usableWidth = Math.max(120, widthPts - margin * 2);
-  const usableHeight = Math.max(120, heightPts - margin * 2);
-  const qrSize = Math.min(usableWidth, usableHeight);
-  const qrBuffer = await QRCode.toBuffer(params.scanUrl, {
-    type: "png",
-    margin: 0,
-    width: Math.max(256, Math.round(qrSize * 2)),
-    errorCorrectionLevel: "M",
-  });
-
   const filename = `label-${Date.now()}-${sha256Hex(params.code).slice(0, 8)}.pdf`;
-  const filePath = path.join(TMP_DIR, filename);
-  await fs.mkdir(TMP_DIR, { recursive: true });
-
-  await new Promise<void>((resolve, reject) => {
-    const doc = new PDFDocument({
-      size: [widthPts, heightPts],
-      margin: 0,
-      compress: true,
-    });
-    const stream = doc.pipe(createWriteStream(filePath));
-    stream.on("finish", () => resolve());
-    stream.on("error", reject);
-    doc.on("error", reject);
-
-    const startX = margin + offsetXPts;
-    const startY = margin + offsetYPts;
-
-    doc.rect(0, 0, widthPts, heightPts).fill("#ffffff");
-    const qrTop = startY;
-    doc.image(qrBuffer, startX, qrTop, {
-      fit: [qrSize, qrSize],
-      align: "center",
-      valign: "center",
-    });
-
-    doc.end();
+  const pdf = await renderPdfLabelBuffer({
+    code: params.code,
+    scanUrl: params.scanUrl,
+    previewLabel: params.previewLabel,
+    calibrationProfile: params.calibrationProfile || null,
   });
-
+  const filePath = await writeFileEnsured(filename, pdf);
   return filePath;
 };
 
@@ -165,8 +114,11 @@ const printWithWindowsSpooler = async (params: {
   previewLabel: string;
   calibrationProfile?: CalibrationProfile | null;
 }) => {
-  const calibration = normalizeCalibration(params.calibrationProfile);
-  const qrPath = await renderQrImage(params.scanUrl, 900);
+  const calibration = normalizeLabelCalibration(params.calibrationProfile || null);
+  const qrPath = await renderQrImage({
+    scanUrl: params.scanUrl,
+    calibrationProfile: params.calibrationProfile || null,
+  });
   const scriptPath = await writeFileEnsured(
     `print-${Date.now()}-${sha256Hex(params.printerId).slice(0, 8)}.ps1`,
     [
@@ -196,6 +148,10 @@ const printWithWindowsSpooler = async (params: {
       "$doc.add_PrintPage({",
       "  param($sender, $e)",
       "  $g = $e.Graphics",
+      "  $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::NearestNeighbor",
+      "  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::None",
+      "  $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half",
+      "  $g.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighSpeed",
       "  $g.Clear([System.Drawing.Color]::White)",
       "  $pageWidth = $e.PageBounds.Width",
       "  $pageHeight = $e.PageBounds.Height",
