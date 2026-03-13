@@ -19,6 +19,12 @@ export type SupportRuntimeIssue = {
 
 const MAX_NETWORK_LOGS = 60;
 const MAX_RUNTIME_ISSUES = 40;
+const SUPPORT_SCREENSHOT_TARGET_MIME = "image/jpeg";
+const SUPPORT_SCREENSHOT_MAX_BYTES = 850 * 1024;
+const SUPPORT_SCREENSHOT_MAX_DIMENSION = 1600;
+const SUPPORT_SCREENSHOT_QUALITY_STEPS = [0.82, 0.74, 0.66, 0.58];
+const SUPPORT_SCREENSHOT_RESIZE_FACTOR = 0.82;
+const SUPPORT_SCREENSHOT_RESIZE_ATTEMPTS = 4;
 
 const networkLogs: SupportNetworkLog[] = [];
 const runtimeIssues: SupportRuntimeIssue[] = [];
@@ -98,22 +104,97 @@ export const buildSupportDiagnosticsPayload = () => ({
   runtimeIssues: getSupportRuntimeIssues(),
 });
 
+const stripMarkup = (value: string) =>
+  value
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+
+export const formatSupportIssueSubmissionError = (raw: string | null | undefined) => {
+  const text = stripMarkup(String(raw || ""));
+  if (!text) return "Please try again.";
+  if (text.toLowerCase().includes("413 request entity too large")) {
+    return "The attached screenshot was too large to upload. Please try again.";
+  }
+  if (text.length > 220) return `${text.slice(0, 217).trimEnd()}...`;
+  return text;
+};
+
+const canvasToBlob = (canvas: HTMLCanvasElement, type: string, quality?: number) =>
+  new Promise<Blob | null>((resolve) => {
+    canvas.toBlob((value) => resolve(value), type, quality);
+  });
+
+const drawScaledCanvas = (source: HTMLCanvasElement, scale: number) => {
+  const next = document.createElement("canvas");
+  next.width = Math.max(1, Math.round(source.width * scale));
+  next.height = Math.max(1, Math.round(source.height * scale));
+  const context = next.getContext("2d");
+  if (!context) return source;
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.drawImage(source, 0, 0, next.width, next.height);
+  return next;
+};
+
+const clampCanvasDimensions = (source: HTMLCanvasElement) => {
+  const largestEdge = Math.max(source.width, source.height);
+  if (largestEdge <= SUPPORT_SCREENSHOT_MAX_DIMENSION) return source;
+  return drawScaledCanvas(source, SUPPORT_SCREENSHOT_MAX_DIMENSION / largestEdge);
+};
+
+const encodeSupportScreenshot = async (source: HTMLCanvasElement) => {
+  let working = clampCanvasDimensions(source);
+  let best: Blob | null = null;
+
+  for (let attempt = 0; attempt < SUPPORT_SCREENSHOT_RESIZE_ATTEMPTS; attempt += 1) {
+    for (const quality of SUPPORT_SCREENSHOT_QUALITY_STEPS) {
+      const blob = await canvasToBlob(working, SUPPORT_SCREENSHOT_TARGET_MIME, quality);
+      if (!blob) continue;
+      best = blob;
+      if (blob.size <= SUPPORT_SCREENSHOT_MAX_BYTES) return blob;
+    }
+    if (attempt < SUPPORT_SCREENSHOT_RESIZE_ATTEMPTS - 1) {
+      working = drawScaledCanvas(working, SUPPORT_SCREENSHOT_RESIZE_FACTOR);
+    }
+  }
+
+  return best;
+};
+
 export const captureSupportScreenshot = async (): Promise<File | null> => {
   if (typeof window === "undefined" || typeof document === "undefined") return null;
   try {
     const { default: html2canvas } = await import("html2canvas");
-    const canvas = await html2canvas(document.body, {
-      scale: Math.max(1, Math.min(window.devicePixelRatio || 1, 2)),
+    const viewportWidth = Math.max(1, Math.round(window.innerWidth || document.documentElement.clientWidth || 1));
+    const viewportHeight = Math.max(1, Math.round(window.innerHeight || document.documentElement.clientHeight || 1));
+    const scrollX = Math.round(window.scrollX || window.pageXOffset || 0);
+    const scrollY = Math.round(window.scrollY || window.pageYOffset || 0);
+
+    const canvas = await html2canvas(document.documentElement, {
+      scale: 1,
       useCORS: true,
       allowTaint: false,
       logging: false,
       backgroundColor: "#ffffff",
+      x: scrollX,
+      y: scrollY,
+      scrollX,
+      scrollY,
+      width: viewportWidth,
+      height: viewportHeight,
+      windowWidth: viewportWidth,
+      windowHeight: viewportHeight,
     });
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob((value) => resolve(value), "image/png", 0.92)
-    );
+    const blob = await encodeSupportScreenshot(canvas);
     if (!blob) return null;
-    return new File([blob], `support-${Date.now()}.png`, { type: "image/png" });
+    return new File([blob], `support-${Date.now()}.jpg`, { type: SUPPORT_SCREENSHOT_TARGET_MIME });
   } catch {
     return null;
   }
