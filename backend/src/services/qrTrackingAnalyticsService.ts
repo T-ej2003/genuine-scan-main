@@ -28,6 +28,17 @@ export type TrackingAnalyticsTotals = {
   created: number;
 };
 
+export type TrackingAnalyticsEventSummary = {
+  totalScanEvents: number;
+  firstScanEvents: number;
+  repeatScanEvents: number;
+  blockedEvents: number;
+  trustedOwnerEvents: number;
+  externalEvents: number;
+  namedLocationEvents: number;
+  knownDeviceEvents: number;
+};
+
 export type TrackingAnalyticsTrendPoint = {
   label: string;
   total: number;
@@ -73,6 +84,17 @@ const emptyTotals = (): TrackingAnalyticsTotals => ({
   redeemed: 0,
   blocked: 0,
   created: 0,
+});
+
+const emptyEventSummary = (): TrackingAnalyticsEventSummary => ({
+  totalScanEvents: 0,
+  firstScanEvents: 0,
+  repeatScanEvents: 0,
+  blockedEvents: 0,
+  trustedOwnerEvents: 0,
+  externalEvents: 0,
+  namedLocationEvents: 0,
+  knownDeviceEvents: 0,
 });
 
 const normalizeCountBucket = (status: string | null | undefined) => {
@@ -191,7 +213,127 @@ const buildTotalsFromRows = (rows: TrackingAnalyticsBatchRow[]): TrackingAnalyti
   return totals;
 };
 
-const collapseTrendRows = (rows: TrackingAnalyticsTrendPoint[]) => rows.slice(-14);
+const parseTrendLabelDate = (label: string) => {
+  const parsed = new Date(`${label} ${new Date().getFullYear()}`);
+  return Number.isFinite(parsed.getTime()) ? parsed.getTime() : Number.POSITIVE_INFINITY;
+};
+
+const collapseTrendRows = (rows: TrackingAnalyticsTrendPoint[]) =>
+  rows
+    .slice()
+    .sort((left, right) => parseTrendLabelDate(left.label) - parseTrendLabelDate(right.label))
+    .slice(-14);
+
+type TrackingEventMetrics = {
+  quantities: {
+    scanEvents: number;
+    matchedBatches: number;
+  };
+  summary: TrackingAnalyticsEventSummary;
+  batchEventCountMap: Map<string, number>;
+  trendMap: Map<string, number>;
+};
+
+const loadEventMetrics = async (filters: TrackingAnalyticsFilters): Promise<TrackingEventMetrics> => {
+  const whereSql = buildMatchingLogWhereSql(filters);
+
+  type QuantityRow = { scanEvents: number; matchedBatches: number };
+  type BatchEventRow = { batchId: string | null; scanEvents: number };
+  type TrendRow = { label: string; scanEvents: number };
+
+  const [quantityRows, summaryRows, batchRows, trendRows] = await Promise.all([
+    prisma.$queryRaw<QuantityRow[]>(Prisma.sql`
+      WITH matching_logs AS (
+        SELECT s."id", s."batchId"
+        FROM "QrScanLog" s
+        LEFT JOIN "Batch" b ON b."id" = s."batchId"
+        ${whereSql}
+      )
+      SELECT
+        COUNT(*)::int AS "scanEvents",
+        COUNT(DISTINCT "batchId") FILTER (WHERE "batchId" IS NOT NULL)::int AS "matchedBatches"
+      FROM matching_logs
+    `),
+    prisma.$queryRaw<TrackingAnalyticsEventSummary[]>(Prisma.sql`
+      WITH matching_logs AS (
+        SELECT
+          s."isFirstScan",
+          s."status",
+          s."isTrustedOwnerContext",
+          s."locationName",
+          s."locationCity",
+          s."locationRegion",
+          s."locationCountry",
+          s."device",
+          s."userAgent"
+        FROM "QrScanLog" s
+        LEFT JOIN "Batch" b ON b."id" = s."batchId"
+        ${whereSql}
+      )
+      SELECT
+        COUNT(*)::int AS "totalScanEvents",
+        COUNT(*) FILTER (WHERE "isFirstScan" = true)::int AS "firstScanEvents",
+        COUNT(*) FILTER (WHERE COALESCE("isFirstScan", false) = false)::int AS "repeatScanEvents",
+        COUNT(*) FILTER (WHERE "status" = 'BLOCKED')::int AS "blockedEvents",
+        COUNT(*) FILTER (WHERE "isTrustedOwnerContext" = true)::int AS "trustedOwnerEvents",
+        COUNT(*) FILTER (WHERE COALESCE("isTrustedOwnerContext", false) = false)::int AS "externalEvents",
+        COUNT(*) FILTER (
+          WHERE NULLIF(COALESCE("locationName", ''), '') IS NOT NULL
+             OR NULLIF(COALESCE("locationCity", ''), '') IS NOT NULL
+             OR NULLIF(COALESCE("locationRegion", ''), '') IS NOT NULL
+             OR NULLIF(COALESCE("locationCountry", ''), '') IS NOT NULL
+        )::int AS "namedLocationEvents",
+        COUNT(*) FILTER (
+          WHERE NULLIF(COALESCE("device", ''), '') IS NOT NULL
+             OR NULLIF(COALESCE("userAgent", ''), '') IS NOT NULL
+        )::int AS "knownDeviceEvents"
+      FROM matching_logs
+    `),
+    prisma.$queryRaw<BatchEventRow[]>(Prisma.sql`
+      SELECT s."batchId" AS "batchId", COUNT(*)::int AS "scanEvents"
+      FROM "QrScanLog" s
+      LEFT JOIN "Batch" b ON b."id" = s."batchId"
+      ${whereSql}
+      GROUP BY s."batchId"
+    `),
+    prisma.$queryRaw<TrendRow[]>(Prisma.sql`
+      SELECT
+        TO_CHAR(DATE_TRUNC('day', s."scannedAt"), 'Mon DD') AS "label",
+        COUNT(*)::int AS "scanEvents"
+      FROM "QrScanLog" s
+      LEFT JOIN "Batch" b ON b."id" = s."batchId"
+      ${whereSql}
+      GROUP BY DATE_TRUNC('day', s."scannedAt")
+      ORDER BY DATE_TRUNC('day', s."scannedAt") ASC
+    `),
+  ]);
+
+  const quantityRow = quantityRows[0] || { scanEvents: 0, matchedBatches: 0 };
+  const summaryRow = summaryRows[0] || emptyEventSummary();
+
+  return {
+    quantities: {
+      scanEvents: Number(quantityRow.scanEvents || 0),
+      matchedBatches: Number(quantityRow.matchedBatches || 0),
+    },
+    summary: {
+      totalScanEvents: Number(summaryRow.totalScanEvents || 0),
+      firstScanEvents: Number(summaryRow.firstScanEvents || 0),
+      repeatScanEvents: Number(summaryRow.repeatScanEvents || 0),
+      blockedEvents: Number(summaryRow.blockedEvents || 0),
+      trustedOwnerEvents: Number(summaryRow.trustedOwnerEvents || 0),
+      externalEvents: Number(summaryRow.externalEvents || 0),
+      namedLocationEvents: Number(summaryRow.namedLocationEvents || 0),
+      knownDeviceEvents: Number(summaryRow.knownDeviceEvents || 0),
+    },
+    batchEventCountMap: new Map(
+      batchRows
+        .filter((row) => Boolean(row.batchId))
+        .map((row) => [String(row.batchId), Number(row.scanEvents || 0)])
+    ),
+    trendMap: new Map(trendRows.map((row) => [row.label, Number(row.scanEvents || 0)])),
+  };
+};
 
 const enrichLogs = async (logs: any[]) => {
   let geocodeBudget = 40;
@@ -246,11 +388,14 @@ const loadLogs = async (filters: TrackingAnalyticsFilters) => {
 
 const buildInventoryAnalytics = async (filters: TrackingAnalyticsFilters) => {
   const qrWhere = buildInventoryQrWhere(filters);
-  const grouped = await prisma.qRCode.groupBy({
-    by: ["batchId", "status"],
-    where: qrWhere,
-    _count: { _all: true },
-  });
+  const [grouped, eventMetrics] = await Promise.all([
+    prisma.qRCode.groupBy({
+      by: ["batchId", "status"],
+      where: qrWhere,
+      _count: { _all: true },
+    }),
+    loadEventMetrics(filters),
+  ]);
 
   const batchIds = Array.from(new Set(grouped.map((row) => row.batchId).filter(Boolean))) as string[];
   const batches = batchIds.length
@@ -285,7 +430,7 @@ const buildInventoryAnalytics = async (filters: TrackingAnalyticsFilters) => {
       createdAt: batch.createdAt.toISOString(),
       batchInventoryTotal: batch.totalCodes,
       scopeCodeCount,
-      scanEventCount: 0,
+      scanEventCount: eventMetrics.batchEventCountMap.get(batch.id) || 0,
       counts,
     };
   });
@@ -306,6 +451,14 @@ const buildInventoryAnalytics = async (filters: TrackingAnalyticsFilters) => {
     byDay.set(label, current);
   }
 
+  for (const [label, scanEvents] of eventMetrics.trendMap.entries()) {
+    const current =
+      byDay.get(label) ||
+      ({ label, total: 0, dormant: 0, allocated: 0, printed: 0, redeemed: 0, blocked: 0, scanEvents: 0 } satisfies TrackingAnalyticsTrendPoint);
+    current.scanEvents = scanEvents;
+    byDay.set(label, current);
+  }
+
   return {
     scopeMode: "inventory" as const,
     totals,
@@ -313,9 +466,10 @@ const buildInventoryAnalytics = async (filters: TrackingAnalyticsFilters) => {
     batches: batchRows,
     quantities: {
       distinctCodes: totals.total,
-      scanEvents: 0,
+      scanEvents: eventMetrics.quantities.scanEvents,
       matchedBatches: batchRows.length,
     },
+    eventSummary: eventMetrics.summary,
   };
 };
 
@@ -345,26 +499,29 @@ const buildActivityAnalytics = async (filters: TrackingAnalyticsFilters) => {
   };
   type EventCountRow = { batchId: string | null; scanEvents: number };
 
-  const latestStatusCounts = await prisma.$queryRaw<CountRow[]>(Prisma.sql`
-    WITH matching_logs AS (
-      SELECT s."id", s."qrCodeId", s."batchId", s."status", s."scannedAt"
-      FROM "QrScanLog" s
-      LEFT JOIN "Batch" b ON b."id" = s."batchId"
-      ${whereSql}
-    ),
-    ranked AS (
-      SELECT ml.*, ROW_NUMBER() OVER (PARTITION BY ml."qrCodeId" ORDER BY ml."scannedAt" DESC, ml."id" DESC) AS rn
-      FROM matching_logs ml
-    ),
-    latest_per_code AS (
-      SELECT *
-      FROM ranked
-      WHERE rn = 1
-    )
-    SELECT l."batchId" AS "batchId", l."status"::text AS "status", COUNT(*)::int AS "count"
-    FROM latest_per_code l
-    GROUP BY l."batchId", l."status"
-  `);
+  const [latestStatusCounts, eventMetrics] = await Promise.all([
+    prisma.$queryRaw<CountRow[]>(Prisma.sql`
+      WITH matching_logs AS (
+        SELECT s."id", s."qrCodeId", s."batchId", s."status", s."scannedAt"
+        FROM "QrScanLog" s
+        LEFT JOIN "Batch" b ON b."id" = s."batchId"
+        ${whereSql}
+      ),
+      ranked AS (
+        SELECT ml.*, ROW_NUMBER() OVER (PARTITION BY ml."qrCodeId" ORDER BY ml."scannedAt" DESC, ml."id" DESC) AS rn
+        FROM matching_logs ml
+      ),
+      latest_per_code AS (
+        SELECT *
+        FROM ranked
+        WHERE rn = 1
+      )
+      SELECT l."batchId" AS "batchId", l."status"::text AS "status", COUNT(*)::int AS "count"
+      FROM latest_per_code l
+      GROUP BY l."batchId", l."status"
+    `),
+    loadEventMetrics(filters),
+  ]);
 
   const quantities = await prisma.$queryRaw<QuantityRow[]>(Prisma.sql`
     WITH matching_logs AS (
@@ -460,7 +617,7 @@ const buildActivityAnalytics = async (filters: TrackingAnalyticsFilters) => {
         totalCodes: scopeCodeCount,
         batchInventoryTotal: meta.totalCodes,
         scopeCodeCount,
-        scanEventCount: eventCountMap.get(batchId) || 0,
+        scanEventCount: eventCountMap.get(batchId) || eventMetrics.batchEventCountMap.get(batchId) || 0,
         createdAt: meta.createdAt.toISOString(),
         counts,
       };
@@ -489,9 +646,10 @@ const buildActivityAnalytics = async (filters: TrackingAnalyticsFilters) => {
     batches: batchRows,
     quantities: {
       distinctCodes: Number(quantityRow.distinctCodes || 0),
-      scanEvents: Number(quantityRow.scanEvents || 0),
+      scanEvents: Number(quantityRow.scanEvents || eventMetrics.quantities.scanEvents || 0),
       matchedBatches: Number(quantityRow.matchedBatches || 0),
     },
+    eventSummary: eventMetrics.summary,
   };
 };
 
@@ -513,6 +671,7 @@ export const getQrTrackingAnalytics = async (filters: TrackingAnalyticsFilters) 
       quantities: analytics.quantities,
     },
     totals: analytics.totals,
+    eventSummary: analytics.eventSummary || emptyEventSummary(),
     trend: analytics.trend,
     batches: analytics.batches,
     logs: logsPayload.logs,

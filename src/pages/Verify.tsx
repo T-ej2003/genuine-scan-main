@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AlertTriangle, Ban, Clock3, Loader2, Lock, SearchX, Shield, ShieldCheck, WifiOff } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -201,6 +201,8 @@ const LEGACY_CUSTOMER_EMAIL_KEY = "authenticqr_verify_customer_email";
 const TRANSFER_TOKEN_KEY_PREFIX = "mscqr_verify_transfer_token:";
 const LEGACY_TRANSFER_TOKEN_KEY_PREFIX = "authenticqr_verify_transfer_token:";
 const APP_NAME = "MSCQR";
+const VERIFY_GEO_CACHE_KEY = "mscqr_verify_last_geo";
+const VERIFY_GEO_CACHE_MAX_AGE_MS = 1000 * 60 * 10;
 
 const DEFAULT_OWNERSHIP_STATUS: OwnershipStatus = {
   isClaimed: false,
@@ -399,6 +401,40 @@ const readStoredValue = (...keys: string[]) => {
   }
 };
 
+const readCachedGeo = () => {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.sessionStorage.getItem(VERIFY_GEO_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as { lat?: number; lon?: number; acc?: number; capturedAt?: number };
+    const capturedAt = Number(parsed.capturedAt || 0);
+    if (!Number.isFinite(capturedAt) || Date.now() - capturedAt > VERIFY_GEO_CACHE_MAX_AGE_MS) return {};
+    return {
+      lat: typeof parsed.lat === "number" ? parsed.lat : undefined,
+      lon: typeof parsed.lon === "number" ? parsed.lon : undefined,
+      acc: typeof parsed.acc === "number" ? parsed.acc : undefined,
+    };
+  } catch {
+    return {};
+  }
+};
+
+const writeCachedGeo = (value: { lat?: number; lon?: number; acc?: number }) => {
+  if (typeof window === "undefined") return;
+  if (typeof value.lat !== "number" || typeof value.lon !== "number") return;
+  try {
+    window.sessionStorage.setItem(
+      VERIFY_GEO_CACHE_KEY,
+      JSON.stringify({
+        ...value,
+        capturedAt: Date.now(),
+      })
+    );
+  } catch {
+    // ignore storage issues
+  }
+};
+
 const SkeletonBlock = ({ className }: { className?: string }) => (
   <div aria-hidden className={cn("premium-shimmer rounded-md bg-[#bccad6]/45", className)} />
 );
@@ -406,6 +442,7 @@ const SkeletonBlock = ({ className }: { className?: string }) => (
 export default function Verify() {
   const { code } = useParams<{ code: string }>();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { toast } = useToast();
 
   const token = searchParams.get("t")?.trim() || "";
@@ -644,16 +681,20 @@ export default function Verify() {
         pending = (async () => {
           const getGeo = () =>
             new Promise<{ lat?: number; lon?: number; acc?: number }>((resolve) => {
-              if (!navigator?.geolocation) return resolve({});
+              const cached = readCachedGeo();
+              if (!navigator?.geolocation) return resolve(cached);
               navigator.geolocation.getCurrentPosition(
-                (pos) =>
-                  resolve({
+                (pos) => {
+                  const nextGeo = {
                     lat: pos.coords.latitude,
                     lon: pos.coords.longitude,
                     acc: pos.coords.accuracy,
-                  }),
-                () => resolve({}),
-                { enableHighAccuracy: false, timeout: 1500 }
+                  };
+                  writeCachedGeo(nextGeo);
+                  resolve(nextGeo);
+                },
+                () => resolve(cached),
+                { enableHighAccuracy: false, timeout: 4000, maximumAge: 300_000 }
               );
             });
 
@@ -731,6 +772,9 @@ export default function Verify() {
 
       setResult((response.data as VerifyPayload) || null);
       setRetryNotice("");
+      if (token && typeof (response.data as VerifyPayload | null)?.code === "string") {
+        navigate(`/verify/${encodeURIComponent(String((response.data as VerifyPayload).code || "").trim())}`, { replace: true });
+      }
       const finalClassification = inferClassification((response.data as VerifyPayload) || null);
       const now = typeof performance !== "undefined" ? performance.now() : Date.now();
       const elapsed = Math.max(0, Math.round(now - verifyStartedAtRef.current));
@@ -755,7 +799,7 @@ export default function Verify() {
     } finally {
       setLoading(false);
     }
-  }, [activeTransferToken, codeParam, customerToken, deviceId, requestKey, token]);
+  }, [activeTransferToken, codeParam, customerToken, deviceId, navigate, requestKey, token]);
 
   useEffect(() => {
     setIssuedTransferLink(null);
