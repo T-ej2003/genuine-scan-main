@@ -98,7 +98,7 @@ describe("PrinterDiagnostics managed printer controls", () => {
     } as any);
   });
 
-  it("opens the managed printer dialog from the saved managed printer card", async () => {
+  it("opens the network route dialog from the saved network route card", async () => {
     render(
       <MemoryRouter>
         <PrinterDiagnostics />
@@ -109,10 +109,10 @@ describe("PrinterDiagnostics managed printer controls", () => {
       expect(vi.mocked(apiClient.listRegisteredPrinters)).toHaveBeenCalled();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /saved managed printer/i }));
+    fireEvent.click(screen.getByRole("button", { name: /saved network route/i }));
 
     await waitFor(() => {
-      expect(screen.getByText("Managed printer profiles")).toBeInTheDocument();
+      expect(screen.getByText("Network printer routes")).toBeInTheDocument();
     });
 
     expect(screen.getAllByText("Line 1 Zebra").length).toBeGreaterThan(0);
@@ -142,7 +142,7 @@ describe("PrinterDiagnostics managed printer controls", () => {
     expect(screen.getByText(/Save a raw TCP endpoint for ZPL, TSPL, EPL, or CPCL dispatch/i)).toBeInTheDocument();
   });
 
-  it("can prefill the managed form from an auto-detected raw TCP printer", async () => {
+  it("can prefill the network route form from an auto-detected raw TCP printer", async () => {
     vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
       success: true,
       data: {
@@ -175,7 +175,7 @@ describe("PrinterDiagnostics managed printer controls", () => {
       expect(vi.mocked(apiClient.getLocalPrintAgentStatus)).toHaveBeenCalled();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /saved managed printer/i }));
+    fireEvent.click(screen.getByRole("button", { name: /saved network route/i }));
 
     await waitFor(() => {
       expect(screen.getByText("Auto-detected connected printers")).toBeInTheDocument();
@@ -203,7 +203,7 @@ describe("PrinterDiagnostics managed printer controls", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Managed printer profiles")).toBeInTheDocument();
+      expect(screen.getByText("Network printer routes")).toBeInTheDocument();
     });
 
     expect(screen.getAllByText("Line 1 Zebra").length).toBeGreaterThan(0);

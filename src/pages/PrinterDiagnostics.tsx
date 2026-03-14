@@ -391,6 +391,56 @@ export default function PrinterDiagnostics() {
     resetNetworkPrinterForm();
   };
 
+  const recommendedAction = useMemo(() => {
+    if (managedPrinterAttentionCount > 0) {
+      return {
+        title: "Review saved network routes",
+        description: "A saved office or factory printer route needs attention before batch printing is reliable.",
+        label: "Open network routes",
+        run: () => openManagedProfilesDialog(),
+      };
+    }
+
+    if (effectiveSummary.state === "agent_unreachable") {
+      return {
+        title: "Install the connector on this computer",
+        description: "This workstation still needs the MSCQR Connector before local printer printing can work.",
+        label: "Install Connector",
+        run: () => navigate("/connector-download"),
+      };
+    }
+
+    if (effectiveSummary.state === "no_printers_detected" || effectiveSummary.state === "selection_required") {
+      return {
+        title: "Refresh the printer list on this workstation",
+        description: "Make sure the operating system already sees the printer, then refresh MSCQR.",
+        label: "Refresh status",
+        run: () => void loadDiagnostics(),
+      };
+    }
+
+    if (
+      effectiveSummary.state === "heartbeat_stale" ||
+      effectiveSummary.state === "server_sync_pending" ||
+      effectiveSummary.state === "trust_blocked" ||
+      effectiveSummary.state === "printer_offline"
+    ) {
+      return {
+        title: "Re-check the connection",
+        description: "MSCQR needs a fresh connector heartbeat before it can trust this printer again.",
+        label: "Refresh status",
+        run: () => void loadDiagnostics(),
+      };
+    }
+
+    return {
+      title: "Continue to printing",
+      description: "This setup is ready enough for the next batch step.",
+      label: "Open batches",
+      run: () => navigate("/batches"),
+    };
+  }, [effectiveSummary.state, managedPrinterAttentionCount, navigate]);
+
   useEffect(() => {
     if (searchParams.get("managedProfiles") !== "open") return;
 
@@ -655,10 +705,10 @@ export default function PrinterDiagnostics() {
   };
 
   const managedDialogTitle = editingPrinterId
-    ? "Update managed printer profile"
+    ? "Update network printer route"
     : setupFormOpen
       ? `Create ${getManagedSetupTypeLabel(networkPrinterForm).toLowerCase()}`
-      : "Managed printer profiles";
+      : "Network printer routes";
 
   const renderRegisteredPrinterCard = (printer: RegisteredPrinterRow) => {
     const isManagedPrinter = printer.connectionType !== "LOCAL_AGENT";
@@ -1062,10 +1112,17 @@ export default function PrinterDiagnostics() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Wifi className="h-4 w-4" />
-                Next steps
+                Recommended next step
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
+              <div className="rounded-lg border bg-muted/40 px-3 py-3">
+                <div className="font-medium text-foreground">{recommendedAction.title}</div>
+                <div className="mt-1 text-muted-foreground">{recommendedAction.description}</div>
+                <Button variant="outline" size="sm" className="mt-3" onClick={recommendedAction.run}>
+                  {recommendedAction.label}
+                </Button>
+              </div>
               {effectiveSummary.nextSteps.map((step) => (
                 <div key={step} className="rounded-lg border bg-muted/40 px-3 py-2">
                   {step}
@@ -1113,7 +1170,7 @@ export default function PrinterDiagnostics() {
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <div className="font-medium text-foreground">Saved managed printer</div>
+                    <div className="font-medium text-foreground">Saved network route</div>
                     <div className="mt-3 text-sm leading-6 text-muted-foreground">
                       {preferredManagedNetworkPrinter ? (
                         <>
@@ -1122,7 +1179,7 @@ export default function PrinterDiagnostics() {
                           Type: <span className="font-medium text-foreground">{getPrinterDispatchLabel(preferredManagedNetworkPrinter)}</span>
                         </>
                       ) : (
-                        "Open managed printer profiles to create factory LAN or office IPP printer routes."
+                        "Open network routes to create factory LAN or office IPP printer setups."
                       )}
                     </div>
                   </div>
@@ -1134,7 +1191,7 @@ export default function PrinterDiagnostics() {
                   </div>
                 </div>
                 <div className="mt-3 text-xs text-muted-foreground">
-                  Saved managed printers do not depend on the workstation printer list. Click here to create, update, delete, or re-check those profiles in one dialog.
+                  Saved network routes do not depend on the workstation printer list. Click here to create, update, remove, or re-check them in one place.
                 </div>
               </button>
             </div>
@@ -1177,7 +1234,7 @@ export default function PrinterDiagnostics() {
               </ul>
             </div>
             <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
-              <div className="font-semibold text-foreground">NETWORK_DIRECT</div>
+              <div className="font-semibold text-foreground">Factory label printer</div>
               <p className="mt-2 leading-6">
                 Best for controlled factory LAN printers with a stable IP address and approved raw TCP access.
               </p>
@@ -1191,12 +1248,12 @@ export default function PrinterDiagnostics() {
                   Register factory printer
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => openManagedProfilesDialog()}>
-                  Manage saved routes
+                  Open network routes
                 </Button>
               </div>
             </div>
             <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
-              <div className="font-semibold text-foreground">NETWORK_IPP</div>
+              <div className="font-semibold text-foreground">Office / AirPrint printer</div>
               <p className="mt-2 leading-6">
                 Best for AirPrint and IPP Everywhere office printers that accept standards-based PDF jobs over IPP/IPPS.
               </p>
@@ -1220,13 +1277,13 @@ export default function PrinterDiagnostics() {
         <Card>
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <CardTitle className="text-base">Managed printer controls</CardTitle>
+              <CardTitle className="text-base">Saved network routes</CardTitle>
               <div className="mt-1 text-sm text-muted-foreground">
-                `NETWORK_DIRECT` and `NETWORK_IPP` already dispatch through the backend. Use this control surface to manage the saved profiles, validate them, and keep their live readiness visible.
+                Factory and office network printers are saved here so MSCQR can validate them and keep their readiness visible.
               </div>
             </div>
             <Button variant="outline" onClick={() => openManagedProfilesDialog()}>
-              Open managed profiles
+              Open network routes
             </Button>
           </CardHeader>
           <CardContent className="grid gap-4 lg:grid-cols-[1fr_1.15fr]">
@@ -1424,12 +1481,12 @@ export default function PrinterDiagnostics() {
               <div className="space-y-4">
                 {!setupFormOpen && !editingPrinterId ? (
                   <div className="rounded-2xl border border-dashed bg-muted/20 p-5 text-sm text-muted-foreground">
-                    <div className="font-medium text-foreground">Select a managed printer action</div>
+                    <div className="font-medium text-foreground">Choose what you want to set up</div>
                     <div className="mt-2 leading-6">
-                      Pick a quick action to create a new network route, or click an existing managed profile to update, delete, or re-check it.
+                      Start a new factory or office printer route, or click a saved route to edit, remove, or re-check it.
                     </div>
                     <div className="mt-4 text-xs leading-5">
-                      `NETWORK_DIRECT` and `NETWORK_IPP` are already wired end to end in MSCQR. This dialog is the control surface for those routes.
+                      Use factory label printer for raw TCP devices on a controlled LAN. Use office / AirPrint printer for IPP or IPPS devices.
                     </div>
                   </div>
                 ) : (

@@ -4,6 +4,74 @@ import { randomNonce } from "./qrTokenService";
 import { reverseGeocode } from "./locationService";
 import { warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
 
+const parseScanRefreshGraceMs = () => {
+  const raw = Number(String(process.env.SCAN_REFRESH_GRACE_SECONDS || "").trim());
+  if (!Number.isFinite(raw) || raw <= 0) return 90_000;
+  return Math.max(10, Math.floor(raw)) * 1000;
+};
+
+const SCAN_REFRESH_GRACE_MS = parseScanRefreshGraceMs();
+
+const normalizeActorToken = (value: string | null | undefined) => String(value || "").trim();
+
+const isRecentRefreshDuplicate = (params: {
+  latestLog:
+    | {
+        scannedAt: Date;
+        customerUserId: string | null;
+        ownershipId: string | null;
+        isTrustedOwnerContext: boolean;
+        ipAddress: string | null;
+        userAgent: string | null;
+        device: string | null;
+      }
+    | null;
+  meta?: {
+    ipAddress?: string | null;
+    userAgent?: string | null;
+    device?: string | null;
+    customerUserId?: string | null;
+    ownershipId?: string | null;
+    isTrustedOwnerContext?: boolean;
+  };
+}) => {
+  if (!params.latestLog) return false;
+
+  const latestScannedAt = new Date(params.latestLog.scannedAt).getTime();
+  if (!Number.isFinite(latestScannedAt)) return false;
+  if (Date.now() - latestScannedAt > SCAN_REFRESH_GRACE_MS) return false;
+
+  const nextTrusted = params.meta?.isTrustedOwnerContext === true;
+  if (Boolean(params.latestLog.isTrustedOwnerContext) !== nextTrusted) return false;
+
+  const currentCustomerUserId = normalizeActorToken(params.meta?.customerUserId);
+  const latestCustomerUserId = normalizeActorToken(params.latestLog.customerUserId);
+  if ((currentCustomerUserId || latestCustomerUserId) && currentCustomerUserId !== latestCustomerUserId) {
+    return false;
+  }
+
+  const currentOwnershipId = normalizeActorToken(params.meta?.ownershipId);
+  const latestOwnershipId = normalizeActorToken(params.latestLog.ownershipId);
+  if ((currentOwnershipId || latestOwnershipId) && currentOwnershipId !== latestOwnershipId) {
+    return false;
+  }
+
+  const currentDevice = normalizeActorToken(params.meta?.device);
+  const latestDevice = normalizeActorToken(params.latestLog.device);
+  if (currentDevice && latestDevice && currentDevice === latestDevice) {
+    return true;
+  }
+
+  const currentUserAgent = normalizeActorToken(params.meta?.userAgent);
+  const latestUserAgent = normalizeActorToken(params.latestLog.userAgent);
+  const currentIpAddress = normalizeActorToken(params.meta?.ipAddress);
+  const latestIpAddress = normalizeActorToken(params.latestLog.ipAddress);
+
+  return Boolean(currentUserAgent && latestUserAgent && currentIpAddress && latestIpAddress) &&
+    currentUserAgent === latestUserAgent &&
+    currentIpAddress === latestIpAddress;
+};
+
 export const generateQRCode = (prefix: string, number: number): string => {
   return `${prefix}${number.toString().padStart(10, "0")}`;
 };
@@ -146,7 +214,6 @@ export const recordScan = async (
   }
 
   const isFirstScan = existing.status === QRStatus.PRINTED;
-  const location = await reverseGeocode(meta?.latitude ?? null, meta?.longitude ?? null);
 
   const isQrScanActorForeignKeyError = (error: unknown) => {
     if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
@@ -158,6 +225,30 @@ export const recordScan = async (
   };
 
   const updated = await prisma.$transaction(async (tx) => {
+    const latestLog = await tx.qrScanLog.findFirst({
+      where: { qrCodeId: existing.id },
+      orderBy: [{ scannedAt: "desc" }, { id: "desc" }],
+      select: {
+        scannedAt: true,
+        isFirstScan: true,
+        customerUserId: true,
+        ownershipId: true,
+        isTrustedOwnerContext: true,
+        ipAddress: true,
+        userAgent: true,
+        device: true,
+      },
+    });
+
+    if (isRecentRefreshDuplicate({ latestLog, meta })) {
+      return {
+        qr: existing,
+        scanRecorded: false,
+        effectiveFirstScan: Boolean(latestLog?.isFirstScan),
+      };
+    }
+
+    const location = await reverseGeocode(meta?.latitude ?? null, meta?.longitude ?? null);
     const qr = await tx.qRCode.update({
       where: { code },
       data: {
@@ -223,10 +314,18 @@ export const recordScan = async (
       }
     }
 
-    return qr;
+    return {
+      qr,
+      scanRecorded: true,
+      effectiveFirstScan: isFirstScan,
+    };
   });
 
-  return { qrCode: updated, isFirstScan };
+  return {
+    qrCode: updated.qr,
+    isFirstScan: updated.effectiveFirstScan,
+    scanRecorded: updated.scanRecorded,
+  };
 };
 
 export const getQRStats = async (licenseeId?: string) => {

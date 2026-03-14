@@ -48,8 +48,23 @@ type ScanLogRow = {
   locationName?: string | null;
   deviceLabel?: string | null;
   isFirstScan?: boolean | null;
+  customerUserId?: string | null;
+  ownershipId?: string | null;
+  ownershipMatchMethod?: string | null;
+  isTrustedOwnerContext?: boolean | null;
   licensee?: { id: string; name: string; prefix: string };
   qrCode?: { id: string; code: string; status: string };
+};
+
+type TrackingEventSummary = {
+  totalScanEvents: number;
+  firstScanEvents: number;
+  repeatScanEvents: number;
+  blockedEvents: number;
+  trustedOwnerEvents: number;
+  externalEvents: number;
+  namedLocationEvents: number;
+  knownDeviceEvents: number;
 };
 
 type TrackingFilterState = {
@@ -102,6 +117,16 @@ export default function QRTracking() {
     scanEvents: 0,
   });
   const [analyticsTrend, setAnalyticsTrend] = useState<TrackingTrendPoint[]>([]);
+  const [eventSummary, setEventSummary] = useState<TrackingEventSummary>({
+    totalScanEvents: 0,
+    firstScanEvents: 0,
+    repeatScanEvents: 0,
+    blockedEvents: 0,
+    trustedOwnerEvents: 0,
+    externalEvents: 0,
+    namedLocationEvents: 0,
+    knownDeviceEvents: 0,
+  });
   const [licensees, setLicensees] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -162,16 +187,36 @@ export default function QRTracking() {
         redeemed: Number(payload.totals?.redeemed || 0),
         blocked: Number(payload.totals?.blocked || 0),
         created: Number(payload.totals?.created || 0),
-        scanEvents: Number(payload.scope?.quantities?.scanEvents || 0),
+        scanEvents: Number(payload.eventSummary?.totalScanEvents || payload.scope?.quantities?.scanEvents || 0),
       });
       setAnalyticsTrend(Array.isArray(payload.trend) ? payload.trend : []);
       setScopeMeta(payload.scope || null);
+      setEventSummary({
+        totalScanEvents: Number(payload.eventSummary?.totalScanEvents || 0),
+        firstScanEvents: Number(payload.eventSummary?.firstScanEvents || 0),
+        repeatScanEvents: Number(payload.eventSummary?.repeatScanEvents || 0),
+        blockedEvents: Number(payload.eventSummary?.blockedEvents || 0),
+        trustedOwnerEvents: Number(payload.eventSummary?.trustedOwnerEvents || 0),
+        externalEvents: Number(payload.eventSummary?.externalEvents || 0),
+        namedLocationEvents: Number(payload.eventSummary?.namedLocationEvents || 0),
+        knownDeviceEvents: Number(payload.eventSummary?.knownDeviceEvents || 0),
+      });
     } catch (e: any) {
       setError(e?.message || "Failed to load tracking data");
       setSummary([]);
       setLogs([]);
       setAnalyticsTrend([]);
       setScopeMeta(null);
+      setEventSummary({
+        totalScanEvents: 0,
+        firstScanEvents: 0,
+        repeatScanEvents: 0,
+        blockedEvents: 0,
+        trustedOwnerEvents: 0,
+        externalEvents: 0,
+        namedLocationEvents: 0,
+        knownDeviceEvents: 0,
+      });
       setAnalyticsTotals({
         total: 0,
         dormant: 0,
@@ -226,10 +271,27 @@ export default function QRTracking() {
     return "We could not load tracking data. Please retry.";
   }, [error]);
 
-  const formatLocation = (log: ScanLogRow) => log.locationName || "Location unavailable";
+  const formatLocation = (log: ScanLogRow) => {
+    if (log.locationName) return log.locationName;
+    if (typeof log.latitude === "number" && typeof log.longitude === "number") {
+      const accuracyText = typeof log.accuracy === "number" && Number.isFinite(log.accuracy) ? ` (~${Math.round(log.accuracy)}m)` : "";
+      return `GPS ${log.latitude.toFixed(3)}, ${log.longitude.toFixed(3)}${accuracyText}`;
+    }
+    return "Location unavailable";
+  };
 
-  const blockedLogCount = logs.filter((l) => String(l.qrCode?.status || l.status || "").toUpperCase() === "BLOCKED").length;
-  const firstScanCount = logs.filter((l) => Boolean(l.isFirstScan)).length;
+  const describeScanContext = (log: ScanLogRow) => {
+    if (log.isTrustedOwnerContext) {
+      if (log.ownershipMatchMethod === "user") return "Trusted owner account";
+      if (log.ownershipMatchMethod === "device_token") return "Trusted claimed device";
+      if (log.ownershipMatchMethod === "ip_fallback") return "Trusted network fallback";
+      return "Trusted owner context";
+    }
+    return "External / anonymous context";
+  };
+
+  const blockedLogCount = eventSummary.blockedEvents;
+  const firstScanCount = eventSummary.firstScanEvents;
   const openAllocationMap = async (batchId: string) => {
     setAllocationMapOpen(true);
     setAllocationMapLoading(true);
@@ -283,6 +345,8 @@ export default function QRTracking() {
           <div className="flex flex-wrap items-center gap-2">
             <Badge className="border-red-200 bg-red-50 text-red-700">{blockedLogCount} blocked events</Badge>
             <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">{firstScanCount} first scans</Badge>
+            <Badge className="border-amber-200 bg-amber-50 text-amber-700">{eventSummary.externalEvents} external scans</Badge>
+            <Badge className="border-sky-200 bg-sky-50 text-sky-700">{eventSummary.trustedOwnerEvents} owner-linked scans</Badge>
             <Button variant="outline" onClick={() => load()} disabled={loading}>
               <RefreshCw className="mr-2 h-4 w-4" />
               Refresh
@@ -306,7 +370,7 @@ export default function QRTracking() {
         <TrackingInsightsPanel totals={analyticsTotals} trend={analyticsTrend} loading={loading && !logs.length && !summary.length} />
 
         {scopeMeta ? (
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-6">
             <div className="rounded-xl border bg-white p-4 shadow-sm">
               <p className="text-[11px] uppercase tracking-wide text-slate-500">Scope mode</p>
               <p className="mt-1 text-lg font-semibold text-slate-900">{scopeMeta.title}</p>
@@ -323,6 +387,14 @@ export default function QRTracking() {
             <div className="rounded-xl border bg-white p-4 shadow-sm">
               <p className="text-[11px] uppercase tracking-wide text-slate-500">Matched batches</p>
               <p className="mt-1 text-2xl font-semibold text-slate-900">{scopeMeta.quantities.matchedBatches.toLocaleString()}</p>
+            </div>
+            <div className="rounded-xl border bg-white p-4 shadow-sm">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">Named locations</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-900">{eventSummary.namedLocationEvents.toLocaleString()}</p>
+            </div>
+            <div className="rounded-xl border bg-white p-4 shadow-sm">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">Known devices</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-900">{eventSummary.knownDeviceEvents.toLocaleString()}</p>
             </div>
           </div>
         ) : null}
@@ -567,6 +639,7 @@ export default function QRTracking() {
                             <TableHead>Batch</TableHead>
                             <TableHead>Status</TableHead>
                             <TableHead>Scan #</TableHead>
+                            <TableHead>Context</TableHead>
                             <TableHead>Location</TableHead>
                             <TableHead>Device</TableHead>
                             <TableHead>IP</TableHead>
@@ -576,7 +649,7 @@ export default function QRTracking() {
                         <TableBody>
                           {logs.length === 0 ? (
                             <TableRow>
-                              <TableCell colSpan={8} className="text-slate-500">
+                              <TableCell colSpan={9} className="text-slate-500">
                                 No scan logs found.
                               </TableCell>
                             </TableRow>
@@ -611,9 +684,18 @@ export default function QRTracking() {
                                       </Badge>
                                     )}
                                   </TableCell>
+                                  <TableCell className="text-xs text-slate-700">
+                                    <Badge className={log.isTrustedOwnerContext ? "border-sky-200 bg-sky-50 text-sky-700" : "border-amber-200 bg-amber-50 text-amber-700"}>
+                                      {log.isTrustedOwnerContext ? "Trusted owner" : "External"}
+                                    </Badge>
+                                    <div className="mt-1 text-[11px] text-slate-500">{describeScanContext(log)}</div>
+                                  </TableCell>
                                   <TableCell className="text-xs text-slate-700">{formatLocation(log)}</TableCell>
                                   <TableCell className="max-w-[220px] text-xs text-slate-600">
-                                    {log.deviceLabel || "Browser device"}
+                                    <div>{log.deviceLabel || "Browser device"}</div>
+                                    <div className="mt-1 text-[11px] text-slate-500">
+                                      {log.userAgent ? "User agent captured" : "Browser fingerprint only"}
+                                    </div>
                                   </TableCell>
                                   <TableCell className="text-xs text-slate-600">{log.ipAddress || "—"}</TableCell>
                                   <TableCell className="text-xs text-slate-600">
