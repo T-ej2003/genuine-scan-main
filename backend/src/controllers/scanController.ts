@@ -90,6 +90,15 @@ type ScanOwnershipRecord = {
   claimedAt: Date;
 };
 
+const isQrScanActorForeignKeyError = (error: unknown) => {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+  if (error.code !== "P2003") return false;
+
+  const meta = (error.meta || {}) as Record<string, unknown>;
+  const haystack = `${String(meta.field_name || "")} ${String(error.message || "")}`.toLowerCase();
+  return haystack.includes("qrscanlog") && (haystack.includes("customeruserid") || haystack.includes("ownershipid"));
+};
+
 const loadOwnershipByQrCodeId = async (qrCodeId: string): Promise<ScanOwnershipRecord | null> => {
   try {
     return await prisma.ownership.findUnique({
@@ -136,33 +145,51 @@ const maybeWriteScanLog = async (
     location: Awaited<ReturnType<typeof reverseGeocode>>;
   }
 ) => {
+  const baseData = {
+    code: input.updatedQr.code,
+    qrCodeId: input.updatedQr.id,
+    licenseeId: input.updatedQr.licenseeId,
+    batchId: input.updatedQr.batchId ?? null,
+    status: input.updatedQr.status,
+    isFirstScan: input.isFirstScan,
+    scanCount: input.updatedQr.scanCount ?? 0,
+    customerUserId: input.customerUserId,
+    ownershipId: input.currentScanTrustedOwnerContext ? input.ownershipId : null,
+    ownershipMatchMethod: input.currentScanTrustedOwnerContext ? "user" : null,
+    isTrustedOwnerContext: input.currentScanTrustedOwnerContext,
+    ipAddress: input.ipAddress,
+    userAgent: input.userAgent,
+    device: input.device,
+    latitude: input.latitude,
+    longitude: input.longitude,
+    accuracy: input.accuracy,
+    locationName: input.location?.name || null,
+    locationCountry: input.location?.country || null,
+    locationRegion: input.location?.region || null,
+    locationCity: input.location?.city || null,
+  };
+
   try {
     await tx.qrScanLog.create({
-      data: {
-        code: input.updatedQr.code,
-        qrCodeId: input.updatedQr.id,
-        licenseeId: input.updatedQr.licenseeId,
-        batchId: input.updatedQr.batchId ?? null,
-        status: input.updatedQr.status,
-        isFirstScan: input.isFirstScan,
-        scanCount: input.updatedQr.scanCount ?? 0,
-        customerUserId: input.customerUserId,
-        ownershipId: input.currentScanTrustedOwnerContext ? input.ownershipId : null,
-        ownershipMatchMethod: input.currentScanTrustedOwnerContext ? "user" : null,
-        isTrustedOwnerContext: input.currentScanTrustedOwnerContext,
-        ipAddress: input.ipAddress,
-        userAgent: input.userAgent,
-        device: input.device,
-        latitude: input.latitude,
-        longitude: input.longitude,
-        accuracy: input.accuracy,
-        locationName: input.location?.name || null,
-        locationCountry: input.location?.country || null,
-        locationRegion: input.location?.region || null,
-        locationCity: input.location?.city || null,
-      },
+      data: baseData,
     });
   } catch (error) {
+    if (isQrScanActorForeignKeyError(error)) {
+      warnStorageUnavailableOnce(
+        "scan-qr-log-actor-fk",
+        "[scan] QrScanLog customer/ownership foreign key is stale. Retrying public scan log without actor linkage."
+      );
+      await tx.qrScanLog.create({
+        data: {
+          ...baseData,
+          customerUserId: null,
+          ownershipId: null,
+          ownershipMatchMethod: null,
+          isTrustedOwnerContext: false,
+        },
+      });
+      return;
+    }
     if (isPrismaMissingTableError(error, ["qrscanlog"])) {
       warnStorageUnavailableOnce(
         "scan-qr-log-storage",
