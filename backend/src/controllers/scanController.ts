@@ -174,6 +174,43 @@ const maybeWriteScanLog = async (
   }
 };
 
+const writePublicScanAuditLog = async (input: {
+  qrId: string;
+  code: string;
+  scanCount: number;
+  ipAddress?: string | null;
+}) => {
+  try {
+    await createAuditLog({
+      action: "REDEEMED",
+      entityType: "QRCode",
+      entityId: input.qrId,
+      details: {
+        qrId: input.qrId,
+        code: input.code,
+        scanCount: input.scanCount,
+      },
+      ipAddress: input.ipAddress || undefined,
+    });
+  } catch (error) {
+    if (
+      isPrismaMissingTableError(error, [
+        "auditlog",
+        "traceevent",
+        "forensiceventchain",
+        "securityeventoutbox",
+      ])
+    ) {
+      warnStorageUnavailableOnce(
+        "scan-audit-storage",
+        "[scan] Audit/telemetry storage is unavailable. Continuing public verification without audit persistence."
+      );
+      return;
+    }
+    console.error("public scan audit log failed:", error);
+  }
+};
+
 export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
   try {
     const token = String(req.query.t || "").trim();
@@ -380,15 +417,10 @@ export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
     });
 
     if (decision.allowRedeem) {
-      await createAuditLog({
-        action: "REDEEMED",
-        entityType: "QRCode",
-        entityId: updated.id,
-        details: {
-          qrId: updated.id,
-          code: updated.code,
-          scanCount: updated.scanCount ?? 0,
-        },
+      await writePublicScanAuditLog({
+        qrId: updated.id,
+        code: updated.code,
+        scanCount: updated.scanCount ?? 0,
         ipAddress: req.ip,
       });
     }

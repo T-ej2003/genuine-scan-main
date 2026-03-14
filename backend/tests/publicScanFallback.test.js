@@ -26,6 +26,12 @@ const missingQrScanLogColumnError = new Prisma.PrismaClientKnownRequestError("Qr
   meta: { modelName: "QrScanLog", column: "customerUserId" },
 });
 
+const missingAuditLogError = new Prisma.PrismaClientKnownRequestError("AuditLog table missing", {
+  code: "P2021",
+  clientVersion: "test",
+  meta: { modelName: "AuditLog" },
+});
+
 const neutralPolicy = {
   policy: {
     autoBlockEnabled: true,
@@ -151,7 +157,11 @@ const fakePrisma = {
 };
 
 mockModule("config/database.js", { __esModule: true, default: fakePrisma });
-mockModule("services/auditService.js", { createAuditLog: async () => {} });
+mockModule("services/auditService.js", {
+  createAuditLog: async () => {
+    throw missingAuditLogError;
+  },
+});
 mockModule("services/locationService.js", { reverseGeocode: async () => null });
 mockModule("services/policyEngineService.js", { evaluateScanAndEnforcePolicy: async () => neutralPolicy });
 mockModule("services/scanInsightService.js", { getScanInsight: async () => emptyScanInsight });
@@ -229,6 +239,7 @@ const res = {
   assert.strictEqual(res.body.data.scanOutcome, "VALID", "first scan should still verify as valid");
   assert.strictEqual(res.body.data.isAuthentic, true, "valid first scan should remain authentic");
   assert.strictEqual(res.body.data.ownershipStatus.isClaimed, false, "missing ownership storage should not block verify");
+  assert.strictEqual(res.body.data.scanCount, 1, "audit log failure should not interrupt the verification response");
 
   console.log("public scan fallback test passed");
 })().catch((error) => {
