@@ -2,6 +2,7 @@ import { QRStatus, Prisma } from "@prisma/client";
 import prisma from "../config/database";
 import { randomNonce } from "./qrTokenService";
 import { reverseGeocode } from "./locationService";
+import { warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
 
 export const generateQRCode = (prefix: string, number: number): string => {
   return `${prefix}${number.toString().padStart(10, "0")}`;
@@ -147,6 +148,15 @@ export const recordScan = async (
   const isFirstScan = existing.status === QRStatus.PRINTED;
   const location = await reverseGeocode(meta?.latitude ?? null, meta?.longitude ?? null);
 
+  const isQrScanActorForeignKeyError = (error: unknown) => {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+    if (error.code !== "P2003") return false;
+
+    const metaInfo = (error.meta || {}) as Record<string, unknown>;
+    const haystack = `${String(metaInfo.field_name || "")} ${String(error.message || "")}`.toLowerCase();
+    return haystack.includes("qrscanlog") && (haystack.includes("customeruserid") || haystack.includes("ownershipid"));
+  };
+
   const updated = await prisma.$transaction(async (tx) => {
     const qr = await tx.qRCode.update({
       where: { code },
@@ -165,31 +175,53 @@ export const recordScan = async (
       },
     });
 
-    await tx.qrScanLog.create({
-      data: {
-        code: qr.code,
-        qrCodeId: qr.id,
-        licenseeId: qr.licenseeId,
-        batchId: qr.batchId ?? null,
-        status: qr.status,
-        isFirstScan,
-        scanCount: qr.scanCount ?? 0,
-        customerUserId: meta?.customerUserId ?? null,
-        ownershipId: meta?.ownershipId ?? null,
-        ownershipMatchMethod: meta?.ownershipMatchMethod ?? null,
-        isTrustedOwnerContext: meta?.isTrustedOwnerContext === true,
-        ipAddress: meta?.ipAddress ?? null,
-        userAgent: meta?.userAgent ?? null,
-        device: meta?.device ?? null,
-        latitude: meta?.latitude ?? null,
-        longitude: meta?.longitude ?? null,
-        accuracy: meta?.accuracy ?? null,
-        locationName: location?.name || null,
-        locationCountry: location?.country || null,
-        locationRegion: location?.region || null,
-        locationCity: location?.city || null,
-      },
-    });
+    const baseScanLogData = {
+      code: qr.code,
+      qrCodeId: qr.id,
+      licenseeId: qr.licenseeId,
+      batchId: qr.batchId ?? null,
+      status: qr.status,
+      isFirstScan,
+      scanCount: qr.scanCount ?? 0,
+      customerUserId: meta?.customerUserId ?? null,
+      ownershipId: meta?.ownershipId ?? null,
+      ownershipMatchMethod: meta?.ownershipMatchMethod ?? null,
+      isTrustedOwnerContext: meta?.isTrustedOwnerContext === true,
+      ipAddress: meta?.ipAddress ?? null,
+      userAgent: meta?.userAgent ?? null,
+      device: meta?.device ?? null,
+      latitude: meta?.latitude ?? null,
+      longitude: meta?.longitude ?? null,
+      accuracy: meta?.accuracy ?? null,
+      locationName: location?.name || null,
+      locationCountry: location?.country || null,
+      locationRegion: location?.region || null,
+      locationCity: location?.city || null,
+    };
+
+    try {
+      await tx.qrScanLog.create({
+        data: baseScanLogData,
+      });
+    } catch (error) {
+      if (isQrScanActorForeignKeyError(error)) {
+        warnStorageUnavailableOnce(
+          "verify-qr-log-actor-fk",
+          "[verify] QrScanLog customer/ownership foreign key is stale. Retrying verification log without actor linkage."
+        );
+        await tx.qrScanLog.create({
+          data: {
+            ...baseScanLogData,
+            customerUserId: null,
+            ownershipId: null,
+            ownershipMatchMethod: null,
+            isTrustedOwnerContext: false,
+          },
+        });
+      } else {
+        throw error;
+      }
+    }
 
     return qr;
   });
