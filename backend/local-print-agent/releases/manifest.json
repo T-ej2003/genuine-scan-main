@@ -22,11 +22,12 @@
           "relativePath": "2026.3.12/windows/MSCQR-Connector-Windows-2026.3.12.zip",
           "contentType": "application/zip",
           "architecture": "x64",
-          "bytes": 20775200,
-          "sha256": "93029bd75b097d71d606f6fd4d66b867f6693a963264ed32a6831c910d8b1935",
+          "bytes": 20317702,
+          "sha256": "719d26a1e96e3e3e7596fc310e2454b9a568e026907cb66dcebe36e88a2f69fb",
           "notes": [
-            "Extract the ZIP package on the Windows computer that will print.",
-            "Run Install Connector.cmd once to install and auto-start the connector."
+            "Extract the ZIP package to a normal folder on the Windows computer that will print.",
+            "Do not run Install Connector.cmd from inside the ZIP preview in File Explorer.",
+            "Run Install Connector.cmd once from the extracted folder to install and auto-start the connector."
           ]
         }
       }

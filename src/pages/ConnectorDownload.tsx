@@ -160,10 +160,10 @@ const platformCopy: Record<
   },
   windows: {
     title: "Windows installer",
-    description: "Download the Windows package, open it, then run Install Connector once on the printing PC.",
+    description: "Download the Windows ZIP, extract it to a normal folder, then run Install Connector once on the printing PC.",
     action: "Download for Windows",
     icon: MonitorSmartphone,
-    helper: "Scheduled Task auto-start after installation.",
+    helper: "Extract first, then install. The connector uses a Scheduled Task to auto-start after installation.",
     iconSurfaceClass: "bg-sky-100 text-sky-700",
   },
 };
@@ -545,6 +545,16 @@ export default function ConnectorDownload() {
                           <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(220px,0.58fr)]">
                             <div className="space-y-4">
                               <p className="text-sm leading-6 text-slate-600">{item.helper}</p>
+
+                              {item.platform === "windows" && item.installerKind === "zip" ? (
+                                <Alert className="border-amber-200 bg-amber-50 text-amber-950">
+                                  <AlertCircle className="h-4 w-4 text-amber-700" />
+                                  <AlertTitle>Important for Windows</AlertTitle>
+                                  <AlertDescription>
+                                    Extract the ZIP fully before running <strong>Install Connector.cmd</strong>. Do not run it from the ZIP preview in File Explorer.
+                                  </AlertDescription>
+                                </Alert>
+                              ) : null}
 
                               <ul className="space-y-3">
                                 {item.notes.map((note) => (

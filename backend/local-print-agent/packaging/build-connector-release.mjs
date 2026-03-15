@@ -323,14 +323,37 @@ Write-Host "MSCQR Connector removed from this Windows workstation."
 `;
 
 const renderWindowsInstallCmd = () => `@echo off
-setlocal
+setlocal EnableExtensions
 cd /d "%~dp0"
-powershell -ExecutionPolicy Bypass -File "%~dp0install-packaged-startup-task.ps1"
-if errorlevel 1 (
+set "INSTALL_SCRIPT=%~dp0install-packaged-startup-task.ps1"
+set "CONNECTOR_EXE=%~dp0bin\\mscqr-local-print-agent.exe"
+
+if not exist "%INSTALL_SCRIPT%" (
+  echo.
+  echo MSCQR Connector setup cannot start from inside the ZIP preview.
+  echo Extract the entire ZIP to a normal folder first, then run Install Connector.cmd again.
+  echo.
+  echo Missing file:
+  echo   %INSTALL_SCRIPT%
+  pause
+  exit /b 1
+)
+
+if not exist "%CONNECTOR_EXE%" (
+  echo.
+  echo MSCQR Connector package is incomplete or was not fully extracted.
+  echo Extract the entire ZIP to a normal folder first, then run Install Connector.cmd again.
+  pause
+  exit /b 1
+)
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%INSTALL_SCRIPT%"
+set "EXITCODE=%ERRORLEVEL%"
+if not "%EXITCODE%"=="0" (
   echo.
   echo MSCQR Connector setup did not complete.
   pause
-  exit /b 1
+  exit /b %EXITCODE%
 )
 echo.
 echo MSCQR Connector setup is complete.
@@ -338,14 +361,24 @@ pause
 `;
 
 const renderWindowsUninstallCmd = () => `@echo off
-setlocal
+setlocal EnableExtensions
 cd /d "%~dp0"
-powershell -ExecutionPolicy Bypass -File "%~dp0uninstall-packaged-startup-task.ps1"
-if errorlevel 1 (
+set "UNINSTALL_SCRIPT=%~dp0uninstall-packaged-startup-task.ps1"
+if not exist "%UNINSTALL_SCRIPT%" (
+  echo.
+  echo MSCQR Connector removal script was not found in this folder.
+  echo Extract the entire ZIP to a normal folder first, then run Uninstall Connector.cmd again.
+  pause
+  exit /b 1
+)
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%UNINSTALL_SCRIPT%"
+set "EXITCODE=%ERRORLEVEL%"
+if not "%EXITCODE%"=="0" (
   echo.
   echo MSCQR Connector removal did not complete.
   pause
-  exit /b 1
+  exit /b %EXITCODE%
 )
 echo.
 echo MSCQR Connector has been removed.
@@ -356,10 +389,11 @@ const renderWindowsReadme = () => `MSCQR Connector for Windows
 Version: ${version}
 
 Setup steps:
-1. Extract this ZIP to any folder on the Windows computer that is connected to the printer.
-2. Double-click "Install Connector.cmd".
-3. After setup completes, open MSCQR and go to Printer Setup.
-4. Confirm the printer shows as ready before you print live labels.
+1. Extract this ZIP to a normal folder on the Windows computer that is connected to the printer.
+2. Do not run the installer from inside the ZIP preview in File Explorer.
+3. Double-click "Install Connector.cmd" from the extracted folder.
+4. After setup completes, open MSCQR and go to Printer Setup.
+5. Confirm the printer shows as ready before you print live labels.
 
 What this does:
 - installs the MSCQR Connector for the signed-in Windows user
