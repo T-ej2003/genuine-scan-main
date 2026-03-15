@@ -5,6 +5,7 @@ import { getEffectiveLicenseeId } from "../middleware/tenantIsolation";
 import { onAuditLog } from "../services/auditService";
 import { UserRole } from "@prisma/client";
 import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
+import { summarizeQrStatusCounts } from "../services/qrStatusMetrics";
 
 function writeSse(res: Response, event: string, data: any) {
   res.write(`event: ${event}\n`);
@@ -80,7 +81,7 @@ async function computeDashboard(req: AuthRequest) {
     activeLicensees,
     manufacturers,
     totalBatches,
-    qr: { total: qrTotal, byStatus },
+    qr: { total: qrTotal, byStatus, ...summarizeQrStatusCounts(byStatus) },
   };
 }
 

@@ -85,12 +85,15 @@ describe("Dashboard manufacturer multi-licensee scope", () => {
     vi.mocked(apiClient.getQRStats).mockResolvedValue({
       success: true,
       data: {
-        dormant: 120,
-        allocated: 900,
-        printed: 600,
-        redeemed: 80,
-        scanned: 80,
-        blocked: 4,
+        byStatus: {
+          DORMANT: 20,
+          ACTIVE: 100,
+          ALLOCATED: 700,
+          ACTIVATED: 200,
+          PRINTED: 600,
+          REDEEMED: 80,
+          BLOCKED: 4,
+        },
       },
     } as any);
 
@@ -115,6 +118,7 @@ describe("Dashboard manufacturer multi-licensee scope", () => {
     expect(vi.mocked(apiClient.getAuditLogs)).not.toHaveBeenCalled();
     expect(await screen.findByText("Linked Licensees")).toBeInTheDocument();
     expect(screen.getByText("Authorized operating scope")).toBeInTheDocument();
+    expect(screen.getByText("Dormant 120 • Redeemed 80")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Open scope details"));
 
