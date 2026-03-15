@@ -2,6 +2,7 @@ import { QRStatus, Prisma } from "@prisma/client";
 import prisma from "../config/database";
 import { randomNonce } from "./qrTokenService";
 import { reverseGeocode } from "./locationService";
+import { summarizeQrStatusCounts } from "./qrStatusMetrics";
 import { warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
 
 const parseScanRefreshGraceMs = () => {
@@ -339,11 +340,14 @@ export const getQRStats = async (licenseeId?: string) => {
 
   const total = await prisma.qRCode.count({ where });
 
+  const byStatus = stats.reduce((acc, s) => {
+    acc[s.status] = s._count;
+    return acc;
+  }, {} as Record<string, number>);
+
   return {
     total,
-    byStatus: stats.reduce((acc, s) => {
-      acc[s.status] = s._count;
-      return acc;
-    }, {} as Record<string, number>),
+    byStatus,
+    ...summarizeQrStatusCounts(byStatus),
   };
 };

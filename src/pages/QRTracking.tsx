@@ -561,8 +561,8 @@ export default function QRTracking() {
                         ) : (
                           summary.map((b) => {
                             const counts = b.counts || {};
-                            const allocated =
-                              toCount(counts, "ALLOCATED") + toCount(counts, "ACTIVE") + toCount(counts, "ACTIVATED");
+                            const dormant = toCount(counts, "DORMANT") + toCount(counts, "ACTIVE");
+                            const allocated = toCount(counts, "ALLOCATED") + toCount(counts, "ACTIVATED");
                             const redeemed = toCount(counts, "REDEEMED") + toCount(counts, "SCANNED");
                             const blocked = toCount(counts, "BLOCKED");
 
@@ -595,7 +595,7 @@ export default function QRTracking() {
                                 <TableCell>{Number(b.batchInventoryTotal || b.totalCodes || 0).toLocaleString()}</TableCell>
                                 <TableCell>{Number(b.scanEventCount || 0).toLocaleString()}</TableCell>
                                 <TableCell>
-                                  <Badge className={statusTone("DORMANT")}>{toCount(counts, "DORMANT")}</Badge>
+                                  <Badge className={statusTone("DORMANT")}>{dormant}</Badge>
                                 </TableCell>
                                 <TableCell>
                                   <Badge className={statusTone("ALLOCATED")}>{allocated}</Badge>

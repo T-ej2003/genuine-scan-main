@@ -18,6 +18,7 @@ import {
   getBatchAllocationMap as loadBatchAllocationMap,
 } from "../services/batchAllocationService";
 import { resolveScopedLicenseeAccess } from "../services/manufacturerScopeService";
+import { summarizeQrStatusCounts } from "../services/qrStatusMetrics";
 
 /* ===================== SCHEMAS ===================== */
 
@@ -1629,15 +1630,17 @@ export const getStats = async (req: AuthRequest, res: Response) => {
         _count: true,
       });
       const total = await prisma.qRCode.count({ where });
+      const byStatus = grouped.reduce((acc, s) => {
+        acc[s.status] = s._count;
+        return acc;
+      }, {} as Record<string, number>);
 
       return res.json({
         success: true,
         data: {
           total,
-          byStatus: grouped.reduce((acc, s) => {
-            acc[s.status] = s._count;
-            return acc;
-          }, {} as Record<string, number>),
+          byStatus,
+          ...summarizeQrStatusCounts(byStatus),
         },
       });
     }

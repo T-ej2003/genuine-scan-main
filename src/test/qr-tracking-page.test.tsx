@@ -65,12 +65,12 @@ describe("QRTracking", () => {
           },
         },
         totals: {
-          total: 5,
-          dormant: 0,
-          allocated: 1,
-          printed: 2,
-          redeemed: 2,
-          blocked: 1,
+          total: 82,
+          dormant: 13,
+          allocated: 17,
+          printed: 19,
+          redeemed: 23,
+          blocked: 29,
           created: 1,
         },
         eventSummary: {
@@ -86,12 +86,12 @@ describe("QRTracking", () => {
         trend: [
           {
             label: "Mar 14",
-            total: 5,
-            dormant: 0,
-            allocated: 1,
-            printed: 2,
-            redeemed: 2,
-            blocked: 1,
+            total: 82,
+            dormant: 13,
+            allocated: 17,
+            printed: 19,
+            redeemed: 23,
+            blocked: 29,
             scanEvents: 7,
           },
         ],
@@ -104,10 +104,10 @@ describe("QRTracking", () => {
             endCode: "AADS00000020100",
             totalCodes: 100,
             batchInventoryTotal: 100,
-            scopeCodeCount: 5,
+            scopeCodeCount: 82,
             scanEventCount: 7,
             createdAt: "2026-03-14T10:00:00.000Z",
-            counts: { ALLOCATED: 1, PRINTED: 2, REDEEMED: 2, BLOCKED: 1 },
+            counts: { DORMANT: 8, ACTIVE: 5, ALLOCATED: 11, ACTIVATED: 6, PRINTED: 19, REDEEMED: 21, SCANNED: 2, BLOCKED: 29 },
           },
         ],
         logs: [
@@ -174,5 +174,11 @@ describe("QRTracking", () => {
     expect(screen.getByText("External / anonymous context")).toBeInTheDocument();
     expect(screen.getByText("Chrome on Android")).toBeInTheDocument();
     expect(screen.getAllByText("User agent captured").length).toBeGreaterThan(0);
+    const batchRow = screen.getAllByText("Batch 1")[0]?.closest("tr");
+    expect(batchRow).toHaveTextContent("13");
+    expect(batchRow).toHaveTextContent("17");
+    expect(batchRow).toHaveTextContent("19");
+    expect(batchRow).toHaveTextContent("23");
+    expect(batchRow).toHaveTextContent("29");
   });
 });

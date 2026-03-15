@@ -173,8 +173,8 @@ export default function Dashboard() {
   const qrStatusData = useMemo(() => {
     const by = qrStats?.byStatus || qrStats?.statusCounts || {};
     return {
-      dormant: qrStats?.dormant ?? by.DORMANT ?? 0,
-      allocated: (qrStats?.allocated ?? by.ALLOCATED ?? 0) + (by.ACTIVE ?? 0) + (by.ACTIVATED ?? 0),
+      dormant: qrStats?.dormant ?? (by.DORMANT ?? 0) + (by.ACTIVE ?? 0),
+      allocated: qrStats?.allocated ?? (by.ALLOCATED ?? 0) + (by.ACTIVATED ?? 0),
       printed: qrStats?.printed ?? by.PRINTED ?? 0,
       scanned: (qrStats?.scanned ?? by.SCANNED ?? 0) + (by.REDEEMED ?? 0),
     };

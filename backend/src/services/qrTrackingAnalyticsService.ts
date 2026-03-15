@@ -2,6 +2,13 @@ import { Prisma, QRStatus } from "@prisma/client";
 
 import prisma from "../config/database";
 import { compactDeviceLabel, reverseGeocode } from "./locationService";
+import {
+  countAllocatedInventory,
+  countBlockedInventory,
+  countDormantInventory,
+  countPrintedInventory,
+  countRedeemedInventory,
+} from "./qrStatusMetrics";
 
 export type TrackingAnalyticsScopeMode = "inventory" | "activity";
 
@@ -204,11 +211,11 @@ const buildTotalsFromRows = (rows: TrackingAnalyticsBatchRow[]): TrackingAnalyti
   totals.created = rows.length;
   for (const row of rows) {
     totals.total += Number(row.scopeCodeCount || row.totalCodes || 0);
-    totals.dormant += Number(row.counts.DORMANT || 0);
-    totals.allocated += Number(row.counts.ACTIVE || 0) + Number(row.counts.ALLOCATED || 0) + Number(row.counts.ACTIVATED || 0);
-    totals.printed += Number(row.counts.PRINTED || 0);
-    totals.redeemed += Number(row.counts.REDEEMED || 0) + Number(row.counts.SCANNED || 0);
-    totals.blocked += Number(row.counts.BLOCKED || 0);
+    totals.dormant += countDormantInventory(row.counts);
+    totals.allocated += countAllocatedInventory(row.counts);
+    totals.printed += countPrintedInventory(row.counts);
+    totals.redeemed += countRedeemedInventory(row.counts);
+    totals.blocked += countBlockedInventory(row.counts);
   }
   return totals;
 };
@@ -443,11 +450,11 @@ const buildInventoryAnalytics = async (filters: TrackingAnalyticsFilters) => {
       byDay.get(label) ||
       ({ label, total: 0, dormant: 0, allocated: 0, printed: 0, redeemed: 0, blocked: 0, scanEvents: 0 } satisfies TrackingAnalyticsTrendPoint);
     current.total += row.scopeCodeCount;
-    current.dormant += Number(row.counts.DORMANT || 0);
-    current.allocated += Number(row.counts.ACTIVE || 0) + Number(row.counts.ALLOCATED || 0) + Number(row.counts.ACTIVATED || 0);
-    current.printed += Number(row.counts.PRINTED || 0);
-    current.redeemed += Number(row.counts.REDEEMED || 0) + Number(row.counts.SCANNED || 0);
-    current.blocked += Number(row.counts.BLOCKED || 0);
+    current.dormant += countDormantInventory(row.counts);
+    current.allocated += countAllocatedInventory(row.counts);
+    current.printed += countPrintedInventory(row.counts);
+    current.redeemed += countRedeemedInventory(row.counts);
+    current.blocked += countBlockedInventory(row.counts);
     byDay.set(label, current);
   }
 
@@ -553,8 +560,8 @@ const buildActivityAnalytics = async (filters: TrackingAnalyticsFilters) => {
     SELECT
       TO_CHAR(DATE_TRUNC('day', ml."scannedAt"), 'Mon DD') AS "label",
       COUNT(DISTINCT ml."qrCodeId")::int AS "total",
-      COUNT(DISTINCT CASE WHEN ml."status" = 'DORMANT' THEN ml."qrCodeId" END)::int AS "dormant",
-      COUNT(DISTINCT CASE WHEN ml."status" IN ('ACTIVE', 'ALLOCATED', 'ACTIVATED') THEN ml."qrCodeId" END)::int AS "allocated",
+      COUNT(DISTINCT CASE WHEN ml."status" IN ('DORMANT', 'ACTIVE') THEN ml."qrCodeId" END)::int AS "dormant",
+      COUNT(DISTINCT CASE WHEN ml."status" IN ('ALLOCATED', 'ACTIVATED') THEN ml."qrCodeId" END)::int AS "allocated",
       COUNT(DISTINCT CASE WHEN ml."status" = 'PRINTED' THEN ml."qrCodeId" END)::int AS "printed",
       COUNT(DISTINCT CASE WHEN ml."status" IN ('REDEEMED', 'SCANNED') THEN ml."qrCodeId" END)::int AS "redeemed",
       COUNT(DISTINCT CASE WHEN ml."status" = 'BLOCKED' THEN ml."qrCodeId" END)::int AS "blocked",
