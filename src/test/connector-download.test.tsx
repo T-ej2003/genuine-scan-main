@@ -94,6 +94,7 @@ describe("ConnectorDownload", () => {
       "href",
       "https://example.test/api/public/connector/download/2026.3.12/windows",
     );
+    expect(screen.getByText(/Extract the ZIP fully before running/i)).toBeInTheDocument();
     expect(screen.getByText(/Run the installer once/i)).toBeInTheDocument();
   });
 
