@@ -35,6 +35,14 @@ const run = () => {
     packagingScript.includes("[System.Windows.Forms.MessageBox]::Show"),
     "Windows installer should invoke a Windows message box"
   );
+  assert(
+    packagingScript.includes('Microsoft\\\\Windows\\\\Start Menu\\\\Programs\\\\Startup'),
+    "Windows installer should register a per-user Startup entry"
+  );
+  assert(
+    packagingScript.includes("Existing scheduled task could not be removed without elevation"),
+    "Windows installer should tolerate legacy scheduled task cleanup failures"
+  );
 
   console.log("windows connector installer script tests passed");
 };
