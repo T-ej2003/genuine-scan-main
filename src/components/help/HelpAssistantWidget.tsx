@@ -265,6 +265,7 @@ export default function HelpAssistantWidget() {
   const quickPrompts = useMemo(() => {
     if (activeRole === "all") {
       return [
+        "How do I set up required MFA?",
         "How do I review incident response lifecycle?",
         "How do I approve QR requests?",
         "How do policy alerts work?",
@@ -273,6 +274,7 @@ export default function HelpAssistantWidget() {
     }
     if (activeRole === "licensee") {
       return [
+        "How do I set up required MFA?",
         "How do I request QR inventory?",
         "How do I use the batch workspace?",
         "How do I add a manufacturer account?",
@@ -281,6 +283,7 @@ export default function HelpAssistantWidget() {
     }
     if (activeRole === "manufacturer") {
       return [
+        "How do I set up required MFA?",
         "How do I create a print job?",
         "Which printers are supported?",
         "How do I use printer diagnostics?",

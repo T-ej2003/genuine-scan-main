@@ -257,6 +257,11 @@ class ApiClient {
       mfaRequired?: boolean;
       mfaTicket?: string;
       mfaExpiresAt?: string;
+      mfaSetupRequired?: boolean;
+      mfaSetupToken?: string;
+      mfaSetupExpiresAt?: string;
+      email?: string;
+      role?: string;
       riskScore?: number;
       riskLevel?: string;
       reasons?: string[];
@@ -265,6 +270,26 @@ class ApiClient {
       body: JSON.stringify({ email, password }),
     });
 
+    if (res.success && res.data?.token) this.setToken(res.data.token);
+    return res;
+  }
+
+  async beginMfaBootstrapSetup(ticket: string) {
+    return this.request<{
+      secret: string;
+      otpauthUri: string;
+      backupCodes: string[];
+    }>("/auth/mfa/bootstrap/setup", {
+      method: "POST",
+      body: JSON.stringify({ ticket }),
+    });
+  }
+
+  async confirmMfaBootstrapSetup(ticket: string, code: string) {
+    const res = await this.request<{ token: string; user: any; mfaEnabled: boolean }>("/auth/mfa/bootstrap/enable", {
+      method: "POST",
+      body: JSON.stringify({ ticket, code }),
+    });
     if (res.success && res.data?.token) this.setToken(res.data.token);
     return res;
   }
@@ -334,7 +359,21 @@ class ApiClient {
   }
 
   async acceptInvite(payload: { token: string; password: string; name?: string }) {
-    const res = await this.request<{ token: string; user: any }>("/auth/accept-invite", {
+    const res = await this.request<{
+      token?: string;
+      user?: any;
+      mfaRequired?: boolean;
+      mfaTicket?: string;
+      mfaExpiresAt?: string;
+      mfaSetupRequired?: boolean;
+      mfaSetupToken?: string;
+      mfaSetupExpiresAt?: string;
+      email?: string;
+      role?: string;
+      riskScore?: number;
+      riskLevel?: string;
+      reasons?: string[];
+    }>("/auth/accept-invite", {
       method: "POST",
       body: JSON.stringify(payload),
     });

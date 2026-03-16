@@ -11,7 +11,7 @@ export default function AuthOverview() {
   return (
     <HelpShell
       title="Auth overview"
-      subtitle="How sign-in works for admins/manufacturers, how sessions are stored, and what to do when login fails."
+      subtitle="How required MFA sign-in works for admins/manufacturers, how sessions are stored, and what to do when login fails."
     >
       <div className="space-y-6">
         <Card>
@@ -24,6 +24,7 @@ export default function AuthOverview() {
           <CardContent className="space-y-2 text-sm text-muted-foreground">
             <ul className="list-disc pl-5">
               <li>Which parts of MSCQR require sign-in.</li>
+              <li>Why Super Admin, Licensee/Admin, and Manufacturer roles must complete MFA enrollment before portal access.</li>
               <li>How your session is stored (secure cookies) and why you should not share tokens.</li>
               <li>Common login issues (invites not accepted, lockouts).</li>
             </ul>
@@ -35,6 +36,14 @@ export default function AuthOverview() {
           <AlertTitle>Security note</AlertTitle>
           <AlertDescription>
             Admin/manufacturer sessions use <strong>HttpOnly</strong> cookies. This means the browser manages your session automatically and the app does not store tokens in localStorage.
+          </AlertDescription>
+        </Alert>
+
+        <Alert>
+          <ShieldCheck className="h-4 w-4" />
+          <AlertTitle>Required MFA policy</AlertTitle>
+          <AlertDescription>
+            Super Admin, Licensee/Admin, and Manufacturer accounts must enroll an authenticator app and backup codes before they can enter the authenticated portal.
           </AlertDescription>
         </Alert>
 
@@ -50,6 +59,8 @@ export default function AuthOverview() {
                   <li>Open the login page.</li>
                   <li>Enter your email and password.</li>
                   <li>Select <Badge variant="outline">Sign in</Badge>.</li>
+                  <li>If MFA is not enrolled yet, complete the setup QR and backup-code step.</li>
+                  <li>For later sign-ins, enter the current authenticator code or a backup code.</li>
                 </ol>
               </CardContent>
             </Card>
@@ -111,4 +122,3 @@ export default function AuthOverview() {
     </HelpShell>
   );
 }
-

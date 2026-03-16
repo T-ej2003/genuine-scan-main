@@ -39,7 +39,8 @@ The `Printer Setup & Support` page is not in the left menu. Open it from the `Pr
 7. Enter a password with at least 8 characters.
 8. Enter the same password again in `Confirm password`.
 9. Select `Activate account`.
-10. Wait for the redirect to the dashboard.
+10. Complete the required MFA setup by scanning the authenticator QR, saving the backup codes, and entering the 6-digit code.
+11. Wait for the redirect to the dashboard.
 
 ![Accept Invite](../public/docs/password-accept-invite.png)
 
@@ -50,9 +51,10 @@ The `Printer Setup & Support` page is not in the left menu. Open it from the `Pr
 2. Enter your email address.
 3. Enter your password.
 4. Select `Sign in`.
-5. If MFA is requested, enter the 6-digit code or backup code.
-6. Select `Verify MFA`.
-7. Confirm the left menu matches the items listed in Section 2.
+5. If this is your first portal sign-in, the system requires MFA setup before portal access is granted.
+6. Scan the authenticator QR, save the backup codes, and enter the 6-digit code.
+7. On later sign-ins, enter the 6-digit code or backup code.
+8. Confirm the left menu matches the items listed in Section 2.
 
 ![Manufacturer Login](../public/docs/access-super-admin-login.png)
 

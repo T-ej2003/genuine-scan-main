@@ -3,11 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { AuthShell } from "@/components/auth/AuthShell";
+import { MfaEnrollmentPanel, type MfaEnrollmentData } from "@/components/auth/MfaEnrollmentPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, AlertCircle, Eye, EyeOff } from "lucide-react";
+import apiClient from "@/lib/api-client";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -15,6 +17,10 @@ export default function Login() {
   const [mfaTicket, setMfaTicket] = useState("");
   const [mfaCode, setMfaCode] = useState("");
   const [mfaRiskLevel, setMfaRiskLevel] = useState<string | null>(null);
+  const [mfaSetupTicket, setMfaSetupTicket] = useState("");
+  const [mfaSetup, setMfaSetup] = useState<MfaEnrollmentData | null>(null);
+  const [mfaSetupCode, setMfaSetupCode] = useState("");
+  const [mfaSetupEmail, setMfaSetupEmail] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -26,7 +32,35 @@ export default function Login() {
     if (text.includes("invalid email or password") || text.includes("password")) {
       return "incorrect-password. try again.";
     }
+    if (text.includes("mfa setup session expired")) {
+      return "your MFA setup session expired. sign in again.";
+    }
     return value || "Login failed";
+  };
+
+  const resetMfaSetupState = () => {
+    setMfaSetupTicket("");
+    setMfaSetup(null);
+    setMfaSetupCode("");
+    setMfaSetupEmail("");
+  };
+
+  const loadMfaSetup = async (ticket: string, bootstrapEmail?: string) => {
+    const setupResult = await apiClient.beginMfaBootstrapSetup(ticket);
+    if (!setupResult.success || !setupResult.data) {
+      resetMfaSetupState();
+      setError(humanizeAuthError(setupResult.error || "Failed to start MFA setup"));
+      return false;
+    }
+
+    setMfaTicket("");
+    setMfaCode("");
+    setMfaRiskLevel(null);
+    setMfaSetupTicket(ticket);
+    setMfaSetup(setupResult.data);
+    setMfaSetupCode("");
+    setMfaSetupEmail(bootstrapEmail || "");
+    return true;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -45,6 +79,12 @@ export default function Login() {
         setMfaTicket(result.mfaTicket);
         setMfaRiskLevel(result.riskLevel || null);
         setMfaCode("");
+        resetMfaSetupState();
+        return;
+      }
+
+      if (result.mfaSetupRequired && result.mfaSetupToken) {
+        await loadMfaSetup(result.mfaSetupToken, result.email);
         return;
       }
 
@@ -72,14 +112,34 @@ export default function Login() {
     }
   };
 
+  const handleMfaSetupSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    if (!mfaSetupTicket) return;
+    setSubmitting(true);
+
+    try {
+      const result = await apiClient.confirmMfaBootstrapSetup(mfaSetupTicket, mfaSetupCode.trim());
+      if (result.success && result.data?.user) {
+        navigate("/dashboard");
+        return;
+      }
+      setError(result.error || "MFA setup failed");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const mode = mfaSetup ? "setup" : mfaTicket ? "mfa" : "login";
+
   return (
     <AuthShell
       title="Welcome back"
-      description="Sign in to access QR operations, approvals, and traceability workflows."
+      description="Sign in to access QR operations, approvals, and traceability workflows. Super admins, licensee admins, and manufacturers use required MFA."
       sideTitle="Control secure QR inventory and approvals from one console."
-      sideDescription="Designed for super users, licensee users, and manufacturer users with role-safe access, audit visibility, and operational continuity."
+      sideDescription="Designed for super users, licensee users, and manufacturer users with role-safe access, required MFA, audit visibility, and operational continuity."
     >
-      <form onSubmit={mfaTicket ? handleMfaSubmit : handleSubmit} className="space-y-5">
+      <form onSubmit={mode === "setup" ? handleMfaSetupSubmit : mode === "mfa" ? handleMfaSubmit : handleSubmit} className="space-y-5">
         {error && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
@@ -87,7 +147,17 @@ export default function Login() {
           </Alert>
         )}
 
-        {mfaTicket ? (
+        {mode === "setup" && mfaSetup ? (
+          <MfaEnrollmentPanel
+            title="Set up multi-factor authentication"
+            description={`This account${mfaSetupEmail ? ` (${mfaSetupEmail})` : ""} must enroll in MFA before portal access is granted.`}
+            setup={mfaSetup}
+            code={mfaSetupCode}
+            onCodeChange={setMfaSetupCode}
+            confirming={submitting}
+            error={null}
+          />
+        ) : mode === "mfa" ? (
           <div className="space-y-2">
             <Label htmlFor="mfaCode">MFA code</Label>
             <Input
@@ -160,23 +230,29 @@ export default function Login() {
         )}
 
         <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 px-4 py-3 text-xs text-emerald-900">
-          {mfaTicket
+          {mode === "setup"
+            ? "Scan the QR with Microsoft Authenticator, Google Authenticator, 1Password, or a compatible app, then store the backup codes before you continue."
+            : mfaTicket
             ? "Use your authenticator app code or a one-time backup code."
             : "Password reset is available directly from the sign-in form and uses the existing secure email token flow."}
         </div>
 
-        <Button type="submit" className="h-11 w-full bg-slate-900 text-white hover:bg-slate-800" disabled={submitting}>
+        <Button
+          type="submit"
+          className="h-11 w-full bg-slate-900 text-white hover:bg-slate-800"
+          disabled={submitting || (mode === "setup" && mfaSetupCode.trim().length < 6)}
+        >
           {submitting ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              {mfaTicket ? "Verifying..." : "Signing in..."}
+              {mode === "setup" ? "Enabling MFA..." : mfaTicket ? "Verifying..." : "Signing in..."}
             </>
           ) : (
-            mfaTicket ? "Verify MFA" : "Sign in"
+            mode === "setup" ? "Enable MFA and continue" : mfaTicket ? "Verify MFA" : "Sign in"
           )}
         </Button>
 
-        {mfaTicket ? (
+        {mode !== "login" ? (
           <Button
             type="button"
             variant="outline"
@@ -185,6 +261,7 @@ export default function Login() {
               setMfaTicket("");
               setMfaCode("");
               setMfaRiskLevel(null);
+              resetMfaSetupState();
               setError("");
             }}
           >
