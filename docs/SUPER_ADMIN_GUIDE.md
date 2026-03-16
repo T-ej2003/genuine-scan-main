@@ -39,7 +39,7 @@ If any of the items above are missing, confirm you are signed in as a Super Admi
 3. Enter a password with at least 8 characters.
 4. Re-enter the same password in `Confirm password`.
 5. Select `Activate account`.
-6. Complete the required MFA setup by scanning the authenticator QR, saving the backup codes, and entering the 6-digit code.
+6. Sign in with the email and password you configured.
 7. Wait for the system to redirect you to the dashboard.
 
 ![Accept Invite](../public/docs/password-accept-invite.png)
@@ -49,9 +49,7 @@ If any of the items above are missing, confirm you are signed in as a Super Admi
 2. Enter your email address.
 3. Enter your password.
 4. Select `Sign in`.
-5. If this is your first privileged sign-in, the system requires MFA setup before portal access is granted.
-6. Scan the authenticator QR, save the backup codes, and enter the 6-digit code.
-7. On later sign-ins, enter the 6-digit code or backup code when prompted.
+5. If sign-in fails, use the password reset flow or ask another active Super Admin for help.
 8. Confirm the left menu contains all Super Admin items listed in Section 2.
 
 ![Super Admin Login](../public/docs/access-super-admin-login.png)
@@ -377,7 +375,7 @@ When you open an incident from `IR Center`, the detail page lets you:
 
 ## 17. Troubleshooting
 - If the account cannot sign in, confirm the invite link or reset link was used before it expired.
-- If MFA appears unexpectedly, complete the code entry step before retrying the password.
+- If sign-in behaves unexpectedly, reset the password or verify the account is still active.
 - If a QR request approval fails with a busy message, refresh the page and retry once.
 - If a source batch cannot be deleted, assume linked allocations or trace history must be preserved.
 - If a support or incident email fails, save the workflow changes first and then retry the communication.

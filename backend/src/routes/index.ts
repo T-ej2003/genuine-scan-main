@@ -14,14 +14,7 @@ import rateLimit from "express-rate-limit";
 import { buildPublicVerifyRateLimitKey } from "../middleware/publicVerifyRateLimit";
 
 import {
-  beginMfaSetupController,
-  beginMfaBootstrapSetupController,
-  completeMfaLoginController,
-  confirmMfaBootstrapSetupController,
-  confirmMfaSetupController,
-  disableMfaController,
   login,
-  getMfaStatusController,
   me,
   refresh,
   logout,
@@ -281,8 +274,6 @@ router.post("/auth/accept-invite", loginLimiter, acceptInviteController);
 router.get("/auth/invite-preview", loginLimiter, invitePreviewController);
 router.post("/auth/forgot-password", forgotPasswordLimiter, forgotPassword);
 router.post("/auth/reset-password", forgotPasswordLimiter, resetPassword);
-router.post("/auth/mfa/bootstrap/setup", loginLimiter, beginMfaBootstrapSetupController);
-router.post("/auth/mfa/bootstrap/enable", loginLimiter, confirmMfaBootstrapSetupController);
 router.get("/public/connector/releases", listConnectorReleasesController);
 router.get("/public/connector/releases/latest", getLatestConnectorReleaseController);
 router.get("/public/connector/download/:version/:platform", downloadConnectorReleaseController);
@@ -308,11 +299,6 @@ router.get("/auth/me", authenticate, me);
 router.post("/auth/refresh", requireCsrf, refresh);
 router.post("/auth/logout", authenticate, requireCsrf, logout);
 router.post("/auth/invite", authenticate, requireAnyAdmin, requireCsrf, invite);
-router.get("/auth/mfa/status", authenticate, requireOpsUser, getMfaStatusController);
-router.post("/auth/mfa/setup", authenticate, requireOpsUser, requireCsrf, beginMfaSetupController);
-router.post("/auth/mfa/enable", authenticate, requireOpsUser, requireCsrf, confirmMfaSetupController);
-router.post("/auth/mfa/disable", authenticate, requireOpsUser, requireCsrf, disableMfaController);
-router.post("/auth/mfa/complete", loginLimiter, completeMfaLoginController);
 
 // ==================== DASHBOARD ====================
 // ✅ Correct stats endpoint used by UI cards + chart + activity

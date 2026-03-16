@@ -294,7 +294,7 @@ export default function Index() {
                 <SecurityBullet>Public verification is separated from the authenticated operations portal.</SecurityBullet>
                 <SecurityBullet>Role-scoped access is used for super admin, licensee, manufacturer, and response workflows.</SecurityBullet>
                 <SecurityBullet>Privileged actions use authenticated API requests, CSRF checks, validation, and audit logging.</SecurityBullet>
-                <SecurityBullet>Required MFA for super admins, licensee admins, and manufacturer users protects the authenticated platform.</SecurityBullet>
+                <SecurityBullet>Authenticated access is protected with role-scoped permissions, secure sessions, and audit logging.</SecurityBullet>
                 <SecurityBullet>Transport security is designed for HTTPS/TLS deployment behind the production reverse proxy.</SecurityBullet>
                 <SecurityBullet>Control wording is aligned for ISO 27001 and SOC 2 style evidence collection; certification claims depend on formal external audit and current operating evidence.</SecurityBullet>
               </ul>

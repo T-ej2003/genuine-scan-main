@@ -21,7 +21,7 @@ export default function SettingPassword() {
           <CardContent className="text-sm text-muted-foreground">
             <ul className="list-disc pl-5">
               <li>Accepting an invite (first-time password set).</li>
-              <li>Required MFA enrollment immediately after password setup for privileged roles.</li>
+              <li>What happens after the password is accepted.</li>
               <li>Forgot password and reset links.</li>
               <li>How this differs for customers (public verify flow).</li>
             </ul>
@@ -49,8 +49,7 @@ export default function SettingPassword() {
                   <li>If you are a manufacturer using a workstation printer, install the connector from the same email before your first print run.</li>
                   <li>Select the invite link (it expires in 24 hours).</li>
                   <li>Set a password and confirm.</li>
-                  <li>After success, privileged roles continue directly into required MFA setup.</li>
-                  <li>Scan the authenticator QR, save the backup codes, then enter the 6-digit code to finish.</li>
+                  <li>After success, you are signed into the portal and can continue with your role-specific work.</li>
                 </ol>
               </CardContent>
             </Card>
@@ -65,7 +64,7 @@ export default function SettingPassword() {
                   <li>Select <Badge variant="outline">Forgot password?</Badge></li>
                   <li>Enter your email and submit.</li>
                   <li>Open the reset link from your email and set a new password.</li>
-                  <li>On the next sign-in, complete MFA if your role requires it.</li>
+                  <li>On the next sign-in, use the new password immediately.</li>
                 </ol>
               </CardContent>
             </Card>

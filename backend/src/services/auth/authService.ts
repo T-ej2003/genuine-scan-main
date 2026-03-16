@@ -1,11 +1,10 @@
 import prisma from "../../config/database";
 import { UserRole, UserStatus } from "@prisma/client";
 import { verifyPassword, hashPassword, shouldRehashPassword } from "./passwordService";
-import { signAccessToken, signMfaBootstrapToken, newCsrfToken, newRefreshToken, getMfaBootstrapTtlMinutes } from "./tokenService";
+import { signAccessToken, newCsrfToken, newRefreshToken } from "./tokenService";
 import { createRefreshToken, rotateRefreshToken, revokeAllUserRefreshTokens, revokeRefreshTokenByRaw } from "./refreshTokenService";
 import { createAuditLog } from "../auditService";
 import { assessAuthSessionRisk } from "./sessionRiskService";
-import { createAdminMfaChallenge, getAdminMfaStatus } from "./mfaService";
 import { listManufacturerLicenseeLinks, normalizeLinkedLicensees } from "../manufacturerScopeService";
 
 const parseIntEnv = (key: string, fallback: number) => {
@@ -39,9 +38,6 @@ export const isOrgAdminRole = (role: UserRole) =>
 
 export const isManufacturerRole = (role: UserRole) =>
   role === UserRole.MANUFACTURER || role === UserRole.MANUFACTURER_ADMIN || role === UserRole.MANUFACTURER_USER;
-
-export const requiresPrivilegedMfa = (role: UserRole) =>
-  isPlatformSuperAdminRole(role) || isOrgAdminRole(role) || isManufacturerRole(role);
 
 export const buildJwtPayloadForUser = (u: {
   id: string;
@@ -142,30 +138,13 @@ export const issueSessionForUser = async (input: {
 
 type SessionIssueResult = Awaited<ReturnType<typeof issueSessionForUser>>;
 
-export type PasswordLoginResult =
-  | (SessionIssueResult & { mfaRequired?: false })
-  | {
-      mfaRequired: true;
-      mfaTicket: string;
-      mfaExpiresAt: string;
-      riskScore: number;
-      riskLevel: string;
-      reasons: string[];
-    }
-  | {
-      mfaSetupRequired: true;
-      mfaSetupToken: string;
-      mfaSetupExpiresAt: string;
-      email: string;
-      role: UserRole;
-    };
+export type PasswordLoginResult = SessionIssueResult;
 
 export const loginWithPassword = async (input: {
   email: string;
   password: string;
   ipHash: string | null;
   userAgent: string | null;
-  allowMfaChallenge?: boolean;
 }): Promise<PasswordLoginResult> => {
   const email = String(input.email || "").trim().toLowerCase();
   const password = String(input.password || "");
@@ -265,67 +244,6 @@ export const loginWithPassword = async (input: {
     failedLoginAttempts: user.failedLoginAttempts || 0,
   });
 
-  const mfaStatus = await getAdminMfaStatus(user.id).catch(() => ({
-    enrolled: false,
-    enabled: false,
-    verifiedAt: null,
-    lastUsedAt: null,
-    backupCodesRemaining: 0,
-    createdAt: null,
-    updatedAt: null,
-  }));
-
-  if (requiresPrivilegedMfa(user.role) && !mfaStatus.enabled) {
-    return {
-      mfaSetupRequired: true,
-      mfaSetupToken: signMfaBootstrapToken({
-        userId: user.id,
-        email: user.email,
-        role: user.role,
-      }),
-      mfaSetupExpiresAt: addMinutes(now, getMfaBootstrapTtlMinutes()).toISOString(),
-      email: user.email,
-      role: user.role,
-    };
-  }
-
-  const allowMfaChallenge = input.allowMfaChallenge !== false;
-  if (mfaStatus.enabled && allowMfaChallenge) {
-    const challenge = await createAdminMfaChallenge({
-      userId: user.id,
-      riskScore: risk.score,
-      riskLevel: risk.riskLevel,
-      reasons: risk.reasons,
-      ipHash: input.ipHash,
-      userAgent: input.userAgent,
-    });
-
-    await createAuditLog({
-      userId: user.id,
-      licenseeId: user.licenseeId || undefined,
-      orgId: user.orgId || undefined,
-      action: "AUTH_MFA_CHALLENGE_ISSUED",
-      entityType: "User",
-      entityId: user.id,
-      details: {
-        riskScore: risk.score,
-        riskLevel: risk.riskLevel,
-        reasons: risk.reasons,
-      },
-      ipHash: input.ipHash || undefined,
-      userAgent: input.userAgent || undefined,
-    } as any);
-
-    return {
-      mfaRequired: true,
-      mfaTicket: challenge.ticket,
-      mfaExpiresAt: challenge.expiresAt.toISOString(),
-      riskScore: risk.score,
-      riskLevel: risk.riskLevel,
-      reasons: risk.reasons,
-    };
-  }
-
   if (risk.shouldBlock && isPlatformSuperAdminRole(user.role)) {
     await createAuditLog({
       userId: user.id,
@@ -363,7 +281,7 @@ export const loginWithPassword = async (input: {
         role: user.role,
         riskScore: risk.score,
         riskLevel: risk.riskLevel,
-        mfaEnabled: mfaStatus.enabled,
+        mfaEnabled: false,
       },
       ipHash: input.ipHash || undefined,
       userAgent: input.userAgent || undefined,
