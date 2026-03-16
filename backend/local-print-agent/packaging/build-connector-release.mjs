@@ -254,10 +254,13 @@ $LogDir = Join-Path $AgentHome "logs"
 $EnvFile = Join-Path $AgentHome "agent.env"
 $TargetExe = Join-Path $BinDir "mscqr-local-print-agent.exe"
 $Wrapper = Join-Path $BinDir "start-local-print-agent.cmd"
+$StartupDir = Join-Path $env:APPDATA "Microsoft\\Windows\\Start Menu\\Programs\\Startup"
+$StartupLauncher = Join-Path $StartupDir "MSCQR Connector.vbs"
 $TaskName = "MSCQR Local Print Agent"
 
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+New-Item -ItemType Directory -Force -Path $StartupDir | Out-Null
 Copy-Item -Path $SourceExe -Destination $TargetExe -Force
 
 if (-not (Test-Path $EnvFile)) {
@@ -286,33 +289,83 @@ if "%PRINT_AGENT_VERSION%"=="" set PRINT_AGENT_VERSION=${version}
 "@
 Set-Content -Path $Wrapper -Value $WrapperBody -Encoding ASCII
 
-$ExistingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-if ($ExistingTask) {
-  Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+$LauncherBody = @"
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run chr(34) & "$Wrapper" & chr(34), 0, False
+"@
+Set-Content -Path $StartupLauncher -Value $LauncherBody -Encoding ASCII
+
+$RunningAgent = Get-Process -Name "mscqr-local-print-agent" -ErrorAction SilentlyContinue
+if ($RunningAgent) {
+  $RunningAgent | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
-$Action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c \`"$Wrapper\`""
-$Trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-$Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-$Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew
+$ExistingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+if ($ExistingTask) {
+  try {
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null
+  } catch {
+  }
 
-Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Principal $Principal -Settings $Settings | Out-Null
-Start-ScheduledTask -TaskName $TaskName
+  try {
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
+    Write-Host "Removed legacy scheduled-task startup entry."
+  } catch {
+    Write-Warning "Existing scheduled task could not be removed without elevation. Continuing with the per-user Startup entry instead."
+  }
+}
+
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "\`"$Wrapper\`"" -WindowStyle Hidden
+
+$StatusReady = $false
+for ($Attempt = 0; $Attempt -lt 20; $Attempt++) {
+  Start-Sleep -Milliseconds 500
+  try {
+    Invoke-WebRequest -Uri "http://127.0.0.1:17866/status" -UseBasicParsing -TimeoutSec 2 | Out-Null
+    $StatusReady = $true
+    break
+  } catch {
+  }
+}
+
+if (-not $StatusReady) {
+  throw "Connector installed, but the local status endpoint did not start. Check $LogDir\\agent.log."
+}
 
 Write-Host ""
 Write-Host "MSCQR Connector installed successfully."
 Write-Host "This connector will start automatically whenever you sign in on this computer."
 Write-Host "Next step: open MSCQR, go to Printer Setup, and confirm the printer shows as ready."
+Write-Host "Startup launcher: $StartupLauncher"
 `;
 
 const renderWindowsUninstallPs1 = () => `$ErrorActionPreference = "Stop"
 
 $TaskName = "MSCQR Local Print Agent"
 $AgentHome = Join-Path $env:LOCALAPPDATA "MSCQR\\local-print-agent"
+$StartupLauncher = Join-Path $env:APPDATA "Microsoft\\Windows\\Start Menu\\Programs\\Startup\\MSCQR Connector.vbs"
+
+$RunningAgent = Get-Process -Name "mscqr-local-print-agent" -ErrorAction SilentlyContinue
+if ($RunningAgent) {
+  $RunningAgent | Stop-Process -Force -ErrorAction SilentlyContinue
+}
 
 $ExistingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($ExistingTask) {
-  Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+  try {
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null
+  } catch {
+  }
+
+  try {
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
+  } catch {
+    Write-Warning "Legacy scheduled task could not be removed without elevation. It can be removed later from Task Scheduler if needed."
+  }
+}
+
+if (Test-Path $StartupLauncher) {
+  Remove-Item -Force $StartupLauncher
 }
 
 if (Test-Path $AgentHome) {

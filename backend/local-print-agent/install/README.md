@@ -50,7 +50,7 @@ Supported rollout paths:
 
 - macOS LaunchAgent
 - Linux systemd user service
-- Windows Scheduled Task at user logon
+- Windows per-user Startup entry at logon
 
 For engineering and release packaging from the `backend` folder:
 
@@ -82,7 +82,7 @@ npm run print:agent:uninstall:windows
 
 1. Builds the backend so `dist/local-print-agent/index.js` is current.
 2. Creates a small wrapper under the user profile.
-3. Registers the wrapper to start automatically at login.
+3. Registers the wrapper to start automatically at login for the signed-in user.
 4. Starts the agent immediately.
 
 The agent still depends on the workstation OS already seeing the printer.

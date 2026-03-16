@@ -19,10 +19,13 @@ $BinDir = Join-Path $AgentHome "bin"
 $LogDir = Join-Path $AgentHome "logs"
 $EnvFile = Join-Path $AgentHome "agent.env"
 $Wrapper = Join-Path $BinDir "start-local-print-agent.cmd"
+$StartupDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup"
+$StartupLauncher = Join-Path $StartupDir "MSCQR Connector.vbs"
 $TaskName = "MSCQR Local Print Agent"
 
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+New-Item -ItemType Directory -Force -Path $StartupDir | Out-Null
 
 if (-not (Test-Path $EnvFile)) {
   @"
@@ -50,19 +53,50 @@ if "%PRINT_AGENT_PORT%"=="" set PRINT_AGENT_PORT=17866
 "@
 Set-Content -Path $Wrapper -Value $WrapperBody -Encoding ASCII
 
-$ExistingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-if ($ExistingTask) {
-  Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+$LauncherBody = @"
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run chr(34) & "$Wrapper" & chr(34), 0, False
+"@
+Set-Content -Path $StartupLauncher -Value $LauncherBody -Encoding ASCII
+
+$RunningAgent = Get-Process -Name "mscqr-local-print-agent" -ErrorAction SilentlyContinue
+if ($RunningAgent) {
+  $RunningAgent | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
-$Action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$Wrapper`""
-$Trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-$Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-$Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew
+$ExistingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+if ($ExistingTask) {
+  try {
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null
+  } catch {
+  }
 
-Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Principal $Principal -Settings $Settings | Out-Null
-Start-ScheduledTask -TaskName $TaskName
+  try {
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
+    Write-Host "Removed legacy scheduled-task startup entry."
+  } catch {
+    Write-Warning "Existing scheduled task could not be removed without elevation. Continuing with the per-user Startup entry instead."
+  }
+}
+
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "`"$Wrapper`"" -WindowStyle Hidden
+
+$StatusReady = $false
+for ($Attempt = 0; $Attempt -lt 20; $Attempt++) {
+  Start-Sleep -Milliseconds 500
+  try {
+    Invoke-WebRequest -Uri "http://127.0.0.1:17866/status" -UseBasicParsing -TimeoutSec 2 | Out-Null
+    $StatusReady = $true
+    break
+  } catch {
+  }
+}
+
+if (-not $StatusReady) {
+  throw "Connector installed, but the local status endpoint did not start. Check $LogDir\agent.log."
+}
 
 Write-Host "MSCQR local print agent installed for Windows logon startup."
 Write-Host "Status endpoint: http://127.0.0.1:17866/status"
 Write-Host "Optional gateway configuration file: $EnvFile"
+Write-Host "Startup launcher: $StartupLauncher"
