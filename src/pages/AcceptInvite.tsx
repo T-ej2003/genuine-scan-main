@@ -4,8 +4,7 @@ import { AlertCircle, CheckCircle2, KeyRound, Loader2, ShieldCheck, UserPlus } f
 
 import apiClient from "@/lib/api-client";
 import { AuthShell } from "@/components/auth/AuthShell";
-import { MfaEnrollmentPanel, type MfaEnrollmentData } from "@/components/auth/MfaEnrollmentPanel";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -24,9 +23,6 @@ export default function AcceptInvite() {
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [mfaSetupTicket, setMfaSetupTicket] = useState("");
-  const [mfaSetup, setMfaSetup] = useState<MfaEnrollmentData | null>(null);
-  const [mfaSetupCode, setMfaSetupCode] = useState("");
   const [preview, setPreview] = useState<null | {
     email: string;
     role: string;
@@ -36,19 +32,6 @@ export default function AcceptInvite() {
   }>(null);
 
   const canSubmit = token && password.length >= 8 && password === confirm;
-
-  const loadMfaSetup = async (ticket: string) => {
-    const setupResult = await apiClient.beginMfaBootstrapSetup(ticket);
-    if (!setupResult.success || !setupResult.data) {
-      setError(setupResult.error || "Failed to start MFA setup");
-      return false;
-    }
-
-    setMfaSetupTicket(ticket);
-    setMfaSetup(setupResult.data);
-    setMfaSetupCode("");
-    return true;
-  };
 
   useEffect(() => {
     let cancelled = false;
@@ -94,37 +77,10 @@ export default function AcceptInvite() {
         setError(res.error || "Invite acceptance failed");
         return;
       }
-      if (res.data?.mfaSetupRequired && res.data.mfaSetupToken) {
-        const loaded = await loadMfaSetup(res.data.mfaSetupToken);
-        if (loaded) {
-          setDone(false);
-          return;
-        }
-      }
       setDone(true);
       window.setTimeout(() => navigate("/dashboard"), 800);
     } catch (err: any) {
       setError(err?.message || "Invite acceptance failed");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const submitMfaSetup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    if (!mfaSetupTicket) return;
-    setSubmitting(true);
-    try {
-      const res = await apiClient.confirmMfaBootstrapSetup(mfaSetupTicket, mfaSetupCode.trim());
-      if (!res.success) {
-        setError(res.error || "MFA setup failed");
-        return;
-      }
-      setDone(true);
-      window.setTimeout(() => navigate("/dashboard"), 800);
-    } catch (err: any) {
-      setError(err?.message || "MFA setup failed");
     } finally {
       setSubmitting(false);
     }
@@ -193,118 +149,80 @@ export default function AcceptInvite() {
           </Alert>
         ) : null}
 
-        {mfaSetup ? (
-          <form onSubmit={submitMfaSetup} className="space-y-4">
-            <MfaEnrollmentPanel
-              title="Finish activation with MFA"
-              description="This role requires an authenticator app before the new account can enter MSCQR."
-              setup={mfaSetup}
-              code={mfaSetupCode}
-              onCodeChange={setMfaSetupCode}
-              confirming={submitting}
-              error={null}
-            />
-
-            <Button type="submit" className="w-full" disabled={submitting || done || mfaSetupCode.trim().length < 6}>
-              {submitting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Enabling MFA...
-                </>
-              ) : done ? (
-                "Activated"
-              ) : (
-                "Enable MFA and continue"
-              )}
-            </Button>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
-              <Link to="/login" className="underline-offset-4 hover:text-foreground hover:underline">
-                Back to sign in
-              </Link>
-              {token ? (
-                <Link to={`/connector-download?inviteToken=${encodeURIComponent(token)}`} className="underline-offset-4 hover:text-foreground hover:underline">
-                  Install Connector
-                </Link>
-              ) : null}
-            </div>
-          </form>
-        ) : (
-          <form onSubmit={submit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Name (optional)</Label>
-              <div className="relative">
-                <UserPlus className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id="name"
-                  type="text"
-                  autoComplete="name"
-                  placeholder="Your name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  disabled={submitting || done}
-                  className="pl-9"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <div className="relative">
-                <KeyRound className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id="password"
-                  type="password"
-                  autoComplete="new-password"
-                  placeholder="At least 8 characters"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  disabled={submitting || done}
-                  className="pl-9"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="confirm">Confirm password</Label>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="name">Name (optional)</Label>
+            <div className="relative">
+              <UserPlus className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                id="confirm"
-                type="password"
-                autoComplete="new-password"
-                placeholder="Re-enter password"
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-                required
+                id="name"
+                type="text"
+                autoComplete="name"
+                placeholder="Your name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
                 disabled={submitting || done}
+                className="pl-9"
               />
             </div>
+          </div>
 
-            <Button type="submit" className="w-full" disabled={submitting || done || !canSubmit}>
-              {submitting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Activating...
-                </>
-              ) : done ? (
-                "Activated"
-              ) : (
-                "Activate account"
-              )}
-            </Button>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
-              <Link to="/login" className="underline-offset-4 hover:text-foreground hover:underline">
-                Back to sign in
-              </Link>
-              {token ? (
-                <Link to={`/connector-download?inviteToken=${encodeURIComponent(token)}`} className="underline-offset-4 hover:text-foreground hover:underline">
-                  Install Connector
-                </Link>
-              ) : null}
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <div className="relative">
+              <KeyRound className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="password"
+                type="password"
+                autoComplete="new-password"
+                placeholder="At least 8 characters"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                disabled={submitting || done}
+                className="pl-9"
+              />
             </div>
-          </form>
-        )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="confirm">Confirm password</Label>
+            <Input
+              id="confirm"
+              type="password"
+              autoComplete="new-password"
+              placeholder="Re-enter password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              required
+              disabled={submitting || done}
+            />
+          </div>
+
+          <Button type="submit" className="w-full" disabled={submitting || done || !canSubmit}>
+            {submitting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Activating...
+              </>
+            ) : done ? (
+              "Activated"
+            ) : (
+              "Activate account"
+            )}
+          </Button>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
+            <Link to="/login" className="underline-offset-4 hover:text-foreground hover:underline">
+              Back to sign in
+            </Link>
+            {token ? (
+              <Link to={`/connector-download?inviteToken=${encodeURIComponent(token)}`} className="underline-offset-4 hover:text-foreground hover:underline">
+                Install Connector
+              </Link>
+            ) : null}
+          </div>
+        </form>
       </div>
     </AuthShell>
   );

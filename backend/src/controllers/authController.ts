@@ -1,6 +1,5 @@
 import { Request, Response } from "express";
 import { z } from "zod";
-import { UserRole } from "@prisma/client";
 import prisma from "../config/database";
 import { hashIp, normalizeUserAgent } from "../utils/security";
 import {
@@ -10,7 +9,6 @@ import {
   getAccessTokenTtlMinutes,
   getRefreshTokenTtlDays,
   newCsrfToken,
-  verifyMfaBootstrapToken,
 } from "../services/auth/tokenService";
 import { acceptInvite, createInvite, getInvitePreview } from "../services/auth/inviteService";
 import {
@@ -18,17 +16,9 @@ import {
   loginWithPassword,
   logoutSession,
   refreshSession,
-  requiresPrivilegedMfa,
 } from "../services/auth/authService";
 import { requestPasswordReset, resetPasswordWithToken } from "../services/auth/passwordResetService";
 import { isValidEmailAddress, normalizeEmailAddress } from "../utils/email";
-import {
-  beginAdminMfaSetup,
-  completeAdminMfaChallenge,
-  confirmAdminMfaSetup,
-  disableAdminMfa,
-  getAdminMfaStatus,
-} from "../services/auth/mfaService";
 import { isManufacturerRole, listManufacturerLicenseeLinks, normalizeLinkedLicensees } from "../services/manufacturerScopeService";
 
 const loginSchema = z.object({
@@ -69,31 +59,6 @@ const resetPasswordSchema = z.object({
   token: z.string().trim().min(10),
   password: z.string().min(8).max(200),
 });
-
-const mfaCodeSchema = z.object({
-  code: z.string().trim().min(6).max(20),
-});
-
-const mfaCompleteSchema = z.object({
-  ticket: z.string().trim().min(10),
-  code: z.string().trim().min(6).max(20),
-});
-
-const mfaBootstrapSetupSchema = z.object({
-  ticket: z.string().trim().min(10),
-});
-
-const mfaBootstrapEnableSchema = z.object({
-  ticket: z.string().trim().min(10),
-  code: z.string().trim().min(6).max(20),
-});
-
-const normalizePrivilegedRole = (role: unknown): UserRole | null => {
-  const value = String(role || "").trim().toUpperCase();
-  const allowed = new Set(Object.values(UserRole));
-  if (!allowed.has(value as UserRole)) return null;
-  return value as UserRole;
-};
 
 const normalizeAuthError = (error: unknown): { status: number; error: string } => {
   const raw = error instanceof Error ? error.message : String(error || "Unknown error");
@@ -186,37 +151,6 @@ export const login = async (req: Request, res: Response) => {
       userAgent,
     });
 
-    if ("mfaRequired" in session && session.mfaRequired) {
-      return res.json({
-        success: true,
-        data: {
-          mfaRequired: true,
-          mfaTicket: session.mfaTicket,
-          mfaExpiresAt: session.mfaExpiresAt,
-          riskScore: session.riskScore,
-          riskLevel: session.riskLevel,
-          reasons: session.reasons,
-        },
-      });
-    }
-
-    if ("mfaSetupRequired" in session && session.mfaSetupRequired) {
-      return res.status(202).json({
-        success: true,
-        data: {
-          mfaSetupRequired: true,
-          mfaSetupToken: session.mfaSetupToken,
-          mfaSetupExpiresAt: session.mfaSetupExpiresAt,
-          email: session.email,
-          role: session.role,
-        },
-      });
-    }
-
-    if (!("accessToken" in session)) {
-      throw new Error("Unexpected login session state");
-    }
-
     const accessTtlMs = getAccessTokenTtlMinutes() * 60 * 1000;
     const refreshTtlMs = getRefreshTokenTtlDays() * 24 * 60 * 60 * 1000;
 
@@ -230,208 +164,6 @@ export const login = async (req: Request, res: Response) => {
     console.error("Login error:", error);
     const out = normalizeAuthError(error);
     return res.status(out.status).json({ success: false, error: out.error });
-  }
-};
-
-export const beginMfaBootstrapSetupController = async (req: Request, res: Response) => {
-  try {
-    const parsed = mfaBootstrapSetupSchema.safeParse(req.body || {});
-    if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
-    }
-
-    const bootstrap = verifyMfaBootstrapToken(parsed.data.ticket);
-    const data = await beginAdminMfaSetup({
-      userId: bootstrap.userId,
-      email: bootstrap.email,
-    });
-    return res.status(201).json({ success: true, data });
-  } catch (error: any) {
-    const message = String(error?.message || "");
-    if (message.includes("INVALID_MFA_BOOTSTRAP_TOKEN") || message.includes("jwt")) {
-      return res.status(401).json({ success: false, error: "MFA setup session expired. Sign in again." });
-    }
-    console.error("beginMfaBootstrapSetupController error:", error);
-    return res.status(500).json({ success: false, error: "Failed to initialize MFA setup" });
-  }
-};
-
-export const confirmMfaBootstrapSetupController = async (req: Request, res: Response) => {
-  try {
-    const parsed = mfaBootstrapEnableSchema.safeParse(req.body || {});
-    if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
-    }
-
-    const bootstrap = verifyMfaBootstrapToken(parsed.data.ticket);
-    await confirmAdminMfaSetup({
-      userId: bootstrap.userId,
-      code: parsed.data.code,
-    });
-
-    const ipHash = hashIp(req.ip);
-    const userAgent = normalizeUserAgent(req.get("user-agent"));
-    const session = await issueSessionForUser({
-      userId: bootstrap.userId,
-      ipHash,
-      userAgent,
-    });
-
-    const accessTtlMs = getAccessTokenTtlMinutes() * 60 * 1000;
-    const refreshTtlMs = getRefreshTokenTtlDays() * 24 * 60 * 60 * 1000;
-
-    res.cookie(ACCESS_TOKEN_COOKIE, session.accessToken, { ...authCookieOptions(), maxAge: accessTtlMs });
-    res.cookie(REFRESH_TOKEN_COOKIE, session.refreshToken, { ...authCookieOptions(), maxAge: refreshTtlMs });
-    res.cookie(CSRF_TOKEN_COOKIE, session.csrfToken, { ...csrfCookieOptions(), maxAge: refreshTtlMs });
-
-    return res.json({
-      success: true,
-      data: {
-        token: session.accessToken,
-        user: session.user,
-        mfaEnabled: true,
-      },
-    });
-  } catch (error: any) {
-    const message = String(error?.message || "");
-    if (message.includes("INVALID_MFA_BOOTSTRAP_TOKEN") || message.includes("jwt")) {
-      return res.status(401).json({ success: false, error: "MFA setup session expired. Sign in again." });
-    }
-    if (message.includes("INVALID_MFA_CODE")) {
-      return res.status(400).json({ success: false, error: "Invalid MFA code" });
-    }
-    if (message.includes("MFA_SETUP_NOT_STARTED")) {
-      return res.status(400).json({ success: false, error: "MFA setup has not been started" });
-    }
-    console.error("confirmMfaBootstrapSetupController error:", error);
-    return res.status(500).json({ success: false, error: "Failed to enable MFA" });
-  }
-};
-
-export const getMfaStatusController = async (req: Request, res: Response) => {
-  try {
-    const authReq = req as any;
-    const userId = authReq.user?.userId as string | undefined;
-    if (!userId) return res.status(401).json({ success: false, error: "Not authenticated" });
-
-    const data = await getAdminMfaStatus(userId);
-    return res.json({ success: true, data });
-  } catch (error) {
-    console.error("getMfaStatusController error:", error);
-    return res.status(500).json({ success: false, error: "Failed to load MFA status" });
-  }
-};
-
-export const beginMfaSetupController = async (req: Request, res: Response) => {
-  try {
-    const authReq = req as any;
-    const userId = authReq.user?.userId as string | undefined;
-    const email = authReq.user?.email as string | undefined;
-    if (!userId || !email) return res.status(401).json({ success: false, error: "Not authenticated" });
-
-    const data = await beginAdminMfaSetup({ userId, email });
-    return res.status(201).json({ success: true, data });
-  } catch (error) {
-    console.error("beginMfaSetupController error:", error);
-    return res.status(500).json({ success: false, error: "Failed to initialize MFA setup" });
-  }
-};
-
-export const confirmMfaSetupController = async (req: Request, res: Response) => {
-  try {
-    const authReq = req as any;
-    const userId = authReq.user?.userId as string | undefined;
-    if (!userId) return res.status(401).json({ success: false, error: "Not authenticated" });
-
-    const parsed = mfaCodeSchema.safeParse(req.body || {});
-    if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid code" });
-    }
-
-    const data = await confirmAdminMfaSetup({ userId, code: parsed.data.code });
-    return res.json({ success: true, data });
-  } catch (error: any) {
-    const message = String(error?.message || "");
-    if (message.includes("INVALID_MFA_CODE")) {
-      return res.status(400).json({ success: false, error: "Invalid MFA code" });
-    }
-    if (message.includes("MFA_SETUP_NOT_STARTED")) {
-      return res.status(400).json({ success: false, error: "MFA setup has not been started" });
-    }
-    console.error("confirmMfaSetupController error:", error);
-    return res.status(500).json({ success: false, error: "Failed to enable MFA" });
-  }
-};
-
-export const disableMfaController = async (req: Request, res: Response) => {
-  try {
-    const authReq = req as any;
-    const userId = authReq.user?.userId as string | undefined;
-    const role = normalizePrivilegedRole(authReq.user?.role);
-    if (!userId) return res.status(401).json({ success: false, error: "Not authenticated" });
-    if (role && requiresPrivilegedMfa(role)) {
-      return res.status(403).json({ success: false, error: "MFA is required for your role and cannot be disabled." });
-    }
-
-    const data = await disableAdminMfa(userId);
-    return res.json({ success: true, data });
-  } catch (error) {
-    console.error("disableMfaController error:", error);
-    return res.status(500).json({ success: false, error: "Failed to disable MFA" });
-  }
-};
-
-export const completeMfaLoginController = async (req: Request, res: Response) => {
-  try {
-    const parsed = mfaCompleteSchema.safeParse(req.body || {});
-    if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
-    }
-
-    const ipHash = hashIp(req.ip);
-    const userAgent = normalizeUserAgent(req.get("user-agent"));
-
-    const completed = await completeAdminMfaChallenge({
-      ticket: parsed.data.ticket,
-      code: parsed.data.code,
-      ipHash,
-      userAgent,
-    });
-
-    const session = await issueSessionForUser({
-      userId: completed.userId,
-      ipHash,
-      userAgent,
-    });
-
-    const accessTtlMs = getAccessTokenTtlMinutes() * 60 * 1000;
-    const refreshTtlMs = getRefreshTokenTtlDays() * 24 * 60 * 60 * 1000;
-
-    res.cookie(ACCESS_TOKEN_COOKIE, session.accessToken, { ...authCookieOptions(), maxAge: accessTtlMs });
-    res.cookie(REFRESH_TOKEN_COOKIE, session.refreshToken, { ...authCookieOptions(), maxAge: refreshTtlMs });
-    res.cookie(CSRF_TOKEN_COOKIE, session.csrfToken, { ...csrfCookieOptions(), maxAge: refreshTtlMs });
-
-    return res.json({
-      success: true,
-      data: {
-        token: session.accessToken,
-        user: session.user,
-        mfaCompleted: true,
-        riskScore: completed.riskScore,
-        riskLevel: completed.riskLevel,
-      },
-    });
-  } catch (error: any) {
-    const message = String(error?.message || "");
-    if (
-      message.includes("MFA_CHALLENGE_NOT_FOUND") ||
-      message.includes("INVALID_MFA_CODE") ||
-      message.includes("MFA_NOT_ENABLED")
-    ) {
-      return res.status(401).json({ success: false, error: "MFA verification failed" });
-    }
-    console.error("completeMfaLoginController error:", error);
-    return res.status(500).json({ success: false, error: "Failed to complete MFA login" });
   }
 };
 
@@ -638,39 +370,7 @@ export const acceptInviteController = async (req: Request, res: Response) => {
       password: parsed.data.password,
       ipHash,
       userAgent,
-      allowMfaChallenge: false,
     });
-
-    if ("mfaRequired" in session && session.mfaRequired) {
-      return res.status(202).json({
-        success: true,
-        data: {
-          mfaRequired: true,
-          mfaTicket: session.mfaTicket,
-          mfaExpiresAt: session.mfaExpiresAt,
-          riskScore: session.riskScore,
-          riskLevel: session.riskLevel,
-          reasons: session.reasons,
-        },
-      });
-    }
-
-    if ("mfaSetupRequired" in session && session.mfaSetupRequired) {
-      return res.status(202).json({
-        success: true,
-        data: {
-          mfaSetupRequired: true,
-          mfaSetupToken: session.mfaSetupToken,
-          mfaSetupExpiresAt: session.mfaSetupExpiresAt,
-          email: session.email,
-          role: session.role,
-        },
-      });
-    }
-
-    if (!("accessToken" in session)) {
-      throw new Error("Unexpected invite activation session state");
-    }
 
     res.cookie(ACCESS_TOKEN_COOKIE, session.accessToken, { ...authCookieOptions(), maxAge: accessTtlMs });
     res.cookie(REFRESH_TOKEN_COOKIE, session.refreshToken, { ...authCookieOptions(), maxAge: refreshTtlMs });

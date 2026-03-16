@@ -160,9 +160,9 @@ export const getPageGuidance = (pathname: string, role?: UserRole | null): PageG
   if (starts(pathname, "/account")) {
     return {
       title: "Keep your account secure",
-      summary: "Update your profile, password, and required MFA settings to maintain secure access.",
-      firstAction: "Confirm MFA is enabled before you leave this page if you are a super admin, licensee admin, or manufacturer user.",
-      note: "If sign-in fails, use the password reset flow from the login page and then complete MFA.",
+      summary: "Update your profile and password to maintain secure access.",
+      firstAction: "Confirm your name, email, and password are current before leaving this page.",
+      note: "If sign-in fails, use the password reset flow from the login page.",
     };
   }
 

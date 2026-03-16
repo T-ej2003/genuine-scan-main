@@ -24,7 +24,7 @@ export default function GettingAccess() {
             <ul className="list-disc pl-5">
               <li>Who creates accounts for each role.</li>
               <li>What invite emails contain and how long invite links remain valid.</li>
-              <li>When required MFA is enforced during onboarding.</li>
+              <li>What first-time sign-in looks like after password setup.</li>
               <li>What customers need to do to verify a product (no account required).</li>
             </ul>
           </CardContent>
@@ -48,7 +48,7 @@ export default function GettingAccess() {
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ul className="list-disc pl-5">
                   <li>Created by the platform owner (not self sign-up).</li>
-                  <li>Must complete MFA before first portal access.</li>
+                  <li>Signs in with the issued email and password.</li>
                   <li>Has full platform visibility and can invite other roles.</li>
                 </ul>
               </CardContent>
@@ -63,7 +63,6 @@ export default function GettingAccess() {
                   <li>Super Admin creates the licensee (tenant).</li>
                   <li>Super Admin or an org admin sends you an invite email.</li>
                   <li>You open the invite link and set your password.</li>
-                  <li>You complete required MFA with an authenticator app.</li>
                   <li>You sign in and operate only within your org scope.</li>
                 </ol>
               </CardContent>
@@ -79,7 +78,6 @@ export default function GettingAccess() {
                   <li>You receive an invite email with the password-setup link.</li>
                   <li>The same email also includes the MSCQR Connector download page for Mac and Windows.</li>
                   <li>Install the connector once on the computer that will print, then open the invite link to set your password.</li>
-                  <li>Complete required MFA before the portal opens.</li>
                   <li>Sign in and you will only see batches assigned to your account.</li>
                 </ol>
               </CardContent>

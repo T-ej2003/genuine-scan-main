@@ -6,21 +6,7 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<{
-    success: boolean;
-    error?: string;
-    mfaRequired?: boolean;
-    mfaTicket?: string;
-    mfaExpiresAt?: string;
-    mfaSetupRequired?: boolean;
-    mfaSetupToken?: string;
-    mfaSetupExpiresAt?: string;
-    email?: string;
-    role?: string;
-    riskLevel?: string;
-    reasons?: string[];
-  }>;
-  completeMfaLogin: (ticket: string, code: string) => Promise<{ success: boolean; error?: string }>;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   refresh: () => Promise<void>;
 }
@@ -120,26 +106,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     try {
       const result = await apiClient.login(email, password);
-      if (result.success && result.data?.mfaRequired) {
-        return {
-          success: false,
-          mfaRequired: true,
-          mfaTicket: result.data.mfaTicket,
-          mfaExpiresAt: result.data.mfaExpiresAt,
-          riskLevel: result.data.riskLevel,
-          reasons: result.data.reasons || [],
-        };
-      }
-      if (result.success && result.data?.mfaSetupRequired) {
-        return {
-          success: false,
-          mfaSetupRequired: true,
-          mfaSetupToken: result.data.mfaSetupToken,
-          mfaSetupExpiresAt: result.data.mfaSetupExpiresAt,
-          email: result.data.email,
-          role: result.data.role,
-        };
-      }
       if (result.success && result.data?.user) {
         setSessionUser(result.data.user);
         return { success: true };
@@ -147,19 +113,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: false, error: result.error || "Invalid email or password" };
     } catch (e: any) {
       return { success: false, error: e?.message || "Login failed" };
-    }
-  };
-
-  const completeMfaLogin = async (ticket: string, code: string) => {
-    try {
-      const result = await apiClient.completeMfaLogin(ticket, code);
-      if (result.success && result.data?.user) {
-        setSessionUser(result.data.user);
-        return { success: true };
-      }
-      return { success: false, error: result.error || "MFA verification failed" };
-    } catch (e: any) {
-      return { success: false, error: e?.message || "MFA verification failed" };
     }
   };
 
@@ -173,7 +126,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isLoading,
       isAuthenticated: !!user,
       login,
-      completeMfaLogin,
       logout,
       refresh,
     }),

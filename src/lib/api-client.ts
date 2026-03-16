@@ -254,12 +254,6 @@ class ApiClient {
     const res = await this.request<{
       token?: string;
       user?: any;
-      mfaRequired?: boolean;
-      mfaTicket?: string;
-      mfaExpiresAt?: string;
-      mfaSetupRequired?: boolean;
-      mfaSetupToken?: string;
-      mfaSetupExpiresAt?: string;
       email?: string;
       role?: string;
       riskScore?: number;
@@ -272,66 +266,6 @@ class ApiClient {
 
     if (res.success && res.data?.token) this.setToken(res.data.token);
     return res;
-  }
-
-  async beginMfaBootstrapSetup(ticket: string) {
-    return this.request<{
-      secret: string;
-      otpauthUri: string;
-      backupCodes: string[];
-    }>("/auth/mfa/bootstrap/setup", {
-      method: "POST",
-      body: JSON.stringify({ ticket }),
-    });
-  }
-
-  async confirmMfaBootstrapSetup(ticket: string, code: string) {
-    const res = await this.request<{ token: string; user: any; mfaEnabled: boolean }>("/auth/mfa/bootstrap/enable", {
-      method: "POST",
-      body: JSON.stringify({ ticket, code }),
-    });
-    if (res.success && res.data?.token) this.setToken(res.data.token);
-    return res;
-  }
-
-  async completeMfaLogin(ticket: string, code: string) {
-    const res = await this.request<{ token: string; user: any; mfaCompleted: boolean }>("/auth/mfa/complete", {
-      method: "POST",
-      body: JSON.stringify({ ticket, code }),
-    });
-    if (res.success && res.data?.token) this.setToken(res.data.token);
-    return res;
-  }
-
-  async getMfaStatus() {
-    return this.request<{
-      enrolled: boolean;
-      enabled: boolean;
-      verifiedAt: string | null;
-      lastUsedAt: string | null;
-      backupCodesRemaining: number;
-      createdAt: string | null;
-      updatedAt: string | null;
-    }>("/auth/mfa/status");
-  }
-
-  async beginMfaSetup() {
-    return this.request<{
-      secret: string;
-      otpauthUri: string;
-      backupCodes: string[];
-    }>("/auth/mfa/setup", { method: "POST" });
-  }
-
-  async confirmMfaSetup(code: string) {
-    return this.request<{ enabled: boolean }>("/auth/mfa/enable", {
-      method: "POST",
-      body: JSON.stringify({ code }),
-    });
-  }
-
-  async disableMfa() {
-    return this.request<{ enabled: boolean }>("/auth/mfa/disable", { method: "POST" });
   }
 
   async getCurrentUser() {
@@ -362,12 +296,6 @@ class ApiClient {
     const res = await this.request<{
       token?: string;
       user?: any;
-      mfaRequired?: boolean;
-      mfaTicket?: string;
-      mfaExpiresAt?: string;
-      mfaSetupRequired?: boolean;
-      mfaSetupToken?: string;
-      mfaSetupExpiresAt?: string;
       email?: string;
       role?: string;
       riskScore?: number;
