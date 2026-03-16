@@ -12,6 +12,11 @@ interface AuthContextType {
     mfaRequired?: boolean;
     mfaTicket?: string;
     mfaExpiresAt?: string;
+    mfaSetupRequired?: boolean;
+    mfaSetupToken?: string;
+    mfaSetupExpiresAt?: string;
+    email?: string;
+    role?: string;
     riskLevel?: string;
     reasons?: string[];
   }>;
@@ -123,6 +128,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           mfaExpiresAt: result.data.mfaExpiresAt,
           riskLevel: result.data.riskLevel,
           reasons: result.data.reasons || [],
+        };
+      }
+      if (result.success && result.data?.mfaSetupRequired) {
+        return {
+          success: false,
+          mfaSetupRequired: true,
+          mfaSetupToken: result.data.mfaSetupToken,
+          mfaSetupExpiresAt: result.data.mfaSetupExpiresAt,
+          email: result.data.email,
+          role: result.data.role,
         };
       }
       if (result.success && result.data?.user) {

@@ -39,7 +39,8 @@ If any of the items above are missing, confirm you are signed in as a Super Admi
 3. Enter a password with at least 8 characters.
 4. Re-enter the same password in `Confirm password`.
 5. Select `Activate account`.
-6. Wait for the system to redirect you to the dashboard.
+6. Complete the required MFA setup by scanning the authenticator QR, saving the backup codes, and entering the 6-digit code.
+7. Wait for the system to redirect you to the dashboard.
 
 ![Accept Invite](../public/docs/password-accept-invite.png)
 
@@ -48,9 +49,10 @@ If any of the items above are missing, confirm you are signed in as a Super Admi
 2. Enter your email address.
 3. Enter your password.
 4. Select `Sign in`.
-5. If the system asks for MFA, enter the 6-digit code or backup code.
-6. Select `Verify MFA`.
-7. Confirm the left menu contains all Super Admin items listed in Section 2.
+5. If this is your first privileged sign-in, the system requires MFA setup before portal access is granted.
+6. Scan the authenticator QR, save the backup codes, and enter the 6-digit code.
+7. On later sign-ins, enter the 6-digit code or backup code when prompted.
+8. Confirm the left menu contains all Super Admin items listed in Section 2.
 
 ![Super Admin Login](../public/docs/access-super-admin-login.png)
 

@@ -1,7 +1,7 @@
 import prisma from "../../config/database";
 import { UserRole, UserStatus } from "@prisma/client";
 import { verifyPassword, hashPassword, shouldRehashPassword } from "./passwordService";
-import { signAccessToken, newCsrfToken, newRefreshToken } from "./tokenService";
+import { signAccessToken, signMfaBootstrapToken, newCsrfToken, newRefreshToken, getMfaBootstrapTtlMinutes } from "./tokenService";
 import { createRefreshToken, rotateRefreshToken, revokeAllUserRefreshTokens, revokeRefreshTokenByRaw } from "./refreshTokenService";
 import { createAuditLog } from "../auditService";
 import { assessAuthSessionRisk } from "./sessionRiskService";
@@ -39,6 +39,9 @@ export const isOrgAdminRole = (role: UserRole) =>
 
 export const isManufacturerRole = (role: UserRole) =>
   role === UserRole.MANUFACTURER || role === UserRole.MANUFACTURER_ADMIN || role === UserRole.MANUFACTURER_USER;
+
+export const requiresPrivilegedMfa = (role: UserRole) =>
+  isPlatformSuperAdminRole(role) || isOrgAdminRole(role) || isManufacturerRole(role);
 
 export const buildJwtPayloadForUser = (u: {
   id: string;
@@ -148,6 +151,13 @@ export type PasswordLoginResult =
       riskScore: number;
       riskLevel: string;
       reasons: string[];
+    }
+  | {
+      mfaSetupRequired: true;
+      mfaSetupToken: string;
+      mfaSetupExpiresAt: string;
+      email: string;
+      role: UserRole;
     };
 
 export const loginWithPassword = async (input: {
@@ -264,6 +274,20 @@ export const loginWithPassword = async (input: {
     createdAt: null,
     updatedAt: null,
   }));
+
+  if (requiresPrivilegedMfa(user.role) && !mfaStatus.enabled) {
+    return {
+      mfaSetupRequired: true,
+      mfaSetupToken: signMfaBootstrapToken({
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+      }),
+      mfaSetupExpiresAt: addMinutes(now, getMfaBootstrapTtlMinutes()).toISOString(),
+      email: user.email,
+      role: user.role,
+    };
+  }
 
   const allowMfaChallenge = input.allowMfaChallenge !== false;
   if (mfaStatus.enabled && allowMfaChallenge) {

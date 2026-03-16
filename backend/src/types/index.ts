@@ -9,6 +9,13 @@ export interface JWTPayload {
   linkedLicenseeIds?: string[] | null;
 }
 
+export interface MfaBootstrapPayload {
+  userId: string;
+  email: string;
+  role: UserRole;
+  stage: "MFA_BOOTSTRAP";
+}
+
 export interface AuthenticatedRequest extends Express.Request {
   user?: JWTPayload;
 }
