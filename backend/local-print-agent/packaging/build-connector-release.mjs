@@ -27,6 +27,7 @@ const windowsPackageName = `MSCQR-Connector-Windows-${version}.zip`;
 const normalizeEnv = (value) => String(value || "").trim();
 const isTruthy = (value) => /^(1|true|yes|on)$/i.test(normalizeEnv(value));
 const hasEnvOverride = (name) => Object.prototype.hasOwnProperty.call(process.env, name);
+const webAppBaseUrl = normalizeEnv(process.env.WEB_APP_BASE_URL).replace(/\/+$/g, "");
 const macSigningIdentity = normalizeEnv(process.env.MACOS_CONNECTOR_SIGN_IDENTITY);
 const macApplicationSigningIdentity = normalizeEnv(process.env.MACOS_CONNECTOR_APP_SIGN_IDENTITY);
 const requireMacNotarization = hasEnvOverride("MACOS_CONNECTOR_REQUIRE_NOTARIZATION")
@@ -66,6 +67,10 @@ const resolveMacNotaryConfig = () => {
 };
 
 const macNotaryConfig = resolveMacNotaryConfig();
+
+if (!webAppBaseUrl) {
+  throw new Error("WEB_APP_BASE_URL is required to package the public Windows connector installer.");
+}
 
 if (macNotaryConfig && !macSigningIdentity) {
   throw new Error("MACOS_CONNECTOR_SIGN_IDENTITY is required when macOS notarization is configured.");
@@ -108,6 +113,19 @@ const writeAsciiFile = (filePath, contents, executable = false) => {
   if (executable) {
     fs.chmodSync(filePath, 0o755);
   }
+};
+
+const windowsInstallAssetRoot = path.join(backendRoot, "local-print-agent", "install", "windows");
+const readWindowsAssetTemplate = (assetName) => {
+  const templatePath = path.join(windowsInstallAssetRoot, assetName);
+  if (!fs.existsSync(templatePath)) {
+    throw new Error(`Missing Windows install asset: ${templatePath}`);
+  }
+
+  return fs
+    .readFileSync(templatePath, "utf8")
+    .replace(/__MSCQR_WEB_APP_BASE_URL__/g, webAppBaseUrl)
+    .replace(/__MSCQR_CONNECTOR_VERSION__/g, version);
 };
 
 const sha256ForFile = (filePath) =>
@@ -237,241 +255,6 @@ rm -f "$PLIST"
 rm -rf "/usr/local/libexec/mscqr-connector"
 
 echo "MSCQR Connector removed from this Mac."
-`;
-
-const renderWindowsInstallerPs1 = () => `$ErrorActionPreference = "Stop"
-
-$PackageRoot = $PSScriptRoot
-$SourceExe = Join-Path $PackageRoot "bin\\mscqr-local-print-agent.exe"
-
-if (-not (Test-Path $SourceExe)) {
-  throw "Connector package is incomplete. mscqr-local-print-agent.exe was not found."
-}
-
-$AgentHome = Join-Path $env:LOCALAPPDATA "MSCQR\\local-print-agent"
-$BinDir = Join-Path $AgentHome "bin"
-$LogDir = Join-Path $AgentHome "logs"
-$EnvFile = Join-Path $AgentHome "agent.env"
-$TargetExe = Join-Path $BinDir "mscqr-local-print-agent.exe"
-$Wrapper = Join-Path $BinDir "start-local-print-agent.cmd"
-$StartupDir = Join-Path $env:APPDATA "Microsoft\\Windows\\Start Menu\\Programs\\Startup"
-$StartupLauncher = Join-Path $StartupDir "MSCQR Connector.vbs"
-$TaskName = "MSCQR Local Print Agent"
-
-New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
-New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
-New-Item -ItemType Directory -Force -Path $StartupDir | Out-Null
-Copy-Item -Path $SourceExe -Destination $TargetExe -Force
-
-if (-not (Test-Path $EnvFile)) {
-@"
-# Optional MSCQR connector overrides.
-# Example:
-# PRINT_GATEWAY_BACKEND_URL=https://mscqr.example.com/api
-# PRINT_GATEWAY_ID=gw_1234567890
-# PRINT_GATEWAY_SECRET=replace-with-bootstrap-secret
-"@ | Set-Content -Path $EnvFile -Encoding ASCII
-}
-
-$WrapperBody = @"
-@echo off
-setlocal EnableExtensions
-set "ENV_FILE=$EnvFile"
-if exist "%ENV_FILE%" (
-  for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%ENV_FILE%") do (
-    if not "%%~A"=="" set "%%~A=%%~B"
-  )
-)
-if "%PRINT_AGENT_HOST%"=="" set PRINT_AGENT_HOST=127.0.0.1
-if "%PRINT_AGENT_PORT%"=="" set PRINT_AGENT_PORT=17866
-if "%PRINT_AGENT_VERSION%"=="" set PRINT_AGENT_VERSION=${version}
-"$TargetExe" >> "$LogDir\\agent.log" 2>&1
-"@
-Set-Content -Path $Wrapper -Value $WrapperBody -Encoding ASCII
-
-$LauncherBody = @"
-Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run chr(34) & "$Wrapper" & chr(34), 0, False
-"@
-Set-Content -Path $StartupLauncher -Value $LauncherBody -Encoding ASCII
-
-$RunningAgent = Get-Process -Name "mscqr-local-print-agent" -ErrorAction SilentlyContinue
-if ($RunningAgent) {
-  $RunningAgent | Stop-Process -Force -ErrorAction SilentlyContinue
-}
-
-$ExistingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-if ($ExistingTask) {
-  try {
-    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null
-  } catch {
-  }
-
-  try {
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
-    Write-Host "Removed legacy scheduled-task startup entry."
-  } catch {
-    Write-Warning "Existing scheduled task could not be removed without elevation. Continuing with the per-user Startup entry instead."
-  }
-}
-
-Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "\`"$Wrapper\`"" -WindowStyle Hidden
-
-$StatusReady = $false
-for ($Attempt = 0; $Attempt -lt 20; $Attempt++) {
-  Start-Sleep -Milliseconds 500
-  try {
-    Invoke-WebRequest -Uri "http://127.0.0.1:17866/status" -UseBasicParsing -TimeoutSec 2 | Out-Null
-    $StatusReady = $true
-    break
-  } catch {
-  }
-}
-
-if (-not $StatusReady) {
-  throw "Connector installed, but the local status endpoint did not start. Check $LogDir\\agent.log."
-}
-
-Write-Host ""
-Write-Host "MSCQR Connector installed successfully."
-Write-Host "This connector will start automatically whenever you sign in on this computer."
-Write-Host "Next step: open MSCQR, go to Printer Setup, and confirm the printer shows as ready."
-Write-Host "Startup launcher: $StartupLauncher"
-`;
-
-const renderWindowsUninstallPs1 = () => `$ErrorActionPreference = "Stop"
-
-$TaskName = "MSCQR Local Print Agent"
-$AgentHome = Join-Path $env:LOCALAPPDATA "MSCQR\\local-print-agent"
-$StartupLauncher = Join-Path $env:APPDATA "Microsoft\\Windows\\Start Menu\\Programs\\Startup\\MSCQR Connector.vbs"
-
-$RunningAgent = Get-Process -Name "mscqr-local-print-agent" -ErrorAction SilentlyContinue
-if ($RunningAgent) {
-  $RunningAgent | Stop-Process -Force -ErrorAction SilentlyContinue
-}
-
-$ExistingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-if ($ExistingTask) {
-  try {
-    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null
-  } catch {
-  }
-
-  try {
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
-  } catch {
-    Write-Warning "Legacy scheduled task could not be removed without elevation. It can be removed later from Task Scheduler if needed."
-  }
-}
-
-if (Test-Path $StartupLauncher) {
-  Remove-Item -Force $StartupLauncher
-}
-
-if (Test-Path $AgentHome) {
-  Remove-Item -Path $AgentHome -Recurse -Force
-}
-
-Write-Host "MSCQR Connector removed from this Windows workstation."
-`;
-
-const renderWindowsInstallCmd = () => `@echo off
-setlocal EnableExtensions
-cd /d "%~dp0"
-set "INSTALL_SCRIPT=%~dp0install-packaged-startup-task.ps1"
-set "CONNECTOR_EXE=%~dp0bin\\mscqr-local-print-agent.exe"
-set "DIALOG_TITLE=MSCQR Connector Setup"
-
-if not exist "%INSTALL_SCRIPT%" (
-  echo.
-  echo MSCQR Connector setup cannot start from inside the ZIP preview.
-  echo Extract the entire ZIP to a normal folder first, then run Install Connector.cmd again.
-  echo.
-  echo Missing file:
-  echo   %INSTALL_SCRIPT%
-  set "DIALOG_MESSAGE=MSCQR Connector setup could not start. Extract the ZIP to a normal folder first, then run Install Connector.cmd again."
-  set "DIALOG_ICON=Error"
-  call :show_dialog
-  pause
-  exit /b 1
-)
-
-if not exist "%CONNECTOR_EXE%" (
-  echo.
-  echo MSCQR Connector package is incomplete or was not fully extracted.
-  echo Extract the entire ZIP to a normal folder first, then run Install Connector.cmd again.
-  set "DIALOG_MESSAGE=MSCQR Connector setup could not start because the package is incomplete. Extract the ZIP to a normal folder first, then run Install Connector.cmd again."
-  set "DIALOG_ICON=Error"
-  call :show_dialog
-  pause
-  exit /b 1
-)
-
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%INSTALL_SCRIPT%"
-set "EXITCODE=%ERRORLEVEL%"
-if not "%EXITCODE%"=="0" (
-  echo.
-  echo MSCQR Connector setup did not complete.
-  set "DIALOG_MESSAGE=MSCQR Connector setup did not complete. Review the Command Prompt window for the error details and try again."
-  set "DIALOG_ICON=Error"
-  call :show_dialog
-  pause
-  exit /b %EXITCODE%
-)
-echo.
-echo MSCQR Connector setup is complete.
-set "DIALOG_MESSAGE=MSCQR Connector setup completed successfully. Return to MSCQR and click Check again."
-set "DIALOG_ICON=Information"
-call :show_dialog
-exit /b 0
-
-:show_dialog
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show($env:DIALOG_MESSAGE, $env:DIALOG_TITLE, [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::%DIALOG_ICON%) | Out-Null" >nul 2>&1
-exit /b 0
-`;
-
-const renderWindowsUninstallCmd = () => `@echo off
-setlocal EnableExtensions
-cd /d "%~dp0"
-set "UNINSTALL_SCRIPT=%~dp0uninstall-packaged-startup-task.ps1"
-if not exist "%UNINSTALL_SCRIPT%" (
-  echo.
-  echo MSCQR Connector removal script was not found in this folder.
-  echo Extract the entire ZIP to a normal folder first, then run Uninstall Connector.cmd again.
-  pause
-  exit /b 1
-)
-
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%UNINSTALL_SCRIPT%"
-set "EXITCODE=%ERRORLEVEL%"
-if not "%EXITCODE%"=="0" (
-  echo.
-  echo MSCQR Connector removal did not complete.
-  pause
-  exit /b %EXITCODE%
-)
-echo.
-echo MSCQR Connector has been removed.
-pause
-`;
-
-const renderWindowsReadme = () => `MSCQR Connector for Windows
-Version: ${version}
-
-Setup steps:
-1. Extract this ZIP to a normal folder on the Windows computer that is connected to the printer.
-2. Do not run the installer from inside the ZIP preview in File Explorer.
-3. Double-click "Install Connector.cmd" from the extracted folder.
-4. After setup completes, open MSCQR and go to Printer Setup.
-5. Confirm the printer shows as ready before you print live labels.
-
-What this does:
-- installs the MSCQR Connector for the signed-in Windows user
-- starts the connector immediately
-- configures it to start automatically at every sign-in
-
-Optional advanced configuration:
-- %LOCALAPPDATA%\\MSCQR\\local-print-agent\\agent.env
 `;
 
 const run = (command, args, cwd = backendRoot) => {
@@ -658,11 +441,11 @@ const buildWindowsPackage = async (binaries, stagingRoot) => {
   ensureDir(windowsReleaseDir);
 
   fs.copyFileSync(binaries.winX64, path.join(bundleBinDir, "mscqr-local-print-agent.exe"));
-  writeAsciiFile(path.join(bundleDir, "install-packaged-startup-task.ps1"), renderWindowsInstallerPs1());
-  writeAsciiFile(path.join(bundleDir, "uninstall-packaged-startup-task.ps1"), renderWindowsUninstallPs1());
-  writeAsciiFile(path.join(bundleDir, "Install Connector.cmd"), renderWindowsInstallCmd());
-  writeAsciiFile(path.join(bundleDir, "Uninstall Connector.cmd"), renderWindowsUninstallCmd());
-  writeAsciiFile(path.join(bundleDir, "README.txt"), renderWindowsReadme());
+  writeAsciiFile(path.join(bundleDir, "install-startup-task.ps1"), readWindowsAssetTemplate("install-startup-task.ps1"));
+  writeAsciiFile(path.join(bundleDir, "uninstall-startup-task.ps1"), readWindowsAssetTemplate("uninstall-startup-task.ps1"));
+  writeAsciiFile(path.join(bundleDir, "Install Connector.cmd"), readWindowsAssetTemplate("Install Connector.cmd"));
+  writeAsciiFile(path.join(bundleDir, "Uninstall Connector.cmd"), readWindowsAssetTemplate("Uninstall Connector.cmd"));
+  writeAsciiFile(path.join(bundleDir, "README.txt"), readWindowsAssetTemplate("README.txt"));
 
   const zipPath = path.join(windowsReleaseDir, windowsPackageName);
   await archiveDirectory(bundleDir, zipPath);
@@ -699,7 +482,7 @@ const updateManifest = (macArtifact, windowsZipPath) => {
       sha256: sha256ForFile(windowsZipPath),
       notes: [
         "Extract the ZIP package on the Windows computer that will print.",
-        "Run Install Connector.cmd once to install and auto-start the connector.",
+        "Run Install Connector.cmd once to install, auto-start, and locally verify the connector.",
       ],
     },
   };
@@ -729,7 +512,7 @@ const updateManifest = (macArtifact, windowsZipPath) => {
     notes: [
       "Use the Mac package on the Mac that is connected to the printer.",
       "Use the Windows package on the Windows PC that is connected to the printer.",
-      "After installation, open Printer Setup in MSCQR and confirm the printer shows as ready.",
+      "Windows installation now verifies local printer readiness before claiming success and opens Printer Setup automatically when attention is still needed.",
     ],
     platforms,
   };

@@ -7,12 +7,12 @@
   "releases": [
     {
       "version": "2026.3.12",
-      "publishedAt": "2026-03-12T19:42:08.582Z",
+      "publishedAt": "2026-03-16T12:36:45.442Z",
       "summary": "Install once on the printing computer, then the MSCQR Connector starts automatically in the background.",
       "notes": [
         "Use the Mac package on the Mac that is connected to the printer.",
         "Use the Windows package on the Windows PC that is connected to the printer.",
-        "After installation, open Printer Setup in MSCQR and confirm the printer shows as ready."
+        "Windows installation now verifies local printer readiness before claiming success and opens Printer Setup automatically when attention is still needed."
       ],
       "platforms": {
         "windows": {
@@ -22,12 +22,11 @@
           "relativePath": "2026.3.12/windows/MSCQR-Connector-Windows-2026.3.12.zip",
           "contentType": "application/zip",
           "architecture": "x64",
-          "bytes": 20166675,
-          "sha256": "5ea0c9d7a527187a418334b120140e67acb266bd335b6e65d4ba78d1a287ad34",
+          "bytes": 20777128,
+          "sha256": "b3388cd62b839b45ad7a449815f18a5e4d0407f2b181c63dfb3714693839a590",
           "notes": [
-            "Extract the ZIP package to a normal folder on the Windows computer that will print.",
-            "Do not run Install Connector.cmd from inside the ZIP preview in File Explorer.",
-            "Run Install Connector.cmd once from the extracted folder. The installer adds a per-user Startup entry and starts the connector immediately."
+            "Extract the ZIP package on the Windows computer that will print.",
+            "Run Install Connector.cmd once to install, auto-start, and locally verify the connector."
           ]
         }
       }

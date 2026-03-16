@@ -2,7 +2,14 @@ import cors from "cors";
 import express from "express";
 import os from "os";
 
-import { buildCapabilitySummary, listLocalPrinters, type LocalAgentPrinter } from "./cups";
+import {
+  buildCapabilitySummary,
+  buildSetupVerification,
+  listLocalPrinters,
+  resolveSelectedPrinter,
+  type LocalAgentPrinter,
+  type LocalAgentSetupVerification,
+} from "./cups";
 import { printLabel } from "./render";
 import {
   loadAgentState,
@@ -34,6 +41,7 @@ type AgentSnapshot = {
   capabilitySummary: ReturnType<typeof buildCapabilitySummary>;
   printers: LocalAgentPrinter[];
   calibrationProfile: CalibrationProfile | null;
+  setupVerification: LocalAgentSetupVerification;
 };
 
 let inventoryCache:
@@ -82,23 +90,17 @@ const buildSnapshot = async (forceRefresh = false): Promise<{ state: AgentState;
   let state = await loadAgentState();
   const inventory = await listLocalPrinters();
   const printers = inventory.printers;
-  const fallbackSelectedId =
-    state.selectedPrinterId && printers.some((printer) => printer.printerId === state.selectedPrinterId)
-      ? state.selectedPrinterId
-      : printers.find((printer) => printer.isDefault)?.printerId || printers[0]?.printerId || null;
-  if (fallbackSelectedId !== state.selectedPrinterId) {
+  const selection = resolveSelectedPrinter(printers, state.selectedPrinterId);
+  const resolvedSelectedId = selection.printerId;
+  if (resolvedSelectedId !== state.selectedPrinterId) {
     state = {
       ...state,
-      selectedPrinterId: fallbackSelectedId,
+      selectedPrinterId: resolvedSelectedId,
     };
     await saveAgentState(state);
   }
 
-  const selectedPrinter =
-    printers.find((printer) => printer.printerId === fallbackSelectedId) ||
-    printers.find((printer) => printer.isDefault) ||
-    printers[0] ||
-    null;
+  const selectedPrinter = selection.printer;
 
   const connected = Boolean(selectedPrinter && selectedPrinter.online);
   const error =
@@ -109,6 +111,12 @@ const buildSnapshot = async (forceRefresh = false): Promise<{ state: AgentState;
         : selectedPrinter.online
           ? null
           : `${selectedPrinter.printerName} is offline or paused.`;
+  const setupVerification = buildSetupVerification({
+    printers,
+    selection,
+    connected,
+    inventoryError: inventory.error,
+  });
 
   const snapshot: AgentSnapshot = {
     connected,
@@ -121,9 +129,10 @@ const buildSnapshot = async (forceRefresh = false): Promise<{ state: AgentState;
     error,
     agentId: state.agentId,
     deviceFingerprint: state.deviceFingerprint,
-    capabilitySummary: buildCapabilitySummary(printers, selectedPrinter?.printerId || null),
+    capabilitySummary: buildCapabilitySummary(printers, selection.printerId),
     printers,
     calibrationProfile: selectedPrinter ? state.calibrationProfiles[selectedPrinter.printerId] || null : null,
+    setupVerification,
   };
 
   inventoryCache = {
@@ -167,6 +176,16 @@ app.get("/status", async (_req, res) => {
       connected: false,
       error: error?.message || "Local print agent failed to inspect printers.",
       printers: [],
+      setupVerification: {
+        state: "PRINTER_UNAVAILABLE",
+        success: false,
+        message: error?.message || "Local print agent failed to inspect printers.",
+        printerCount: 0,
+        onlinePrinterCount: 0,
+        selectedPrinterId: null,
+        selectedPrinterName: null,
+        selectionSource: "none",
+      },
     });
   }
 });

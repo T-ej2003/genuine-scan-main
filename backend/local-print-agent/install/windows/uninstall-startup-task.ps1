@@ -1,6 +1,12 @@
 $ErrorActionPreference = "Stop"
 
 $TaskName = "MSCQR Local Print Agent"
+$PackagedInstall = $false
+if ("1", "true", "yes", "on" -contains [string]$env:MSCQR_PACKAGED_INSTALL) {
+  $PackagedInstall = $true
+}
+
+$AgentHome = Join-Path $env:LOCALAPPDATA "MSCQR\local-print-agent"
 $Wrapper = Join-Path $env:LOCALAPPDATA "MSCQR\local-print-agent\bin\start-local-print-agent.cmd"
 $StartupLauncher = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup\MSCQR Connector.vbs"
 
@@ -29,6 +35,10 @@ if (Test-Path $Wrapper) {
 
 if (Test-Path $StartupLauncher) {
   Remove-Item -Force $StartupLauncher
+}
+
+if ($PackagedInstall -and (Test-Path $AgentHome)) {
+  Remove-Item -Path $AgentHome -Recurse -Force
 }
 
 Write-Host "MSCQR local print agent removed from Windows logon startup."
