@@ -163,7 +163,7 @@ const platformCopy: Record<
     description: "Download the Windows ZIP, extract it to a normal folder, then run Install Connector once on the printing PC.",
     action: "Download for Windows",
     icon: MonitorSmartphone,
-    helper: "Extract first, then install. The connector uses a Scheduled Task to auto-start after installation.",
+    helper: "Extract first, then install. The connector uses a per-user Startup entry and verifies local printer readiness before claiming success.",
     iconSurfaceClass: "bg-sky-100 text-sky-700",
   },
 };
@@ -177,7 +177,7 @@ const workspaceHighlights = [
   {
     icon: Sparkles,
     title: "Single install",
-    detail: "Run the package once and the connector keeps starting automatically in the background after sign-in.",
+    detail: "Run the package once and the connector keeps starting automatically in the background after sign-in, then verifies whether Windows or macOS can actually use the printer.",
   },
   {
     icon: Printer,
@@ -189,8 +189,9 @@ const workspaceHighlights = [
 const setupSteps = [
   "Open this page on the same computer that is already connected to the printer.",
   "Choose the Mac or Windows installer that matches that computer.",
-  "Run the installer once. The connector will then start automatically at sign-in.",
-  "Open MSCQR, go to Printer Setup, and confirm the printer status is ready.",
+  "Run the installer once. The connector will start automatically at sign-in after that.",
+  "The installer verifies local printer readiness before it tells you setup is complete.",
+  "If the printer still needs OS-side attention, MSCQR opens Printer Setup and keeps the connector installed.",
   "Return to Batches and create the print job.",
 ];
 
@@ -434,7 +435,7 @@ export default function ConnectorDownload() {
                   <p className="text-base leading-7 text-slate-600">
                     Open this page on the same Mac or Windows computer that is already connected to the printer. Choose
                     the installer below, run it once, and the connector starts automatically every time that user signs
-                    in after that.
+                    in after that. Windows setup now verifies the local printer before it claims the workstation is ready.
                   </p>
                 </div>
 
@@ -551,7 +552,7 @@ export default function ConnectorDownload() {
                                   <AlertCircle className="h-4 w-4 text-amber-700" />
                                   <AlertTitle>Important for Windows</AlertTitle>
                                   <AlertDescription>
-                                    Extract the ZIP fully before running <strong>Install Connector.cmd</strong>. Do not run it from the ZIP preview in File Explorer.
+                                    Extract the ZIP fully before running <strong>Install Connector.cmd</strong>. Do not run it from the ZIP preview in File Explorer. The installer will tell you whether the connector is ready, needs printer attention, or failed.
                                   </AlertDescription>
                                 </Alert>
                               ) : null}

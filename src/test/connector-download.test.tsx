@@ -96,6 +96,7 @@ describe("ConnectorDownload", () => {
     );
     expect(screen.getByText(/Extract the ZIP fully before running/i)).toBeInTheDocument();
     expect(screen.getByText(/Run the installer once/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/verifies local printer readiness/i).length).toBeGreaterThan(0);
   });
 
   it("repairs legacy connector links that still point at /public instead of /api/public", async () => {

@@ -115,6 +115,7 @@ export default function ManufacturerHelp() {
                 <ol className="list-decimal pl-5">
                   <li>Open <Badge variant="outline">Install Connector</Badge> on the workstation that will print.</li>
                   <li>Choose the Mac or Windows installer for that workstation and run it once.</li>
+                  <li>Let the installer verify whether the workstation can see a usable printer before you leave setup.</li>
                   <li>Confirm it is configured to auto-start at login and run in the background.</li>
                   <li>Make sure the operating system already lists the printer and driver correctly.</li>
                   <li>Open <Badge variant="outline">Printer Setup</Badge> in MSCQR and use <Badge variant="outline">Refresh status</Badge>.</li>
@@ -130,6 +131,7 @@ export default function ManufacturerHelp() {
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ul className="list-disc pl-5">
                   <li><Badge variant="outline">Connector unavailable</Badge> means MSCQR cannot detect the workstation connector on that device.</li>
+                  <li><Badge variant="outline">Connector installed, printer needs attention</Badge> means setup succeeded, but Windows or macOS is not exposing a usable online printer yet.</li>
                   <li><Badge variant="outline">No printer detected</Badge> means the connector is running but the operating system is not exposing a usable printer yet.</li>
                   <li><Badge variant="outline">Needs attention</Badge> means the saved printer setup or secure connection still needs review.</li>
                   <li>If the connector is not installed yet, return to <Badge variant="outline">Install Connector</Badge> first.</li>

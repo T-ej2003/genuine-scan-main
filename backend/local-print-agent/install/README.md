@@ -84,6 +84,10 @@ npm run print:agent:uninstall:windows
 2. Creates a small wrapper under the user profile.
 3. Registers the wrapper to start automatically at login for the signed-in user.
 4. Starts the agent immediately.
+5. On Windows packaged installs, polls the local `/status` endpoint and classifies the workstation as:
+   - `READY`: connector installed and a usable online printer was verified
+   - `NO_PRINTERS`: connector installed, but the OS has not exposed any printers yet
+   - `PRINTER_UNAVAILABLE`: connector installed, but the resolved printer is offline or otherwise not usable yet
 
 The agent still depends on the workstation OS already seeing the printer.
 

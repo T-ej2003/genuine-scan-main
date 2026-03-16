@@ -29,6 +29,33 @@ export type LocalAgentCapabilitySummary = {
   mediaSizes: string[];
 };
 
+export type LocalAgentPrinterSelectionSource =
+  | "persisted"
+  | "default"
+  | "first_online"
+  | "first_available"
+  | "none";
+
+export type LocalAgentPrinterSelection = {
+  printer: LocalAgentPrinter | null;
+  printerId: string | null;
+  printerName: string | null;
+  selectionSource: LocalAgentPrinterSelectionSource;
+};
+
+export type LocalAgentSetupVerificationState = "READY" | "NO_PRINTERS" | "PRINTER_UNAVAILABLE";
+
+export type LocalAgentSetupVerification = {
+  state: LocalAgentSetupVerificationState;
+  success: boolean;
+  message: string;
+  printerCount: number;
+  onlinePrinterCount: number;
+  selectedPrinterId: string | null;
+  selectedPrinterName: string | null;
+  selectionSource: LocalAgentPrinterSelectionSource;
+};
+
 type ParsedSystemProfilerPrinter = {
   name: string;
   model: string | null;
@@ -295,6 +322,122 @@ export const buildCapabilitySummary = (
     supportsPdf: true,
     dpiOptions: selected.dpi ? [selected.dpi] : [300],
     mediaSizes: selected.mediaSizes.slice(0, 12),
+  };
+};
+
+export const resolveSelectedPrinter = (
+  printers: LocalAgentPrinter[],
+  persistedSelectedPrinterId: string | null
+): LocalAgentPrinterSelection => {
+  if (printers.length === 0) {
+    return {
+      printer: null,
+      printerId: null,
+      printerName: null,
+      selectionSource: "none",
+    };
+  }
+
+  const persisted =
+    persistedSelectedPrinterId
+      ? printers.find((printer) => printer.printerId === persistedSelectedPrinterId) || null
+      : null;
+  if (persisted) {
+    return {
+      printer: persisted,
+      printerId: persisted.printerId,
+      printerName: persisted.printerName,
+      selectionSource: "persisted",
+    };
+  }
+
+  const defaultPrinter = printers.find((printer) => printer.isDefault) || null;
+  const firstOnline = printers.find((printer) => printer.online) || null;
+
+  if (defaultPrinter?.online) {
+    return {
+      printer: defaultPrinter,
+      printerId: defaultPrinter.printerId,
+      printerName: defaultPrinter.printerName,
+      selectionSource: "default",
+    };
+  }
+
+  if (firstOnline) {
+    return {
+      printer: firstOnline,
+      printerId: firstOnline.printerId,
+      printerName: firstOnline.printerName,
+      selectionSource: "first_online",
+    };
+  }
+
+  if (defaultPrinter) {
+    return {
+      printer: defaultPrinter,
+      printerId: defaultPrinter.printerId,
+      printerName: defaultPrinter.printerName,
+      selectionSource: "default",
+    };
+  }
+
+  const firstAvailable = printers[0] || null;
+  return {
+    printer: firstAvailable,
+    printerId: firstAvailable?.printerId || null,
+    printerName: firstAvailable?.printerName || null,
+    selectionSource: firstAvailable ? "first_available" : "none",
+  };
+};
+
+export const buildSetupVerification = (params: {
+  printers: LocalAgentPrinter[];
+  selection: LocalAgentPrinterSelection;
+  connected: boolean;
+  inventoryError?: string | null;
+}): LocalAgentSetupVerification => {
+  const printerCount = params.printers.length;
+  const onlinePrinterCount = params.printers.filter((printer) => printer.online).length;
+
+  if (printerCount === 0) {
+    return {
+      state: "NO_PRINTERS",
+      success: false,
+      message: params.inventoryError || "Windows did not report any printers yet.",
+      printerCount,
+      onlinePrinterCount,
+      selectedPrinterId: null,
+      selectedPrinterName: null,
+      selectionSource: "none",
+    };
+  }
+
+  if (params.selection.printer && params.selection.printer.online && params.connected) {
+    return {
+      state: "READY",
+      success: true,
+      message: `${params.selection.printer.printerName} is installed, reachable, and ready to print.`,
+      printerCount,
+      onlinePrinterCount,
+      selectedPrinterId: params.selection.printer.printerId,
+      selectedPrinterName: params.selection.printer.printerName,
+      selectionSource: params.selection.selectionSource,
+    };
+  }
+
+  const message = params.selection.printer
+    ? `${params.selection.printer.printerName} is installed, but Windows is not exposing it as an online printer yet.`
+    : "Printers were detected, but MSCQR could not resolve a usable printer yet.";
+
+  return {
+    state: "PRINTER_UNAVAILABLE",
+    success: false,
+    message,
+    printerCount,
+    onlinePrinterCount,
+    selectedPrinterId: params.selection.printerId,
+    selectedPrinterName: params.selection.printerName,
+    selectionSource: params.selection.selectionSource,
   };
 };
 
