@@ -27,6 +27,7 @@ deploy/certbot/www/*
 *.p12
 *.pfx
 *.csr
+databasefiles/
 backend/uploads
 uploads
 .DS_Store
