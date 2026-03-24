@@ -1,21 +1,22 @@
 FROM node:20-bookworm-slim AS deps
 
-WORKDIR /app
+WORKDIR /workspace/backend
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-COPY package*.json ./
+COPY backend/package*.json ./
 RUN npm ci
 
 FROM deps AS builder
 
-COPY prisma ./prisma
+COPY backend/prisma ./prisma
 RUN npx prisma generate
 
-COPY tsconfig.json ./
-COPY src ./src
-COPY local-print-agent ./local-print-agent
+COPY backend/tsconfig.json ./tsconfig.json
+COPY backend/src ./src
+COPY backend/local-print-agent ./local-print-agent
+COPY shared ../shared
 RUN npm run build
 
 FROM node:20-bookworm-slim AS runtime
@@ -27,11 +28,11 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-COPY package*.json ./
-COPY prisma ./prisma
-COPY local-print-agent ./local-print-agent
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
+COPY backend/package*.json ./
+COPY backend/prisma ./prisma
+COPY backend/local-print-agent ./local-print-agent
+COPY --from=builder /workspace/backend/node_modules ./node_modules
+COPY --from=builder /workspace/backend/dist ./dist
 RUN npx prisma generate \
   && chown -R node:node /app
 

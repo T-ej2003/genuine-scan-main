@@ -7,7 +7,7 @@ Use this sequence to push the current repo-hardening update and deploy it on Lig
 cd /Users/abhiramteja/Downloads/genuine-scan-main
 git status
 git checkout -b codex/industry-grade-hardening
-git add README.md .env.example deploy/LIGHTSAIL_ENTERPRISE_UPDATE_COMMANDS.md docker-compose.yml Dockerfile package.json package-lock.json vite.config.ts tsconfig.app.json tsconfig.incremental-strict.json playwright.enterprise.config.ts src/vite-env.d.ts
+git add README.md .env.example deploy/LIGHTSAIL_ENTERPRISE_UPDATE_COMMANDS.md docker-compose.yml Dockerfile backend/Dockerfile package.json package-lock.json vite.config.ts tsconfig.app.json tsconfig.incremental-strict.json playwright.enterprise.config.ts src/vite-env.d.ts
 git add src/App.tsx src/main.tsx src/pages/Batches.tsx src/pages/Dashboard.tsx src/pages/Incidents.tsx src/pages/SupportCenter.tsx src/pages/Verify.tsx
 git add src/components/layout/DashboardLayout.tsx src/components/batches/LicenseeBatchWorkspaceDialog.tsx src/components/page-patterns src/features src/lib/api-client.ts src/lib/api src/lib/query-client.tsx src/lib/query-keys.ts src/lib/support-diagnostics.ts src/lib/observability
 git add e2e
@@ -84,12 +84,14 @@ export VITE_APP_ENV=production
 export SENTRY_ENVIRONMENT=production
 # Optional:
 # export VITE_SENTRY_DSN=https://<frontend-dsn>
-docker compose build --pull
-docker compose up -d
+docker compose build --pull --no-cache backend frontend
+docker compose up -d --force-recreate
 docker compose ps
 docker compose logs backend --tail 120
 docker compose logs frontend --tail 120
 ```
+
+If the previous backend build failed with `Cannot find module '../../../shared/contracts/printing'`, this clean rebuild is the fix. The backend image now builds from the repo root so the shared contracts are available during `tsc`.
 
 ### Optional mock printer for isolated network-direct testing
 ```bash
