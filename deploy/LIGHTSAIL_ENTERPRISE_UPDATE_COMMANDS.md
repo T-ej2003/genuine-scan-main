@@ -14,8 +14,7 @@ git add -A -- . \
   ':(exclude)docs/MEETING_MANUFACTURER_USER_MANUAL.md' \
   ':(exclude)public/docs/manuals' \
   ':(exclude)scripts/capture-role-manual-screenshots.mjs' \
-  ':(exclude)scripts/generate-meeting-role-manual-docx.mjs' \
-  ':(exclude)backend/tests/printJobOperationalView.test.js'
+  ':(exclude)scripts/generate-meeting-role-manual-docx.mjs'
 git status --short
 git commit -m "Finish industry-grade hardening pass"
 git push origin codex/industry-grade-hardening
