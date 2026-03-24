@@ -10,8 +10,8 @@ import { ClipboardList, Factory, FileText, ShieldCheck } from "lucide-react";
 export default function LicenseeAdminHelp() {
   return (
     <HelpShell
-      title="Licensee/Admin (brand/company)"
-      subtitle="Operate within your organization: manufacturers, QR requests, batches, tracking, and audit logs."
+      title="Licensee Admin"
+      subtitle="Manage code requests, manufacturers, batches, scan activity, and audit history for your company."
     >
       <div className="space-y-6">
         <Card>
@@ -24,9 +24,9 @@ export default function LicenseeAdminHelp() {
           <CardContent className="text-sm text-muted-foreground">
             <ul className="list-disc pl-5">
               <li>Create and manage manufacturer users under your licensee.</li>
-              <li>Request additional QR inventory by quantity.</li>
-              <li>Assign received QR batches to manufacturers.</li>
-              <li>Monitor QR Tracking and review Audit Logs within your org scope.</li>
+              <li>Request additional code inventory by quantity.</li>
+              <li>Assign approved batches to manufacturer teams.</li>
+              <li>Monitor Scan Activity and review Audit History within your company scope.</li>
             </ul>
           </CardContent>
         </Card>
@@ -63,12 +63,12 @@ export default function LicenseeAdminHelp() {
               <CardHeader className="space-y-1">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <FileText className="h-4 w-4 text-primary" />
-                  Request QR inventory
+                  Request more codes
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">
-                  <li>Open <Badge variant="outline">QR Requests</Badge>.</li>
+                  <li>Open <Badge variant="outline">Code Requests</Badge>.</li>
                   <li>Enter the quantity you need.</li>
                   <li>Select <Badge variant="outline">Submit Request</Badge>.</li>
                   <li>After Super Admin approval, the received batch appears in <Badge variant="outline">Batches</Badge>.</li>
@@ -113,11 +113,11 @@ export default function LicenseeAdminHelp() {
 
             <Card>
               <CardHeader className="space-y-1">
-                <CardTitle className="text-base">Use QR Tracking without losing allocation context</CardTitle>
+                <CardTitle className="text-base">Use Scan Activity without losing allocation context</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">
-                  <li>Open <Badge variant="outline">QR Tracking</Badge> and filter by batch ID or batch name.</li>
+                  <li>Open <Badge variant="outline">Scan Activity</Badge> and filter by batch ID or batch name.</li>
                   <li>Open the allocation structure from the tracked batch when you need to understand where quantity moved.</li>
                   <li>Use batch ID, lifecycle totals, and audit history together before deciding a quantity is missing.</li>
                 </ol>
@@ -132,7 +132,7 @@ export default function LicenseeAdminHelp() {
             <DocScreenshot
               filename="licensee-request-qr-inventory.png"
               alt="Licensee request QR inventory"
-              caption="QR Requests: submit a quantity request."
+              caption="Code Requests: submit a quantity request."
               eager
             />
             <DocScreenshot
@@ -150,7 +150,7 @@ export default function LicenseeAdminHelp() {
             items={[
               {
                 filename: "licensee-request-qr-inventory.png",
-                whereToCapture: "QR Requests page with quantity filled and Submit highlighted.",
+                whereToCapture: "Code Requests page with quantity filled and Send request highlighted.",
               },
               {
                 filename: "licensee-batch-workspace-annotated.svg",

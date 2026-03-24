@@ -1,10 +1,11 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import Dashboard from "@/pages/Dashboard";
 import apiClient from "@/lib/api-client";
+import { renderWithQueryClient } from "@/test/render-with-query-client";
 
 const mockNavigate = vi.fn();
 
@@ -104,7 +105,7 @@ describe("Dashboard manufacturer multi-licensee scope", () => {
   });
 
   it("loads unscoped manufacturer stats and shows linked licensees", async () => {
-    render(
+    renderWithQueryClient(
       <MemoryRouter>
         <Dashboard />
       </MemoryRouter>

@@ -447,9 +447,14 @@ export const shouldPreferNetworkDirectSummary = (params: {
   return Boolean(params.networkPrinter) && printers.length === 0;
 };
 
-export const selectPreferredManagedPrinter = <T extends NetworkDirectPrinterSummaryLike>(printers?: T[] | null): T | null => {
+export const selectPreferredManagedPrinter = <T extends NetworkDirectPrinterSummaryLike | null>(
+  printers?: T[] | null
+): Exclude<T, null> | null => {
   const activePrinters = (Array.isArray(printers) ? printers : []).filter(
-    (printer) => printer && printer.connectionType !== "LOCAL_AGENT" && printer.isActive !== false
+    (printer): printer is Exclude<T, null> => {
+      if (!printer) return false;
+      return printer.connectionType !== "LOCAL_AGENT" && printer.isActive !== false;
+    }
   );
   return (
     activePrinters.find((printer) => printer.isDefault) ||

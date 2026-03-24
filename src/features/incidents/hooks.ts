@@ -1,10 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 
 import apiClient from "@/lib/api-client";
-import { unwrapApiResponse } from "@/lib/api/query-utils";
+import { parseWithSchema, unwrapParsedApiResponse } from "@/lib/api/query-utils";
 import { queryKeys } from "@/lib/query-keys";
 
-import type { IncidentDTO, IncidentDetailDTO } from "../../../shared/contracts/incidents";
+import { z } from "zod";
+
+import {
+  incidentArraySchema,
+  incidentDetailSchema,
+  type IncidentDTO,
+  type IncidentDetailDTO,
+} from "../../../shared/contracts/runtime/incidents.ts";
 
 type IncidentFilters = {
   status?: string;
@@ -24,12 +31,12 @@ export function useIncidents(filters: IncidentFilters, enabled = true) {
     queryKey: queryKeys.incidents.list(filters),
     enabled,
     queryFn: async (): Promise<IncidentDTO[]> => {
-      const response = await apiClient.getIncidents(filters);
-      const payload = unwrapApiResponse<unknown>(response, "Failed to load incidents");
-      if (Array.isArray(payload)) return payload as IncidentDTO[];
-      return Array.isArray((payload as { incidents?: unknown[] })?.incidents)
-        ? ((payload as { incidents: IncidentDTO[] }).incidents ?? [])
-        : [];
+      const payload = unwrapParsedApiResponse(
+        await apiClient.getIncidents(filters),
+        incidentArraySchema.or(z.object({ incidents: incidentArraySchema }).passthrough()),
+        "Failed to load incidents"
+      );
+      return Array.isArray(payload) ? payload : parseWithSchema(incidentArraySchema, payload.incidents || [], "Failed to load incidents");
     },
   });
 }
@@ -39,8 +46,9 @@ export function useIncident(id?: string, enabled = true) {
     queryKey: queryKeys.incidents.detail(id),
     enabled: enabled && Boolean(id),
     queryFn: async (): Promise<IncidentDetailDTO | null> =>
-      unwrapApiResponse<IncidentDetailDTO | null>(
+      unwrapParsedApiResponse(
         await apiClient.getIncidentById(String(id)),
+        incidentDetailSchema.nullable(),
         "Failed to load incident detail"
       ),
   });

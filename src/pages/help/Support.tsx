@@ -53,8 +53,8 @@ export default function SupportHelp() {
                   A green status dot indicates active live stream connection to the notification event channel.
                 </li>
                 <li>
-                  Click a notification to open the linked page (for example <Badge variant="outline">QR Requests</Badge> or{" "}
-                  <Badge variant="outline">Incidents</Badge>).
+                  Click a notification to open the linked page (for example <Badge variant="outline">Code Requests</Badge> or{" "}
+                  <Badge variant="outline">Incident Response</Badge>).
                 </li>
               </ol>
             </CardContent>

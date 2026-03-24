@@ -47,7 +47,32 @@ export default defineConfig(() => ({
     __APP_GIT_SHA__: JSON.stringify(gitSha),
     __APP_RELEASE__: JSON.stringify(releaseTag),
   },
-  // Keep production chunking on Vite defaults.
-  // The previous manual chunk strategy created cross-chunk cycles
-  // (e.g. vendor <-> react-vendor) which caused React to be undefined at runtime.
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+
+          if (
+            id.includes("/react/") ||
+            id.includes("react-dom") ||
+            id.includes("scheduler") ||
+            id.includes("react-router")
+          ) {
+            return "react-core";
+          }
+
+          if (id.includes("@radix-ui")) return "radix-ui";
+          if (id.includes("@tanstack/react-query")) return "react-query";
+          if (id.includes("recharts") || id.includes("/d3-")) return "charts";
+          if (id.includes("html2canvas")) return "capture";
+          if (id.includes("date-fns")) return "date-utils";
+          if (id.includes("zod")) return "schema";
+          if (id.includes("lucide-react")) return "icons";
+
+          return;
+        },
+      },
+    },
+  },
 }));

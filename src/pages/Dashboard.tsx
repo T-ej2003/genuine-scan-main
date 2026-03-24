@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { APP_PATHS, getRoleDisplayLabel } from "@/app/route-metadata";
 import { useAuth } from "@/contexts/AuthContext";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { DashboardPagePattern } from "@/components/page-patterns/PagePatterns";
@@ -17,7 +18,7 @@ import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { useDashboardAuditLogs, useDashboardStats } from "@/features/dashboard/hooks";
 
-import type { AuditLogDTO, DashboardStatsDTO, QrStatsDTO } from "../../shared/contracts/dashboard";
+import type { AuditLogDTO, DashboardStatsDTO, QrStatsDTO } from "../../shared/contracts/runtime/dashboard.ts";
 
 const STATS_POLL_MS = 5000;
 const API_BASE = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
@@ -189,7 +190,7 @@ export default function Dashboard() {
         label: "Redeemed",
         value: qrStatusData.scanned,
         description: "Customer verifications completed",
-        href: "/qr-tracking",
+        href: APP_PATHS.scanActivity,
         pct: total > 0 ? Math.round((qrStatusData.scanned / total) * 100) : 0,
       },
     ];
@@ -201,44 +202,38 @@ export default function Dashboard() {
   const fulfillmentPct = totalTracked > 0 ? Math.round((fulfilled / totalTracked) * 100) : 0;
   const redemptionPct = fulfilled > 0 ? Math.round((qrStatusData.scanned / fulfilled) * 100) : 0;
 
-  const roleLabel = useMemo(() => {
-    if (user?.role === "super_admin") return "Super User";
-    if (user?.role === "licensee_admin") return "Licensee User";
-    if (user?.role === "manufacturer") return "Manufacturer User";
-    return "User";
-  }, [user?.role]);
+  const roleLabel = useMemo(() => getRoleDisplayLabel(user?.role), [user?.role]);
 
   const quickActions = useMemo(() => {
     if (user?.role === "super_admin") {
       return [
-        { label: "Licensees", description: "Onboard and manage tenants", href: "/licensees" },
-        { label: "QR Requests", description: "Review pending allocations", href: "/qr-requests" },
-        { label: "Tracking", description: "Inspect scans and risk", href: "/qr-tracking" },
-        { label: "Audit Logs", description: "Review recent operations", href: "/audit-logs" },
+        { label: "Licensees", description: "Onboard and manage tenants", href: APP_PATHS.licensees },
+        { label: "Code Requests", description: "Review pending allocations", href: APP_PATHS.codeRequests },
+        { label: "Scan Activity", description: "Inspect scans and risk", href: APP_PATHS.scanActivity },
+        { label: "Audit History", description: "Review recent operations", href: APP_PATHS.auditHistory },
       ];
     }
     if (user?.role === "licensee_admin") {
       return [
-        { label: "Batches", description: "Assign and monitor production", href: "/batches" },
-        { label: "Manufacturers", description: "Manage factory users", href: "/manufacturers" },
-        { label: "QR Requests", description: "Raise range requests", href: "/qr-requests" },
-        { label: "Tracking", description: "Monitor scans and alerts", href: "/qr-tracking" },
+        { label: "Batches", description: "Assign and monitor production", href: APP_PATHS.batches },
+        { label: "Manufacturers", description: "Manage factory users", href: APP_PATHS.manufacturers },
+        { label: "Code Requests", description: "Request more codes", href: APP_PATHS.codeRequests },
+        { label: "Scan Activity", description: "Monitor scans and alerts", href: APP_PATHS.scanActivity },
       ];
     }
     return [
-      { label: "My Batches", description: "Create and print jobs", href: "/batches" },
-      { label: "QR Tracking", description: "Track scans for your assigned batches", href: "/qr-tracking" },
-      { label: "Verify Page", description: "Open customer verification", href: "/verify" },
-      { label: "Account", description: "Manage account settings", href: "/account" },
+      { label: "My Batches", description: "Create and print jobs", href: APP_PATHS.batches },
+      { label: "Printer Setup", description: "Check printer readiness", href: APP_PATHS.printerSetup },
+      { label: "Scan Activity", description: "Track scans for your assigned batches", href: APP_PATHS.scanActivity },
+      { label: "Verify Product", description: "Open customer verification", href: APP_PATHS.verify },
     ];
   }, [user?.role]);
 
   const cards = useMemo(() => {
-    const totalQrHref =
-      user?.role === "super_admin" ? "/qr-codes" : "/qr-tracking";
+    const totalQrHref = APP_PATHS.scanActivity;
     const totalQrCta =
       user?.role === "super_admin" ? "Inspect master inventory" : "Inspect tenant inventory";
-    const manufacturersHref = user?.role === "manufacturer" ? "/qr-tracking" : "/manufacturers";
+    const manufacturersHref = user?.role === "manufacturer" ? APP_PATHS.scanActivity : APP_PATHS.manufacturers;
     const manufacturersCta =
       user?.role === "manufacturer" ? "View manufacturer telemetry" : "Manage manufacturers";
     const scopeCard =
@@ -277,7 +272,7 @@ export default function Dashboard() {
 
     const items = [
       {
-        title: "Total QR Codes",
+        title: "Total Codes",
         value: totalQRCodes,
         icon: QrCode,
         variant: "default" as const,
@@ -296,7 +291,7 @@ export default function Dashboard() {
         ctaLabel: manufacturersCta,
       },
       {
-        title: "QR Batches",
+        title: "Batches",
         value: batchesCount,
         icon: FileText,
         variant: "success" as const,
@@ -326,7 +321,7 @@ export default function Dashboard() {
     <DashboardLayout>
       <DashboardPagePattern
         title="Dashboard"
-        description={`Welcome back, ${user?.name}. ${roleLabel} overview with live operational signals.`}
+        description={`Welcome back, ${user?.name}. Review the activity, queues, and next actions for your ${roleLabel.toLowerCase()} workspace.`}
         actions={
           <>
             <Badge variant={liveUpdates && sseConnected ? "default" : "secondary"}>
@@ -435,7 +430,7 @@ export default function Dashboard() {
                 <div className="rounded-md border bg-muted/40 p-3">
                   <div className="font-medium">{focusedRow.label} focus</div>
                   <p className="text-xs text-muted-foreground">
-                    {focusedRow.value.toLocaleString()} QR codes currently {focusedRow.description.toLowerCase()}.
+                    {focusedRow.value.toLocaleString()} codes currently {focusedRow.description.toLowerCase()}.
                   </p>
                   <Button
                     variant="ghost"
@@ -465,7 +460,7 @@ export default function Dashboard() {
                 ? "No recent activity yet. Actions in batches, users, and requests will appear here."
                 : "Activity feed is available for admin roles. Use Batches for your print operations."
             }
-            onViewAll={canViewAudit ? () => navigate("/audit-logs") : undefined}
+            onViewAll={canViewAudit ? () => navigate(APP_PATHS.auditHistory) : undefined}
           />
         </div>
 
@@ -507,9 +502,9 @@ export default function Dashboard() {
                 <button
                   type="button"
                   className="rounded-xl border p-4 text-left hover:bg-slate-50"
-                  onClick={() => navigate("/qr-tracking")}
+                  onClick={() => navigate(APP_PATHS.scanActivity)}
                 >
-                  <p className="font-medium text-slate-900">QR Tracking</p>
+                  <p className="font-medium text-slate-900">Scan Activity</p>
                   <p className="mt-1 text-xs text-slate-600">Review scan analytics within your production scope.</p>
                 </button>
                 <button

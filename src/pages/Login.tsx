@@ -20,7 +20,7 @@ export default function Login() {
   const humanizeAuthError = (value?: string) => {
     const text = String(value || "").toLowerCase();
     if (text.includes("invalid email or password") || text.includes("password")) {
-      return "incorrect-password. try again.";
+      return "Incorrect password. Try again.";
     }
     return value || "Login failed";
   };
@@ -45,9 +45,9 @@ export default function Login() {
   return (
     <AuthShell
       title="Welcome back"
-      description="Sign in to access QR operations, approvals, and traceability workflows."
-      sideTitle="Control secure QR inventory and approvals from one console."
-      sideDescription="Designed for super users, licensee users, and manufacturer users with role-safe access, audit visibility, and operational continuity."
+      description="Sign in to manage code requests, batches, printing, and traceability workflows."
+      sideTitle="Control secure product code operations from one console."
+      sideDescription="Built for Super Admins, Licensee Admins, and Manufacturer Admins with role-safe access, audit visibility, and day-to-day operational control."
     >
       <form onSubmit={handleSubmit} className="space-y-5">
         {error && (

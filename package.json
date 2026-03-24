@@ -16,6 +16,7 @@
     "docs:meeting:screenshots": "node scripts/capture-role-manual-screenshots.mjs",
     "docs:printing:images": "node scripts/generate-printing-doc-images.mjs",
     "docs:screenshots": "playwright test scripts/docs-screenshots.spec.ts && npm run docs:printing:images",
+    "check:budgets": "node scripts/check-code-size.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
@@ -23,7 +24,7 @@
     "test:e2e:headed": "playwright test --config=playwright.enterprise.config.ts --headed",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
-    "typecheck:incremental": "tsc --noEmit -p tsconfig.incremental-strict.json"
+    "typecheck:incremental": "npm run typecheck"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

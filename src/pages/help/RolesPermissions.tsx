@@ -43,11 +43,11 @@ export default function RolesPermissions() {
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <CardHeader className="space-y-1">
-                <CardTitle className="text-base">Super User</CardTitle>
+                <CardTitle className="text-base">Super Admin</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  Full platform access: licensees, QR inventory flows, audit logs, and the IR Center.
+                  Full platform access: licensees, code allocation flows, audit history, and Incident Response.
                 </p>
                 <p className="text-xs">
                   Login role: <span className="font-mono">SUPER_ADMIN</span> (legacy aliases map to this role).
@@ -57,7 +57,7 @@ export default function RolesPermissions() {
 
             <Card>
               <CardHeader className="space-y-1">
-                <CardTitle className="text-base">Licensee User (brand/company)</CardTitle>
+                <CardTitle className="text-base">Licensee Admin (brand/company)</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <p>
@@ -71,7 +71,7 @@ export default function RolesPermissions() {
 
             <Card>
               <CardHeader className="space-y-1">
-                <CardTitle className="text-base">Manufacturer User</CardTitle>
+                <CardTitle className="text-base">Manufacturer Admin</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <p>

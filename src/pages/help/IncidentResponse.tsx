@@ -35,7 +35,7 @@ export default function IncidentResponseHelp() {
           <Siren className="h-4 w-4" />
           <AlertTitle>Super Admin only</AlertTitle>
           <AlertDescription>
-            The IR Center is restricted to platform admins. Actions taken in IR will be recorded in audit logs and the incident timeline.
+            Incident Response is restricted to platform admins. Actions taken there are recorded in audit history and the incident timeline.
           </AlertDescription>
         </Alert>
 
@@ -65,12 +65,12 @@ export default function IncidentResponseHelp() {
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <CardHeader className="space-y-1">
-                <CardTitle className="text-base">1. Open IR Center</CardTitle>
+                <CardTitle className="text-base">1. Open Incident Response</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">
                   <li>Sign in as Super Admin.</li>
-                  <li>Open <Badge variant="outline">IR Center</Badge> from the left navigation.</li>
+                  <li>Open <Badge variant="outline">Incident Response</Badge> from the left navigation.</li>
                   <li>Review <strong>Incidents</strong>, <strong>Alerts</strong>, and <strong>Policies</strong>.</li>
                 </ol>
               </CardContent>
@@ -116,15 +116,15 @@ export default function IncidentResponseHelp() {
           <h2 className="text-lg font-semibold text-foreground">Screenshots</h2>
           <DocScreenshot
             filename="ir-dashboard.png"
-            alt="IR Center dashboard"
-            caption="IR Center: incidents, alerts, and policies."
+            alt="Incident Response dashboard"
+            caption="Incident Response: incidents, alerts, and policies."
             eager
           />
           <ScreenshotChecklist
             items={[
               {
                 filename: "ir-dashboard.png",
-                whereToCapture: "IR Center page (Incidents/Alerts/Policies) as Super Admin.",
+                whereToCapture: "Incident Response page (Incidents/Alerts/Policies) as Super Admin.",
               },
             ]}
           />

@@ -1,10 +1,11 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import apiClient from "@/lib/api-client";
+import { renderWithQueryClient } from "@/test/render-with-query-client";
 
 const localStorageState = new Map<string, string>();
 const sessionStorageState = new Map<string, string>();
@@ -134,7 +135,7 @@ describe("DashboardLayout printer connection dialog", () => {
   it("opens the printer dialog even when the local agent is unreachable", async () => {
     localStorageState.set("manufacturer-printer-onboarding:v1:manufacturer-1", "dismissed");
 
-    render(
+    renderWithQueryClient(
       <MemoryRouter>
         <DashboardLayout>
           <div>Dashboard content</div>
@@ -157,7 +158,7 @@ describe("DashboardLayout printer connection dialog", () => {
   });
 
   it("shows first-run workstation printer onboarding for manufacturers", async () => {
-    render(
+    renderWithQueryClient(
       <MemoryRouter>
         <DashboardLayout>
           <div>Dashboard content</div>
@@ -197,7 +198,7 @@ describe("DashboardLayout printer connection dialog", () => {
       ],
     } as any);
 
-    render(
+    renderWithQueryClient(
       <MemoryRouter>
         <DashboardLayout>
           <div>Dashboard content</div>
@@ -262,7 +263,7 @@ describe("DashboardLayout printer connection dialog", () => {
       },
     } as any);
 
-    const firstMount = render(
+    const firstMount = renderWithQueryClient(
       <MemoryRouter>
         <DashboardLayout>
           <div>Dashboard content</div>
@@ -278,7 +279,7 @@ describe("DashboardLayout printer connection dialog", () => {
 
     firstMount.unmount();
 
-    render(
+    renderWithQueryClient(
       <MemoryRouter>
         <DashboardLayout>
           <div>Dashboard content</div>

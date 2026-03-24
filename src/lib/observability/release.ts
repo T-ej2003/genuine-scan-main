@@ -8,16 +8,20 @@ export type FrontendReleaseMeta = {
 };
 
 const environment = String(import.meta.env.VITE_APP_ENV || import.meta.env.MODE || "development").trim() || "development";
-const gitSha = String(__APP_GIT_SHA__ || "unknown").trim() || "unknown";
+const appName = typeof __APP_NAME__ !== "undefined" ? __APP_NAME__ : "genuine-scan-console";
+const appVersion = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "0.0.0";
+const gitSha = String(typeof __APP_GIT_SHA__ !== "undefined" ? __APP_GIT_SHA__ : "unknown").trim() || "unknown";
 const shortGitSha = gitSha === "unknown" ? "unknown" : gitSha.slice(0, 12);
+const appRelease =
+  typeof __APP_RELEASE__ !== "undefined" ? __APP_RELEASE__ : `${appName}@${appVersion}`;
 
 export const frontendRelease: FrontendReleaseMeta = {
-  name: __APP_NAME__,
-  version: __APP_VERSION__,
+  name: appName,
+  version: appVersion,
   gitSha,
   shortGitSha,
   environment,
-  release: __APP_RELEASE__ || `${__APP_NAME__}@${__APP_VERSION__}`,
+  release: appRelease,
 };
 
 if (typeof window !== "undefined") {

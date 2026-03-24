@@ -1,10 +1,11 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 
 import Incidents from "@/pages/Incidents";
 import apiClient from "@/lib/api-client";
 import { saveAs } from "file-saver";
+import { renderWithQueryClient } from "@/test/render-with-query-client";
 
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
@@ -78,13 +79,12 @@ describe("Incidents PDF export", () => {
   });
 
   it("exports selected incident as PDF", async () => {
-    render(<Incidents />);
+    renderWithQueryClient(<Incidents />);
 
-    await waitFor(() => {
-      expect(vi.mocked(apiClient.getIncidentById)).toHaveBeenCalledWith(incidentRow.id);
-    });
+    const exportButton = await screen.findByRole("button", { name: "Export PDF" });
+    expect(vi.mocked(apiClient.getIncidentById)).toHaveBeenCalledWith(incidentRow.id);
 
-    fireEvent.click(screen.getByRole("button", { name: "Export PDF" }));
+    fireEvent.click(exportButton);
 
     await waitFor(() => {
       expect(vi.mocked(apiClient.requestIncidentPdfExport)).toHaveBeenCalledWith(incidentRow.id);

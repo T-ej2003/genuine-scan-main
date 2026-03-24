@@ -11,7 +11,7 @@ export default function SuperAdminHelp() {
   return (
     <HelpShell
       title="Super Admin"
-      subtitle="Platform-wide administration: tenants, QR allocation approvals, audit visibility, and Incident Response (IR)."
+      subtitle="Manage tenants, code approvals, audit visibility, and incident response across the platform."
     >
       <div className="space-y-6">
         <Card>
@@ -24,16 +24,16 @@ export default function SuperAdminHelp() {
           <CardContent className="text-sm text-muted-foreground">
             <ul className="list-disc pl-5">
               <li>Create and manage licensees (organizations/tenants).</li>
-              <li>Approve QR inventory requests from licensees.</li>
+              <li>Approve code inventory requests from licensees.</li>
               <li>View platform audit logs and investigate activity.</li>
-              <li>Use the IR Center to triage alerts, open incidents, and apply containment actions.</li>
+              <li>Use Incident Response to triage alerts, open incidents, and apply containment actions.</li>
             </ul>
           </CardContent>
         </Card>
 
         <Alert>
           <Siren className="h-4 w-4" />
-          <AlertTitle>IR Center is Super Admin only</AlertTitle>
+          <AlertTitle>Incident Response is Super Admin only</AlertTitle>
           <AlertDescription>
             Incident Response tooling is restricted to platform admins. Licensees can still report issues via customer reports and licensee audit logs.
           </AlertDescription>
@@ -62,12 +62,12 @@ export default function SuperAdminHelp() {
               <CardHeader className="space-y-1">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <FileCheck2 className="h-4 w-4 text-primary" />
-                  Approve QR requests
+                  Approve code requests
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">
-                  <li>Open <Badge variant="outline">QR Requests</Badge>.</li>
+                  <li>Open <Badge variant="outline">Code Requests</Badge>.</li>
                   <li>Filter to <Badge variant="outline">Pending</Badge>.</li>
                   <li>Open a request and select <Badge variant="outline">Approve</Badge> or <Badge variant="outline">Reject</Badge>.</li>
                   <li>Approved requests allocate the next available sequence automatically.</li>
@@ -85,7 +85,7 @@ export default function SuperAdminHelp() {
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-muted-foreground">
               <ol className="list-decimal pl-5">
-                <li>Open <Badge variant="outline">IR Center</Badge>.</li>
+                <li>Open <Badge variant="outline">Incident Response</Badge>.</li>
                 <li>Review <strong>Alerts</strong> (policy triggers) and <strong>Incidents</strong> (cases).</li>
                 <li>Assign an owner, set severity/priority, and add notes to build the timeline.</li>
                 <li>Apply containment actions only when needed (they are reversible with reason).</li>
@@ -104,13 +104,13 @@ export default function SuperAdminHelp() {
             />
             <DocScreenshot
               filename="superadmin-approve-qr-request.png"
-              alt="Approve QR request modal"
-              caption="QR Requests: approve/reject pending requests."
+              alt="Approve code request modal"
+              caption="Code Requests: approve or reject pending requests."
             />
             <DocScreenshot
               filename="ir-dashboard.png"
-              alt="IR Center dashboard"
-              caption="IR Center: incidents, alerts, and policy rules."
+              alt="Incident Response dashboard"
+              caption="Incident Response: incidents, alerts, and policy rules."
             />
           </div>
           <ScreenshotChecklist
@@ -121,11 +121,11 @@ export default function SuperAdminHelp() {
               },
               {
                 filename: "superadmin-approve-qr-request.png",
-                whereToCapture: "QR Requests page with Approve Request modal open.",
+                whereToCapture: "Code Requests page with Approve Request modal open.",
               },
               {
                 filename: "ir-dashboard.png",
-                whereToCapture: "IR Center page (Incidents/Alerts/Policies) as Super Admin.",
+                whereToCapture: "Incident Response page (Incidents/Alerts/Policies) as Super Admin.",
               },
             ]}
           />
@@ -156,4 +156,3 @@ export default function SuperAdminHelp() {
     </HelpShell>
   );
 }
-

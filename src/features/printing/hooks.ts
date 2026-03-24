@@ -1,16 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
 
 import apiClient from "@/lib/api-client";
-import { unwrapArrayResponse } from "@/lib/api/query-utils";
+import { parseWithSchema, unwrapParsedApiResponse } from "@/lib/api/query-utils";
 import { queryKeys } from "@/lib/query-keys";
 import type { LocalPrinterAgentSnapshot } from "@/lib/printer-diagnostics";
 
-import type {
+import {
+  localPrinterArraySchema,
+  printJobArraySchema,
+  printerConnectionStatusSchema,
+  registeredPrinterArraySchema,
   LocalPrinterDTO,
   PrintJobDTO,
   PrinterConnectionStatusDTO,
   RegisteredPrinterDTO,
-} from "../../../shared/contracts/printing";
+} from "../../../shared/contracts/runtime/printing.ts";
 
 export type ManufacturerPrinterRuntime = {
   localAgent: LocalPrinterAgentSnapshot;
@@ -86,8 +90,9 @@ export function usePrintJobs(batchId?: string, limit = 8, enabled = true) {
     queryKey: queryKeys.printing.jobs(batchId, limit),
     enabled,
     queryFn: async (): Promise<PrintJobDTO[]> =>
-      unwrapArrayResponse<PrintJobDTO>(
+      unwrapParsedApiResponse(
         await apiClient.listPrintJobs({ batchId, limit }),
+        printJobArraySchema,
         "Failed to load print jobs"
       ),
   });
@@ -106,13 +111,17 @@ export function useManufacturerPrinterRuntime(includeInactive = true, enabled = 
       ]);
 
       const localPrinters = normalizeLocalPrinterRows((localResponse.data as { printers?: unknown[] } | undefined)?.printers || []);
-      const remoteStatus =
+      const parsedRemoteStatus =
         remoteResponse.success && remoteResponse.data
+          ? unwrapParsedApiResponse(remoteResponse, printerConnectionStatusSchema, "Printer status unavailable")
+          : null;
+      const remoteStatus =
+        parsedRemoteStatus
           ? ({
-              ...(remoteResponse.data as PrinterConnectionStatusDTO),
+              ...parsedRemoteStatus,
               printers:
-                normalizeLocalPrinterRows((remoteResponse.data as PrinterConnectionStatusDTO).printers || []).length > 0
-                  ? normalizeLocalPrinterRows((remoteResponse.data as PrinterConnectionStatusDTO).printers || [])
+                normalizeLocalPrinterRows(parsedRemoteStatus.printers || []).length > 0
+                  ? normalizeLocalPrinterRows(parsedRemoteStatus.printers || [])
                   : localPrinters,
             } satisfies PrinterConnectionStatusDTO)
           : buildFallbackPrinterStatus(localPrinters, remoteResponse.error || localResponse.error || "Printer status unavailable");
@@ -138,7 +147,11 @@ export function useManufacturerPrinterRuntime(includeInactive = true, enabled = 
         remoteStatus,
         detectedPrinters,
         registeredPrinters: registeredPrinterResponse.success
-          ? (Array.isArray(registeredPrinterResponse.data) ? (registeredPrinterResponse.data as RegisteredPrinterDTO[]) : [])
+          ? parseWithSchema(
+              registeredPrinterArraySchema,
+              Array.isArray(registeredPrinterResponse.data) ? registeredPrinterResponse.data : [],
+              "Failed to load printers"
+            )
           : [],
         preferredPrinterId,
       };

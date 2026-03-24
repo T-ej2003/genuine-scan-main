@@ -18,6 +18,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 
 type FraudStatus = "OPEN" | "REVIEWED" | "RESOLVED" | "DISMISSED";
+type FraudResponseStatus = Exclude<FraudStatus, "OPEN">;
 
 type FraudReportQueueItem = {
   id: string;
@@ -121,7 +122,7 @@ export default function AuditLogs() {
 
   const [respondDialogOpen, setRespondDialogOpen] = useState(false);
   const [selectedFraudReport, setSelectedFraudReport] = useState<FraudReportQueueItem | null>(null);
-  const [responseStatus, setResponseStatus] = useState<FraudStatus>("REVIEWED");
+  const [responseStatus, setResponseStatus] = useState<FraudResponseStatus>("REVIEWED");
   const [responseMessage, setResponseMessage] = useState("");
   const [notifyCustomer, setNotifyCustomer] = useState(true);
   const [responding, setResponding] = useState(false);
@@ -298,7 +299,7 @@ export default function AuditLogs() {
     });
   }, [logs, search, action, licenseeFilter, isSuperAdmin]);
 
-  const openRespondDialog = (report: FraudReportQueueItem, status: FraudStatus) => {
+  const openRespondDialog = (report: FraudReportQueueItem, status: FraudResponseStatus) => {
     setSelectedFraudReport(report);
     setResponseStatus(status);
     setNotifyCustomer(Boolean(report?.report?.contactEmail));
@@ -343,7 +344,7 @@ export default function AuditLogs() {
         <div className="space-y-6">
         <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 via-white to-cyan-50 p-4 sm:flex-row sm:items-center sm:justify-between">
           <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
-            Audit Logs
+            Audit History
             <Badge className={live ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-600"}>
               {live ? "LIVE" : "PAUSED"}
             </Badge>
@@ -613,7 +614,7 @@ export default function AuditLogs() {
 
               <div className="space-y-2">
                 <Label>Status</Label>
-                <Select value={responseStatus} onValueChange={(v) => setResponseStatus(v as FraudStatus)}>
+                <Select value={responseStatus} onValueChange={(v) => setResponseStatus(v as FraudResponseStatus)}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select status" />
                   </SelectTrigger>

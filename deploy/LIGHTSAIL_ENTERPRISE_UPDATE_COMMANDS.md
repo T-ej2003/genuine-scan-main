@@ -6,23 +6,20 @@ Use this sequence to push the current repo-hardening update and deploy it on Lig
 ```bash
 cd /Users/abhiramteja/Downloads/genuine-scan-main
 git status
-git checkout -b codex/industry-grade-hardening
-git add README.md .env.example deploy/LIGHTSAIL_ENTERPRISE_UPDATE_COMMANDS.md docker-compose.yml Dockerfile backend/Dockerfile package.json package-lock.json vite.config.ts tsconfig.app.json tsconfig.incremental-strict.json playwright.enterprise.config.ts src/vite-env.d.ts
-git add src/App.tsx src/main.tsx src/pages/Batches.tsx src/pages/Dashboard.tsx src/pages/Incidents.tsx src/pages/SupportCenter.tsx src/pages/Verify.tsx
-git add src/components/layout/DashboardLayout.tsx src/components/batches/LicenseeBatchWorkspaceDialog.tsx src/components/page-patterns src/features src/lib/api-client.ts src/lib/api src/lib/query-client.tsx src/lib/query-keys.ts src/lib/support-diagnostics.ts src/lib/observability
-git add e2e
-git add shared
-git add backend/.env.example backend/package.json backend/package-lock.json backend/src/index.ts backend/src/routes/index.ts backend/src/controllers/healthController.ts
-git add backend/src/controllers/printJobController.ts backend/src/controllers/printerAgentController.ts backend/src/controllers/verifyController.ts
-git add backend/src/controllers/print-job backend/src/controllers/verify
-git add backend/src/observability
-git add backend/src/services/networkDirectPrintService.ts backend/src/services/printerConnectionService.ts
-git add -u backend/dist dist
-git commit -m "Harden architecture and add release observability"
-git push -u origin codex/industry-grade-hardening
+git checkout codex/industry-grade-hardening
+git pull --ff-only origin codex/industry-grade-hardening
+git add -A -- . \
+  ':(exclude)DOCX' \
+  ':(exclude)docs/MEETING_LICENSEE_ADMIN_USER_MANUAL.md' \
+  ':(exclude)docs/MEETING_MANUFACTURER_USER_MANUAL.md' \
+  ':(exclude)public/docs/manuals' \
+  ':(exclude)scripts/capture-role-manual-screenshots.mjs' \
+  ':(exclude)scripts/generate-meeting-role-manual-docx.mjs' \
+  ':(exclude)backend/tests/printJobOperationalView.test.js'
+git status --short
+git commit -m "Finish industry-grade hardening pass"
+git push origin codex/industry-grade-hardening
 ```
-
-If you are already on your preferred branch, keep the same `git add`, `git commit`, and `git push` flow and skip the branch-creation line.
 
 ## 1) SSH and update code on Lightsail
 ```bash

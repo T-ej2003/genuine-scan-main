@@ -10,8 +10,8 @@ import { ScanLine, ShieldCheck, ShieldAlert, Flag } from "lucide-react";
 export default function CustomerHelp() {
   return (
     <HelpShell
-      title="Customer (scanner / verification page)"
-      subtitle="How to verify a product, understand the result, and report suspected counterfeit."
+      title="Verify Product"
+      subtitle="Check a product, understand the result, and report a suspected issue."
     >
       <div className="space-y-6">
         <Card>
@@ -23,8 +23,8 @@ export default function CustomerHelp() {
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
             <ul className="list-disc pl-5">
-              <li>Scan the QR and verify authenticity.</li>
-              <li>See a clear result state: first scan, verified again, or possible duplicate.</li>
+              <li>Scan the code and verify authenticity.</li>
+              <li>See a clear result state: Product verified, Needs review, or Could not verify.</li>
               <li>Review scan history summary (counts and coarse location hints).</li>
               <li>Report suspected counterfeit with optional photos and contact details.</li>
             </ul>
@@ -77,7 +77,7 @@ export default function CustomerHelp() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
-                <p>This QR shows unusual scan patterns that may indicate label copying.</p>
+                <p>This code shows unusual scan patterns that may indicate label copying.</p>
                 <ul className="list-disc pl-5">
                   <li>Check the scan history summary and the “Why this was flagged” reasons.</li>
                   <li>If anything looks wrong, report it so the brand can investigate.</li>
@@ -95,7 +95,7 @@ export default function CustomerHelp() {
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-muted-foreground">
               <ol className="list-decimal pl-5">
-                <li>Scan the QR code on the product label.</li>
+                <li>Scan the code on the product label.</li>
                 <li>Wait for the verification result.</li>
                 <li>Review the brand/manufacturer and printed date.</li>
                 <li>If the banner says <strong>Under investigation</strong>, follow the support guidance shown.</li>
@@ -183,7 +183,7 @@ export default function CustomerHelp() {
                 <CardTitle className="text-base">Code not registered / invalid</CardTitle>
               </CardHeader>
               <CardContent className="text-sm text-muted-foreground">
-                The QR may be damaged, tampered, or not issued by the brand. Report it if you suspect counterfeit.
+                The code may be damaged, tampered, or not issued by the brand. Report it if you suspect counterfeit.
               </CardContent>
             </Card>
           </div>
@@ -192,4 +192,3 @@ export default function CustomerHelp() {
     </HelpShell>
   );
 }
-

@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { APP_PATHS } from "@/app/route-metadata";
 
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -22,6 +23,7 @@ const Licensees = lazy(() => import("@/pages/Licensees"));
 const QRRequests = lazy(() => import("@/pages/QRRequests"));
 const Batches = lazy(() => import("@/pages/Batches"));
 const PrinterDiagnostics = lazy(() => import("@/pages/PrinterDiagnostics"));
+const PrinterSetupAdvancedPage = lazy(() => import("@/features/printing/PrinterSetupAdvancedPage"));
 const QRTracking = lazy(() => import("@/pages/QRTracking"));
 const Manufacturers = lazy(() => import("@/pages/Manufacturers"));
 const AuditLogs = lazy(() => import("@/pages/AuditLogs"));
@@ -51,6 +53,11 @@ const HelpCommunications = lazy(() => import("@/pages/help/Communications"));
 const HelpSupport = lazy(() => import("@/pages/help/Support"));
 const HelpGovernance = lazy(() => import("@/pages/help/Governance"));
 const HelpIncidents = lazy(() => import("@/pages/help/Incidents"));
+
+function RedirectWithQuery({ to }: { to: string }) {
+  const location = useLocation();
+  return <Navigate to={`${to}${location.search}`} replace />;
+}
 
 /* =========================
    Route Guards
@@ -312,7 +319,7 @@ function AppRoutes() {
           path="/qr-codes"
           element={
             <ProtectedRoute>
-              <Navigate to="/qr-tracking" replace />
+              <RedirectWithQuery to={APP_PATHS.scanActivity} />
             </ProtectedRoute>
           }
         />
@@ -327,19 +334,43 @@ function AppRoutes() {
         />
 
         <Route
-          path="/printer-diagnostics"
+          path={APP_PATHS.printerSetup}
           element={
             <ProtectedRoute allowedRoles={["manufacturer"]}>
               <PrinterDiagnostics />
             </ProtectedRoute>
           }
         />
+        <Route
+          path={APP_PATHS.printerSetupAdvanced}
+          element={
+            <ProtectedRoute allowedRoles={["manufacturer"]}>
+              <PrinterSetupAdvancedPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/printer-diagnostics"
+          element={
+            <ProtectedRoute allowedRoles={["manufacturer"]}>
+              <RedirectWithQuery to={APP_PATHS.printerSetupAdvanced} />
+            </ProtectedRoute>
+          }
+        />
 
+        <Route
+          path={APP_PATHS.codeRequests}
+          element={
+            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
+              <QRRequests />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/qr-requests"
           element={
             <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
-              <QRRequests />
+              <RedirectWithQuery to={APP_PATHS.codeRequests} />
             </ProtectedRoute>
           }
         />
@@ -347,10 +378,18 @@ function AppRoutes() {
         <Route path="/product-batches" element={<Navigate to="/batches" replace />} />
 
         <Route
-          path="/qr-tracking"
+          path={APP_PATHS.scanActivity}
           element={
             <ProtectedRoute allowedRoles={["super_admin", "licensee_admin", "manufacturer"]}>
               <QRTracking />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/qr-tracking"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin", "manufacturer"]}>
+              <RedirectWithQuery to={APP_PATHS.scanActivity} />
             </ProtectedRoute>
           }
         />
@@ -365,19 +404,43 @@ function AppRoutes() {
         />
 
         <Route
-          path="/audit-logs"
+          path={APP_PATHS.auditHistory}
           element={
             <ProtectedRoute allowedRoles={["super_admin", "licensee_admin", "manufacturer"]}>
               <AuditLogs />
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/audit-logs"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin", "manufacturer"]}>
+              <RedirectWithQuery to={APP_PATHS.auditHistory} />
+            </ProtectedRoute>
+          }
+        />
 
+        <Route
+          path={APP_PATHS.incidentResponse}
+          element={
+            <ProtectedRoute allowedRoles={["super_admin"]}>
+              <IR />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/ir"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin"]}>
+              <RedirectWithQuery to={APP_PATHS.incidentResponse} />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/incidents"
           element={
             <ProtectedRoute allowedRoles={["super_admin"]}>
-              <Incidents />
+              <RedirectWithQuery to={APP_PATHS.incidentResponse} />
             </ProtectedRoute>
           }
         />
@@ -401,14 +464,13 @@ function AppRoutes() {
         />
 
         <Route
-          path="/ir"
+          path={`${APP_PATHS.incidentDetailPrefix}/:id`}
           element={
             <ProtectedRoute allowedRoles={["super_admin"]}>
-              <IR />
+              <IRIncidentDetail />
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/ir/incidents/:id"
           element={

@@ -26,7 +26,7 @@ type AllocationBatchRow = {
   batchKind?: "RECEIVED_PARENT" | "MANUFACTURER_CHILD";
 };
 
-type AllocationMapPayload = {
+export type AllocationMapPayload = {
   sourceBatchId: string;
   focusBatchId: string;
   sourceBatch: AllocationBatchRow | null;

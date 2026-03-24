@@ -86,7 +86,9 @@ export function SupportIssueLauncher() {
       );
       setOpen(true);
     });
-    return off;
+    return () => {
+      off();
+    };
   }, [isEligible]);
 
   useEffect(() => {
@@ -181,7 +183,7 @@ export function SupportIssueLauncher() {
     <>
       <Button variant="ghost" className="mr-1 gap-2" onClick={openManualDialog}>
         <Bug className="h-4 w-4 text-muted-foreground" />
-        <span className="hidden sm:inline">Support</span>
+        <span className="hidden sm:inline">Report issue</span>
       </Button>
 
       <Dialog

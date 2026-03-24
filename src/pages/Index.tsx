@@ -118,7 +118,7 @@ export default function Index() {
           <div>
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-emerald-300/25 bg-emerald-300/10 px-3 py-1 text-xs font-medium text-emerald-200">
               <ShieldCheck className="h-3.5 w-3.5" />
-              MSCQR secure verification platform
+              Secure product verification platform
             </div>
 
             <div className="mb-5 flex flex-wrap items-center gap-3">
@@ -140,9 +140,9 @@ export default function Index() {
             </h1>
 
             <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300 md:text-lg">
-              MSCQR runs a public verification route for customers and a role-scoped operations portal for licensees,
-              manufacturers, and super admins. QR codes move through issuance, print, scan, and audit workflows with
-              traceable platform events and authenticated operational controls.
+              The platform provides a public verification route for customers and a role-scoped operations portal for
+              licensee admins, manufacturer admins, and super admins. Product codes move through request, print, scan,
+              and audit workflows with traceable platform events and secure operational controls.
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -224,7 +224,7 @@ export default function Index() {
                 <ActionCard
                   icon={Lock}
                   title="Login to dashboard"
-                  description="Sign in for role-scoped QR operations, governance, audit logs, incident handling, notifications, and support workflows."
+                  description="Sign in for role-scoped code operations, governance, audit history, incident handling, notifications, and support workflows."
                   href="/login"
                   cta="Open Login"
                   internal
@@ -239,8 +239,8 @@ export default function Index() {
                 />
                 <ActionCard
                   icon={Mail}
-                  title="Contact MSCQR team"
-                  description="For onboarding or platform administration queries, contact the MSCQR admin team."
+                  title="Contact platform team"
+                  description="For onboarding or platform administration queries, contact the admin team."
                   href={`mailto:${CONTACT_EMAIL}?subject=MSCQR%20Inquiry`}
                   cta={CONTACT_EMAIL}
                 />
@@ -271,7 +271,7 @@ export default function Index() {
               <FeatureCard
                 icon={ShieldAlert}
                 title="Traceable lifecycle control"
-                description="Operational events, audit logs, and support handling stay attached to the QR lifecycle so disputes and failures can be reviewed."
+                description="Operational events, audit history, and support handling stay attached to the code lifecycle so disputes and failures can be reviewed."
               />
             </div>
           </div>
@@ -285,7 +285,7 @@ export default function Index() {
             <div>
               <h2 className="text-3xl font-semibold text-white md:text-4xl">Authentication and control posture</h2>
               <p className="mt-4 max-w-2xl leading-7 text-slate-300">
-                MSCQR is the platform for public verification and authenticated back-office operations.
+                The platform combines public verification with authenticated back-office operations.
                 Security still depends on production deployment and operating procedures, but the application ships with
                 role-aware access control, auditable workflows, notification trails, and tenant-separated operational
                 paths.
@@ -314,7 +314,7 @@ export default function Index() {
                   <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
                     <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Authenticated operations</div>
                     <p className="mt-2 text-sm leading-6 text-slate-200">
-                      Internal users sign in through <span className="font-semibold text-white">/login</span> for QR
+                      Internal users sign in through <span className="font-semibold text-white">/login</span> for code
                       lifecycle management, printing, audit review, incidents, governance, and support response.
                     </p>
                   </div>
@@ -359,7 +359,7 @@ export default function Index() {
 
               <Panel
                 title="Contact"
-                description="For onboarding, admin coordination, or platform inquiries, contact the MSCQR administration team. Include your organization name and issue summary for faster routing."
+                description="For onboarding, admin coordination, or platform inquiries, contact the administration team. Include your organization name and issue summary for faster routing."
                 actions={
                   <>
                     <a href={`mailto:${CONTACT_EMAIL}?subject=MSCQR%20Support%20Request`}>
@@ -390,7 +390,7 @@ export default function Index() {
             <img src="/brand/mscqr-mark.svg" alt="MSCQR logo" className="h-9 w-9 rounded-lg border border-white/10 bg-slate-900 p-1" />
             <div>
               <div className="text-sm font-semibold text-white">MSCQR</div>
-              <div className="text-xs text-slate-400">Secure QR verification and product trust</div>
+              <div className="text-xs text-slate-400">Secure product verification and product trust</div>
             </div>
           </div>
 

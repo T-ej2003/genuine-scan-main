@@ -12,8 +12,8 @@ import { Download, Factory, FileArchive, ShieldCheck, Wrench } from "lucide-reac
 export default function ManufacturerHelp() {
   return (
     <HelpShell
-      title="Manufacturer (factory user)"
-      subtitle="Production execution: assigned batches, direct-print jobs, and one-time token handling."
+      title="Manufacturer Admin"
+      subtitle="Handle assigned batches, printer setup, and controlled print jobs for your factory."
     >
       <div className="space-y-6">
         <Card>
@@ -27,7 +27,7 @@ export default function ManufacturerHelp() {
             <ul className="list-disc pl-5">
               <li>View batches assigned to your manufacturer account only.</li>
               <li>Create print jobs for approved quantities.</li>
-              <li>Request one-time short-lived render tokens via authenticated print agent.</li>
+              <li>Use the approved secure print path for workstation or managed printer jobs.</li>
               <li>Confirm print status via the batch status indicators.</li>
             </ul>
           </CardContent>
@@ -37,8 +37,7 @@ export default function ManufacturerHelp() {
           <FileArchive className="h-4 w-4" />
           <AlertTitle>Direct-print security mode</AlertTitle>
           <AlertDescription>
-            ZIP/PNG distribution is disabled. Industrial printers must request one-time short-lived server render tokens
-            for each QR just-in-time.
+            ZIP/PNG distribution is disabled. Printing happens through the approved secure connector or managed printer route.
           </AlertDescription>
         </Alert>
 
@@ -66,12 +65,12 @@ export default function ManufacturerHelp() {
               <CardHeader className="space-y-1">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Download className="h-4 w-4 text-primary" />
-                  Start controlled dispatch
+                  Start printing
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">
-                  <li>After job creation, MSCQR dispatches approved payloads through the selected printer profile.</li>
+                  <li>After job creation, the app sends approved print payloads through the selected printer route.</li>
                   <li>Workstation printing stays tied to the selected workstation printer. Factory label printer jobs go to saved LAN printer profiles. Office printer jobs send standards-based PDF jobs to AirPrint or IPP Everywhere printers.</li>
                   <li>Printed status updates as the job confirms on completion.</li>
                 </ol>
@@ -85,7 +84,7 @@ export default function ManufacturerHelp() {
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-muted-foreground">
               <ul className="list-disc pl-5">
-                <li>Batch/QR statuses update to printed after the print workflow.</li>
+                <li>Batch and code statuses update to printed after the print workflow.</li>
                 <li>If status does not update, refresh and retry once.</li>
                 <li>If problems persist, contact your Licensee/Admin with the batch ID and timestamp.</li>
               </ul>
@@ -94,7 +93,7 @@ export default function ManufacturerHelp() {
         </section>
 
         <section className="space-y-3">
-          <h2 className="text-lg font-semibold text-foreground">Printer onboarding and diagnostics</h2>
+          <h2 className="text-lg font-semibold text-foreground">Printer setup and troubleshooting</h2>
           <div className="flex flex-wrap gap-3">
             <Button asChild variant="outline">
               <Link to="/connector-download">Install Connector</Link>

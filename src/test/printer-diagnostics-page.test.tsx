@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
-import PrinterDiagnostics from "@/pages/PrinterDiagnostics";
+import PrinterSetupAdvancedPage from "@/features/printing/PrinterSetupAdvancedPage";
 import apiClient from "@/lib/api-client";
 
 vi.mock("@/contexts/AuthContext", () => ({
@@ -101,7 +101,7 @@ describe("PrinterDiagnostics managed printer controls", () => {
   it("opens the network route dialog from the saved network route card", async () => {
     render(
       <MemoryRouter>
-        <PrinterDiagnostics />
+        <PrinterSetupAdvancedPage />
       </MemoryRouter>
     );
 
@@ -124,7 +124,7 @@ describe("PrinterDiagnostics managed printer controls", () => {
   it("lets the network-direct compatibility controls open the create flow", async () => {
     render(
       <MemoryRouter>
-        <PrinterDiagnostics />
+        <PrinterSetupAdvancedPage />
       </MemoryRouter>
     );
 
@@ -167,7 +167,7 @@ describe("PrinterDiagnostics managed printer controls", () => {
 
     render(
       <MemoryRouter>
-        <PrinterDiagnostics />
+        <PrinterSetupAdvancedPage />
       </MemoryRouter>
     );
 
@@ -193,8 +193,8 @@ describe("PrinterDiagnostics managed printer controls", () => {
 
   it("opens the managed printer dialog from the route query", async () => {
     render(
-      <MemoryRouter initialEntries={["/printer-diagnostics?managedProfiles=open"]}>
-        <PrinterDiagnostics />
+      <MemoryRouter initialEntries={["/printer-setup/advanced?managedProfiles=open"]}>
+        <PrinterSetupAdvancedPage />
       </MemoryRouter>
     );
 

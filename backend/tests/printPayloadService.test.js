@@ -1,3 +1,7 @@
+if (!process.env.QR_SIGN_HMAC_SECRET && !process.env.QR_SIGN_PRIVATE_KEY) {
+  process.env.QR_SIGN_HMAC_SECRET = "print-payload-test-secret";
+}
+
 const {
   buildApprovedPrintPayload,
   resolvePayloadType,

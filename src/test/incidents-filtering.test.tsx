@@ -1,9 +1,10 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 
 import Incidents from "@/pages/Incidents";
 import apiClient from "@/lib/api-client";
+import { renderWithQueryClient } from "@/test/render-with-query-client";
 
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
@@ -70,7 +71,7 @@ describe("Incidents filters", () => {
   });
 
   it("sends search filter to incidents API", async () => {
-    render(<Incidents />);
+    renderWithQueryClient(<Incidents />);
 
     await waitFor(() => {
       expect(vi.mocked(apiClient.getIncidents).mock.calls.length).toBeGreaterThan(0);
@@ -92,7 +93,7 @@ describe("Incidents filters", () => {
   });
 
   it("quick status buttons patch incident directly", async () => {
-    render(<Incidents />);
+    renderWithQueryClient(<Incidents />);
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Mark resolved" })).toBeInTheDocument();

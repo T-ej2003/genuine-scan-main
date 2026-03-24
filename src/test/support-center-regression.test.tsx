@@ -1,10 +1,11 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import SupportCenter from "@/pages/SupportCenter";
 import apiClient from "@/lib/api-client";
+import { renderWithQueryClient } from "@/test/render-with-query-client";
 
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
@@ -75,7 +76,7 @@ describe("SupportCenter regression", () => {
   });
 
   it("loads detail and allows workflow save + message append", async () => {
-    render(
+    renderWithQueryClient(
       <MemoryRouter>
         <SupportCenter />
       </MemoryRouter>
@@ -86,7 +87,7 @@ describe("SupportCenter regression", () => {
       expect(vi.mocked(apiClient.getSupportTicket)).toHaveBeenCalledWith(ticket.id);
     });
 
-    fireEvent.change(screen.getByPlaceholderText("Add handoff or customer-support note..."), {
+    fireEvent.change(await screen.findByPlaceholderText("Add handoff or customer-support note..."), {
       target: { value: "Escalated to L2 for root-cause trace." },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add message" }));
@@ -115,7 +116,7 @@ describe("SupportCenter regression", () => {
   });
 
   it("responds to incoming issue reports and calls the response API", async () => {
-    render(
+    renderWithQueryClient(
       <MemoryRouter>
         <SupportCenter />
       </MemoryRouter>
