@@ -12,8 +12,8 @@ export type BatchRow = {
   printedAt: string | null;
   createdAt: string;
   updatedAt?: string;
-  licensee?: { id: string; name: string; prefix: string };
-  manufacturer?: { id: string; name: string; email: string };
+  licensee?: { id: string; name: string; prefix: string } | null;
+  manufacturer?: { id: string; name: string; email: string } | null;
   _count?: { qrCodes: number };
   availableCodes?: number;
   unassignedRemainingCodes?: number;
