@@ -6,7 +6,8 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY backend/package*.json ./
-RUN npm ci
+RUN npm ci \
+  && ln -s /workspace/backend/node_modules /workspace/node_modules
 
 FROM deps AS builder
 
