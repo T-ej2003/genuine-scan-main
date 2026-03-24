@@ -7,7 +7,7 @@ Use this sequence to push the current repo-hardening update and deploy it on Lig
 cd /Users/abhiramteja/Downloads/genuine-scan-main
 git status
 git checkout -b codex/industry-grade-hardening
-git add README.md .env.example deploy/LIGHTSAIL_ENTERPRISE_UPDATE_COMMANDS.md package.json package-lock.json vite.config.ts tsconfig.app.json tsconfig.incremental-strict.json playwright.enterprise.config.ts src/vite-env.d.ts
+git add README.md .env.example deploy/LIGHTSAIL_ENTERPRISE_UPDATE_COMMANDS.md docker-compose.yml Dockerfile package.json package-lock.json vite.config.ts tsconfig.app.json tsconfig.incremental-strict.json playwright.enterprise.config.ts src/vite-env.d.ts
 git add src/App.tsx src/main.tsx src/pages/Batches.tsx src/pages/Dashboard.tsx src/pages/Incidents.tsx src/pages/SupportCenter.tsx src/pages/Verify.tsx
 git add src/components/layout/DashboardLayout.tsx src/components/batches/LicenseeBatchWorkspaceDialog.tsx src/components/page-patterns src/features src/lib/api-client.ts src/lib/api src/lib/query-client.tsx src/lib/query-keys.ts src/lib/support-diagnostics.ts src/lib/observability
 git add e2e
@@ -79,7 +79,13 @@ PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin npm run test
 ## 4A) If you run Docker Compose
 ```bash
 cd /home/ubuntu/genuine-scan-main
-docker compose up -d --build
+export GIT_SHA=$(/usr/bin/git rev-parse HEAD)
+export VITE_APP_ENV=production
+export SENTRY_ENVIRONMENT=production
+# Optional:
+# export VITE_SENTRY_DSN=https://<frontend-dsn>
+docker compose build --pull
+docker compose up -d
 docker compose ps
 docker compose logs backend --tail 120
 docker compose logs frontend --tail 120

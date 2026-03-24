@@ -11,6 +11,8 @@ services:
     environment:
       NODE_ENV: production
       PORT: ${BACKEND_PORT:-4000}
+      GIT_SHA: ${GIT_SHA:-unknown}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
     expose:
       - "4000"
     healthcheck:
@@ -40,6 +42,9 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_URL: /api
+        GIT_SHA: ${GIT_SHA:-unknown}
+        VITE_APP_ENV: ${VITE_APP_ENV:-production}
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
     container_name: genuine-scan-frontend
     restart: unless-stopped
     depends_on:
