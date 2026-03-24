@@ -164,7 +164,7 @@ import { listIrAlerts, patchIrAlert } from "../controllers/irAlertController";
 
 import { getDashboardStats } from "../controllers/dashboardController";
 import { dashboardEvents } from "../controllers/eventsController";
-import { healthCheck } from "../controllers/healthController";
+import { healthCheck, latencySummary, versionCheck } from "../controllers/healthController";
 import { captureRouteTransitionMetric, getRouteTransitionSummary } from "../controllers/telemetryController";
 import { listNotifications, readAllNotifications, readNotification } from "../controllers/notificationController";
 import { notificationEvents } from "../controllers/notificationEventsController";
@@ -293,6 +293,9 @@ router.get("/support/tickets/track/:reference", trackSupportTicketPublic);
 router.get("/scan", scanLimiter, optionalCustomerVerifyAuth, scanToken);
 router.post("/telemetry/route-transition", optionalAuth, captureRouteTransitionMetric);
 router.get("/health", healthCheck);
+router.get("/healthz", healthCheck);
+router.get("/health/latency", latencySummary);
+router.get("/version", versionCheck);
 
 // ==================== AUTH ====================
 router.get("/auth/me", authenticate, me);

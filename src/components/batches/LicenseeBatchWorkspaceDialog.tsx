@@ -183,7 +183,7 @@ export function LicenseeBatchWorkspaceDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[90vh] max-h-[90vh] flex-col overflow-hidden p-0 sm:max-w-[980px]">
+      <DialogContent data-testid="batch-workspace-dialog" className="flex h-[90vh] max-h-[90vh] flex-col overflow-hidden p-0 sm:max-w-[980px]">
         {!workspace ? null : (
           <>
             <DialogHeader className="border-b px-6 py-5">
@@ -219,9 +219,9 @@ export function LicenseeBatchWorkspaceDialog({
             <Tabs defaultValue="overview" className="flex min-h-0 flex-1 flex-col">
               <div className="border-b px-6 py-3">
                 <TabsList className="grid w-full grid-cols-3 sm:w-[26rem]">
-                  <TabsTrigger value="overview">Overview</TabsTrigger>
-                  <TabsTrigger value="operations">Operations</TabsTrigger>
-                  <TabsTrigger value="audit">Audit</TabsTrigger>
+                  <TabsTrigger data-testid="batch-workspace-tab-overview" value="overview">Overview</TabsTrigger>
+                  <TabsTrigger data-testid="batch-workspace-tab-operations" value="operations">Operations</TabsTrigger>
+                  <TabsTrigger data-testid="batch-workspace-tab-audit" value="audit">Audit</TabsTrigger>
                 </TabsList>
               </div>
 
@@ -348,7 +348,7 @@ export function LicenseeBatchWorkspaceDialog({
                             <div className="space-y-2">
                               <Label>Manufacturer</Label>
                               <Select value={assignManufacturerId} onValueChange={onAssignManufacturerChange}>
-                                <SelectTrigger>
+                                <SelectTrigger data-testid="batch-workspace-manufacturer-select">
                                   <SelectValue placeholder="Select manufacturer" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -369,6 +369,7 @@ export function LicenseeBatchWorkspaceDialog({
                             <div className="space-y-2">
                               <Label>Quantity to allocate</Label>
                               <Input
+                                data-testid="batch-workspace-assign-quantity"
                                 type="number"
                                 min={1}
                                 value={assignQuantity}
@@ -385,7 +386,7 @@ export function LicenseeBatchWorkspaceDialog({
                               ) : null}
                             </div>
                             <div className="flex justify-end">
-                              <Button onClick={onSubmitAssign} disabled={assigning || remaining <= 0}>
+                              <Button data-testid="batch-workspace-assign-submit" onClick={onSubmitAssign} disabled={assigning || remaining <= 0}>
                                 {assigning ? "Allocating..." : "Allocate quantity"}
                               </Button>
                             </div>

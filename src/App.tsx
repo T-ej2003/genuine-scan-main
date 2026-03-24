@@ -1,6 +1,6 @@
 import React, { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -10,6 +10,7 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import HelpAssistantWidget from "@/components/help/HelpAssistantWidget";
 import { getRoleHelpHome } from "@/help/contextual-help";
 import RouteMetricsTracker from "@/components/RouteMetricsTracker";
+import { MutationEventBridge, queryClient } from "@/lib/query-client";
 
 const Login = lazy(() => import("@/pages/Login"));
 const AcceptInvite = lazy(() => import("@/pages/AcceptInvite"));
@@ -50,19 +51,6 @@ const HelpCommunications = lazy(() => import("@/pages/help/Communications"));
 const HelpSupport = lazy(() => import("@/pages/help/Support"));
 const HelpGovernance = lazy(() => import("@/pages/help/Governance"));
 const HelpIncidents = lazy(() => import("@/pages/help/Incidents"));
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      staleTime: 10_000,
-      refetchOnWindowFocus: false,
-    },
-    mutations: {
-      retry: 0,
-    },
-  },
-});
 
 /* =========================
    Route Guards
@@ -449,6 +437,7 @@ function AppRoutes() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <MutationEventBridge />
       <AuthProvider>
         <TooltipProvider>
           <Toaster />

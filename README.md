@@ -2,6 +2,16 @@
 
 Production-grade, multi-tenant QR authenticity platform for secure code issuance, controlled print operations, consumer verification, anomaly detection, and auditability.
 
+## Delivery Standards
+
+- Feature-first frontend domains now live under `src/features/` for `batches`, `printing`, `verify`, `incidents`, `dashboard`, and `layout`.
+- Route files under `src/pages/` remain as thin wrappers so page imports stay stable while domain logic moves behind feature modules.
+- Server state should be loaded through React Query hooks such as `useDashboardStats`, `useBatches`, `usePrintJobs`, and `useIncident`, not ad-hoc page fetches.
+- Generated build artifacts like `dist/` and `backend/dist/` are not source and should stay out of commits.
+- Incremental TypeScript tightening lives in `tsconfig.incremental-strict.json`; use it for newly refactored modules before broadening repo-wide strictness.
+- Release metadata is propagated through the frontend build, backend health/version payloads, support diagnostics, and optional Sentry telemetry so one deploy maps to one release tag.
+- Critical path smoke coverage lives in `e2e/enterprise-smoke.spec.ts` and targets login, batch allocation, print job start, public verify reporting, and support follow-up.
+
 ## 1. What This System Is
 
 MSCQR is designed for anti-counterfeit operations across four user types:
@@ -71,19 +81,50 @@ Open app:
 - Backend API: `http://localhost:4000/api`
 - Health: `http://localhost:4000/health`
 - DB health: `http://localhost:4000/health/db`
+- Latency summary: `http://localhost:4000/health/latency`
+
+Targeted verification:
+
+```bash
+npm run typecheck:incremental
+npm --prefix backend run build
+npm run build
+```
+
+Optional live smoke run against a ready environment:
+
+```bash
+E2E_BASE_URL=http://localhost:8080 \
+E2E_SUPERADMIN_EMAIL=... \
+E2E_SUPERADMIN_PASSWORD=... \
+E2E_LICENSEE_ADMIN_EMAIL=... \
+E2E_LICENSEE_ADMIN_PASSWORD=... \
+E2E_MANUFACTURER_EMAIL=... \
+E2E_MANUFACTURER_PASSWORD=... \
+E2E_LICENSEE_BATCH_QUERY="Batch name" \
+E2E_ASSIGN_MANUFACTURER_NAME="Manufacturer name" \
+E2E_MANUFACTURER_BATCH_QUERY="Allocated batch" \
+E2E_PRINTER_PROFILE_NAME="Ready printer profile" \
+E2E_VERIFY_CODE=A0000000051 \
+npm run test:e2e
+```
 
 ## 3. Repository Layout
 
 ```text
 .
 ├── src/                              # Frontend React app
-│   ├── pages/                        # Route pages
+│   ├── features/                     # Feature-first UI/data domains
+│   ├── pages/                        # Thin route wrappers
 │   ├── components/                   # Shared and feature UI
 │   ├── contexts/                     # Auth/session context
-│   └── lib/api-client.ts             # API client
+│   └── lib/api-client.ts             # Stable API client entrypoint
+├── e2e/                              # Playwright smoke coverage for critical workflows
+├── shared/contracts/                 # Shared DTO/type boundaries
 ├── backend/
 │   ├── src/
 │   │   ├── controllers/              # HTTP handlers
+│   │   ├── observability/            # Release metadata, request metrics, Sentry hooks
 │   │   ├── services/                 # Core business logic
 │   │   ├── middleware/               # Auth/RBAC/tenant isolation
 │   │   ├── routes/                   # API route registration

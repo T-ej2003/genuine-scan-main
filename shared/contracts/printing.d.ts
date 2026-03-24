@@ -1,0 +1,120 @@
+export interface PrinterCapabilitySummaryDTO {
+  transports: string[];
+  protocols: string[];
+  languages: string[];
+  supportsRaster: boolean;
+  supportsPdf: boolean;
+  dpiOptions: number[];
+  mediaSizes: string[];
+}
+
+export interface LocalPrinterDTO {
+  printerId: string;
+  printerName: string;
+  model?: string | null;
+  connection?: string | null;
+  online?: boolean;
+  isDefault?: boolean;
+  protocols?: string[];
+  languages?: string[];
+  mediaSizes?: string[];
+  dpi?: number | null;
+}
+
+export interface PrinterConnectionStatusDTO {
+  connected: boolean;
+  trusted: boolean;
+  compatibilityMode: boolean;
+  compatibilityReason?: string | null;
+  eligibleForPrinting: boolean;
+  connectionClass?: "TRUSTED" | "COMPATIBILITY" | "BLOCKED";
+  stale: boolean;
+  requiredForPrinting: boolean;
+  trustStatus?: string;
+  trustReason?: string | null;
+  lastHeartbeatAt: string | null;
+  ageSeconds: number | null;
+  registrationId?: string | null;
+  agentId?: string | null;
+  deviceFingerprint?: string | null;
+  mtlsFingerprint?: string | null;
+  printerName?: string | null;
+  printerId?: string | null;
+  selectedPrinterId?: string | null;
+  selectedPrinterName?: string | null;
+  deviceName?: string | null;
+  agentVersion?: string | null;
+  capabilitySummary?: PrinterCapabilitySummaryDTO | null;
+  printers?: LocalPrinterDTO[];
+  calibrationProfile?: Record<string, unknown> | null;
+  error?: string | null;
+}
+
+export interface RegisteredPrinterDTO {
+  id: string;
+  name: string;
+  vendor?: string | null;
+  model?: string | null;
+  connectionType: "LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP";
+  commandLanguage?: "AUTO" | "ZPL" | "TSPL" | "SBPL" | "EPL" | "CPCL" | "ESC_POS" | "OTHER" | string | null;
+  ipAddress?: string | null;
+  host?: string | null;
+  port?: number | null;
+  resourcePath?: string | null;
+  tlsEnabled?: boolean | null;
+  printerUri?: string | null;
+  deliveryMode?: "DIRECT" | "SITE_GATEWAY";
+  nativePrinterId?: string | null;
+  isActive: boolean;
+  isDefault?: boolean;
+  registryStatus?: {
+    state: "READY" | "ATTENTION" | "OFFLINE" | "BLOCKED";
+    summary: string;
+    detail?: string | null;
+  } | null;
+}
+
+export interface PrintJobSessionDTO {
+  id?: string;
+  remainingToPrint?: number;
+  confirmedItems?: number;
+  frozenItems?: number;
+  counts?: Record<string, number>;
+}
+
+export interface PrintJobDTO {
+  id: string;
+  jobNumber?: string | null;
+  status: "PENDING" | "SENT" | "CONFIRMED" | "FAILED" | "CANCELLED";
+  printMode: "LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP";
+  quantity: number;
+  itemCount?: number | null;
+  failureReason?: string | null;
+  createdAt: string;
+  updatedAt?: string;
+  sentAt?: string | null;
+  confirmedAt?: string | null;
+  completedAt?: string | null;
+  batch?: {
+    id?: string;
+    name?: string | null;
+    licenseeId?: string | null;
+  } | null;
+  printer?: {
+    id?: string;
+    name?: string | null;
+    connectionType?: string | null;
+  } | null;
+  session?: PrintJobSessionDTO | null;
+}
+
+export interface DashboardNotificationDTO {
+  id: string;
+  type?: string | null;
+  title?: string | null;
+  body?: string | null;
+  createdAt?: string | null;
+  readAt?: string | null;
+  data?: unknown;
+  incidentId?: string | null;
+}

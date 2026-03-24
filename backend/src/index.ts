@@ -2,8 +2,8 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
+import { randomUUID } from "crypto";
 import cookieParser from "cookie-parser";
-import packageJson from "../package.json";
 import routes from "./routes";
 import prisma from "./config/database";
 import { logger } from "./utils/logger";
@@ -11,6 +11,9 @@ import { startSecurityEventOutboxWorker, stopSecurityEventOutboxWorker } from ".
 import { startCompliancePackScheduler, stopCompliancePackScheduler } from "./services/compliancePackService";
 import { resumePendingNetworkDirectJobs } from "./services/networkDirectPrintService";
 import { resumePendingNetworkIppJobs } from "./services/networkIppPrintService";
+import { releaseMetadata } from "./observability/release";
+import { captureBackendException, flushBackendMonitoring, initBackendMonitoring } from "./observability/sentry";
+import { getLatencySummary, recordRequestMetric } from "./observability/requestMetrics";
 
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -85,15 +88,14 @@ const app = express();
 app.disable("etag");
 app.set("trust proxy", 1);
 const PORT = process.env.PORT || 4000;
-const APP_NAME = packageJson.name;
-const APP_VERSION = packageJson.version;
-const GIT_SHA =
-  process.env.GIT_SHA ||
-  process.env.GITHUB_SHA ||
-  process.env.COMMIT_SHA ||
-  process.env.RENDER_GIT_COMMIT ||
-  process.env.VERCEL_GIT_COMMIT_SHA ||
-  "unknown";
+const sentryEnabled = initBackendMonitoring();
+
+if (sentryEnabled) {
+  logger.info("Sentry monitoring enabled", {
+    environment: releaseMetadata.environment,
+    release: releaseMetadata.release,
+  });
+}
 
 // ✅ Allow multiple dev frontends (WEB APP 1 on 8081, landing on 8080, default Vite on 5173)
 const allowedOrigins = new Set<string>([
@@ -155,7 +157,69 @@ app.use((req, res, next) => {
   next();
 });
 
-const healthPayload = () => ({ status: "ok", timestamp: new Date().toISOString() });
+const requestTelemetryDebugPaths = new Set(["/health", "/healthz", "/health/db", "/health/latency", "/version"]);
+
+app.use((req, res, next) => {
+  const requestId = String(req.get("x-request-id") || randomUUID());
+  const startedAt = process.hrtime.bigint();
+
+  (req as express.Request & { requestId?: string }).requestId = requestId;
+  res.setHeader("X-Request-Id", requestId);
+  res.setHeader("X-Release-Version", releaseMetadata.version);
+  res.setHeader("X-Release-Sha", releaseMetadata.shortGitSha);
+
+  res.on("finish", () => {
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+    const pathName = req.originalUrl.split("?")[0] || req.path || "/";
+
+    recordRequestMetric({
+      at: Date.now(),
+      method: req.method,
+      route: pathName,
+      status: res.statusCode,
+      durationMs,
+    });
+
+    const meta = {
+      requestId,
+      method: req.method,
+      path: pathName,
+      status: res.statusCode,
+      durationMs: Math.round(durationMs * 10) / 10,
+      release: releaseMetadata.release,
+    };
+
+    if (requestTelemetryDebugPaths.has(pathName)) {
+      logger.debug("HTTP request completed", meta);
+      return;
+    }
+
+    if (res.statusCode >= 500) {
+      logger.error("HTTP request failed", meta);
+      return;
+    }
+
+    if (res.statusCode >= 400 || durationMs >= 1500) {
+      logger.warn("HTTP request completed", meta);
+      return;
+    }
+
+    logger.info("HTTP request completed", meta);
+  });
+
+  next();
+});
+
+const healthPayload = () => ({
+  status: "ok",
+  timestamp: new Date().toISOString(),
+  release: {
+    name: releaseMetadata.name,
+    version: releaseMetadata.version,
+    gitSha: releaseMetadata.shortGitSha,
+    environment: releaseMetadata.environment,
+  },
+});
 
 app.get("/health", (_req, res) => {
   res.json(healthPayload());
@@ -166,7 +230,20 @@ app.get("/healthz", (_req, res) => {
 });
 
 app.get("/version", (_req, res) => {
-  res.json({ name: APP_NAME, version: APP_VERSION, gitSha: GIT_SHA });
+  res.json({
+    name: releaseMetadata.name,
+    version: releaseMetadata.version,
+    gitSha: releaseMetadata.gitSha,
+    release: releaseMetadata.release,
+    environment: releaseMetadata.environment,
+  });
+});
+
+app.get("/health/latency", (_req, res) => {
+  res.json({
+    ...healthPayload(),
+    latency: getLatencySummary(),
+  });
 });
 
 app.get("/health/db", async (_req, res) => {
@@ -199,10 +276,23 @@ app.use("/api", (_req, res, next) => {
 
 app.use("/api", routes);
 
-app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  logger.error("Unhandled error:", { error: err?.message || err });
+app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const requestId = (req as express.Request & { requestId?: string }).requestId;
+  captureBackendException(err, {
+    requestId,
+    method: req.method,
+    path: req.originalUrl,
+    status: 500,
+  });
+  logger.error("Unhandled error", {
+    requestId,
+    method: req.method,
+    path: req.originalUrl,
+    error: err?.message || err,
+  });
   res.status(500).json({
     success: false,
+    requestId,
     error: process.env.NODE_ENV === "development" ? err.message : "Internal server error",
   });
 });
@@ -212,9 +302,15 @@ app.use((_req, res) => {
 });
 
 const server = app.listen(PORT, () => {
+  logger.info("Release metadata loaded", {
+    environment: releaseMetadata.environment,
+    release: releaseMetadata.release,
+    gitSha: releaseMetadata.shortGitSha,
+  });
   logger.info(`🚀 Server running on http://localhost:${PORT}`);
   logger.info(`📚 API available at http://localhost:${PORT}/api`);
   logger.info(`🔍 Health check at http://localhost:${PORT}/health`);
+  logger.info(`⏱️ Latency summary at http://localhost:${PORT}/health/latency`);
   startSecurityEventOutboxWorker();
   startCompliancePackScheduler();
   void resumePendingNetworkDirectJobs().catch((error) => {
@@ -254,6 +350,7 @@ const shutdown = async (signal: string) => {
     stopSecurityEventOutboxWorker();
     stopCompliancePackScheduler();
     await prisma.$disconnect();
+    await flushBackendMonitoring();
     clearTimeout(forceExit);
     logger.info("Shutdown complete");
     process.exit(0);
@@ -273,10 +370,12 @@ process.on("SIGINT", () => {
 });
 
 process.on("unhandledRejection", (reason) => {
+  captureBackendException(reason);
   logger.error("Unhandled promise rejection", { error: reason instanceof Error ? reason.message : String(reason) });
 });
 
 process.on("uncaughtException", (error) => {
+  captureBackendException(error);
   logger.error("Uncaught exception", { error: error?.message || String(error) });
   void shutdown("uncaughtException");
 });

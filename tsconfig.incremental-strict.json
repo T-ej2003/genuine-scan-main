@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  "include": [
+    "src/features/dashboard/hooks.ts",
+    "src/features/batches/hooks.ts",
+    "src/features/printing/hooks.ts",
+    "src/features/layout/hooks.ts",
+    "src/features/incidents/hooks.ts",
+    "src/components/page-patterns/**/*",
+    "src/lib/observability/**/*",
+    "src/lib/support-diagnostics.ts",
+    "src/lib/query-client.tsx",
+    "src/lib/query-keys.ts",
+    "src/lib/api/query-utils.ts",
+    "src/vite-env.d.ts",
+    "shared/contracts/**/*.d.ts"
+  ]
+}

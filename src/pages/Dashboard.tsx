@@ -2,12 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { DashboardPagePattern } from "@/components/page-patterns/PagePatterns";
 import { StatsCard } from "@/components/dashboard/StatsCard";
 import { QRStatusChart } from "@/components/dashboard/QRStatusChart";
 import { RecentActivityCard } from "@/components/dashboard/RecentActivityCard";
 import { QrCode, Building2, Factory, FileText, RefreshCw, ArrowRight, Boxes } from "lucide-react";
-import apiClient from "@/lib/api-client";
-import { onMutationEvent } from "@/lib/mutation-events";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +15,9 @@ import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
+import { useDashboardAuditLogs, useDashboardStats } from "@/features/dashboard/hooks";
+
+import type { AuditLogDTO, DashboardStatsDTO, QrStatsDTO } from "../../shared/contracts/dashboard";
 
 const STATS_POLL_MS = 5000;
 const API_BASE = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
@@ -24,60 +26,27 @@ type StatusFocus = "all" | "dormant" | "allocated" | "printed" | "scanned";
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const scopedLicenseeId = user?.role === "manufacturer" ? undefined : user?.licenseeId;
+  const canReadAuditFeed = user?.role === "super_admin" || user?.role === "licensee_admin";
+  const dashboardQuery = useDashboardStats(scopedLicenseeId);
+  const auditLogsQuery = useDashboardAuditLogs(canReadAuditFeed, 5);
 
-  const [summary, setSummary] = useState<any>(null);
-  const [qrStats, setQrStats] = useState<any>(null);
-  const [logs, setLogs] = useState<any[]>([]);
+  const [liveSummary, setLiveSummary] = useState<DashboardStatsDTO | null>(null);
+  const [liveQrStats, setLiveQrStats] = useState<QrStatsDTO | null>(null);
+  const [liveLogs, setLiveLogs] = useState<AuditLogDTO[] | null>(null);
   const [liveUpdates, setLiveUpdates] = useState(true);
   const [sseConnected, setSseConnected] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [statusFocus, setStatusFocus] = useState<StatusFocus>("all");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
 
   const pollRef = useRef<number | null>(null);
   const sseRef = useRef<EventSource | null>(null);
 
-  const load = async (opts?: { silent?: boolean }) => {
-    if (!opts?.silent) {
-      setLoading(true);
-      setError(null);
-    }
-
-    try {
-      const scopedLicenseeId = user?.role === "manufacturer" ? undefined : user?.licenseeId;
-      const [summaryRes, qrRes] = await Promise.all([
-        apiClient.getDashboardStats(scopedLicenseeId),
-        apiClient.getQRStats(scopedLicenseeId),
-      ]);
-
-      if (!summaryRes.success) throw new Error(summaryRes.error || "Failed to load dashboard stats");
-      if (!qrRes.success) throw new Error(qrRes.error || "Failed to load QR stats");
-
-      setSummary(summaryRes.data || {});
-      setQrStats(qrRes.data || {});
-      setLastUpdated(new Date());
-
-      if (user?.role === "super_admin" || user?.role === "licensee_admin") {
-        const logsRes = await apiClient.getAuditLogs({ limit: 5 });
-        if (logsRes.success) {
-          const payload: any = logsRes.data;
-          const list = Array.isArray(payload) ? payload : Array.isArray(payload?.logs) ? payload.logs : [];
-          setLogs(list);
-        } else {
-          setLogs([]);
-        }
-      } else {
-        setLogs([]);
-      }
-    } catch (e: any) {
-      setError(e?.message || "Failed to load dashboard");
-      setSummary(null);
-      setQrStats(null);
-      setLogs([]);
-    } finally {
-      if (!opts?.silent) setLoading(false);
+  const refreshDashboard = async () => {
+    await dashboardQuery.refetch();
+    if (canReadAuditFeed) {
+      await auditLogsQuery.refetch();
     }
   };
 
@@ -92,10 +61,12 @@ export default function Dashboard() {
       setSseConnected(false);
     };
 
-    // initial load
-    load();
+    void refreshDashboard();
 
     if (!liveUpdates) {
+      setLiveSummary(null);
+      setLiveQrStats(null);
+      setLiveLogs(null);
       closeRealtime();
       return () => {
         closeRealtime();
@@ -107,7 +78,7 @@ export default function Dashboard() {
     pollRef.current = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
       if (sseRef.current) return;
-      load({ silent: true });
+      void refreshDashboard();
     }, STATS_POLL_MS);
 
     // setup SSE for realtime (cookie-auth; do not put tokens in URLs)
@@ -119,13 +90,13 @@ export default function Dashboard() {
       es.addEventListener("stats", (e: MessageEvent) => {
         try {
           const payload = JSON.parse(e.data);
-          setSummary({
+          setLiveSummary({
             totalQRCodes: payload?.totalQRCodes ?? 0,
             activeLicensees: payload?.activeLicensees ?? 0,
             manufacturers: payload?.manufacturers ?? 0,
             totalBatches: payload?.totalBatches ?? 0,
           });
-          setQrStats(payload?.qr || {});
+          setLiveQrStats(payload?.qr || {});
           setLastUpdated(new Date());
         } catch {
           // ignore parse errors
@@ -135,7 +106,7 @@ export default function Dashboard() {
       es.addEventListener("audit", (e: MessageEvent) => {
         try {
           const log = JSON.parse(e.data);
-          setLogs((prev) => [log, ...(prev || [])].slice(0, 10));
+          setLiveLogs((prev) => [log, ...((prev || auditLogsQuery.data || []) as AuditLogDTO[])].slice(0, 10));
         } catch {
           // ignore
         }
@@ -153,15 +124,21 @@ export default function Dashboard() {
       closeRealtime();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.licenseeId, user?.role, liveUpdates]);
+  }, [auditLogsQuery.data, canReadAuditFeed, liveUpdates, scopedLicenseeId, user?.role]);
 
   useEffect(() => {
-    const off = onMutationEvent(() => {
-      load({ silent: true });
-    });
-    return off;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (dashboardQuery.dataUpdatedAt) {
+      setLastUpdated(new Date(dashboardQuery.dataUpdatedAt));
+    }
+  }, [dashboardQuery.dataUpdatedAt]);
+
+  const summary = liveSummary ?? dashboardQuery.data?.summary ?? null;
+  const qrStats = liveQrStats ?? dashboardQuery.data?.qrStats ?? null;
+  const logs = liveLogs ?? auditLogsQuery.data ?? [];
+  const loading = dashboardQuery.isLoading && !dashboardQuery.data && !liveSummary;
+  const error =
+    (dashboardQuery.error instanceof Error ? dashboardQuery.error.message : null) ||
+    (auditLogsQuery.error instanceof Error ? auditLogsQuery.error.message : null);
 
   // totals (support multiple backend shapes)
   const totalQRCodes = summary?.totalQRCodes ?? 0;
@@ -347,15 +324,11 @@ export default function Dashboard() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
-        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">Dashboard</h1>
-            <p className="text-muted-foreground">
-              Welcome back, {user?.name}. {roleLabel} overview with live operational signals.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+      <DashboardPagePattern
+        title="Dashboard"
+        description={`Welcome back, ${user?.name}. ${roleLabel} overview with live operational signals.`}
+        actions={
+          <>
             <Badge variant={liveUpdates && sseConnected ? "default" : "secondary"}>
               {liveUpdates && sseConnected ? "Live Connected" : liveUpdates ? "Live Polling" : "Live Paused"}
             </Badge>
@@ -366,12 +339,13 @@ export default function Dashboard() {
               <span className="text-xs text-muted-foreground">Live</span>
               <Switch checked={liveUpdates} onCheckedChange={setLiveUpdates} />
             </div>
-            <Button variant="outline" size="sm" onClick={() => load()} className="gap-2">
-              <RefreshCw className="h-4 w-4" />
+            <Button variant="outline" size="sm" onClick={() => void refreshDashboard()} className="gap-2">
+              <RefreshCw className={cn("h-4 w-4", dashboardQuery.isFetching ? "animate-spin" : "")} />
               Refresh
             </Button>
-          </div>
-        </div>
+          </>
+        }
+      >
 
         {error && (
           <div className="rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
@@ -388,7 +362,7 @@ export default function Dashboard() {
               icon={item.icon}
               subtitle={item.subtitle}
               variant={item.variant}
-              onClick={() => (item.action === "scope" ? setScopeDialogOpen(true) : navigate(item.href))}
+              onClick={() => (("action" in item && item.action === "scope") ? setScopeDialogOpen(true) : navigate(item.href))}
               ctaLabel={item.ctaLabel}
             />
           ))}
@@ -480,7 +454,12 @@ export default function Dashboard() {
         <div className="grid gap-6 md:grid-cols-2 mt-6">
           <QRStatusChart data={qrStatusData} selectedStatus={statusFocus} onStatusSelect={setStatusFocus} />
           <RecentActivityCard
-            logs={logs}
+            logs={logs.map((log) => ({
+              ...log,
+              action: log.action || "Activity",
+              entityType: log.entityType || "System",
+              entityId: log.entityId || log.id,
+            }))}
             emptyMessage={
               canViewAudit
                 ? "No recent activity yet. Actions in batches, users, and requests will appear here."
@@ -545,7 +524,7 @@ export default function Dashboard() {
             </div>
           </DialogContent>
         </Dialog>
-      </div>
+      </DashboardPagePattern>
     </DashboardLayout>
   );
 }

@@ -10,6 +10,7 @@ import {
   PrinterConnectionType,
   QRStatus,
 } from "@prisma/client";
+import type { PrintJobDTO } from "../../../shared/contracts/printing";
 
 import prisma from "../config/database";
 import { logger } from "../utils/logger";
@@ -21,6 +22,56 @@ import { createRoleNotifications, createUserNotification } from "./notificationS
 
 const activeDispatches = new Set<string>();
 const NETWORK_DIRECT_CHUNK_SIZE = Math.max(1, Math.min(250, Number(process.env.NETWORK_DIRECT_CHUNK_SIZE || 25) || 25));
+
+const buildSessionStateCounts = async (sessionIds: string[]) => {
+  if (sessionIds.length === 0) return {} as Record<string, Record<string, number>>;
+
+  const rows = await prisma.printItem.groupBy({
+    by: ["printSessionId", "state"],
+    where: { printSessionId: { in: sessionIds } },
+    _count: { _all: true },
+  });
+
+  return rows.reduce<Record<string, Record<string, number>>>((acc, row) => {
+    const sessionCounts = acc[row.printSessionId] || {};
+    sessionCounts[row.state] = row._count._all;
+    acc[row.printSessionId] = sessionCounts;
+    return acc;
+  }, {});
+};
+
+const buildSessionSnapshot = <
+  T extends {
+    id: string;
+    status: PrintSessionStatus;
+    totalItems: number;
+    issuedItems?: number;
+    confirmedItems?: number;
+    frozenItems?: number;
+    failedReason?: string | null;
+    startedAt?: Date;
+    completedAt?: Date | null;
+  },
+>(
+  session: T | null | undefined,
+  countsByState: Record<string, number> = {}
+) => {
+  if (!session) return null;
+
+  const remainingToPrint = OPEN_PRINT_STATES.reduce((sum, state) => sum + (countsByState[state] || 0), 0);
+  const confirmedItems = (countsByState[PrintItemState.PRINT_CONFIRMED] || 0) + (countsByState[PrintItemState.CLOSED] || 0);
+  const frozenItems = countsByState[PrintItemState.FROZEN] || 0;
+
+  return {
+    ...session,
+    confirmedItems: Math.max(Number(session.confirmedItems || 0), confirmedItems),
+    frozenItems: Math.max(Number(session.frozenItems || 0), frozenItems),
+    remainingToPrint,
+    counts: countsByState,
+  };
+};
+
+const toIsoOrNull = (value: Date | null | undefined) => (value ? value.toISOString() : null);
 
 const notifySystemPrintEvent = async (params: {
   licenseeId?: string | null;
@@ -275,7 +326,7 @@ const confirmNetworkPrintedItem = async (params: {
   });
 };
 
-export const getPrintJobOperationalView = async (params: { jobId: string; userId: string }) => {
+export const getPrintJobOperationalView = async (params: { jobId: string; userId: string }): Promise<PrintJobDTO | null> => {
   const job = await prisma.printJob.findFirst({
     where: {
       id: params.jobId,
@@ -316,16 +367,9 @@ export const getPrintJobOperationalView = async (params: { jobId: string; userId
   });
   if (!job) return null;
 
-  const stateCounts = await prisma.printItem.groupBy({
-    by: ["state"],
-    where: { printSessionId: job.printSession?.id || "__missing__" },
-    _count: { _all: true },
-  });
-  const counts = stateCounts.reduce<Record<string, number>>((acc, row) => {
-    acc[row.state] = row._count._all;
-    return acc;
-  }, {});
-  const remainingToPrint = job.printSession?.id ? await prisma.printItem.count({ where: { printSessionId: job.printSession.id, state: { in: OPEN_PRINT_STATES } } }) : 0;
+  const sessionIds = job.printSession?.id ? [job.printSession.id] : [];
+  const sessionStateCounts = await buildSessionStateCounts(sessionIds);
+  const counts = job.printSession?.id ? sessionStateCounts[job.printSession.id] || {} : {};
 
   return {
     id: job.id,
@@ -335,18 +379,14 @@ export const getPrintJobOperationalView = async (params: { jobId: string; userId
     quantity: job.quantity,
     itemCount: job.itemCount || job.quantity,
     failureReason: job.failureReason,
-    createdAt: job.createdAt,
-    updatedAt: job.updatedAt,
-    sentAt: job.sentAt,
-    confirmedAt: job.confirmedAt,
-    completedAt: job.completedAt,
+    createdAt: job.createdAt.toISOString(),
+    updatedAt: job.updatedAt.toISOString(),
+    sentAt: toIsoOrNull(job.sentAt),
+    confirmedAt: toIsoOrNull(job.confirmedAt),
+    completedAt: toIsoOrNull(job.completedAt),
     batch: job.batch,
     printer: job.printer,
-    session: {
-      ...(job.printSession || null),
-      remainingToPrint,
-      counts,
-    },
+    session: buildSessionSnapshot(job.printSession, counts),
   };
 };
 
@@ -354,7 +394,7 @@ export const listPrintJobsForManufacturer = async (params: {
   userId: string;
   batchId?: string;
   limit?: number;
-}) => {
+}): Promise<PrintJobDTO[]> => {
   const jobs = await prisma.printJob.findMany({
     where: {
       manufacturerId: params.userId,
@@ -383,7 +423,18 @@ export const listPrintJobsForManufacturer = async (params: {
     take: Math.max(1, Math.min(100, params.limit || 20)),
   });
 
-  return jobs;
+  const sessionIds = jobs.map((job) => job.printSession?.id).filter((value): value is string => Boolean(value));
+  const sessionStateCounts = await buildSessionStateCounts(sessionIds);
+
+  return jobs.map((job) => ({
+    ...job,
+    createdAt: job.createdAt.toISOString(),
+    updatedAt: job.updatedAt.toISOString(),
+    sentAt: toIsoOrNull(job.sentAt),
+    confirmedAt: toIsoOrNull(job.confirmedAt),
+    completedAt: toIsoOrNull(job.completedAt),
+    session: buildSessionSnapshot(job.printSession, job.printSession?.id ? sessionStateCounts[job.printSession.id] || {} : {}),
+  }));
 };
 
 const runNetworkDirectDispatch = async (jobId: string, actorUserId: string) => {

@@ -111,7 +111,7 @@ export default function SupportCenter() {
     isInternal: true,
   });
 
-  const canEdit = user?.role === "super_admin" || user?.role === "platform_super_admin";
+  const canEdit = user?.role === "super_admin";
 
   const loadTickets = async () => {
     setLoading(true);
@@ -304,13 +304,14 @@ export default function SupportCenter() {
             <div className="text-sm font-semibold">Filters</div>
             <div className="flex w-full flex-wrap gap-2 md:w-auto">
               <Input
+                data-testid="support-search-input"
                 value={filters.search}
                 onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
                 placeholder="Search by reference / incident / subject"
                 className="w-full md:w-[280px]"
               />
               <Select value={filters.status} onValueChange={(value) => setFilters((prev) => ({ ...prev, status: value }))}>
-                <SelectTrigger className="w-[180px]">
+                <SelectTrigger data-testid="support-status-filter" className="w-[180px]">
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
@@ -323,7 +324,7 @@ export default function SupportCenter() {
                 </SelectContent>
               </Select>
               <Select value={filters.priority} onValueChange={(value) => setFilters((prev) => ({ ...prev, priority: value }))}>
-                <SelectTrigger className="w-[150px]">
+                <SelectTrigger data-testid="support-priority-filter" className="w-[150px]">
                   <SelectValue placeholder="Priority" />
                 </SelectTrigger>
                 <SelectContent>
@@ -335,7 +336,7 @@ export default function SupportCenter() {
                   ))}
                 </SelectContent>
               </Select>
-              <Button onClick={loadTickets} disabled={loading} className="bg-slate-900 text-white hover:bg-slate-800">
+              <Button data-testid="support-apply-filters" onClick={loadTickets} disabled={loading} className="bg-slate-900 text-white hover:bg-slate-800">
                 {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Apply
               </Button>
@@ -469,6 +470,7 @@ export default function SupportCenter() {
                     ) : (
                       tickets.map((ticket) => (
                         <TableRow
+                          data-testid="support-ticket-row"
                           key={ticket.id}
                           onClick={() => setSelectedId(ticket.id)}
                           className={ticket.id === selectedId ? "cursor-pointer bg-cyan-50/70" : "cursor-pointer"}
@@ -552,7 +554,7 @@ export default function SupportCenter() {
                     <div className="space-y-2">
                       <Label>Status</Label>
                       <Select value={editState.status} onValueChange={(value) => setEditState((prev) => ({ ...prev, status: value }))}>
-                        <SelectTrigger>
+                        <SelectTrigger data-testid="support-ticket-status">
                           <SelectValue placeholder="Status" />
                         </SelectTrigger>
                         <SelectContent>
@@ -587,7 +589,12 @@ export default function SupportCenter() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    <Button onClick={saveTicket} disabled={!canEdit || saving} className="bg-slate-900 text-white hover:bg-slate-800">
+                    <Button
+                      data-testid="support-ticket-save"
+                      onClick={saveTicket}
+                      disabled={!canEdit || saving}
+                      className="bg-slate-900 text-white hover:bg-slate-800"
+                    >
                       {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <TimerReset className="mr-2 h-4 w-4" />}
                       Save workflow update
                     </Button>
@@ -614,6 +621,7 @@ export default function SupportCenter() {
 
                     <div className="mt-3 space-y-2">
                       <Textarea
+                        data-testid="support-ticket-message-input"
                         rows={3}
                         value={newMessage}
                         onChange={(e) => setNewMessage(e.target.value)}
@@ -628,7 +636,7 @@ export default function SupportCenter() {
                           />
                           Internal note
                         </label>
-                        <Button onClick={sendMessage} disabled={!newMessage.trim()}>
+                        <Button data-testid="support-ticket-message-submit" onClick={sendMessage} disabled={!newMessage.trim()}>
                           <MessageSquareText className="mr-2 h-4 w-4" />
                           Add message
                         </Button>

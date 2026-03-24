@@ -1,31 +1,15 @@
 import { createHash, createPublicKey, verify as cryptoVerify } from "crypto";
-import { PrinterTrustStatus, UserRole } from "@prisma/client";
+import { Prisma, PrinterTrustStatus, UserRole } from "@prisma/client";
+import type {
+  LocalPrinterDTO as PrinterInventoryDevice,
+  PrinterCapabilitySummaryDTO as PrinterCapabilitySummary,
+  PrinterConnectionStatusDTO as PrinterConnectionStatus,
+} from "../../../shared/contracts/printing";
 
 import prisma from "../config/database";
 import { hashIp, hashToken, normalizeUserAgent, randomOpaqueToken } from "../utils/security";
 
-export type PrinterCapabilitySummary = {
-  transports: string[];
-  protocols: string[];
-  languages: string[];
-  supportsRaster: boolean;
-  supportsPdf: boolean;
-  dpiOptions: number[];
-  mediaSizes: string[];
-};
-
-export type PrinterInventoryDevice = {
-  printerId: string;
-  printerName: string;
-  model: string | null;
-  connection: string | null;
-  online: boolean;
-  isDefault: boolean;
-  protocols: string[];
-  languages: string[];
-  mediaSizes: string[];
-  dpi: number | null;
-};
+export type { PrinterCapabilitySummary, PrinterConnectionStatus, PrinterInventoryDevice };
 
 type PrinterRegistrationWithLatest = {
   id: string;
@@ -51,35 +35,6 @@ type PrinterRegistrationWithLatest = {
     metadata: any;
     createdAt: Date;
   }>;
-};
-
-export type PrinterConnectionStatus = {
-  connected: boolean;
-  trusted: boolean;
-  compatibilityMode: boolean;
-  compatibilityReason: string | null;
-  eligibleForPrinting: boolean;
-  connectionClass: "TRUSTED" | "COMPATIBILITY" | "BLOCKED";
-  stale: boolean;
-  requiredForPrinting: boolean;
-  trustStatus: PrinterTrustStatus | "UNREGISTERED";
-  trustReason: string | null;
-  lastHeartbeatAt: string | null;
-  ageSeconds: number | null;
-  registrationId: string | null;
-  agentId: string | null;
-  deviceFingerprint: string | null;
-  mtlsFingerprint: string | null;
-  printerName?: string | null;
-  printerId?: string | null;
-  deviceName?: string | null;
-  agentVersion?: string | null;
-  selectedPrinterId?: string | null;
-  selectedPrinterName?: string | null;
-  capabilitySummary?: PrinterCapabilitySummary | null;
-  printers?: PrinterInventoryDevice[];
-  calibrationProfile?: Record<string, any> | null;
-  error?: string | null;
 };
 
 export type PrinterConnectionRealtimeEvent = {
@@ -653,7 +608,7 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
         signatureValid,
         trustValid: Boolean(trustValid && input.connected),
         rejectionReason,
-        metadata,
+        metadata: metadata as unknown as Prisma.InputJsonValue,
       },
     });
   }

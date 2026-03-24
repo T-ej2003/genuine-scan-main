@@ -109,7 +109,7 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
       printers: Array.isArray(parsed.data.printers) ? parsed.data.printers : [],
       capabilitySummary:
         update.status.capabilitySummary && typeof update.status.capabilitySummary === "object"
-          ? (update.status.capabilitySummary as Record<string, unknown>)
+          ? (update.status.capabilitySummary as unknown as Record<string, unknown>)
           : null,
       calibrationProfile:
         update.status.calibrationProfile && typeof update.status.calibrationProfile === "object"
