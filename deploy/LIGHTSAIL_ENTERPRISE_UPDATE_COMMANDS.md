@@ -89,6 +89,13 @@ docker compose logs frontend --tail 120
 
 If the previous backend build failed with `Cannot find module '../../../shared/contracts/printing'`, this clean rebuild is the fix. The backend image now builds from the repo root so the shared contracts are available during `tsc`.
 
+If the previous frontend deploy showed a blank page with missing `assets/*.js` chunks or a MIME-type error, this rebuild also picks up the nginx cache rules that:
+- return `404` for missing hashed assets instead of falling back to `index.html`
+- mark `index.html` as non-cacheable
+- mark hashed `/assets/*` files as immutable
+
+After this deploy, open the app once in a fresh tab or hard-refresh the browser so any old cached `index.html` is replaced.
+
 ### Optional mock printer for isolated network-direct testing
 ```bash
 cd /home/ubuntu/genuine-scan-main
@@ -158,6 +165,7 @@ curl -sS https://www.mscqr.com/api/healthz
 curl -sS https://www.mscqr.com/api/version
 curl -sS https://www.mscqr.com/healthz
 curl -sS https://www.mscqr.com/api/health/latency
+curl -I https://www.mscqr.com/index.html
 curl -sS https://www.mscqr.com/api/public/connector/releases/latest
 curl -I https://www.mscqr.com/api/public/connector/download/2026.3.12/macos
 curl -I https://www.mscqr.com/api/public/connector/download/2026.3.12/windows

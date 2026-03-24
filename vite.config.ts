@@ -64,7 +64,6 @@ export default defineConfig(() => ({
 
           if (id.includes("@radix-ui")) return "radix-ui";
           if (id.includes("@tanstack/react-query")) return "react-query";
-          if (id.includes("recharts") || id.includes("/d3-")) return "charts";
           if (id.includes("html2canvas")) return "capture";
           if (id.includes("date-fns")) return "date-utils";
           if (id.includes("zod")) return "schema";
