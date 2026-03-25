@@ -1,205 +1,185 @@
 # Security Key Rotation Runbook
 
-This runbook covers rotation of the following backend secrets:
+This runbook covers the rotating backend secret families used by the app:
 
-- `QR_SIGN_HMAC_SECRET`
-- `PRINTER_SSE_SIGN_SECRET`
-- `INCIDENT_HASH_SALT`
-- `TOKEN_HASH_SECRET`
-- `IP_HASH_SALT`
+- `JWT_SECRET_CURRENT` / `JWT_SECRET_PREVIOUS`
+- `QR_SIGN_HMAC_SECRET_CURRENT` / `QR_SIGN_HMAC_SECRET_PREVIOUS`
+- `PRINTER_SSE_SIGN_SECRET_CURRENT` / `PRINTER_SSE_SIGN_SECRET_PREVIOUS`
+- `TOKEN_HASH_SECRET_CURRENT` / `TOKEN_HASH_SECRET_PREVIOUS`
+- `INCIDENT_HASH_SALT_CURRENT` / `INCIDENT_HASH_SALT_PREVIOUS`
+- `IP_HASH_SALT_CURRENT` / `IP_HASH_SALT_PREVIOUS`
 
-These values must never be committed to git. Store them only in your deployment secret manager or server environment.
+Legacy single-slot variables still exist for compatibility, but production should use the dual-slot `CURRENT` / `PREVIOUS` model.
 
-## Rotation Principles
+## Principles
 
-- Rotate in a controlled maintenance window unless a secret is already known to be compromised.
-- Generate new secrets with at least `32` random bytes from a cryptographically secure source.
-- Apply the same value set to every backend instance before marking the rotation complete.
-- Record the exact deploy SHA, rotation timestamp, operator, and affected environments.
-- Verify after rotation with live health checks and one real workflow per affected feature.
+- Never commit secrets to git.
+- Generate at least `32` random bytes for each new secret.
+- Deploy the same secret set to every backend instance before switching traffic.
+- Rotate in two deployments: `accept both`, then `remove previous`.
+- Record environment, deploy SHA, operator, timestamp, and reason.
 
 ## Secret Generation
-
-Use one of these commands to generate a new secret:
 
 ```bash
 openssl rand -base64 48
 ```
 
-```bash
-python3 - <<'PY'
-import secrets
-print(secrets.token_urlsafe(48))
-PY
-```
+## How Rotation Works in This Repo
 
-## Secret Inventory
+- Writers always use the `*_CURRENT` secret.
+- Verification accepts both `*_CURRENT` and `*_PREVIOUS` during the cutover window.
+- JWTs include a `kid` derived from the active signing secret.
+- Versioned hashes are stored with a prefix, so historic hashes remain comparable during the cutover.
+- After the cutover window, `*_PREVIOUS` is removed in a second deploy.
 
-### `QR_SIGN_HMAC_SECRET`
-- Purpose: signs QR payloads when asymmetric `QR_SIGN_PRIVATE_KEY` / `QR_SIGN_PUBLIC_KEY` are not configured.
-- Risk of rotation: existing HMAC-signed QR tokens will stop verifying after the backend switches to the new secret.
-- Safer long-term direction: move to asymmetric signing and stop relying on the HMAC fallback.
-
-### `PRINTER_SSE_SIGN_SECRET`
-- Purpose: signs printer SSE keepalive/trust payloads.
-- Risk of rotation: existing live SSE sessions may fail signature checks and reconnect.
-- Expected impact: low, short-lived reconnects for active printer pages.
-
-### `INCIDENT_HASH_SALT`
-- Purpose: salts incident-related hashes.
-- Risk of rotation: newly computed hashes will differ from historic values. Do not expect stable comparisons across the rotation boundary unless you keep an explicit migration strategy.
-
-### `TOKEN_HASH_SECRET`
-- Purpose: secret input for token and request fingerprint hashing fallbacks.
-- Risk of rotation: any feature relying on deterministic hashes from previous values may no longer match historic derived hashes.
-
-### `IP_HASH_SALT`
-- Purpose: salts IP hashing for audit/security utilities.
-- Risk of rotation: historical hash comparisons across the cutover will no longer match.
-
-## Standard Rotation Procedure
+## Standard Two-Deploy Rotation
 
 ### 1. Prepare
-- Confirm current production is healthy.
-- Confirm you have rollback access to the previous secret values.
-- Generate a fresh replacement secret for each value you intend to rotate.
-- Decide whether the rotation is `routine` or `emergency`.
 
-### 2. Stage
-- Apply the new secret values in staging.
-- Deploy staging backend.
-- Run:
-  - backend health checks
-  - login flow
-  - verify flow
-  - incident submit flow
-  - printing flow if rotating `PRINTER_SSE_SIGN_SECRET`
+- Confirm production is healthy.
+- Confirm you still have the current live secret values.
+- Generate new replacement values.
+- Choose a cutover window longer than the affected token/session TTLs.
 
-### 3. Production rollout
-- Update the production environment variables.
-- Redeploy all backend instances together.
-- Confirm `/healthz`, `/api/healthz`, and `/api/version`.
-- Run at least one smoke flow tied to the rotated secret.
+### 2. Stage the New Secrets
 
-### 4. Record
-- Update the ops/security log with:
-  - secret name
-  - environment
-  - deploy SHA
-  - operator
-  - timestamp
-  - reason
+Set the target environment like this:
 
-## Secret-Specific Procedures
+```bash
+export JWT_SECRET_PREVIOUS="<old-jwt>"
+export JWT_SECRET_CURRENT="<new-jwt>"
 
-### Rotate `QR_SIGN_HMAC_SECRET`
+export QR_SIGN_HMAC_SECRET_PREVIOUS="<old-qr-hmac>"
+export QR_SIGN_HMAC_SECRET_CURRENT="<new-qr-hmac>"
 
-Use this only if the app is still on HMAC QR signing. If asymmetric keys are configured, rotate those instead under a separate asymmetric-key procedure.
+export PRINTER_SSE_SIGN_SECRET_PREVIOUS="<old-printer-sse>"
+export PRINTER_SSE_SIGN_SECRET_CURRENT="<new-printer-sse>"
 
-Steps:
-- Set a maintenance window.
-- Update `QR_SIGN_HMAC_SECRET` in the target environment.
-- Deploy backend.
-- Reissue any operational flows that mint fresh QR tokens after deploy.
-- Validate:
-  - QR verification for newly issued tokens
-  - scan flow for newly issued tokens
+export TOKEN_HASH_SECRET_PREVIOUS="<old-token-hash>"
+export TOKEN_HASH_SECRET_CURRENT="<new-token-hash>"
 
-Important limitation:
-- Existing HMAC-signed tokens minted with the old secret will fail verification after the cutover because the current implementation does not support dual-key verification.
+export INCIDENT_HASH_SALT_PREVIOUS="<old-incident-salt>"
+export INCIDENT_HASH_SALT_CURRENT="<new-incident-salt>"
 
-### Rotate `PRINTER_SSE_SIGN_SECRET`
+export IP_HASH_SALT_PREVIOUS="<old-ip-salt>"
+export IP_HASH_SALT_CURRENT="<new-ip-salt>"
+```
 
-Steps:
-- Update `PRINTER_SSE_SIGN_SECRET`.
-- Deploy backend.
-- Ask manufacturers to refresh active printer setup pages if they see transient disconnects.
-- Validate:
-  - printer setup page reconnects
-  - live printer status events
-  - direct-print readiness banner
+Deploy backend and frontend with both slots present.
 
-Expected impact:
-- existing SSE sessions may reconnect once
+### 3. Verify During the Cutover
 
-### Rotate `INCIDENT_HASH_SALT`
+Run:
 
-Steps:
-- Confirm no downstream process depends on stable historic incident-hash equality across the cutover.
-- Update `INCIDENT_HASH_SALT`.
-- Deploy backend.
-- Validate:
-  - incident creation
-  - incident evidence export
-  - incident-related audit records
+- health/version checks
+- admin login
+- refresh session
+- password reset
+- invite accept
+- verify-email
+- printer status SSE
+- one public verify flow
+- one incident/support flow
 
-Expected impact:
-- old and new hashes will differ for the same input
+During this window:
 
-### Rotate `TOKEN_HASH_SECRET`
+- old JWTs still verify
+- old token hashes still match
+- old HMAC-signed QR payloads still verify
+- active printer SSE keepalive signatures remain valid until reconnect
 
-Steps:
-- Review any feature that compares previously derived token hashes.
-- Update `TOKEN_HASH_SECRET`.
-- Deploy backend.
-- Validate:
-  - login/session flows
-  - any direct token hashing utilities
-  - scan/request fingerprint dependent flows
+### 4. Wait Out the Window
 
-Expected impact:
-- previously derived token hashes are not stable across rotation
+Wait at least:
 
-### Rotate `IP_HASH_SALT`
+- access-token TTL
+- refresh-token operational buffer
+- invite/reset/email-verification link buffer
+- any printer/SSE reconnect buffer
 
-Steps:
-- Confirm audit analytics do not require cross-rotation hash matching.
-- Update `IP_HASH_SALT`.
-- Deploy backend.
-- Validate:
-  - audit logging
-  - security event generation
-  - abuse/rate-limit telemetry still records correctly
+For this repo, the practical minimum is the full refresh-token window if you want zero forced re-auth on refresh rotation. If that is too long for the incident, rotate immediately and accept forced reauthentication.
 
-Expected impact:
-- old and new IP hashes are not comparable without a migration layer
+### 5. Cleanup Deploy
+
+After the cutover window:
+
+```bash
+unset JWT_SECRET_PREVIOUS
+unset QR_SIGN_HMAC_SECRET_PREVIOUS
+unset PRINTER_SSE_SIGN_SECRET_PREVIOUS
+unset TOKEN_HASH_SECRET_PREVIOUS
+unset INCIDENT_HASH_SALT_PREVIOUS
+unset IP_HASH_SALT_PREVIOUS
+```
+
+Redeploy again. At that point only the new `CURRENT` secrets remain.
+
+## Secret-Specific Notes
+
+### JWT signing
+
+- Used for admin/staff access tokens and MFA bootstrap tokens.
+- Cutover impact is low with dual-slot support.
+- Removing `JWT_SECRET_PREVIOUS` too early will force some active sessions to fail verification.
+
+### QR HMAC signing
+
+- Only relevant when QR signing is using HMAC fallback instead of Ed25519 keys.
+- With dual-slot support, existing HMAC-signed QR tokens continue to verify during the cutover.
+- Long term, Ed25519 keys are still the preferred posture.
+
+### Printer SSE signing
+
+- Existing SSE clients may reconnect during deploy, which is acceptable.
+- Dual-slot verification prevents keepalive validation drift during cutover.
+
+### TOKEN_HASH_SECRET
+
+- Covers auth-linked hashed tokens and similar secret-derived comparisons.
+- Versioned hashes now allow old and new derived values to match during the cutover.
+
+### INCIDENT_HASH_SALT and IP_HASH_SALT
+
+- Newly written values use the current salt.
+- Historic versioned hashes remain comparable during the cutover.
+- Remove the previous slot only after the reporting/forensics team is clear on the boundary.
 
 ## Emergency Rotation
 
-If a secret is suspected compromised:
+If a secret is believed compromised:
 
 - rotate immediately
-- invalidate or reissue affected sessions/tokens where applicable
-- note that `QR_SIGN_HMAC_SECRET` emergency rotation invalidates old HMAC-signed QR tokens
-- review logs for abuse before and after the rotation timestamp
+- deploy with `CURRENT` + `PREVIOUS`
+- revoke affected sessions or tokens if the compromise scope includes active credentials
+- review logs around the compromise window
+- remove `PREVIOUS` as soon as the operational buffer closes
 
 ## Rollback
 
-Rollback is allowed only if the new secret deployment is broken and the old secret is not believed compromised.
+Rollback is allowed only if the new deployment is broken and the previous secret is not considered compromised.
 
-Steps:
-- restore the previous environment value
-- redeploy backend
-- rerun the same verification checks
-- document the rollback reason and follow-up action
+- restore the prior values into `*_CURRENT`
+- optionally keep the broken new value in `*_PREVIOUS` only if you still need to verify items minted after the failed deploy
+- redeploy
+- rerun the verification checklist
 
 ## Post-Rotation Verification Checklist
 
 - `curl -sS /healthz`
 - `curl -sS /api/healthz`
 - `curl -sS /api/version`
-- login works
-- verify works
+- admin login works
+- refresh works
+- password reset works
+- invite acceptance works
+- email verification works
+- public verify works
 - incident submit works
-- support workflow works
-- printing workflow works if printer-related secrets changed
+- printer SSE stream reconnects cleanly
 
-## Implementation Notes
+## Operational Notes
 
-Current implementation limitations:
-
-- `QR_SIGN_HMAC_SECRET` rotation is a hard cutover unless you add dual-key verification support.
-- `INCIDENT_HASH_SALT`, `TOKEN_HASH_SECRET`, and `IP_HASH_SALT` affect deterministic hashing, so cross-cutover comparisons are not stable by default.
-- `PRINTER_SSE_SIGN_SECRET` is low-risk to rotate but active connections may reconnect.
-
-If you want zero-downtime or comparison-safe rotation for these secrets, add explicit multi-key or versioned-hash support before the next rotation cycle.
+- Production should use the `CURRENT` / `PREVIOUS` variables, not only the legacy single-slot names.
+- `AUTH_LEGACY_TOKEN_RESPONSE_ENABLED` and `AUTH_SSE_QUERY_TOKEN_ENABLED` should remain `false` in production after the cookie-only auth rollout.
+- `AUTH_MFA_ENCRYPTION_KEY` is required in production and should be rotated separately from JWT secrets.

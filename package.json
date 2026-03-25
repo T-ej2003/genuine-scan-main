@@ -17,6 +17,7 @@
     "docs:printing:images": "node scripts/generate-printing-doc-images.mjs",
     "docs:screenshots": "playwright test scripts/docs-screenshots.spec.ts && npm run docs:printing:images",
     "check:budgets": "node scripts/check-code-size.mjs",
+    "check:security-guardrails": "node scripts/check-security-guardrails.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
