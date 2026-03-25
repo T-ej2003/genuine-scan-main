@@ -9,6 +9,7 @@ import prisma from "../config/database";
 import { createAuditLog } from "./auditService";
 import { generateComplianceReport } from "./governanceService";
 import { logger } from "../utils/logger";
+import { getQrSigningHmacSecret } from "../utils/secretConfig";
 
 const ensureDir = (dir: string) => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -47,7 +48,7 @@ const signPayload = (payload: string) => {
     return { algorithm: "ed25519", signature: toBase64Url(signature) };
   }
 
-  const secret = String(process.env.QR_SIGN_HMAC_SECRET || process.env.JWT_SECRET || "genuine-scan-fallback-signing-key");
+  const secret = getQrSigningHmacSecret();
   const signature = createHmac("sha256", secret).update(payloadHash).digest();
   return { algorithm: "hmac-sha256", signature: toBase64Url(signature) };
 };

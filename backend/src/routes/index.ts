@@ -1,7 +1,8 @@
-import { Router } from "express";
+import { Request, Router } from "express";
 import { authenticate, authenticateSSE, optionalAuth } from "../middleware/auth";
 import { optionalCustomerVerifyAuth, requireCustomerVerifyAuth } from "../middleware/customerVerifyAuth";
 import { enforceTenantIsolation } from "../middleware/tenantIsolation";
+import { sanitizeRequestInput } from "../middleware/requestSanitizer";
 import {
   requirePlatformAdmin,
   requireLicenseeAdmin,
@@ -10,8 +11,18 @@ import {
   requireOpsUser,
 } from "../middleware/rbac";
 import { requireCsrf } from "../middleware/csrf";
-import rateLimit from "express-rate-limit";
-import { buildPublicVerifyRateLimitKey } from "../middleware/publicVerifyRateLimit";
+import {
+  composeRequestResolvers,
+  createPublicActorRateLimiter,
+  createPublicIpRateLimiter,
+  fromAuthorizationBearer,
+  fromBodyFields,
+  fromHeaderFields,
+  fromParamFields,
+  fromQueryFields,
+  fromUserAgent,
+  parsePositiveIntEnv,
+} from "../middleware/publicRateLimit";
 
 import {
   login,
@@ -197,105 +208,277 @@ import {
 
 const router = Router();
 
-const parsePositiveIntEnv = (key: string, fallback: number, min = 1, max = 100_000) => {
-  const raw = Number(String(process.env[key] || "").trim());
-  if (!Number.isFinite(raw)) return fallback;
-  return Math.min(max, Math.max(min, Math.floor(raw)));
+const buildPublicRateLimitPair = (params: {
+  scope: string;
+  windowMs: number;
+  ipMax: number;
+  actorMax?: number;
+  message: string;
+  actorResolver?: (req: Request) => string | null | undefined;
+  resourceResolver?: (req: Request) => string | null | undefined;
+}) => {
+  return [
+    createPublicIpRateLimiter({
+      scope: `${params.scope}:ip`,
+      windowMs: params.windowMs,
+      max: params.ipMax,
+      message: params.message,
+      resourceResolver: params.resourceResolver,
+    }),
+    createPublicActorRateLimiter({
+      scope: `${params.scope}:actor`,
+      windowMs: params.windowMs,
+      max: params.actorMax ?? params.ipMax,
+      message: params.message,
+      actorResolver: params.actorResolver || fromUserAgent,
+      resourceResolver: params.resourceResolver,
+    }),
+  ];
 };
 
-const loginLimiter = rateLimit({
+const publicClientActor = composeRequestResolvers(
+  fromAuthorizationBearer,
+  fromHeaderFields("x-device-fp"),
+  fromQueryFields("device"),
+  fromUserAgent
+);
+const emailActor = composeRequestResolvers(
+  fromBodyFields("email", "contactEmail", "customerEmail", "recipientEmail"),
+  fromQueryFields("email"),
+  publicClientActor
+);
+const tokenActor = composeRequestResolvers(
+  fromBodyFields("token", "challengeToken", "transferId"),
+  fromQueryFields("token"),
+  publicClientActor
+);
+const gatewayActor = composeRequestResolvers(
+  fromHeaderFields("x-printer-gateway-id"),
+  fromBodyFields("gatewayId"),
+  fromUserAgent
+);
+
+const verifyResourceResolver = (req: any) => String(req.params?.code || "").trim().toUpperCase() || null;
+const scanResourceResolver = (req: any) => {
+  const token = Array.isArray(req.query?.t) ? req.query.t[0] : req.query?.t;
+  return String(token || "").trim() || null;
+};
+const connectorDownloadResourceResolver = (req: any) =>
+  [String(req.params?.version || "").trim(), String(req.params?.platform || "").trim()].filter(Boolean).join(":") || null;
+const supportTicketTrackResourceResolver = (req: any) => String(req.params?.reference || "").trim().toUpperCase() || null;
+
+const loginLimiters = buildPublicRateLimitPair({
+  scope: "auth.login",
   windowMs: 15 * 60 * 1000,
-  max: 25,
-  standardHeaders: true,
-  legacyHeaders: false,
+  ipMax: 25,
+  actorMax: 10,
+  message: "Too many sign-in attempts. Please wait before trying again.",
+  actorResolver: composeRequestResolvers(fromBodyFields("email"), fromUserAgent),
 });
 
-const forgotPasswordLimiter = rateLimit({
+const inviteAcceptanceLimiters = buildPublicRateLimitPair({
+  scope: "auth.invite",
   windowMs: 15 * 60 * 1000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
+  ipMax: 25,
+  actorMax: 10,
+  message: "Too many invite attempts. Please wait before retrying.",
+  actorResolver: tokenActor,
 });
 
-const verifyOtpRequestLimiter = rateLimit({
+const forgotPasswordLimiters = buildPublicRateLimitPair({
+  scope: "auth.password-reset",
   windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
+  ipMax: 10,
+  actorMax: 5,
+  message: "Too many password reset requests. Please wait before trying again.",
+  actorResolver: emailActor,
 });
 
-const verifyOtpVerifyLimiter = rateLimit({
+const verifyOtpRequestLimiters = buildPublicRateLimitPair({
+  scope: "verify.otp-request",
   windowMs: 15 * 60 * 1000,
-  max: 40,
-  standardHeaders: true,
-  legacyHeaders: false,
+  ipMax: 20,
+  actorMax: 6,
+  message: "Too many verification code requests. Please wait before retrying.",
+  actorResolver: emailActor,
 });
 
-const verifyClaimLimiter = rateLimit({
+const verifyOtpVerifyLimiters = buildPublicRateLimitPair({
+  scope: "verify.otp-verify",
+  windowMs: 15 * 60 * 1000,
+  ipMax: 40,
+  actorMax: 12,
+  message: "Too many verification attempts. Please wait before retrying.",
+  actorResolver: composeRequestResolvers(fromBodyFields("challengeToken"), publicClientActor),
+});
+
+const verifyClaimLimiters = buildPublicRateLimitPair({
+  scope: "verify.claim",
   windowMs: 10 * 60 * 1000,
-  max: 25,
-  standardHeaders: true,
-  legacyHeaders: false,
+  ipMax: 25,
+  actorMax: 12,
+  message: "Too many ownership actions. Please wait before retrying.",
+  actorResolver: composeRequestResolvers(fromAuthorizationBearer, fromBodyFields("token", "transferId"), publicClientActor),
+  resourceResolver: verifyResourceResolver,
 });
 
-const verifyCodeLimiter = rateLimit({
+const verifyCodeLimiters = buildPublicRateLimitPair({
+  scope: "verify.code",
   windowMs: 60 * 1000,
-  max: parsePositiveIntEnv("PUBLIC_VERIFY_RATE_LIMIT_PER_MIN", 120, 20, 1000),
-  keyGenerator: (req) => buildPublicVerifyRateLimitKey(req, "verify"),
-  standardHeaders: true,
-  legacyHeaders: false,
+  ipMax: parsePositiveIntEnv("PUBLIC_VERIFY_RATE_LIMIT_PER_MIN", 45, 20, 1000),
+  actorMax: parsePositiveIntEnv("PUBLIC_VERIFY_RATE_LIMIT_PER_MIN", 45, 20, 1000),
+  message: "Too many verification requests. Please slow down and try again shortly.",
+  actorResolver: publicClientActor,
+  resourceResolver: verifyResourceResolver,
 });
 
-const scanLimiter = rateLimit({
+const scanLimiters = buildPublicRateLimitPair({
+  scope: "scan.token",
   windowMs: 60 * 1000,
-  max: parsePositiveIntEnv("SCAN_RATE_LIMIT_PER_MIN", 120, 20, 1000),
-  keyGenerator: (req) => buildPublicVerifyRateLimitKey(req, "scan"),
-  standardHeaders: true,
-  legacyHeaders: false,
+  ipMax: parsePositiveIntEnv("SCAN_RATE_LIMIT_PER_MIN", 60, 20, 1000),
+  actorMax: parsePositiveIntEnv("SCAN_RATE_LIMIT_PER_MIN", 60, 20, 1000),
+  message: "Too many scan requests. Please slow down and try again shortly.",
+  actorResolver: publicClientActor,
+  resourceResolver: scanResourceResolver,
 });
 
-const verifyReportLimiter = rateLimit({
+const verifyReportIpLimiter = createPublicIpRateLimiter({
+  scope: "verify.report:ip",
   windowMs: 15 * 60 * 1000,
   max: parsePositiveIntEnv("VERIFY_REPORT_RATE_LIMIT_PER_15MIN", 20, 3, 300),
-  standardHeaders: true,
-  legacyHeaders: false,
+  message: "Too many reports were submitted from this address. Please wait before trying again.",
+});
+const verifyReportActorLimiter = createPublicActorRateLimiter({
+  scope: "verify.report:actor",
+  windowMs: 15 * 60 * 1000,
+  max: parsePositiveIntEnv("VERIFY_REPORT_RATE_LIMIT_PER_15MIN", 20, 3, 300),
+  message: "Too many reports were submitted from this account or device. Please wait before trying again.",
+  actorResolver: composeRequestResolvers(emailActor, publicClientActor),
+  resourceResolver: composeRequestResolvers(fromBodyFields("code", "qrCodeValue")),
 });
 
-const verifyFeedbackLimiter = rateLimit({
+const verifyFeedbackLimiters = buildPublicRateLimitPair({
+  scope: "verify.feedback",
   windowMs: 15 * 60 * 1000,
-  max: parsePositiveIntEnv("VERIFY_FEEDBACK_RATE_LIMIT_PER_15MIN", 30, 5, 500),
-  standardHeaders: true,
-  legacyHeaders: false,
+  ipMax: parsePositiveIntEnv("VERIFY_FEEDBACK_RATE_LIMIT_PER_15MIN", 30, 5, 500),
+  actorMax: parsePositiveIntEnv("VERIFY_FEEDBACK_RATE_LIMIT_PER_15MIN", 30, 5, 500),
+  message: "Too many feedback submissions. Please wait before trying again.",
+  actorResolver: composeRequestResolvers(fromBodyFields("code"), emailActor),
+  resourceResolver: composeRequestResolvers(fromBodyFields("code")),
+});
+
+const connectorManifestLimiters = buildPublicRateLimitPair({
+  scope: "connector.manifest",
+  windowMs: 60 * 1000,
+  ipMax: parsePositiveIntEnv("PUBLIC_CONNECTOR_RATE_LIMIT_PER_MIN", 120, 30, 2000),
+  actorMax: parsePositiveIntEnv("PUBLIC_CONNECTOR_RATE_LIMIT_PER_MIN", 120, 30, 2000),
+  message: "Too many connector download checks. Please wait before retrying.",
+});
+
+const connectorDownloadLimiters = buildPublicRateLimitPair({
+  scope: "connector.download",
+  windowMs: 5 * 60 * 1000,
+  ipMax: parsePositiveIntEnv("PUBLIC_CONNECTOR_DOWNLOAD_RATE_LIMIT_PER_5MIN", 60, 10, 1000),
+  actorMax: parsePositiveIntEnv("PUBLIC_CONNECTOR_DOWNLOAD_RATE_LIMIT_PER_5MIN", 60, 10, 1000),
+  message: "Too many connector download requests. Please wait before retrying.",
+  resourceResolver: connectorDownloadResourceResolver,
+});
+
+const supportTicketTrackLimiters = buildPublicRateLimitPair({
+  scope: "support.ticket-track",
+  windowMs: 15 * 60 * 1000,
+  ipMax: parsePositiveIntEnv("SUPPORT_TICKET_TRACK_RATE_LIMIT_PER_15MIN", 30, 5, 500),
+  actorMax: parsePositiveIntEnv("SUPPORT_TICKET_TRACK_RATE_LIMIT_PER_15MIN", 30, 5, 500),
+  message: "Too many support tracking lookups. Please wait before trying again.",
+  actorResolver: composeRequestResolvers(fromQueryFields("email"), fromParamFields("reference"), fromUserAgent),
+  resourceResolver: supportTicketTrackResourceResolver,
+});
+
+const telemetryLimiters = buildPublicRateLimitPair({
+  scope: "telemetry.route-transition",
+  windowMs: 60 * 1000,
+  ipMax: parsePositiveIntEnv("PUBLIC_TELEMETRY_RATE_LIMIT_PER_MIN", 120, 30, 3000),
+  actorMax: parsePositiveIntEnv("PUBLIC_TELEMETRY_RATE_LIMIT_PER_MIN", 120, 30, 3000),
+  message: "Too many telemetry events. Please wait before retrying.",
+  actorResolver: composeRequestResolvers((req: any) => req.user?.userId || null, fromAuthorizationBearer, fromUserAgent),
+  resourceResolver: composeRequestResolvers(fromBodyFields("routeTo")),
+});
+
+const publicStatusLimiters = buildPublicRateLimitPair({
+  scope: "public.status",
+  windowMs: 60 * 1000,
+  ipMax: parsePositiveIntEnv("PUBLIC_STATUS_RATE_LIMIT_PER_MIN", 240, 60, 5000),
+  actorMax: parsePositiveIntEnv("PUBLIC_STATUS_RATE_LIMIT_PER_MIN", 240, 60, 5000),
+  message: "Too many status checks. Please wait before retrying.",
+});
+
+const gatewayHeartbeatLimiters = buildPublicRateLimitPair({
+  scope: "gateway.heartbeat",
+  windowMs: 60 * 1000,
+  ipMax: 240,
+  actorMax: 120,
+  message: "Too many gateway heartbeat requests. Please wait before retrying.",
+  actorResolver: gatewayActor,
+});
+
+const gatewayJobLimiters = buildPublicRateLimitPair({
+  scope: "gateway.jobs",
+  windowMs: 60 * 1000,
+  ipMax: 180,
+  actorMax: 120,
+  message: "Too many gateway job requests. Please wait before retrying.",
+  actorResolver: gatewayActor,
 });
 
 // ==================== PUBLIC ====================
-router.post("/auth/login", loginLimiter, login);
-router.post("/auth/accept-invite", loginLimiter, acceptInviteController);
-router.get("/auth/invite-preview", loginLimiter, invitePreviewController);
-router.post("/auth/forgot-password", forgotPasswordLimiter, forgotPassword);
-router.post("/auth/reset-password", forgotPasswordLimiter, resetPassword);
-router.get("/public/connector/releases", listConnectorReleasesController);
-router.get("/public/connector/releases/latest", getLatestConnectorReleaseController);
-router.get("/public/connector/download/:version/:platform", downloadConnectorReleaseController);
-router.get("/verify/:code", verifyCodeLimiter, optionalCustomerVerifyAuth, verifyQRCode);
-router.post("/verify/auth/email-otp/request", verifyOtpRequestLimiter, requestCustomerEmailOtp);
-router.post("/verify/auth/email-otp/verify", verifyOtpVerifyLimiter, verifyCustomerEmailOtp);
-router.post("/verify/:code/claim", verifyClaimLimiter, optionalCustomerVerifyAuth, claimProductOwnership);
-router.post("/verify/:code/link-claim", verifyClaimLimiter, requireCustomerVerifyAuth, linkDeviceClaimToCustomer);
-router.post("/verify/:code/transfer", verifyClaimLimiter, requireCustomerVerifyAuth, createOwnershipTransfer);
-router.post("/verify/:code/transfer/cancel", verifyClaimLimiter, requireCustomerVerifyAuth, cancelOwnershipTransfer);
-router.post("/verify/transfer/accept", verifyClaimLimiter, requireCustomerVerifyAuth, acceptOwnershipTransfer);
-router.post("/verify/report-fraud", verifyReportLimiter, uploadIncidentReportPhotos, reportFraud);
-router.post("/fraud-report", verifyReportLimiter, uploadIncidentReportPhotos, reportFraud);
-router.post("/verify/feedback", verifyFeedbackLimiter, submitProductFeedback);
-router.post("/incidents/report", verifyReportLimiter, uploadIncidentReportPhotos, reportIncident);
-router.get("/support/tickets/track/:reference", trackSupportTicketPublic);
-router.get("/scan", scanLimiter, optionalCustomerVerifyAuth, scanToken);
-router.post("/telemetry/route-transition", optionalAuth, captureRouteTransitionMetric);
-router.get("/health", healthCheck);
-router.get("/healthz", healthCheck);
-router.get("/health/latency", latencySummary);
-router.get("/version", versionCheck);
+router.post("/auth/login", ...loginLimiters, login);
+router.post("/auth/accept-invite", ...inviteAcceptanceLimiters, acceptInviteController);
+router.get("/auth/invite-preview", ...inviteAcceptanceLimiters, invitePreviewController);
+router.post("/auth/forgot-password", ...forgotPasswordLimiters, forgotPassword);
+router.post("/auth/reset-password", ...forgotPasswordLimiters, resetPassword);
+router.get("/public/connector/releases", ...connectorManifestLimiters, listConnectorReleasesController);
+router.get("/public/connector/releases/latest", ...connectorManifestLimiters, getLatestConnectorReleaseController);
+router.get("/public/connector/download/:version/:platform", ...connectorDownloadLimiters, downloadConnectorReleaseController);
+router.get("/verify/:code", ...verifyCodeLimiters, optionalCustomerVerifyAuth, verifyQRCode);
+router.post("/verify/auth/email-otp/request", ...verifyOtpRequestLimiters, requestCustomerEmailOtp);
+router.post("/verify/auth/email-otp/verify", ...verifyOtpVerifyLimiters, verifyCustomerEmailOtp);
+router.post("/verify/:code/claim", ...verifyClaimLimiters, optionalCustomerVerifyAuth, claimProductOwnership);
+router.post("/verify/:code/link-claim", ...verifyClaimLimiters, requireCustomerVerifyAuth, linkDeviceClaimToCustomer);
+router.post("/verify/:code/transfer", ...verifyClaimLimiters, requireCustomerVerifyAuth, createOwnershipTransfer);
+router.post("/verify/:code/transfer/cancel", ...verifyClaimLimiters, requireCustomerVerifyAuth, cancelOwnershipTransfer);
+router.post("/verify/transfer/accept", ...verifyClaimLimiters, requireCustomerVerifyAuth, acceptOwnershipTransfer);
+router.post(
+  "/verify/report-fraud",
+  verifyReportIpLimiter,
+  uploadIncidentReportPhotos,
+  sanitizeRequestInput,
+  verifyReportActorLimiter,
+  reportFraud
+);
+router.post(
+  "/fraud-report",
+  verifyReportIpLimiter,
+  uploadIncidentReportPhotos,
+  sanitizeRequestInput,
+  verifyReportActorLimiter,
+  reportFraud
+);
+router.post("/verify/feedback", ...verifyFeedbackLimiters, submitProductFeedback);
+router.post(
+  "/incidents/report",
+  verifyReportIpLimiter,
+  uploadIncidentReportPhotos,
+  sanitizeRequestInput,
+  verifyReportActorLimiter,
+  reportIncident
+);
+router.get("/support/tickets/track/:reference", ...supportTicketTrackLimiters, trackSupportTicketPublic);
+router.get("/scan", ...scanLimiters, optionalCustomerVerifyAuth, scanToken);
+router.post("/telemetry/route-transition", optionalAuth, ...telemetryLimiters, captureRouteTransitionMetric);
+router.get("/health", ...publicStatusLimiters, healthCheck);
+router.get("/healthz", ...publicStatusLimiters, healthCheck);
+router.get("/health/latency", ...publicStatusLimiters, latencySummary);
+router.get("/version", ...publicStatusLimiters, versionCheck);
 
 // ==================== AUTH ====================
 router.get("/auth/me", authenticate, me);
@@ -417,10 +600,10 @@ router.post("/qr/batches/bulk-delete", authenticate, requireAnyAdmin, enforceTen
 router.delete("/qr/codes", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, bulkDeleteQRCodes);
 
 // ==================== MANUFACTURER PRINT JOBS ====================
-router.post("/print-gateway/heartbeat", gatewayHeartbeat);
-router.post("/print-gateway/ipp/claim", claimGatewayIppJob);
-router.post("/print-gateway/ipp/confirm", confirmGatewayIppJob);
-router.post("/print-gateway/ipp/fail", failGatewayIppJob);
+router.post("/print-gateway/heartbeat", ...gatewayHeartbeatLimiters, gatewayHeartbeat);
+router.post("/print-gateway/ipp/claim", ...gatewayJobLimiters, claimGatewayIppJob);
+router.post("/print-gateway/ipp/confirm", ...gatewayJobLimiters, confirmGatewayIppJob);
+router.post("/print-gateway/ipp/fail", ...gatewayJobLimiters, failGatewayIppJob);
 
 router.post(
   "/manufacturer/printer-agent/heartbeat",
@@ -624,6 +807,7 @@ router.post(
   enforceTenantIsolation,
   requireCsrf,
   supportIssueUpload.single("screenshot"),
+  sanitizeRequestInput,
   createSupportIssueReport
 );
 router.post(

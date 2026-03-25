@@ -17,7 +17,7 @@ const routeTransitionSchema = z.object({
   deviceType: z.string().trim().max(40).optional().nullable(),
   networkType: z.string().trim().max(40).optional().nullable(),
   online: z.boolean().optional().default(true),
-});
+}).strict();
 
 const toDate = (value: unknown) => {
   const raw = String(value || "").trim();

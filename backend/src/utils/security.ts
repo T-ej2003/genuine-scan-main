@@ -1,4 +1,5 @@
 import { createHmac, randomBytes } from "crypto";
+import { getRequiredSecret } from "./secretConfig";
 
 const must = (key: string) => {
   const v = String(process.env[key] || "").trim();
@@ -8,10 +9,9 @@ const must = (key: string) => {
 
 export const getJwtSecret = () => must("JWT_SECRET");
 
-const getHashSecret = () => String(process.env.IP_HASH_SALT || "").trim() || getJwtSecret();
+const getHashSecret = () => getRequiredSecret("IP_HASH_SALT", ["JWT_SECRET"]);
 
-const getTokenHashSecret = () =>
-  String(process.env.TOKEN_HASH_SECRET || "").trim() || String(process.env.JWT_SECRET || "").trim() || getHashSecret();
+const getTokenHashSecret = () => getRequiredSecret("TOKEN_HASH_SECRET", ["JWT_SECRET", "IP_HASH_SALT"]);
 
 export const hmacSha256Hex = (value: string, secret: string) =>
   createHmac("sha256", secret).update(value).digest("hex");
@@ -36,4 +36,3 @@ export const hashToken = (token: string) => {
 };
 
 export const randomOpaqueToken = (bytes = 32) => randomBytes(bytes).toString("base64url");
-

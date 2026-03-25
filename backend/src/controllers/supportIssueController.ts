@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
+import { sanitizeUnknownInput } from "../middleware/requestSanitizer";
 import { createAuditLog } from "../services/auditService";
 import { createRoleNotifications, createUserNotification } from "../services/notificationService";
 import { resolveSupportIssueUploadPath } from "../middleware/supportIssueUpload";
@@ -22,21 +23,32 @@ const createSchema = z.object({
   description: z.string().trim().max(5000).optional().or(z.literal("")),
   sourcePath: z.string().trim().max(500).optional().or(z.literal("")),
   pageUrl: z.string().trim().max(1200).optional().or(z.literal("")),
-  autoDetected: z.string().trim().toLowerCase().optional(),
+  autoDetected: z.union([z.boolean(), z.string().trim().toLowerCase()]).optional(),
   diagnostics: z.string().trim().max(250_000).optional().or(z.literal("")),
-});
+}).strict();
 
 const responseSchema = z.object({
   message: z.string().trim().min(5).max(5000),
   status: z.enum(["OPEN", "RESPONDED", "CLOSED"]).optional(),
-});
+}).strict();
+
+const listQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  offset: z.coerce.number().int().min(0).max(5000).optional(),
+  licenseeId: z.string().uuid().optional(),
+}).strict();
 
 const parseDiagnostics = (raw?: string | null) => {
   const text = String(raw || "").trim();
   if (!text) return null;
   try {
     const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === "object") return parsed;
+    if (parsed && typeof parsed === "object") {
+      const sanitized = sanitizeUnknownInput(parsed, "supportIssueDiagnostics");
+      if (sanitized && typeof sanitized === "object" && !Array.isArray(sanitized)) {
+        return sanitized;
+      }
+    }
     return { raw: text };
   } catch {
     return { raw: text };
@@ -69,7 +81,10 @@ export const createSupportIssueReport = async (req: AuthRequest, res: Response) 
         description: parsed.data.description?.trim() || null,
         sourcePath: parsed.data.sourcePath?.trim() || null,
         pageUrl: parsed.data.pageUrl?.trim() || null,
-        autoDetected: parsed.data.autoDetected === "true" || parsed.data.autoDetected === "1",
+        autoDetected:
+          parsed.data.autoDetected === true ||
+          parsed.data.autoDetected === "true" ||
+          parsed.data.autoDetected === "1",
         screenshotPath,
         screenshotMime,
         screenshotSize,
@@ -134,16 +149,20 @@ export const createSupportIssueReport = async (req: AuthRequest, res: Response) 
 };
 
 export const listSupportIssueReports = async (req: AuthRequest, res: Response) => {
-  const limit = toInt(req.query.limit, 50, 1, 200);
-  const offset = toInt(req.query.offset, 0, 0, 5000);
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+    const parsed = listQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+    }
+    const limit = parsed.data.limit ?? 50;
+    const offset = parsed.data.offset ?? 0;
 
     const where: any = {};
     if (!isPlatform(req.user.role)) {
       where.reporterUserId = req.user.userId;
-    } else if (req.query.licenseeId) {
-      where.licenseeId = String(req.query.licenseeId);
+    } else if (parsed.data.licenseeId) {
+      where.licenseeId = parsed.data.licenseeId;
     }
 
     const [reports, total] = await Promise.all([
@@ -171,6 +190,8 @@ export const listSupportIssueReports = async (req: AuthRequest, res: Response) =
       },
     });
   } catch (error) {
+    const limit = toInt(req.query.limit, 50, 1, 200);
+    const offset = toInt(req.query.offset, 0, 0, 5000);
     if (isPrismaMissingTableError(error, ["supportissuereport"])) {
       warnStorageUnavailableOnce(
         "support-issue-list-storage",

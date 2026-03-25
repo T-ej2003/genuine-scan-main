@@ -26,6 +26,7 @@ import {
   hashLockToken,
   isLockExpired,
   notifySystemPrintEvent,
+  printJobIdParamSchema,
   replayIdempotentResponseIfAny,
 } from "./shared";
 
@@ -39,10 +40,11 @@ export const confirmDirectPrintItem = async (req: AuthRequest, res: Response) =>
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const jobId = String(req.params.id || "").trim();
-    if (!jobId) {
-      return res.status(400).json({ success: false, error: "Missing print job id" });
+    const paramsParsed = printJobIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid print job id" });
     }
+    const jobId = paramsParsed.data.id;
 
     let idempotency;
     try {
@@ -306,8 +308,11 @@ export const confirmPrintJob = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const jobId = String(req.params.id || "");
-    if (!jobId) return res.status(400).json({ success: false, error: "Missing print job id" });
+    const paramsParsed = printJobIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid print job id" });
+    }
+    const jobId = paramsParsed.data.id;
 
     const job = await getManufacturerPrintJob(jobId, user.userId);
     if (!job) return res.status(404).json({ success: false, error: "Print job not found" });

@@ -39,7 +39,9 @@ export const reportFraudSchema = z
     observedOutcome: z.string().trim().max(64).optional(),
     pageUrl: z.string().trim().max(1000).optional(),
     tags: z.union([z.string(), z.array(z.string())]).optional(),
+    captchaToken: z.string().trim().max(4000).optional(),
   })
+  .strict()
   .refine((value) => Boolean(String(value.code || value.qrCodeValue || "").trim()), {
     message: "Code is required",
     path: ["code"],
@@ -53,28 +55,28 @@ export const productFeedbackSchema = z.object({
   observedStatus: z.string().trim().max(64).optional(),
   observedOutcome: z.string().trim().max(64).optional(),
   pageUrl: z.string().trim().max(1000).optional(),
-});
+}).strict();
 
 export const requestOtpSchema = z.object({
   email: z.string().trim().email().max(160),
-});
+}).strict();
 
 export const verifyOtpSchema = z.object({
   challengeToken: z.string().trim().min(16),
   otp: z.string().trim().min(4).max(12),
-});
+}).strict();
 
 export const createOwnershipTransferSchema = z.object({
   recipientEmail: z.string().trim().email().max(160).optional(),
-});
+}).strict();
 
 export const cancelOwnershipTransferSchema = z.object({
   transferId: z.string().trim().min(6).optional(),
-});
+}).strict();
 
 export const acceptOwnershipTransferSchema = z.object({
   token: z.string().trim().min(16),
-});
+}).strict();
 
 const DEVICE_CLAIM_COOKIE = "gs_device_claim";
 const DEVICE_CLAIM_COOKIE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 365;

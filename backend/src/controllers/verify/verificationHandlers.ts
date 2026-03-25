@@ -1,4 +1,5 @@
 import { Response } from "express";
+import { z } from "zod";
 
 import { CustomerVerifyRequest } from "../../middleware/customerVerifyAuth";
 import { createAuditLog } from "../../services/auditService";
@@ -40,18 +41,32 @@ import {
   buildNotReadyVerificationPayload,
 } from "./verificationResponseBuilders";
 
+const verifyParamsSchema = z.object({
+  code: z.string().trim().min(2).max(128),
+}).strict();
+
+const verifyQuerySchema = z.object({
+  transfer: z.string().trim().max(512).optional(),
+  device: z.string().trim().max(256).optional(),
+  lat: z.union([z.string().trim().max(40), z.number()]).optional(),
+  lon: z.union([z.string().trim().max(40), z.number()]).optional(),
+  acc: z.union([z.string().trim().max(40), z.number()]).optional(),
+}).strict();
+
 export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) => {
   try {
-    const { code } = req.params;
-
-    if (!code || code.length < 2) {
+    const paramsParsed = verifyParamsSchema.safeParse(req.params || {});
+    const queryParsed = verifyQuerySchema.safeParse(req.query || {});
+    if (!paramsParsed.success || !queryParsed.success) {
+      const error = paramsParsed.success ? queryParsed.error?.errors[0] : paramsParsed.error?.errors[0];
       return res.status(400).json({
         success: false,
-        error: "Invalid QR code format",
+        error: error?.message || "Invalid QR code format",
       });
     }
 
-    const normalizedCode = normalizeCode(code);
+    const normalizedCode = normalizeCode(paramsParsed.data.code);
+    const requestQuery = queryParsed.data;
     const defaultVerifyUxPolicy = await resolveVerifyUxPolicy(null);
 
     const qrCode = await prisma.qRCode.findUnique({
@@ -109,7 +124,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
     const riskProfile = await resolveDuplicateRiskProfile(qrCode.licenseeId || null);
 
     const customerUserId = req.customer?.userId || null;
-    const requestedTransferToken = String(req.query.transfer || "").trim() || null;
+    const requestedTransferToken = String(requestQuery.transfer || "").trim() || null;
     const requestDeviceFingerprint = deriveRequestDeviceFingerprint(req);
     const deviceClaimToken = getDeviceClaimTokenFromRequest(req);
     const deviceTokenHash = deviceClaimToken ? hashToken(deviceClaimToken) : null;
@@ -211,9 +226,9 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       return Number.isFinite(n) ? n : null;
     };
 
-    const latitude = toNum(req.query.lat);
-    const longitude = toNum(req.query.lon);
-    const accuracy = toNum(req.query.acc);
+    const latitude = toNum(requestQuery.lat);
+    const longitude = toNum(requestQuery.lon);
+    const accuracy = toNum(requestQuery.acc);
 
     const { isFirstScan, qrCode: updated } = await recordScan(normalizedCode, {
       ipAddress: req.ip,

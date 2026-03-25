@@ -29,6 +29,7 @@ const allocateRangeSchema = z
     endNumber: z.number().int().positive(),
     receivedBatchName: z.string().trim().min(2).max(120).optional(),
   })
+  .strict()
   .refine((d) => d.endNumber >= d.startNumber, {
     message: "End number must be >= start number",
   });
@@ -40,6 +41,7 @@ const allocateLicenseeTopupSchema = z
     quantity: z.number().int().positive().max(500000).optional(),
     receivedBatchName: z.string().trim().min(2).max(120).optional(),
   })
+  .strict()
   .refine(
     (d) => {
       const hasRange = d.startNumber != null || d.endNumber != null;
@@ -60,43 +62,57 @@ const createBatchSchema = z
     name: z.string().trim().min(2).max(120),
     quantity: z.number().int().positive().max(500000),
     manufacturerId: z.string().uuid().optional(),
-  });
+  })
+  .strict();
 
 const assignManufacturerSchema = z.object({
   manufacturerId: z.string().uuid(),
   quantity: z.number().int().positive().max(500000),
   name: z.string().trim().min(2).max(120).optional(),
-});
+}).strict();
 
 const renameBatchSchema = z.object({
   name: z.string().trim().min(2).max(120),
-});
+}).strict();
 
 const bulkDeleteQRCodesSchema = z
   .object({
     ids: z.array(z.string().uuid()).optional(),
     codes: z.array(z.string().min(1)).optional(),
   })
+  .strict()
   .refine((d) => (d.ids && d.ids.length) || (d.codes && d.codes.length), {
     message: "Provide ids or codes to delete",
   });
 
 const bulkDeleteBatchesSchema = z.object({
   ids: z.array(z.string().uuid()).min(1, "Provide batch ids"),
-});
+}).strict();
 
 const generateQRCodesSchema = z.object({
   licenseeId: z.string().uuid(),
   quantity: z.number().int().positive().max(200000),
-});
+}).strict();
 
 const generateSignedLinksSchema = z.object({
   codes: z.array(z.string().trim().min(2).max(128)).min(1).max(2000),
-});
+}).strict();
 
 const blockQRSschema = z.object({
   reason: z.string().trim().max(500).optional(),
-});
+}).strict();
+
+const batchIdParamSchema = z.object({
+  id: z.string().uuid("Invalid batch id"),
+}).strict();
+
+const qrCodeIdParamSchema = z.object({
+  id: z.string().uuid("Invalid QR id"),
+}).strict();
+
+const licenseeIdParamSchema = z.object({
+  licenseeId: z.string().uuid("Invalid licensee id"),
+}).strict();
 
 /* ===================== HELPERS ===================== */
 
@@ -223,11 +239,11 @@ export const allocateQRRangeForLicensee = async (req: AuthRequest, res: Response
     const auth = ensureAuth(req);
     if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    const licenseeIdParsed = z.string().uuid().safeParse(req.params.licenseeId);
-    if (!licenseeIdParsed.success) {
-      return res.status(400).json({ success: false, error: "Invalid licenseeId" });
+    const paramsParsed = licenseeIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid licenseeId" });
     }
-    const licenseeId = licenseeIdParsed.data;
+    const { licenseeId } = paramsParsed.data;
 
     const parsed = allocateLicenseeTopupSchema.safeParse(req.body || {});
     if (!parsed.success) {
@@ -476,7 +492,11 @@ export const deleteBatch = async (req: AuthRequest, res: Response) => {
     const auth = ensureAuth(req);
     if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    const batchId = req.params.id;
+    const paramsParsed = batchIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid batch id" });
+    }
+    const batchId = paramsParsed.data.id;
 
     const batch = await prisma.batch.findUnique({
       where: { id: batchId },
@@ -662,7 +682,11 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const batchId = req.params.id;
+    const paramsParsed = batchIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid batch id" });
+    }
+    const batchId = paramsParsed.data.id;
 
     const batch = await prisma.batch.findUnique({
       where: { id: batchId },
@@ -894,8 +918,11 @@ export const renameBatch = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const batchId = String(req.params.id || "").trim();
-    if (!batchId) return res.status(400).json({ success: false, error: "Missing batch id" });
+    const paramsParsed = batchIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid batch id" });
+    }
+    const batchId = paramsParsed.data.id;
 
     const existing = await prisma.batch.findUnique({
       where: { id: batchId },
@@ -1252,8 +1279,11 @@ export const blockQRCode = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Missing QR id" });
+    const paramsParsed = qrCodeIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid QR id" });
+    }
+    const id = paramsParsed.data.id;
 
     const updated = await prisma.qRCode.update({
       where: { id },
@@ -1288,8 +1318,11 @@ export const blockBatch = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Missing batch id" });
+    const paramsParsed = batchIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid batch id" });
+    }
+    const id = paramsParsed.data.id;
 
     const batch = await prisma.batch.findUnique({
       where: { id },

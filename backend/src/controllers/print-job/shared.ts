@@ -46,32 +46,32 @@ export const createPrintJobSchema = z.object({
   rangeEnd: z.string().optional(),
   reprintOfJobId: z.string().uuid().optional(),
   reprintReason: z.string().trim().min(3).max(300).optional(),
-});
+}).strict();
 
 export const listPrintJobsQuerySchema = z.object({
   batchId: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
-});
+}).strict();
 
 export const confirmSchema = z.object({
   printLockToken: z.string().min(10),
-});
+}).strict();
 
 export const issueDirectPrintTokensSchema = z.object({
   printLockToken: z.string().min(10),
   count: z.number().int().min(1).max(500).optional(),
-});
+}).strict();
 
 export const resolveDirectPrintTokenSchema = z.object({
   printLockToken: z.string().min(10),
   renderToken: z.string().min(16),
-});
+}).strict();
 
 export const confirmDirectPrintItemSchema = z.object({
   printLockToken: z.string().min(10),
   printItemId: z.string().uuid(),
   agentMetadata: z.any().optional(),
-});
+}).strict();
 
 export const reportDirectPrintFailureSchema = z.object({
   printLockToken: z.string().min(10),
@@ -79,7 +79,11 @@ export const reportDirectPrintFailureSchema = z.object({
   printItemId: z.string().uuid().optional(),
   retries: z.number().int().min(0).max(20).optional(),
   agentMetadata: z.any().optional(),
-});
+}).strict();
+
+export const printJobIdParamSchema = z.object({
+  id: z.string().uuid("Invalid print job id"),
+}).strict();
 
 export const hashLockToken = (raw: string) =>
   createHash("sha256").update(raw).digest("hex");

@@ -20,8 +20,8 @@ const flagUpdateSchema = z.object({
   licenseeId: z.string().uuid().optional(),
   key: z.string().trim().min(3).max(120),
   enabled: z.boolean(),
-  config: z.any().optional(),
-});
+  config: z.unknown().optional(),
+}).strict();
 
 const retentionPatchSchema = z.object({
   licenseeId: z.string().uuid().optional(),
@@ -29,18 +29,22 @@ const retentionPatchSchema = z.object({
   purgeEnabled: z.boolean().optional(),
   exportBeforePurge: z.boolean().optional(),
   legalHoldTags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
-});
+}).strict();
 
 const retentionRunSchema = z.object({
   licenseeId: z.string().uuid().optional(),
   mode: z.enum(["PREVIEW", "APPLY"]).default("PREVIEW"),
-});
+}).strict();
 
 const compliancePackRunSchema = z.object({
   licenseeId: z.string().uuid().optional(),
   from: z.string().optional(),
   to: z.string().optional(),
-});
+}).strict();
+
+const incidentIdParamSchema = z.object({
+  id: z.string().uuid("Invalid incident id"),
+}).strict();
 
 const resolveLicenseeScope = (req: AuthRequest, value?: string) => {
   if (!req.user) return null;
@@ -221,8 +225,11 @@ export const exportIncidentEvidenceBundleController = async (req: AuthRequest, r
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    const incidentId = String(req.params.id || "").trim();
-    if (!incidentId) return res.status(400).json({ success: false, error: "Incident ID is required" });
+    const paramsParsed = incidentIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Incident ID is required" });
+    }
+    const incidentId = paramsParsed.data.id;
 
     const incident = await prisma.incident.findUnique({
       where: { id: incidentId },

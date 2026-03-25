@@ -44,7 +44,7 @@ const adminSchema = z.object({
     .transform((value) => normalizeEmailAddress(value) as string),
   password: z.string().min(6, "Admin password must be at least 6 characters").optional(),
   sendInvite: z.boolean().optional(),
-});
+}).strict();
 
 // Format A (legacy)
 const createLicenseeLegacy = z.object({
@@ -58,7 +58,7 @@ const createLicenseeLegacy = z.object({
   supportPhone: z.string().trim().max(40).optional().or(z.literal("")),
   isActive: z.boolean().optional(),
   admin: adminSchema.optional(),
-});
+}).strict();
 
 // Format B (new)
 const createLicenseeWithAdmin = z.object({
@@ -72,9 +72,9 @@ const createLicenseeWithAdmin = z.object({
     supportEmail: optionalEmailSchema("support email"),
     supportPhone: z.string().trim().max(40).optional().or(z.literal("")),
     isActive: z.boolean().optional(),
-  }),
+  }).strict(),
   admin: adminSchema,
-});
+}).strict();
 
 const createLicenseeSchema = z.union([createLicenseeLegacy, createLicenseeWithAdmin]);
 
@@ -87,7 +87,11 @@ const updateLicenseeSchema = z.object({
   supportEmail: optionalEmailSchema("support email"),
   supportPhone: z.string().trim().max(40).optional().or(z.literal("")),
   isActive: z.boolean().optional(),
-});
+}).strict();
+
+const licenseeIdParamSchema = z.object({
+  id: z.string().uuid("Invalid licensee id"),
+}).strict();
 
 type CreateLicenseeInput = z.infer<typeof createLicenseeSchema>;
 
@@ -340,7 +344,11 @@ export const getLicensees = async (_req: AuthRequest, res: Response) => {
 
 export const getLicensee = async (req: AuthRequest, res: Response) => {
   try {
-    const { id } = req.params;
+    const paramsParsed = licenseeIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid licensee id" });
+    }
+    const { id } = paramsParsed.data;
 
     const licensee = await prisma.licensee.findUnique({
       where: { id },
@@ -364,7 +372,11 @@ export const getLicensee = async (req: AuthRequest, res: Response) => {
 
 export const updateLicensee = async (req: AuthRequest, res: Response) => {
   try {
-    const { id } = req.params;
+    const paramsParsed = licenseeIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid licensee id" });
+    }
+    const { id } = paramsParsed.data;
 
     const parsed = updateLicenseeSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -416,7 +428,11 @@ export const updateLicensee = async (req: AuthRequest, res: Response) => {
 
 export const deleteLicensee = async (req: AuthRequest, res: Response) => {
   try {
-    const { id } = req.params;
+    const paramsParsed = licenseeIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid licensee id" });
+    }
+    const { id } = paramsParsed.data;
 
     const [users, batches, ranges, codes] = await Promise.all([
       prisma.user.count({ where: { licenseeId: id } }),
@@ -459,7 +475,7 @@ const resendInviteSchema = z.object({
     .refine((value) => isValidEmailAddress(value), "Invalid email")
     .transform((value) => normalizeEmailAddress(value) as string)
     .optional(),
-});
+}).strict();
 
 export const resendLicenseeAdminInvite = async (req: AuthRequest, res: Response) => {
   try {
@@ -467,7 +483,11 @@ export const resendLicenseeAdminInvite = async (req: AuthRequest, res: Response)
       return res.status(403).json({ success: false, error: "Insufficient permissions" });
     }
 
-    const { id } = req.params;
+    const paramsParsed = licenseeIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid licensee id" });
+    }
+    const { id } = paramsParsed.data;
     const parsed = resendInviteSchema.safeParse(req.body || {});
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });

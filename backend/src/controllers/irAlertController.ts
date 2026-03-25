@@ -10,14 +10,19 @@ import { createRoleNotifications } from "../services/notificationService";
 const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
-});
+}).strict();
 
 const patchAlertSchema = z
   .object({
     acknowledged: z.boolean().optional(),
     incidentId: z.string().uuid().nullable().optional(),
   })
+  .strict()
   .refine((val) => Object.keys(val).length > 0, { message: "No fields provided" });
+
+const alertIdParamSchema = z.object({
+  id: z.string().uuid("Invalid alert id"),
+}).strict();
 
 export const listIrAlerts = async (req: AuthRequest, res: Response) => {
   try {
@@ -74,8 +79,11 @@ export const listIrAlerts = async (req: AuthRequest, res: Response) => {
 export const patchIrAlert = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Missing alert id" });
+    const paramsParsed = alertIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid alert id" });
+    }
+    const id = paramsParsed.data.id;
 
     const parsed = patchAlertSchema.safeParse(req.body || {});
     if (!parsed.success) {

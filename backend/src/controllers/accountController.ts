@@ -7,13 +7,13 @@ import { hashPassword, verifyPassword } from "../services/auth/passwordService";
 
 const updateProfileSchema = z.object({
   name: z.string().trim().min(2).max(80).optional(),
-  email: z.string().trim().email().optional(),
-});
+  email: z.string().trim().email().max(320).optional(),
+}).strict();
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),
   newPassword: z.string().min(6).max(200),
-});
+}).strict();
 
 export const updateMyProfile = async (req: AuthRequest, res: Response) => {
   try {

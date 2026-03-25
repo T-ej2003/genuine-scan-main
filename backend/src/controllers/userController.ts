@@ -52,7 +52,7 @@ const createUserSchema = z.object({
   licenseeId: z.string().uuid().optional(),
   location: z.string().trim().max(200).optional(),
   website: z.string().trim().max(200).optional(),
-});
+}).strict();
 
 const updateUserSchema = z.object({
   name: z.string().min(2).optional(),
@@ -62,7 +62,15 @@ const updateUserSchema = z.object({
   licenseeId: z.string().uuid().optional(), // SUPER_ADMIN only
   location: z.string().trim().max(200).optional(),
   website: z.string().trim().max(200).optional(),
-});
+}).strict();
+
+const userIdParamSchema = z.object({
+  id: z.string().uuid("Invalid user id"),
+}).strict();
+
+const deleteUserQuerySchema = z.object({
+  hard: z.enum(["true", "false"]).optional(),
+}).strict();
 
 /* ===================== HELPERS ===================== */
 
@@ -452,7 +460,11 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const targetId = req.params.id;
+    const paramsParsed = userIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid user id" });
+    }
+    const targetId = paramsParsed.data.id;
     const t = await assertManufacturerTarget(targetId);
     if (!t.ok) return res.status(t.status).json({ success: false, error: t.error });
 
@@ -558,8 +570,17 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
     const auth = ensureAuth(req);
     if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    const targetId = req.params.id;
-    const hard = String(req.query.hard || "false").toLowerCase() === "true";
+    const paramsParsed = userIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid user id" });
+    }
+    const queryParsed = deleteUserQuerySchema.safeParse(req.query || {});
+    if (!queryParsed.success) {
+      return res.status(400).json({ success: false, error: queryParsed.error.errors[0]?.message || "Invalid delete query" });
+    }
+
+    const targetId = paramsParsed.data.id;
+    const hard = queryParsed.data.hard === "true";
 
     const t = await assertManufacturerTarget(targetId);
     if (!t.ok) return res.status(t.status).json({ success: false, error: t.error });
@@ -692,7 +713,11 @@ export const restoreManufacturer = async (req: AuthRequest, res: Response) => {
     const auth = ensureAuth(req);
     if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    const targetId = req.params.id;
+    const paramsParsed = userIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid user id" });
+    }
+    const targetId = paramsParsed.data.id;
     const t = await assertManufacturerTarget(targetId);
     if (!t.ok) return res.status(t.status).json({ success: false, error: t.error });
 

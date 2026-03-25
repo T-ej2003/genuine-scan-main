@@ -1,5 +1,6 @@
 import { PrintDispatchMode, PrintItemEventType, PrintItemState, PrintPayloadType, QRStatus } from "@prisma/client";
 import { Request, Response } from "express";
+import { z } from "zod";
 
 import prisma from "../config/database";
 import { buildApprovedPrintContext } from "../services/printPayloadService";
@@ -8,6 +9,37 @@ import { hashGatewaySecret } from "../services/printerRegistryService";
 
 const gatewayIdFrom = (req: Request) => String(req.get("x-printer-gateway-id") || req.body?.gatewayId || "").trim();
 const gatewaySecretFrom = (req: Request) => String(req.get("x-printer-gateway-secret") || req.body?.gatewaySecret || "").trim();
+
+const gatewayCredentialsSchema = z.object({
+  gatewayId: z.string().trim().min(3).max(180).optional(),
+  gatewaySecret: z.string().trim().min(8).max(512).optional(),
+});
+
+const gatewayHeartbeatSchema = gatewayCredentialsSchema
+  .extend({
+    error: z.string().trim().max(500).optional().or(z.literal("")),
+  })
+  .strict();
+
+const gatewayClaimSchema = gatewayCredentialsSchema.strict();
+
+const gatewayConfirmSchema = gatewayCredentialsSchema
+  .extend({
+    printJobId: z.string().trim().min(1).max(120),
+    printItemId: z.string().trim().min(1).max(120),
+    payloadHash: z.string().trim().max(256).optional().or(z.literal("")),
+    bytesWritten: z.coerce.number().int().min(1).max(50_000_000).optional(),
+    ippJobId: z.coerce.number().int().min(1).max(2_147_483_647).optional(),
+  })
+  .strict();
+
+const gatewayFailureSchema = gatewayCredentialsSchema
+  .extend({
+    printJobId: z.string().trim().min(1).max(120),
+    printItemId: z.string().trim().min(1).max(120),
+    reason: z.string().trim().min(2).max(1000),
+  })
+  .strict();
 
 const reserveGatewayItem = async (params: { printSessionId: string; actorUserId: string }) => {
   const now = new Date();
@@ -95,12 +127,17 @@ const authenticateGatewayPrinter = async (req: Request) => {
 
 export const gatewayHeartbeat = async (req: Request, res: Response) => {
   try {
+    const parsed = gatewayHeartbeatSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid heartbeat payload" });
+    }
+
     const printer = await authenticateGatewayPrinter(req);
     if (!printer) {
       return res.status(401).json({ success: false, error: "Invalid gateway credentials" });
     }
 
-    const gatewayError = String(req.body?.error || "").trim() || null;
+    const gatewayError = String(parsed.data.error || "").trim() || null;
     const status = gatewayError ? "ERROR" : "ONLINE";
     await prisma.printer.update({
       where: { id: printer.id },
@@ -127,6 +164,11 @@ export const gatewayHeartbeat = async (req: Request, res: Response) => {
 
 export const claimGatewayIppJob = async (req: Request, res: Response) => {
   try {
+    const parsed = gatewayClaimSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid gateway request" });
+    }
+
     const printer = await authenticateGatewayPrinter(req);
     if (!printer) {
       return res.status(401).json({ success: false, error: "Invalid gateway credentials" });
@@ -238,16 +280,18 @@ export const claimGatewayIppJob = async (req: Request, res: Response) => {
 
 export const confirmGatewayIppJob = async (req: Request, res: Response) => {
   try {
+    const parsed = gatewayConfirmSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid gateway confirm payload" });
+    }
+
     const printer = await authenticateGatewayPrinter(req);
     if (!printer) {
       return res.status(401).json({ success: false, error: "Invalid gateway credentials" });
     }
 
-    const printJobId = String(req.body?.printJobId || "").trim();
-    const printItemId = String(req.body?.printItemId || "").trim();
-    if (!printJobId || !printItemId) {
-      return res.status(400).json({ success: false, error: "printJobId and printItemId are required" });
-    }
+    const printJobId = parsed.data.printJobId;
+    const printItemId = parsed.data.printItemId;
 
     const job = await prisma.printJob.findFirst({
       where: {
@@ -282,9 +326,9 @@ export const confirmGatewayIppJob = async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: "Print item not found." });
     }
 
-    const payloadHash = String(req.body?.payloadHash || "").trim();
-    const bytesWritten = Math.max(1, Number(req.body?.bytesWritten || 1) || 1);
-    const ippJobId = Number(req.body?.ippJobId || 0) || null;
+    const payloadHash = String(parsed.data.payloadHash || "").trim();
+    const bytesWritten = Math.max(1, parsed.data.bytesWritten || 1);
+    const ippJobId = parsed.data.ippJobId || null;
     const now = new Date();
 
     const finalize = await prisma.$transaction(async (tx) => {
@@ -398,17 +442,19 @@ export const confirmGatewayIppJob = async (req: Request, res: Response) => {
 
 export const failGatewayIppJob = async (req: Request, res: Response) => {
   try {
+    const parsed = gatewayFailureSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid gateway failure payload" });
+    }
+
     const printer = await authenticateGatewayPrinter(req);
     if (!printer) {
       return res.status(401).json({ success: false, error: "Invalid gateway credentials" });
     }
 
-    const printJobId = String(req.body?.printJobId || "").trim();
-    const printItemId = String(req.body?.printItemId || "").trim();
-    const reason = String(req.body?.reason || "").trim();
-    if (!printJobId || !printItemId || !reason) {
-      return res.status(400).json({ success: false, error: "printJobId, printItemId, and reason are required" });
-    }
+    const printJobId = parsed.data.printJobId;
+    const printItemId = parsed.data.printItemId;
+    const reason = parsed.data.reason;
 
     const job = await prisma.printJob.findFirst({
       where: {

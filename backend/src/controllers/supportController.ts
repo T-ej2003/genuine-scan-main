@@ -19,24 +19,33 @@ const listSchema = z.object({
   priority: z.enum(["P1", "P2", "P3", "P4"]).optional(),
   licenseeId: z.string().uuid().optional(),
   search: z.string().trim().max(120).optional(),
-});
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  offset: z.coerce.number().int().min(0).max(2000).optional(),
+}).strict();
 
 const patchSchema = z.object({
   status: z.nativeEnum(SupportTicketStatus).optional(),
   assignedToUserId: z.string().uuid().nullable().optional(),
-});
+}).strict();
 
 const messageSchema = z.object({
   message: z.string().trim().min(2).max(4000),
   isInternal: z.boolean().optional().default(false),
-});
+}).strict();
+
+const publicTrackParamsSchema = z.object({
+  reference: z.string().trim().min(4).max(64).regex(/^[a-z0-9_-]+$/i, "Invalid reference format"),
+}).strict();
+
+const publicTrackQuerySchema = z.object({
+  email: z.string().trim().email().max(160).optional(),
+}).strict();
 
 const isPlatform = (role: UserRole) => role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN;
 
 export const listSupportTickets = async (req: AuthRequest, res: Response) => {
-  const limit = toInt(req.query.limit, 50, 1, 200);
-  const offset = toInt(req.query.offset, 0, 0, 2000);
-
+  const fallbackLimit = toInt(req.query.limit, 50, 1, 200);
+  const fallbackOffset = toInt(req.query.offset, 0, 0, 2000);
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
 
@@ -44,6 +53,8 @@ export const listSupportTickets = async (req: AuthRequest, res: Response) => {
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
     }
+    const limit = parsed.data.limit ?? fallbackLimit;
+    const offset = parsed.data.offset ?? fallbackOffset;
 
     const where: any = {};
     if (parsed.data.status) where.status = parsed.data.status;
@@ -109,8 +120,8 @@ export const listSupportTickets = async (req: AuthRequest, res: Response) => {
         data: {
           tickets: [],
           total: 0,
-          limit,
-          offset,
+          limit: fallbackLimit,
+          offset: fallbackOffset,
           storageUnavailable: true,
         },
       });
@@ -324,10 +335,15 @@ export const addSupportMessage = async (req: AuthRequest, res: Response) => {
 
 export const trackSupportTicketPublic = async (req: Request, res: Response) => {
   try {
-    const reference = String(req.params.reference || "").trim().toUpperCase();
-    if (!reference) return res.status(400).json({ success: false, error: "Reference is required" });
+    const paramsParsed = publicTrackParamsSchema.safeParse(req.params || {});
+    const queryParsed = publicTrackQuerySchema.safeParse(req.query || {});
+    if (!paramsParsed.success || !queryParsed.success) {
+      const firstError = paramsParsed.success ? queryParsed.error?.errors[0] : paramsParsed.error?.errors[0];
+      return res.status(400).json({ success: false, error: firstError?.message || "Invalid tracking request" });
+    }
 
-    const contactEmail = String(req.query.email || "").trim().toLowerCase();
+    const reference = paramsParsed.data.reference.trim().toUpperCase();
+    const contactEmail = String(queryParsed.data.email || "").trim().toLowerCase();
 
     const ticket = await prisma.supportTicket.findFirst({
       where: {

@@ -31,6 +31,29 @@ import { incidentEvidenceUpload, incidentReportUpload, resolveUploadPath } from 
 import { buildIncidentPdfBuffer } from "../services/incidentPdfService";
 import { runIncidentAutoContainment } from "../services/soarService";
 
+const publicIncidentRawSchema = z.object({
+  qrCodeValue: z.string().trim().max(128).optional(),
+  code: z.string().trim().max(128).optional(),
+  incidentType: z.enum(["counterfeit_suspected", "duplicate_scan", "tampered_label", "wrong_product", "other"]).optional(),
+  description: z.string().trim().max(2000).optional(),
+  notes: z.string().trim().max(2000).optional(),
+  customerName: z.string().trim().max(120).optional(),
+  customerEmail: z.string().trim().email().max(160).optional(),
+  contactEmail: z.string().trim().email().max(160).optional(),
+  customerPhone: z.string().trim().max(40).optional(),
+  customerCountry: z.string().trim().max(80).optional(),
+  preferredContactMethod: z.enum(["email", "phone", "whatsapp", "none"]).optional(),
+  consentToContact: z.union([z.boolean(), z.string()]).optional(),
+  purchasePlace: z.string().trim().max(240).optional(),
+  purchaseDate: z.string().trim().max(32).optional(),
+  productBatchNo: z.string().trim().max(120).optional(),
+  locationLat: z.union([z.number(), z.string().trim().max(40)]).optional().nullable(),
+  locationLng: z.union([z.number(), z.string().trim().max(40)]).optional().nullable(),
+  tags: z.union([z.string(), z.array(z.string().trim().max(40))]).optional(),
+  photoUrls: z.union([z.string(), z.array(z.string().trim().max(1000))]).optional(),
+  captchaToken: z.string().trim().max(4000).optional(),
+}).strict();
+
 const publicIncidentSchema = z.object({
   qrCodeValue: z.string().trim().min(2).max(128),
   incidentType: z.enum(["counterfeit_suspected", "duplicate_scan", "tampered_label", "wrong_product", "other"]),
@@ -48,7 +71,7 @@ const publicIncidentSchema = z.object({
   locationLng: z.number().min(-180).max(180).optional().nullable(),
   tags: z.array(z.string().trim().max(40)).optional(),
   photoUrls: z.array(z.string().trim().url().max(1000)).optional(),
-});
+}).strict();
 
 const incidentPatchSchema = z.object({
   status: z
@@ -70,17 +93,32 @@ const incidentPatchSchema = z.object({
   severity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
   resolutionSummary: z.string().trim().max(3000).optional(),
   resolutionOutcome: z.enum(["CONFIRMED_FRAUD", "NOT_FRAUD", "INCONCLUSIVE"]).nullable().optional(),
-});
+}).strict();
 
 const incidentNoteSchema = z.object({
   note: z.string().trim().min(2).max(3000),
-});
+}).strict();
 
 const notifyCustomerSchema = z.object({
   subject: z.string().trim().min(3).max(200),
   message: z.string().trim().min(3).max(5000),
   senderMode: z.enum(["actor", "system"]).optional(),
-});
+}).strict();
+
+const incidentListQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  offset: z.coerce.number().int().min(0).max(20_000).optional(),
+  status: z
+    .enum(["NEW", "TRIAGED", "INVESTIGATING", "AWAITING_CUSTOMER", "AWAITING_LICENSEE", "MITIGATED", "RESOLVED", "CLOSED", "REJECTED_SPAM"])
+    .optional(),
+  severity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
+  qr: z.string().trim().max(128).optional(),
+  search: z.string().trim().max(120).optional(),
+  date_from: z.string().trim().max(64).optional(),
+  date_to: z.string().trim().max(64).optional(),
+  assigned_to: z.string().uuid().optional(),
+  licenseeId: z.string().uuid().optional(),
+}).strict();
 
 const parseBoolean = (value: unknown) => {
   if (typeof value === "boolean") return value;
@@ -139,24 +177,24 @@ const incidentSummaryText = (incident: any) =>
     .filter(Boolean)
     .join("\n");
 
-const asIncidentPayload = (req: Request) => {
+const asIncidentPayload = (input: z.infer<typeof publicIncidentRawSchema>) => {
   return {
-    qrCodeValue: String(req.body?.qrCodeValue || req.body?.code || "").trim(),
-    incidentType: String(req.body?.incidentType || "other").trim().toLowerCase(),
-    description: String(req.body?.description || req.body?.notes || "").trim(),
-    customerName: String(req.body?.customerName || "").trim() || undefined,
-    customerEmail: String(req.body?.customerEmail || req.body?.contactEmail || "").trim() || undefined,
-    customerPhone: String(req.body?.customerPhone || "").trim() || undefined,
-    customerCountry: String(req.body?.customerCountry || "").trim() || undefined,
-    preferredContactMethod: String(req.body?.preferredContactMethod || "none").trim().toLowerCase() || "none",
-    consentToContact: parseBoolean(req.body?.consentToContact),
-    purchasePlace: String(req.body?.purchasePlace || "").trim() || undefined,
-    purchaseDate: String(req.body?.purchaseDate || "").trim() || undefined,
-    productBatchNo: String(req.body?.productBatchNo || "").trim() || undefined,
-    locationLat: parseNumber(req.body?.locationLat),
-    locationLng: parseNumber(req.body?.locationLng),
-    tags: parseJsonArray(req.body?.tags),
-    photoUrls: parseJsonArray(req.body?.photoUrls),
+    qrCodeValue: String(input.qrCodeValue || input.code || "").trim(),
+    incidentType: String(input.incidentType || "other").trim().toLowerCase(),
+    description: String(input.description || input.notes || "").trim(),
+    customerName: String(input.customerName || "").trim() || undefined,
+    customerEmail: String(input.customerEmail || input.contactEmail || "").trim() || undefined,
+    customerPhone: String(input.customerPhone || "").trim() || undefined,
+    customerCountry: String(input.customerCountry || "").trim() || undefined,
+    preferredContactMethod: String(input.preferredContactMethod || "none").trim().toLowerCase() || "none",
+    consentToContact: parseBoolean(input.consentToContact),
+    purchasePlace: String(input.purchasePlace || "").trim() || undefined,
+    purchaseDate: String(input.purchaseDate || "").trim() || undefined,
+    productBatchNo: String(input.productBatchNo || "").trim() || undefined,
+    locationLat: parseNumber(input.locationLat),
+    locationLng: parseNumber(input.locationLng),
+    tags: parseJsonArray(input.tags),
+    photoUrls: parseJsonArray(input.photoUrls),
   };
 };
 
@@ -165,7 +203,15 @@ export const uploadIncidentEvidence = incidentEvidenceUpload.single("file");
 
 export const reportIncident = async (req: Request, res: Response) => {
   try {
-    const parsed = publicIncidentSchema.safeParse(asIncidentPayload(req));
+    const rawParsed = publicIncidentRawSchema.safeParse(req.body || {});
+    if (!rawParsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: rawParsed.error.errors[0]?.message || "Invalid incident payload",
+      });
+    }
+
+    const parsed = publicIncidentSchema.safeParse(asIncidentPayload(rawParsed.data));
     if (!parsed.success) {
       return res.status(400).json({
         success: false,
@@ -318,19 +364,23 @@ export const reportIncident = async (req: Request, res: Response) => {
 export const listIncidents = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+    const parsed = incidentListQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid incident filters" });
+    }
 
-    const limit = Math.min(Math.max(Number(req.query.limit || 50), 1), 200);
-    const offset = Math.max(Number(req.query.offset || 0), 0);
-    const status = sanitizeIncidentStatus(String(req.query.status || ""));
-    const severity = sanitizeIncidentSeverity(String(req.query.severity || ""));
-    const qr = String(req.query.qr || "").trim() || undefined;
-    const search = String(req.query.search || "").trim() || undefined;
-    const dateFromRaw = String(req.query.date_from || "").trim();
-    const dateToRaw = String(req.query.date_to || "").trim();
-    const assignedTo = String(req.query.assigned_to || "").trim() || undefined;
+    const limit = parsed.data.limit ?? 50;
+    const offset = parsed.data.offset ?? 0;
+    const status = sanitizeIncidentStatus(String(parsed.data.status || ""));
+    const severity = sanitizeIncidentSeverity(String(parsed.data.severity || ""));
+    const qr = parsed.data.qr || undefined;
+    const search = parsed.data.search || undefined;
+    const dateFromRaw = String(parsed.data.date_from || "").trim();
+    const dateToRaw = String(parsed.data.date_to || "").trim();
+    const assignedTo = parsed.data.assigned_to || undefined;
     const licenseeId =
       req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
-        ? String(req.query.licenseeId || "").trim() || undefined
+        ? parsed.data.licenseeId || undefined
         : undefined;
 
     const dateFrom = dateFromRaw ? new Date(dateFromRaw) : undefined;

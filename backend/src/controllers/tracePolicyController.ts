@@ -20,6 +20,7 @@ const policyUpdateSchema = z
     velocitySpikeThresholdPerMin: z.number().int().min(1).max(10000).optional(),
     stuckBatchHours: z.number().int().min(1).max(24 * 365).optional(),
   })
+  .strict()
   .refine(
     (d) =>
       d.autoBlockEnabled !== undefined ||
@@ -30,6 +31,10 @@ const policyUpdateSchema = z
       d.stuckBatchHours !== undefined,
     { message: "Provide at least one policy field to update." }
   );
+
+const alertIdParamSchema = z.object({
+  id: z.string().uuid("Invalid alert id"),
+}).strict();
 
 const asInt = (value: unknown, fallback: number, min: number, max: number) => {
   const n = Number.parseInt(String(value ?? ""), 10);
@@ -304,8 +309,11 @@ export const getPolicyAlertsController = async (req: AuthRequest, res: Response)
 export const acknowledgePolicyAlertController = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Invalid alert id" });
+    const paramsParsed = alertIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid alert id" });
+    }
+    const id = paramsParsed.data.id;
 
     const licenseeId = resolveScopedLicenseeId(req);
 

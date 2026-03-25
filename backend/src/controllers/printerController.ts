@@ -34,7 +34,7 @@ const networkDirectPrinterSchema = z.object({
   calibrationProfile: z.record(z.any()).optional(),
   isActive: z.boolean().optional(),
   isDefault: z.boolean().optional(),
-});
+}).strict();
 
 const networkIppPrinterSchema = z.object({
   name: z.string().trim().min(2).max(180),
@@ -52,13 +52,17 @@ const networkIppPrinterSchema = z.object({
   calibrationProfile: z.record(z.any()).optional(),
   isActive: z.boolean().optional(),
   isDefault: z.boolean().optional(),
-});
+}).strict();
 
 const networkPrinterSchema = z.discriminatedUnion("connectionType", [networkDirectPrinterSchema, networkIppPrinterSchema]);
 const networkPrinterUpdateSchema = z.union([
   networkDirectPrinterSchema.partial().extend({ connectionType: z.literal(PrinterConnectionType.NETWORK_DIRECT).optional() }),
   networkIppPrinterSchema.partial().extend({ connectionType: z.literal(PrinterConnectionType.NETWORK_IPP).optional() }),
 ]);
+
+const printerIdParamSchema = z.object({
+  id: z.string().uuid("Invalid printer id"),
+}).strict();
 
 const isOpsRole = (role?: UserRole | null) =>
   Boolean(
@@ -165,8 +169,11 @@ export const updateNetworkPrinter = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
-    const printerId = String(req.params.id || "").trim();
-    if (!printerId) return res.status(400).json({ success: false, error: "Missing printer id" });
+    const paramsParsed = printerIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid printer id" });
+    }
+    const printerId = paramsParsed.data.id;
 
     const parsed = networkPrinterUpdateSchema.safeParse(req.body || {});
     if (!parsed.success) {
@@ -273,8 +280,11 @@ export const testPrinter = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
-    const printerId = String(req.params.id || "").trim();
-    if (!printerId) return res.status(400).json({ success: false, error: "Missing printer id" });
+    const paramsParsed = printerIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid printer id" });
+    }
+    const printerId = paramsParsed.data.id;
 
     const scope = await resolveScope(req);
     const printer = await getRegisteredPrinterForManufacturer({
@@ -319,8 +329,11 @@ export const deleteNetworkPrinter = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
-    const printerId = String(req.params.id || "").trim();
-    if (!printerId) return res.status(400).json({ success: false, error: "Missing printer id" });
+    const paramsParsed = printerIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid printer id" });
+    }
+    const printerId = paramsParsed.data.id;
 
     const scope = await resolveScope(req);
     const printer = await getRegisteredPrinterForManufacturer({

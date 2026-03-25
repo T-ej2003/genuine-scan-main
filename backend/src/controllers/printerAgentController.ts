@@ -13,6 +13,7 @@ import {
 } from "../services/printerConnectionService";
 import { syncLocalAgentPrintersFromHeartbeat } from "../services/printerRegistryService";
 import { hmacSha256Hex } from "../utils/security";
+import { getPrinterSseSignSecret } from "../utils/secretConfig";
 
 const MANUFACTURER_ROLES: UserRole[] = [
   UserRole.MANUFACTURER,
@@ -43,7 +44,7 @@ const heartbeatSchema = z.object({
   capabilitySummary: z.any().optional(),
   printers: z.array(z.any()).max(50).optional(),
   calibrationProfile: z.any().optional(),
-});
+}).strict();
 
 const writeSse = (res: Response, event: string, data: any) => {
   res.write(`event: ${event}\n`);
@@ -51,7 +52,7 @@ const writeSse = (res: Response, event: string, data: any) => {
 };
 
 const sseKeepaliveSignature = (userId: string, nowIso: string) => {
-  const secret = String(process.env.PRINTER_SSE_SIGN_SECRET || process.env.JWT_SECRET || "printer-sse-fallback");
+  const secret = getPrinterSseSignSecret();
   const payload = `${userId}|${nowIso}`;
   return hmacSha256Hex(payload, secret);
 };

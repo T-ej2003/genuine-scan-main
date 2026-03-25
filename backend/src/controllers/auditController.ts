@@ -12,7 +12,11 @@ const fraudResponseSchema = z.object({
   status: z.enum(["REVIEWED", "RESOLVED", "DISMISSED"]).default("REVIEWED"),
   message: z.string().trim().max(1000).optional(),
   notifyCustomer: z.boolean().optional().default(true),
-});
+}).strict();
+
+const fraudReportIdParamSchema = z.object({
+  id: z.string().uuid("Invalid fraud report id"),
+}).strict();
 
 const coerceDetails = (details: unknown): Record<string, any> => {
   if (!details || typeof details !== "object" || Array.isArray(details)) return {};
@@ -371,10 +375,11 @@ export const respondToFraudReport = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
-    const reportId = String(req.params.id || "").trim();
-    if (!reportId) {
-      return res.status(400).json({ success: false, error: "Missing report id" });
+    const paramsParsed = fraudReportIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid report id" });
     }
+    const reportId = paramsParsed.data.id;
 
     const parsed = fraudResponseSchema.safeParse(req.body || {});
     if (!parsed.success) {

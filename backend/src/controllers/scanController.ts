@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import prisma from "../config/database";
 import { Prisma, QRStatus } from "@prisma/client";
+import { z } from "zod";
 import { createAuditLog } from "../services/auditService";
 import { evaluateScanPolicy } from "../services/scanPolicy";
 import { hashToken, verifyQrToken } from "../services/qrTokenService";
@@ -18,6 +19,14 @@ import { resolveDuplicateRiskProfile } from "../services/governanceService";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
 
 const deviceFingerprint = (req: Request) => deriveRequestDeviceFingerprint(req);
+
+const scanQuerySchema = z.object({
+  t: z.string().trim().min(16).max(4096),
+  device: z.string().trim().max(256).optional(),
+  lat: z.union([z.string().trim().max(40), z.number()]).optional(),
+  lon: z.union([z.string().trim().max(40), z.number()]).optional(),
+  acc: z.union([z.string().trim().max(40), z.number()]).optional(),
+}).strict();
 
 const isQrReadyForCustomerUse = (status: QRStatus) => {
   return status === QRStatus.PRINTED || status === QRStatus.REDEEMED || status === QRStatus.SCANNED;
@@ -240,10 +249,12 @@ const writePublicScanAuditLog = async (input: {
 
 export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
   try {
-    const token = String(req.query.t || "").trim();
-    if (!token) {
-      return res.status(400).json({ success: false, error: "Missing token" });
+    const queryParsed = scanQuerySchema.safeParse(req.query || {});
+    if (!queryParsed.success) {
+      return res.status(400).json({ success: false, error: queryParsed.error.errors[0]?.message || "Invalid scan request" });
     }
+    const requestQuery = queryParsed.data;
+    const token = requestQuery.t;
 
     let payload;
     try {
@@ -397,9 +408,9 @@ export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
       const n = parseFloat(String(v));
       return Number.isFinite(n) ? n : null;
     };
-    const latitude = toNum(req.query.lat);
-    const longitude = toNum(req.query.lon);
-    const accuracy = toNum(req.query.acc);
+    const latitude = toNum(requestQuery.lat);
+    const longitude = toNum(requestQuery.lon);
+    const accuracy = toNum(requestQuery.acc);
     const location = await reverseGeocode(latitude, longitude);
     const customerUserId = req.customer?.userId || null;
     const ownershipBeforeScan = await loadOwnershipByQrCodeId(qr.id);

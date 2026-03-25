@@ -24,7 +24,7 @@ import { runIncidentAutoContainment } from "../services/soarService";
 const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
-});
+}).strict();
 
 const listIncidentsQuerySchema = z.object({
   status: z.string().trim().optional(),
@@ -37,7 +37,7 @@ const listIncidentsQuerySchema = z.object({
   date_from: z.string().trim().optional(),
   date_to: z.string().trim().optional(),
   assigned_to: z.string().trim().optional(),
-});
+}).strict();
 
 const createIncidentSchema = z.object({
   qrCodeValue: z.string().trim().min(2).max(128),
@@ -47,7 +47,7 @@ const createIncidentSchema = z.object({
   description: z.string().trim().min(6).max(2000),
   licenseeId: z.string().uuid().optional(),
   tags: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
-});
+}).strict();
 
 const patchIncidentSchema = z
   .object({
@@ -60,11 +60,12 @@ const patchIncidentSchema = z
     resolutionSummary: z.string().trim().max(3000).nullable().optional(),
     resolutionOutcome: z.nativeEnum(IncidentResolutionOutcome).nullable().optional(),
   })
+  .strict()
   .refine((val) => Object.keys(val).length > 0, { message: "No fields provided" });
 
 const noteSchema = z.object({
   note: z.string().trim().min(2).max(4000),
-});
+}).strict();
 
 const actionSchema = z.object({
   action: z.enum([
@@ -82,7 +83,7 @@ const actionSchema = z.object({
   batchId: z.string().uuid().optional(),
   licenseeId: z.string().uuid().optional(),
   manufacturerUserIds: z.array(z.string().uuid()).optional(),
-});
+}).strict();
 
 const commSchema = z.object({
   recipient: z.enum(["reporter", "org_admin"]).optional(),
@@ -91,7 +92,11 @@ const commSchema = z.object({
   message: z.string().trim().min(1).max(5000),
   template: z.string().trim().max(80).optional(),
   senderMode: z.enum(["actor", "system"]).optional(),
-});
+}).strict();
+
+const incidentIdParamSchema = z.object({
+  id: z.string().uuid("Invalid incident id"),
+}).strict();
 
 const normalizeCode = (value: string) => String(value || "").trim().toUpperCase();
 
@@ -278,8 +283,11 @@ export const createIrIncident = async (req: AuthRequest, res: Response) => {
 export const getIrIncident = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Missing incident id" });
+    const paramsParsed = incidentIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid incident id" });
+    }
+    const id = paramsParsed.data.id;
 
     const incident = await prisma.incident.findUnique({
       where: { id },
@@ -322,8 +330,11 @@ export const getIrIncident = async (req: AuthRequest, res: Response) => {
 export const patchIrIncident = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Missing incident id" });
+    const paramsParsed = incidentIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid incident id" });
+    }
+    const id = paramsParsed.data.id;
 
     const parsed = patchIncidentSchema.safeParse(req.body || {});
     if (!parsed.success) {
@@ -460,8 +471,11 @@ export const patchIrIncident = async (req: AuthRequest, res: Response) => {
 export const addIrIncidentEvent = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Missing incident id" });
+    const paramsParsed = incidentIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid incident id" });
+    }
+    const id = paramsParsed.data.id;
 
     const parsed = noteSchema.safeParse(req.body || {});
     if (!parsed.success) {
@@ -499,8 +513,11 @@ export const addIrIncidentEvent = async (req: AuthRequest, res: Response) => {
 export const applyIrIncidentAction = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Missing incident id" });
+    const paramsParsed = incidentIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid incident id" });
+    }
+    const id = paramsParsed.data.id;
 
     const parsed = actionSchema.safeParse(req.body || {});
     if (!parsed.success) {

@@ -14,6 +14,14 @@ import { resumePendingNetworkIppJobs } from "./services/networkIppPrintService";
 import { releaseMetadata } from "./observability/release";
 import { captureBackendException, flushBackendMonitoring, initBackendMonitoring } from "./observability/sentry";
 import { getLatencySummary, recordRequestMetric } from "./observability/requestMetrics";
+import { sanitizeRequestInput } from "./middleware/requestSanitizer";
+import {
+  createPublicActorRateLimiter,
+  createPublicIpRateLimiter,
+  fromUserAgent,
+  parsePositiveIntEnv,
+} from "./middleware/publicRateLimit";
+import { hasConfiguredSecret, usesLegacySecretFallback } from "./utils/secretConfig";
 
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -74,6 +82,8 @@ if (process.env.NODE_ENV === "production") {
     "CUSTOMER_VERIFY_OTP_SECRET",
     "CUSTOMER_VERIFY_TOKEN_SECRET",
     "SCAN_FINGERPRINT_SECRET",
+    "PRINTER_SSE_SIGN_SECRET",
+    "INCIDENT_HASH_SALT",
   ].filter((key) => !String(process.env[key] || "").trim());
 
   if (missingStrongSecurityEnv.length > 0) {
@@ -81,6 +91,33 @@ if (process.env.NODE_ENV === "production") {
       `Refusing to start: production security hardening requires ${missingStrongSecurityEnv.join(", ")}`
     );
     process.exit(1);
+  }
+}
+
+const legacyFallbackWarnings = [
+  {
+    primary: "QR_SIGN_HMAC_SECRET",
+    fallback: ["JWT_SECRET"],
+    enabled: !hasConfiguredSecret("QR_SIGN_PRIVATE_KEY"),
+    message: "QR signing HMAC is falling back to JWT_SECRET. Configure QR_SIGN_HMAC_SECRET so it can be rotated independently.",
+  },
+  {
+    primary: "PRINTER_SSE_SIGN_SECRET",
+    fallback: ["JWT_SECRET"],
+    enabled: true,
+    message: "Printer SSE signing is falling back to JWT_SECRET. Configure PRINTER_SSE_SIGN_SECRET to isolate that channel.",
+  },
+  {
+    primary: "INCIDENT_HASH_SALT",
+    fallback: ["JWT_SECRET"],
+    enabled: true,
+    message: "Incident hashing is falling back to JWT_SECRET. Configure INCIDENT_HASH_SALT for independent rotation.",
+  },
+];
+
+for (const warning of legacyFallbackWarnings) {
+  if (warning.enabled && usesLegacySecretFallback(warning.primary, warning.fallback)) {
+    logger.warn(warning.message);
   }
 }
 
@@ -139,6 +176,7 @@ app.use(
 
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
+app.use(sanitizeRequestInput);
 
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
@@ -221,15 +259,29 @@ const healthPayload = () => ({
   },
 });
 
-app.get("/health", (_req, res) => {
+const publicStatusIpLimiter = createPublicIpRateLimiter({
+  scope: "status.direct:ip",
+  windowMs: 60 * 1000,
+  max: parsePositiveIntEnv("PUBLIC_STATUS_RATE_LIMIT_PER_MIN", 240, 60, 5000),
+  message: "Too many status checks. Please wait before retrying.",
+});
+const publicStatusActorLimiter = createPublicActorRateLimiter({
+  scope: "status.direct:actor",
+  windowMs: 60 * 1000,
+  max: parsePositiveIntEnv("PUBLIC_STATUS_RATE_LIMIT_PER_MIN", 240, 60, 5000),
+  message: "Too many status checks. Please wait before retrying.",
+  actorResolver: fromUserAgent,
+});
+
+app.get("/health", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
   res.json(healthPayload());
 });
 
-app.get("/healthz", (_req, res) => {
+app.get("/healthz", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
   res.json(healthPayload());
 });
 
-app.get("/version", (_req, res) => {
+app.get("/version", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
   res.json({
     name: releaseMetadata.name,
     version: releaseMetadata.version,
@@ -239,14 +291,14 @@ app.get("/version", (_req, res) => {
   });
 });
 
-app.get("/health/latency", (_req, res) => {
+app.get("/health/latency", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
   res.json({
     ...healthPayload(),
     latency: getLatencySummary(),
   });
 });
 
-app.get("/health/db", async (_req, res) => {
+app.get("/health/db", publicStatusIpLimiter, publicStatusActorLimiter, async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
     return res.json({

@@ -1,6 +1,7 @@
 import { createHash, createHmac, createPrivateKey, sign as cryptoSign } from "crypto";
 import JSZip from "jszip";
 import prisma from "../config/database";
+import { getQrSigningHmacSecret } from "../utils/secretConfig";
 
 const toBase64Url = (buf: Buffer) =>
   buf
@@ -35,8 +36,7 @@ const signIntegrityPayload = (payload: string): SignatureResult => {
     return { algorithm: "ed25519", signature: toBase64Url(signature) };
   }
 
-  const secret = String(process.env.QR_SIGN_HMAC_SECRET || process.env.JWT_SECRET || "");
-  const signature = createHmac("sha256", secret || "genuine-scan-fallback-signing-key")
+  const signature = createHmac("sha256", getQrSigningHmacSecret())
     .update(payloadHash)
     .digest();
   return { algorithm: "hmac-sha256", signature: toBase64Url(signature) };

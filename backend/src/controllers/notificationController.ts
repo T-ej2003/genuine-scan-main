@@ -1,4 +1,5 @@
 import { Response } from "express";
+import { z } from "zod";
 
 import { AuthRequest } from "../middleware/auth";
 import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
@@ -21,6 +22,10 @@ const parseBool = (value: unknown) => {
   if (["0", "false", "no"].includes(normalized)) return false;
   return false;
 };
+
+const notificationIdParamSchema = z.object({
+  id: z.string().uuid("Invalid notification id"),
+}).strict();
 
 export const listNotifications = async (req: AuthRequest, res: Response) => {
   try {
@@ -60,8 +65,11 @@ export const readNotification = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Notification ID is required" });
+    const paramsParsed = notificationIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Notification ID is required" });
+    }
+    const id = paramsParsed.data.id;
     const licenseeIds = await resolveAccessibleLicenseeIdsForUser(req.user);
 
     const updated = await markNotificationRead({

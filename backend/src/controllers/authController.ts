@@ -22,9 +22,15 @@ import { isValidEmailAddress, normalizeEmailAddress } from "../utils/email";
 import { isManufacturerRole, listManufacturerLicenseeLinks, normalizeLinkedLicensees } from "../services/manufacturerScopeService";
 
 const loginSchema = z.object({
-  email: z.string().email("Invalid email format"),
+  email: z
+    .string()
+    .trim()
+    .min(3)
+    .max(320)
+    .refine((value) => isValidEmailAddress(value), "Invalid email format")
+    .transform((value) => normalizeEmailAddress(value) as string),
   password: z.string().min(6, "Password must be at least 6 characters"),
-});
+}).strict();
 
 const inviteSchema = z.object({
   email: z
@@ -39,26 +45,32 @@ const inviteSchema = z.object({
   licenseeId: z.string().uuid().optional(),
   manufacturerId: z.string().uuid().optional(),
   allowExistingInvitedUser: z.boolean().optional(),
-});
+}).strict();
 
 const acceptInviteSchema = z.object({
   token: z.string().trim().min(10),
   password: z.string().min(8).max(200),
   name: z.string().trim().min(2).max(120).optional(),
-});
+}).strict();
 
 const invitePreviewQuerySchema = z.object({
   token: z.string().trim().min(10),
-});
+}).strict();
 
 const forgotPasswordSchema = z.object({
-  email: z.string().trim().email(),
-});
+  email: z
+    .string()
+    .trim()
+    .min(3)
+    .max(320)
+    .refine((value) => isValidEmailAddress(value), "Invalid email format")
+    .transform((value) => normalizeEmailAddress(value) as string),
+}).strict();
 
 const resetPasswordSchema = z.object({
   token: z.string().trim().min(10),
   password: z.string().min(8).max(200),
-});
+}).strict();
 
 const normalizeAuthError = (error: unknown): { status: number; error: string } => {
   const raw = error instanceof Error ? error.message : String(error || "Unknown error");
