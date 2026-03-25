@@ -8,7 +8,6 @@ import { queryKeys } from "@/lib/query-keys";
 
 import {
   dashboardNotificationArraySchema,
-  dashboardNotificationSchema,
   type DashboardNotificationDTO,
 } from "../../../shared/contracts/runtime/printing.ts";
 
@@ -17,7 +16,6 @@ export type NotificationsSnapshot = {
   unread: number;
 };
 
-const NOTIFICATION_WINDOW_SIZE = 4;
 const NOTIFICATION_CLEAR_ANIMATION_MS = 260;
 
 const notificationsResponseSchema = z
@@ -56,8 +54,6 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
   const [dismissedNotificationIds, setDismissedNotificationIds] = useState<string[]>([]);
   const [clearingNotificationIds, setClearingNotificationIds] = useState<string[]>([]);
   const [clearingNotifications, setClearingNotifications] = useState(false);
-  const [notificationWindowStart, setNotificationWindowStart] = useState(0);
-  const [notificationMotionSeed, setNotificationMotionSeed] = useState(0);
   const clearNotificationsTimerRef = useRef<number | null>(null);
 
   const applyNotificationSnapshot = (rows: DashboardNotificationDTO[], unread: number) => {
@@ -152,21 +148,6 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
     [notifications, dismissedNotificationIdSet]
   );
 
-  const notificationTimelineMax = Math.max(0, visibleNotifications.length - NOTIFICATION_WINDOW_SIZE);
-
-  useEffect(() => {
-    setNotificationWindowStart((prev) => Math.min(prev, notificationTimelineMax));
-  }, [notificationTimelineMax]);
-
-  useEffect(() => {
-    setNotificationMotionSeed((prev) => prev + 1);
-  }, [notificationWindowStart, visibleNotifications.length]);
-
-  const notificationItems = useMemo(
-    () => visibleNotifications.slice(notificationWindowStart, notificationWindowStart + NOTIFICATION_WINDOW_SIZE),
-    [visibleNotifications, notificationWindowStart]
-  );
-
   const markNotificationRead = async (id: string) => {
     if (!id) return;
     await apiClient.markNotificationRead(id);
@@ -221,13 +202,6 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
     }
   };
 
-  const stepNotificationTimeline = (direction: "newer" | "older") => {
-    setNotificationWindowStart((prev) => {
-      if (direction === "newer") return Math.max(0, prev - 1);
-      return Math.min(notificationTimelineMax, prev + 1);
-    });
-  };
-
   return {
     notifications,
     unreadNotifications,
@@ -235,23 +209,13 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
     notificationsLive,
     clearingNotificationIdSet,
     clearingNotifications,
-    notificationWindowStart,
-    notificationTimelineMax,
-    notificationItems,
-    notificationMotionSeed,
     visibleNotifications,
-    canMoveTimelineToNewer: notificationWindowStart > 0,
-    canMoveTimelineToOlder: notificationWindowStart < notificationTimelineMax,
     hasVisibleNotifications: visibleNotifications.length > 0,
     notificationPanelCleared: notifications.length > 0 && visibleNotifications.length === 0,
     canClearNotifications: visibleNotifications.length > 0 && !notificationsLoading && !clearingNotifications,
-    timelineVisibleStart: visibleNotifications.length > 0 ? notificationWindowStart + 1 : 0,
-    timelineVisibleEnd: visibleNotifications.length > 0 ? notificationWindowStart + notificationItems.length : 0,
     markNotificationRead,
     markAllNotificationsRead,
     clearNotifications,
-    setNotificationWindowStart,
-    stepNotificationTimeline,
     loadNotifications,
   };
 }

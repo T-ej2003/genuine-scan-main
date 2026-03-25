@@ -49,17 +49,7 @@ const notifySystemPrintEvent = async (params: {
       data: params.data || null,
       channels,
     }),
-    params.licenseeId
-      ? createRoleNotifications({
-          audience: NotificationAudience.LICENSEE_ADMIN,
-          licenseeId: params.licenseeId,
-          type: params.type,
-          title: params.title,
-          body: params.body,
-          data: params.data || null,
-          channels: [NotificationChannel.WEB],
-        })
-      : Promise.resolve([] as any[]),
+    Promise.resolve([] as any[]),
     params.orgId
       ? createRoleNotifications({
           audience: NotificationAudience.MANUFACTURER,

@@ -4,6 +4,7 @@ import { Response } from "express";
 import { AuthRequest } from "../middleware/auth";
 import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
 import { listNotificationsForUser, onNotificationEvent, type NotificationRealtimeEvent } from "../services/notificationService";
+import { canRoleViewNotificationType } from "../services/notificationVisibility";
 
 const toInt = (value: unknown, fallback: number, min: number, max: number) => {
   const n = Number.parseInt(String(value ?? ""), 10);
@@ -29,6 +30,10 @@ const shouldDeliver = (
   user: NonNullable<AuthRequest["user"]>,
   accessibleLicenseeIds: string[]
 ) => {
+  if (event.notificationType && !canRoleViewNotificationType(user.role, event.notificationType)) {
+    return false;
+  }
+
   if (event.userIds?.length && event.userIds.includes(user.userId)) return true;
 
   if (event.audience !== NotificationAudience.ALL) {

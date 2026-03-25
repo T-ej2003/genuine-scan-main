@@ -48,9 +48,12 @@ export default function SupportHelp() {
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-muted-foreground">
               <ol className="list-decimal pl-5">
-                <li>The top-right bell receives live updates for requests and alerts.</li>
+                <li>The top-right bell shows only the notifications that belong to your own role and system scope.</li>
                 <li>
                   A green status dot indicates active live stream connection to the notification event channel.
+                </li>
+                <li>
+                  The feed scrolls vertically like a normal inbox so you can review older items without using a slider control.
                 </li>
                 <li>
                   Click a notification to open the linked page (for example <Badge variant="outline">Code Requests</Badge> or{" "}

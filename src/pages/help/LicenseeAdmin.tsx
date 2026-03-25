@@ -3,8 +3,8 @@ import { HelpShell } from "@/pages/help/HelpShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { DocScreenshot } from "@/components/help/DocScreenshot";
 import { ScreenshotChecklist } from "@/components/help/ScreenshotChecklist";
+import { WorkflowScreenshotCard } from "@/components/help/WorkflowScreenshotCard";
 import { ClipboardList, Factory, FileText, ShieldCheck } from "lucide-react";
 
 export default function LicenseeAdminHelp() {
@@ -127,23 +127,60 @@ export default function LicenseeAdminHelp() {
         </section>
 
         <section className="space-y-3">
-          <h2 className="text-lg font-semibold text-foreground">Screenshots</h2>
+          <h2 className="text-lg font-semibold text-foreground">Core workflow screens</h2>
+          <p className="text-sm text-muted-foreground">
+            Use these screens for the real day-to-day licensee flow: request more codes, onboard the factory admin,
+            and move source stock into the correct manufacturer queue.
+          </p>
           <div className="grid gap-4 md:grid-cols-2">
-            <DocScreenshot
+            <WorkflowScreenshotCard
+              title="Request more codes"
+              description="This is the starting point whenever your company needs the next approved source batch."
               filename="licensee-request-qr-inventory.png"
               alt="Licensee request QR inventory"
-              caption="Code Requests: submit a quantity request."
+              caption="Code Requests: submit a new quantity request and monitor the queue on the same page."
+              highlights={[
+                "Enter the quantity needed for the next production run.",
+                "Use a clear batch reference so the request is easy to recognise later.",
+                "Check the queue below the form for pending, approved, or rejected requests.",
+              ]}
               eager
             />
-            <DocScreenshot
-              filename="licensee-batch-workspace-annotated.svg"
-              alt="Licensee batch workspace"
-              caption="Batches: one stable source row opens a workspace for overview, operations, allocation structure, and merged audit history."
+            <WorkflowScreenshotCard
+              title="Invite the manufacturer admin"
+              description="Create the factory record first, then send the secure invite to the person who will manage printing on that side."
+              filename="licensee-create-manufacturer.png"
+              alt="Create manufacturer"
+              caption="Manufacturers: create the factory record and send the activation link."
+              highlights={[
+                "Add the real factory contact instead of sharing credentials.",
+                "Finish this step before assigning any source stock.",
+                "Return here later to open the factory record and inspect assigned work.",
+              ]}
             />
-            <DocScreenshot
-              filename="licensee-manufacturer-ops-annotated.svg"
-              alt="Manufacturer controls"
-              caption="Manufacturers: add a factory user, inspect details, and jump into pending or printed work."
+            <WorkflowScreenshotCard
+              title="Assign source stock"
+              description="Use the batch assignment flow to move approved source quantity into the right manufacturer queue."
+              filename="licensee-assign-batch.png"
+              alt="Assign manufacturer batch"
+              caption="Batches: open the source batch and allocate the exact quantity to the selected manufacturer."
+              highlights={[
+                "Start from the received source batch row.",
+                "Assign only the quantity that should move now.",
+                "Review the remaining source quantity before confirming the allocation.",
+              ]}
+            />
+            <WorkflowScreenshotCard
+              title="Check the handoff"
+              description="After assignment, return to the manufacturer directory to confirm the factory account exists and the work can be opened from the right place."
+              filename="licensee-create-manufacturer.png"
+              alt="Manufacturer directory handoff"
+              caption="Manufacturers: use the factory record as the handoff checkpoint before escalating missing-work issues."
+              highlights={[
+                "Open the manufacturer record when a factory says it cannot find a batch.",
+                "Use the directory to confirm you are working with the correct factory account.",
+                "Then reopen the batch workspace and audit history if the quantity still looks wrong.",
+              ]}
             />
           </div>
           <ScreenshotChecklist
@@ -153,12 +190,12 @@ export default function LicenseeAdminHelp() {
                 whereToCapture: "Code Requests page with quantity filled and Send request highlighted.",
               },
               {
-                filename: "licensee-batch-workspace-annotated.svg",
-                whereToCapture: "Batches page showing the stable source row and the workspace dialog with Overview, Operations, and Audit tabs.",
+                filename: "licensee-create-manufacturer.png",
+                whereToCapture: "Manufacturers page with the Add Manufacturer dialog open and the factory invite-ready details visible.",
               },
               {
-                filename: "licensee-manufacturer-ops-annotated.svg",
-                whereToCapture: "Manufacturers page showing Add Manufacturer, View details, Pending/Printed chips, and Open manufacturer batches.",
+                filename: "licensee-assign-batch.png",
+                whereToCapture: "Batches page with the assign-manufacturer flow open from a received source batch.",
               },
             ]}
           />

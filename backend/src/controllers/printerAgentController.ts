@@ -203,34 +203,6 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
           },
           channels: [NotificationChannel.WEB, NotificationChannel.EMAIL],
         }),
-        scopedLicenseeId
-          ? createRoleNotifications({
-              audience: NotificationAudience.LICENSEE_ADMIN,
-              licenseeId: scopedLicenseeId,
-              type: "system_printer_status_changed",
-              title,
-              body,
-              data: {
-                connected: update.status.connected,
-                trusted: update.status.trusted,
-                compatibilityMode: update.status.compatibilityMode,
-                compatibilityReason: update.status.compatibilityReason,
-                connectionClass: update.status.connectionClass,
-                trustStatus: update.status.trustStatus,
-                trustReason: update.status.trustReason,
-                printerName: update.status.printerName || null,
-                printerId: update.status.printerId || null,
-                selectedPrinterId: update.status.selectedPrinterId || null,
-                selectedPrinterName: update.status.selectedPrinterName || null,
-                capabilitySummary: update.status.capabilitySummary || null,
-                printers: update.status.printers || [],
-                deviceName: update.status.deviceName || null,
-                manufacturerUserId: req.user.userId,
-                targetRoute: "/batches",
-              },
-              channels: [NotificationChannel.WEB],
-            })
-          : Promise.resolve([] as any[]),
       ]);
     }
 

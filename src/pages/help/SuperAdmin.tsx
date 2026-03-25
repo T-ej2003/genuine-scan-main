@@ -3,8 +3,8 @@ import { HelpShell } from "@/pages/help/HelpShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { DocScreenshot } from "@/components/help/DocScreenshot";
 import { ScreenshotChecklist } from "@/components/help/ScreenshotChecklist";
+import { WorkflowScreenshotCard } from "@/components/help/WorkflowScreenshotCard";
 import { Shield, Building2, FileCheck2, Siren } from "lucide-react";
 
 export default function SuperAdminHelp() {
@@ -95,22 +95,59 @@ export default function SuperAdminHelp() {
         </section>
 
         <section className="space-y-3">
-          <h2 className="text-lg font-semibold text-foreground">Screenshots</h2>
+          <h2 className="text-lg font-semibold text-foreground">Core workflow screens</h2>
+          <p className="text-sm text-muted-foreground">
+            These screens cover the platform-admin loop: create the tenant, approve inventory, triage incidents, and
+            tune policy rules when the platform needs a control change.
+          </p>
           <div className="grid gap-4 md:grid-cols-2">
-            <DocScreenshot
+            <WorkflowScreenshotCard
+              title="Create the licensee"
+              description="Start every new customer rollout here. This tenant record is the anchor for users, batches, scope, and audit history."
               filename="superadmin-create-licensee.png"
               alt="Create licensee modal"
-              caption="Licensees: create a new licensee (tenant)."
+              caption="Licensees: create the tenant before inviting admins or reviewing request volume."
+              highlights={[
+                "Confirm the company name and prefix before saving.",
+                "Create the tenant record first, then invite the licensee admin.",
+                "Return here for cross-tenant administration and status checks.",
+              ]}
             />
-            <DocScreenshot
+            <WorkflowScreenshotCard
+              title="Approve a code request"
+              description="Use the pending request queue to decide whether the next source sequence should be released."
               filename="superadmin-approve-qr-request.png"
               alt="Approve code request modal"
-              caption="Code Requests: approve or reject pending requests."
+              caption="Code Requests: review the request and release or reject the next available sequence."
+              highlights={[
+                "Work from the pending queue first.",
+                "Check the quantity and reference before approval.",
+                "Reject with a reason if the request needs correction instead of silent rejection.",
+              ]}
             />
-            <DocScreenshot
+            <WorkflowScreenshotCard
+              title="Triage incidents and alerts"
+              description="Use Incident Response as the live operating console for policy triggers, fraud reports, and response ownership."
               filename="ir-dashboard.png"
               alt="Incident Response dashboard"
-              caption="Incident Response: incidents, alerts, and policy rules."
+              caption="Incident Response: review open incidents, alert state, and active platform risk signals."
+              highlights={[
+                "Prioritise open incidents before tuning lower-priority alerts.",
+                "Use owner, severity, and status together to decide the next action.",
+                "Open the incident detail when you need evidence, history, or customer communications.",
+              ]}
+            />
+            <WorkflowScreenshotCard
+              title="Adjust a policy rule"
+              description="Use the policy editor when you need to change the threshold that creates future platform alerts."
+              filename="ir-policy-create.png"
+              alt="Create policy rule"
+              caption="Policy Alerts: create or refine the rule that should generate future alerts."
+              highlights={[
+                "Change rules after you understand the underlying incident pattern.",
+                "Use names and thresholds that another admin can understand later.",
+                "Return to the alert queue after saving to confirm the rule behaves correctly.",
+              ]}
             />
           </div>
           <ScreenshotChecklist
@@ -126,6 +163,10 @@ export default function SuperAdminHelp() {
               {
                 filename: "ir-dashboard.png",
                 whereToCapture: "Incident Response page (Incidents/Alerts/Policies) as Super Admin.",
+              },
+              {
+                filename: "ir-policy-create.png",
+                whereToCapture: "Policy Alerts view with the create/edit rule workflow open.",
               },
             ]}
           />

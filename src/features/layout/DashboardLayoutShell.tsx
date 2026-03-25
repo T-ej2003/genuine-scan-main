@@ -164,22 +164,12 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             visibleNotifications={notificationCenter.visibleNotifications}
             notificationsLoading={notificationCenter.notificationsLoading}
             notificationsLive={notificationCenter.notificationsLive}
-            notificationWindowStart={notificationCenter.notificationWindowStart}
-            notificationTimelineMax={notificationCenter.notificationTimelineMax}
-            notificationItems={notificationCenter.notificationItems}
-            notificationMotionSeed={notificationCenter.notificationMotionSeed}
             clearingNotificationIdSet={notificationCenter.clearingNotificationIdSet}
             clearingNotifications={notificationCenter.clearingNotifications}
             hasVisibleNotifications={notificationCenter.hasVisibleNotifications}
             notificationPanelCleared={notificationCenter.notificationPanelCleared}
-            canMoveTimelineToNewer={notificationCenter.canMoveTimelineToNewer}
-            canMoveTimelineToOlder={notificationCenter.canMoveTimelineToOlder}
             canClearNotifications={notificationCenter.canClearNotifications}
-            timelineVisibleStart={notificationCenter.timelineVisibleStart}
-            timelineVisibleEnd={notificationCenter.timelineVisibleEnd}
             onMarkAllNotificationsRead={notificationCenter.markAllNotificationsRead}
-            onStepTimeline={notificationCenter.stepNotificationTimeline}
-            onNotificationWindowStartChange={notificationCenter.setNotificationWindowStart}
             onNotificationOpen={async (notification) => {
               await notificationCenter.markNotificationRead(notification.id);
               navigate(notificationTarget(notification));

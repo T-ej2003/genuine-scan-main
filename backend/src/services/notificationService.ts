@@ -8,10 +8,15 @@ import prisma from "../config/database";
 import { sendIncidentEmail } from "./incidentEmailService";
 import { sendAuthEmail } from "./auth/authEmailService";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
+import {
+  canAudienceReceiveNotificationType,
+  hiddenNotificationTypesForRole,
+} from "./notificationVisibility";
 
 export type NotificationRealtimeEvent = {
   type: "created" | "read" | "read_all";
   audience: NotificationAudience;
+  notificationType?: string | null;
   licenseeId?: string | null;
   orgId?: string | null;
   incidentId?: string | null;
@@ -153,6 +158,10 @@ export const createRoleNotifications = async (params: {
   data?: any;
   channels?: NotificationChannel[];
 }) => {
+  if (!canAudienceReceiveNotificationType(params.audience, params.type)) {
+    return [] as any[];
+  }
+
   const channels = params.channels && params.channels.length > 0 ? params.channels : [NotificationChannel.WEB];
 
   const userWhere: any = {
@@ -232,6 +241,7 @@ export const createRoleNotifications = async (params: {
         emitNotificationEvent({
           type: "created",
           audience: params.audience,
+          notificationType: params.type,
           licenseeId: params.licenseeId || null,
           orgId: params.orgId || null,
           incidentId: params.incidentId || null,
@@ -335,6 +345,7 @@ export const createUserNotification = async (params: {
       emitNotificationEvent({
         type: "created",
         audience: NotificationAudience.ALL,
+        notificationType: params.type,
         licenseeId: params.licenseeId || null,
         orgId: params.orgId || null,
         incidentId: params.incidentId || null,
@@ -487,6 +498,7 @@ export const listNotificationsForUser = async (params: {
   unreadOnly?: boolean;
 }) => {
   const audience = normalizeRole(params.role);
+  const hiddenTypes = hiddenNotificationTypesForRole(params.role);
 
   const scopedBroadcast: any = {
     userId: null,
@@ -521,6 +533,9 @@ export const listNotificationsForUser = async (params: {
   const where: any = {
     OR: scopedOr,
   };
+  if (hiddenTypes.length > 0) {
+    where.type = { notIn: hiddenTypes };
+  }
 
   if (params.unreadOnly) {
     where.readAt = null;
@@ -574,6 +589,7 @@ export const markNotificationRead = async (params: {
   orgId?: string | null;
 }) => {
   const audience = normalizeRole(params.role);
+  const hiddenTypes = hiddenNotificationTypesForRole(params.role);
   try {
     const sharedScope: any = {
       userId: null,
@@ -603,6 +619,7 @@ export const markNotificationRead = async (params: {
     const existing = await prisma.notification.findFirst({
       where: {
         id: params.notificationId,
+        ...(hiddenTypes.length > 0 ? { type: { notIn: hiddenTypes } } : {}),
         OR: [
           { userId: params.userId, channel: NotificationChannel.WEB },
           sharedScope,
@@ -648,6 +665,7 @@ export const markAllNotificationsRead = async (params: {
   orgId?: string | null;
 }) => {
   const audience = normalizeRole(params.role);
+  const hiddenTypes = hiddenNotificationTypesForRole(params.role);
 
   const sharedScope: any = {
     userId: null,
@@ -681,6 +699,9 @@ export const markAllNotificationsRead = async (params: {
       sharedScope,
     ],
   };
+  if (hiddenTypes.length > 0) {
+    where.type = { notIn: hiddenTypes };
+  }
 
   try {
     const result = await prisma.notification.updateMany({

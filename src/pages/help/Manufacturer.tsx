@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { DocScreenshot } from "@/components/help/DocScreenshot";
 import { ScreenshotChecklist } from "@/components/help/ScreenshotChecklist";
+import { WorkflowScreenshotCard } from "@/components/help/WorkflowScreenshotCard";
 import { Download, Factory, FileArchive, ShieldCheck, Wrench } from "lucide-react";
 
 export default function ManufacturerHelp() {
@@ -178,28 +178,60 @@ export default function ManufacturerHelp() {
         </section>
 
         <section className="space-y-3">
-          <h2 className="text-lg font-semibold text-foreground">Screenshots</h2>
+          <h2 className="text-lg font-semibold text-foreground">Core workflow screens</h2>
+          <p className="text-sm text-muted-foreground">
+            These screens cover the full manufacturer journey: install the connector, confirm printer readiness, create
+            the job, and verify that the run completed correctly.
+          </p>
           <div className="grid gap-4 md:grid-cols-2">
-            <DocScreenshot
+            <WorkflowScreenshotCard
+              title="Install the connector"
+              description="Start on the actual workstation that will print. This is the approved entry point for workstation-based printing."
               filename="manufacturer-connector-download.png"
               alt="Connector download page"
-              caption="Connector download page: choose the Mac or Windows installer for the computer that will print."
+              caption="Install Connector: choose the package for the exact computer that will handle printing."
+              highlights={[
+                "Download the installer on the computer that has the printer attached or reachable.",
+                "Finish installation before returning to batch operations.",
+                "Use this page first when the connector is not running yet.",
+              ]}
             />
-            <DocScreenshot
-              filename="manufacturer-create-print-job.png"
-              alt="Create print job modal"
-              caption="Batches: select the printer profile, validate readiness, and start controlled dispatch."
-              eager
-            />
-            <DocScreenshot
+            <WorkflowScreenshotCard
+              title="Check printer readiness"
+              description="Use Printer Setup to confirm the connector, selected printer, and saved routes are ready before you print any live quantity."
               filename="manufacturer-printer-diagnostics.png"
               alt="Printer setup and support"
-              caption="Printer Setup & Support: choose the right printer path, review readiness, and validate saved printer profiles."
+              caption="Printer Setup: review readiness, saved routes, and the action needed before printing."
+              highlights={[
+                "Confirm the printer is ready before you open the print dialog.",
+                "Use this page to separate connector issues from printer issues.",
+                "Copy the support summary from here when you need help.",
+              ]}
             />
-            <DocScreenshot
+            <WorkflowScreenshotCard
+              title="Create the print job"
+              description="Open your assigned batch, choose the approved printer path, and start the secure print run from the controlled dialog."
+              filename="manufacturer-create-print-job.png"
+              alt="Create print job modal"
+              caption="Batches: select the quantity and approved printer route, then start the print job."
+              highlights={[
+                "Stay inside your assigned batch scope only.",
+                "Confirm quantity, printer, and readiness in the same dialog.",
+                "Use this dialog for the actual controlled dispatch step.",
+              ]}
+              eager
+            />
+            <WorkflowScreenshotCard
+              title="Confirm the result"
+              description="Return to the batch status view after printing so you can verify that the system recorded the completed run."
               filename="manufacturer-print-status.png"
               alt="Printed status update"
-              caption="Batches: status updates after print workflow."
+              caption="Batches: review the latest print status and confirm the run completed correctly."
+              highlights={[
+                "Check the status immediately after each print run.",
+                "Confirm the printed count moved before creating a follow-up job.",
+                "If the count is wrong, refresh once and then contact support with batch and time details.",
+              ]}
             />
           </div>
           <ScreenshotChecklist

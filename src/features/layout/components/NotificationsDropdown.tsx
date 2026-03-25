@@ -1,9 +1,9 @@
-import { Bell, ChevronLeft, ChevronRight, Inbox, SlidersHorizontal, Sparkles, Trash2 } from "lucide-react";
+import { Bell, Inbox, Sparkles, Trash2 } from "lucide-react";
 
 import { friendlyReferenceLabel, friendlyReferenceWords } from "@/lib/friendly-reference";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Slider } from "@/components/ui/slider";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 export type DashboardNotification = {
@@ -22,22 +22,12 @@ type NotificationsDropdownProps = {
   visibleNotifications: DashboardNotification[];
   notificationsLoading: boolean;
   notificationsLive: boolean;
-  notificationWindowStart: number;
-  notificationTimelineMax: number;
-  notificationItems: DashboardNotification[];
-  notificationMotionSeed: number;
   clearingNotificationIdSet: Set<string>;
   clearingNotifications: boolean;
   hasVisibleNotifications: boolean;
   notificationPanelCleared: boolean;
-  canMoveTimelineToNewer: boolean;
-  canMoveTimelineToOlder: boolean;
   canClearNotifications: boolean;
-  timelineVisibleStart: number;
-  timelineVisibleEnd: number;
   onMarkAllNotificationsRead: () => void | Promise<void>;
-  onStepTimeline: (direction: "newer" | "older") => void;
-  onNotificationWindowStartChange: (value: number) => void;
   onNotificationOpen: (notification: DashboardNotification) => void | Promise<void>;
   onClearNotifications: () => void | Promise<void>;
 };
@@ -176,22 +166,12 @@ export function NotificationsDropdown({
   visibleNotifications,
   notificationsLoading,
   notificationsLive,
-  notificationWindowStart,
-  notificationTimelineMax,
-  notificationItems,
-  notificationMotionSeed,
   clearingNotificationIdSet,
   clearingNotifications,
   hasVisibleNotifications,
   notificationPanelCleared,
-  canMoveTimelineToNewer,
-  canMoveTimelineToOlder,
   canClearNotifications,
-  timelineVisibleStart,
-  timelineVisibleEnd,
   onMarkAllNotificationsRead,
-  onStepTimeline,
-  onNotificationWindowStartChange,
   onNotificationOpen,
   onClearNotifications,
 }: NotificationsDropdownProps) {
@@ -239,9 +219,14 @@ export function NotificationsDropdown({
                     />
                     {notificationsLive ? "Live feed active" : "Polling mode"}
                   </span>
-                  {hasVisibleNotifications ? (
+                  {visibleNotifications.length > 0 ? (
                     <span className="rounded-full border border-white/25 bg-white/35 px-2 py-0.5 dark:border-white/10 dark:bg-white/5">
-                      Showing {timelineVisibleStart}-{timelineVisibleEnd} of {visibleNotifications.length}
+                      {visibleNotifications.length} total
+                    </span>
+                  ) : null}
+                  {unreadNotifications > 0 ? (
+                    <span className="rounded-full border border-emerald-300/35 bg-emerald-400/10 px-2 py-0.5 text-emerald-800 dark:text-emerald-200">
+                      {unreadNotifications} unread
                     </span>
                   ) : null}
                 </div>
@@ -258,62 +243,11 @@ export function NotificationsDropdown({
                 Mark all read
               </Button>
             </div>
-
-            <div className="mt-3 rounded-xl border border-white/25 bg-white/40 p-3 dark:border-white/10 dark:bg-white/5">
-              <div className="mb-2 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
-                <div className="inline-flex items-center gap-1.5">
-                  <SlidersHorizontal className="h-3.5 w-3.5" />
-                  Recent
-                </div>
-                <span className="text-foreground/80 dark:text-foreground/70">
-                  {hasVisibleNotifications ? `${timelineVisibleStart}-${timelineVisibleEnd}` : "0"}
-                </span>
-                <span>Older</span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 rounded-full"
-                  disabled={!canMoveTimelineToNewer || notificationsLoading || clearingNotifications}
-                  onClick={() => onStepTimeline("newer")}
-                  aria-label="Move toward most recent notifications"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                </Button>
-                <Slider
-                  value={[notificationWindowStart]}
-                  min={0}
-                  max={Math.max(notificationTimelineMax, 1)}
-                  step={1}
-                  disabled={notificationTimelineMax === 0 || notificationsLoading || clearingNotifications}
-                  onValueChange={(value) => {
-                    const next = Math.max(0, Math.min(notificationTimelineMax, Number(value?.[0] ?? 0)));
-                    onNotificationWindowStartChange(next);
-                  }}
-                  className="flex-1"
-                  aria-label="Notification timeline from recent to older"
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 rounded-full"
-                  disabled={!canMoveTimelineToOlder || notificationsLoading || clearingNotifications}
-                  onClick={() => onStepTimeline("older")}
-                  aria-label="Move toward older notifications"
-                >
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </div>
           </div>
 
           <div className="relative p-3 pt-2">
             <div className="relative rounded-2xl border border-white/25 bg-white/38 p-2 shadow-[0_10px_24px_-20px_rgba(15,23,42,0.35)] dark:border-white/10 dark:bg-white/5">
-              <div className="pointer-events-none absolute inset-x-4 top-0 h-10 bg-gradient-to-b from-white/35 to-transparent dark:from-white/5" />
-
-              <div className="relative min-h-[18.5rem] pb-16">
+              <div className="relative min-h-[18.5rem]">
                 {notificationsLoading ? (
                   <div className="space-y-2 p-1">
                     {Array.from({ length: 4 }).map((_, index) => (
@@ -329,70 +263,69 @@ export function NotificationsDropdown({
                     ))}
                   </div>
                 ) : hasVisibleNotifications ? (
-                  <div
-                    key={`${notificationMotionSeed}-${notificationWindowStart}-${visibleNotifications.length}`}
-                    className="space-y-2 p-1 animate-in fade-in-0 slide-in-from-bottom-1 duration-200"
-                  >
-                    {notificationItems.map((item, index) => {
-                      const isUnread = isNotificationUnread(item);
-                      const itemId = String(item.id);
-                      const isClearingItem = clearingNotificationIdSet.has(itemId);
-                      const tone = notificationToneClasses(item);
-                      const copy = notificationCopy(item);
+                  <ScrollArea type="always" scrollHideDelay={0} className="h-[24rem] pr-1">
+                    <div className="space-y-2 p-1 animate-in fade-in-0 slide-in-from-bottom-1 duration-200">
+                      {visibleNotifications.map((item, index) => {
+                        const isUnread = isNotificationUnread(item);
+                        const itemId = String(item.id);
+                        const isClearingItem = clearingNotificationIdSet.has(itemId);
+                        const tone = notificationToneClasses(item);
+                        const copy = notificationCopy(item);
 
-                      return (
-                        <div
-                          key={itemId}
-                          className={cn(
-                            "overflow-hidden transition-[max-height,opacity,transform,margin] duration-300 ease-out",
-                            isClearingItem ? "max-h-0 opacity-0 -translate-y-2" : "max-h-56 opacity-100 translate-y-0"
-                          )}
-                          style={{ transitionDelay: isClearingItem ? `${index * 24}ms` : undefined }}
-                        >
-                          <DropdownMenuItem
-                            disabled={isClearingItem || clearingNotifications}
-                            onClick={async () => {
-                              await onNotificationOpen(item);
-                            }}
+                        return (
+                          <div
+                            key={itemId}
                             className={cn(
-                              "group relative flex cursor-pointer flex-col items-start gap-1.5 rounded-xl border px-3 py-3 pr-10 transition-all duration-200 ease-out focus-visible:ring-1 focus-visible:ring-emerald-300/60",
-                              tone.border,
-                              tone.glow,
-                              isUnread
-                                ? "bg-white/80 hover:bg-white/95 dark:bg-slate-900/70 dark:hover:bg-slate-900/90"
-                                : "bg-white/55 hover:bg-white/75 dark:bg-slate-900/45 dark:hover:bg-slate-900/70"
+                              "overflow-hidden transition-[max-height,opacity,transform,margin] duration-300 ease-out",
+                              isClearingItem ? "max-h-0 opacity-0 -translate-y-2" : "max-h-56 opacity-100 translate-y-0"
                             )}
+                            style={{ transitionDelay: isClearingItem ? `${index * 24}ms` : undefined }}
                           >
-                            <span
+                            <DropdownMenuItem
+                              disabled={isClearingItem || clearingNotifications}
+                              onClick={async () => {
+                                await onNotificationOpen(item);
+                              }}
                               className={cn(
-                                "absolute inset-y-2 left-0 w-1 rounded-r-full transition-opacity",
-                                tone.accent,
-                                isUnread ? "opacity-100" : "opacity-35"
+                                "group relative flex cursor-pointer flex-col items-start gap-1.5 rounded-xl border px-3 py-3 pr-10 transition-all duration-200 ease-out focus-visible:ring-1 focus-visible:ring-emerald-300/60",
+                                tone.border,
+                                tone.glow,
+                                isUnread
+                                  ? "bg-white/80 hover:bg-white/95 dark:bg-slate-900/70 dark:hover:bg-slate-900/90"
+                                  : "bg-white/55 hover:bg-white/75 dark:bg-slate-900/45 dark:hover:bg-slate-900/70"
                               )}
-                            />
-                            <div className="flex w-full items-start justify-between gap-2 pl-2">
-                              <p className={cn("line-clamp-1 text-sm font-semibold tracking-tight", isUnread ? "text-foreground" : "text-foreground/90")}>
-                                {copy.title}
-                              </p>
+                            >
                               <span
                                 className={cn(
-                                  "inline-flex h-5 shrink-0 items-center rounded-full border px-1.5 text-[10px] font-semibold uppercase tracking-wide",
-                                  isUnread
-                                    ? tone.chip
-                                    : "border-white/30 bg-white/40 text-muted-foreground dark:border-white/10 dark:bg-white/5"
+                                  "absolute inset-y-2 left-0 w-1 rounded-r-full transition-opacity",
+                                  tone.accent,
+                                  isUnread ? "opacity-100" : "opacity-35"
                                 )}
-                              >
-                                {isUnread ? "New" : "Read"}
-                              </span>
-                            </div>
+                              />
+                              <div className="flex w-full items-start justify-between gap-2 pl-2">
+                                <p className={cn("line-clamp-1 text-sm font-semibold tracking-tight", isUnread ? "text-foreground" : "text-foreground/90")}>
+                                  {copy.title}
+                                </p>
+                                <span
+                                  className={cn(
+                                    "inline-flex h-5 shrink-0 items-center rounded-full border px-1.5 text-[10px] font-semibold uppercase tracking-wide",
+                                    isUnread
+                                      ? tone.chip
+                                      : "border-white/30 bg-white/40 text-muted-foreground dark:border-white/10 dark:bg-white/5"
+                                  )}
+                                >
+                                  {isUnread ? "New" : "Read"}
+                                </span>
+                              </div>
 
-                            <p className="line-clamp-2 pl-2 text-xs leading-5 text-muted-foreground">{copy.body}</p>
-                            <p className="pl-2 text-[11px] font-medium text-muted-foreground/90">{formatNotificationDate(item.createdAt)}</p>
-                          </DropdownMenuItem>
-                        </div>
-                      );
-                    })}
-                  </div>
+                              <p className="line-clamp-2 pl-2 text-xs leading-5 text-muted-foreground">{copy.body}</p>
+                              <p className="pl-2 text-[11px] font-medium text-muted-foreground/90">{formatNotificationDate(item.createdAt)}</p>
+                            </DropdownMenuItem>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
                 ) : (
                   <div className="flex min-h-[18.5rem] items-center justify-center p-3 animate-in fade-in-0 slide-in-from-bottom-1 duration-200">
                     <div className="w-full rounded-2xl border border-dashed border-white/30 bg-white/50 px-4 py-8 text-center dark:border-white/10 dark:bg-white/5">
@@ -412,9 +345,7 @@ export function NotificationsDropdown({
                 )}
               </div>
 
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 rounded-b-2xl bg-gradient-to-t from-white/75 via-white/40 to-transparent dark:from-slate-950/70 dark:via-slate-950/30" />
-
-              <div className="absolute bottom-3 right-3 flex items-center gap-2">
+              <div className="mt-3 flex items-center justify-end border-t border-white/20 px-1 pt-3 dark:border-white/10">
                 <Button
                   variant="outline"
                   size="sm"
