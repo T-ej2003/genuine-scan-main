@@ -14,6 +14,7 @@ import {
 import { syncLocalAgentPrintersFromHeartbeat } from "../services/printerRegistryService";
 import { hmacSha256Hex } from "../utils/security";
 import { getPrinterSseSignSecret } from "../utils/secretConfig";
+import { boundedJsonSchema } from "../utils/boundedJson";
 
 const MANUFACTURER_ROLES: UserRole[] = [
   UserRole.MANUFACTURER,
@@ -41,9 +42,9 @@ const heartbeatSchema = z.object({
   heartbeatNonce: z.string().trim().max(180).optional(),
   heartbeatIssuedAt: z.string().trim().max(80).optional(),
   heartbeatSignature: z.string().trim().max(2000).optional(),
-  capabilitySummary: z.any().optional(),
-  printers: z.array(z.any()).max(50).optional(),
-  calibrationProfile: z.any().optional(),
+  capabilitySummary: boundedJsonSchema({ maxDepth: 4, maxKeys: 40, maxArrayLength: 40 }).optional(),
+  printers: z.array(boundedJsonSchema({ maxDepth: 3, maxKeys: 40, maxArrayLength: 40 })).max(50).optional(),
+  calibrationProfile: boundedJsonSchema({ maxDepth: 4, maxKeys: 60, maxArrayLength: 40 }).optional(),
 }).strict();
 
 const writeSse = (res: Response, event: string, data: any) => {
@@ -107,7 +108,11 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
       deviceFingerprint: update.status.deviceFingerprint || parsed.data.deviceFingerprint || null,
       selectedPrinterId: update.status.selectedPrinterId || parsed.data.selectedPrinterId || null,
       selectedPrinterName: update.status.selectedPrinterName || parsed.data.selectedPrinterName || null,
-      printers: Array.isArray(parsed.data.printers) ? parsed.data.printers : [],
+      printers: Array.isArray(parsed.data.printers)
+        ? parsed.data.printers.filter(
+            (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item)
+          )
+        : [],
       capabilitySummary:
         update.status.capabilitySummary && typeof update.status.capabilitySummary === "object"
           ? (update.status.capabilitySummary as unknown as Record<string, unknown>)

@@ -53,7 +53,7 @@ export type ApiClientCore = {
 export function createApiClientCore(): ApiClientCore {
   let token: string | null = null;
   const getCache = new Map<string, unknown>();
-  let refreshInFlight: Promise<ApiResponse<{ token: string; user: any }>> | null = null;
+  let refreshInFlight: Promise<ApiResponse<{ user: any }>> | null = null;
 
   const setToken = (nextToken: string | null) => {
     token = nextToken;
@@ -146,15 +146,13 @@ export function createApiClientCore(): ApiClientCore {
 
     const refreshOnce = async () => {
       if (refreshInFlight) return refreshInFlight;
-      refreshInFlight = request<{ token: string; user: any }>("/auth/refresh", {
+      refreshInFlight = request<{ user: any }>("/auth/refresh", {
         method: "POST",
         skipAuthRefresh: true,
       }).finally(() => {
         refreshInFlight = null;
       });
-      const refreshResponse = await refreshInFlight;
-      if (refreshResponse.success && refreshResponse.data?.token) setToken(refreshResponse.data.token);
-      return refreshResponse;
+      return refreshInFlight;
     };
 
     try {

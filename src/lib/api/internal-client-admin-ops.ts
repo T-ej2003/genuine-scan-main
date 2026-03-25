@@ -81,9 +81,7 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
   },
 
   streamAuditLogs(onMessage: (log: any) => void, onError?: () => void) {
-    const token = core.getToken();
-    const query = token ? `?token=${encodeURIComponent(token)}` : "";
-    const url = `${BASE_URL}/audit/stream${query}`;
+    const url = `${BASE_URL}/audit/stream`;
 
     let eventSource: EventSource;
     try {
@@ -114,10 +112,8 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     onOpen?: () => void,
     options?: { limit?: number }
   ) {
-    const token = core.getToken();
     const params = new URLSearchParams();
     params.set("limit", String(options?.limit ?? 8));
-    if (token) params.set("token", token);
     const query = params.toString() ? `?${params.toString()}` : "";
     const url = `${BASE_URL}/events/notifications${query}`;
 
@@ -210,11 +206,7 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     onError?: () => void,
     onOpen?: () => void
   ) {
-    const token = core.getToken();
-    const params = new URLSearchParams();
-    if (token) params.set("token", token);
-    const query = params.toString() ? `?${params.toString()}` : "";
-    const url = `${BASE_URL}/manufacturer/printer-agent/events${query}`;
+    const url = `${BASE_URL}/manufacturer/printer-agent/events`;
 
     let eventSource: EventSource;
     try {

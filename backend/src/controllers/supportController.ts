@@ -37,6 +37,10 @@ const publicTrackParamsSchema = z.object({
   reference: z.string().trim().min(4).max(64).regex(/^[a-z0-9_-]+$/i, "Invalid reference format"),
 }).strict();
 
+const supportTicketIdParamSchema = z.object({
+  id: z.string().uuid("Invalid support ticket id"),
+}).strict();
+
 const publicTrackQuerySchema = z.object({
   email: z.string().trim().email().max(160).optional(),
 }).strict();
@@ -135,8 +139,9 @@ export const getSupportTicket = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Ticket ID is required" });
+    const paramsParsed = supportTicketIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Ticket ID is required" });
+    const id = paramsParsed.data.id;
 
     const where: any = { id };
     if (!isPlatform(req.user.role)) {
@@ -193,8 +198,9 @@ export const patchSupportTicket = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Ticket ID is required" });
+    const paramsParsed = supportTicketIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Ticket ID is required" });
+    const id = paramsParsed.data.id;
 
     const parsed = patchSchema.safeParse(req.body || {});
     if (!parsed.success) {
@@ -282,8 +288,9 @@ export const addSupportMessage = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Ticket ID is required" });
+    const paramsParsed = supportTicketIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Ticket ID is required" });
+    const id = paramsParsed.data.id;
 
     const parsed = messageSchema.safeParse(req.body || {});
     if (!parsed.success) {

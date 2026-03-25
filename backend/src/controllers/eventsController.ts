@@ -87,8 +87,7 @@ async function computeDashboard(req: AuthRequest) {
 
 /**
  * SSE stream for dashboard updates.
- * Use EventSource in frontend:
- *   new EventSource(`${API}/api/events/dashboard?token=${token}`)
+ * Browser sessions use secure cookies, so EventSource connects without query tokens.
  */
 export const dashboardEvents = async (req: AuthRequest, res: Response) => {
   try {

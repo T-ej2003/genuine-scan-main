@@ -26,7 +26,12 @@ import { hasConfiguredSecret, usesLegacySecretFallback } from "./utils/secretCon
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
-const missingRequiredEnv = ["DATABASE_URL", "JWT_SECRET"].filter((k) => !process.env[k]);
+const hasAnyConfiguredSecret = (...keys: string[]) => keys.some((key) => hasConfiguredSecret(key));
+
+const missingRequiredEnv = ["DATABASE_URL"].filter((k) => !process.env[k]);
+if (!hasAnyConfiguredSecret("JWT_SECRET_CURRENT", "JWT_SECRET")) {
+  missingRequiredEnv.push("JWT_SECRET_CURRENT or JWT_SECRET");
+}
 if (missingRequiredEnv.length > 0) {
   logger.error(`Missing required environment variables: ${missingRequiredEnv.join(", ")}`);
   process.exit(1);
@@ -71,20 +76,39 @@ if (process.env.NODE_ENV === "production") {
   }
 
   if (String(process.env.COOKIE_SECURE || "").trim().toLowerCase() !== "true") {
-    logger.warn("COOKIE_SECURE is not 'true' in production. Session cookie security may be weaker than intended.");
+    logger.error("Refusing to start: COOKIE_SECURE must be 'true' in production.");
+    process.exit(1);
   }
 
+  const insecurePublicUrls = [
+    "PUBLIC_SCAN_WEB_BASE_URL",
+    "PUBLIC_VERIFY_WEB_BASE_URL",
+    "PUBLIC_ADMIN_WEB_BASE_URL",
+    "WEB_APP_BASE_URL",
+  ].filter((key) => {
+    const value = String(process.env[key] || "").trim();
+    return value && !value.toLowerCase().startsWith("https://");
+  });
+
+  if (insecurePublicUrls.length > 0) {
+    logger.error(`Refusing to start: production public URLs must use HTTPS (${insecurePublicUrls.join(", ")})`);
+    process.exit(1);
+  }
+
+  const hasQrEd25519 = hasAnyConfiguredSecret("QR_SIGN_PRIVATE_KEY") && hasAnyConfiguredSecret("QR_SIGN_PUBLIC_KEY");
+  const hasQrHmac = hasAnyConfiguredSecret("QR_SIGN_HMAC_SECRET_CURRENT", "QR_SIGN_HMAC_SECRET");
+
   const missingStrongSecurityEnv = [
-    "QR_SIGN_PRIVATE_KEY",
-    "QR_SIGN_PUBLIC_KEY",
-    "TOKEN_HASH_SECRET",
-    "IP_HASH_SALT",
-    "CUSTOMER_VERIFY_OTP_SECRET",
-    "CUSTOMER_VERIFY_TOKEN_SECRET",
-    "SCAN_FINGERPRINT_SECRET",
-    "PRINTER_SSE_SIGN_SECRET",
-    "INCIDENT_HASH_SALT",
-  ].filter((key) => !String(process.env[key] || "").trim());
+    !hasQrEd25519 && !hasQrHmac ? "QR signing keys (QR_SIGN_PRIVATE_KEY + QR_SIGN_PUBLIC_KEY or QR_SIGN_HMAC_SECRET_CURRENT/QR_SIGN_HMAC_SECRET)" : "",
+    !hasAnyConfiguredSecret("TOKEN_HASH_SECRET_CURRENT", "TOKEN_HASH_SECRET") ? "TOKEN_HASH_SECRET_CURRENT or TOKEN_HASH_SECRET" : "",
+    !hasAnyConfiguredSecret("IP_HASH_SALT_CURRENT", "IP_HASH_SALT") ? "IP_HASH_SALT_CURRENT or IP_HASH_SALT" : "",
+    !String(process.env.CUSTOMER_VERIFY_OTP_SECRET || "").trim() ? "CUSTOMER_VERIFY_OTP_SECRET" : "",
+    !String(process.env.CUSTOMER_VERIFY_TOKEN_SECRET || "").trim() ? "CUSTOMER_VERIFY_TOKEN_SECRET" : "",
+    !String(process.env.SCAN_FINGERPRINT_SECRET || "").trim() ? "SCAN_FINGERPRINT_SECRET" : "",
+    !hasAnyConfiguredSecret("PRINTER_SSE_SIGN_SECRET_CURRENT", "PRINTER_SSE_SIGN_SECRET") ? "PRINTER_SSE_SIGN_SECRET_CURRENT or PRINTER_SSE_SIGN_SECRET" : "",
+    !hasAnyConfiguredSecret("INCIDENT_HASH_SALT_CURRENT", "INCIDENT_HASH_SALT") ? "INCIDENT_HASH_SALT_CURRENT or INCIDENT_HASH_SALT" : "",
+    !String(process.env.AUTH_MFA_ENCRYPTION_KEY || "").trim() ? "AUTH_MFA_ENCRYPTION_KEY" : "",
+  ].filter(Boolean);
 
   if (missingStrongSecurityEnv.length > 0) {
     logger.error(

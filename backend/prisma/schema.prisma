@@ -318,6 +318,7 @@ enum CompliancePackJobStatus {
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
+  pendingEmail String?  @unique
   passwordHash String?
   name         String
   role         UserRole
@@ -340,6 +341,8 @@ model User {
   failedLoginAttempts Int @default(0)
   lockedUntil DateTime?
   lastLoginAt DateTime?
+  emailVerifiedAt DateTime?
+  pendingEmailRequestedAt DateTime?
 
   assignedBatches        Batch[]        @relation("ManufacturerBatches")
 
@@ -379,6 +382,7 @@ model User {
   invitesCreated Invite[] @relation("InviteCreatedBy")
   invitesAccepted Invite[] @relation("InviteAcceptedBy")
   passwordResets PasswordReset[]
+  emailVerificationTokens EmailVerificationToken[]
   refreshTokens RefreshToken[]
   adminMfaCredential AdminMfaCredential?
   authMfaChallenges AuthMfaChallenge[]
@@ -394,6 +398,7 @@ model User {
   @@index([isActive])
   @@index([status])
   @@index([lockedUntil])
+  @@index([emailVerifiedAt])
 }
 
 model Organization {
@@ -1079,6 +1084,31 @@ model PasswordReset {
 
   @@index([userId])
   @@index([orgId])
+  @@index([expiresAt])
+  @@index([usedAt])
+}
+
+model EmailVerificationToken {
+  id String @id @default(uuid())
+
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  email String
+  pendingEmail String?
+  purpose String
+  tokenHash String @unique
+  secretVersion String?
+  expiresAt DateTime
+  usedAt DateTime?
+  createdAt DateTime @default(now())
+  createdIpHash String?
+  userAgentHash String?
+
+  @@index([userId])
+  @@index([email])
+  @@index([pendingEmail])
+  @@index([purpose])
   @@index([expiresAt])
   @@index([usedAt])
 }

@@ -17,6 +17,7 @@ import {
   logoutSession,
   refreshSession,
 } from "../services/auth/authService";
+import { confirmEmailVerification } from "../services/auth/emailVerificationService";
 import { requestPasswordReset, resetPasswordWithToken } from "../services/auth/passwordResetService";
 import { isValidEmailAddress, normalizeEmailAddress } from "../utils/email";
 import { isManufacturerRole, listManufacturerLicenseeLinks, normalizeLinkedLicensees } from "../services/manufacturerScopeService";
@@ -72,6 +73,10 @@ const resetPasswordSchema = z.object({
   password: z.string().min(8).max(200),
 }).strict();
 
+const verifyEmailSchema = z.object({
+  token: z.string().trim().min(10),
+}).strict();
+
 const normalizeAuthError = (error: unknown): { status: number; error: string } => {
   const raw = error instanceof Error ? error.message : String(error || "Unknown error");
   const lower = raw.toLowerCase();
@@ -94,6 +99,10 @@ const normalizeAuthError = (error: unknown): { status: number; error: string } =
 
   if (lower.includes("account not activated")) {
     return { status: 403, error: "Account not activated. Please accept your invite or reset your password." };
+  }
+
+  if (lower.includes("verify your email before signing in")) {
+    return { status: 403, error: "Verify your email before signing in." };
   }
 
   if (
@@ -140,6 +149,17 @@ const csrfCookieOptions = () => ({
   domain: cookieDomain(),
 });
 
+const allowLegacyTokenResponse = () => {
+  const explicit = String(process.env.AUTH_LEGACY_TOKEN_RESPONSE_ENABLED || "").trim().toLowerCase();
+  if (explicit === "true") return true;
+  return process.env.NODE_ENV !== "production";
+};
+
+const authResponseData = (session: { accessToken: string; user: any }) => ({
+  ...(allowLegacyTokenResponse() ? { token: session.accessToken } : {}),
+  user: session.user,
+});
+
 export const login = async (req: Request, res: Response) => {
   try {
     const validation = loginSchema.safeParse(req.body);
@@ -170,8 +190,7 @@ export const login = async (req: Request, res: Response) => {
     res.cookie(REFRESH_TOKEN_COOKIE, session.refreshToken, { ...authCookieOptions(), maxAge: refreshTtlMs });
     res.cookie(CSRF_TOKEN_COOKIE, session.csrfToken, { ...csrfCookieOptions(), maxAge: refreshTtlMs });
 
-    // Backward compatibility: some clients may still read token from body.
-    return res.json({ success: true, data: { token: session.accessToken, user: session.user } });
+    return res.json({ success: true, data: authResponseData(session) });
   } catch (error) {
     console.error("Login error:", error);
     const out = normalizeAuthError(error);
@@ -230,6 +249,9 @@ export const me = async (req: Request, res: Response) => {
             }
           : null,
         linkedLicensees,
+        emailVerifiedAt: user.emailVerifiedAt?.toISOString?.() || null,
+        pendingEmail: user.pendingEmail || null,
+        pendingEmailRequestedAt: user.pendingEmailRequestedAt?.toISOString?.() || null,
       },
     });
   } catch (error) {
@@ -265,7 +287,7 @@ export const refresh = async (req: Request, res: Response) => {
     res.cookie(REFRESH_TOKEN_COOKIE, rotated.refreshToken, { ...authCookieOptions(), maxAge: refreshTtlMs });
     res.cookie(CSRF_TOKEN_COOKIE, rotated.csrfToken, { ...csrfCookieOptions(), maxAge: refreshTtlMs });
 
-    return res.json({ success: true, data: { token: rotated.accessToken, user: rotated.user } });
+    return res.json({ success: true, data: authResponseData(rotated) });
   } catch (e: any) {
     console.error("Refresh error:", e);
     return res.status(401).json({ success: false, error: "Session expired. Please sign in again." });
@@ -388,9 +410,27 @@ export const acceptInviteController = async (req: Request, res: Response) => {
     res.cookie(REFRESH_TOKEN_COOKIE, session.refreshToken, { ...authCookieOptions(), maxAge: refreshTtlMs });
     res.cookie(CSRF_TOKEN_COOKIE, session.csrfToken, { ...csrfCookieOptions(), maxAge: refreshTtlMs });
 
-    return res.status(200).json({ success: true, data: { token: session.accessToken, user: session.user } });
+    return res.status(200).json({ success: true, data: authResponseData(session) });
   } catch (e: any) {
     return res.status(400).json({ success: false, error: e?.message || "Invite acceptance failed" });
+  }
+};
+
+export const verifyEmailController = async (req: Request, res: Response) => {
+  const parsed = verifyEmailSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+  }
+
+  try {
+    const result = await confirmEmailVerification({
+      rawToken: parsed.data.token,
+      actorIpAddress: req.ip,
+      actorUserAgent: req.get("user-agent"),
+    });
+    return res.json({ success: true, data: result });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error?.message || "Verification failed" });
   }
 };
 

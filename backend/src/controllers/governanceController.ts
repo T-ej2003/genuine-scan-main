@@ -46,6 +46,26 @@ const incidentIdParamSchema = z.object({
   id: z.string().uuid("Invalid incident id"),
 }).strict();
 
+const governanceQuerySchema = z.object({
+  licenseeId: z.string().uuid().optional(),
+}).strict();
+
+const complianceReportQuerySchema = z.object({
+  licenseeId: z.string().uuid().optional(),
+  from: z.string().trim().max(64).optional(),
+  to: z.string().trim().max(64).optional(),
+}).strict();
+
+const compliancePackJobsQuerySchema = z.object({
+  licenseeId: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  offset: z.coerce.number().int().min(0).max(20000).optional(),
+}).strict();
+
+const compliancePackJobParamSchema = z.object({
+  id: z.string().uuid("Invalid compliance pack job id"),
+}).strict();
+
 const resolveLicenseeScope = (req: AuthRequest, value?: string) => {
   if (!req.user) return null;
   if (req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN) {
@@ -64,8 +84,12 @@ const toDate = (value: unknown) => {
 export const getFeatureFlags = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+    const parsed = governanceQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+    }
 
-    const licenseeId = resolveLicenseeScope(req);
+    const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
     if (!licenseeId) {
       return res.status(400).json({ success: false, error: "licenseeId is required" });
     }
@@ -123,8 +147,12 @@ export const upsertFeatureFlag = async (req: AuthRequest, res: Response) => {
 export const getRetentionPolicyController = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+    const parsed = governanceQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+    }
 
-    const licenseeId = resolveLicenseeScope(req);
+    const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
     if (!licenseeId) {
       return res.status(400).json({ success: false, error: "licenseeId is required" });
     }
@@ -231,20 +259,15 @@ export const exportIncidentEvidenceBundleController = async (req: AuthRequest, r
     }
     const incidentId = paramsParsed.data.id;
 
-    const incident = await prisma.incident.findUnique({
-      where: { id: incidentId },
+    const incident = await prisma.incident.findFirst({
+      where:
+        req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
+          ? { id: incidentId }
+          : { id: incidentId, licenseeId: req.user.licenseeId || "__none__" },
       select: { id: true, licenseeId: true },
     });
 
     if (!incident) return res.status(404).json({ success: false, error: "Incident not found" });
-
-    if (
-      req.user.role !== UserRole.SUPER_ADMIN &&
-      req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
-      req.user.licenseeId !== incident.licenseeId
-    ) {
-      return res.status(403).json({ success: false, error: "Access denied" });
-    }
 
     const bundle = await buildIncidentEvidenceAuditBundle(incident.id);
 
@@ -270,10 +293,14 @@ export const exportIncidentEvidenceBundleController = async (req: AuthRequest, r
 export const generateComplianceReportController = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+    const parsed = complianceReportQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+    }
 
-    const licenseeId = resolveLicenseeScope(req);
-    const from = toDate(req.query.from);
-    const to = toDate(req.query.to);
+    const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
+    const from = toDate(parsed.data.from);
+    const to = toDate(parsed.data.to);
 
     const report = await generateComplianceReport({
       actor: {
@@ -328,10 +355,14 @@ export const runCompliancePackController = async (req: AuthRequest, res: Respons
 export const listCompliancePackJobsController = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+    const parsed = compliancePackJobsQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+    }
 
-    const limit = Math.min(Math.max(Number(req.query.limit || 20), 1), 200);
-    const offset = Math.max(Number(req.query.offset || 0), 0);
-    const licenseeId = resolveLicenseeScope(req);
+    const limit = parsed.data.limit ?? 20;
+    const offset = parsed.data.offset ?? 0;
+    const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
 
     const result = await listCompliancePackJobs({
       licenseeId,
@@ -357,12 +388,16 @@ export const listCompliancePackJobsController = async (req: AuthRequest, res: Re
 export const downloadCompliancePackJobController = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+    const paramsParsed = compliancePackJobParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Compliance pack job ID is required" });
+    }
 
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Compliance pack job ID is required" });
-
-    const row = await prisma.compliancePackJob.findUnique({
-      where: { id },
+    const row = await prisma.compliancePackJob.findFirst({
+      where:
+        req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
+          ? { id: paramsParsed.data.id }
+          : { id: paramsParsed.data.id, licenseeId: req.user.licenseeId || "__none__" },
       select: {
         id: true,
         licenseeId: true,
@@ -372,14 +407,6 @@ export const downloadCompliancePackJobController = async (req: AuthRequest, res:
       },
     });
     if (!row) return res.status(404).json({ success: false, error: "Compliance pack job not found" });
-
-    if (
-      req.user.role !== UserRole.SUPER_ADMIN &&
-      req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
-      req.user.licenseeId !== row.licenseeId
-    ) {
-      return res.status(403).json({ success: false, error: "Access denied" });
-    }
     if (row.status !== "COMPLETED" || !row.storageKey || !row.fileName) {
       return res.status(409).json({ success: false, error: "Compliance pack is not ready" });
     }

@@ -4,6 +4,9 @@ import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { createAuditLog } from "../services/auditService";
 import { hashPassword, verifyPassword } from "../services/auth/passwordService";
+import { requestEmailChangeVerification } from "../services/auth/emailVerificationService";
+import { revokeAllUserRefreshTokens } from "../services/auth/refreshTokenService";
+import { normalizeEmailAddress } from "../utils/email";
 
 const updateProfileSchema = z.object({
   name: z.string().trim().min(2).max(80).optional(),
@@ -12,7 +15,7 @@ const updateProfileSchema = z.object({
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),
-  newPassword: z.string().min(6).max(200),
+  newPassword: z.string().min(8).max(200),
 }).strict();
 
 export const updateMyProfile = async (req: AuthRequest, res: Response) => {
@@ -27,36 +30,91 @@ export const updateMyProfile = async (req: AuthRequest, res: Response) => {
 
     const data: any = {};
     if (parsed.data.name !== undefined) data.name = parsed.data.name;
-    if (parsed.data.email !== undefined) data.email = parsed.data.email.toLowerCase();
 
-    if (!Object.keys(data).length) {
+    if (!Object.keys(data).length && parsed.data.email === undefined) {
       return res.status(400).json({ success: false, error: "No changes provided" });
     }
 
-    // email uniqueness check (if changing email)
-    if (data.email) {
-      const exists = await prisma.user.findUnique({ where: { email: data.email } });
-      if (exists && exists.id !== userId) {
-        return res.status(409).json({ success: false, error: "Email already in use" });
+    let emailChangeResult: Awaited<ReturnType<typeof requestEmailChangeVerification>> | null = null;
+
+    if (parsed.data.email !== undefined) {
+      const normalizedEmail = normalizeEmailAddress(parsed.data.email);
+      if (!normalizedEmail) {
+        return res.status(400).json({ success: false, error: "Invalid email address" });
       }
+      emailChangeResult = await requestEmailChangeVerification({
+        userId,
+        nextEmail: normalizedEmail,
+        actorUserId: userId,
+        actorIpAddress: req.ip,
+        actorUserAgent: req.get("user-agent"),
+      });
     }
 
-    const updated = await prisma.user.update({
-      where: { id: userId },
-      data,
-      select: { id: true, name: true, email: true, role: true, licenseeId: true, isActive: true, createdAt: true },
-    });
+    const updated =
+      Object.keys(data).length > 0
+        ? await prisma.user.update({
+            where: { id: userId },
+            data,
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              pendingEmail: true,
+              pendingEmailRequestedAt: true,
+              emailVerifiedAt: true,
+              role: true,
+              licenseeId: true,
+              isActive: true,
+              createdAt: true,
+            },
+          })
+        : await prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              pendingEmail: true,
+              pendingEmailRequestedAt: true,
+              emailVerifiedAt: true,
+              role: true,
+              licenseeId: true,
+              isActive: true,
+              createdAt: true,
+            },
+          });
+
+    if (!updated) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
 
     await createAuditLog({
       userId,
       action: "UPDATE_MY_PROFILE",
       entityType: "User",
       entityId: userId,
-      details: { changed: Object.keys(data) },
+      details: {
+        changed: Object.keys(data),
+        pendingEmail: emailChangeResult && "pendingEmail" in emailChangeResult ? emailChangeResult.pendingEmail : null,
+      },
       ipAddress: req.ip,
     });
 
-    return res.json({ success: true, data: updated });
+    return res.json({
+      success: true,
+      data: {
+        ...updated,
+        emailChange:
+          emailChangeResult && "pendingEmail" in emailChangeResult
+            ? {
+                verificationRequired: true,
+                pendingEmail: emailChangeResult.pendingEmail,
+                expiresAt: emailChangeResult.expiresAt,
+              }
+            : null,
+      },
+    });
   } catch (e) {
     console.error("updateMyProfile error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });
@@ -94,6 +152,11 @@ export const changeMyPassword = async (req: AuthRequest, res: Response) => {
     await prisma.user.update({
       where: { id: userId },
       data: { passwordHash },
+    });
+
+    await revokeAllUserRefreshTokens({
+      userId,
+      reason: "PASSWORD_CHANGED",
     });
 
     await createAuditLog({

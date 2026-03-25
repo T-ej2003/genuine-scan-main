@@ -18,6 +18,23 @@ const fraudReportIdParamSchema = z.object({
   id: z.string().uuid("Invalid fraud report id"),
 }).strict();
 
+const auditLogQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+  offset: z.coerce.number().int().min(0).max(20_000).optional(),
+  entityType: z.string().trim().max(120).optional(),
+  entityId: z.string().trim().max(160).optional(),
+  action: z.string().trim().max(160).optional(),
+  licenseeId: z.string().uuid().optional(),
+}).strict();
+
+const auditExportQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(20_000).optional(),
+  entityType: z.string().trim().max(120).optional(),
+  entityId: z.string().trim().max(160).optional(),
+  action: z.string().trim().max(160).optional(),
+  licenseeId: z.string().uuid().optional(),
+}).strict();
+
 const coerceDetails = (details: unknown): Record<string, any> => {
   if (!details || typeof details !== "object" || Array.isArray(details)) return {};
   return details as Record<string, any>;
@@ -39,18 +56,23 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ success: false, error: "Not authenticated" });
     }
 
-    const limit = Number(req.query.limit) || 50;
-    const offset = Number(req.query.offset) || 0;
-    const entityType = req.query.entityType as string | undefined;
-    const entityId = req.query.entityId as string | undefined;
-    const action = req.query.action as string | undefined;
+    const parsed = auditLogQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+    }
+
+    const limit = parsed.data.limit ?? 50;
+    const offset = parsed.data.offset ?? 0;
+    const entityType = parsed.data.entityType;
+    const entityId = parsed.data.entityId;
+    const action = parsed.data.action;
 
     const isSuper = req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN;
     const isManufacturer =
       req.user.role === UserRole.MANUFACTURER ||
       req.user.role === UserRole.MANUFACTURER_ADMIN ||
       req.user.role === UserRole.MANUFACTURER_USER;
-    const licenseeId = isSuper ? (req.query.licenseeId as string | undefined) : isManufacturer ? undefined : req.user.licenseeId ?? undefined;
+    const licenseeId = isSuper ? parsed.data.licenseeId : isManufacturer ? undefined : req.user.licenseeId ?? undefined;
 
     let userIds: string[] | undefined;
     if (isManufacturer) {
@@ -114,17 +136,22 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ success: false, error: "Not authenticated" });
     }
 
-    const limit = Math.min(Number(req.query.limit) || 5000, 20000);
-    const entityType = req.query.entityType as string | undefined;
-    const entityId = req.query.entityId as string | undefined;
-    const action = req.query.action as string | undefined;
+    const parsed = auditExportQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+    }
+
+    const limit = parsed.data.limit ?? 5000;
+    const entityType = parsed.data.entityType;
+    const entityId = parsed.data.entityId;
+    const action = parsed.data.action;
 
     const isSuper = req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN;
     const isManufacturer =
       req.user.role === UserRole.MANUFACTURER ||
       req.user.role === UserRole.MANUFACTURER_ADMIN ||
       req.user.role === UserRole.MANUFACTURER_USER;
-    const licenseeId = isSuper ? (req.query.licenseeId as string | undefined) : isManufacturer ? undefined : req.user.licenseeId ?? undefined;
+    const licenseeId = isSuper ? parsed.data.licenseeId : isManufacturer ? undefined : req.user.licenseeId ?? undefined;
 
     let userIds: string[] | undefined;
     if (isManufacturer) {

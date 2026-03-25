@@ -1,4 +1,5 @@
 import prisma from "../../config/database";
+import { buildTokenHashCandidates } from "../../utils/security";
 import { hashRefreshToken, getRefreshTokenTtlDays, newRefreshToken } from "./tokenService";
 
 const addDays = (d: Date, days: number) => new Date(d.getTime() + days * 24 * 60 * 60 * 1000);
@@ -36,11 +37,11 @@ export const revokeRefreshTokenByRaw = async (input: {
   now?: Date;
 }) => {
   const now = input.now || new Date();
-  const tokenHash = hashRefreshToken(input.rawToken);
+  const tokenHashCandidates = buildTokenHashCandidates(input.rawToken);
 
   await prisma.refreshToken.updateMany({
     where: {
-      tokenHash,
+      tokenHash: { in: tokenHashCandidates },
       revokedAt: null,
     },
     data: {
@@ -90,11 +91,11 @@ export const rotateRefreshToken = async (input: {
     }
 > => {
   const now = input.now || new Date();
-  const presentedHash = hashRefreshToken(input.rawToken);
+  const presentedHashCandidates = buildTokenHashCandidates(input.rawToken);
 
   return prisma.$transaction(async (tx) => {
-    const tokenRow = await tx.refreshToken.findUnique({
-      where: { tokenHash: presentedHash },
+    const tokenRow = await tx.refreshToken.findFirst({
+      where: { tokenHash: { in: presentedHashCandidates } },
       select: {
         id: true,
         userId: true,
@@ -169,4 +170,3 @@ export const rotateRefreshToken = async (input: {
     } as const;
   });
 };
-

@@ -320,24 +320,21 @@ export const serveSupportIssueScreenshot = async (req: Request, res: Response) =
     if (!fileName) return res.status(404).json({ success: false, error: "File not found" });
 
     const report = await prisma.supportIssueReport.findFirst({
-      where: { screenshotPath: fileName },
+      where: isPlatform(authReq.user.role)
+        ? { screenshotPath: fileName }
+        : {
+            screenshotPath: fileName,
+            OR: [
+              { reporterUserId: authReq.user.userId },
+              ...(authReq.user.licenseeId ? [{ licenseeId: authReq.user.licenseeId }] : []),
+            ],
+          },
       select: {
         reporterUserId: true,
         licenseeId: true,
       },
     });
     if (!report) return res.status(404).json({ success: false, error: "File not found" });
-
-    if (!isPlatform(authReq.user.role)) {
-      const sameReporter = report.reporterUserId === authReq.user.userId;
-      const sameLicensee =
-        Boolean(report.licenseeId) &&
-        Boolean(authReq.user.licenseeId) &&
-        String(report.licenseeId) === String(authReq.user.licenseeId);
-      if (!sameReporter && !sameLicensee) {
-        return res.status(403).json({ success: false, error: "Access denied" });
-      }
-    }
 
     const resolved = resolveSupportIssueUploadPath(fileName);
     const uploadsRoot = path.resolve(__dirname, "../../uploads/support-issues");

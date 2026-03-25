@@ -6,6 +6,7 @@ import { createRefreshToken, rotateRefreshToken, revokeAllUserRefreshTokens, rev
 import { createAuditLog } from "../auditService";
 import { assessAuthSessionRisk } from "./sessionRiskService";
 import { listManufacturerLicenseeLinks, normalizeLinkedLicensees } from "../manufacturerScopeService";
+import { isVerifiedAccount } from "./emailVerificationService";
 
 const parseIntEnv = (key: string, fallback: number) => {
   const raw = String(process.env[key] || "").trim();
@@ -132,6 +133,7 @@ export const issueSessionForUser = async (input: {
           }
         : null,
       linkedLicensees: linkedScope.linkedLicensees,
+      emailVerifiedAt: user.emailVerifiedAt,
     },
   };
 };
@@ -189,6 +191,10 @@ export const loginWithPassword = async (input: {
 
   if (!user.passwordHash) {
     throw new Error("Account not activated. Please accept your invite or reset your password.");
+  }
+
+  if (!isVerifiedAccount(user)) {
+    throw new Error("Verify your email before signing in.");
   }
 
   const ok = await verifyPassword(user.passwordHash, password);

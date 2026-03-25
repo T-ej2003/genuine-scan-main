@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, 
 import { AuthRiskLevel } from "@prisma/client";
 
 import prisma from "../../config/database";
-import { hashToken, randomOpaqueToken } from "../../utils/security";
+import { buildTokenHashCandidates, hashToken, matchesHashedToken, randomOpaqueToken } from "../../utils/security";
 
 const TOTP_STEP_SECONDS = 30;
 const TOTP_DIGITS = 6;
@@ -16,8 +16,19 @@ const parseIntEnv = (key: string, fallback: number) => {
 const issuer = () => String(process.env.MFA_TOTP_ISSUER || process.env.APP_NAME || "MSCQR").trim();
 
 const encryptionKey = () => {
-  const seed = String(process.env.AUTH_MFA_ENCRYPTION_KEY || process.env.JWT_SECRET || "").trim();
-  if (!seed) throw new Error("Missing AUTH_MFA_ENCRYPTION_KEY or JWT_SECRET");
+  const explicit = String(process.env.AUTH_MFA_ENCRYPTION_KEY || "").trim();
+  if (explicit) {
+    return createHash("sha256").update(explicit).digest();
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("Missing AUTH_MFA_ENCRYPTION_KEY");
+  }
+
+  const legacy = String(process.env.JWT_SECRET || "").trim();
+  if (!legacy) throw new Error("Missing AUTH_MFA_ENCRYPTION_KEY or JWT_SECRET");
+  console.warn("[auth] MFA encryption is using JWT_SECRET fallback outside production. Set AUTH_MFA_ENCRYPTION_KEY.");
+  const seed = legacy;
   return createHash("sha256").update(seed).digest();
 };
 
@@ -291,11 +302,8 @@ export const createAdminMfaChallenge = async (params: {
 };
 
 const consumeBackupCode = async (userId: string, codesHash: string[], provided: string) => {
-  const wanted = backupHash(provided);
   const index = codesHash.findIndex((entry) => {
-    const left = Buffer.from(entry);
-    const right = Buffer.from(wanted);
-    return left.length === right.length && timingSafeEqual(left, right);
+    return matchesHashedToken(String(provided || "").trim().toUpperCase(), entry);
   });
   if (index < 0) return false;
 
@@ -317,12 +325,12 @@ export const completeAdminMfaChallenge = async (params: {
   ipHash?: string | null;
   userAgent?: string | null;
 }) => {
-  const ticketHash = hashToken(String(params.ticket || "").trim());
+  const ticketHashCandidates = buildTokenHashCandidates(String(params.ticket || "").trim());
   const now = new Date();
 
   const challenge = await prisma.authMfaChallenge.findFirst({
     where: {
-      ticketHash,
+      ticketHash: { in: ticketHashCandidates },
       consumedAt: null,
       expiresAt: { gt: now },
     },

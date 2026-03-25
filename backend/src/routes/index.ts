@@ -34,6 +34,7 @@ import {
   invite,
   acceptInviteController,
   invitePreviewController,
+  verifyEmailController,
 } from "../controllers/authController";
 import {
   downloadConnectorReleaseController,
@@ -193,6 +194,7 @@ import {
   serveSupportIssueScreenshot,
 } from "../controllers/supportIssueController";
 import { supportIssueUpload } from "../middleware/supportIssueUpload";
+import { enforceUploadedFileSignatures } from "../middleware/uploadSignatureValidation";
 import {
   downloadCompliancePackJobController,
   exportIncidentEvidenceBundleController,
@@ -235,6 +237,20 @@ const buildPublicRateLimitPair = (params: {
     }),
   ];
 };
+
+const buildAuthenticatedRateLimitPair = (params: {
+  scope: string;
+  windowMs: number;
+  ipMax: number;
+  actorMax?: number;
+  message: string;
+  actorResolver?: (req: Request) => string | null | undefined;
+  resourceResolver?: (req: Request) => string | null | undefined;
+}) =>
+  buildPublicRateLimitPair({
+    ...params,
+    actorResolver: params.actorResolver || ((req: any) => req.user?.userId || null),
+  });
 
 const publicClientActor = composeRequestResolvers(
   fromAuthorizationBearer,
@@ -282,6 +298,15 @@ const inviteAcceptanceLimiters = buildPublicRateLimitPair({
   ipMax: 25,
   actorMax: 10,
   message: "Too many invite attempts. Please wait before retrying.",
+  actorResolver: tokenActor,
+});
+
+const verifyEmailLimiters = buildPublicRateLimitPair({
+  scope: "auth.verify-email",
+  windowMs: 15 * 60 * 1000,
+  ipMax: 25,
+  actorMax: 10,
+  message: "Too many verification attempts. Please wait before retrying.",
   actorResolver: tokenActor,
 });
 
@@ -430,10 +455,73 @@ const gatewayJobLimiters = buildPublicRateLimitPair({
   actorResolver: gatewayActor,
 });
 
+const adminInviteLimiters = buildAuthenticatedRateLimitPair({
+  scope: "admin.invite",
+  windowMs: 15 * 60 * 1000,
+  ipMax: 40,
+  actorMax: 12,
+  message: "Too many invite actions. Please wait before retrying.",
+  resourceResolver: composeRequestResolvers(fromBodyFields("email"), fromParamFields("id")),
+});
+
+const adminUserMutationLimiters = buildAuthenticatedRateLimitPair({
+  scope: "admin.users",
+  windowMs: 10 * 60 * 1000,
+  ipMax: 80,
+  actorMax: 30,
+  message: "Too many user-management actions. Please slow down and retry.",
+  resourceResolver: composeRequestResolvers(fromParamFields("id"), fromBodyFields("email", "licenseeId")),
+});
+
+const qrMutationLimiters = buildAuthenticatedRateLimitPair({
+  scope: "qr.mutation",
+  windowMs: 10 * 60 * 1000,
+  ipMax: 80,
+  actorMax: 30,
+  message: "Too many allocation or code actions. Please wait before retrying.",
+  resourceResolver: composeRequestResolvers(fromParamFields("licenseeId", "id"), fromBodyFields("licenseeId", "batchId")),
+});
+
+const printMutationLimiters = buildAuthenticatedRateLimitPair({
+  scope: "print.mutation",
+  windowMs: 5 * 60 * 1000,
+  ipMax: 120,
+  actorMax: 60,
+  message: "Too many printing actions. Please wait before retrying.",
+  resourceResolver: composeRequestResolvers(fromParamFields("id"), fromBodyFields("printerId")),
+});
+
+const incidentSupportMutationLimiters = buildAuthenticatedRateLimitPair({
+  scope: "incident-support.mutation",
+  windowMs: 10 * 60 * 1000,
+  ipMax: 80,
+  actorMax: 40,
+  message: "Too many incident or support actions. Please wait before retrying.",
+  resourceResolver: composeRequestResolvers(fromParamFields("id", "reference"), fromBodyFields("incidentId", "ticketId")),
+});
+
+const secureAccountMutationLimiters = buildAuthenticatedRateLimitPair({
+  scope: "account.security",
+  windowMs: 15 * 60 * 1000,
+  ipMax: 40,
+  actorMax: 12,
+  message: "Too many account security actions. Please wait before retrying.",
+});
+
+const exportLimiters = buildAuthenticatedRateLimitPair({
+  scope: "exports.downloads",
+  windowMs: 10 * 60 * 1000,
+  ipMax: 40,
+  actorMax: 20,
+  message: "Too many export or download requests. Please wait before retrying.",
+  resourceResolver: composeRequestResolvers(fromParamFields("id", "fileName")),
+});
+
 // ==================== PUBLIC ====================
 router.post("/auth/login", ...loginLimiters, login);
 router.post("/auth/accept-invite", ...inviteAcceptanceLimiters, acceptInviteController);
 router.get("/auth/invite-preview", ...inviteAcceptanceLimiters, invitePreviewController);
+router.post("/auth/verify-email", ...verifyEmailLimiters, verifyEmailController);
 router.post("/auth/forgot-password", ...forgotPasswordLimiters, forgotPassword);
 router.post("/auth/reset-password", ...forgotPasswordLimiters, resetPassword);
 router.get("/public/connector/releases", ...connectorManifestLimiters, listConnectorReleasesController);
@@ -451,6 +539,7 @@ router.post(
   "/verify/report-fraud",
   verifyReportIpLimiter,
   uploadIncidentReportPhotos,
+  enforceUploadedFileSignatures(["image/png", "image/jpeg", "image/webp", "application/pdf"]),
   sanitizeRequestInput,
   verifyReportActorLimiter,
   reportFraud
@@ -459,6 +548,7 @@ router.post(
   "/fraud-report",
   verifyReportIpLimiter,
   uploadIncidentReportPhotos,
+  enforceUploadedFileSignatures(["image/png", "image/jpeg", "image/webp", "application/pdf"]),
   sanitizeRequestInput,
   verifyReportActorLimiter,
   reportFraud
@@ -468,6 +558,7 @@ router.post(
   "/incidents/report",
   verifyReportIpLimiter,
   uploadIncidentReportPhotos,
+  enforceUploadedFileSignatures(["image/png", "image/jpeg", "image/webp", "application/pdf"]),
   sanitizeRequestInput,
   verifyReportActorLimiter,
   reportIncident
@@ -484,13 +575,13 @@ router.get("/version", ...publicStatusLimiters, versionCheck);
 router.get("/auth/me", authenticate, me);
 router.post("/auth/refresh", requireCsrf, refresh);
 router.post("/auth/logout", authenticate, requireCsrf, logout);
-router.post("/auth/invite", authenticate, requireAnyAdmin, requireCsrf, invite);
+router.post("/auth/invite", authenticate, requireAnyAdmin, ...adminInviteLimiters, requireCsrf, invite);
 
 // ==================== DASHBOARD ====================
 // ✅ Correct stats endpoint used by UI cards + chart + activity
 router.get("/dashboard/stats", authenticate, enforceTenantIsolation, getDashboardStats);
 
-// ✅ Real-time events (SSE). Use EventSource with ?token=
+// ✅ Real-time events (SSE). Browser sessions authenticate with secure cookies.
 router.get("/events/dashboard", authenticateSSE, enforceTenantIsolation, dashboardEvents);
 router.get("/events/notifications", authenticateSSE, notificationEvents);
 
@@ -500,22 +591,29 @@ router.post("/notifications/read-all", authenticate, requireCsrf, readAllNotific
 router.post("/notifications/:id/read", authenticate, requireCsrf, readNotification);
 
 // ==================== LICENSEES (SUPER ADMIN) ====================
-router.get("/licensees/export", authenticate, requirePlatformAdmin, exportLicenseesCsv);
+router.get("/licensees/export", authenticate, requirePlatformAdmin, ...exportLimiters, exportLicenseesCsv);
 
 router.post("/licensees", authenticate, requirePlatformAdmin, requireCsrf, createLicensee);
 router.get("/licensees", authenticate, requirePlatformAdmin, getLicensees);
 router.get("/licensees/:id", authenticate, requirePlatformAdmin, getLicensee);
 router.patch("/licensees/:id", authenticate, requirePlatformAdmin, requireCsrf, updateLicensee);
 router.delete("/licensees/:id", authenticate, requirePlatformAdmin, requireCsrf, deleteLicensee);
-router.post("/licensees/:id/admin-invite/resend", authenticate, requirePlatformAdmin, requireCsrf, resendLicenseeAdminInvite);
+router.post(
+  "/licensees/:id/admin-invite/resend",
+  authenticate,
+  requirePlatformAdmin,
+  ...adminInviteLimiters,
+  requireCsrf,
+  resendLicenseeAdminInvite
+);
 
 // ==================== USERS ====================
 // ✅ recommended: allow LICENSEE_ADMIN to create MANUFACTURER (controller already enforces)
-router.post("/users", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, createUser);
+router.post("/users", authenticate, requireAnyAdmin, enforceTenantIsolation, ...adminUserMutationLimiters, requireCsrf, createUser);
 
 router.get("/users", authenticate, requireAnyAdmin, enforceTenantIsolation, getUsers);
-router.patch("/users/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, updateUser);
-router.delete("/users/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, deleteUser);
+router.patch("/users/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, ...adminUserMutationLimiters, requireCsrf, updateUser);
+router.delete("/users/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, ...adminUserMutationLimiters, requireCsrf, deleteUser);
 
 // ==================== MANUFACTURERS ====================
 router.get("/manufacturers", authenticate, requireAnyAdmin, enforceTenantIsolation, getManufacturers);
@@ -548,20 +646,21 @@ router.delete(
 );
 
 // ==================== QR (SUPER ADMIN for ranges) ====================
-router.post("/qr/ranges/allocate", authenticate, requirePlatformAdmin, requireCsrf, allocateQRRange);
-router.post("/qr/generate", authenticate, requirePlatformAdmin, requireCsrf, generateQRCodes);
+router.post("/qr/ranges/allocate", authenticate, requirePlatformAdmin, ...qrMutationLimiters, requireCsrf, allocateQRRange);
+router.post("/qr/generate", authenticate, requirePlatformAdmin, ...qrMutationLimiters, requireCsrf, generateQRCodes);
 
 // Super admin allocate range to existing licensee
 router.post(
   "/admin/licensees/:licenseeId/qr-allocate-range",
   authenticate,
   requirePlatformAdmin,
+  ...qrMutationLimiters,
   requireCsrf,
   allocateQRRangeForLicensee
 );
 
 // ==================== BATCHES ====================
-router.post("/qr/batches", authenticate, requireLicenseeAdmin, enforceTenantIsolation, requireCsrf, createBatch);
+router.post("/qr/batches", authenticate, requireLicenseeAdmin, enforceTenantIsolation, ...qrMutationLimiters, requireCsrf, createBatch);
 router.get("/qr/batches", authenticate, enforceTenantIsolation, getBatches);
 router.get("/qr/batches/:id/allocation-map", authenticate, enforceTenantIsolation, getBatchAllocationMap);
 
@@ -570,6 +669,7 @@ router.post(
   authenticate,
   requireLicenseeAdmin,
   enforceTenantIsolation,
+  ...qrMutationLimiters,
   requireCsrf,
   assignManufacturer
 );
@@ -583,11 +683,11 @@ router.patch(
 );
 
 // Super admin bulk allocation helper
-router.post("/qr/batches/admin-allocate", authenticate, requirePlatformAdmin, requireCsrf, adminAllocateBatch);
+router.post("/qr/batches/admin-allocate", authenticate, requirePlatformAdmin, ...qrMutationLimiters, requireCsrf, adminAllocateBatch);
 
 // ✅ IMPORTANT: remove QR Codes page for LICENSEE_ADMIN
 // raw QR list/export should be SUPER_ADMIN only
-router.get("/qr/codes/export", authenticate, requirePlatformAdmin, exportQRCodesCsv);
+router.get("/qr/codes/export", authenticate, requirePlatformAdmin, ...exportLimiters, exportQRCodesCsv);
 router.get("/qr/codes", authenticate, requirePlatformAdmin, getQRCodes);
 router.post("/qr/codes/signed-links", authenticate, requirePlatformAdmin, requireCsrf, generateSignedScanLinks);
 
@@ -632,6 +732,7 @@ router.post(
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
+  ...printMutationLimiters,
   requireCsrf,
   createPrintJob
 );
@@ -647,6 +748,7 @@ router.post(
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
+  ...printMutationLimiters,
   requireCsrf,
   createNetworkPrinter
 );
@@ -655,6 +757,7 @@ router.patch(
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
+  ...printMutationLimiters,
   requireCsrf,
   updateNetworkPrinter
 );
@@ -663,6 +766,7 @@ router.delete(
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
+  ...printMutationLimiters,
   requireCsrf,
   deleteNetworkPrinter
 );
@@ -671,6 +775,7 @@ router.post(
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
+  ...printMutationLimiters,
   requireCsrf,
   testPrinter
 );
@@ -693,6 +798,7 @@ router.get(
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
+  ...exportLimiters,
   downloadPrintJobPack
 );
 router.post(
@@ -700,6 +806,7 @@ router.post(
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
+  ...printMutationLimiters,
   requireCsrf,
   issueDirectPrintTokens
 );
@@ -708,6 +815,7 @@ router.post(
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
+  ...printMutationLimiters,
   requireCsrf,
   resolveDirectPrintToken
 );
@@ -716,6 +824,7 @@ router.post(
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
+  ...printMutationLimiters,
   requireCsrf,
   confirmDirectPrintItem
 );
@@ -724,6 +833,7 @@ router.post(
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
+  ...printMutationLimiters,
   requireCsrf,
   reportDirectPrintFailure
 );
@@ -732,6 +842,7 @@ router.post(
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
+  ...printMutationLimiters,
   requireCsrf,
   confirmPrintJob
 );
@@ -742,12 +853,13 @@ router.post(
   authenticate,
   requireAnyAdmin,
   enforceTenantIsolation,
+  ...qrMutationLimiters,
   requireCsrf,
   createQrAllocationRequest
 );
 router.get("/qr/requests", authenticate, requireAnyAdmin, enforceTenantIsolation, getQrAllocationRequests);
-router.post("/qr/requests/:id/approve", authenticate, requirePlatformAdmin, requireCsrf, approveQrAllocationRequest);
-router.post("/qr/requests/:id/reject", authenticate, requirePlatformAdmin, requireCsrf, rejectQrAllocationRequest);
+router.post("/qr/requests/:id/approve", authenticate, requirePlatformAdmin, ...qrMutationLimiters, requireCsrf, approveQrAllocationRequest);
+router.post("/qr/requests/:id/reject", authenticate, requirePlatformAdmin, ...qrMutationLimiters, requireCsrf, rejectQrAllocationRequest);
 
 // ==================== AUDIT ====================
 router.use("/audit", auditRoutes);
@@ -772,6 +884,7 @@ router.get(
   authenticate,
   requireAnyAdmin,
   enforceTenantIsolation,
+  ...exportLimiters,
   exportBatchAuditPackageController
 );
 router.get(
@@ -789,6 +902,7 @@ router.patch(
   "/support/tickets/:id",
   authenticate,
   requirePlatformAdmin,
+  ...incidentSupportMutationLimiters,
   requireCsrf,
   patchSupportTicket
 );
@@ -796,6 +910,7 @@ router.post(
   "/support/tickets/:id/messages",
   authenticate,
   requirePlatformAdmin,
+  ...incidentSupportMutationLimiters,
   requireCsrf,
   addSupportMessage
 );
@@ -805,8 +920,10 @@ router.post(
   authenticate,
   requireOpsUser,
   enforceTenantIsolation,
+  ...incidentSupportMutationLimiters,
   requireCsrf,
   supportIssueUpload.single("screenshot"),
+  enforceUploadedFileSignatures(["image/png", "image/jpeg", "image/webp"]),
   sanitizeRequestInput,
   createSupportIssueReport
 );
@@ -814,6 +931,7 @@ router.post(
   "/support/reports/:id/respond",
   authenticate,
   requirePlatformAdmin,
+  ...incidentSupportMutationLimiters,
   requireCsrf,
   respondToSupportIssueReport
 );
@@ -851,6 +969,7 @@ router.post(
   "/governance/evidence-retention/run",
   authenticate,
   requirePlatformAdmin,
+  ...incidentSupportMutationLimiters,
   requireCsrf,
   runRetentionJobController
 );
@@ -858,12 +977,14 @@ router.get(
   "/governance/compliance/report",
   authenticate,
   requirePlatformAdmin,
+  ...exportLimiters,
   generateComplianceReportController
 );
 router.post(
   "/governance/compliance/pack/run",
   authenticate,
   requirePlatformAdmin,
+  ...exportLimiters,
   requireCsrf,
   runCompliancePackController
 );
@@ -877,12 +998,14 @@ router.get(
   "/governance/compliance/pack/jobs/:id/download",
   authenticate,
   requirePlatformAdmin,
+  ...exportLimiters,
   downloadCompliancePackJobController
 );
 router.get(
   "/audit/export/incidents/:id/bundle",
   authenticate,
   requirePlatformAdmin,
+  ...exportLimiters,
   exportIncidentEvidenceBundleController
 );
 
@@ -901,15 +1024,17 @@ router.get(
   serveIncidentEvidenceFile
 );
 router.get("/incidents/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, getIncident);
-router.patch("/incidents/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, patchIncident);
-router.post("/incidents/:id/events", authenticate, requireAnyAdmin, enforceTenantIsolation, requireCsrf, addIncidentEventNote);
+router.patch("/incidents/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, ...incidentSupportMutationLimiters, requireCsrf, patchIncident);
+router.post("/incidents/:id/events", authenticate, requireAnyAdmin, enforceTenantIsolation, ...incidentSupportMutationLimiters, requireCsrf, addIncidentEventNote);
 router.post(
   "/incidents/:id/evidence",
   authenticate,
   requireAnyAdmin,
   enforceTenantIsolation,
+  ...incidentSupportMutationLimiters,
   requireCsrf,
   uploadIncidentEvidence,
+  enforceUploadedFileSignatures(["image/png", "image/jpeg", "image/webp", "application/pdf"]),
   addIncidentEvidence
 );
 router.post(
@@ -917,6 +1042,7 @@ router.post(
   authenticate,
   requireAnyAdmin,
   enforceTenantIsolation,
+  ...incidentSupportMutationLimiters,
   requireCsrf,
   notifyIncidentCustomer
 );
@@ -925,6 +1051,7 @@ router.post(
   authenticate,
   requireAnyAdmin,
   enforceTenantIsolation,
+  ...incidentSupportMutationLimiters,
   requireCsrf,
   notifyIncidentCustomer
 );
@@ -933,6 +1060,7 @@ router.get(
   authenticate,
   requireAnyAdmin,
   enforceTenantIsolation,
+  ...exportLimiters,
   exportIncidentPdfHook
 );
 
@@ -956,6 +1084,7 @@ router.post(
   requirePlatformAdmin,
   requireCsrf,
   uploadIncidentEvidence,
+  enforceUploadedFileSignatures(["image/png", "image/jpeg", "image/webp", "application/pdf"]),
   addIncidentEvidence
 );
 
@@ -971,7 +1100,7 @@ router.post("/admin/qrs/:id/block", authenticate, requirePlatformAdmin, requireC
 router.post("/admin/batches/:id/block", authenticate, requirePlatformAdmin, requireCsrf, blockBatch);
 
 // ==================== ACCOUNT ====================
-router.patch("/account/profile", authenticate, requireCsrf, updateMyProfile);
-router.patch("/account/password", authenticate, requireCsrf, changeMyPassword);
+router.patch("/account/profile", authenticate, ...secureAccountMutationLimiters, requireCsrf, updateMyProfile);
+router.patch("/account/password", authenticate, ...secureAccountMutationLimiters, requireCsrf, changeMyPassword);
 
 export default router;

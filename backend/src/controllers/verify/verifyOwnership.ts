@@ -3,7 +3,7 @@ import { OwnershipTransferStatus, Prisma } from "@prisma/client";
 import prisma from "../../config/database";
 import { maskEmail } from "../../services/customerVerifyAuthService";
 import { buildVerifyUrl } from "../../services/qrService";
-import { hashToken } from "../../utils/security";
+import { buildTokenHashCandidates, hashToken } from "../../utils/security";
 
 export type OwnershipStatus = {
   isClaimed: boolean;
@@ -210,10 +210,10 @@ export const loadOwnershipTransferByRawToken = async (rawToken: string): Promise
   if (!token) return null;
 
   try {
-    const tokenHash = hashToken(token);
-    await expirePendingOwnershipTransfers({ tokenHash });
-    const transfer = await prisma.ownershipTransfer.findUnique({
-      where: { tokenHash },
+    const tokenHashCandidates = buildTokenHashCandidates(token);
+    await expirePendingOwnershipTransfers({ tokenHash: { in: tokenHashCandidates } });
+    const transfer = await prisma.ownershipTransfer.findFirst({
+      where: { tokenHash: { in: tokenHashCandidates } },
       select: {
         id: true,
         qrCodeId: true,

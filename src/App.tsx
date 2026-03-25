@@ -15,6 +15,7 @@ import { MutationEventBridge, queryClient } from "@/lib/query-client";
 
 const Login = lazy(() => import("@/pages/Login"));
 const AcceptInvite = lazy(() => import("@/pages/AcceptInvite"));
+const VerifyEmail = lazy(() => import("@/pages/VerifyEmail"));
 const ConnectorDownload = lazy(() => import("@/pages/ConnectorDownload"));
 const ForgotPassword = lazy(() => import("@/pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
@@ -279,6 +280,7 @@ function AppRoutes() {
             </AuthRoute>
           }
         />
+        <Route path="/verify-email" element={<VerifyEmail />} />
         <Route
           path="/forgot-password"
           element={

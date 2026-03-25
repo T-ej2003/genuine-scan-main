@@ -36,6 +36,52 @@ const alertIdParamSchema = z.object({
   id: z.string().uuid("Invalid alert id"),
 }).strict();
 
+const batchAuditExportParamSchema = z.object({
+  id: z.string().uuid("Invalid batch id"),
+}).strict();
+
+const traceTimelineQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  offset: z.coerce.number().int().min(0).max(100000).optional(),
+  licenseeId: z.string().uuid().optional(),
+  eventType: z.nativeEnum(TraceEventType).optional(),
+  batchId: z.string().uuid().optional(),
+  manufacturerId: z.string().uuid().optional(),
+  qrCodeId: z.string().uuid().optional(),
+}).strict();
+
+const batchSlaQuerySchema = z.object({
+  licenseeId: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(2000).optional(),
+  stuckBatchHours: z.coerce.number().int().min(1).max(24 * 365).optional(),
+}).strict();
+
+const riskAnalyticsQuerySchema = z.object({
+  licenseeId: z.string().uuid().optional(),
+  lookbackHours: z.coerce.number().int().min(1).max(24 * 30).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+}).strict();
+
+const policyConfigQuerySchema = z.object({
+  licenseeId: z.string().uuid().optional(),
+}).strict();
+
+const policyAlertsQuerySchema = z.object({
+  licenseeId: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+  offset: z.coerce.number().int().min(0).max(100000).optional(),
+  alertType: z.nativeEnum(PolicyAlertType).optional(),
+  severity: z.nativeEnum(AlertSeverity).optional(),
+  acknowledged: z
+    .union([z.boolean(), z.enum(["true", "false", "1", "0"])])
+    .optional()
+    .transform((value) => {
+      if (value === undefined) return undefined;
+      if (typeof value === "boolean") return value;
+      return value === "true" || value === "1";
+    }),
+}).strict();
+
 const asInt = (value: unknown, fallback: number, min: number, max: number) => {
   const n = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(n)) return fallback;
@@ -57,18 +103,18 @@ const asOptionalBool = (value: unknown): boolean | undefined => {
   return undefined;
 };
 
-const resolveScopedLicenseeId = (req: AuthRequest): string | undefined => {
+const resolveScopedLicenseeId = (req: AuthRequest, requestedLicenseeId?: string): string | undefined => {
   if (!req.user) return undefined;
   if (req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN) {
-    return asOptionalString(req.query.licenseeId) || undefined;
+    return requestedLicenseeId || undefined;
   }
   return req.user.licenseeId || undefined;
 };
 
-const requirePolicyLicenseeId = (req: AuthRequest, bodyLicenseeId?: string) => {
+const requirePolicyLicenseeId = (req: AuthRequest, bodyLicenseeId?: string, queryLicenseeId?: string) => {
   if (!req.user) return null;
   if (req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN) {
-    return bodyLicenseeId || asOptionalString(req.query.licenseeId) || undefined;
+    return bodyLicenseeId || queryLicenseeId || undefined;
   }
   return req.user.licenseeId || undefined;
 };
@@ -76,20 +122,15 @@ const requirePolicyLicenseeId = (req: AuthRequest, bodyLicenseeId?: string) => {
 export const getTraceTimelineController = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
-
-    const limit = asInt(req.query.limit, 50, 1, 200);
-    const offset = asInt(req.query.offset, 0, 0, 100000);
-    const licenseeId = resolveScopedLicenseeId(req);
-
-    const rawEventType = asOptionalString(req.query.eventType);
-    let eventType: TraceEventType | undefined;
-    if (rawEventType) {
-      const normalized = rawEventType.toUpperCase();
-      if (!(normalized in TraceEventType)) {
-        return res.status(400).json({ success: false, error: "Invalid eventType" });
-      }
-      eventType = normalized as TraceEventType;
+    const parsed = traceTimelineQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
     }
+
+    const limit = parsed.data.limit ?? 50;
+    const offset = parsed.data.offset ?? 0;
+    const licenseeId = resolveScopedLicenseeId(req, parsed.data.licenseeId);
+    const eventType = parsed.data.eventType;
 
     let manufacturerId = asOptionalString(req.query.manufacturerId);
     if (
@@ -103,15 +144,15 @@ export const getTraceTimelineController = async (req: AuthRequest, res: Response
     await backfillTraceEventsFromAuditLogs({
       licenseeId,
       limit: 2500,
-      force: Boolean(asOptionalString(req.query.batchId) || asOptionalString(req.query.qrCodeId)),
+      force: Boolean(parsed.data.batchId || parsed.data.qrCodeId),
     });
 
     const result = await getTraceTimeline({
       licenseeId,
       eventType,
-      batchId: asOptionalString(req.query.batchId),
+      batchId: parsed.data.batchId,
       manufacturerId,
-      qrCodeId: asOptionalString(req.query.qrCodeId),
+      qrCodeId: parsed.data.qrCodeId,
       limit,
       offset,
     });
@@ -134,11 +175,14 @@ export const getTraceTimelineController = async (req: AuthRequest, res: Response
 export const getBatchSlaAnalyticsController = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+    const parsed = batchSlaQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+    }
 
-    const licenseeId = resolveScopedLicenseeId(req);
-    const limit = asInt(req.query.limit, 200, 1, 2000);
-    const stuckBatchHoursRaw = req.query.stuckBatchHours;
-    const stuckBatchHours = stuckBatchHoursRaw != null ? asInt(stuckBatchHoursRaw, 24, 1, 24 * 365) : undefined;
+    const licenseeId = resolveScopedLicenseeId(req, parsed.data.licenseeId);
+    const limit = parsed.data.limit ?? 200;
+    const stuckBatchHours = parsed.data.stuckBatchHours;
 
     const data = await getBatchSlaAnalytics({ licenseeId, limit, stuckBatchHours });
     return res.json({ success: true, data });
@@ -151,10 +195,14 @@ export const getBatchSlaAnalyticsController = async (req: AuthRequest, res: Resp
 export const getRiskAnalyticsController = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+    const parsed = riskAnalyticsQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+    }
 
-    const licenseeId = resolveScopedLicenseeId(req);
-    const limit = asInt(req.query.limit, 20, 1, 200);
-    const lookbackHours = asInt(req.query.lookbackHours, 24, 1, 24 * 30);
+    const licenseeId = resolveScopedLicenseeId(req, parsed.data.licenseeId);
+    const limit = parsed.data.limit ?? 20;
+    const lookbackHours = parsed.data.lookbackHours ?? 24;
 
     const data = await getRiskAnalytics({ licenseeId, lookbackHours, limit });
     return res.json({ success: true, data });
@@ -167,7 +215,11 @@ export const getRiskAnalyticsController = async (req: AuthRequest, res: Response
 export const getPolicyConfigController = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
-    const licenseeId = requirePolicyLicenseeId(req);
+    const parsed = policyConfigQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+    }
+    const licenseeId = requirePolicyLicenseeId(req, undefined, parsed.data.licenseeId);
     if (!licenseeId) {
       return res.json({
         success: true,
@@ -202,7 +254,11 @@ export const updatePolicyConfigController = async (req: AuthRequest, res: Respon
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const licenseeId = requirePolicyLicenseeId(req, parsed.data.licenseeId);
+    const queryParsed = policyConfigQuerySchema.safeParse(req.query || {});
+    if (!queryParsed.success) {
+      return res.status(400).json({ success: false, error: queryParsed.error.errors[0]?.message || "Invalid filters" });
+    }
+    const licenseeId = requirePolicyLicenseeId(req, parsed.data.licenseeId, queryParsed.data.licenseeId);
     if (!licenseeId) {
       return res
         .status(400)
@@ -241,32 +297,17 @@ export const updatePolicyConfigController = async (req: AuthRequest, res: Respon
 export const getPolicyAlertsController = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
-
-    const licenseeId = resolveScopedLicenseeId(req);
-    const limit = asInt(req.query.limit, 50, 1, 500);
-    const offset = asInt(req.query.offset, 0, 0, 100000);
-    const acknowledged = asOptionalBool(req.query.acknowledged);
-
-    const rawType = asOptionalString(req.query.alertType);
-    const rawSeverity = asOptionalString(req.query.severity);
-
-    let alertType: PolicyAlertType | undefined;
-    if (rawType) {
-      const normalized = rawType.toUpperCase();
-      if (!(normalized in PolicyAlertType)) {
-        return res.status(400).json({ success: false, error: "Invalid alertType" });
-      }
-      alertType = normalized as PolicyAlertType;
+    const parsed = policyAlertsQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
     }
 
-    let severity: AlertSeverity | undefined;
-    if (rawSeverity) {
-      const normalized = rawSeverity.toUpperCase();
-      if (!(normalized in AlertSeverity)) {
-        return res.status(400).json({ success: false, error: "Invalid severity" });
-      }
-      severity = normalized as AlertSeverity;
-    }
+    const licenseeId = resolveScopedLicenseeId(req, parsed.data.licenseeId);
+    const limit = parsed.data.limit ?? 50;
+    const offset = parsed.data.offset ?? 0;
+    const acknowledged = parsed.data.acknowledged;
+    const alertType = parsed.data.alertType;
+    const severity = parsed.data.severity;
 
     const where: any = {};
     if (licenseeId) where.licenseeId = licenseeId;
@@ -393,22 +434,17 @@ export const acknowledgePolicyAlertController = async (req: AuthRequest, res: Re
 export const exportBatchAuditPackageController = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
-    const batchId = String(req.params.id || "").trim();
-    if (!batchId) return res.status(400).json({ success: false, error: "Invalid batch id" });
+    const parsed = batchAuditExportParamSchema.safeParse(req.params || {});
+    if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid batch id" });
 
-    const batch = await prisma.batch.findUnique({
-      where: { id: batchId },
+    const batch = await prisma.batch.findFirst({
+      where:
+        req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
+          ? { id: parsed.data.id }
+          : { id: parsed.data.id, licenseeId: req.user.licenseeId || "__none__" },
       select: { id: true, licenseeId: true },
     });
     if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
-
-    if (
-      req.user.role !== UserRole.SUPER_ADMIN &&
-      req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
-      req.user.licenseeId !== batch.licenseeId
-    ) {
-      return res.status(403).json({ success: false, error: "Access denied" });
-    }
 
     const pkg = await buildImmutableBatchAuditPackage(batch.id);
 

@@ -193,6 +193,7 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
               email,
               name: adminPayload.name,
               passwordHash: await hashPassword(adminPassword),
+              emailVerifiedAt: new Date(),
               role: UserRole.LICENSEE_ADMIN,
               licenseeId: lic.id,
               orgId: lic.orgId,

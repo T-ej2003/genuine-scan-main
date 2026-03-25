@@ -48,7 +48,15 @@ export default function AccountSettings() {
       const res = await apiClient.updateMyProfile({ name: n, email: em });
       if (!res.success) throw new Error(res.error || "Update failed");
 
-      toast({ title: "Saved", description: "Your profile has been updated." });
+      const emailChange = (res.data as any)?.emailChange;
+      if (emailChange?.verificationRequired && emailChange?.pendingEmail) {
+        toast({
+          title: "Check your email",
+          description: `Confirm ${emailChange.pendingEmail} from the verification message before the change goes live.`,
+        });
+      } else {
+        toast({ title: "Saved", description: "Your profile has been updated." });
+      }
       await refresh();
     } catch (e: any) {
       toast({ title: "Save failed", description: e?.message || "Error", variant: "destructive" });
@@ -65,8 +73,8 @@ export default function AccountSettings() {
       toast({ title: "Missing current password", description: "Enter your current password.", variant: "destructive" });
       return;
     }
-    if (!newPassword || newPassword.length < 6) {
-      toast({ title: "Weak password", description: "New password must be at least 6 characters.", variant: "destructive" });
+    if (!newPassword || newPassword.length < 8) {
+      toast({ title: "Weak password", description: "New password must be at least 8 characters.", variant: "destructive" });
       return;
     }
     if (newPassword !== confirmNewPassword) {
@@ -102,7 +110,7 @@ export default function AccountSettings() {
           <CardHeader className="pb-2">
             <div className="font-semibold">Profile</div>
             <div className="text-sm text-muted-foreground">
-              Update your name and email address.
+              Update your name. Email changes stay pending until you confirm them from your inbox.
             </div>
           </CardHeader>
           <CardContent>
@@ -115,6 +123,15 @@ export default function AccountSettings() {
               <div className="space-y-2">
                 <Label>Email</Label>
                 <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+                {user?.pendingEmail ? (
+                  <p className="text-sm text-amber-700">
+                    Pending change: <strong>{user.pendingEmail}</strong>. Open the verification email to finish this update.
+                  </p>
+                ) : user?.emailVerifiedAt ? (
+                  <p className="text-sm text-muted-foreground">Verified on {new Date(user.emailVerifiedAt).toLocaleString()}.</p>
+                ) : (
+                  <p className="text-sm text-amber-700">This account email is not verified yet.</p>
+                )}
               </div>
 
               <div className="flex justify-end">

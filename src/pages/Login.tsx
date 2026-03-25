@@ -22,6 +22,18 @@ export default function Login() {
     if (text.includes("invalid email or password") || text.includes("password")) {
       return "Incorrect password. Try again.";
     }
+    if (text.includes("verify your email")) {
+      return "Verify your email before signing in. Use the latest message sent to your inbox.";
+    }
+    if (text.includes("temporarily locked")) {
+      return "Your account is temporarily locked after repeated sign-in attempts. Try again later.";
+    }
+    if (text.includes("too many")) {
+      return "Too many sign-in attempts. Wait a moment, then try again.";
+    }
+    if (text.includes("session expired")) {
+      return "Your session expired. Sign in again to continue.";
+    }
     return value || "Login failed";
   };
 
@@ -107,7 +119,7 @@ export default function Login() {
         </div>
 
         <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 px-4 py-3 text-xs text-emerald-900">
-          Password reset is available directly from the sign-in form and uses the existing secure email token flow.
+          Password reset and account verification both use secure email links. If access is blocked after setup, check your inbox for the latest verification message.
         </div>
 
         <Button type="submit" className="h-11 w-full bg-slate-900 text-white hover:bg-slate-800" disabled={submitting}>

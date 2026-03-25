@@ -8,6 +8,7 @@ import {
   timingSafeEqual,
   verify as cryptoVerify,
 } from "crypto";
+import { getQrSigningHmacSecretSet } from "../utils/secretConfig";
 
 export type QrTokenPayload = {
   qr_id: string;
@@ -74,8 +75,12 @@ const getSignMode = (): { mode: SignMode; key: string } => {
   const pub = process.env.QR_SIGN_PUBLIC_KEY;
   if (priv && pub) return { mode: "ed25519", key: "ed25519" };
 
-  const hmac = process.env.QR_SIGN_HMAC_SECRET;
-  if (hmac) return { mode: "hmac", key: "hmac" };
+  try {
+    const hmac = getQrSigningHmacSecretSet().current.value;
+    if (hmac) return { mode: "hmac", key: "hmac" };
+  } catch {
+    // handled by final error below
+  }
 
   throw new Error("Missing QR signing keys. Set QR_SIGN_PRIVATE_KEY + QR_SIGN_PUBLIC_KEY (preferred) or QR_SIGN_HMAC_SECRET.");
 };
@@ -113,7 +118,7 @@ export const signQrPayload = (payload: QrTokenPayload): string => {
     const { privateKey } = getEd25519Keys();
     sig = cryptoSign(null, payloadHash, privateKey);
   } else {
-    const secret = String(process.env.QR_SIGN_HMAC_SECRET || "");
+    const secret = getQrSigningHmacSecretSet().current.value;
     sig = createHmac("sha256", secret).update(payloadHash).digest();
   }
 
@@ -139,10 +144,16 @@ export const verifyQrToken = (token: string): { payload: QrTokenPayload } => {
     const ok = cryptoVerify(null, payloadHash, publicKey, decodeBase64UrlStrict(sigPart));
     if (!ok) throw new Error("Signature verification failed");
   } else {
-    const secret = String(process.env.QR_SIGN_HMAC_SECRET || "");
-    const expected = createHmac("sha256", secret).update(payloadHash).digest();
     const got = decodeBase64UrlStrict(sigPart);
-    if (expected.length !== got.length || !timingSafeEqual(expected, got)) {
+    let valid = false;
+    for (const version of getQrSigningHmacSecretSet().all) {
+      const expected = createHmac("sha256", version.value).update(payloadHash).digest();
+      if (expected.length === got.length && timingSafeEqual(expected, got)) {
+        valid = true;
+        break;
+      }
+    }
+    if (!valid) {
       throw new Error("Signature verification failed");
     }
   }

@@ -1,9 +1,8 @@
 import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
 import prisma from "../config/database";
 import { JWTPayload } from "../types";
 import { UserRole } from "@prisma/client";
-import { ACCESS_TOKEN_COOKIE } from "../services/auth/tokenService";
+import { ACCESS_TOKEN_COOKIE, verifyAccessToken } from "../services/auth/tokenService";
 import { isManufacturerRole, listManufacturerLinkedLicenseeIds } from "../services/manufacturerScopeService";
 
 export interface AuthRequest extends Request {
@@ -54,6 +53,11 @@ async function hydrateTenantIfNeeded(payload: JWTPayload): Promise<JWTPayload> {
   };
 }
 
+const allowSseQueryToken = () => {
+  if (String(process.env.AUTH_SSE_QUERY_TOKEN_ENABLED || "").trim().toLowerCase() === "true") return true;
+  return process.env.NODE_ENV !== "production";
+};
+
 export const authenticate = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const bearer = getBearerToken(req);
   const cookieToken = bearer ? null : getCookieAccessToken(req);
@@ -61,7 +65,7 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
   if (!token) return res.status(401).json({ success: false, error: "No token provided" });
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
+    const decoded = verifyAccessToken(token);
     req.user = await hydrateTenantIfNeeded(decoded);
     req.authMode = bearer ? "bearer" : "cookie";
     return next();
@@ -77,7 +81,7 @@ export const optionalAuth = async (req: AuthRequest, _res: Response, next: NextF
   if (!token) return next();
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
+    const decoded = verifyAccessToken(token);
     req.user = await hydrateTenantIfNeeded(decoded);
     req.authMode = bearer ? "bearer" : "cookie";
   } catch {
@@ -88,12 +92,12 @@ export const optionalAuth = async (req: AuthRequest, _res: Response, next: NextF
 
 /**
  * SSE auth supports:
- * - ?token= (for EventSource)
+ * - ?token= (temporary compatibility only when explicitly enabled or outside production)
  * - Authorization: Bearer (normal)
  * - Cookie access token (preferred; avoids putting tokens in URLs)
  */
 export const authenticateSSE = async (req: AuthRequest, res: Response, next: NextFunction) => {
-  const queryToken = (req.query.token as string | undefined) || "";
+  const queryToken = allowSseQueryToken() ? (req.query.token as string | undefined) || "" : "";
   const headerToken = getBearerToken(req) || "";
   const cookieToken = !queryToken && !headerToken ? getCookieAccessToken(req) || "" : "";
   const token = queryToken || headerToken || cookieToken;
@@ -101,7 +105,7 @@ export const authenticateSSE = async (req: AuthRequest, res: Response, next: Nex
   if (!token) return res.status(401).json({ success: false, error: "No token provided" });
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
+    const decoded = verifyAccessToken(token);
     req.user = await hydrateTenantIfNeeded(decoded);
     req.authMode = queryToken ? "bearer" : headerToken ? "bearer" : "cookie";
     return next();

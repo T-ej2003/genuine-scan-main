@@ -268,6 +268,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
         data: {
           email,
           passwordHash,
+          emailVerifiedAt: new Date(),
           name,
           role,
           licenseeId,

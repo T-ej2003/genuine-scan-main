@@ -25,6 +25,7 @@ export async function createUser(params: {
     data: {
       email: params.email.toLowerCase(),
       passwordHash,
+      emailVerifiedAt: new Date(),
       name: params.name,
       role: params.role,
       licenseeId,

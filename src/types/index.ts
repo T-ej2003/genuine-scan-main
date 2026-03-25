@@ -14,6 +14,9 @@ export interface User {
   email: string;
   name: string;
   role: UserRole;
+  emailVerifiedAt?: string | null;
+  pendingEmail?: string | null;
+  pendingEmailRequestedAt?: string | null;
   licenseeId?: string;
   orgId?: string | null;
   licensee?: {

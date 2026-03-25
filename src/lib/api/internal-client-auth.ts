@@ -3,7 +3,6 @@ import { type ApiClientCore, type ApiResponse } from "@/lib/api/internal-client-
 export const createAuthApi = (core: ApiClientCore) => ({
   async login(email: string, password: string) {
     const response = await core.request<{
-      token?: string;
       user?: any;
       email?: string;
       role?: string;
@@ -14,8 +13,6 @@ export const createAuthApi = (core: ApiClientCore) => ({
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
-
-    if (response.success && response.data?.token) core.setToken(response.data.token);
     return response;
   },
 
@@ -24,9 +21,7 @@ export const createAuthApi = (core: ApiClientCore) => ({
   },
 
   async refreshSession() {
-    const response = await core.request<{ token: string; user: any }>("/auth/refresh", { method: "POST" });
-    if (response.success && response.data?.token) core.setToken(response.data.token);
-    return response;
+    return core.request<{ user: any }>("/auth/refresh", { method: "POST" });
   },
 
   async logoutSession() {
@@ -45,7 +40,6 @@ export const createAuthApi = (core: ApiClientCore) => ({
 
   async acceptInvite(payload: { token: string; password: string; name?: string }) {
     const response = await core.request<{
-      token?: string;
       user?: any;
       email?: string;
       role?: string;
@@ -56,9 +50,14 @@ export const createAuthApi = (core: ApiClientCore) => ({
       method: "POST",
       body: JSON.stringify(payload),
     });
-
-    if (response.success && response.data?.token) core.setToken(response.data.token);
     return response;
+  },
+
+  async verifyEmail(token: string) {
+    return core.request<{ verified: boolean; purpose: string; email: string }>("/auth/verify-email", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
   },
 
   async getInvitePreview(token: string) {
