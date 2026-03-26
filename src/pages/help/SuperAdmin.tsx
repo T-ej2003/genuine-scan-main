@@ -25,6 +25,7 @@ export default function SuperAdminHelp() {
             <ul className="list-disc pl-5">
               <li>Create and manage licensees (organizations/tenants).</li>
               <li>Approve code inventory requests from licensees.</li>
+              <li>Review printer certification state and print trace when a tenant route needs investigation.</li>
               <li>View platform audit logs and investigate activity.</li>
               <li>Use Incident Response to triage alerts, open incidents, and apply containment actions.</li>
             </ul>
@@ -89,6 +90,19 @@ export default function SuperAdminHelp() {
                 <li>Review <strong>Alerts</strong> (policy triggers) and <strong>Incidents</strong> (cases).</li>
                 <li>Assign an owner, set severity/priority, and add notes to build the timeline.</li>
                 <li>Apply containment actions only when needed (they are reversible with reason).</li>
+              </ol>
+              </CardContent>
+            </Card>
+
+          <Card>
+            <CardHeader className="space-y-1">
+              <CardTitle className="text-base">Investigate a printer route issue</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm text-muted-foreground">
+              <ol className="list-decimal pl-5">
+                <li>Confirm whether the issue is tenant-scoped or affects multiple sites.</li>
+                <li>Review the saved printer profile, live discovery status, and latest print trace before changing certification.</li>
+                <li>Use the audit trail to decide whether the route should stay certified, move to review, or be blocked.</li>
               </ol>
             </CardContent>
           </Card>

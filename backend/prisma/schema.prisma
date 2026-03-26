@@ -61,9 +61,52 @@ enum PrinterCommandLanguage {
   TSPL
   SBPL
   EPL
+  DPL
+  HONEYWELL_DP
+  HONEYWELL_FINGERPRINT
+  IPL
+  ZSIM
   CPCL
   ESC_POS
   OTHER
+}
+
+enum PrinterTransportKind {
+  RAW_TCP
+  USB_RAW
+  SERIAL_RAW
+  DRIVER_QUEUE
+  SITE_GATEWAY
+  VENDOR_SDK
+  WEB_API
+}
+
+enum PrinterLanguageKind {
+  AUTO
+  ZPL
+  EPL
+  TSPL
+  DPL
+  SBPL
+  HONEYWELL_DP
+  HONEYWELL_FINGERPRINT
+  IPL
+  ZSIM
+  PDF
+  OTHER
+}
+
+enum PrinterProfileStatus {
+  DRAFT
+  CERTIFIED
+  NEEDS_REVIEW
+  BLOCKED
+}
+
+enum PrinterProfileSnapshotType {
+  ONBOARDING
+  LIVE_DISCOVERY
+  CERTIFICATION_TEST
 }
 
 enum PrintDispatchMode {
@@ -78,6 +121,10 @@ enum PrintPayloadType {
   TSPL
   SBPL
   EPL
+  DPL
+  HONEYWELL_DP
+  HONEYWELL_FINGERPRINT
+  IPL
   CPCL
   ESC_POS
   JSON
@@ -106,6 +153,17 @@ enum PrintItemState {
   FAILED
 }
 
+enum PrintPipelineState {
+  QUEUED
+  PREFLIGHT_OK
+  SENT_TO_PRINTER
+  PRINTER_ACKNOWLEDGED
+  PRINT_CONFIRMED
+  LOCKED
+  FAILED
+  NEEDS_OPERATOR_ACTION
+}
+
 enum PrintItemEventType {
   RESERVED
   ISSUED
@@ -122,6 +180,14 @@ enum PrinterTrustStatus {
   TRUSTED
   REVOKED
   FAILED
+}
+
+enum ReissueRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXECUTED
+  CANCELLED
 }
 
 enum OwnershipTransferStatus {
@@ -360,6 +426,8 @@ model User {
   printersCreated Printer[] @relation("PrinterCreatedBy")
   assignedPrinters Printer[] @relation("PrinterAssignedUser")
   approvedPrintJobs PrintJob[] @relation("PrintJobApprovedBy")
+  requestedPrintReissues PrintReissueRequest[] @relation("PrintReissueRequestedBy")
+  approvedPrintReissues PrintReissueRequest[] @relation("PrintReissueApprovedBy")
   printItemEvents PrintItemEvent[] @relation("PrintItemEventActor")
   traceEventsAsActor TraceEvent[] @relation("TraceEventUser")
   traceEventsAsManufacturer TraceEvent[] @relation("TraceEventManufacturer")
@@ -567,6 +635,7 @@ model PrintJob {
 
   status     PrintJobStatus @default(PENDING)
   printMode  PrintDispatchMode @default(LOCAL_AGENT)
+  pipelineState PrintPipelineState @default(QUEUED)
   payloadType PrintPayloadType?
   payloadHash String?
   quantity   Int
@@ -585,7 +654,7 @@ model PrintJob {
   approvedByUser User? @relation("PrintJobApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
   reprintReason String?
 
-  printLockTokenHash String @unique
+  printLockTokenHash String? @unique
   confirmedAt DateTime?
   createdAt   DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -593,11 +662,14 @@ model PrintJob {
   qrCodes QRCode[]
   renderTokens PrintRenderToken[]
   printSession PrintSession?
+  reissueRequests PrintReissueRequest[] @relation("OriginalPrintJobReissueRequests")
+  replacementForReissueRequest PrintReissueRequest? @relation("ReplacementPrintJobReissueRequest")
 
   @@index([batchId])
   @@index([manufacturerId])
   @@index([printerId])
   @@index([printMode, status])
+  @@index([pipelineState])
   @@index([status])
   @@index([reprintOfJobId])
 }
@@ -723,6 +795,7 @@ model PrintItem {
 
   code String
   state PrintItemState @default(RESERVED)
+  pipelineState PrintPipelineState @default(QUEUED)
   issueSequence Int?
   attemptCount Int @default(0)
   currentRenderTokenHash String?
@@ -743,6 +816,7 @@ model PrintItem {
 
   @@index([printSessionId, state, issueSequence])
   @@index([state, updatedAt])
+  @@index([pipelineState, updatedAt])
   @@index([currentRenderTokenHash])
 }
 
@@ -857,6 +931,7 @@ model Printer {
   capabilitySummary Json?
   calibrationProfile Json?
   metadata Json?
+  profile PrinterProfile?
 
   printJobs PrintJob[]
   printSessions PrintSession[]
@@ -873,6 +948,99 @@ model Printer {
   @@index([licenseeId, host, port])
   @@index([assignedUserId, isActive])
   @@index([gatewayId, isActive])
+}
+
+model PrinterProfile {
+  id String @id @default(uuid())
+
+  printerId String @unique
+  printer Printer @relation(fields: [printerId], references: [id], onDelete: Cascade)
+
+  status PrinterProfileStatus @default(NEEDS_REVIEW)
+  transportKind PrinterTransportKind
+  activeLanguage PrinterLanguageKind @default(AUTO)
+  nativeLanguage String
+  supportedLanguages Json
+  emulationMode String?
+  languageVersion String?
+  jobMode String
+  spoolFormat String?
+  preferredTransport String?
+  connectionTypes Json?
+
+  brand String?
+  modelName String?
+  modelFamily String?
+  firmwareVersion String?
+  serialNumber String?
+  dpi Int?
+
+  statusConfig Json?
+  mediaConstraints Json?
+  installedOptions Json?
+  renderingCapabilities Json?
+  securityPosture Json?
+  latestSeenCapabilities Json?
+  notes String?
+  lastVerifiedAt DateTime?
+  lastCertifiedAt DateTime?
+
+  onboardingSnapshotId String?
+  onboardingSnapshot PrinterProfileSnapshot? @relation("PrinterProfileOnboardingSnapshot", fields: [onboardingSnapshotId], references: [id], onDelete: SetNull)
+
+  snapshots PrinterProfileSnapshot[] @relation("PrinterProfileSnapshots")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, activeLanguage])
+  @@index([transportKind, status])
+  @@index([modelFamily])
+}
+
+model PrinterProfileSnapshot {
+  id String @id @default(uuid())
+
+  printerProfileId String
+  printerProfile PrinterProfile @relation("PrinterProfileSnapshots", fields: [printerProfileId], references: [id], onDelete: Cascade)
+
+  snapshotType PrinterProfileSnapshotType
+  summary String?
+  warnings Json?
+  data Json
+  capturedAt DateTime @default(now())
+
+  onboardingForProfile PrinterProfile[] @relation("PrinterProfileOnboardingSnapshot")
+
+  @@index([printerProfileId, snapshotType, capturedAt])
+}
+
+model PrintReissueRequest {
+  id String @id @default(uuid())
+
+  originalPrintJobId String
+  originalPrintJob PrintJob @relation("OriginalPrintJobReissueRequests", fields: [originalPrintJobId], references: [id], onDelete: Cascade)
+
+  replacementPrintJobId String? @unique
+  replacementPrintJob PrintJob? @relation("ReplacementPrintJobReissueRequest", fields: [replacementPrintJobId], references: [id], onDelete: SetNull)
+
+  requestedByUserId String
+  requestedByUser User @relation("PrintReissueRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Cascade)
+
+  approvedByUserId String?
+  approvedByUser User? @relation("PrintReissueApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+
+  status ReissueRequestStatus @default(PENDING)
+  reason String
+  rejectionReason String?
+  approvedAt DateTime?
+  rejectedAt DateTime?
+  executedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([originalPrintJobId, status, createdAt])
+  @@index([requestedByUserId, createdAt])
 }
 
 model PrinterAttestation {

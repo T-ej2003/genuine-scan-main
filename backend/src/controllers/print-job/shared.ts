@@ -34,9 +34,26 @@ const MANUFACTURER_ROLES: UserRole[] = [
   UserRole.MANUFACTURER_ADMIN,
   UserRole.MANUFACTURER_USER,
 ];
+export const PRINT_OPERATIONS_ROLES: UserRole[] = [
+  UserRole.SUPER_ADMIN,
+  UserRole.PLATFORM_SUPER_ADMIN,
+  UserRole.LICENSEE_ADMIN,
+  UserRole.ORG_ADMIN,
+  ...MANUFACTURER_ROLES,
+];
+export const PRINT_REISSUE_ROLES: UserRole[] = [
+  UserRole.SUPER_ADMIN,
+  UserRole.PLATFORM_SUPER_ADMIN,
+  UserRole.LICENSEE_ADMIN,
+  UserRole.ORG_ADMIN,
+];
 
 const isManufacturerRole = (role?: UserRole | null) =>
   Boolean(role && MANUFACTURER_ROLES.includes(role));
+const isPrintOperationsRole = (role?: UserRole | null) =>
+  Boolean(role && PRINT_OPERATIONS_ROLES.includes(role));
+const isPrintReissueRole = (role?: UserRole | null) =>
+  Boolean(role && PRINT_REISSUE_ROLES.includes(role));
 
 export const createPrintJobSchema = z.object({
   batchId: z.string().uuid(),
@@ -44,13 +61,15 @@ export const createPrintJobSchema = z.object({
   quantity: z.number().int().positive().max(200000),
   rangeStart: z.string().optional(),
   rangeEnd: z.string().optional(),
-  reprintOfJobId: z.string().uuid().optional(),
-  reprintReason: z.string().trim().min(3).max(300).optional(),
 }).strict();
 
 export const listPrintJobsQuerySchema = z.object({
   batchId: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
+}).strict();
+export const reissuePrintJobSchema = z.object({
+  reason: z.string().trim().min(5).max(500),
+  quantity: z.number().int().positive().max(200000).optional(),
 }).strict();
 
 export const confirmSchema = z.object({
@@ -113,6 +132,22 @@ export const isLockExpired = (createdAt: Date, now: Date = new Date()) =>
 export const ensureManufacturerUser = (req: AuthRequest, res: Response) => {
   if (!req.user || !isManufacturerRole(req.user.role)) {
     res.status(403).json({ success: false, error: "Access denied" });
+    return null;
+  }
+  return req.user;
+};
+
+export const ensurePrintOperationsUser = (req: AuthRequest, res: Response) => {
+  if (!req.user || !isPrintOperationsRole(req.user.role)) {
+    res.status(403).json({ success: false, error: "Access denied" });
+    return null;
+  }
+  return req.user;
+};
+
+export const ensurePrintReissueApprover = (req: AuthRequest, res: Response) => {
+  if (!req.user || !isPrintReissueRole(req.user.role)) {
+    res.status(403).json({ success: false, error: "Only super-admin and licensee admin roles can authorize reissue." });
     return null;
   }
   return req.user;
@@ -181,7 +216,7 @@ export const ensureSelectedPrinterReady = async (params: {
 
     if (!supportsNetworkDirectPayload(printer as any)) {
       const detail =
-        "Network-direct printing currently supports only ZPL, TSPL, EPL, and CPCL. Use the local agent for other printer languages.";
+        "Network-direct printing currently supports certified ZPL, TSPL, EPL, DPL, Honeywell, IPL, SBPL, ZSim, and CPCL profiles only. Use the managed connector path for anything else.";
       await prisma.printer.update({
         where: { id: printer.id },
         data: {

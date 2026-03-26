@@ -7,6 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { ScreenshotChecklist } from "@/components/help/ScreenshotChecklist";
 import { WorkflowScreenshotCard } from "@/components/help/WorkflowScreenshotCard";
+import { NETWORK_DIRECT_SUPPORTED_LANGUAGE_LABEL } from "@/features/printing/advanced-types";
 import { Download, Factory, FileArchive, ShieldCheck, Wrench } from "lucide-react";
 
 export default function ManufacturerHelp() {
@@ -156,9 +157,8 @@ export default function ManufacturerHelp() {
                 <div className="rounded-xl border bg-muted/20 p-4">
                   <div className="font-semibold text-foreground">NETWORK_DIRECT</div>
                   <p className="mt-2">
-                    Use this for controlled LAN label printers saved in Printer Setup.
-                    Current direct dispatch support: <strong>ZPL</strong>, <strong>TSPL</strong>, <strong>EPL</strong>,
-                    and <strong>CPCL</strong>.
+                    Use this for controlled LAN label printers saved in Printer Setup. Certified raw TCP profiles can run{" "}
+                    <strong>{NETWORK_DIRECT_SUPPORTED_LANGUAGE_LABEL}</strong>.
                   </p>
                 </div>
                 <div className="rounded-xl border bg-muted/20 p-4">
@@ -170,8 +170,7 @@ export default function ManufacturerHelp() {
                 </div>
               </div>
               <p className="text-xs">
-                If a printer uses SBPL, ESC/POS, or another driver-dependent path, keep it on LOCAL_AGENT. Pure browser
-                printing is intentionally not the production path because secure silent printer access is not exposed by the web platform.
+                If a printer depends on the workstation driver or a non-certified queue, keep it on LOCAL_AGENT. Browser-submitted printing is intentionally disabled; MSCQR creates the job and the connector or certified route completes it directly.
               </p>
             </CardContent>
           </Card>

@@ -24,7 +24,17 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     model?: string;
     licenseeId?: string;
     connectionType?: "NETWORK_DIRECT" | "NETWORK_IPP";
-    commandLanguage?: "ZPL" | "TSPL" | "EPL" | "CPCL";
+    commandLanguage?:
+      | "ZPL"
+      | "TSPL"
+      | "SBPL"
+      | "EPL"
+      | "DPL"
+      | "HONEYWELL_DP"
+      | "HONEYWELL_FINGERPRINT"
+      | "IPL"
+      | "ZSIM"
+      | "CPCL";
     ipAddress?: string;
     host?: string;
     port?: number;
@@ -48,7 +58,17 @@ export const createPrintingApi = (core: ApiClientCore) => ({
       vendor: string;
       model: string;
       connectionType: "NETWORK_DIRECT" | "NETWORK_IPP";
-      commandLanguage: "ZPL" | "TSPL" | "EPL" | "CPCL";
+      commandLanguage:
+        | "ZPL"
+        | "TSPL"
+        | "SBPL"
+        | "EPL"
+        | "DPL"
+        | "HONEYWELL_DP"
+        | "HONEYWELL_FINGERPRINT"
+        | "IPL"
+        | "ZSIM"
+        | "CPCL";
       ipAddress: string;
       host: string;
       port: number;
@@ -73,6 +93,10 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     return core.request(`/manufacturer/printers/${encodeURIComponent(printerId)}/test`, { method: "POST" });
   },
 
+  async discoverRegisteredPrinter(printerId: string) {
+    return core.request(`/manufacturer/printers/${encodeURIComponent(printerId)}/discover`, { method: "POST" });
+  },
+
   async deleteRegisteredPrinter(printerId: string) {
     return core.request(`/manufacturer/printers/${encodeURIComponent(printerId)}`, { method: "DELETE" });
   },
@@ -89,56 +113,33 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     return core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}`);
   },
 
-  async requestDirectPrintTokens(jobId: string, printLockToken: string, count = 1) {
-    return core.request<{
-      printJobId: string;
-      printSessionId?: string;
-      lockExpiresAt?: string;
-      directPrintTokenExpiresAt?: string;
-      remainingToPrint: number;
-      items: Array<{
-        printItemId: string;
-        qrId: string;
-        code: string;
-        renderToken: string;
-        expiresAt: string;
-      }>;
-    }>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/direct-print/tokens`, {
-      method: "POST",
-      body: JSON.stringify({ printLockToken, count }),
-    });
-  },
-
-  async resolveDirectPrintToken(jobId: string, payload: { printLockToken: string; renderToken: string }) {
-    return core.request<{
-      printJobId: string;
-      printSessionId?: string;
-      printItemId: string;
-      qrId: string;
-      code: string;
-      renderResolvedAt: string;
-      remainingToPrint: number;
-      jobConfirmed: boolean;
-      confirmedAt: string | null;
-      printMode: "LOCAL_AGENT" | "NETWORK_DIRECT";
-      payloadType: "ZPL" | "TSPL" | "SBPL" | "EPL" | "CPCL" | "ESC_POS" | "JSON" | "OTHER";
-      payloadContent: string;
-      payloadHash: string;
-      previewLabel: string;
-      commandLanguage: string;
-      scanToken: string;
-      scanUrl: string;
-      printer: {
-        id: string;
-        name: string;
-        connectionType: "LOCAL_AGENT" | "NETWORK_DIRECT";
-        commandLanguage: string;
-        nativePrinterId?: string | null;
-      };
-    }>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/direct-print/resolve`, {
+  async requestPrintJobReissue(
+    jobId: string,
+    payload: {
+      reason: string;
+      quantity?: number;
+    }
+  ) {
+    return core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/reissue`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
+  },
+
+  async requestDirectPrintTokens(_jobId: string, _printLockToken: string, _count = 1) {
+    return {
+      success: false as const,
+      error:
+        "Browser-mediated direct printing has been disabled. Create a controlled print job and let the MSCQR connector claim it directly from the server.",
+    };
+  },
+
+  async resolveDirectPrintToken(_jobId: string, _payload: { printLockToken: string; renderToken: string }) {
+    return {
+      success: false as const,
+      error:
+        "Browser-mediated direct printing has been disabled. Create a controlled print job and let the MSCQR connector claim it directly from the server.",
+    };
   },
 
   async confirmDirectPrintItem(
@@ -149,20 +150,11 @@ export const createPrintingApi = (core: ApiClientCore) => ({
       agentMetadata?: any;
     }
   ) {
-    return core.request<{
-      printJobId: string;
-      printSessionId?: string;
-      printItemId: string;
-      qrId: string;
-      code: string;
-      printConfirmedAt: string;
-      remainingToPrint: number;
-      jobConfirmed: boolean;
-      confirmedAt: string | null;
-    }>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/direct-print/confirm-item`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    return {
+      success: false as const,
+      error:
+        "Browser-mediated direct printing has been disabled. The MSCQR connector now confirms printed labels directly with the server.",
+    };
   },
 
   async reportDirectPrintFailure(
@@ -175,23 +167,19 @@ export const createPrintingApi = (core: ApiClientCore) => ({
       agentMetadata?: any;
     }
   ) {
-    return core.request<{
-      printJobId: string;
-      printSessionId?: string;
-      incidentId?: string;
-      frozenCount?: number;
-      reason: string;
-    }>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/direct-print/fail`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    return {
+      success: false as const,
+      error:
+        "Browser-mediated direct printing has been disabled. The MSCQR connector now reports print failures directly to the server.",
+    };
   },
 
-  async confirmPrintJob(jobId: string, printLockToken: string) {
-    return core.request(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/confirm`, {
-      method: "POST",
-      body: JSON.stringify({ printLockToken }),
-    });
+  async confirmPrintJob(_jobId: string, _printLockToken: string) {
+    return {
+      success: false as const,
+      error:
+        "Manual browser print confirmation has been disabled. Wait for the MSCQR connector or certified printer route to confirm the job.",
+    };
   },
 
   async reportPrinterHeartbeat(payload: {
@@ -402,6 +390,41 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     }
   },
 
+  async configureLocalPrintAgentBackend(backendUrl: string) {
+    const base = String(import.meta.env.VITE_PRINT_AGENT_URL || "http://127.0.0.1:17866")
+      .trim()
+      .replace(/\/+$/, "");
+    const normalizedBackendUrl = String(backendUrl || "").trim().replace(/\/+$/, "");
+    if (!normalizedBackendUrl) return { success: false, error: "backendUrl is required" };
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 3500);
+    try {
+      const response = await fetch(`${base}/backend/config`, {
+        method: "POST",
+        mode: "cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ backendUrl: normalizedBackendUrl }),
+        signal: controller.signal,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return {
+          success: false,
+          error: String((payload as any)?.error || `Local print backend configuration failed: HTTP ${response.status}`),
+        };
+      }
+      return { success: true, data: payload };
+    } catch (error: any) {
+      const aborted = error?.name === "AbortError";
+      return {
+        success: false,
+        error: aborted ? "Local print backend configuration timed out" : "Local print agent is unavailable",
+      };
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  },
+
   async getLocalPrinters() {
     const base = String(import.meta.env.VITE_PRINT_AGENT_URL || "http://127.0.0.1:17866")
       .trim()
@@ -551,62 +574,12 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     mediaSize?: string;
     calibrationProfile?: Record<string, unknown> | null;
   }) {
-    const base = String(import.meta.env.VITE_PRINT_AGENT_URL || "http://127.0.0.1:17866")
-      .trim()
-      .replace(/\/+$/, "");
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 8000);
-    try {
-      const response = await fetch(`${base}/print`, {
-        method: "POST",
-        mode: "cors",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          printJobId: payload.printJobId,
-          qrId: payload.qrId,
-          code: payload.code,
-          scanUrl: payload.scanUrl,
-          payloadType: payload.payloadType || undefined,
-          payloadContent: payload.payloadContent || undefined,
-          payloadHash: payload.payloadHash || undefined,
-          previewLabel: payload.previewLabel || undefined,
-          commandLanguage: payload.commandLanguage || undefined,
-          copies: Math.max(1, Math.min(5, Number(payload.copies || 1))),
-          printerId: payload.printerId || undefined,
-          printPath: payload.printPath || "auto",
-          labelLanguage: payload.labelLanguage || "AUTO",
-          mediaSize: payload.mediaSize || undefined,
-          calibrationProfile:
-            payload.calibrationProfile && typeof payload.calibrationProfile === "object"
-              ? payload.calibrationProfile
-              : undefined,
-          fallbackRaster: true,
-        }),
-        signal: controller.signal,
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok || body?.success === false) {
-        return {
-          success: false,
-          error: String(body?.error || "").trim() || `Local print failed: HTTP ${response.status}`,
-        };
-      }
-      return {
-        success: true,
-        data: {
-          queued: Boolean(body?.queued ?? true),
-          printerName: body?.printerName || null,
-          jobRef: body?.jobRef || null,
-          printPath: body?.printPath || payload.printPath || "auto",
-          labelLanguage: body?.labelLanguage || payload.labelLanguage || "AUTO",
-        },
-      };
-    } catch (error: any) {
-      const aborted = error?.name === "AbortError";
-      return { success: false, error: aborted ? "Local print request timed out" : "Local print agent is unavailable" };
-    } finally {
-      window.clearTimeout(timeout);
-    }
+    void payload;
+    return {
+      success: false as const,
+      error:
+        "Legacy browser-submitted local printing has been disabled. Create a controlled MSCQR print job so the connector can claim approved work directly from the server.",
+    };
   },
 
   async getManufacturers(arg?: string | { licenseeId?: string; includeInactive?: boolean }) {

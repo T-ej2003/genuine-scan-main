@@ -4,7 +4,7 @@ import type {
   LocalPrinterDTO as PrinterInventoryDevice,
   PrinterCapabilitySummaryDTO as PrinterCapabilitySummary,
   PrinterConnectionStatusDTO as PrinterConnectionStatus,
-} from "../../../shared/contracts/printing";
+} from "../../../shared/contracts/printing.d.ts";
 
 import prisma from "../config/database";
 import { hashIp, hashToken, normalizeUserAgent, randomOpaqueToken } from "../utils/security";

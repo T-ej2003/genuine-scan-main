@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { PrintJobRow } from "@/features/batches/types";
 
 type ManufacturerRow = {
   id: string;
@@ -69,6 +70,13 @@ type LicenseeBatchWorkspaceDialogProps = {
   historyLogs: TraceEventRow[];
   historyLastUpdatedAt: Date | null;
   onRefreshHistory: () => void;
+  recentPrintJobs: PrintJobRow[];
+  printJobsLoading: boolean;
+  canRequestReissue: boolean;
+  reissueReason: string;
+  onReissueReasonChange: (value: string) => void;
+  onRequestReissue: (jobId: string) => void;
+  reissuingJobId: string | null;
 };
 
 const eventBadgeClass = (eventType?: string) => {
@@ -115,6 +123,16 @@ const historyActor = (log: TraceEventRow) => {
 };
 
 const statusTone = (value: number) => (value > 0 ? "default" : "secondary");
+
+const getPrintJobStatusBadgeVariant = (job: PrintJobRow): "default" | "secondary" | "destructive" | "outline" => {
+  if (job.pipelineState === "LOCKED" || job.status === "CONFIRMED") return "default";
+  if (job.pipelineState === "FAILED" || job.status === "FAILED") return "destructive";
+  if (job.pipelineState === "NEEDS_OPERATOR_ACTION") return "secondary";
+  return "outline";
+};
+
+const isEligibleForReissue = (job: PrintJobRow) =>
+  job.pipelineState === "LOCKED" || job.pipelineState === "PRINT_CONFIRMED" || job.status === "CONFIRMED";
 
 const renderManufacturerLine = (allocation: BatchWorkspaceAllocation) => (
   <div key={`${allocation.batchId}:${allocation.manufacturerId}`} className="rounded-xl border bg-muted/20 p-4">
@@ -176,6 +194,13 @@ export function LicenseeBatchWorkspaceDialog({
   historyLogs,
   historyLastUpdatedAt,
   onRefreshHistory,
+  recentPrintJobs,
+  printJobsLoading,
+  canRequestReissue,
+  reissueReason,
+  onReissueReasonChange,
+  onRequestReissue,
+  reissuingJobId,
 }: LicenseeBatchWorkspaceDialogProps) {
   const remaining = Number(workspace?.remainingUnassignedCodes || 0);
   const assignQuantityValue = Number(assignQuantity || 0);
@@ -424,6 +449,87 @@ export function LicenseeBatchWorkspaceDialog({
                           If manufacturers have already received allocations, the backend will block deletion and preserve traceability.
                         </div>
                       </div>
+                    </div>
+
+                    <div className="rounded-2xl border p-5">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="text-base font-semibold">Controlled reissue</div>
+                          <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
+                            Reissue is an authorized exception path only. Once a print job is confirmed and locked, a replacement job can be created only with a clear reason. Manufacturers cannot trigger this directly.
+                          </p>
+                        </div>
+                        <Badge variant="secondary">{recentPrintJobs.length} recent job{recentPrintJobs.length === 1 ? "" : "s"}</Badge>
+                      </div>
+
+                      {!canRequestReissue ? (
+                        <div className="mt-4 rounded-xl border border-dashed bg-muted/10 p-4 text-sm text-muted-foreground">
+                          Reissue authorization is limited to super-admin and licensee-admin roles.
+                        </div>
+                      ) : (
+                        <div className="mt-5 space-y-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="batch-reissue-reason">Authorization reason</Label>
+                            <Input
+                              id="batch-reissue-reason"
+                              value={reissueReason}
+                              onChange={(event) => onReissueReasonChange(event.target.value)}
+                              placeholder="Explain why a controlled reissue is required"
+                            />
+                            <div className="text-xs text-muted-foreground">
+                              This reason is written to the immutable audit trail and linked to the replacement print job.
+                            </div>
+                          </div>
+
+                          {printJobsLoading ? (
+                            <div className="rounded-xl border border-dashed bg-muted/10 p-4 text-sm text-muted-foreground">
+                              Loading recent print jobs...
+                            </div>
+                          ) : recentPrintJobs.length === 0 ? (
+                            <div className="rounded-xl border border-dashed bg-muted/10 p-4 text-sm text-muted-foreground">
+                              No recent print jobs were found for this source batch yet.
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              {recentPrintJobs.map((job) => (
+                                <div key={job.id} className="rounded-xl border bg-muted/10 p-4">
+                                  <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div className="space-y-2">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <div className="font-medium text-foreground">{job.jobNumber || "Print job"}</div>
+                                        <Badge variant={getPrintJobStatusBadgeVariant(job)}>
+                                          {job.pipelineState || job.status}
+                                        </Badge>
+                                        {job.reprintOfJobId ? <Badge variant="outline">Replacement</Badge> : null}
+                                      </div>
+                                      <div className="text-xs text-muted-foreground">
+                                        {job.printer?.name || "Saved printer"} · {job.quantity.toLocaleString()} labels
+                                        {job.confirmedAt ? ` · confirmed ${format(new Date(job.confirmedAt), "PPp")}` : ""}
+                                      </div>
+                                      {job.reprintReason ? (
+                                        <div className="text-xs text-muted-foreground">Reason: {job.reprintReason}</div>
+                                      ) : null}
+                                      {job.failureReason ? (
+                                        <div className="text-xs text-destructive">Failure: {job.failureReason}</div>
+                                      ) : null}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={!isEligibleForReissue(job) || !reissueReason.trim() || reissuingJobId === job.id}
+                                        onClick={() => onRequestReissue(job.id)}
+                                      >
+                                        {reissuingJobId === job.id ? "Authorizing..." : "Authorize reissue"}
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </TabsContent>
 

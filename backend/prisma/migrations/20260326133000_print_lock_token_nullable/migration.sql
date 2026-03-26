@@ -1,0 +1,2 @@
+ALTER TABLE "PrintJob"
+ALTER COLUMN "printLockTokenHash" DROP NOT NULL;

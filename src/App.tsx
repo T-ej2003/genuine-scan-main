@@ -74,9 +74,11 @@ function LoadingScreen() {
 function ProtectedRoute({
   children,
   allowedRoles,
+  allowedRawRoles,
 }: {
   children: React.ReactNode;
   allowedRoles?: string[];
+  allowedRawRoles?: string[];
 }) {
   const { user, isAuthenticated, isLoading } = useAuth();
 
@@ -85,6 +87,13 @@ function ProtectedRoute({
 
   if (allowedRoles && user && !allowedRoles.includes(user.role)) {
     return <Navigate to="/dashboard" replace />;
+  }
+
+  if (allowedRawRoles && user) {
+    const rawRole = String(user.rawRole || "").trim().toUpperCase();
+    if (!allowedRawRoles.includes(rawRole)) {
+      return <Navigate to="/dashboard" replace />;
+    }
   }
 
   return <>{children}</>;
@@ -346,7 +355,10 @@ function AppRoutes() {
         <Route
           path={APP_PATHS.printerSetupAdvanced}
           element={
-            <ProtectedRoute allowedRoles={["manufacturer"]}>
+            <ProtectedRoute
+              allowedRoles={["manufacturer", "super_admin"]}
+              allowedRawRoles={["MANUFACTURER", "MANUFACTURER_ADMIN", "SUPER_ADMIN", "PLATFORM_SUPER_ADMIN"]}
+            >
               <PrinterSetupAdvancedPage />
             </ProtectedRoute>
           }
@@ -354,7 +366,10 @@ function AppRoutes() {
         <Route
           path="/printer-diagnostics"
           element={
-            <ProtectedRoute allowedRoles={["manufacturer"]}>
+            <ProtectedRoute
+              allowedRoles={["manufacturer", "super_admin"]}
+              allowedRawRoles={["MANUFACTURER", "MANUFACTURER_ADMIN", "SUPER_ADMIN", "PLATFORM_SUPER_ADMIN"]}
+            >
               <RedirectWithQuery to={APP_PATHS.printerSetupAdvanced} />
             </ProtectedRoute>
           }

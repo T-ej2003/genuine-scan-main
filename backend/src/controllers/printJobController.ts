@@ -6,6 +6,7 @@ export {
   getManufacturerPrintJobStatus,
   issueDirectPrintTokens,
   listManufacturerPrintJobs,
+  reissueManufacturerPrintJob,
   reportDirectPrintFailure,
   resolveDirectPrintToken,
 } from "./print-job/printJobHandlers";

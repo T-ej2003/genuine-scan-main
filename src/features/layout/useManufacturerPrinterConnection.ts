@@ -77,6 +77,7 @@ export function useManufacturerPrinterConnection({
   const detectedPrintersRef = useRef<NonNullable<PrinterConnectionStatusDTO["printers"]>>([]);
   const printerFailureReportRef = useRef<{ signature: string; at: number }>({ signature: "", at: 0 });
   const printerFailureInFlightRef = useRef(false);
+  const configuredBackendUrlRef = useRef("");
 
   const [printerStatus, setPrinterStatus] = useState<PrinterConnectionStatusDTO>(defaultPrinterStatus);
   const [printerDialogOpen, setPrinterDialogOpen] = useState(false);
@@ -285,6 +286,15 @@ export function useManufacturerPrinterConnection({
     await loadManagedPrinterProfiles();
 
     const local = await apiClient.getLocalPrintAgentStatus();
+    const browserBackendUrl = window.location.origin;
+    if (local.success && configuredBackendUrlRef.current !== browserBackendUrl) {
+      const backendConfiguration = await apiClient.configureLocalPrintAgentBackend(browserBackendUrl);
+      if (!backendConfiguration.success) {
+        console.warn("Local print agent backend configuration failed:", backendConfiguration.error);
+      } else {
+        configuredBackendUrlRef.current = browserBackendUrl;
+      }
+    }
     const localPrinters = normalizeLocalPrinterRows(
       ((local.data as { printers?: unknown[] } | undefined)?.printers) || []
     );

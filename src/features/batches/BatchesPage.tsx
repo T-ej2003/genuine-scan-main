@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { BatchAllocationMapDialog } from "@/components/batches/BatchAllocationMapDialog";
@@ -18,6 +19,8 @@ import { BatchesWorkspaceTable } from "@/features/batches/components/BatchesWork
 import { useOperationProgress } from "@/hooks/useOperationProgress";
 import { useToast } from "@/hooks/use-toast";
 import { APP_PATHS } from "@/app/route-metadata";
+import { usePrintJobs } from "@/features/printing/hooks";
+import apiClient from "@/lib/api-client";
 
 export default function BatchesPage() {
   const { toast } = useToast();
@@ -29,7 +32,10 @@ export default function BatchesPage() {
   const role = user?.role;
   const canDelete = role === "super_admin" || role === "licensee_admin";
   const canAssignManufacturer = role === "licensee_admin";
+  const canRequestReissue = role === "super_admin" || role === "licensee_admin";
   const isManufacturer = role === "manufacturer";
+  const [reissueReason, setReissueReason] = useState("");
+  const [reissuingJobId, setReissuingJobId] = useState<string | null>(null);
 
   const operations = useBatchOperationsController({
     role,
@@ -56,6 +62,51 @@ export default function BatchesPage() {
     getAvailableInventory: operations.getAvailableInventory,
     onBatchesChanged: operations.fetchBatches,
   });
+
+  const workspacePrintJobsQuery = usePrintJobs(
+    workspace.workspaceBatch?.sourceBatchRow?.id,
+    12,
+    workspace.workspaceOpen && canRequestReissue
+  );
+
+  const requestPrintJobReissue = async (jobId: string) => {
+    const reason = reissueReason.trim();
+    if (!reason) {
+      toast({
+        title: "Reason required",
+        description: "Enter a clear authorization reason before creating a controlled reissue.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setReissuingJobId(jobId);
+    try {
+      const response = await apiClient.requestPrintJobReissue(jobId, { reason });
+      if (!response.success) {
+        toast({
+          title: "Reissue not created",
+          description: response.error || "MSCQR could not authorize the replacement print job.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setReissueReason("");
+      toast({
+        title: "Reissue authorized",
+        description: "A controlled replacement print job was created and added to the audit trail.",
+      });
+
+      await Promise.allSettled([
+        workspacePrintJobsQuery.refetch(),
+        operations.fetchBatches(),
+        workspace.workspaceBatch ? workspace.fetchWorkspaceHistory(workspace.workspaceBatch) : Promise.resolve(),
+      ]);
+    } finally {
+      setReissuingJobId(null);
+    }
+  };
 
   return (
     <DashboardLayout>
@@ -119,6 +170,7 @@ export default function BatchesPage() {
         onOpenChange={(open) => {
           if (!open) {
             workspace.closeWorkspace();
+            setReissueReason("");
           }
         }}
         workspace={workspace.workspaceBatch}
@@ -160,6 +212,15 @@ export default function BatchesPage() {
             void workspace.fetchWorkspaceHistory(workspace.workspaceBatch);
           }
         }}
+        recentPrintJobs={workspacePrintJobsQuery.data || []}
+        printJobsLoading={workspacePrintJobsQuery.isLoading || workspacePrintJobsQuery.isFetching}
+        canRequestReissue={canRequestReissue}
+        reissueReason={reissueReason}
+        onReissueReasonChange={setReissueReason}
+        onRequestReissue={(jobId) => {
+          void requestPrintJobReissue(jobId);
+        }}
+        reissuingJobId={reissuingJobId}
       />
 
       <RenameBatchDialog

@@ -17,6 +17,18 @@ const run = () => {
   assert(resolvePayloadType({ commandLanguage: "ZPL" }) === "ZPL", "ZPL printers should resolve to ZPL payloads");
   assert(resolvePayloadType({ commandLanguage: "TSPL" }) === "TSPL", "TSPL printers should resolve to TSPL payloads");
   assert(resolvePayloadType({ commandLanguage: "EPL" }) === "EPL", "EPL printers should resolve to EPL payloads");
+  assert(resolvePayloadType({ commandLanguage: "DPL" }) === "DPL", "DPL printers should resolve to DPL payloads");
+  assert(
+    resolvePayloadType({ commandLanguage: "HONEYWELL_DP" }) === "HONEYWELL_DP",
+    "Honeywell DP printers should resolve to Honeywell DP payloads"
+  );
+  assert(
+    resolvePayloadType({ commandLanguage: "HONEYWELL_FINGERPRINT" }) === "HONEYWELL_FINGERPRINT",
+    "Fingerprint printers should resolve to Fingerprint payloads"
+  );
+  assert(resolvePayloadType({ commandLanguage: "IPL" }) === "IPL", "IPL printers should resolve to IPL payloads");
+  assert(resolvePayloadType({ commandLanguage: "SBPL" }) === "SBPL", "SBPL printers should resolve to SBPL payloads");
+  assert(resolvePayloadType({ commandLanguage: "ZSIM" }) === "ZPL", "ZSim printers should resolve through the ZPL renderer");
   assert(resolvePayloadType({ commandLanguage: "CPCL" }) === "CPCL", "CPCL printers should resolve to CPCL payloads");
   assert(
     resolvePayloadType({ connectionType: "LOCAL_AGENT", commandLanguage: "AUTO" }) === "JSON",
@@ -34,6 +46,11 @@ const run = () => {
   assert(supportsNetworkDirectPayloadType("ZPL"), "ZPL should be allowed for network-direct dispatch");
   assert(supportsNetworkDirectPayloadType("TSPL"), "TSPL should be allowed for network-direct dispatch");
   assert(supportsNetworkDirectPayloadType("EPL"), "EPL should be allowed for network-direct dispatch");
+  assert(supportsNetworkDirectPayloadType("DPL"), "DPL should be allowed for network-direct dispatch");
+  assert(supportsNetworkDirectPayloadType("HONEYWELL_DP"), "Honeywell DP should be allowed for network-direct dispatch");
+  assert(supportsNetworkDirectPayloadType("HONEYWELL_FINGERPRINT"), "Fingerprint should be allowed for network-direct dispatch");
+  assert(supportsNetworkDirectPayloadType("IPL"), "IPL should be allowed for network-direct dispatch");
+  assert(supportsNetworkDirectPayloadType("SBPL"), "SBPL should be allowed for network-direct dispatch");
   assert(supportsNetworkDirectPayloadType("CPCL"), "CPCL should be allowed for network-direct dispatch");
   assert(!supportsNetworkDirectPayloadType("JSON"), "JSON payloads must not be treated as network-direct capable");
 
@@ -42,8 +59,16 @@ const run = () => {
     "Registered CPCL printers should be network-direct capable"
   );
   assert(
-    !supportsNetworkDirectPayload({ connectionType: "NETWORK_DIRECT", commandLanguage: "SBPL" }),
-    "SBPL should remain blocked for network-direct until an adapter is added"
+    supportsNetworkDirectPayload({ connectionType: "NETWORK_DIRECT", commandLanguage: "SBPL" }),
+    "SBPL should be network-direct capable once the industrial adapter layer is present"
+  );
+  assert(
+    supportsNetworkDirectPayload({ connectionType: "NETWORK_DIRECT", commandLanguage: "HONEYWELL_DP" }),
+    "Honeywell DP should be network-direct capable"
+  );
+  assert(
+    supportsNetworkDirectPayload({ connectionType: "NETWORK_DIRECT", commandLanguage: "IPL" }),
+    "IPL should be network-direct capable"
   );
 
   const builtPayload = buildApprovedPrintPayload({

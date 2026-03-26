@@ -10,4 +10,5 @@ export {
   downloadPrintJobPack,
   getManufacturerPrintJobStatus,
   listManufacturerPrintJobs,
+  reissueManufacturerPrintJob,
 } from "./queryHandlers";

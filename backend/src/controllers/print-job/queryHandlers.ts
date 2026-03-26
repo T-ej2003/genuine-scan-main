@@ -1,20 +1,28 @@
 import { Response } from "express";
 
 import { AuthRequest } from "../../middleware/auth";
+import { getEffectiveLicenseeId } from "../../middleware/tenantIsolation";
 import { getPrintJobOperationalView, listPrintJobsForManufacturer } from "../../services/networkDirectPrintService";
-import { ensureManufacturerUser, listPrintJobsQuerySchema } from "./shared";
+import { createAuthorizedPrintReissue } from "../../services/printReissueService";
+import {
+  ensurePrintOperationsUser,
+  ensurePrintReissueApprover,
+  listPrintJobsQuerySchema,
+  printJobIdParamSchema,
+  reissuePrintJobSchema,
+} from "./shared";
 
 export const downloadPrintJobPack = async (_req: AuthRequest, res: Response) => {
   return res.status(410).json({
     success: false,
     error:
-      "Print-pack download is disabled. Use the direct-print pipeline (one-time short-lived render tokens) via authenticated print agent.",
+      "Print-pack download is disabled. Create the print job and let the MSCQR connector or certified printer route complete it directly.",
   });
 };
 
 export const listManufacturerPrintJobs = async (req: AuthRequest, res: Response) => {
   try {
-    const user = ensureManufacturerUser(req, res);
+    const user = ensurePrintOperationsUser(req, res);
     if (!user) return;
 
     const parsed = listPrintJobsQuerySchema.safeParse(req.query || {});
@@ -23,7 +31,11 @@ export const listManufacturerPrintJobs = async (req: AuthRequest, res: Response)
     }
 
     const rows = await listPrintJobsForManufacturer({
-      userId: user.userId,
+      scope: {
+        role: user.role,
+        userId: user.userId,
+        licenseeId: getEffectiveLicenseeId(req),
+      },
       batchId: parsed.data.batchId,
       limit: parsed.data.limit,
     });
@@ -37,15 +49,22 @@ export const listManufacturerPrintJobs = async (req: AuthRequest, res: Response)
 
 export const getManufacturerPrintJobStatus = async (req: AuthRequest, res: Response) => {
   try {
-    const user = ensureManufacturerUser(req, res);
+    const user = ensurePrintOperationsUser(req, res);
     if (!user) return;
 
-    const jobId = String(req.params.id || "").trim();
-    if (!jobId) {
-      return res.status(400).json({ success: false, error: "Missing print job id" });
+    const parsedParams = printJobIdParamSchema.safeParse(req.params || {});
+    if (!parsedParams.success) {
+      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid print job id" });
     }
 
-    const view = await getPrintJobOperationalView({ jobId, userId: user.userId });
+    const view = await getPrintJobOperationalView({
+      jobId: parsedParams.data.id,
+      scope: {
+        role: user.role,
+        userId: user.userId,
+        licenseeId: getEffectiveLicenseeId(req),
+      },
+    });
     if (!view) {
       return res.status(404).json({ success: false, error: "Print job not found" });
     }
@@ -54,5 +73,56 @@ export const getManufacturerPrintJobStatus = async (req: AuthRequest, res: Respo
   } catch (error: any) {
     console.error("getManufacturerPrintJobStatus error:", error);
     return res.status(500).json({ success: false, error: error?.message || "Internal server error" });
+  }
+};
+
+export const reissueManufacturerPrintJob = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = ensurePrintReissueApprover(req, res);
+    if (!user) return;
+
+    const parsedParams = printJobIdParamSchema.safeParse(req.params || {});
+    if (!parsedParams.success) {
+      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid print job id" });
+    }
+
+    const parsedBody = reissuePrintJobSchema.safeParse(req.body || {});
+    if (!parsedBody.success) {
+      return res.status(400).json({ success: false, error: parsedBody.error.errors[0]?.message || "Invalid reissue request" });
+    }
+
+    const data = await createAuthorizedPrintReissue({
+      scope: {
+        role: user.role,
+        userId: user.userId,
+        licenseeId: getEffectiveLicenseeId(req),
+      },
+      originalPrintJobId: parsedParams.data.id,
+      reason: parsedBody.data.reason,
+      quantity: parsedBody.data.quantity ?? null,
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || null,
+    });
+
+    return res.status(201).json({ success: true, data });
+  } catch (error: any) {
+    console.error("reissueManufacturerPrintJob error:", error);
+    const message = String(error?.message || "");
+    if (typeof error?.statusCode === "number") {
+      return res.status(error.statusCode).json({ success: false, error: message || "Print reissue failed" });
+    }
+    if (message.startsWith("NOT_ENOUGH_CODES")) {
+      return res.status(409).json({
+        success: false,
+        error: "Not enough unprinted codes remain in this source batch to authorize a controlled reissue.",
+      });
+    }
+    if (message === "BATCH_BUSY") {
+      return res.status(409).json({
+        success: false,
+        error: "This source batch is busy. Refresh the workspace and try the reissue again.",
+      });
+    }
+    return res.status(500).json({ success: false, error: message || "Internal server error" });
   }
 };

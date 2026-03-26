@@ -1,5 +1,5 @@
 import { randomBytes } from "crypto";
-import { PrintDispatchMode, PrintJobStatus, QRStatus } from "@prisma/client";
+import { PrintDispatchMode, PrintJobStatus, PrintPipelineState, QRStatus } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 
 import prisma from "../../config/database";
@@ -53,7 +53,7 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
 
     if (replayIdempotentResponseIfAny(idempotency, res)) return;
 
-    const { batchId, printerId, quantity, rangeStart, rangeEnd, reprintOfJobId, reprintReason } = parsed.data;
+    const { batchId, printerId, quantity, rangeStart, rangeEnd } = parsed.data;
     const batch = await prisma.batch.findFirst({
       where: { id: batchId, manufacturerId: user.userId },
       select: { id: true, name: true, licenseeId: true, manufacturerId: true },
@@ -74,12 +74,13 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
     ) {
       return res.status(409).json({
         success: false,
-        error: "Network-direct printing currently supports registered ZPL, TSPL, EPL, and CPCL printers only.",
+        error: "Network-direct printing currently supports certified industrial printer profiles only when the live language and transport are approved.",
       });
     }
 
-    const printLockToken = randomBytes(24).toString("base64url");
-    const printLockTokenHash = hashLockToken(printLockToken);
+    const printLockToken =
+      printerSelection.printMode === PrintDispatchMode.LOCAL_AGENT ? randomBytes(24).toString("base64url") : null;
+    const printLockTokenHash = printLockToken ? hashLockToken(printLockToken) : null;
     const now = new Date();
     const expAt = getQrTokenExpiryDate(now);
 
@@ -136,10 +137,14 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
             payloadType: printerSelection.payloadType,
             rangeStart: rangeStart || null,
             rangeEnd: rangeEnd || null,
-            reprintOfJobId: reprintOfJobId || null,
-            reprintReason: reprintReason || null,
-            printLockTokenHash,
+            reprintOfJobId: null,
+            reprintReason: null,
+            ...(printLockTokenHash ? { printLockTokenHash } : {}),
             status: PrintJobStatus.PENDING,
+            pipelineState:
+              printerSelection.printMode === PrintDispatchMode.LOCAL_AGENT
+                ? PrintPipelineState.QUEUED
+                : PrintPipelineState.PREFLIGHT_OK,
           },
         });
 
@@ -189,6 +194,7 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
             qrCodeId: item.qr.id,
             code: item.qr.code,
             state: "RESERVED",
+            pipelineState: PrintPipelineState.QUEUED,
           })),
         });
 
@@ -226,10 +232,14 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
       data: {
         printJobId: created.job.id,
         printSessionId: created.session.id,
-        printLockToken: printerSelection.printMode === PrintDispatchMode.LOCAL_AGENT ? printLockToken : null,
+        printLockToken: null,
         quantity,
         tokenCount: created.preparedCount,
         mode: printerSelection.printMode,
+        pipelineState:
+          printerSelection.printMode === PrintDispatchMode.LOCAL_AGENT
+            ? PrintPipelineState.QUEUED
+            : PrintPipelineState.PREFLIGHT_OK,
         lockExpiresAt: getLockExpiresAt(created.job.createdAt).toISOString(),
         printer: {
           id: printerSelection.printer.id,
@@ -358,7 +368,7 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
       return res.status(409).json({
         success: false,
         error:
-          "Selected network printer uses a language that is not available for network-direct dispatch. Use ZPL, TSPL, EPL, or CPCL, or switch to the local agent path.",
+          "Selected network printer uses a language that is not certified for secure raw-TCP dispatch. Update the printer profile or switch to the MSCQR connector path.",
       });
     }
     if (msg.includes("PRINTER_NETWORK_UNREACHABLE")) {

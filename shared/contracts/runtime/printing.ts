@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  printerCapabilityDiscoverySchema,
+  printerProfileSchema,
+  printerProfileSnapshotSchema,
+  printPipelineStateSchema,
+} from "./printer-profiles";
 
 export const printerCapabilitySummarySchema = z
   .object({
@@ -86,6 +92,9 @@ export const registeredPrinterSchema = z
       })
       .nullable()
       .optional(),
+    printerProfile: printerProfileSchema.nullable().optional(),
+    latestDiscoverySnapshot: printerProfileSnapshotSchema.nullable().optional(),
+    capabilityDiscovery: printerCapabilityDiscoverySchema.nullable().optional(),
   })
   .passthrough();
 
@@ -106,9 +115,12 @@ export const printJobSchema = z
     id: z.string(),
     jobNumber: z.string().nullable().optional(),
     status: z.enum(["PENDING", "SENT", "CONFIRMED", "FAILED", "CANCELLED"]),
+    pipelineState: printPipelineStateSchema.optional(),
     printMode: z.enum(["LOCAL_AGENT", "NETWORK_DIRECT", "NETWORK_IPP"]),
     quantity: z.number(),
     itemCount: z.number().nullable().optional(),
+    reprintOfJobId: z.string().nullable().optional(),
+    reprintReason: z.string().nullable().optional(),
     failureReason: z.string().nullable().optional(),
     createdAt: z.string(),
     updatedAt: z.string().optional(),

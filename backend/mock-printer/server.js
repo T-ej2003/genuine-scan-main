@@ -13,11 +13,19 @@ const CRLF = "\r\n";
 const PRINTER_STATES = {
   READY: "ready",
   PAPER_OUT: "paper-out",
+  RIBBON_OUT: "ribbon-out",
   HEAD_OPEN: "head-open",
+  MEDIA_MISMATCH: "media-mismatch",
+  TIMEOUT: "timeout",
   OFFLINE: "offline",
 };
 
-const FAULTED_PRINT_STATES = new Set([PRINTER_STATES.PAPER_OUT, PRINTER_STATES.HEAD_OPEN]);
+const FAULTED_PRINT_STATES = new Set([
+  PRINTER_STATES.PAPER_OUT,
+  PRINTER_STATES.RIBBON_OUT,
+  PRINTER_STATES.HEAD_OPEN,
+  PRINTER_STATES.MEDIA_MISMATCH,
+]);
 
 const runtime = {
   state: PRINTER_STATES.READY,
@@ -83,6 +91,14 @@ const getStatusFlags = (state) => {
     return {
       ...base,
       paperOut: 1,
+      labelWaiting: 1,
+    };
+  }
+
+  if (state === PRINTER_STATES.RIBBON_OUT) {
+    return {
+      ...base,
+      ribbonOut: 1,
       labelWaiting: 1,
     };
   }
@@ -202,6 +218,17 @@ const createTcpServer = () => {
       received = Buffer.concat([received, chunk]);
 
       if (handled) return;
+
+      if (runtime.state === PRINTER_STATES.TIMEOUT) {
+        handled = true;
+        runtime.lastPayload = summarizePayload(received, isHostStatusQuery(received) ? "status-query-timeout" : "print-job-timeout");
+        log("Holding connection open to simulate a timeout", {
+          remote,
+          state: runtime.state,
+          payload: runtime.lastPayload,
+        });
+        return;
+      }
 
       if (isHostStatusQuery(received)) {
         handled = true;
@@ -341,7 +368,10 @@ app.get("/", (_req, res) => {
       "GET /status",
       "GET /state/ready",
       "GET /state/paper-out",
+      "GET /state/ribbon-out",
       "GET /state/head-open",
+      "GET /state/media-mismatch",
+      "GET /state/timeout",
       "GET /state/offline",
     ],
     ...snapshot(),
@@ -368,9 +398,33 @@ app.get("/state/paper-out", async (_req, res, next) => {
   }
 });
 
+app.get("/state/ribbon-out", async (_req, res, next) => {
+  try {
+    res.json(await setPrinterState(PRINTER_STATES.RIBBON_OUT));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/state/head-open", async (_req, res, next) => {
   try {
     res.json(await setPrinterState(PRINTER_STATES.HEAD_OPEN));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/state/media-mismatch", async (_req, res, next) => {
+  try {
+    res.json(await setPrinterState(PRINTER_STATES.MEDIA_MISMATCH));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/state/timeout", async (_req, res, next) => {
+  try {
+    res.json(await setPrinterState(PRINTER_STATES.TIMEOUT));
   } catch (error) {
     next(error);
   }

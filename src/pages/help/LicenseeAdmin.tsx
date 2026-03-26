@@ -26,6 +26,7 @@ export default function LicenseeAdminHelp() {
               <li>Create and manage manufacturer users under your licensee.</li>
               <li>Request additional code inventory by quantity.</li>
               <li>Assign approved batches to manufacturer teams.</li>
+              <li>Review manufacturer print readiness and audit outcomes without editing technical printer profiles.</li>
               <li>Monitor Scan Activity and review Audit History within your company scope.</li>
             </ul>
           </CardContent>
@@ -124,6 +125,19 @@ export default function LicenseeAdminHelp() {
               </CardContent>
             </Card>
           </div>
+
+          <Card>
+            <CardHeader className="space-y-1">
+              <CardTitle className="text-base">Monitor printer readiness without changing factory setup</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm text-muted-foreground">
+              <ol className="list-decimal pl-5">
+                <li>Open the assigned batch or manufacturer record when a factory reports a print delay.</li>
+                <li>Review the readiness state, latest print outcome, and audit timeline first.</li>
+                <li>Escalate to the manufacturer admin or Super Admin if the printer route itself needs certification or technical changes.</li>
+              </ol>
+            </CardContent>
+          </Card>
         </section>
 
         <section className="space-y-3">

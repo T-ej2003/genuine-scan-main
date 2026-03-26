@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { AuthRequest } from "../middleware/auth";
 import { getEffectiveLicenseeId } from "../middleware/tenantIsolation";
+import { discoverPrinterCapabilities } from "../printing/registry/printerProfileService";
 import {
   deleteNetworkDirectPrinter as deleteNetworkDirectPrinterRecord,
   getRegisteredPrinterForManufacturer,
@@ -18,7 +19,13 @@ import { sanitizePrinterActionError } from "../utils/printerUserFacingErrors";
 const NETWORK_DIRECT_LANGUAGE_OPTIONS = [
   PrinterCommandLanguage.ZPL,
   PrinterCommandLanguage.TSPL,
+  PrinterCommandLanguage.SBPL,
   PrinterCommandLanguage.EPL,
+  PrinterCommandLanguage.DPL,
+  PrinterCommandLanguage.HONEYWELL_DP,
+  PrinterCommandLanguage.HONEYWELL_FINGERPRINT,
+  PrinterCommandLanguage.IPL,
+  PrinterCommandLanguage.ZSIM,
   PrinterCommandLanguage.CPCL,
 ] as const;
 
@@ -78,6 +85,17 @@ const isOpsRole = (role?: UserRole | null) =>
       ].includes(role)
   );
 
+const canManagePrinterProfiles = (role?: UserRole | null) =>
+  Boolean(
+    role &&
+      ([
+        UserRole.SUPER_ADMIN,
+        UserRole.PLATFORM_SUPER_ADMIN,
+        UserRole.MANUFACTURER,
+        UserRole.MANUFACTURER_ADMIN,
+      ] as UserRole[]).includes(role)
+  );
+
 const resolveScope = async (req: AuthRequest) => ({
   userId: req.user!.userId,
   orgId: req.user?.orgId || null,
@@ -110,7 +128,7 @@ export const listPrinters = async (req: AuthRequest, res: Response) => {
 
 export const createNetworkPrinter = async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user || !isOpsRole(req.user.role)) {
+    if (!req.user || !canManagePrinterProfiles(req.user.role)) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
@@ -165,7 +183,7 @@ export const createNetworkPrinter = async (req: AuthRequest, res: Response) => {
 
 export const updateNetworkPrinter = async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user || !isOpsRole(req.user.role)) {
+    if (!req.user || !canManagePrinterProfiles(req.user.role)) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
@@ -276,7 +294,7 @@ export const updateNetworkPrinter = async (req: AuthRequest, res: Response) => {
 
 export const testPrinter = async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user || !isOpsRole(req.user.role)) {
+    if (!req.user || !canManagePrinterProfiles(req.user.role)) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
@@ -323,9 +341,77 @@ export const testPrinter = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const discoverPrinter = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || !canManagePrinterProfiles(req.user.role)) {
+      return res.status(403).json({ success: false, error: "Access denied" });
+    }
+
+    const paramsParsed = printerIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid printer id" });
+    }
+    const printerId = paramsParsed.data.id;
+
+    const scope = await resolveScope(req);
+    const printer = await getRegisteredPrinterForManufacturer({
+      printerId,
+      userId: scope.userId,
+      orgId: scope.orgId,
+      licenseeId: scope.licenseeId,
+      licenseeIds: scope.licenseeIds,
+      includeInactive: true,
+    });
+    if (!printer) return res.status(404).json({ success: false, error: "Printer not found" });
+
+    if (printer.connectionType === PrinterConnectionType.LOCAL_AGENT) {
+      return res.status(400).json({
+        success: false,
+        error: "Connector-managed workstation printers refresh their capabilities automatically. Open the standard Printer Setup flow instead of running manual certification here.",
+      });
+    }
+
+    const validation = await testRegisteredPrinterConnection({
+      printer,
+      userId: scope.userId,
+    });
+    const certification = await discoverPrinterCapabilities(printer);
+
+    await createAuditLog({
+      userId: scope.userId,
+      licenseeId: scope.licenseeId || undefined,
+      action: "PRINTER_DISCOVERED",
+      entityType: "Printer",
+      entityId: printer.id,
+      details: {
+        connectionType: printer.connectionType,
+        commandLanguage: printer.commandLanguage,
+        validation,
+        certification,
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || undefined,
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        validation,
+        certification,
+      },
+    });
+  } catch (error: any) {
+    console.error("discoverPrinter error:", error);
+    return res.status(400).json({
+      success: false,
+      error: sanitizePrinterActionError(error?.message, "This printer could not complete discovery and certification."),
+    });
+  }
+};
+
 export const deleteNetworkPrinter = async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user || !isOpsRole(req.user.role)) {
+    if (!req.user || !canManagePrinterProfiles(req.user.role)) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 

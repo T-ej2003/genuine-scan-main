@@ -69,8 +69,6 @@ export function useBatchPrintWorkflow({
   const [printing, setPrinting] = useState(false);
   const [printQuantity, setPrintQuantity] = useState("");
   const [printJobId, setPrintJobId] = useState("");
-  const [printLockToken, setPrintLockToken] = useState("");
-  const [printJobTokensCount, setPrintJobTokensCount] = useState(0);
   const [directRemainingToPrint, setDirectRemainingToPrint] = useState<number | null>(null);
   const [detectedPrinters, setDetectedPrinters] = useState<LocalPrinterRow[]>([]);
   const [selectedPrinterId, setSelectedPrinterId] = useState("");
@@ -78,8 +76,6 @@ export function useBatchPrintWorkflow({
   const [selectedPrinterProfileId, setSelectedPrinterProfileId] = useState("");
   const [recentPrintJobs, setRecentPrintJobs] = useState<PrintJobRow[]>([]);
   const [switchingPrinter, setSwitchingPrinter] = useState(false);
-  const [printPath] = useState<"auto" | "spooler" | "raw-9100" | "label-language" | "pdf-raster">("auto");
-  const [labelLanguage] = useState<"AUTO" | "ZPL" | "EPL" | "CPCL" | "TSPL" | "ESC_POS">("AUTO");
   const [calibrationProfile, setCalibrationProfile] = useState<CalibrationProfileState>({
     dpi: "",
     labelWidthMm: "50",
@@ -275,8 +271,6 @@ export function useBatchPrintWorkflow({
           printerStatus,
           selectedPrinterId,
           detectedPrinters,
-          printPath,
-          labelLanguage,
           context: params.context,
           details: params.diagnostics || null,
         })
@@ -369,8 +363,6 @@ export function useBatchPrintWorkflow({
     setPrintBatch(batch);
     setPrintQuantity("");
     setPrintJobId("");
-    setPrintLockToken("");
-    setPrintJobTokensCount(0);
     setDirectRemainingToPrint(null);
     setPrintProgressOpen(false);
     setPrintProgressPhase("Preparing print pipeline");
@@ -516,11 +508,7 @@ export function useBatchPrintWorkflow({
         onBatchesChanged,
         loadRecentPrintJobs,
         setPrintJobId,
-        setPrintLockToken,
-        setPrintJobTokensCount,
         printJobId,
-        printLockToken,
-        printJobTokensCount,
         directRemainingToPrint,
         ...progressStateSetters,
       });
@@ -529,8 +517,8 @@ export function useBatchPrintWorkflow({
     }
   };
 
-  const requestDirectPrintTokens = async () => {
-    if (!printJobId || !printLockToken) return;
+  const refreshPendingPrintStatus = async () => {
+    if (!printJobId) return;
 
     setPrinting(true);
     try {
@@ -551,11 +539,7 @@ export function useBatchPrintWorkflow({
         onBatchesChanged,
         loadRecentPrintJobs,
         setPrintJobId,
-        setPrintLockToken,
-        setPrintJobTokensCount,
         printJobId,
-        printLockToken,
-        printJobTokensCount,
         directRemainingToPrint,
         ...progressStateSetters,
       });
@@ -588,12 +572,11 @@ export function useBatchPrintWorkflow({
     onStartPrint: createPrintJob,
     selectedPrinterCanPrint,
     printJobId,
-    printLockToken,
     printProgressPrinterName,
     printProgressDispatchMode,
     formatDispatchModeLabel,
     directRemainingToPrint,
-    onRetryPendingLabels: requestDirectPrintTokens,
+    onRefreshPrintStatus: refreshPendingPrintStatus,
     recentPrintJobs,
     onClose: () => setPrintOpen(false),
   };

@@ -127,7 +127,20 @@ export type RegisteredPrinterRow = {
   vendor?: string | null;
   model?: string | null;
   connectionType: "LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP";
-  commandLanguage: "AUTO" | "ZPL" | "TSPL" | "SBPL" | "EPL" | "CPCL" | "ESC_POS" | "OTHER";
+  commandLanguage:
+    | "AUTO"
+    | "ZPL"
+    | "TSPL"
+    | "SBPL"
+    | "EPL"
+    | "DPL"
+    | "HONEYWELL_DP"
+    | "HONEYWELL_FINGERPRINT"
+    | "IPL"
+    | "ZSIM"
+    | "CPCL"
+    | "ESC_POS"
+    | "OTHER";
   ipAddress?: string | null;
   host?: string | null;
   port?: number | null;
@@ -143,6 +156,9 @@ export type RegisteredPrinterRow = {
     summary: string;
     detail?: string | null;
   } | null;
+  printerProfile?: Record<string, unknown> | null;
+  latestDiscoverySnapshot?: Record<string, unknown> | null;
+  capabilityDiscovery?: Record<string, unknown> | null;
 };
 
 export type PrinterNoticeTone = "success" | "warning" | "neutral" | "danger";
@@ -158,9 +174,20 @@ export type PrintJobRow = {
   id: string;
   jobNumber?: string | null;
   status: "PENDING" | "SENT" | "CONFIRMED" | "FAILED" | "CANCELLED";
+  pipelineState?:
+    | "QUEUED"
+    | "PREFLIGHT_OK"
+    | "SENT_TO_PRINTER"
+    | "PRINTER_ACKNOWLEDGED"
+    | "PRINT_CONFIRMED"
+    | "LOCKED"
+    | "FAILED"
+    | "NEEDS_OPERATOR_ACTION";
   printMode: "LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP";
   quantity: number;
   itemCount?: number | null;
+  reprintOfJobId?: string | null;
+  reprintReason?: string | null;
   failureReason?: string | null;
   createdAt: string;
   updatedAt?: string;
@@ -168,14 +195,14 @@ export type PrintJobRow = {
   confirmedAt?: string | null;
   completedAt?: string | null;
   printer?: {
-    id: string;
-    name: string;
-    connectionType: "LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP";
-    commandLanguage: string;
+    id?: string;
+    name?: string | null;
+    connectionType?: "LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP" | string | null;
+    commandLanguage?: string;
   } | null;
   session?: {
-    id: string;
-    status: string;
+    id?: string;
+    status?: string;
     totalItems?: number;
     confirmedItems?: number;
     frozenItems?: number;

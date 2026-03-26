@@ -10,7 +10,7 @@ import {
   PrinterConnectionType,
   QRStatus,
 } from "@prisma/client";
-import type { PrintJobDTO } from "../../../shared/contracts/printing";
+import type { PrintJobDTO } from "../../../shared/contracts/printing.d.ts";
 
 import prisma from "../config/database";
 import { logger } from "../utils/logger";
@@ -19,6 +19,7 @@ import { buildApprovedPrintPayload, supportsNetworkDirectPayload } from "./print
 import { failStopPrintSession, finalizePrintSessionIfReady, getOrCreatePrintSession, OPEN_PRINT_STATES } from "./printLifecycleService";
 import { createAuditLog } from "./auditService";
 import { createRoleNotifications, createUserNotification } from "./notificationService";
+import { buildScopedPrintJobWhere, type PrintJobScope } from "./printJobScopeService";
 
 const activeDispatches = new Set<string>();
 const NETWORK_DIRECT_CHUNK_SIZE = Math.max(1, Math.min(250, Number(process.env.NETWORK_DIRECT_CHUNK_SIZE || 25) || 25));
@@ -316,12 +317,12 @@ const confirmNetworkPrintedItem = async (params: {
   });
 };
 
-export const getPrintJobOperationalView = async (params: { jobId: string; userId: string }): Promise<PrintJobDTO | null> => {
+export const getPrintJobOperationalView = async (params: {
+  jobId: string;
+  scope: PrintJobScope;
+}): Promise<PrintJobDTO | null> => {
   const job = await prisma.printJob.findFirst({
-    where: {
-      id: params.jobId,
-      manufacturerId: params.userId,
-    },
+    where: buildScopedPrintJobWhere(params.scope, { id: params.jobId }),
     include: {
       batch: { select: { id: true, name: true, licenseeId: true } },
       printer: {
@@ -365,9 +366,12 @@ export const getPrintJobOperationalView = async (params: { jobId: string; userId
     id: job.id,
     jobNumber: job.jobNumber,
     status: job.status,
+    pipelineState: job.pipelineState,
     printMode: job.printMode,
     quantity: job.quantity,
     itemCount: job.itemCount || job.quantity,
+    reprintOfJobId: job.reprintOfJobId,
+    reprintReason: job.reprintReason,
     failureReason: job.failureReason,
     createdAt: job.createdAt.toISOString(),
     updatedAt: job.updatedAt.toISOString(),
@@ -381,15 +385,14 @@ export const getPrintJobOperationalView = async (params: { jobId: string; userId
 };
 
 export const listPrintJobsForManufacturer = async (params: {
-  userId: string;
+  scope: PrintJobScope;
   batchId?: string;
   limit?: number;
 }): Promise<PrintJobDTO[]> => {
   const jobs = await prisma.printJob.findMany({
-    where: {
-      manufacturerId: params.userId,
+    where: buildScopedPrintJobWhere(params.scope, {
       ...(params.batchId ? { batchId: params.batchId } : {}),
-    },
+    }),
     include: {
       batch: { select: { id: true, name: true } },
       printer: {
@@ -418,6 +421,9 @@ export const listPrintJobsForManufacturer = async (params: {
 
   return jobs.map((job) => ({
     ...job,
+    pipelineState: job.pipelineState,
+    reprintOfJobId: job.reprintOfJobId,
+    reprintReason: job.reprintReason,
     createdAt: job.createdAt.toISOString(),
     updatedAt: job.updatedAt.toISOString(),
     sentAt: toIsoOrNull(job.sentAt),

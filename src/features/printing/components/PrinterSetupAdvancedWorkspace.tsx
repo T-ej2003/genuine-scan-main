@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 import { Activity, Copy, RefreshCw, ShieldAlert, Wifi, Wrench } from "lucide-react";
@@ -29,6 +29,7 @@ import {
   buildEmptyNetworkPrinterForm,
   getManagedSetupTypeLabel,
   isSupportedNetworkDirectLanguage,
+  NETWORK_DIRECT_SUPPORTED_LANGUAGE_LABEL,
   type RegisteredPrinterRow,
 } from "@/features/printing/advanced-types";
 import { ManagedPrinterRoutesDialog } from "@/features/printing/components/ManagedPrinterRoutesDialog";
@@ -46,6 +47,10 @@ export default function PrinterDiagnostics() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const contextualHelpRoute = getContextualHelpRoute("/printer-diagnostics", user?.role);
+  const rawRole = String(user?.rawRole || "").trim().toUpperCase();
+  const isManufacturerUser = user?.role === "manufacturer" && rawRole !== "MANUFACTURER_USER";
+  const isGlobalPrinterAdmin = user?.role === "super_admin";
+  const canInspectManagedProfiles = isManufacturerUser || isGlobalPrinterAdmin;
 
   const [loading, setLoading] = useState(false);
   const [localAgent, setLocalAgent] = useState<LocalPrinterAgentSnapshot>(EMPTY_LOCAL_AGENT);
@@ -55,17 +60,22 @@ export default function PrinterDiagnostics() {
   const [registeredPrinters, setRegisteredPrinters] = useState<RegisteredPrinterRow[]>([]);
   const [savingNetworkPrinter, setSavingNetworkPrinter] = useState(false);
   const [testingPrinterId, setTestingPrinterId] = useState<string | null>(null);
+  const [discoveringPrinterId, setDiscoveringPrinterId] = useState<string | null>(null);
   const [deletingPrinterId, setDeletingPrinterId] = useState<string | null>(null);
   const [editingPrinterId, setEditingPrinterId] = useState<string | null>(null);
   const [networkPrinterForm, setNetworkPrinterForm] = useState(buildEmptyNetworkPrinterForm);
   const [gatewayProvisioningSecret, setGatewayProvisioningSecret] = useState<string | null>(null);
   const [setupFormOpen, setSetupFormOpen] = useState(false);
   const [managedProfilesDialogOpen, setManagedProfilesDialogOpen] = useState(false);
+  const configuredBackendUrlRef = useRef("");
 
   const networkPrinterLanguageSupported = isSupportedNetworkDirectLanguage(networkPrinterForm.commandLanguage);
 
   const loadRegisteredPrinters = async () => {
-    if (user?.role !== "manufacturer") return;
+    if (!canInspectManagedProfiles) {
+      setRegisteredPrinters([]);
+      return;
+    }
     const response = await apiClient.listRegisteredPrinters(false);
     if (!response.success) {
       setRegisteredPrinters([]);
@@ -77,7 +87,32 @@ export default function PrinterDiagnostics() {
   const loadDiagnostics = async () => {
     setLoading(true);
     try {
+      if (!isManufacturerUser) {
+        setLocalAgent({
+          ...EMPTY_LOCAL_AGENT,
+          error: "Workstation connector diagnostics are shown only on manufacturer workstations.",
+          checkedAt: new Date().toISOString(),
+        });
+        setDetectedPrinters([]);
+        setRemoteStatus(null);
+        await loadRegisteredPrinters();
+        return;
+      }
+
       const local = await apiClient.getLocalPrintAgentStatus();
+      const browserBackendUrl = window.location.origin;
+      if (
+        local.success &&
+        configuredBackendUrlRef.current !== browserBackendUrl &&
+        typeof apiClient.configureLocalPrintAgentBackend === "function"
+      ) {
+        const backendConfiguration = await apiClient.configureLocalPrintAgentBackend(browserBackendUrl);
+        if (!backendConfiguration.success) {
+          console.warn("Local print agent backend configuration failed:", backendConfiguration.error);
+        } else {
+          configuredBackendUrlRef.current = browserBackendUrl;
+        }
+      }
       const localPrinters = normalizePrinterInventoryRows((local as any)?.data?.printers || []);
       const nextLocalAgent: LocalPrinterAgentSnapshot = {
         reachable: Boolean(local.success),
@@ -97,7 +132,7 @@ export default function PrinterDiagnostics() {
       ).trim();
       if (preferredPrinterId) setSelectedPrinterId((prev) => prev || preferredPrinterId);
 
-      if (user?.role === "manufacturer") {
+      if (isManufacturerUser) {
         const heartbeatPayload = local.success
           ? {
               connected: Boolean((local.data as any)?.connected),
@@ -155,10 +190,8 @@ export default function PrinterDiagnostics() {
             error: remote.error || "Printer diagnostics unavailable",
           });
         }
-        await loadRegisteredPrinters();
-      } else {
-        setRemoteStatus(null);
       }
+      await loadRegisteredPrinters();
     } finally {
       setLoading(false);
     }
@@ -338,6 +371,15 @@ export default function PrinterDiagnostics() {
   };
 
   const recommendedAction = useMemo(() => {
+    if (isGlobalPrinterAdmin) {
+      return {
+        title: "Review printer certification",
+        description: "Open the managed profiles workspace to inspect capability discovery, mismatches, and certification readiness.",
+        label: "Open network routes",
+        run: () => openManagedProfilesDialog(),
+      };
+    }
+
     if (managedPrinterAttentionCount > 0) {
       return {
         title: "Review saved network routes",
@@ -385,7 +427,7 @@ export default function PrinterDiagnostics() {
       label: "Open batches",
       run: () => navigate("/batches"),
     };
-  }, [effectiveSummary.state, managedPrinterAttentionCount, navigate]);
+  }, [effectiveSummary.state, isGlobalPrinterAdmin, managedPrinterAttentionCount, navigate]);
 
   useEffect(() => {
     if (searchParams.get("managedProfiles") !== "open") return;
@@ -442,7 +484,7 @@ export default function PrinterDiagnostics() {
     if (isNetworkDirect && !isSupportedNetworkDirectLanguage(source.commandLanguage)) {
       toast({
         title: "Unsupported network-direct language",
-        description: "Choose ZPL, TSPL, EPL, or CPCL. Use the workstation or office printer path for other printer types.",
+        description: `Choose a certified raw TCP language. Supported today: ${NETWORK_DIRECT_SUPPORTED_LANGUAGE_LABEL}. Use the connector-managed or IPP path for other printers.`,
         variant: "destructive",
       });
       return null;
@@ -460,7 +502,17 @@ export default function PrinterDiagnostics() {
             connectionType: "NETWORK_DIRECT" as const,
             ipAddress,
             port,
-            commandLanguage: source.commandLanguage as "ZPL" | "TSPL" | "EPL" | "CPCL",
+            commandLanguage: source.commandLanguage as
+              | "ZPL"
+              | "TSPL"
+              | "SBPL"
+              | "EPL"
+              | "DPL"
+              | "HONEYWELL_DP"
+              | "HONEYWELL_FINGERPRINT"
+              | "IPL"
+              | "ZSIM"
+              | "CPCL",
             isDefault: params?.printerId ? undefined : !hasActiveDefault,
           }
         : {
@@ -509,6 +561,13 @@ export default function PrinterDiagnostics() {
         } else {
           detail = sanitizePrinterUiError(validation.error, "Printer profile saved, but the connection still needs attention.");
         }
+      }
+
+      if (validated && savedPrinterId) {
+        const certified = await runPrinterDiscovery(savedPrinterId);
+        detail = certified
+          ? "Printer profile saved, validated, and certified for controlled production dispatch."
+          : "Printer profile saved and validated, but discovery flagged it for review before production print.";
       }
 
       toast({
@@ -630,6 +689,43 @@ export default function PrinterDiagnostics() {
     }
   };
 
+  const runPrinterDiscovery = async (printerId: string) => {
+    setDiscoveringPrinterId(printerId);
+    try {
+      const response = await apiClient.discoverRegisteredPrinter(printerId);
+      if (!response.success) {
+        toast({
+          title: "Discovery needs attention",
+          description: sanitizePrinterUiError(response.error, "Capability discovery could not complete right now."),
+          variant: "destructive",
+        });
+        return false;
+      }
+
+      const certification = (response.data as { certification?: { summary?: string; warnings?: string[]; mismatches?: string[] } } | undefined)
+        ?.certification;
+      const mismatchCount = Array.isArray(certification?.mismatches) ? certification.mismatches.length : 0;
+      const warningCount = Array.isArray(certification?.warnings) ? certification.warnings.length : 0;
+      const summary =
+        certification?.summary ||
+        (mismatchCount > 0
+          ? "This printer still needs review before production print."
+          : warningCount > 0
+            ? "Discovery completed with warnings."
+            : "Printer discovery and certification completed.");
+
+      toast({
+        title: mismatchCount > 0 ? "Printer needs review" : "Discovery complete",
+        description: summary,
+        variant: mismatchCount > 0 ? "destructive" : "default",
+      });
+      await loadRegisteredPrinters();
+      return mismatchCount === 0;
+    } finally {
+      setDiscoveringPrinterId(null);
+    }
+  };
+
   const removeNetworkPrinter = async (printer: RegisteredPrinterRow) => {
     if (printer.connectionType === "LOCAL_AGENT") return;
     const confirmed = window.confirm(
@@ -671,61 +767,73 @@ export default function PrinterDiagnostics() {
       <div className="space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-3xl font-bold">Printer Setup & Support</h1>
+            <h1 className="text-3xl font-bold">
+              {isGlobalPrinterAdmin ? "Printer Profiles & Certification" : "Printer Setup & Support"}
+            </h1>
             <p className="text-muted-foreground">
-              Review printer readiness, guided setup steps, and support-safe status summaries for this workstation.
+              {isGlobalPrinterAdmin
+                ? "Review certified profiles, capability discovery, and controlled network routes without exposing raw label payloads."
+                : "Review printer readiness, guided setup steps, and support-safe status summaries for this workstation."}
             </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => navigate("/connector-download")}>
-              Install Connector
-            </Button>
+            {isManufacturerUser ? (
+              <Button variant="outline" onClick={() => navigate("/connector-download")}>
+                Install Connector
+              </Button>
+            ) : null}
             <Button variant="outline" onClick={() => void loadDiagnostics()} disabled={loading} className="gap-2">
               <RefreshCw className="h-4 w-4" />
-              {loading ? "Refreshing..." : "Refresh status"}
+              {loading ? "Refreshing..." : isGlobalPrinterAdmin ? "Refresh inventory" : "Refresh status"}
             </Button>
-            <Button variant="outline" onClick={copySupportSummary} className="gap-2">
-              <Copy className="h-4 w-4" />
-              Copy support summary
-            </Button>
-            <Button variant="outline" onClick={() => navigate("/batches")}>
-              Open batches
-            </Button>
+            {isManufacturerUser ? (
+              <>
+                <Button variant="outline" onClick={copySupportSummary} className="gap-2">
+                  <Copy className="h-4 w-4" />
+                  Copy support summary
+                </Button>
+                <Button variant="outline" onClick={() => navigate("/batches")}>
+                  Open batches
+                </Button>
+              </>
+            ) : null}
             <Button variant="outline" onClick={() => navigate(contextualHelpRoute)}>
               Open help
             </Button>
           </div>
         </div>
 
-        <Card className={statusClasses}>
-          <CardContent className="pt-6">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="text-lg font-semibold">{effectiveSummary.title}</div>
-                  <Badge variant={effectiveSummary.tone === "danger" ? "destructive" : "secondary"}>{effectiveSummary.badgeLabel}</Badge>
-                </div>
-                <p className="text-sm leading-6">{effectiveSummary.summary}</p>
-                <p className="text-xs leading-5 opacity-90">{effectiveSummary.detail}</p>
-              </div>
+        {isManufacturerUser ? (
+          <>
+            <Card className={statusClasses}>
+              <CardContent className="pt-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-lg font-semibold">{effectiveSummary.title}</div>
+                      <Badge variant={effectiveSummary.tone === "danger" ? "destructive" : "secondary"}>{effectiveSummary.badgeLabel}</Badge>
+                    </div>
+                    <p className="text-sm leading-6">{effectiveSummary.summary}</p>
+                    <p className="text-xs leading-5 opacity-90">{effectiveSummary.detail}</p>
+                  </div>
 
-              <div className="grid gap-2 text-xs lg:min-w-[16rem]">
-                <div className="rounded-xl border border-white/60 bg-white/60 px-3 py-2">
-                  <div className="font-medium opacity-70">Agent check</div>
-                  <div className="mt-1 font-semibold">{checkedLabel}</div>
+                  <div className="grid gap-2 text-xs lg:min-w-[16rem]">
+                    <div className="rounded-xl border border-white/60 bg-white/60 px-3 py-2">
+                      <div className="font-medium opacity-70">Agent check</div>
+                      <div className="mt-1 font-semibold">{checkedLabel}</div>
+                    </div>
+                    <div className="rounded-xl border border-white/60 bg-white/60 px-3 py-2">
+                      <div className="font-medium opacity-70">Selected printer</div>
+                      <div className="mt-1 font-semibold">{effectiveSummary.selectedPrinter?.printerName || remoteStatus?.selectedPrinterName || "—"}</div>
+                    </div>
+                  </div>
                 </div>
-                <div className="rounded-xl border border-white/60 bg-white/60 px-3 py-2">
-                  <div className="font-medium opacity-70">Selected printer</div>
-                  <div className="mt-1 font-semibold">{effectiveSummary.selectedPrinter?.printerName || remoteStatus?.selectedPrinterName || "—"}</div>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          <Card>
+            <div className="grid gap-4 lg:grid-cols-3">
+              <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Activity className="h-4 w-4" />
@@ -750,7 +858,7 @@ export default function PrinterDiagnostics() {
             </CardContent>
           </Card>
 
-          <Card>
+              <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <ShieldAlert className="h-4 w-4" />
@@ -777,7 +885,7 @@ export default function PrinterDiagnostics() {
             </CardContent>
           </Card>
 
-          <Card>
+              <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Wifi className="h-4 w-4" />
@@ -799,9 +907,9 @@ export default function PrinterDiagnostics() {
               ))}
             </CardContent>
           </Card>
-        </div>
+            </div>
 
-        <Card>
+            <Card>
           <CardHeader>
             <CardTitle className="text-base">Workstation requirements</CardTitle>
           </CardHeader>
@@ -883,7 +991,23 @@ export default function PrinterDiagnostics() {
               </div>
             </div>
           </CardContent>
-        </Card>
+            </Card>
+          </>
+        ) : (
+          <Card className="border-slate-200 bg-slate-50">
+            <CardContent className="pt-6 text-sm text-slate-700">
+              <div className="font-semibold text-slate-900">Global printer inventory</div>
+              <p className="mt-2 max-w-3xl leading-6">
+                This admin view is focused on certified routes, capability discovery, and mismatch review. Workstation connector diagnostics stay in the manufacturer setup flow.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Badge variant="secondary">{managedNetworkPrinters.length} managed routes</Badge>
+                <Badge variant={managedPrinterReadyCount > 0 ? "default" : "secondary"}>{managedPrinterReadyCount} certified / ready</Badge>
+                <Badge variant={managedPrinterAttentionCount > 0 ? "secondary" : "outline"}>{managedPrinterAttentionCount} needs review</Badge>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>
@@ -908,7 +1032,7 @@ export default function PrinterDiagnostics() {
                 Best for controlled factory LAN printers with a stable IP address and approved raw TCP access.
               </p>
               <ul className="mt-3 list-disc space-y-2 pl-5 text-xs">
-                <li>Current direct-dispatch languages: ZPL, TSPL, EPL, and CPCL.</li>
+                <li>Current direct-dispatch languages: {NETWORK_DIRECT_SUPPORTED_LANGUAGE_LABEL}.</li>
                 <li>Printer must be registered here first. Freeform IP/port entry during print is not allowed.</li>
                 <li>Use <strong>Check</strong> after registration to confirm connectivity and language readiness.</li>
               </ul>
@@ -979,7 +1103,9 @@ export default function PrinterDiagnostics() {
                 className="rounded-2xl border bg-background p-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
               >
                 <div className="text-sm font-semibold text-foreground">Factory label printer</div>
-                <div className="mt-2 text-xs leading-5 text-muted-foreground">Save a ZPL, TSPL, EPL, or CPCL network route and validate it before batch printing.</div>
+                <div className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Save a raw TCP industrial printer route for {NETWORK_DIRECT_SUPPORTED_LANGUAGE_LABEL} and validate it before batch printing.
+                </div>
               </button>
               <button
                 type="button"
@@ -1017,6 +1143,7 @@ export default function PrinterDiagnostics() {
           gatewayProvisioningSecret={gatewayProvisioningSecret}
           savingNetworkPrinter={savingNetworkPrinter}
           testingPrinterId={testingPrinterId}
+          discoveringPrinterId={discoveringPrinterId}
           deletingPrinterId={deletingPrinterId}
           onRefreshNow={loadDiagnostics}
           onUseAutoDetectedPrinter={useAutoDetectedPrinter}
@@ -1025,91 +1152,94 @@ export default function PrinterDiagnostics() {
           onResetNetworkPrinterForm={resetNetworkPrinterForm}
           onSaveNetworkPrinter={saveNetworkPrinter}
           onRunPrinterTest={runPrinterTest}
+          onRunPrinterDiscovery={runPrinterDiscovery}
           onRemoveNetworkPrinter={removeNetworkPrinter}
         />
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Wrench className="h-4 w-4" />
-              Discovered printers
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div className="space-y-2">
-                <div className="text-sm text-muted-foreground">Active printer selection</div>
-                <Select value={selectedPrinterId || "__none__"} onValueChange={(value) => setSelectedPrinterId(value === "__none__" ? "" : value)}>
-                  <SelectTrigger className="sm:w-[24rem]">
-                    <SelectValue placeholder="Select printer" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {detectedPrinters.length === 0 ? (
-                      <SelectItem value="__none__" disabled>
-                        No printers discovered
-                      </SelectItem>
-                    ) : (
-                      detectedPrinters.map((row) => (
-                        <SelectItem key={row.printerId} value={row.printerId}>
-                          {row.printerName}
-                          {row.connection ? ` · ${row.connection}` : ""}
-                          {row.online === false ? " · offline" : ""}
+        {isManufacturerUser ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Wrench className="h-4 w-4" />
+                Discovered printers
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div className="space-y-2">
+                  <div className="text-sm text-muted-foreground">Active printer selection</div>
+                  <Select value={selectedPrinterId || "__none__"} onValueChange={(value) => setSelectedPrinterId(value === "__none__" ? "" : value)}>
+                    <SelectTrigger className="sm:w-[24rem]">
+                      <SelectValue placeholder="Select printer" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {detectedPrinters.length === 0 ? (
+                        <SelectItem value="__none__" disabled>
+                          No printers discovered
                         </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
+                      ) : (
+                        detectedPrinters.map((row) => (
+                          <SelectItem key={row.printerId} value={row.printerId}>
+                            {row.printerName}
+                            {row.connection ? ` · ${row.connection}` : ""}
+                            {row.online === false ? " · offline" : ""}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <Button variant="outline" disabled={!selectedPrinterId || detectedPrinters.length === 0} onClick={switchSelectedPrinter}>
+                  Switch active printer
+                </Button>
               </div>
 
-              <Button variant="outline" disabled={!selectedPrinterId || detectedPrinters.length === 0} onClick={switchSelectedPrinter}>
-                Switch active printer
-              </Button>
-            </div>
-
-            {detectedPrinters.length === 0 ? (
-              <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
-                {preferredManagedNetworkPrinter ? (
-                  <>
-                    No local-agent printers were reported. The registered network printer
-                    <span className="mx-1 font-medium text-foreground">{preferredManagedNetworkPrinter.name}</span>
-                    can still be used from batch operations once it validates successfully.
-                  </>
-                ) : (
-                  "No workstation printers were reported by the connector."
-                )}
-              </div>
-            ) : (
-              <div className="grid gap-3 md:grid-cols-2">
-                {detectedPrinters.map((printer) => {
-                  const active = printer.printerId === selectedPrinterId;
-                  return (
-                    <div key={printer.printerId} className="rounded-xl border p-4">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="font-semibold">{printer.printerName}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {printer.model || "Unknown model"}
-                            {printer.connection ? ` · ${printer.connection}` : ""}
+              {detectedPrinters.length === 0 ? (
+                <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+                  {preferredManagedNetworkPrinter ? (
+                    <>
+                      No local-agent printers were reported. The registered network printer
+                      <span className="mx-1 font-medium text-foreground">{preferredManagedNetworkPrinter.name}</span>
+                      can still be used from batch operations once it validates successfully.
+                    </>
+                  ) : (
+                    "No workstation printers were reported by the connector."
+                  )}
+                </div>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {detectedPrinters.map((printer) => {
+                    const active = printer.printerId === selectedPrinterId;
+                    return (
+                      <div key={printer.printerId} className="rounded-xl border p-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="font-semibold">{printer.printerName}</div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {printer.model || "Unknown model"}
+                              {printer.connection ? ` · ${printer.connection}` : ""}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {active && <Badge variant="default">Selected</Badge>}
+                            {printer.isDefault && <Badge variant="secondary">Default</Badge>}
+                            {printer.online === false ? <Badge variant="destructive">Offline</Badge> : <Badge variant="secondary">Online</Badge>}
                           </div>
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                          {active && <Badge variant="default">Selected</Badge>}
-                          {printer.isDefault && <Badge variant="secondary">Default</Badge>}
-                          {printer.online === false ? <Badge variant="destructive">Offline</Badge> : <Badge variant="secondary">Online</Badge>}
+                        <div className="mt-3 text-xs text-muted-foreground">
+                          {printer.online === false
+                            ? "This printer is currently unavailable on the workstation."
+                            : "Available on this workstation for printer selection and print jobs."}
                         </div>
                       </div>
-                      <div className="mt-3 text-xs text-muted-foreground">
-                        {printer.online === false
-                          ? "This printer is currently unavailable on the workstation."
-                          : "Available on this workstation for printer selection and print jobs."}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
     </DashboardLayout>
   );

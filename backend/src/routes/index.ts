@@ -124,6 +124,7 @@ import {
   getManufacturerPrintJobStatus,
   issueDirectPrintTokens,
   listManufacturerPrintJobs,
+  reissueManufacturerPrintJob,
   reportDirectPrintFailure,
   resolveDirectPrintToken,
 } from "../controllers/printJobController";
@@ -133,8 +134,14 @@ import {
   reportPrinterHeartbeat,
 } from "../controllers/printerAgentController";
 import {
+  claimLocalAgentPrintJob,
+  confirmLocalAgentPrintJob,
+  failLocalAgentPrintJob,
+} from "../controllers/printerAgentJobController";
+import {
   createNetworkPrinter,
   deleteNetworkPrinter,
+  discoverPrinter,
   listPrinters,
   testPrinter,
   updateNetworkPrinter,
@@ -702,6 +709,9 @@ router.delete("/qr/codes", authenticate, requireAnyAdmin, enforceTenantIsolation
 // ==================== MANUFACTURER PRINT JOBS ====================
 router.post("/print-gateway/heartbeat", ...gatewayHeartbeatLimiters, gatewayHeartbeat);
 router.post("/print-gateway/ipp/claim", ...gatewayJobLimiters, claimGatewayIppJob);
+router.post("/printer-agent/local/claim", ...gatewayJobLimiters, claimLocalAgentPrintJob);
+router.post("/printer-agent/local/confirm", ...gatewayJobLimiters, confirmLocalAgentPrintJob);
+router.post("/printer-agent/local/fail", ...gatewayJobLimiters, failLocalAgentPrintJob);
 router.post("/print-gateway/ipp/confirm", ...gatewayJobLimiters, confirmGatewayIppJob);
 router.post("/print-gateway/ipp/fail", ...gatewayJobLimiters, failGatewayIppJob);
 
@@ -739,14 +749,14 @@ router.post(
 router.get(
   "/manufacturer/printers",
   authenticate,
-  requireManufacturer,
+  requireOpsUser,
   enforceTenantIsolation,
   listPrinters
 );
 router.post(
   "/manufacturer/printers",
   authenticate,
-  requireManufacturer,
+  requireOpsUser,
   enforceTenantIsolation,
   ...printMutationLimiters,
   requireCsrf,
@@ -755,7 +765,7 @@ router.post(
 router.patch(
   "/manufacturer/printers/:id",
   authenticate,
-  requireManufacturer,
+  requireOpsUser,
   enforceTenantIsolation,
   ...printMutationLimiters,
   requireCsrf,
@@ -764,7 +774,7 @@ router.patch(
 router.delete(
   "/manufacturer/printers/:id",
   authenticate,
-  requireManufacturer,
+  requireOpsUser,
   enforceTenantIsolation,
   ...printMutationLimiters,
   requireCsrf,
@@ -773,25 +783,43 @@ router.delete(
 router.post(
   "/manufacturer/printers/:id/test",
   authenticate,
-  requireManufacturer,
+  requireOpsUser,
   enforceTenantIsolation,
   ...printMutationLimiters,
   requireCsrf,
   testPrinter
 );
+router.post(
+  "/manufacturer/printers/:id/discover",
+  authenticate,
+  requireOpsUser,
+  enforceTenantIsolation,
+  ...printMutationLimiters,
+  requireCsrf,
+  discoverPrinter
+);
 router.get(
   "/manufacturer/print-jobs",
   authenticate,
-  requireManufacturer,
+  requireOpsUser,
   enforceTenantIsolation,
   listManufacturerPrintJobs
 );
 router.get(
   "/manufacturer/print-jobs/:id",
   authenticate,
-  requireManufacturer,
+  requireOpsUser,
   enforceTenantIsolation,
   getManufacturerPrintJobStatus
+);
+router.post(
+  "/manufacturer/print-jobs/:id/reissue",
+  authenticate,
+  requireOpsUser,
+  enforceTenantIsolation,
+  ...printMutationLimiters,
+  requireCsrf,
+  reissueManufacturerPrintJob
 );
 router.get(
   "/manufacturer/print-jobs/:id/pack",

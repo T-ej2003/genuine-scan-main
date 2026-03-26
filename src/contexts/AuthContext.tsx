@@ -41,6 +41,7 @@ function normalizeUser(u: any): User {
     email: String(u.email),
     name: String(u.name ?? ""),
     role: normalizeRole(u.role),
+    rawRole: String(u.role || "").trim().toUpperCase() || null,
     emailVerifiedAt: u.emailVerifiedAt ?? null,
     pendingEmail: u.pendingEmail ?? null,
     pendingEmailRequestedAt: u.pendingEmailRequestedAt ?? null,

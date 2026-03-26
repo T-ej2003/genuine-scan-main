@@ -8,7 +8,13 @@ import apiClient from "@/lib/api-client";
 
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
-    user: { id: "manufacturer-1", role: "manufacturer", name: "Factory User", email: "factory@example.com" },
+    user: {
+      id: "manufacturer-1",
+      role: "manufacturer",
+      rawRole: "MANUFACTURER_ADMIN",
+      name: "Factory User",
+      email: "factory@example.com",
+    },
   }),
 }));
 
@@ -33,10 +39,12 @@ vi.mock("@/lib/api-client", () => ({
     getPrinterConnectionStatus: vi.fn(),
     listRegisteredPrinters: vi.fn(),
     testRegisteredPrinter: vi.fn(),
+    discoverRegisteredPrinter: vi.fn(),
     deleteRegisteredPrinter: vi.fn(),
     createNetworkPrinter: vi.fn(),
     updateNetworkPrinter: vi.fn(),
     selectLocalPrinter: vi.fn(),
+    configureLocalPrintAgentBackend: vi.fn(),
   },
 }));
 
@@ -96,6 +104,18 @@ describe("PrinterDiagnostics managed printer controls", () => {
         },
       },
     } as any);
+    vi.mocked(apiClient.discoverRegisteredPrinter).mockResolvedValue({
+      success: true,
+      data: {
+        certification: {
+          status: "CERTIFIED",
+          summary: "Printer profile discovered and certified.",
+          warnings: [],
+          mismatches: [],
+        },
+      },
+    } as any);
+    vi.mocked(apiClient.configureLocalPrintAgentBackend).mockResolvedValue({ success: true } as any);
   });
 
   it("opens the network route dialog from the saved network route card", async () => {
@@ -117,6 +137,7 @@ describe("PrinterDiagnostics managed printer controls", () => {
 
     expect(screen.getAllByText("Line 1 Zebra").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Check" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /discover & certify/i }).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /remove/i }).length).toBeGreaterThan(0);
   });
@@ -139,7 +160,9 @@ describe("PrinterDiagnostics managed printer controls", () => {
     });
 
     expect(screen.getByRole("button", { name: /save setup/i })).toBeInTheDocument();
-    expect(screen.getByText(/Save a raw TCP endpoint for ZPL, TSPL, EPL, or CPCL dispatch/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Save a raw TCP endpoint for ZPL, TSPL, SBPL, EPL, DPL, Honeywell DP, Honeywell Fingerprint, IPL, ZSim, CPCL dispatch/i)
+    ).toBeInTheDocument();
   });
 
   it("can prefill the network route form from an auto-detected raw TCP printer", async () => {

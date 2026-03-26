@@ -54,11 +54,7 @@ type BatchPrintOperationContext = PrintProgressSetters & {
   onBatchesChanged?: () => Promise<void> | void;
   loadRecentPrintJobs: () => Promise<void>;
   setPrintJobId: Dispatch<SetStateAction<string>>;
-  setPrintLockToken: Dispatch<SetStateAction<string>>;
-  setPrintJobTokensCount: Dispatch<SetStateAction<number>>;
   printJobId: string;
-  printLockToken: string;
-  printJobTokensCount: number;
   directRemainingToPrint: number | null;
 };
 
@@ -156,271 +152,6 @@ export const pollPrintJobUntilSettled = async (
   return { settled: false as const, job: latest };
 };
 
-export const runAutoDirectPrint = async (
-  jobId: string,
-  lockToken: string,
-  requestedQty: number,
-  context: Pick<
-    BatchPrintOperationContext,
-    | "selectedPrinterId"
-    | "printerStatus"
-    | "buildCalibrationPayload"
-    | "autoReportPrinterFailure"
-    | "setPrintProgressOpen"
-    | "setPrintProgressTotal"
-    | "setPrintProgressPrinted"
-    | "setPrintProgressRemaining"
-    | "setPrintProgressCurrentCode"
-    | "setPrintProgressError"
-    | "setPrintProgressPhase"
-    | "setDirectRemainingToPrint"
-  >
-) => {
-  const {
-    selectedPrinterId,
-    printerStatus,
-    buildCalibrationPayload,
-    autoReportPrinterFailure,
-    setPrintProgressOpen,
-    setPrintProgressTotal,
-    setPrintProgressPrinted,
-    setPrintProgressRemaining,
-    setPrintProgressCurrentCode,
-    setPrintProgressError,
-    setPrintProgressPhase,
-    setDirectRemainingToPrint,
-  } = context;
-
-  let printedCount = 0;
-  let remainingToPrint = Math.max(0, requestedQty);
-  let guard = 0;
-
-  setPrintProgressOpen(true);
-  setPrintProgressTotal(requestedQty);
-  setPrintProgressPrinted(0);
-  setPrintProgressRemaining(remainingToPrint);
-  setPrintProgressCurrentCode(null);
-  setPrintProgressError(null);
-  setPrintProgressPhase("Issuing one-time render tokens");
-
-  while (remainingToPrint > 0 && guard < 600) {
-    guard += 1;
-    const nextBatchSize = Math.max(1, Math.min(250, remainingToPrint));
-    const issueResponse = await apiClient.requestDirectPrintTokens(jobId, lockToken, nextBatchSize);
-    if (!issueResponse.success) {
-      const safeError = sanitizePrinterUiError(
-        issueResponse.error,
-        "Printing could not continue right now. Start a fresh print job and try again."
-      );
-      setPrintProgressError(safeError);
-      return { success: false, printedCount, remainingToPrint, error: safeError };
-    }
-
-    const issueData = (issueResponse.data || {}) as {
-      items?: Array<{ printItemId: string; qrId: string; code: string; renderToken: string }>;
-      remainingToPrint?: number;
-      jobConfirmed?: boolean;
-    };
-    const items = Array.isArray(issueData.items) ? issueData.items : [];
-
-    if (typeof issueData.remainingToPrint === "number") {
-      remainingToPrint = issueData.remainingToPrint;
-      setDirectRemainingToPrint(issueData.remainingToPrint);
-      setPrintProgressRemaining(issueData.remainingToPrint);
-    }
-
-    if (items.length === 0) {
-      if (issueData.jobConfirmed || remainingToPrint === 0) {
-        setPrintProgressPhase("Print session completed");
-        return { success: true, printedCount, remainingToPrint: 0, error: null };
-      }
-
-      const pausedMessage = "Printing paused before all labels were confirmed. Retry the remaining labels.";
-      setPrintProgressError(pausedMessage);
-      return { success: false, printedCount, remainingToPrint, error: pausedMessage };
-    }
-
-    for (const item of items) {
-      setPrintProgressPhase("Resolving token and sending print command");
-      setPrintProgressCurrentCode(item.code);
-
-      const resolveResponse = await apiClient.resolveDirectPrintToken(jobId, {
-        printLockToken: lockToken,
-        renderToken: item.renderToken,
-      });
-
-      if (!resolveResponse.success) {
-        const safeError = sanitizePrinterUiError(
-          resolveResponse.error,
-          "Printing could not continue right now. Start a fresh print job and try again."
-        );
-        await apiClient.reportDirectPrintFailure(jobId, {
-          printLockToken: lockToken,
-          reason: resolveResponse.error || `Failed to resolve render token for ${item.code}.`,
-          printItemId: item.printItemId,
-          retries: 0,
-        });
-        setPrintProgressError(safeError);
-        void autoReportPrinterFailure({
-          context: "resolve_direct_print_token",
-          reason: resolveResponse.error || `Failed to resolve render token for ${item.code}.`,
-          diagnostics: { jobId, printItemId: item.printItemId, code: item.code },
-        });
-        return { success: false, printedCount, remainingToPrint, error: safeError };
-      }
-
-      const resolvedData = (resolveResponse.data || {}) as {
-        printItemId?: string;
-        scanUrl?: string;
-        payloadContent?: string;
-        payloadHash?: string;
-        payloadType?: string;
-        previewLabel?: string;
-        commandLanguage?: string;
-        printer?: { nativePrinterId?: string };
-      };
-      const printItemId = String(resolvedData.printItemId || item.printItemId || "").trim();
-      const scanUrl = String(resolvedData.scanUrl || "").trim();
-      const payloadContent = String(resolvedData.payloadContent || "");
-      const payloadHash = String(resolvedData.payloadHash || "").trim();
-      const payloadType = String(resolvedData.payloadType || "").trim();
-
-      if (!scanUrl || !printItemId || !payloadContent || !payloadHash || !payloadType) {
-        await apiClient.reportDirectPrintFailure(jobId, {
-          printLockToken: lockToken,
-          reason: `Resolved token missing print session metadata for ${item.code}.`,
-          printItemId: printItemId || item.printItemId,
-          retries: 0,
-        });
-        const incompleteMessage =
-          "Printing could not continue because this secure print session is incomplete. Start a fresh print job.";
-        setPrintProgressError(incompleteMessage);
-        return { success: false, printedCount, remainingToPrint, error: incompleteMessage };
-      }
-
-      const localPrintResponse = await apiClient.printWithLocalAgent({
-        printJobId: jobId,
-        qrId: item.qrId,
-        code: item.code,
-        scanUrl,
-        payloadType: resolvedData.payloadType as
-          | "ZPL"
-          | "TSPL"
-          | "SBPL"
-          | "EPL"
-          | "CPCL"
-          | "ESC_POS"
-          | "JSON"
-          | "OTHER"
-          | undefined,
-        payloadContent,
-        payloadHash,
-        previewLabel: resolvedData.previewLabel || undefined,
-        commandLanguage: resolvedData.commandLanguage || undefined,
-        copies: 1,
-        printerId:
-          selectedPrinterId || printerStatus.selectedPrinterId || resolvedData.printer?.nativePrinterId || undefined,
-        printPath: "auto",
-        labelLanguage:
-          resolvedData.commandLanguage && resolvedData.commandLanguage !== "OTHER"
-            ? (resolvedData.commandLanguage as "AUTO" | "ZPL" | "EPL" | "CPCL" | "TSPL" | "ESC_POS")
-            : "AUTO",
-        mediaSize:
-          (printerStatus.capabilitySummary?.mediaSizes && printerStatus.capabilitySummary.mediaSizes[0]) || undefined,
-        calibrationProfile: buildCalibrationPayload(),
-      });
-
-      if (!localPrintResponse.success) {
-        const safeError = sanitizePrinterUiError(
-          localPrintResponse.error,
-          "The workstation printer could not complete this label."
-        );
-        await apiClient.reportDirectPrintFailure(jobId, {
-          printLockToken: lockToken,
-          reason: localPrintResponse.error || `Local print failed for ${item.code}.`,
-          printItemId,
-          retries: 0,
-          agentMetadata: {
-            selectedPrinterId: selectedPrinterId || printerStatus.selectedPrinterId || null,
-            printPath: "auto",
-            labelLanguage: "AUTO",
-            payloadType,
-            payloadHash,
-            calibrationProfile: buildCalibrationPayload(),
-          },
-        });
-        setPrintProgressError(safeError);
-        void autoReportPrinterFailure({
-          context: "local_print",
-          reason: localPrintResponse.error || `Local print failed for ${item.code}.`,
-          diagnostics: {
-            jobId,
-            printItemId,
-            code: item.code,
-            selectedPrinterId: selectedPrinterId || printerStatus.selectedPrinterId || null,
-            printPath: "auto",
-            labelLanguage: "AUTO",
-            payloadType,
-          },
-        });
-        return { success: false, printedCount, remainingToPrint, error: safeError };
-      }
-
-      setPrintProgressPhase("Confirming printed label with server");
-      const confirmResponse = await apiClient.confirmDirectPrintItem(jobId, {
-        printLockToken: lockToken,
-        printItemId,
-        agentMetadata: {
-          localPrintSuccess: true,
-          localAgentVersion: (localPrintResponse as { data?: { agentVersion?: string } }).data?.agentVersion || null,
-          selectedPrinterId: selectedPrinterId || printerStatus.selectedPrinterId || null,
-          selectedPrinterName: printerStatus.selectedPrinterName || printerStatus.printerName || null,
-          printPath: "auto",
-          labelLanguage: "AUTO",
-          payloadType,
-          payloadHash,
-          calibrationProfile: buildCalibrationPayload(),
-        },
-      });
-
-      if (!confirmResponse.success) {
-        const safeError = sanitizePrinterUiError(
-          confirmResponse.error,
-          "MSCQR could not confirm the printed labels. Start a fresh print job for any remaining quantity."
-        );
-        await apiClient.reportDirectPrintFailure(jobId, {
-          printLockToken: lockToken,
-          reason: confirmResponse.error || `Failed to confirm print item ${item.code}.`,
-          printItemId,
-          retries: 0,
-        });
-        setPrintProgressError(safeError);
-        return { success: false, printedCount, remainingToPrint, error: safeError };
-      }
-
-      const confirmData = (confirmResponse.data || {}) as { remainingToPrint?: number };
-      printedCount += 1;
-      setPrintProgressPrinted(printedCount);
-      if (typeof confirmData.remainingToPrint === "number") {
-        remainingToPrint = confirmData.remainingToPrint;
-        setDirectRemainingToPrint(confirmData.remainingToPrint);
-        setPrintProgressRemaining(confirmData.remainingToPrint);
-      }
-    }
-  }
-
-  setPrintProgressPhase(remainingToPrint === 0 ? "Print session completed" : "Print session paused");
-  return {
-    success: remainingToPrint === 0,
-    printedCount,
-    remainingToPrint,
-    error:
-      remainingToPrint === 0
-        ? null
-        : "Auto print stopped before all labels completed. Retry the remaining labels.",
-  };
-};
-
 export const createPrintJob = async (context: BatchPrintOperationContext) => {
   const {
     toast,
@@ -439,8 +170,6 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
     onBatchesChanged,
     loadRecentPrintJobs,
     setPrintJobId,
-    setPrintLockToken,
-    setPrintJobTokensCount,
     setPrintProgressOpen,
     setPrintProgressPhase,
     setPrintProgressError,
@@ -574,6 +303,13 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
   setPrintProgressPrinterName(selectedPrinterProfile.name);
   setPrintProgressDispatchMode(selectedPrinterProfile.connectionType);
 
+  if (selectedPrinterProfile.connectionType === "LOCAL_AGENT") {
+    const backendConfiguration = await apiClient.configureLocalPrintAgentBackend(window.location.origin);
+    if (!backendConfiguration.success) {
+      console.warn("Local print agent backend configuration failed:", backendConfiguration.error);
+    }
+  }
+
   const response = await apiClient.createPrintJob({
     batchId: printBatch.id,
     printerId: selectedPrinterProfile.id,
@@ -600,20 +336,17 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
 
   const data = (response.data || {}) as {
     printJobId?: string;
-    printLockToken?: string;
     tokenCount?: number;
     mode?: string;
+    pipelineState?: string;
     printer?: { name?: string };
   };
   setPrintJobId(data.printJobId || "");
-  setPrintLockToken(data.printLockToken || "");
-  setPrintJobTokensCount(typeof data.tokenCount === "number" ? data.tokenCount : 0);
   setDirectRemainingToPrint(typeof data.tokenCount === "number" ? data.tokenCount : null);
   setPrintProgressTotal(typeof data.tokenCount === "number" ? data.tokenCount : quantity);
   setPrintProgressRemaining(typeof data.tokenCount === "number" ? data.tokenCount : quantity);
 
   const createdJobId = String(data.printJobId || "").trim();
-  const createdLockToken = String(data.printLockToken || "").trim();
   const createdMode = String(data.mode || selectedPrinterProfile.connectionType).trim();
   const isServerDispatchedMode = createdMode === "NETWORK_DIRECT" || createdMode === "NETWORK_IPP";
 
@@ -680,50 +413,47 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
       });
     }
   } else {
-    if (!createdLockToken) {
-      const sessionMessage = "The workstation print session could not be started correctly. Please try again.";
-      toast({ title: "Print job setup incomplete", description: sessionMessage, variant: "destructive" });
-      setPrintProgressError(sessionMessage);
-      return;
-    }
-
     toast({
-      title: "Workstation print started",
-      description: `MSCQR is sending approved labels to ${selectedPrinterProfile.name}.`,
+      title: "Connector print started",
+      description: `MSCQR has queued approved labels for ${selectedPrinterProfile.name}. The connector will claim and print them securely.`,
     });
+    setPrintProgressPhase(
+      data.pipelineState === "QUEUED" ? "Waiting for connector claim" : "Connector print session active"
+    );
 
-    const autoResult = await runAutoDirectPrint(createdJobId, createdLockToken, typeof data.tokenCount === "number" ? data.tokenCount : quantity, context);
-
-    if (autoResult.success) {
+    const pollResult = await pollPrintJobUntilSettled(createdJobId, context, 60_000);
+    if (pollResult.settled && pollResult.job?.status === "CONFIRMED") {
       toast({
-        title: "Local print complete",
-        description: `${autoResult.printedCount} labels printed through the controlled local-agent pipeline.`,
+        title: "Connector print complete",
+        description: `${pollResult.job.session?.confirmedItems || quantity} labels were confirmed through the controlled connector pipeline.`,
       });
       setPrintProgressPhase("Completed");
       setPrintProgressError(null);
-    } else {
+    } else if (pollResult.settled && pollResult.job?.status === "FAILED") {
       const safeError = sanitizePrinterUiError(
-        autoResult.error,
-        `Printed ${autoResult.printedCount}. Remaining: ${autoResult.remainingToPrint}.`
+        pollResult.job.failureReason || pollResult.job.session?.failedReason,
+        "The connector or printer could not complete this label run."
       );
       toast({
-        title: "Workstation print needs attention",
+        title: "Connector print needs attention",
         description: safeError,
         variant: "destructive",
       });
       setPrintProgressError(safeError);
       void autoReportPrinterFailure({
-        context: "auto_print_flow",
-        reason:
-          autoResult.error ||
-          `Printed ${autoResult.printedCount}. Remaining: ${autoResult.remainingToPrint}.`,
+        context: "connector_print",
+        reason: safeError,
         diagnostics: {
           printJobId: createdJobId,
-          tokenCount: data.tokenCount,
-          printedCount: autoResult.printedCount,
-          remainingToPrint: autoResult.remainingToPrint,
+          printedCount: pollResult.job.session?.confirmedItems || 0,
+          remainingToPrint: pollResult.job.session?.remainingToPrint ?? null,
           printerId: selectedPrinterProfile.id,
         },
+      });
+    } else {
+      toast({
+        title: "Connector print continues in background",
+        description: "The secure connector is still processing this job. Refresh the print status to see the latest confirmed count.",
       });
     }
   }
@@ -736,14 +466,12 @@ export const retryPendingDirectPrint = async (context: BatchPrintOperationContex
   const {
     toast,
     printJobId,
-    printLockToken,
     directRemainingToPrint,
-    printJobTokensCount,
     loadRecentPrintJobs,
     setPrintProgressOpen,
   } = context;
 
-  if (!printJobId || !printLockToken) return;
+  if (!printJobId) return;
 
   setPrintProgressOpen(true);
   const statusResponse = await apiClient.getPrintJobStatus(printJobId);
@@ -751,23 +479,49 @@ export const retryPendingDirectPrint = async (context: BatchPrintOperationContex
     syncProgressFromPrintJob(statusResponse.data as PrintJobRow, context);
   }
 
-  const remaining =
-    ((statusResponse.data as PrintJobRow | undefined)?.session?.remainingToPrint ?? directRemainingToPrint ?? printJobTokensCount ?? 1);
-
-  const retryResult = await runAutoDirectPrint(printJobId, printLockToken, Math.max(1, remaining), context);
-  if (!retryResult.success) {
+  const latestJob = (statusResponse.data as PrintJobRow | undefined) || null;
+  if (latestJob?.status === "CONFIRMED") {
     toast({
-      title: "Retry needs attention",
+      title: "Print job already complete",
+      description: `${latestJob.session?.confirmedItems || latestJob.quantity} labels are already confirmed.`,
+    });
+    await loadRecentPrintJobs();
+    return;
+  }
+  if (latestJob?.status === "FAILED" || latestJob?.status === "CANCELLED") {
+    toast({
+      title: "Print job needs attention",
       description:
-        retryResult.error || `Printed ${retryResult.printedCount}. Remaining: ${retryResult.remainingToPrint}.`,
+        sanitizePrinterUiError(
+          latestJob?.failureReason || latestJob?.session?.failedReason,
+          latestJob?.status === "CANCELLED" ? "This print job was cancelled before completion." : "This print job needs attention."
+        ),
       variant: "destructive",
     });
     return;
   }
 
-  toast({
-    title: "Retry completed",
-    description: `${retryResult.printedCount} additional labels printed.`,
-  });
+  const remaining = latestJob?.session?.remainingToPrint ?? directRemainingToPrint ?? latestJob?.quantity ?? 1;
+  const pollResult = await pollPrintJobUntilSettled(printJobId, context, 45_000);
+  if (pollResult.settled && pollResult.job?.status === "CONFIRMED") {
+    toast({
+      title: "Print job completed",
+      description: `${pollResult.job.session?.confirmedItems || pollResult.job.quantity} labels are now confirmed.`,
+    });
+  } else if (pollResult.settled && pollResult.job?.status === "FAILED") {
+    toast({
+      title: "Print job needs attention",
+      description: sanitizePrinterUiError(
+        pollResult.job.failureReason || pollResult.job.session?.failedReason,
+        "The connector or printer could not complete the remaining labels."
+      ),
+      variant: "destructive",
+    });
+  } else {
+    toast({
+      title: "Print job still running",
+      description: `The connector still has ${remaining} label${remaining === 1 ? "" : "s"} to confirm.`,
+    });
+  }
   await loadRecentPrintJobs();
 };

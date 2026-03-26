@@ -6,7 +6,20 @@ export type RegisteredPrinterRow = {
   vendor?: string | null;
   model?: string | null;
   connectionType: "LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP";
-  commandLanguage: "AUTO" | "ZPL" | "TSPL" | "SBPL" | "EPL" | "CPCL" | "ESC_POS" | "OTHER";
+  commandLanguage:
+    | "AUTO"
+    | "ZPL"
+    | "TSPL"
+    | "SBPL"
+    | "EPL"
+    | "DPL"
+    | "HONEYWELL_DP"
+    | "HONEYWELL_FINGERPRINT"
+    | "IPL"
+    | "ZSIM"
+    | "CPCL"
+    | "ESC_POS"
+    | "OTHER";
   ipAddress?: string | null;
   host?: string | null;
   port?: number | null;
@@ -28,10 +41,41 @@ export type RegisteredPrinterRow = {
     summary: string;
     detail?: string | null;
   } | null;
+  printerProfile?: Record<string, unknown> | null;
+  latestDiscoverySnapshot?: Record<string, unknown> | null;
+  capabilityDiscovery?: Record<string, unknown> | null;
 };
 
-export const NETWORK_DIRECT_SUPPORTED_LANGUAGES = ["ZPL", "TSPL", "EPL", "CPCL"] as const;
+export const NETWORK_DIRECT_SUPPORTED_LANGUAGES = [
+  "ZPL",
+  "TSPL",
+  "SBPL",
+  "EPL",
+  "DPL",
+  "HONEYWELL_DP",
+  "HONEYWELL_FINGERPRINT",
+  "IPL",
+  "ZSIM",
+  "CPCL",
+] as const;
 export type NetworkDirectCommandLanguage = (typeof NETWORK_DIRECT_SUPPORTED_LANGUAGES)[number];
+
+export const NETWORK_DIRECT_LANGUAGE_LABELS: Record<NetworkDirectCommandLanguage, string> = {
+  ZPL: "ZPL",
+  TSPL: "TSPL",
+  SBPL: "SBPL",
+  EPL: "EPL",
+  DPL: "DPL",
+  HONEYWELL_DP: "Honeywell DP",
+  HONEYWELL_FINGERPRINT: "Honeywell Fingerprint",
+  IPL: "IPL",
+  ZSIM: "ZSim",
+  CPCL: "CPCL",
+};
+
+export const NETWORK_DIRECT_SUPPORTED_LANGUAGE_LABEL = NETWORK_DIRECT_SUPPORTED_LANGUAGES.map(
+  (language) => NETWORK_DIRECT_LANGUAGE_LABELS[language]
+).join(", ");
 
 export const isSupportedNetworkDirectLanguage = (
   value: RegisteredPrinterRow["commandLanguage"] | string | null | undefined

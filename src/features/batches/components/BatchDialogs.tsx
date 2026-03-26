@@ -150,12 +150,11 @@ type PrintJobDialogProps = {
   onStartPrint: () => void;
   selectedPrinterCanPrint: boolean;
   printJobId: string | null;
-  printLockToken: string | null;
   printProgressPrinterName: string | null;
   printProgressDispatchMode: string | null;
   formatDispatchModeLabel: (mode?: string | null) => string;
   directRemainingToPrint: number | null;
-  onRetryPendingLabels: () => void;
+  onRefreshPrintStatus: () => void;
   recentPrintJobs: PrintJobRow[];
   onClose: () => void;
 };
@@ -183,12 +182,11 @@ export function BatchPrintJobDialog({
   onStartPrint,
   selectedPrinterCanPrint,
   printJobId,
-  printLockToken,
   printProgressPrinterName,
   printProgressDispatchMode,
   formatDispatchModeLabel,
   directRemainingToPrint,
-  onRetryPendingLabels,
+  onRefreshPrintStatus,
   recentPrintJobs,
   onClose,
 }: PrintJobDialogProps) {
@@ -387,18 +385,16 @@ export function BatchPrintJobDialog({
               </div>
             ) : null}
 
-            {printJobId &&
-            printLockToken &&
-            selectedPrinterProfile?.connectionType === "LOCAL_AGENT" &&
-            directRemainingToPrint !== 0 ? (
+            {printJobId && selectedPrinterProfile?.connectionType === "LOCAL_AGENT" && directRemainingToPrint !== 0 ? (
               <div className="space-y-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm">
-                <div className="font-medium text-emerald-900">Continue remaining labels</div>
+                <div className="font-medium text-emerald-900">Connector is processing this run</div>
                 <div className="text-xs text-emerald-900">
-                  Retry only the labels that are still pending on this workstation.
+                  The connector continues claiming and confirming labels in the background. Refresh the job status when you
+                  need the latest confirmed count.
                 </div>
                 <div className="flex justify-end">
-                  <Button variant="outline" onClick={onRetryPendingLabels} disabled={printing || !printJobId}>
-                    Retry pending labels
+                  <Button variant="outline" onClick={onRefreshPrintStatus} disabled={printing || !printJobId}>
+                    Refresh print status
                   </Button>
                 </div>
               </div>
