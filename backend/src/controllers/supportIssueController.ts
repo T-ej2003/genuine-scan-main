@@ -10,6 +10,7 @@ import { sanitizeUnknownInput } from "../middleware/requestSanitizer";
 import { createAuditLog } from "../services/auditService";
 import { createRoleNotifications, createUserNotification } from "../services/notificationService";
 import { resolveSupportIssueUploadPath } from "../middleware/supportIssueUpload";
+import { downloadObjectBuffer, isObjectStorageConfigured, removeLocalFileIfExists, uploadObjectFromFile } from "../services/objectStorageService";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
 
 const toInt = (value: unknown, fallback: number, min: number, max: number) => {
@@ -71,6 +72,15 @@ export const createSupportIssueReport = async (req: AuthRequest, res: Response) 
     const screenshotMime = file?.mimetype || null;
     const screenshotSize = file?.size || null;
     const diagnostics = parseDiagnostics(parsed.data.diagnostics);
+
+    if (file?.path && screenshotPath && isObjectStorageConfigured()) {
+      await uploadObjectFromFile({
+        objectKey: screenshotPath,
+        filePath: file.path,
+        contentType: screenshotMime,
+      });
+      await removeLocalFileIfExists(file.path);
+    }
 
     const created = await prisma.supportIssueReport.create({
       data: {
@@ -332,9 +342,20 @@ export const serveSupportIssueScreenshot = async (req: Request, res: Response) =
       select: {
         reporterUserId: true,
         licenseeId: true,
+        screenshotMime: true,
       },
     });
     if (!report) return res.status(404).json({ success: false, error: "File not found" });
+
+    if (isObjectStorageConfigured()) {
+      const buffer = await downloadObjectBuffer(fileName);
+      if (buffer) {
+        if (report.screenshotMime) {
+          res.setHeader("Content-Type", report.screenshotMime);
+        }
+        return res.send(buffer);
+      }
+    }
 
     const resolved = resolveSupportIssueUploadPath(fileName);
     const uploadsRoot = path.resolve(__dirname, "../../uploads/support-issues");
@@ -342,6 +363,9 @@ export const serveSupportIssueScreenshot = async (req: Request, res: Response) =
       return res.status(400).json({ success: false, error: "Invalid file path" });
     }
     if (!fs.existsSync(resolved)) return res.status(404).json({ success: false, error: "File not found" });
+    if (report.screenshotMime) {
+      res.setHeader("Content-Type", report.screenshotMime);
+    }
     return res.sendFile(resolved);
   } catch (error) {
     console.error("serveSupportIssueScreenshot error:", error);

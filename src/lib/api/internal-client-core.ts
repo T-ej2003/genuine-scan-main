@@ -87,7 +87,8 @@ export function createApiClientCore(): ApiClientCore {
     endpoint === "/auth/login" ||
     endpoint === "/auth/refresh" ||
     endpoint === "/auth/logout" ||
-    endpoint === "/auth/accept-invite";
+    endpoint === "/auth/accept-invite" ||
+    endpoint.startsWith("/auth/mfa/");
 
   const request = async <T>(endpoint: string, options: RequestOptions = {}): Promise<ApiResponse<T>> => {
     const headers: Record<string, string> = {

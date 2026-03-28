@@ -27,11 +27,20 @@ export const signAccessToken = (payload: JWTPayload) => {
   const jwtSecret = getJwtSecret();
   const expiresInMinutes = getAccessTokenTtlMinutes();
   const opts: SignOptions = { expiresIn: `${expiresInMinutes}m`, header: { alg: "HS256", kid: getJwtSecretId() } };
-  return jwt.sign(payload, jwtSecret, opts);
+  return jwt.sign({ ...payload, sessionStage: "ACTIVE" } satisfies JWTPayload, jwtSecret, opts);
 };
 
 export const verifyAccessToken = (token: string): JWTPayload => {
-  return verifyJwtWithCurrentOrPrevious(token, (secret) => jwt.verify(token, secret) as JWTPayload);
+  const payload = verifyJwtWithCurrentOrPrevious(token, (secret) => jwt.verify(token, secret) as Partial<JWTPayload>);
+  if (
+    payload?.sessionStage !== "ACTIVE" ||
+    !payload.userId ||
+    !payload.email ||
+    !payload.role
+  ) {
+    throw new Error("INVALID_ACCESS_TOKEN");
+  }
+  return payload as JWTPayload;
 };
 
 export const signMfaBootstrapToken = (payload: Omit<MfaBootstrapPayload, "stage">) => {
@@ -45,7 +54,12 @@ export const signMfaBootstrapToken = (payload: Omit<MfaBootstrapPayload, "stage"
 
 export const verifyMfaBootstrapToken = (token: string): MfaBootstrapPayload => {
   const payload = verifyJwtWithCurrentOrPrevious(token, (secret) => jwt.verify(token, secret) as Partial<MfaBootstrapPayload>);
-  if (payload?.stage !== "MFA_BOOTSTRAP" || !payload.userId || !payload.email || !payload.role) {
+  if (
+    payload?.stage !== "MFA_BOOTSTRAP" ||
+    !payload.userId ||
+    !payload.email ||
+    !payload.role
+  ) {
     throw new Error("INVALID_MFA_BOOTSTRAP_TOKEN");
   }
   return payload as MfaBootstrapPayload;

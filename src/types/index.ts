@@ -1,4 +1,21 @@
 export type UserRole = "super_admin" | "licensee_admin" | "manufacturer";
+export type AuthSessionStage = "ACTIVE" | "MFA_BOOTSTRAP";
+export type AuthAssuranceLevel = "PASSWORD" | "ADMIN_MFA";
+
+export interface AuthState {
+  sessionStage: AuthSessionStage;
+  authAssurance: AuthAssuranceLevel;
+  mfaRequired: boolean;
+  mfaEnrolled: boolean;
+  authenticatedAt?: string | null;
+  mfaVerifiedAt?: string | null;
+  stepUpRequired?: boolean;
+}
+
+export interface PendingAuthSession {
+  user: User;
+  auth: AuthState;
+}
 export type QRStatus =
   | "DORMANT"
   | "ACTIVE"
@@ -39,6 +56,7 @@ export interface User {
   deletedAt?: string | null;
   location?: string | null;
   website?: string | null;
+  auth?: AuthState | null;
 }
 
 export interface Licensee {

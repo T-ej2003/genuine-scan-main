@@ -10,6 +10,8 @@ export const createRefreshToken = async (input: {
   rawToken: string;
   ipHash: string | null;
   userAgent: string | null;
+  authenticatedAt?: Date | null;
+  mfaVerifiedAt?: Date | null;
   now?: Date;
 }) => {
   const now = input.now || new Date();
@@ -24,6 +26,8 @@ export const createRefreshToken = async (input: {
       expiresAt,
       createdIpHash: input.ipHash,
       createdUserAgent: input.userAgent,
+      authenticatedAt: input.authenticatedAt || now,
+      mfaVerifiedAt: input.mfaVerifiedAt || null,
       lastUsedAt: now,
     },
   });
@@ -83,6 +87,8 @@ export const rotateRefreshToken = async (input: {
       orgId: string | null;
       newRawToken: string;
       newExpiresAt: Date;
+      authenticatedAt: Date | null;
+      mfaVerifiedAt: Date | null;
     }
   | {
       ok: false;
@@ -104,6 +110,8 @@ export const rotateRefreshToken = async (input: {
         expiresAt: true,
         revokedAt: true,
         replacedByTokenHash: true,
+        authenticatedAt: true,
+        mfaVerifiedAt: true,
       },
     });
 
@@ -147,6 +155,8 @@ export const rotateRefreshToken = async (input: {
         expiresAt: newExpiresAt,
         createdIpHash: input.ipHash,
         createdUserAgent: input.userAgent,
+        authenticatedAt: tokenRow.authenticatedAt || now,
+        mfaVerifiedAt: tokenRow.mfaVerifiedAt || null,
         lastUsedAt: now,
       },
     });
@@ -167,6 +177,8 @@ export const rotateRefreshToken = async (input: {
       orgId: tokenRow.orgId,
       newRawToken,
       newExpiresAt,
+      authenticatedAt: tokenRow.authenticatedAt || now,
+      mfaVerifiedAt: tokenRow.mfaVerifiedAt || null,
     } as const;
   });
 };

@@ -4,6 +4,7 @@ import { createTraceEventFromAuditLog } from "./traceEventService";
 import { hashIp, normalizeUserAgent } from "../utils/security";
 import { queueSecurityEvent } from "./siemOutboxService";
 import { appendForensicChainFromAuditLog } from "./forensicChainService";
+import { getRedisInstanceId, publishRedisJson, subscribeRedisJson } from "./redisService";
 
 export interface AuditLogInput {
   userId?: string;
@@ -21,8 +22,17 @@ export interface AuditLogInput {
 type Listener = (log: any) => void;
 
 const listeners = new Set<Listener>();
+const AUDIT_LOG_CHANNEL = "mscqr:realtime:audit-log";
+let auditChannelReady = false;
 
 export const onAuditLog = (cb: Listener) => {
+  if (!auditChannelReady) {
+    auditChannelReady = true;
+    void subscribeRedisJson(AUDIT_LOG_CHANNEL, (payload) => {
+      if (!payload || payload.origin === getRedisInstanceId()) return;
+      emitAuditLog(payload.log);
+    });
+  }
   listeners.add(cb);
   return () => listeners.delete(cb);
 };
@@ -108,6 +118,10 @@ export const createAuditLog = async (data: AuditLogInput) => {
     console.error("appendForensicChainFromAuditLog failed:", e);
   }
   emitAuditLog(log);
+  void publishRedisJson(AUDIT_LOG_CHANNEL, {
+    origin: getRedisInstanceId(),
+    log,
+  }).catch(() => undefined);
   await queueSecurityEvent("AUDIT_LOG", {
     id: log.id,
     action: log.action,

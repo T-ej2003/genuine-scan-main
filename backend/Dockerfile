@@ -16,9 +16,11 @@ RUN npx prisma generate
 
 COPY backend/tsconfig.json ./tsconfig.json
 COPY backend/src ./src
+COPY backend/tests ./tests
+COPY backend/scripts ./scripts
 COPY backend/local-print-agent ./local-print-agent
 COPY shared ../shared
-RUN npm run build
+RUN npm test
 
 FROM node:20-bookworm-slim AS runtime
 
@@ -31,6 +33,7 @@ RUN apt-get update \
 
 COPY backend/package*.json ./
 COPY backend/prisma ./prisma
+COPY backend/scripts ./scripts
 COPY backend/local-print-agent ./local-print-agent
 COPY --from=builder /workspace/backend/node_modules ./node_modules
 COPY --from=builder /workspace/backend/dist ./dist

@@ -1,3 +1,5 @@
+import { getRedisClient, isRedisConfigured } from "./redisService";
+
 type RateHitResult = {
   blocked: boolean;
   retryAfterSec: number;
@@ -40,7 +42,25 @@ const makeKey = (prefix: string, value: string | null | undefined) => {
   return `${prefix}:${normalized}`;
 };
 
-export const enforceIncidentRateLimit = (input: {
+const hitRedisKey = async (key: string): Promise<RateHitResult> => {
+  const redis = await getRedisClient();
+  if (!redis) return hitKey(key);
+
+  const namespacedKey = `incident:${key}`;
+  const count = await redis.incr(namespacedKey);
+  let ttlMs = await redis.pttl(namespacedKey);
+  if (ttlMs < 0) {
+    await redis.pexpire(namespacedKey, DEFAULT_WINDOW_MS);
+    ttlMs = DEFAULT_WINDOW_MS;
+  }
+
+  return {
+    blocked: count > DEFAULT_MAX_PER_KEY,
+    retryAfterSec: Math.max(1, Math.ceil(ttlMs / 1000)),
+  };
+};
+
+export const enforceIncidentRateLimit = async (input: {
   ip?: string | null;
   qrCode?: string | null;
   deviceFp?: string | null;
@@ -58,7 +78,7 @@ export const enforceIncidentRateLimit = (input: {
 
   let maxRetry = 0;
   for (const key of keys) {
-    const result = hitKey(key);
+    const result = isRedisConfigured() ? await hitRedisKey(key) : hitKey(key);
     if (result.retryAfterSec > maxRetry) maxRetry = result.retryAfterSec;
     if (result.blocked) {
       return { blocked: true, retryAfterSec: result.retryAfterSec };

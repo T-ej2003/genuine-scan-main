@@ -1,4 +1,56 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: genuine-scan-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - app
+
+  minio:
+    image: minio/minio:latest
+    container_name: genuine-scan-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-mscqrminio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-mscqrminiochange}
+    volumes:
+      - minio_data:/data
+    expose:
+      - "9000"
+      - "9001"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - app
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: genuine-scan-minio-init
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c
+      "mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-mscqrminio} ${MINIO_ROOT_PASSWORD:-mscqrminiochange} &&
+      mc mb --ignore-existing local/${OBJECT_STORAGE_BUCKET:-mscqr-artifacts}"
+    networks:
+      - app
+
   backend:
     build:
       context: .
@@ -13,20 +65,75 @@ services:
       PORT: ${BACKEND_PORT:-4000}
       GIT_SHA: ${GIT_SHA:-unknown}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
+      RUN_BACKGROUND_WORKERS: "false"
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      OBJECT_STORAGE_ENDPOINT: ${OBJECT_STORAGE_ENDPOINT:-http://minio:9000}
+      OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION:-us-east-1}
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:-mscqr-artifacts}
+      OBJECT_STORAGE_ACCESS_KEY: ${OBJECT_STORAGE_ACCESS_KEY:-mscqrminio}
+      OBJECT_STORAGE_SECRET_KEY: ${OBJECT_STORAGE_SECRET_KEY:-mscqrminiochange}
+      OBJECT_STORAGE_FORCE_PATH_STYLE: ${OBJECT_STORAGE_FORCE_PATH_STYLE:-true}
     expose:
       - "4000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     healthcheck:
       test:
         [
           "CMD",
           "node",
           "-e",
-          "require('http').get('http://127.0.0.1:4000/health/db', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));",
+          "require('http').get('http://127.0.0.1:4000/health/ready', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));",
         ]
       interval: 15s
       timeout: 10s
       retries: 8
-      start_period: 90s
+      start_period: 120s
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - app
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: genuine-scan-worker
+    restart: unless-stopped
+    init: true
+    env_file:
+      - ./backend/.env
+    environment:
+      NODE_ENV: production
+      GIT_SHA: ${GIT_SHA:-unknown}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
+      RUN_BACKGROUND_WORKERS: "true"
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      OBJECT_STORAGE_ENDPOINT: ${OBJECT_STORAGE_ENDPOINT:-http://minio:9000}
+      OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION:-us-east-1}
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:-mscqr-artifacts}
+      OBJECT_STORAGE_ACCESS_KEY: ${OBJECT_STORAGE_ACCESS_KEY:-mscqrminio}
+      OBJECT_STORAGE_SECRET_KEY: ${OBJECT_STORAGE_SECRET_KEY:-mscqrminiochange}
+      OBJECT_STORAGE_FORCE_PATH_STYLE: ${OBJECT_STORAGE_FORCE_PATH_STYLE:-true}
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      backend:
+        condition: service_healthy
+    command: ["sh", "-c", "npm run worker"]
     stop_grace_period: 20s
     logging:
       driver: json-file
@@ -76,3 +183,7 @@ services:
 networks:
   app:
     driver: bridge
+
+volumes:
+  redis_data:
+  minio_data:

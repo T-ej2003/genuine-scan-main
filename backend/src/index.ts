@@ -23,11 +23,18 @@ import {
   parsePositiveIntEnv,
 } from "./middleware/publicRateLimit";
 import { hasConfiguredSecret, usesLegacySecretFallback } from "./utils/secretConfig";
+import { buildReadyPayload } from "./controllers/healthController";
 
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 const hasAnyConfiguredSecret = (...keys: string[]) => keys.some((key) => hasConfiguredSecret(key));
+const parseBool = (value: unknown, fallback = false) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+};
 
 const missingRequiredEnv = ["DATABASE_URL"].filter((k) => !process.env[k]);
 if (!hasAnyConfiguredSecret("JWT_SECRET_CURRENT", "JWT_SECRET")) {
@@ -150,6 +157,7 @@ const app = express();
 app.disable("etag");
 app.set("trust proxy", 1);
 const PORT = process.env.PORT || 4000;
+const runBackgroundWorkers = parseBool(process.env.RUN_BACKGROUND_WORKERS, true);
 const sentryEnabled = initBackendMonitoring();
 
 if (sentryEnabled) {
@@ -306,6 +314,13 @@ app.get("/healthz", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res)
   res.json(healthPayload());
 });
 
+app.get("/health/live", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
+  res.json({
+    ...healthPayload(),
+    status: "live",
+  });
+});
+
 app.get("/version", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
   res.json({
     name: releaseMetadata.name,
@@ -323,26 +338,34 @@ app.get("/health/latency", publicStatusIpLimiter, publicStatusActorLimiter, (_re
   });
 });
 
+app.get("/health/ready", publicStatusIpLimiter, publicStatusActorLimiter, async (_req, res) => {
+  const payload = await buildReadyPayload();
+  return res.status(payload.success ? 200 : 503).json(payload);
+});
+
 app.get("/health/db", publicStatusIpLimiter, publicStatusActorLimiter, async (_req, res) => {
-  try {
-    await prisma.$queryRaw`SELECT 1`;
+  const payload = await buildReadyPayload();
+  if (payload.dependencies.database.ready) {
     return res.json({
       status: "ok",
       database: "reachable",
-      timestamp: new Date().toISOString(),
-    });
-  } catch (e: any) {
-    const detail =
-      process.env.NODE_ENV === "development"
-        ? e?.message || "Database connectivity failed"
-        : "Database connectivity failed";
-    return res.status(503).json({
-      status: "degraded",
-      database: "unreachable",
-      error: detail,
+      redis: payload.dependencies.redis.ready || !payload.dependencies.redis.configured ? "ready" : "unreachable",
+      objectStorage:
+        payload.dependencies.objectStorage.ready || !payload.dependencies.objectStorage.configured ? "ready" : "unreachable",
       timestamp: new Date().toISOString(),
     });
   }
+
+  const detail =
+    process.env.NODE_ENV === "development"
+      ? payload.dependencies.database.error || "Database connectivity failed"
+      : "Database connectivity failed";
+  return res.status(503).json({
+    status: "degraded",
+    database: "unreachable",
+    error: detail,
+    timestamp: new Date().toISOString(),
+  });
 });
 
 app.use("/api", (_req, res, next) => {
@@ -388,15 +411,19 @@ const server = app.listen(PORT, () => {
   logger.info(`📚 API available at http://localhost:${PORT}/api`);
   logger.info(`🔍 Health check at http://localhost:${PORT}/health`);
   logger.info(`⏱️ Latency summary at http://localhost:${PORT}/health/latency`);
-  startSecurityEventOutboxWorker();
-  startCompliancePackScheduler();
-  void resumePendingNetworkDirectJobs().catch((error) => {
-    logger.error("Failed to resume pending network-direct jobs", { error: error?.message || error });
-  });
-  void resumePendingNetworkIppJobs().catch((error) => {
-    logger.error("Failed to resume pending network IPP jobs", { error: error?.message || error });
-  });
-  stopPrintConfirmationReconcilerWorker = startPrintConfirmationReconciler();
+  if (runBackgroundWorkers) {
+    startSecurityEventOutboxWorker();
+    startCompliancePackScheduler();
+    void resumePendingNetworkDirectJobs().catch((error) => {
+      logger.error("Failed to resume pending network-direct jobs", { error: error?.message || error });
+    });
+    void resumePendingNetworkIppJobs().catch((error) => {
+      logger.error("Failed to resume pending network IPP jobs", { error: error?.message || error });
+    });
+    stopPrintConfirmationReconcilerWorker = startPrintConfirmationReconciler();
+  } else {
+    logger.info("Background workers disabled for this HTTP process");
+  }
 });
 
 server.on("error", (err: NodeJS.ErrnoException) => {

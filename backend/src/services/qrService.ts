@@ -3,7 +3,7 @@ import prisma from "../config/database";
 import { randomNonce } from "./qrTokenService";
 import { reverseGeocode } from "./locationService";
 import { summarizeQrStatusCounts } from "./qrStatusMetrics";
-import { warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
+import { guardPublicIntegrityFallback } from "../utils/publicIntegrityGuard";
 
 const parseScanRefreshGraceMs = () => {
   const raw = Number(String(process.env.SCAN_REFRESH_GRACE_SECONDS || "").trim());
@@ -194,6 +194,9 @@ export const recordScan = async (
     ownershipId?: string | null;
     ownershipMatchMethod?: string | null;
     isTrustedOwnerContext?: boolean;
+  },
+  options?: {
+    strictStorage?: boolean;
   }
 ) => {
   const existing = await prisma.qRCode.findUnique({
@@ -297,10 +300,14 @@ export const recordScan = async (
       });
     } catch (error) {
       if (isQrScanActorForeignKeyError(error)) {
-        warnStorageUnavailableOnce(
-          "verify-qr-log-actor-fk",
-          "[verify] QrScanLog customer/ownership foreign key is stale. Retrying verification log without actor linkage."
-        );
+        guardPublicIntegrityFallback({
+          strictStorage: options?.strictStorage,
+          warningKey: "verify-qr-log-actor-fk",
+          warningMessage:
+            "[verify] QrScanLog customer/ownership foreign key is stale. Retrying verification log without actor linkage.",
+          degradedMessage: "Verification is temporarily unavailable because scan-log integrity checks are stale.",
+          degradedCode: "PUBLIC_SCAN_LOG_INTEGRITY_STALE",
+        });
         await tx.qrScanLog.create({
           data: {
             ...baseScanLogData,

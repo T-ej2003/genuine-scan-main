@@ -16,7 +16,12 @@ import {
 } from "../services/duplicateRiskService";
 import { deriveRequestDeviceFingerprint } from "../utils/requestFingerprint";
 import { resolveDuplicateRiskProfile } from "../services/governanceService";
-import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
+import { isPrismaMissingTableError } from "../utils/prismaStorageGuard";
+import {
+  buildPublicIntegrityErrorBody,
+  guardPublicIntegrityFallback,
+  isPublicIntegrityDependencyError,
+} from "../utils/publicIntegrityGuard";
 
 const deviceFingerprint = (req: Request) => deriveRequestDeviceFingerprint(req);
 
@@ -108,7 +113,10 @@ const isQrScanActorForeignKeyError = (error: unknown) => {
   return haystack.includes("qrscanlog") && (haystack.includes("customeruserid") || haystack.includes("ownershipid"));
 };
 
-const loadOwnershipByQrCodeId = async (qrCodeId: string): Promise<ScanOwnershipRecord | null> => {
+const loadOwnershipByQrCodeId = async (
+  qrCodeId: string,
+  options?: { strictStorage?: boolean }
+): Promise<ScanOwnershipRecord | null> => {
   try {
     return await prisma.ownership.findUnique({
       where: { qrCodeId },
@@ -120,10 +128,13 @@ const loadOwnershipByQrCodeId = async (qrCodeId: string): Promise<ScanOwnershipR
     });
   } catch (error) {
     if (isPrismaMissingTableError(error, ["ownership"])) {
-      warnStorageUnavailableOnce(
-        "scan-ownership-storage",
-        "[scan] Ownership table is unavailable. Continuing public scan without ownership data."
-      );
+      guardPublicIntegrityFallback({
+        strictStorage: options?.strictStorage,
+        warningKey: "scan-ownership-storage",
+        warningMessage: "[scan] Ownership table is unavailable. Continuing public scan without ownership data.",
+        degradedMessage: "Verification is temporarily unavailable because ownership records are not ready.",
+        degradedCode: "PUBLIC_OWNERSHIP_UNAVAILABLE",
+      });
       return null;
     }
     throw error;
@@ -152,6 +163,7 @@ const maybeWriteScanLog = async (
     longitude: number | null;
     accuracy: number | null;
     location: Awaited<ReturnType<typeof reverseGeocode>>;
+    strictStorage?: boolean;
   }
 ) => {
   const baseData = {
@@ -184,10 +196,14 @@ const maybeWriteScanLog = async (
     });
   } catch (error) {
     if (isQrScanActorForeignKeyError(error)) {
-      warnStorageUnavailableOnce(
-        "scan-qr-log-actor-fk",
-        "[scan] QrScanLog customer/ownership foreign key is stale. Retrying public scan log without actor linkage."
-      );
+      guardPublicIntegrityFallback({
+        strictStorage: input.strictStorage,
+        warningKey: "scan-qr-log-actor-fk",
+        warningMessage:
+          "[scan] QrScanLog customer/ownership foreign key is stale. Retrying public scan log without actor linkage.",
+        degradedMessage: "Verification is temporarily unavailable because scan-log integrity checks are stale.",
+        degradedCode: "PUBLIC_SCAN_LOG_INTEGRITY_STALE",
+      });
       await tx.qrScanLog.create({
         data: {
           ...baseData,
@@ -200,10 +216,13 @@ const maybeWriteScanLog = async (
       return;
     }
     if (isPrismaMissingTableError(error, ["qrscanlog"])) {
-      warnStorageUnavailableOnce(
-        "scan-qr-log-storage",
-        "[scan] QrScanLog storage is unavailable. Continuing public scan without scan log persistence."
-      );
+      guardPublicIntegrityFallback({
+        strictStorage: input.strictStorage,
+        warningKey: "scan-qr-log-storage",
+        warningMessage: "[scan] QrScanLog storage is unavailable. Continuing public scan without scan log persistence.",
+        degradedMessage: "Verification is temporarily unavailable because scan-log storage is not ready.",
+        degradedCode: "PUBLIC_SCAN_LOG_UNAVAILABLE",
+      });
       return;
     }
     throw error;
@@ -215,6 +234,7 @@ const writePublicScanAuditLog = async (input: {
   code: string;
   scanCount: number;
   ipAddress?: string | null;
+  strictStorage?: boolean;
 }) => {
   try {
     await createAuditLog({
@@ -237,10 +257,14 @@ const writePublicScanAuditLog = async (input: {
         "securityeventoutbox",
       ])
     ) {
-      warnStorageUnavailableOnce(
-        "scan-audit-storage",
-        "[scan] Audit/telemetry storage is unavailable. Continuing public verification without audit persistence."
-      );
+      guardPublicIntegrityFallback({
+        strictStorage: input.strictStorage,
+        warningKey: "scan-audit-storage",
+        warningMessage:
+          "[scan] Audit/telemetry storage is unavailable. Continuing public verification without audit persistence.",
+        degradedMessage: "Verification is temporarily unavailable because audit storage is not ready.",
+        degradedCode: "PUBLIC_AUDIT_STORAGE_UNAVAILABLE",
+      });
       return;
     }
     console.error("public scan audit log failed:", error);
@@ -447,7 +471,7 @@ export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
     const accuracy = toNum(requestQuery.acc);
     const location = await reverseGeocode(latitude, longitude);
     const customerUserId = req.customer?.userId || null;
-    const ownershipBeforeScan = await loadOwnershipByQrCodeId(qr.id);
+    const ownershipBeforeScan = await loadOwnershipByQrCodeId(qr.id, { strictStorage: true });
     const currentScanTrustedOwnerContext =
       Boolean(customerUserId) && ownershipBeforeScan?.userId === customerUserId;
 
@@ -483,6 +507,7 @@ export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
         longitude,
         accuracy,
         location,
+        strictStorage: true,
       });
 
       return updatedQr;
@@ -494,6 +519,7 @@ export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
         code: updated.code,
         scanCount: updated.scanCount ?? 0,
         ipAddress: req.ip,
+        strictStorage: true,
       });
     }
 
@@ -509,6 +535,7 @@ export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
       longitude,
       ipAddress: req.ip,
       userAgent: req.get("user-agent") || null,
+      strictStorage: true,
     });
 
     const finalStatus =
@@ -528,6 +555,7 @@ export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
       currentCustomerUserId: customerUserId,
       currentOwnershipId: ownershipBeforeScan?.id || null,
       currentActorTrustedOwnerContext: ownershipStatus.isOwnedByRequester,
+      strictStorage: true,
     });
 
     const containment = {
@@ -689,6 +717,9 @@ export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
       },
     });
   } catch (error) {
+    if (isPublicIntegrityDependencyError(error)) {
+      return res.status(error.statusCode).json(buildPublicIntegrityErrorBody(error.message, error.code));
+    }
     console.error("scanToken error:", error);
     return res.status(500).json({
       success: false,

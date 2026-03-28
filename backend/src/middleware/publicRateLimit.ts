@@ -1,6 +1,9 @@
 import { createHash } from "crypto";
 import type { Request, Response } from "express";
 import rateLimit from "express-rate-limit";
+import { RedisStore } from "rate-limit-redis";
+
+import { getRedisClient, isRedisConfigured } from "../services/redisService";
 
 type RequestResolver = (req: Request) => string | null | undefined;
 
@@ -74,6 +77,16 @@ export const createPublicIpRateLimiter = ({ scope, windowMs, max, message, resou
     max,
     standardHeaders: true,
     legacyHeaders: false,
+    store: isRedisConfigured()
+      ? new RedisStore({
+          sendCommand: (async (...args: string[]) => {
+            const redis = await getRedisClient();
+            if (!redis) throw new Error("Redis unavailable");
+            const redisAny = redis as any;
+            return redisAny.call(args[0], ...args.slice(1));
+          }) as any,
+        })
+      : undefined,
     keyGenerator: (req) => buildPublicIpRateLimitKey(req, scope, resourceResolver),
     handler: createJson429Handler(scope, message),
   });
@@ -91,6 +104,16 @@ export const createPublicActorRateLimiter = ({
     max,
     standardHeaders: true,
     legacyHeaders: false,
+    store: isRedisConfigured()
+      ? new RedisStore({
+          sendCommand: (async (...args: string[]) => {
+            const redis = await getRedisClient();
+            if (!redis) throw new Error("Redis unavailable");
+            const redisAny = redis as any;
+            return redisAny.call(args[0], ...args.slice(1));
+          }) as any,
+        })
+      : undefined,
     keyGenerator: (req) => buildPublicActorRateLimitKey(req, scope, actorResolver, resourceResolver),
     handler: createJson429Handler(scope, message),
   });

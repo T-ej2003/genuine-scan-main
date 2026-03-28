@@ -2,6 +2,10 @@ import { Request, Response } from "express";
 import { QRStatus } from "@prisma/client";
 import prisma from "../config/database";
 import { parseQRCode, recordScan } from "../services/qrService";
+import {
+  buildPublicIntegrityErrorBody,
+  isPublicIntegrityDependencyError,
+} from "../utils/publicIntegrityGuard";
 
 type PublicStatus =
   | "VALID"
@@ -9,7 +13,8 @@ type PublicStatus =
   | "NOT_FOUND"
   | "REVOKED"
   | "ALREADY_SCANNED"
-  | "SUSPICIOUS";
+  | "SUSPICIOUS"
+  | "DEGRADED";
 
 const mapStage = (s: QRStatus) => {
   switch (s) {
@@ -111,7 +116,7 @@ export const publicVerify = async (req: Request, res: Response) => {
     }
 
     // Printed or scanned => record scan (increments)
-    const result = await recordScan(raw);
+    const result = await recordScan(raw, undefined, { strictStorage: true });
     const updated = result.qrCode;
 
     const status: PublicStatus = result.isFirstScan ? "VALID" : "ALREADY_SCANNED";
@@ -145,6 +150,15 @@ export const publicVerify = async (req: Request, res: Response) => {
       theme: { brandName: updated.licensee?.name || "Authenticity Check" },
     });
   } catch (e: any) {
+    if (isPublicIntegrityDependencyError(e)) {
+      const body = buildPublicIntegrityErrorBody(e.message, e.code);
+      return res.status(e.statusCode).json({
+        status: "DEGRADED" as PublicStatus,
+        message: body.error,
+        degraded: true,
+        code: body.code,
+      });
+    }
     console.error("publicVerify error:", e);
     return res.status(500).json({
       status: "SUSPICIOUS",
@@ -152,4 +166,3 @@ export const publicVerify = async (req: Request, res: Response) => {
     });
   }
 };
-

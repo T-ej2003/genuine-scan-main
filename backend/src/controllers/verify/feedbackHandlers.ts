@@ -35,7 +35,7 @@ export const reportFraud = async (req: Request, res: Response) => {
     const payload = parsed.data;
     const normalizedCode = normalizeCode(payload.code || payload.qrCodeValue || "");
     const fingerprint = deriveRequestDeviceFingerprint(req, { allowClientHint: false });
-    const rateLimit = enforceIncidentRateLimit({
+    const rateLimit = await enforceIncidentRateLimit({
       ip: req.ip,
       qrCode: normalizedCode,
       deviceFp: fingerprint,
@@ -195,7 +195,7 @@ export const submitProductFeedback = async (req: Request, res: Response) => {
 
     const payload = parsed.data;
     const normalizedCode = payload.code.toUpperCase();
-    const feedbackRate = enforceIncidentRateLimit({
+    const feedbackRate = await enforceIncidentRateLimit({
       ip: req.ip,
       qrCode: normalizedCode,
       deviceFp: deriveRequestDeviceFingerprint(req, { allowClientHint: false }),

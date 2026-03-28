@@ -19,13 +19,16 @@ vi.mock("react-router-dom", async () => {
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
     login: loginMock,
+    logout: vi.fn(),
+    pendingAuth: null,
+    completeMfaSession: vi.fn(),
   }),
 }));
 
 describe("Login basic flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    loginMock.mockResolvedValue({ success: true });
+    loginMock.mockResolvedValue({ success: true, sessionStage: "ACTIVE" });
   });
 
   it("submits credentials and redirects to the dashboard", async () => {

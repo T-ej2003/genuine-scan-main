@@ -1,6 +1,7 @@
 import prisma from "../config/database";
 import { reverseGeocode } from "./locationService";
-import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
+import { isPrismaMissingTableError } from "../utils/prismaStorageGuard";
+import { guardPublicIntegrityFallback } from "../utils/publicIntegrityGuard";
 
 type ScanInsight = {
   firstScanAt: string | null;
@@ -39,6 +40,7 @@ type ScanInsightOptions = {
   currentCustomerUserId?: string | null;
   currentOwnershipId?: string | null;
   currentActorTrustedOwnerContext?: boolean;
+  strictStorage?: boolean;
 };
 
 const emptyScanInsight = (currentActorTrustedOwnerContext: boolean): ScanInsight => ({
@@ -341,10 +343,14 @@ export const getScanInsight = async (
     };
   } catch (error) {
     if (isPrismaMissingTableError(error, ["qrscanlog"])) {
-      warnStorageUnavailableOnce(
-        "scan-insight-storage",
-        "[scan] QrScanLog storage is unavailable. Returning empty scan insight until scan-log migrations are applied."
-      );
+      guardPublicIntegrityFallback({
+        strictStorage: options?.strictStorage,
+        warningKey: "scan-insight-storage",
+        warningMessage:
+          "[scan] QrScanLog storage is unavailable. Returning empty scan insight until scan-log migrations are applied.",
+        degradedMessage: "Verification is temporarily unavailable because scan history storage is not ready.",
+        degradedCode: "PUBLIC_SCAN_LOG_UNAVAILABLE",
+      });
       return emptyScanInsight(currentActorTrustedOwnerContext);
     }
     throw error;

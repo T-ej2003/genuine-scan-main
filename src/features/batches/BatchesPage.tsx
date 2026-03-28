@@ -253,7 +253,6 @@ export default function BatchesPage() {
 
       <BatchPrintJobDialog
         {...printWorkflow.dialogProps}
-        onOpenPrinterSetup={() => navigate(APP_PATHS.printerSetup)}
       />
 
       <BatchAllocationMapDialog

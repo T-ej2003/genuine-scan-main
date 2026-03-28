@@ -1,12 +1,13 @@
 import { Request, Response, NextFunction } from "express";
 import prisma from "../config/database";
-import { JWTPayload } from "../types";
+import { AuthenticatedSessionClaims, JWTPayload } from "../types";
 import { UserRole } from "@prisma/client";
-import { ACCESS_TOKEN_COOKIE, verifyAccessToken } from "../services/auth/tokenService";
+import { ACCESS_TOKEN_COOKIE, verifyAccessToken, verifyMfaBootstrapToken } from "../services/auth/tokenService";
 import { isManufacturerRole, listManufacturerLinkedLicenseeIds } from "../services/manufacturerScopeService";
+import { isAdminMfaRequiredRole } from "../services/auth/authService";
 
 export interface AuthRequest extends Request {
-  user?: JWTPayload;
+  user?: AuthenticatedSessionClaims;
   authMode?: "bearer" | "cookie";
 }
 
@@ -22,7 +23,7 @@ const getCookieAccessToken = (req: Request) => {
   return token ? String(token) : null;
 };
 
-async function hydrateTenantIfNeeded(payload: JWTPayload): Promise<JWTPayload> {
+async function hydrateTenantIfNeeded(payload: AuthenticatedSessionClaims): Promise<AuthenticatedSessionClaims> {
   if (!payload?.userId || !payload?.role) return payload;
 
   if (payload.role === UserRole.SUPER_ADMIN || payload.role === UserRole.PLATFORM_SUPER_ADMIN) return payload;
@@ -53,6 +54,27 @@ async function hydrateTenantIfNeeded(payload: JWTPayload): Promise<JWTPayload> {
   };
 }
 
+const parseAnySessionToken = async (token: string): Promise<AuthenticatedSessionClaims> => {
+  try {
+    const decoded = verifyAccessToken(token);
+    return hydrateTenantIfNeeded(decoded);
+  } catch {
+    const decoded = verifyMfaBootstrapToken(token);
+    return hydrateTenantIfNeeded({
+      userId: decoded.userId,
+      email: decoded.email,
+      role: decoded.role,
+      licenseeId: decoded.licenseeId ?? null,
+      orgId: decoded.orgId ?? null,
+      linkedLicenseeIds: decoded.linkedLicenseeIds ?? null,
+      sessionStage: "MFA_BOOTSTRAP",
+      authAssurance: "PASSWORD",
+      authenticatedAt: null,
+      mfaVerifiedAt: null,
+    });
+  }
+};
+
 const allowSseQueryToken = () => {
   if (String(process.env.AUTH_SSE_QUERY_TOKEN_ENABLED || "").trim().toLowerCase() === "true") return true;
   return process.env.NODE_ENV !== "production";
@@ -67,6 +89,21 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
   try {
     const decoded = verifyAccessToken(token);
     req.user = await hydrateTenantIfNeeded(decoded);
+    req.authMode = bearer ? "bearer" : "cookie";
+    return next();
+  } catch {
+    return res.status(401).json({ success: false, error: "Invalid or expired token" });
+  }
+};
+
+export const authenticateAnySession = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  const bearer = getBearerToken(req);
+  const cookieToken = bearer ? null : getCookieAccessToken(req);
+  const token = bearer || cookieToken;
+  if (!token) return res.status(401).json({ success: false, error: "No token provided" });
+
+  try {
+    req.user = await parseAnySessionToken(token);
     req.authMode = bearer ? "bearer" : "cookie";
     return next();
   } catch {
@@ -112,4 +149,48 @@ export const authenticateSSE = async (req: AuthRequest, res: Response, next: Nex
   } catch {
     return res.status(401).json({ success: false, error: "Invalid or expired token" });
   }
+};
+
+const parseStepUpWindowMinutes = () => {
+  const raw = Number(String(process.env.ADMIN_STEP_UP_WINDOW_MINUTES || "").trim());
+  if (!Number.isFinite(raw) || raw <= 0) return 30;
+  return Math.max(5, Math.min(720, Math.floor(raw)));
+};
+
+export const requireRecentAdminMfa = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, error: "Authentication required" });
+  }
+
+  if (!isAdminMfaRequiredRole(req.user.role)) {
+    return next();
+  }
+
+  if (req.user.sessionStage !== "ACTIVE") {
+    return res.status(428).json({
+      success: false,
+      error: "Admin MFA verification is required before continuing.",
+      code: "STEP_UP_REQUIRED",
+    });
+  }
+
+  const verifiedAt = req.user.mfaVerifiedAt ? new Date(req.user.mfaVerifiedAt) : null;
+  if (!verifiedAt || Number.isNaN(verifiedAt.getTime())) {
+    return res.status(428).json({
+      success: false,
+      error: "Admin MFA verification is required before continuing.",
+      code: "STEP_UP_REQUIRED",
+    });
+  }
+
+  const maxAgeMs = parseStepUpWindowMinutes() * 60_000;
+  if (Date.now() - verifiedAt.getTime() > maxAgeMs) {
+    return res.status(428).json({
+      success: false,
+      error: "Your admin verification is no longer fresh enough for this action. Sign in again to continue.",
+      code: "STEP_UP_REQUIRED",
+    });
+  }
+
+  return next();
 };

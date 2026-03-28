@@ -30,6 +30,7 @@ import { createAuditLog } from "../services/auditService";
 import { incidentEvidenceUpload, incidentReportUpload, resolveUploadPath } from "../middleware/incidentUpload";
 import { buildIncidentPdfBuffer } from "../services/incidentPdfService";
 import { runIncidentAutoContainment } from "../services/soarService";
+import { downloadObjectBuffer, isObjectStorageConfigured, removeLocalFileIfExists, uploadObjectFromFile } from "../services/objectStorageService";
 
 const publicIncidentRawSchema = z.object({
   qrCodeValue: z.string().trim().max(128).optional(),
@@ -228,7 +229,7 @@ export const reportIncident = async (req: Request, res: Response) => {
     const deviceFp =
       String(req.headers["x-device-fp"] || "").trim() ||
       String(req.headers["user-agent"] || "").trim();
-    const rate = enforceIncidentRateLimit({
+    const rate = await enforceIncidentRateLimit({
       ip: req.ip || "",
       qrCode: parsed.data.qrCodeValue,
       deviceFp,
@@ -242,6 +243,19 @@ export const reportIncident = async (req: Request, res: Response) => {
     }
 
     const files = (req.files || []) as Express.Multer.File[];
+    if (isObjectStorageConfigured()) {
+      await Promise.all(
+        files.map(async (file) => {
+          if (!file?.path || !file.filename) return;
+          await uploadObjectFromFile({
+            objectKey: file.filename,
+            filePath: file.path,
+            contentType: file.mimetype,
+          });
+          await removeLocalFileIfExists(file.path);
+        })
+      );
+    }
     const uploadedRecords = files.map(mapFileToStorageRecord);
 
     const incident = await createIncidentFromReport(
@@ -629,6 +643,15 @@ export const addIncidentEvidence = async (req: AuthRequest, res: Response) => {
     const file = req.file;
     if (!file) return res.status(400).json({ success: false, error: "Missing evidence file" });
 
+    if (isObjectStorageConfigured() && file.path && file.filename) {
+      await uploadObjectFromFile({
+        objectKey: file.filename,
+        filePath: file.path,
+        contentType: file.mimetype,
+      });
+      await removeLocalFileIfExists(file.path);
+    }
+
     const mapped = mapFileToStorageRecord(file);
     const evidence = await prisma.incidentEvidence.create({
       data: {
@@ -828,9 +851,19 @@ export const serveIncidentEvidenceFile = async (req: AuthRequest, res: Response)
             ? undefined
             : { licenseeId: req.user.licenseeId || "__none__" },
       },
-      select: { id: true },
+      select: { id: true, fileType: true },
     });
     if (!evidence) return res.status(404).json({ success: false, error: "File not found" });
+
+    if (isObjectStorageConfigured()) {
+      const buffer = await downloadObjectBuffer(fileName);
+      if (buffer) {
+        if (evidence.fileType) {
+          res.setHeader("Content-Type", evidence.fileType);
+        }
+        return res.send(buffer);
+      }
+    }
 
     const resolved = resolveUploadPath(fileName);
     if (!resolved.startsWith(path.resolve(__dirname, "../../uploads/incidents"))) {

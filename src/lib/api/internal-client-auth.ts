@@ -4,11 +4,15 @@ export const createAuthApi = (core: ApiClientCore) => ({
   async login(email: string, password: string) {
     const response = await core.request<{
       user?: any;
-      email?: string;
-      role?: string;
-      riskScore?: number;
-      riskLevel?: string;
-      reasons?: string[];
+      auth?: {
+        sessionStage: "ACTIVE" | "MFA_BOOTSTRAP";
+        authAssurance: "PASSWORD" | "ADMIN_MFA";
+        mfaRequired: boolean;
+        mfaEnrolled: boolean;
+        authenticatedAt?: string | null;
+        mfaVerifiedAt?: string | null;
+        stepUpRequired?: boolean;
+      };
     }>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
@@ -21,7 +25,7 @@ export const createAuthApi = (core: ApiClientCore) => ({
   },
 
   async refreshSession() {
-    return core.request<{ user: any }>("/auth/refresh", { method: "POST" });
+    return core.request<{ user: any; auth?: any }>("/auth/refresh", { method: "POST" });
   },
 
   async logoutSession() {
@@ -41,11 +45,15 @@ export const createAuthApi = (core: ApiClientCore) => ({
   async acceptInvite(payload: { token: string; password: string; name?: string }) {
     const response = await core.request<{
       user?: any;
-      email?: string;
-      role?: string;
-      riskScore?: number;
-      riskLevel?: string;
-      reasons?: string[];
+      auth?: {
+        sessionStage: "ACTIVE" | "MFA_BOOTSTRAP";
+        authAssurance: "PASSWORD" | "ADMIN_MFA";
+        mfaRequired: boolean;
+        mfaEnrolled: boolean;
+        authenticatedAt?: string | null;
+        mfaVerifiedAt?: string | null;
+        stepUpRequired?: boolean;
+      };
     }>("/auth/accept-invite", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -168,6 +176,64 @@ export const createAuthApi = (core: ApiClientCore) => ({
     allowExistingInvitedUser?: boolean;
   }) {
     return core.request("/auth/invite", { method: "POST", body: JSON.stringify(payload) });
+  },
+
+  async getAdminMfaStatus() {
+    return core.request<{
+      required: boolean;
+      sessionStage: "ACTIVE" | "MFA_BOOTSTRAP";
+      enrolled: boolean;
+      enabled: boolean;
+      backupCodesRemaining?: number;
+      verifiedAt?: string | null;
+      lastUsedAt?: string | null;
+      createdAt?: string | null;
+      updatedAt?: string | null;
+    }>("/auth/mfa/status");
+  },
+
+  async beginAdminMfaSetup() {
+    return core.request<{
+      secret: string;
+      otpauthUri: string;
+      backupCodes: string[];
+    }>("/auth/mfa/setup/begin", {
+      method: "POST",
+    });
+  },
+
+  async confirmAdminMfaSetup(code: string) {
+    return core.request<{ user?: any; auth?: any; enabled?: boolean }>("/auth/mfa/setup/confirm", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    });
+  },
+
+  async beginAdminMfaChallenge() {
+    return core.request<{ ticket: string; expiresAt: string }>("/auth/mfa/challenge/begin", {
+      method: "POST",
+    });
+  },
+
+  async completeAdminMfaChallenge(ticket: string, code: string) {
+    return core.request<{ user?: any; auth?: any }>("/auth/mfa/challenge/complete", {
+      method: "POST",
+      body: JSON.stringify({ ticket, code }),
+    });
+  },
+
+  async rotateAdminMfaBackupCodes(code: string) {
+    return core.request<{ backupCodes: string[] }>("/auth/mfa/backup-codes/rotate", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    });
+  },
+
+  async disableAdminMfa(payload: { code: string; currentPassword: string }) {
+    return core.request<{ enabled: boolean }>("/auth/mfa/disable", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
 });
 

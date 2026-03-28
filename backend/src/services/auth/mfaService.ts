@@ -319,6 +319,63 @@ const consumeBackupCode = async (userId: string, codesHash: string[], provided: 
   return true;
 };
 
+export const verifyAdminMfaCode = async (params: { userId: string; code: string }) => {
+  const credential = await prisma.adminMfaCredential.findUnique({
+    where: { userId: params.userId },
+    select: {
+      userId: true,
+      isEnabled: true,
+      secretCiphertext: true,
+      secretIv: true,
+      secretTag: true,
+      backupCodesHash: true,
+    },
+  });
+
+  if (!credential?.isEnabled) {
+    throw new Error("MFA_NOT_ENABLED");
+  }
+
+  const normalizedCode = String(params.code || "").trim();
+  if (!normalizedCode) {
+    throw new Error("INVALID_MFA_CODE");
+  }
+
+  if (/^[A-Za-z0-9]{4,8}-[A-Za-z0-9]{4,8}$/.test(normalizedCode) && credential.backupCodesHash.length > 0) {
+    const consumed = await consumeBackupCode(params.userId, credential.backupCodesHash, normalizedCode);
+    if (consumed) {
+      return { ok: true as const, method: "BACKUP_CODE" as const };
+    }
+  }
+
+  const secret = decryptSecret(credential);
+  const verified = verifyTotp(secret, normalizedCode);
+  if (!verified) {
+    throw new Error("INVALID_MFA_CODE");
+  }
+
+  await prisma.adminMfaCredential.update({
+    where: { userId: params.userId },
+    data: { lastUsedAt: new Date() },
+  });
+
+  return { ok: true as const, method: "TOTP" as const };
+};
+
+export const rotateAdminMfaBackupCodes = async (params: { userId: string; code: string }) => {
+  await verifyAdminMfaCode({ userId: params.userId, code: params.code });
+  const backupCodes = generateBackupCodes(parseIntEnv("AUTH_MFA_BACKUP_CODE_COUNT", 8));
+  await prisma.adminMfaCredential.update({
+    where: { userId: params.userId },
+    data: {
+      backupCodesHash: backupCodes.map((entry) => backupHash(entry)),
+      lastUsedAt: new Date(),
+    },
+  });
+
+  return { backupCodes };
+};
+
 export const completeAdminMfaChallenge = async (params: {
   ticket: string;
   code: string;
@@ -353,39 +410,10 @@ export const completeAdminMfaChallenge = async (params: {
 
   if (!challenge) throw new Error("MFA_CHALLENGE_NOT_FOUND");
 
-  const credential = await prisma.adminMfaCredential.findUnique({
-    where: { userId: challenge.userId },
-    select: {
-      userId: true,
-      isEnabled: true,
-      secretCiphertext: true,
-      secretIv: true,
-      secretTag: true,
-      backupCodesHash: true,
-    },
+  await verifyAdminMfaCode({
+    userId: challenge.userId,
+    code: params.code,
   });
-
-  if (!credential?.isEnabled) throw new Error("MFA_NOT_ENABLED");
-
-  const normalizedCode = String(params.code || "").trim();
-  let verified = false;
-
-  if (/^[A-Za-z0-9]{4,8}-[A-Za-z0-9]{4,8}$/.test(normalizedCode) && credential.backupCodesHash.length > 0) {
-    verified = await consumeBackupCode(challenge.userId, credential.backupCodesHash, normalizedCode);
-  }
-
-  if (!verified) {
-    const secret = decryptSecret(credential);
-    verified = verifyTotp(secret, normalizedCode);
-    if (verified) {
-      await prisma.adminMfaCredential.update({
-        where: { userId: challenge.userId },
-        data: { lastUsedAt: new Date() },
-      });
-    }
-  }
-
-  if (!verified) throw new Error("INVALID_MFA_CODE");
 
   await prisma.authMfaChallenge.update({
     where: { id: challenge.id },

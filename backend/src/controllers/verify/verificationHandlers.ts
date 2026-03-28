@@ -9,6 +9,10 @@ import { evaluateScanAndEnforcePolicy } from "../../services/policyEngineService
 import { getScanInsight } from "../../services/scanInsightService";
 import { assessDuplicateRisk, deriveAnomalyModelScore } from "../../services/duplicateRiskService";
 import {
+  buildPublicIntegrityErrorBody,
+  isPublicIntegrityDependencyError,
+} from "../../utils/publicIntegrityGuard";
+import {
   QRStatus,
   VerifyClassification,
   buildContainment,
@@ -132,7 +136,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
     const containment = buildContainment(qrCode);
     const qrBlocked = qrCode.status === QRStatus.BLOCKED;
     const qrReady = isQrReadyForCustomerUse(qrCode.status);
-    const baseOwnership = await loadOwnershipByQrCodeId(qrCode.id);
+    const baseOwnership = await loadOwnershipByQrCodeId(qrCode.id, { strictStorage: true });
     const baseOwnershipStatus = buildOwnershipStatus({
       ownership: baseOwnership,
       customerUserId,
@@ -148,6 +152,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       currentCustomerUserId: customerUserId,
       currentOwnershipId: baseOwnership?.id || null,
       currentActorTrustedOwnerContext: baseOwnershipStatus.isOwnedByRequester,
+      strictStorage: true,
     });
     const baseScanSummary = buildScanSummary({
       scanCount: Number(qrCode.scanCount || 0),
@@ -230,18 +235,22 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
     const longitude = toNum(requestQuery.lon);
     const accuracy = toNum(requestQuery.acc);
 
-    const { isFirstScan, qrCode: updated } = await recordScan(normalizedCode, {
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent") || null,
-      device: requestDeviceFingerprint,
-      latitude,
-      longitude,
-      accuracy,
-      customerUserId,
-      ownershipId: baseOwnershipStatus.isOwnedByRequester ? baseOwnership?.id || null : null,
-      ownershipMatchMethod: baseOwnershipStatus.isOwnedByRequester ? baseOwnershipStatus.matchMethod || null : null,
-      isTrustedOwnerContext: baseOwnershipStatus.isOwnedByRequester,
-    });
+    const { isFirstScan, qrCode: updated } = await recordScan(
+      normalizedCode,
+      {
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") || null,
+        device: requestDeviceFingerprint,
+        latitude,
+        longitude,
+        accuracy,
+        customerUserId,
+        ownershipId: baseOwnershipStatus.isOwnedByRequester ? baseOwnership?.id || null : null,
+        ownershipMatchMethod: baseOwnershipStatus.isOwnedByRequester ? baseOwnershipStatus.matchMethod || null : null,
+        isTrustedOwnerContext: baseOwnershipStatus.isOwnedByRequester,
+      },
+      { strictStorage: true }
+    );
 
     await createAuditLog({
       action: "VERIFY_SUCCESS",
@@ -266,6 +275,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       longitude,
       ipAddress: req.ip,
       userAgent: req.get("user-agent") || null,
+      strictStorage: true,
     });
 
     const blockedByPolicy = Boolean(policy.autoBlockedQr || policy.autoBlockedBatch);
@@ -280,6 +290,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       currentCustomerUserId: customerUserId,
       currentOwnershipId: baseOwnership?.id || null,
       currentActorTrustedOwnerContext: baseOwnershipStatus.isOwnedByRequester,
+      strictStorage: true,
     });
     const postScanSummary = buildScanSummary({
       scanCount: Number(updated.scanCount || 0),
@@ -293,7 +304,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       Boolean(runtimeContainment.batchSuspended) ||
       Boolean(runtimeContainment.orgSuspended);
 
-    const ownership = await loadOwnershipByQrCodeId(updated.id);
+    const ownership = await loadOwnershipByQrCodeId(updated.id, { strictStorage: true });
     const ownershipStatus = buildOwnershipStatus({
       ownership,
       customerUserId,
@@ -441,6 +452,9 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       },
     });
   } catch (error) {
+    if (isPublicIntegrityDependencyError(error)) {
+      return res.status(error.statusCode).json(buildPublicIntegrityErrorBody(error.message, error.code));
+    }
     console.error("Verify error:", error);
     return res.status(500).json({
       success: false,

@@ -1303,6 +1303,8 @@ model RefreshToken {
   createdAt DateTime @default(now())
   createdIpHash String?
   createdUserAgent String?
+  authenticatedAt DateTime?
+  mfaVerifiedAt DateTime?
 
   lastUsedAt DateTime?
   revokedAt DateTime?

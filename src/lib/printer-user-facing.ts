@@ -25,7 +25,7 @@ export const sanitizePrinterUiError = (raw?: string | null, fallback = "Printing
       "p2002",
     ])
   ) {
-    return "A saved printer profile already uses this connection. Update or remove the existing profile first.";
+    return "A saved printer profile already uses this connection. Open the existing setup to edit it or remove it first.";
   }
   if (hasAny(value, ["busy", "conflict", "please retry"])) {
     return "Another printing action is already using this batch. Please wait a moment and try again.";

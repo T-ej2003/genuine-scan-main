@@ -4,6 +4,7 @@ import { createHash } from "crypto";
 
 import prisma from "../config/database";
 import { resolveUploadPath } from "../middleware/incidentUpload";
+import { downloadObjectBuffer } from "./objectStorageService";
 
 type EvidenceRecord = {
   id: string;
@@ -20,8 +21,7 @@ const EXPECTED_EXTENSIONS: Record<string, string[]> = {
   "application/pdf": [".pdf"],
 };
 
-const fileSha256 = async (filePath: string) => {
-  const bytes = await fs.readFile(filePath);
+const fileSha256FromBytes = async (bytes: Buffer) => {
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   return { sha256, bytes };
 };
@@ -54,8 +54,22 @@ export const runTamperEvidenceChecks = async (evidenceRows: EvidenceRecord[]) =>
 
     try {
       const resolvedPath = resolveUploadPath(storageKey);
-      const stat = await fs.stat(resolvedPath);
-      const { sha256 } = await fileSha256(resolvedPath);
+      let bytes: Buffer;
+      let fileSize: number;
+
+      try {
+        bytes = await fs.readFile(resolvedPath);
+        const stat = await fs.stat(resolvedPath);
+        fileSize = stat.size;
+      } catch (localError: any) {
+        if (localError?.code !== "ENOENT") throw localError;
+        const objectBytes = await downloadObjectBuffer(storageKey);
+        if (!objectBytes) throw localError;
+        bytes = objectBytes;
+        fileSize = objectBytes.length;
+      }
+
+      const { sha256 } = await fileSha256FromBytes(bytes);
 
       const mimeType = String(evidence.fileType || "application/octet-stream").toLowerCase();
       const ext = path.extname(storageKey).toLowerCase();
@@ -77,10 +91,10 @@ export const runTamperEvidenceChecks = async (evidenceRows: EvidenceRecord[]) =>
 
       const checks = {
         extensionMismatch: expected.length > 0 ? !expected.includes(ext) : false,
-        verySmallFile: stat.size < 1024,
+        verySmallFile: fileSize < 1024,
         duplicateInIncident,
         seenInOtherIncidents,
-        fileSizeBytes: stat.size,
+        fileSizeBytes: fileSize,
         mimeType,
         ext,
       };
@@ -91,7 +105,7 @@ export const runTamperEvidenceChecks = async (evidenceRows: EvidenceRecord[]) =>
         where: { incidentEvidenceId: evidence.id },
         update: {
           sha256,
-          fileSize: stat.size,
+          fileSize,
           mimeType,
           ext,
           duplicateCount: duplicateInIncident,
@@ -103,7 +117,7 @@ export const runTamperEvidenceChecks = async (evidenceRows: EvidenceRecord[]) =>
           incidentEvidenceId: evidence.id,
           incidentId: evidence.incidentId,
           sha256,
-          fileSize: stat.size,
+          fileSize,
           mimeType,
           ext,
           duplicateCount: duplicateInIncident,

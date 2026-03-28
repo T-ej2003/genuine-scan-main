@@ -12,7 +12,6 @@ import { buildScanUrl, getQrTokenExpiryDate, hashToken, randomNonce, signQrPaylo
 import { resolveQrZipProfile, streamQrZipToResponse } from "../services/qrZipStreamService";
 import { createUserNotification } from "../services/notificationService";
 import {
-  backfillBatchLineageFromAuditLogs,
   buildLineageSuccessMessage,
   enrichBatchSummaries,
   getBatchAllocationMap as loadBatchAllocationMap,
@@ -1370,30 +1369,33 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
       where.manufacturerId = req.user.userId;
     }
 
-    await backfillBatchLineageFromAuditLogs({
-      licenseeId: where.licenseeId,
-      force: Boolean(req.query.forceLineage),
-    });
+    const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 500);
+    const offset = Math.max(0, parseInt(String(req.query.offset ?? "0"), 10) || 0);
 
-    const batches = await prisma.batch.findMany({
-      where,
-      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-      include: {
-        licensee: { select: { id: true, name: true, prefix: true } },
-        manufacturer: { select: { id: true, name: true, email: true } },
-        parentBatch: { select: { id: true, name: true } },
-        rootBatch: { select: { id: true, name: true } },
-        _count: { select: { qrCodes: true } },
-      },
-    });
+    const [batches, total] = await Promise.all([
+      prisma.batch.findMany({
+        where,
+        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+        include: {
+          licensee: { select: { id: true, name: true, prefix: true } },
+          manufacturer: { select: { id: true, name: true, email: true } },
+          parentBatch: { select: { id: true, name: true } },
+          rootBatch: { select: { id: true, name: true } },
+          _count: { select: { qrCodes: true } },
+        },
+        take: limit,
+        skip: offset,
+      }),
+      prisma.batch.count({ where }),
+    ]);
 
     if (!batches.length) {
-      return res.json({ success: true, data: batches });
+      return res.json({ success: true, data: batches, meta: { total, limit, offset } });
     }
 
     const enriched = await enrichBatchSummaries(batches as any);
 
-    return res.json({ success: true, data: enriched });
+    return res.json({ success: true, data: enriched, meta: { total, limit, offset } });
   } catch (e) {
     console.error("getBatches error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });
@@ -1430,11 +1432,6 @@ export const getBatchAllocationMap = async (req: AuthRequest, res: Response) => 
     ) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
-
-    await backfillBatchLineageFromAuditLogs({
-      licenseeId: focusBatch.licenseeId,
-      force: true,
-    });
 
     const allocationMap = await loadBatchAllocationMap(batchId, { licenseeId: focusBatch.licenseeId });
     if (!allocationMap) {

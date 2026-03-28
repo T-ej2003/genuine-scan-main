@@ -12,6 +12,7 @@ import {
   canAudienceReceiveNotificationType,
   hiddenNotificationTypesForRole,
 } from "./notificationVisibility";
+import { getRedisInstanceId, publishRedisJson, subscribeRedisJson } from "./redisService";
 
 export type NotificationRealtimeEvent = {
   type: "created" | "read" | "read_all";
@@ -27,6 +28,8 @@ export type NotificationRealtimeEvent = {
 type NotificationListener = (event: NotificationRealtimeEvent) => void;
 
 const listeners = new Set<NotificationListener>();
+const NOTIFICATION_EVENT_CHANNEL = "mscqr:realtime:notifications";
+let notificationChannelReady = false;
 
 const parseBool = (value: unknown, fallback = false) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -94,11 +97,18 @@ const sendRealtimeAlertEmailForNotification = async (params: {
 };
 
 export const onNotificationEvent = (cb: NotificationListener) => {
+  if (!notificationChannelReady) {
+    notificationChannelReady = true;
+    void subscribeRedisJson(NOTIFICATION_EVENT_CHANNEL, (payload) => {
+      if (!payload || payload.origin === getRedisInstanceId()) return;
+      notifyLocalListeners(payload.event);
+    });
+  }
   listeners.add(cb);
   return () => listeners.delete(cb);
 };
 
-const emitNotificationEvent = (event: NotificationRealtimeEvent) => {
+const notifyLocalListeners = (event: NotificationRealtimeEvent) => {
   for (const cb of listeners) {
     try {
       cb(event);
@@ -106,6 +116,14 @@ const emitNotificationEvent = (event: NotificationRealtimeEvent) => {
       // ignore listener failures
     }
   }
+};
+
+const emitNotificationEvent = (event: NotificationRealtimeEvent) => {
+  notifyLocalListeners(event);
+  void publishRedisJson(NOTIFICATION_EVENT_CHANNEL, {
+    origin: getRedisInstanceId(),
+    event,
+  }).catch(() => undefined);
 };
 
 const normalizeRole = (role: UserRole): NotificationAudience => {

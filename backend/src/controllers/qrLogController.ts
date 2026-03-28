@@ -131,6 +131,8 @@ export const getBatchSummary = async (req: AuthRequest, res: Response) => {
         ? (req.query.manufacturerId as string | undefined) || undefined
         : undefined;
     const whereBatch: any = {};
+    const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 500);
+    const offset = Math.max(0, parseInt(String(req.query.offset ?? "0"), 10) || 0);
     if (licenseeId) whereBatch.licenseeId = licenseeId;
     if (manufacturerId) whereBatch.manufacturerId = manufacturerId;
     if (
@@ -141,14 +143,19 @@ export const getBatchSummary = async (req: AuthRequest, res: Response) => {
       whereBatch.manufacturerId = req.user.userId;
     }
 
-    const batches = await prisma.batch.findMany({
-      where: whereBatch,
-      orderBy: { createdAt: "desc" },
-      select: { id: true, name: true, licenseeId: true, startCode: true, endCode: true, totalCodes: true, createdAt: true },
-    });
+    const [batches, total] = await Promise.all([
+      prisma.batch.findMany({
+        where: whereBatch,
+        orderBy: { createdAt: "desc" },
+        select: { id: true, name: true, licenseeId: true, startCode: true, endCode: true, totalCodes: true, createdAt: true },
+        take: limit,
+        skip: offset,
+      }),
+      prisma.batch.count({ where: whereBatch }),
+    ]);
 
     if (batches.length === 0) {
-      return res.json({ success: true, data: [] });
+      return res.json({ success: true, data: [], meta: { total, limit, offset } });
     }
 
     const batchIds = batches.map((b) => b.id);
@@ -172,7 +179,7 @@ export const getBatchSummary = async (req: AuthRequest, res: Response) => {
       counts: map.get(b.id) || {},
     }));
 
-    return res.json({ success: true, data });
+    return res.json({ success: true, data, meta: { total, limit, offset } });
   } catch (e) {
     console.error("getBatchSummary error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });

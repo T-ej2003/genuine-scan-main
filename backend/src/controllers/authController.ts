@@ -16,11 +16,25 @@ import {
   loginWithPassword,
   logoutSession,
   refreshSession,
+  isAdminMfaRequiredRole,
 } from "../services/auth/authService";
 import { confirmEmailVerification } from "../services/auth/emailVerificationService";
 import { requestPasswordReset, resetPasswordWithToken } from "../services/auth/passwordResetService";
 import { isValidEmailAddress, normalizeEmailAddress } from "../utils/email";
 import { isManufacturerRole, listManufacturerLicenseeLinks, normalizeLinkedLicensees } from "../services/manufacturerScopeService";
+import {
+  beginAdminMfaSetup,
+  completeAdminMfaChallenge,
+  confirmAdminMfaSetup,
+  disableAdminMfa,
+  getAdminMfaStatus,
+  rotateAdminMfaBackupCodes,
+  verifyAdminMfaCode,
+  createAdminMfaChallenge,
+} from "../services/auth/mfaService";
+import { verifyPassword } from "../services/auth/passwordService";
+import { createAuditLog } from "../services/auditService";
+import type { AuthenticatedSessionClaims } from "../types";
 
 const loginSchema = z.object({
   email: z
@@ -75,6 +89,20 @@ const resetPasswordSchema = z.object({
 
 const verifyEmailSchema = z.object({
   token: z.string().trim().min(10),
+}).strict();
+
+const mfaCodeSchema = z.object({
+  code: z.string().trim().min(6).max(32),
+}).strict();
+
+const mfaChallengeCompleteSchema = z.object({
+  ticket: z.string().trim().min(10),
+  code: z.string().trim().min(6).max(32),
+}).strict();
+
+const disableMfaSchema = z.object({
+  code: z.string().trim().min(6).max(32),
+  currentPassword: z.string().min(8).max(200),
 }).strict();
 
 const normalizeAuthError = (error: unknown): { status: number; error: string } => {
@@ -155,10 +183,62 @@ const allowLegacyTokenResponse = () => {
   return process.env.NODE_ENV !== "production";
 };
 
-const authResponseData = (session: { accessToken: string; user: any }) => ({
-  ...(allowLegacyTokenResponse() ? { token: session.accessToken } : {}),
+type CookieBackedAuthResponse = {
+  sessionStage: "ACTIVE" | "MFA_BOOTSTRAP";
+  accessToken: string;
+  refreshToken: string | null;
+  refreshTokenExpiresAt: Date | null;
+  csrfToken: string;
+  user: any;
+  auth: any;
+};
+
+const authResponseData = (session: CookieBackedAuthResponse) => ({
+  ...(allowLegacyTokenResponse() && session.sessionStage === "ACTIVE" ? { token: session.accessToken } : {}),
   user: session.user,
+  auth: session.auth,
 });
+
+const clearAuthCookies = (res: Response) => {
+  res.clearCookie(ACCESS_TOKEN_COOKIE, authCookieOptions());
+  res.clearCookie(REFRESH_TOKEN_COOKIE, authCookieOptions());
+  res.clearCookie(CSRF_TOKEN_COOKIE, csrfCookieOptions());
+};
+
+const setAuthCookies = (res: Response, session: CookieBackedAuthResponse) => {
+  const accessTtlMs = getAccessTokenTtlMinutes() * 60 * 1000;
+  const refreshTtlMs = getRefreshTokenTtlDays() * 24 * 60 * 60 * 1000;
+
+  res.cookie(ACCESS_TOKEN_COOKIE, session.accessToken, { ...authCookieOptions(), maxAge: accessTtlMs });
+
+  if (session.refreshToken) {
+    res.cookie(REFRESH_TOKEN_COOKIE, session.refreshToken, { ...authCookieOptions(), maxAge: refreshTtlMs });
+  } else {
+    res.clearCookie(REFRESH_TOKEN_COOKIE, authCookieOptions());
+  }
+
+  res.cookie(CSRF_TOKEN_COOKIE, session.csrfToken, {
+    ...csrfCookieOptions(),
+    maxAge: session.refreshToken ? refreshTtlMs : accessTtlMs,
+  });
+};
+
+const getAuthClaims = (req: Request) => ((req as any).user || null) as AuthenticatedSessionClaims | null;
+
+const buildAuthState = async (claims: AuthenticatedSessionClaims, userRole: string, userId: string) => {
+  const mfaRequired = isAdminMfaRequiredRole(userRole as any);
+  const mfaStatus = mfaRequired ? await getAdminMfaStatus(userId).catch(() => null) : null;
+
+  return {
+    sessionStage: claims.sessionStage,
+    authAssurance: claims.authAssurance || "PASSWORD",
+    mfaRequired,
+    mfaEnrolled: mfaRequired ? Boolean(mfaStatus?.enabled || mfaStatus?.enrolled) : false,
+    authenticatedAt: claims.authenticatedAt || null,
+    mfaVerifiedAt: claims.mfaVerifiedAt || null,
+    stepUpRequired: mfaRequired && claims.sessionStage === "ACTIVE" ? !claims.mfaVerifiedAt : claims.sessionStage !== "ACTIVE",
+  };
+};
 
 export const login = async (req: Request, res: Response) => {
   try {
@@ -183,12 +263,7 @@ export const login = async (req: Request, res: Response) => {
       userAgent,
     });
 
-    const accessTtlMs = getAccessTokenTtlMinutes() * 60 * 1000;
-    const refreshTtlMs = getRefreshTokenTtlDays() * 24 * 60 * 60 * 1000;
-
-    res.cookie(ACCESS_TOKEN_COOKIE, session.accessToken, { ...authCookieOptions(), maxAge: accessTtlMs });
-    res.cookie(REFRESH_TOKEN_COOKIE, session.refreshToken, { ...authCookieOptions(), maxAge: refreshTtlMs });
-    res.cookie(CSRF_TOKEN_COOKIE, session.csrfToken, { ...csrfCookieOptions(), maxAge: refreshTtlMs });
+    setAuthCookies(res, session);
 
     return res.json({ success: true, data: authResponseData(session) });
   } catch (error) {
@@ -200,8 +275,8 @@ export const login = async (req: Request, res: Response) => {
 
 export const me = async (req: Request, res: Response) => {
   try {
-    const authReq = req as any;
-    const userId = authReq.user?.userId;
+    const claims = getAuthClaims(req);
+    const userId = claims?.userId;
 
     if (!userId) {
       return res.status(401).json({ success: false, error: "Not authenticated" });
@@ -231,6 +306,8 @@ export const me = async (req: Request, res: Response) => {
       res.cookie(CSRF_TOKEN_COOKIE, newCsrfToken(), { ...csrfCookieOptions(), maxAge: getRefreshTokenTtlDays() * 24 * 60 * 60 * 1000 });
     }
 
+    const auth = claims ? await buildAuthState(claims, user.role, user.id) : null;
+
     return res.json({
       success: true,
       data: {
@@ -252,6 +329,7 @@ export const me = async (req: Request, res: Response) => {
         emailVerifiedAt: user.emailVerifiedAt?.toISOString?.() || null,
         pendingEmail: user.pendingEmail || null,
         pendingEmailRequestedAt: user.pendingEmailRequestedAt?.toISOString?.() || null,
+        auth,
       },
     });
   } catch (error) {
@@ -275,19 +353,32 @@ export const refresh = async (req: Request, res: Response) => {
     });
 
     if (!rotated.ok) {
-      res.clearCookie(ACCESS_TOKEN_COOKIE, authCookieOptions());
-      res.clearCookie(REFRESH_TOKEN_COOKIE, authCookieOptions());
+      clearAuthCookies(res);
       return res.status(401).json({ success: false, error: "Session expired. Please sign in again." });
     }
 
-    const accessTtlMs = getAccessTokenTtlMinutes() * 60 * 1000;
-    const refreshTtlMs = getRefreshTokenTtlDays() * 24 * 60 * 60 * 1000;
+    setAuthCookies(res, {
+      sessionStage: "ACTIVE",
+      accessToken: rotated.accessToken,
+      refreshToken: rotated.refreshToken,
+      refreshTokenExpiresAt: rotated.refreshTokenExpiresAt,
+      csrfToken: rotated.csrfToken,
+      user: rotated.user,
+      auth: rotated.auth,
+    });
 
-    res.cookie(ACCESS_TOKEN_COOKIE, rotated.accessToken, { ...authCookieOptions(), maxAge: accessTtlMs });
-    res.cookie(REFRESH_TOKEN_COOKIE, rotated.refreshToken, { ...authCookieOptions(), maxAge: refreshTtlMs });
-    res.cookie(CSRF_TOKEN_COOKIE, rotated.csrfToken, { ...csrfCookieOptions(), maxAge: refreshTtlMs });
-
-    return res.json({ success: true, data: authResponseData(rotated) });
+    return res.json({
+      success: true,
+      data: authResponseData({
+        sessionStage: "ACTIVE",
+        accessToken: rotated.accessToken,
+        refreshToken: rotated.refreshToken,
+        refreshTokenExpiresAt: rotated.refreshTokenExpiresAt,
+        csrfToken: rotated.csrfToken,
+        user: rotated.user,
+        auth: rotated.auth,
+      }),
+    });
   } catch (e: any) {
     console.error("Refresh error:", e);
     return res.status(401).json({ success: false, error: "Session expired. Please sign in again." });
@@ -296,8 +387,7 @@ export const refresh = async (req: Request, res: Response) => {
 
 export const logout = async (req: Request, res: Response) => {
   try {
-    const authReq = req as any;
-    const userId = authReq.user?.userId;
+    const userId = getAuthClaims(req)?.userId;
     if (!userId) return res.status(401).json({ success: false, error: "Not authenticated" });
 
     const rawRefresh = (req as any).cookies?.[REFRESH_TOKEN_COOKIE] as string | undefined;
@@ -306,9 +396,7 @@ export const logout = async (req: Request, res: Response) => {
 
     await logoutSession({ userId, rawRefreshToken: rawRefresh || null, ipHash, userAgent });
 
-    res.clearCookie(ACCESS_TOKEN_COOKIE, authCookieOptions());
-    res.clearCookie(REFRESH_TOKEN_COOKIE, authCookieOptions());
-    res.clearCookie(CSRF_TOKEN_COOKIE, csrfCookieOptions());
+    clearAuthCookies(res);
 
     return res.json({ success: true, data: { loggedOut: true } });
   } catch (e: any) {
@@ -396,9 +484,6 @@ export const acceptInviteController = async (req: Request, res: Response) => {
     });
 
     // Auto sign-in after accepting invite
-    const accessTtlMs = getAccessTokenTtlMinutes() * 60 * 1000;
-    const refreshTtlMs = getRefreshTokenTtlDays() * 24 * 60 * 60 * 1000;
-
     const session = await loginWithPassword({
       email: user.email,
       password: parsed.data.password,
@@ -406,9 +491,7 @@ export const acceptInviteController = async (req: Request, res: Response) => {
       userAgent,
     });
 
-    res.cookie(ACCESS_TOKEN_COOKIE, session.accessToken, { ...authCookieOptions(), maxAge: accessTtlMs });
-    res.cookie(REFRESH_TOKEN_COOKIE, session.refreshToken, { ...authCookieOptions(), maxAge: refreshTtlMs });
-    res.cookie(CSRF_TOKEN_COOKIE, session.csrfToken, { ...csrfCookieOptions(), maxAge: refreshTtlMs });
+    setAuthCookies(res, session);
 
     return res.status(200).json({ success: true, data: authResponseData(session) });
   } catch (e: any) {
@@ -445,5 +528,243 @@ export const invitePreviewController = async (req: Request, res: Response) => {
     return res.json({ success: true, data: preview });
   } catch (e: any) {
     return res.status(400).json({ success: false, error: e?.message || "Invite preview unavailable" });
+  }
+};
+
+export const getAdminMfaStatusController = async (req: Request, res: Response) => {
+  const claims = getAuthClaims(req);
+  if (!claims?.userId) return res.status(401).json({ success: false, error: "Not authenticated" });
+  if (!isAdminMfaRequiredRole(claims.role)) {
+    return res.json({
+      success: true,
+      data: {
+        required: false,
+        sessionStage: claims.sessionStage,
+        enrolled: false,
+        enabled: false,
+      },
+    });
+  }
+
+  const status = await getAdminMfaStatus(claims.userId);
+  return res.json({
+    success: true,
+    data: {
+      required: true,
+      sessionStage: claims.sessionStage,
+      ...status,
+    },
+  });
+};
+
+export const beginAdminMfaSetupController = async (req: Request, res: Response) => {
+  const claims = getAuthClaims(req);
+  if (!claims?.userId) return res.status(401).json({ success: false, error: "Not authenticated" });
+  if (!isAdminMfaRequiredRole(claims.role)) {
+    return res.status(403).json({ success: false, error: "MFA is not required for this role." });
+  }
+
+  const setup = await beginAdminMfaSetup({
+    userId: claims.userId,
+    email: claims.email,
+  });
+
+  return res.json({ success: true, data: setup });
+};
+
+export const confirmAdminMfaSetupController = async (req: Request, res: Response) => {
+  const claims = getAuthClaims(req);
+  if (!claims?.userId) return res.status(401).json({ success: false, error: "Not authenticated" });
+  const parsed = mfaCodeSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+  }
+
+  try {
+    await confirmAdminMfaSetup({ userId: claims.userId, code: parsed.data.code });
+
+    if (claims.sessionStage === "MFA_BOOTSTRAP") {
+      const ipHash = hashIp(req.ip);
+      const userAgent = normalizeUserAgent(req.get("user-agent"));
+      const now = new Date();
+      const session = await issueSessionForUser({
+        userId: claims.userId,
+        ipHash,
+        userAgent,
+        authAssurance: "ADMIN_MFA",
+        authenticatedAt: now,
+        mfaVerifiedAt: now,
+        now,
+      });
+
+      await createAuditLog({
+        userId: claims.userId,
+        action: "AUTH_MFA_ENROLLED",
+        entityType: "User",
+        entityId: claims.userId,
+        details: { source: "LOGIN_BOOTSTRAP" },
+        ipHash: ipHash || undefined,
+        userAgent: userAgent || undefined,
+      } as any);
+
+      setAuthCookies(res, session);
+      return res.json({ success: true, data: authResponseData(session) });
+    }
+
+    return res.json({ success: true, data: { enabled: true } });
+  } catch (error: any) {
+    const message = String(error?.message || "");
+    const status = message === "INVALID_MFA_CODE" ? 400 : 409;
+    return res.status(status).json({ success: false, error: message === "INVALID_MFA_CODE" ? "Invalid authentication code." : "MFA setup could not be completed." });
+  }
+};
+
+export const beginAdminMfaChallengeController = async (req: Request, res: Response) => {
+  const claims = getAuthClaims(req);
+  if (!claims?.userId) return res.status(401).json({ success: false, error: "Not authenticated" });
+  if (!isAdminMfaRequiredRole(claims.role)) {
+    return res.status(403).json({ success: false, error: "MFA is not required for this role." });
+  }
+
+  const ipHash = hashIp(req.ip);
+  const userAgent = normalizeUserAgent(req.get("user-agent"));
+  const challenge = await createAdminMfaChallenge({
+    userId: claims.userId,
+    riskScore: 0,
+    riskLevel: "LOW",
+    reasons: ["Admin login requires MFA confirmation."],
+    ipHash,
+    userAgent,
+  });
+
+  return res.json({
+    success: true,
+    data: {
+      ticket: challenge.ticket,
+      expiresAt: challenge.expiresAt,
+    },
+  });
+};
+
+export const completeAdminMfaChallengeController = async (req: Request, res: Response) => {
+  const claims = getAuthClaims(req);
+  if (!claims?.userId) return res.status(401).json({ success: false, error: "Not authenticated" });
+  const parsed = mfaChallengeCompleteSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+  }
+
+  try {
+    const ipHash = hashIp(req.ip);
+    const userAgent = normalizeUserAgent(req.get("user-agent"));
+    const now = new Date();
+    const completed = await completeAdminMfaChallenge({
+      ticket: parsed.data.ticket,
+      code: parsed.data.code,
+      ipHash,
+      userAgent,
+    });
+
+    if (completed.userId !== claims.userId) {
+      return res.status(403).json({ success: false, error: "MFA challenge does not match the active bootstrap session." });
+    }
+
+    const session = await issueSessionForUser({
+      userId: claims.userId,
+      ipHash,
+      userAgent,
+      authAssurance: "ADMIN_MFA",
+      authenticatedAt: now,
+      mfaVerifiedAt: now,
+      now,
+    });
+
+    await createAuditLog({
+      userId: claims.userId,
+      action: "AUTH_MFA_LOGIN_COMPLETE",
+      entityType: "User",
+      entityId: claims.userId,
+      details: {
+        riskScore: completed.riskScore,
+        riskLevel: completed.riskLevel,
+        reasons: completed.reasons,
+      },
+      ipHash: ipHash || undefined,
+      userAgent: userAgent || undefined,
+    } as any);
+
+    setAuthCookies(res, session);
+    return res.json({ success: true, data: authResponseData(session) });
+  } catch (error: any) {
+    const raw = String(error?.message || "");
+    const status = raw === "INVALID_MFA_CODE" ? 400 : raw === "MFA_CHALLENGE_NOT_FOUND" ? 410 : 409;
+    const message =
+      raw === "INVALID_MFA_CODE"
+        ? "Invalid authentication code."
+        : raw === "MFA_CHALLENGE_NOT_FOUND"
+          ? "This MFA challenge expired. Start again."
+          : "MFA challenge could not be completed.";
+    return res.status(status).json({ success: false, error: message });
+  }
+};
+
+export const rotateAdminMfaBackupCodesController = async (req: Request, res: Response) => {
+  const claims = getAuthClaims(req);
+  if (!claims?.userId || claims.sessionStage !== "ACTIVE") {
+    return res.status(401).json({ success: false, error: "An active authenticated session is required." });
+  }
+
+  const parsed = mfaCodeSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+  }
+
+  try {
+    const rotated = await rotateAdminMfaBackupCodes({ userId: claims.userId, code: parsed.data.code });
+    return res.json({ success: true, data: rotated });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: "Could not rotate backup codes. Check the authentication code and try again." });
+  }
+};
+
+export const disableAdminMfaController = async (req: Request, res: Response) => {
+  const claims = getAuthClaims(req);
+  if (!claims?.userId || claims.sessionStage !== "ACTIVE") {
+    return res.status(401).json({ success: false, error: "An active authenticated session is required." });
+  }
+
+  const parsed = disableMfaSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: claims.userId },
+    select: { id: true, passwordHash: true, role: true },
+  });
+
+  if (!user?.passwordHash) {
+    return res.status(400).json({ success: false, error: "Password confirmation is unavailable for this account." });
+  }
+
+  const passwordOk = await verifyPassword(user.passwordHash, parsed.data.currentPassword);
+  if (!passwordOk) {
+    return res.status(400).json({ success: false, error: "Current password is incorrect." });
+  }
+
+  try {
+    await verifyAdminMfaCode({ userId: claims.userId, code: parsed.data.code });
+    await disableAdminMfa(claims.userId);
+    await createAuditLog({
+      userId: claims.userId,
+      action: "AUTH_MFA_DISABLED",
+      entityType: "User",
+      entityId: claims.userId,
+      details: { actorUserId: claims.userId },
+      ipAddress: req.ip,
+    } as any);
+    return res.json({ success: true, data: { enabled: false } });
+  } catch {
+    return res.status(400).json({ success: false, error: "Could not disable MFA. Check the code and try again." });
   }
 };

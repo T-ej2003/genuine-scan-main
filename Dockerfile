@@ -16,7 +16,10 @@ ENV GIT_SHA=${GIT_SHA}
 ENV VITE_APP_ENV=${VITE_APP_ENV}
 ENV VITE_SENTRY_DSN=${VITE_SENTRY_DSN}
 
-RUN npm run build
+RUN npm run check:security-guardrails \
+  && npm run typecheck \
+  && npm test \
+  && npm run build
 
 FROM nginx:1.27-alpine
 

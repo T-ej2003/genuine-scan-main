@@ -25,7 +25,8 @@
     "test:e2e:headed": "playwright test --config=playwright.enterprise.config.ts --headed",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
-    "typecheck:incremental": "npm run typecheck"
+    "typecheck:incremental": "npm run typecheck",
+    "verify:release": "npm run check:security-guardrails && npm run typecheck && npm test && (cd backend && npm test)"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

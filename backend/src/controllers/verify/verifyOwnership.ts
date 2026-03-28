@@ -4,6 +4,7 @@ import prisma from "../../config/database";
 import { maskEmail } from "../../services/customerVerifyAuthService";
 import { buildVerifyUrl } from "../../services/qrService";
 import { buildTokenHashCandidates, hashToken } from "../../utils/security";
+import { guardPublicIntegrityFallback } from "../../utils/publicIntegrityGuard";
 
 export type OwnershipStatus = {
   isClaimed: boolean;
@@ -117,8 +118,6 @@ export const buildOwnershipStatus = (params: {
   };
 };
 
-let ownershipStorageWarningLogged = false;
-
 export const isOwnershipStorageMissingError = (error: unknown) => {
   if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
   if (error.code !== "P2021" && error.code !== "P2022") return false;
@@ -130,7 +129,10 @@ export const isOwnershipStorageMissingError = (error: unknown) => {
   return String(error.message || "").toLowerCase().includes("ownership");
 };
 
-export const loadOwnershipByQrCodeId = async (qrCodeId: string): Promise<OwnershipRecord | null> => {
+export const loadOwnershipByQrCodeId = async (
+  qrCodeId: string,
+  options?: { strictStorage?: boolean }
+): Promise<OwnershipRecord | null> => {
   try {
     return await prisma.ownership.findUnique({
       where: { qrCodeId },
@@ -147,12 +149,14 @@ export const loadOwnershipByQrCodeId = async (qrCodeId: string): Promise<Ownersh
     });
   } catch (error) {
     if (isOwnershipStorageMissingError(error)) {
-      if (!ownershipStorageWarningLogged) {
-        ownershipStorageWarningLogged = true;
-        console.warn(
-          "[verify] Ownership table is unavailable. Continuing verification without ownership data. Apply ownership migrations."
-        );
-      }
+      guardPublicIntegrityFallback({
+        strictStorage: options?.strictStorage,
+        warningKey: "verify-ownership-storage",
+        warningMessage:
+          "[verify] Ownership table is unavailable. Continuing verification without ownership data. Apply ownership migrations.",
+        degradedMessage: "Verification is temporarily unavailable because ownership records are not ready.",
+        degradedCode: "PUBLIC_OWNERSHIP_UNAVAILABLE",
+      });
       return null;
     }
     throw error;
