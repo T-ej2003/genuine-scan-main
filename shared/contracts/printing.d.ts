@@ -27,6 +27,7 @@ export type PrinterConnectionStatusDTO = {
   connected: boolean;
   trusted: boolean;
   compatibilityMode: boolean;
+  degraded?: boolean;
   compatibilityReason?: string | null;
   eligibleForPrinting: boolean;
   connectionClass?: "TRUSTED" | "COMPATIBILITY" | "BLOCKED";

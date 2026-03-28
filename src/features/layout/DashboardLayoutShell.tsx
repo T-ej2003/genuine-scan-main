@@ -4,6 +4,7 @@ import { ChevronDown, CircleHelp, LogOut, Menu, Printer, Settings } from "lucide
 
 import { APP_PATHS, getAppBreadcrumbs, getNavItemsForRole, getRoleDisplayLabel, isAppRouteActive } from "@/app/route-metadata";
 import { SupportIssueLauncher } from "@/components/support/SupportIssueLauncher";
+import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -186,6 +187,14 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               <Printer className="h-4 w-4" />
               <span className="hidden md:inline">{`Printer ${printerConnection.printerModeLabel}`}</span>
               <span className="md:hidden">{printerConnection.printerModeLabel}</span>
+              {printerConnection.printerDegraded ? (
+                <Badge
+                  variant="outline"
+                  className="border-amber-300 bg-amber-100/80 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-800"
+                >
+                  Degraded
+                </Badge>
+              ) : null}
             </Button>
           ) : null}
 
@@ -258,6 +267,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             printerUpdatedLabel={printerConnection.printerUpdatedLabel}
             printerFeedLabel={printerConnection.printerFeedLabel}
             printerStatusLive={printerConnection.printerStatusLive}
+            printerDegraded={printerConnection.printerDegraded}
+            printerDegradedMessage={printerConnection.printerDegradedMessage}
             selectedPrinter={printerConnection.selectedPrinter}
             shouldUseManagedPrinterSummary={printerConnection.shouldUseManagedPrinterSummary}
             preferredManagedNetworkPrinter={printerConnection.preferredManagedNetworkPrinter}

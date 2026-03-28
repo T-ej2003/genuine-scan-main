@@ -38,6 +38,7 @@ vi.mock("@/lib/support-diagnostics", () => ({
 
 vi.mock("@/lib/api-client", () => ({
   default: {
+    configureLocalPrintAgentBackend: vi.fn(),
     getNotifications: vi.fn(),
     streamNotifications: vi.fn(),
     listRegisteredPrinters: vi.fn(),
@@ -87,6 +88,9 @@ describe("DashboardLayout printer connection dialog", () => {
     vi.mocked(apiClient.getNotifications).mockResolvedValue({
       success: true,
       data: { notifications: [], unread: 0 },
+    } as any);
+    vi.mocked(apiClient.configureLocalPrintAgentBackend).mockResolvedValue({
+      success: true,
     } as any);
     vi.mocked(apiClient.streamNotifications).mockImplementation(() => () => undefined);
     vi.mocked(apiClient.streamPrinterConnectionStatus).mockImplementation(() => () => undefined);
@@ -293,5 +297,103 @@ describe("DashboardLayout printer connection dialog", () => {
 
     expect(screen.getByRole("button", { name: /printer ready/i })).toBeInTheDocument();
     expect(screen.queryByText("Printing Status")).not.toBeInTheDocument();
+  });
+
+  it("surfaces degraded connector mode when heartbeat falls back to recovery mode", async () => {
+    localStorageState.set("manufacturer-printer-onboarding:v1:manufacturer-1", "dismissed");
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
+      success: true,
+      data: {
+        connected: true,
+        printerName: "Canon TS4100i series 2",
+        printerId: "printer-1",
+        selectedPrinterId: "printer-1",
+        selectedPrinterName: "Canon TS4100i series 2",
+        deviceName: "Factory Mac",
+        agentVersion: "2026.3.28",
+        printers: [
+          {
+            printerId: "printer-1",
+            printerName: "Canon TS4100i series 2",
+            model: "TS4100i",
+            connection: "ipps",
+            online: true,
+            isDefault: true,
+            protocols: ["ipp"],
+            languages: ["pdf"],
+            mediaSizes: ["A4"],
+            dpi: 300,
+          },
+        ],
+      },
+    } as any);
+    vi.mocked(apiClient.reportPrinterHeartbeat).mockResolvedValue({
+      success: true,
+      degraded: true,
+      data: {
+        connected: true,
+        trusted: false,
+        compatibilityMode: true,
+        degraded: true,
+        compatibilityReason: "Heartbeat accepted in degraded mode while secure printer storage is recovering.",
+        eligibleForPrinting: true,
+        connectionClass: "COMPATIBILITY",
+        stale: false,
+        requiredForPrinting: true,
+        trustStatus: "DEGRADED",
+        trustReason: "Printer heartbeat storage is temporarily unavailable",
+        lastHeartbeatAt: "2026-03-28T10:00:00.000Z",
+        ageSeconds: 0,
+        registrationId: null,
+        agentId: "agent-1",
+        deviceFingerprint: "device-fingerprint",
+        mtlsFingerprint: null,
+        printerName: "Canon TS4100i series 2",
+        printerId: "printer-1",
+        selectedPrinterId: "printer-1",
+        selectedPrinterName: "Canon TS4100i series 2",
+        deviceName: "Factory Mac",
+        agentVersion: "2026.3.28",
+        capabilitySummary: null,
+        printers: [
+          {
+            printerId: "printer-1",
+            printerName: "Canon TS4100i series 2",
+            model: "TS4100i",
+            connection: "ipps",
+            online: true,
+            isDefault: true,
+            protocols: ["ipp"],
+            languages: ["pdf"],
+            mediaSizes: ["A4"],
+            dpi: 300,
+          },
+        ],
+        calibrationProfile: null,
+        error: null,
+      },
+    } as any);
+
+    renderWithQueryClient(
+      <MemoryRouter>
+        <DashboardLayout>
+          <div>Dashboard content</div>
+        </DashboardLayout>
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("Degraded connector mode")).toBeInTheDocument();
+    expect(vi.mocked(apiClient.getPrinterConnectionStatus)).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/degraded mode active while secure printer storage recovers/i)
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: /^close$/i })[0]);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Printing Status")).not.toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("button", { name: /printer .*degraded/i })).toBeInTheDocument();
   });
 });

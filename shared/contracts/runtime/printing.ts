@@ -40,6 +40,7 @@ export const printerConnectionStatusSchema = z
     connected: z.boolean(),
     trusted: z.boolean(),
     compatibilityMode: z.boolean(),
+    degraded: z.boolean().optional(),
     compatibilityReason: z.string().nullable().optional(),
     eligibleForPrinting: z.boolean(),
     connectionClass: z.enum(["TRUSTED", "COMPATIBILITY", "BLOCKED"]).optional(),

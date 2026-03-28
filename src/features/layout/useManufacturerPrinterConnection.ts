@@ -40,6 +40,7 @@ const defaultPrinterStatus: PrinterConnectionStatusDTO = {
   connected: false,
   trusted: false,
   compatibilityMode: false,
+  degraded: false,
   compatibilityReason: null,
   eligibleForPrinting: false,
   connectionClass: "BLOCKED",
@@ -143,10 +144,13 @@ export function useManufacturerPrinterConnection({
     const remotePrinters = normalizeLocalPrinterRows(nextStatus.printers || []);
     const mergedPrinters = remotePrinters.length > 0 ? remotePrinters : fallbackPrinters;
 
-    setPrinterStatus({
+    setPrinterStatus((previous) => ({
+      ...previous,
       ...nextStatus,
+      degraded:
+        typeof nextStatus.degraded === "boolean" ? nextStatus.degraded : Boolean(previous.degraded),
       printers: mergedPrinters,
-    });
+    }));
     setDetectedPrinters(mergedPrinters);
     setPrinterStatusUpdatedAt(options?.updatedAt || nextStatus.lastHeartbeatAt || new Date().toISOString());
 
@@ -341,10 +345,37 @@ export function useManufacturerPrinterConnection({
           error: String(local.error || "Local print agent unavailable"),
         };
 
-    await apiClient.reportPrinterHeartbeat(heartbeatPayload);
+    const heartbeat = await apiClient.reportPrinterHeartbeat(heartbeatPayload);
+    const heartbeatStatus =
+      heartbeat.success && heartbeat.data ? (heartbeat.data as PrinterConnectionStatusDTO) : null;
+    const heartbeatDegraded = Boolean(heartbeat.degraded || heartbeatStatus?.degraded);
+
+    if (heartbeatDegraded && heartbeatStatus) {
+      const degradedStatus: PrinterConnectionStatusDTO = {
+        ...heartbeatStatus,
+        degraded: true,
+      };
+      applyPrinterStatusSnapshot(degradedStatus, {
+        fallbackPrinters: localPrinters,
+        updatedAt: degradedStatus.lastHeartbeatAt || new Date().toISOString(),
+      });
+
+      if (!Boolean(degradedStatus.connected && degradedStatus.eligibleForPrinting)) {
+        void maybeAutoReportPrinterFailure({
+          localResult: local,
+          remoteStatus: degradedStatus,
+          printers: localPrinters.map((item) => ({ printerId: item.printerId, printerName: item.printerName })),
+        });
+      }
+      return;
+    }
+
     const remote = await apiClient.getPrinterConnectionStatus();
     if (remote.success && remote.data) {
-      const nextStatus = remote.data as PrinterConnectionStatusDTO;
+      const nextStatus = {
+        ...(remote.data as PrinterConnectionStatusDTO),
+        degraded: false,
+      } satisfies PrinterConnectionStatusDTO;
       applyPrinterStatusSnapshot(nextStatus, {
         fallbackPrinters: localPrinters,
         updatedAt: nextStatus.lastHeartbeatAt || new Date().toISOString(),
@@ -528,6 +559,13 @@ export function useManufacturerPrinterConnection({
   });
   const printerFeedLabel = printerStatusLive ? "Live updates" : "Automatic refresh";
   const printerUpdatedLabel = formatPrinterTimestamp(printerStatusUpdatedAt || printerStatus.lastHeartbeatAt);
+  const printerDegraded = Boolean(printerStatus.degraded);
+  const printerDegradedMessage = printerDegraded
+    ? sanitizePrinterUiError(
+        printerStatus.compatibilityReason || printerStatus.trustReason || printerStatus.error,
+        "MSCQR is running in degraded connector mode while secure printer storage finishes recovering."
+      )
+    : "";
   const printerSummaryMessage = effectivePrinterReady
     ? shouldUseManagedPrinterSummary
       ? effectivePrinterDiagnostics.summary
@@ -634,6 +672,8 @@ export function useManufacturerPrinterConnection({
     printerToneClass,
     printerTitle,
     printerModeLabel,
+    printerDegraded,
+    printerDegradedMessage,
     managedNetworkPrinters,
     detectedPrinters,
     effectivePrinterReady,

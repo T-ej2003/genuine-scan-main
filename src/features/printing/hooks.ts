@@ -59,6 +59,7 @@ function buildFallbackPrinterStatus(printers: LocalPrinterDTO[], error?: string 
     connected: false,
     trusted: false,
     compatibilityMode: false,
+    degraded: false,
     compatibilityReason: null,
     eligibleForPrinting: false,
     connectionClass: "BLOCKED",

@@ -196,6 +196,8 @@ type PrinterStatusDialogProps = {
   printerUpdatedLabel: string;
   printerFeedLabel: string;
   printerStatusLive: boolean;
+  printerDegraded: boolean;
+  printerDegradedMessage: string;
   selectedPrinter?: PrinterInventoryRow | null;
   shouldUseManagedPrinterSummary: boolean;
   preferredManagedNetworkPrinter?: ManagedPrinterProfile | null;
@@ -231,6 +233,8 @@ export function PrinterStatusDialog({
   printerUpdatedLabel,
   printerFeedLabel,
   printerStatusLive,
+  printerDegraded,
+  printerDegradedMessage,
   selectedPrinter,
   shouldUseManagedPrinterSummary,
   preferredManagedNetworkPrinter,
@@ -301,6 +305,14 @@ export function PrinterStatusDialog({
                       {shouldUseManagedPrinterSummary && preferredManagedNetworkPrinter ? (
                         <Badge variant="secondary">{getPrinterDispatchLabel(preferredManagedNetworkPrinter)}</Badge>
                       ) : null}
+                      {printerDegraded ? (
+                        <Badge
+                          variant="outline"
+                          className="border-amber-300 bg-amber-100 text-amber-900"
+                        >
+                          Degraded connector mode
+                        </Badge>
+                      ) : null}
                     </div>
                     <p className="mt-1 text-sm font-medium text-slate-700">
                       {printerIdentity.vendor}
@@ -316,6 +328,11 @@ export function PrinterStatusDialog({
                     </p>
                     <p className="mt-2 text-xs leading-5 text-slate-600">{effectivePrinterDiagnostics.detail}</p>
                     <p className="mt-2 text-xs leading-5 text-slate-600">{printerNextStep}</p>
+                    {printerDegraded ? (
+                      <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+                        {printerDegradedMessage}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
@@ -379,6 +396,15 @@ export function PrinterStatusDialog({
                     <div className="text-xs text-slate-600">{effectivePrinterDiagnostics.badgeLabel}</div>
                   </div>
                 </div>
+                {printerDegraded ? (
+                  <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-700" />
+                    <div>
+                      <div className="font-medium text-amber-950">Connector mode</div>
+                      <div className="text-xs text-amber-800">Degraded mode active while secure printer storage recovers</div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>

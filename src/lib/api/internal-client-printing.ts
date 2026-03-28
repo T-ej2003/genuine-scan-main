@@ -229,6 +229,7 @@ export const createPrintingApi = (core: ApiClientCore) => ({
       connected: boolean;
       trusted: boolean;
       compatibilityMode: boolean;
+      degraded?: boolean;
       compatibilityReason?: string | null;
       eligibleForPrinting: boolean;
       connectionClass: "TRUSTED" | "COMPATIBILITY" | "BLOCKED";
@@ -283,6 +284,7 @@ export const createPrintingApi = (core: ApiClientCore) => ({
       connected: boolean;
       trusted: boolean;
       compatibilityMode: boolean;
+      degraded?: boolean;
       compatibilityReason?: string | null;
       eligibleForPrinting: boolean;
       connectionClass: "TRUSTED" | "COMPATIBILITY" | "BLOCKED";

@@ -8,6 +8,7 @@ export interface ApiResponse<T = any> {
   data?: T;
   error?: string;
   message?: string;
+  degraded?: boolean;
 }
 
 type RequestOptions = RequestInit & {
