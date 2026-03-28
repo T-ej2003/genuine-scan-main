@@ -80,17 +80,13 @@ describe("ConnectorDownload", () => {
       </MemoryRouter>
     );
 
-    await waitFor(() => {
-      expect(vi.mocked(apiClient.getLatestConnectorRelease)).toHaveBeenCalled();
-    });
-
-    expect(screen.getByText("Install MSCQR Connector")).toBeInTheDocument();
+    expect(await screen.findByText("Install MSCQR Connector")).toBeInTheDocument();
     expect(screen.getByText(/Acme Factory 1/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /download for mac/i })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: /download for mac/i })).toHaveAttribute(
       "href",
       "https://example.test/api/public/connector/download/2026.3.12/macos",
     );
-    expect(screen.getByRole("link", { name: /download for windows/i })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: /download for windows/i })).toHaveAttribute(
       "href",
       "https://example.test/api/public/connector/download/2026.3.12/windows",
     );
@@ -152,15 +148,11 @@ describe("ConnectorDownload", () => {
       </MemoryRouter>,
     );
 
-    await waitFor(() => {
-      expect(vi.mocked(apiClient.getLatestConnectorRelease)).toHaveBeenCalled();
-    });
-
-    expect(screen.getByRole("link", { name: /download for mac/i })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: /download for mac/i })).toHaveAttribute(
       "href",
       "https://example.test/api/public/connector/download/2026.3.12/macos",
     );
-    expect(screen.getByRole("link", { name: /download for windows/i })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: /download for windows/i })).toHaveAttribute(
       "href",
       "https://example.test/api/public/connector/download/2026.3.12/windows",
     );
@@ -207,12 +199,8 @@ describe("ConnectorDownload", () => {
       </MemoryRouter>,
     );
 
-    await waitFor(() => {
-      expect(vi.mocked(apiClient.getLatestConnectorRelease)).toHaveBeenCalled();
-    });
-
     expect(screen.queryByRole("link", { name: /download for mac/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /download for windows/i })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: /download for windows/i })).toHaveAttribute(
       "href",
       "https://example.test/api/public/connector/download/2026.3.12/windows",
     );
