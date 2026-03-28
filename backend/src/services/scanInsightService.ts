@@ -2,6 +2,7 @@ import prisma from "../config/database";
 import { reverseGeocode } from "./locationService";
 import { isPrismaMissingTableError } from "../utils/prismaStorageGuard";
 import { guardPublicIntegrityFallback } from "../utils/publicIntegrityGuard";
+import { getQrScanHistoryEdges } from "./scanLogReportingService";
 
 type ScanInsight = {
   firstScanAt: string | null;
@@ -166,38 +167,8 @@ export const getScanInsight = async (
       })
     : "";
   try {
-    const [first, latestTwo, recent24h, ipVelocityCount10m, deviceCorrelatedCodes] = await Promise.all([
-      prisma.qrScanLog.findFirst({
-        where: { qrCodeId },
-        orderBy: [{ scannedAt: "asc" }, { id: "asc" }],
-        select: {
-          scannedAt: true,
-          locationName: true,
-          locationCity: true,
-          locationRegion: true,
-          locationCountry: true,
-          latitude: true,
-          longitude: true,
-        },
-      }),
-      prisma.qrScanLog.findMany({
-        where: { qrCodeId },
-        orderBy: [{ scannedAt: "desc" }, { id: "desc" }],
-        take: 2,
-        select: {
-          scannedAt: true,
-          locationName: true,
-          locationCity: true,
-          locationRegion: true,
-          locationCountry: true,
-          latitude: true,
-          longitude: true,
-          device: true,
-          customerUserId: true,
-          ownershipId: true,
-          isTrustedOwnerContext: true,
-        },
-      }),
+    const [historyEdges, recent24h, ipVelocityCount10m, deviceCorrelatedCodes] = await Promise.all([
+      getQrScanHistoryEdges(qrCodeId),
       prisma.qrScanLog.findMany({
         where: {
           qrCodeId,
@@ -235,6 +206,8 @@ export const getScanInsight = async (
         : Promise.resolve([] as Array<{ qrCodeId: string }>),
     ]);
 
+    const first = historyEdges.first;
+    const latestTwo = historyEdges.latestTwo;
     const latest = latestTwo[0] || null;
     const previous = latestTwo[1] || null;
     const latestTimestamp = latest?.scannedAt ? new Date(latest.scannedAt).getTime() : null;

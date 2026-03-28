@@ -1432,6 +1432,7 @@ model SecurityEventOutbox {
 
   @@index([status, nextAttemptAt])
   @@index([createdAt])
+  @@index([updatedAt])
 }
 
 model CompliancePackJob {
@@ -1962,6 +1963,7 @@ model Notification {
   readAt DateTime?
   emailedAt DateTime?
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId, readAt])
   @@index([licenseeId, createdAt])
@@ -1969,6 +1971,7 @@ model Notification {
   @@index([incidentId])
   @@index([channel, createdAt])
   @@index([userId, createdAt, id])
+  @@index([updatedAt])
 }
 
 model TenantFeatureFlag {

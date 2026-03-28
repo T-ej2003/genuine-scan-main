@@ -9,6 +9,10 @@ import {
   countPrintedInventory,
   countRedeemedInventory,
 } from "./qrStatusMetrics";
+import {
+  getScanLogReportingRelationName,
+  listScanLogsForReporting,
+} from "./scanLogReportingService";
 
 export type TrackingAnalyticsScopeMode = "inventory" | "activity";
 
@@ -82,6 +86,7 @@ const TRACKING_STATUSES: QRStatus[] = [
   QRStatus.SCANNED,
 ];
 const INSENSITIVE = Prisma.QueryMode.insensitive;
+const relationSql = (relationName: string) => Prisma.raw(`"${relationName.replace(/"/g, "\"\"")}"`);
 
 const emptyTotals = (): TrackingAnalyticsTotals => ({
   total: 0,
@@ -243,6 +248,7 @@ type TrackingEventMetrics = {
 
 const loadEventMetrics = async (filters: TrackingAnalyticsFilters): Promise<TrackingEventMetrics> => {
   const whereSql = buildMatchingLogWhereSql(filters);
+  const sourceRelation = relationSql(await getScanLogReportingRelationName());
 
   type QuantityRow = { scanEvents: number; matchedBatches: number };
   type BatchEventRow = { batchId: string | null; scanEvents: number };
@@ -252,7 +258,7 @@ const loadEventMetrics = async (filters: TrackingAnalyticsFilters): Promise<Trac
     prisma.$queryRaw<QuantityRow[]>(Prisma.sql`
       WITH matching_logs AS (
         SELECT s."id", s."batchId"
-        FROM "QrScanLog" s
+        FROM ${sourceRelation} s
         LEFT JOIN "Batch" b ON b."id" = s."batchId"
         ${whereSql}
       )
@@ -273,7 +279,7 @@ const loadEventMetrics = async (filters: TrackingAnalyticsFilters): Promise<Trac
           s."locationCountry",
           s."device",
           s."userAgent"
-        FROM "QrScanLog" s
+        FROM ${sourceRelation} s
         LEFT JOIN "Batch" b ON b."id" = s."batchId"
         ${whereSql}
       )
@@ -298,7 +304,7 @@ const loadEventMetrics = async (filters: TrackingAnalyticsFilters): Promise<Trac
     `),
     prisma.$queryRaw<BatchEventRow[]>(Prisma.sql`
       SELECT s."batchId" AS "batchId", COUNT(*)::int AS "scanEvents"
-      FROM "QrScanLog" s
+      FROM ${sourceRelation} s
       LEFT JOIN "Batch" b ON b."id" = s."batchId"
       ${whereSql}
       GROUP BY s."batchId"
@@ -307,7 +313,7 @@ const loadEventMetrics = async (filters: TrackingAnalyticsFilters): Promise<Trac
       SELECT
         TO_CHAR(DATE_TRUNC('day', s."scannedAt"), 'Mon DD') AS "label",
         COUNT(*)::int AS "scanEvents"
-      FROM "QrScanLog" s
+      FROM ${sourceRelation} s
       LEFT JOIN "Batch" b ON b."id" = s."batchId"
       ${whereSql}
       GROUP BY DATE_TRUNC('day', s."scannedAt")
@@ -372,20 +378,18 @@ const enrichLogs = async (logs: any[]) => {
 };
 
 const loadLogs = async (filters: TrackingAnalyticsFilters) => {
-  const where = buildLogWhereObject(filters);
-  const [logs, total] = await Promise.all([
-    prisma.qrScanLog.findMany({
-      where,
-      orderBy: { scannedAt: "desc" },
-      take: filters.limit,
-      skip: filters.offset,
-      include: {
-        licensee: { select: { id: true, name: true, prefix: true } },
-        qrCode: { select: { id: true, code: true, status: true } },
-      },
-    }),
-    prisma.qrScanLog.count({ where }),
-  ]);
+  const { logs, total } = await listScanLogsForReporting({
+    licenseeId: filters.licenseeId,
+    manufacturerId: filters.manufacturerId,
+    batchQuery: filters.batchQuery,
+    code: filters.code,
+    status: filters.status,
+    firstScan: filters.firstScan,
+    from: filters.from,
+    to: filters.to,
+    limit: filters.limit,
+    offset: filters.offset,
+  });
 
   return {
     logs: await enrichLogs(logs),
@@ -482,6 +486,7 @@ const buildInventoryAnalytics = async (filters: TrackingAnalyticsFilters) => {
 
 const buildActivityAnalytics = async (filters: TrackingAnalyticsFilters) => {
   const whereSql = buildMatchingLogWhereSql(filters);
+  const sourceRelation = relationSql(await getScanLogReportingRelationName());
 
   type CountRow = { batchId: string | null; status: string; count: number };
   type QuantityRow = { distinctCodes: number; scanEvents: number; matchedBatches: number };
@@ -510,7 +515,7 @@ const buildActivityAnalytics = async (filters: TrackingAnalyticsFilters) => {
     prisma.$queryRaw<CountRow[]>(Prisma.sql`
       WITH matching_logs AS (
         SELECT s."id", s."qrCodeId", s."batchId", s."status", s."scannedAt"
-        FROM "QrScanLog" s
+        FROM ${sourceRelation} s
         LEFT JOIN "Batch" b ON b."id" = s."batchId"
         ${whereSql}
       ),
@@ -533,7 +538,7 @@ const buildActivityAnalytics = async (filters: TrackingAnalyticsFilters) => {
   const quantities = await prisma.$queryRaw<QuantityRow[]>(Prisma.sql`
     WITH matching_logs AS (
       SELECT s."id", s."qrCodeId", s."batchId", s."scannedAt"
-      FROM "QrScanLog" s
+      FROM ${sourceRelation} s
       LEFT JOIN "Batch" b ON b."id" = s."batchId"
       ${whereSql}
     ),
@@ -553,7 +558,7 @@ const buildActivityAnalytics = async (filters: TrackingAnalyticsFilters) => {
   const trend = await prisma.$queryRaw<TrendRow[]>(Prisma.sql`
     WITH matching_logs AS (
       SELECT s."id", s."qrCodeId", s."status", s."scannedAt"
-      FROM "QrScanLog" s
+      FROM ${sourceRelation} s
       LEFT JOIN "Batch" b ON b."id" = s."batchId"
       ${whereSql}
     )
@@ -598,7 +603,7 @@ const buildActivityAnalytics = async (filters: TrackingAnalyticsFilters) => {
 
   const eventCounts = await prisma.$queryRaw<EventCountRow[]>(Prisma.sql`
     SELECT s."batchId" AS "batchId", COUNT(*)::int AS "scanEvents"
-    FROM "QrScanLog" s
+    FROM ${sourceRelation} s
     LEFT JOIN "Batch" b ON b."id" = s."batchId"
     ${whereSql}
     GROUP BY s."batchId"

@@ -1,6 +1,7 @@
 import { SecurityPolicy } from "@prisma/client";
 import prisma from "../config/database";
 import { getOrCreateSecurityPolicy } from "./policyEngineService";
+import { getBatchScanHistoryFallback } from "./scanLogReportingService";
 
 const EARTH_RADIUS_KM = 6371;
 
@@ -153,17 +154,12 @@ export const getBatchSlaAnalytics = async (opts: {
 
   const missingBatchIds = batchIds.filter((batchId) => !scanCountMap.has(batchId));
   if (missingBatchIds.length > 0) {
-    const fallbackGrouped = await prisma.qrScanLog.groupBy({
-      by: ["batchId"],
-      where: { batchId: { in: missingBatchIds } },
-      _min: { scannedAt: true },
-      _count: { _all: true },
-    });
+    const fallbackGrouped = await getBatchScanHistoryFallback(missingBatchIds);
 
     for (const group of fallbackGrouped) {
       if (!group.batchId) continue;
-      if (group._min.scannedAt) firstScanMap.set(group.batchId, group._min.scannedAt);
-      scanCountMap.set(group.batchId, group._count._all || 0);
+      if (group.firstScannedAt) firstScanMap.set(group.batchId, group.firstScannedAt);
+      scanCountMap.set(group.batchId, Number(group.totalScanEvents || 0));
     }
   }
 

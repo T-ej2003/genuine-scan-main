@@ -11,6 +11,10 @@ import { resumePendingNetworkDirectJobs } from "./services/networkDirectPrintSer
 import { resumePendingNetworkIppJobs } from "./services/networkIppPrintService";
 import { startPrintConfirmationReconciler } from "./services/printConfirmationReconciler";
 import { startAnalyticsRollupWorker } from "./services/analyticsRollupService";
+import {
+  startHotEventPartitionMaintenanceWorker,
+  stopHotEventPartitionMaintenanceWorker,
+} from "./services/hotEventPartitionService";
 
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -19,6 +23,7 @@ initBackendMonitoring();
 
 let stopPrintConfirmationReconcilerWorker: (() => void) | null = null;
 let stopAnalyticsRollupWorker: (() => void) | null = null;
+let stopHotEventPartitionWorker: (() => void) | null = null;
 let keepAlive: NodeJS.Timeout | null = null;
 let shuttingDown = false;
 
@@ -39,6 +44,7 @@ const boot = async () => {
   });
   stopPrintConfirmationReconcilerWorker = startPrintConfirmationReconciler();
   stopAnalyticsRollupWorker = startAnalyticsRollupWorker();
+  stopHotEventPartitionWorker = startHotEventPartitionMaintenanceWorker();
 
   keepAlive = setInterval(() => {
     logger.debug("Worker heartbeat", {
@@ -58,6 +64,9 @@ const shutdown = async (signal: string) => {
   stopPrintConfirmationReconcilerWorker = null;
   stopAnalyticsRollupWorker?.();
   stopAnalyticsRollupWorker = null;
+  stopHotEventPartitionWorker?.();
+  stopHotEventPartitionWorker = null;
+  stopHotEventPartitionMaintenanceWorker();
   stopSecurityEventOutboxWorker();
   stopCompliancePackScheduler();
   await prisma.$disconnect().catch(() => undefined);

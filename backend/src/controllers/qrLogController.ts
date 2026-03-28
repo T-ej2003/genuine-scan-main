@@ -5,6 +5,7 @@ import { Prisma, UserRole } from "@prisma/client";
 import { compactDeviceLabel, reverseGeocode } from "../services/locationService";
 import { getQrTrackingAnalytics } from "../services/qrTrackingAnalyticsService";
 import { resolveScopedLicenseeAccess } from "../services/manufacturerScopeService";
+import { listScanLogsForReporting } from "../services/scanLogReportingService";
 
 export const getScanLogs = async (req: AuthRequest, res: Response) => {
   try {
@@ -60,19 +61,25 @@ export const getScanLogs = async (req: AuthRequest, res: Response) => {
       where.batch = { manufacturerId: req.user.userId };
     }
 
-    const [logs, total] = await Promise.all([
-      prisma.qrScanLog.findMany({
-        where,
-        orderBy: { scannedAt: "desc" },
-        take: limit,
-        skip: offset,
-        include: {
-          licensee: { select: { id: true, name: true, prefix: true } },
-          qrCode: { select: { id: true, code: true, status: true } },
-        },
-      }),
-      prisma.qrScanLog.count({ where }),
-    ]);
+    const reporting = await listScanLogsForReporting({
+      licenseeId,
+      manufacturerId:
+        req.user.role === UserRole.MANUFACTURER ||
+        req.user.role === UserRole.MANUFACTURER_ADMIN ||
+        req.user.role === UserRole.MANUFACTURER_USER
+          ? req.user.userId
+          : undefined,
+      batchId,
+      code,
+      status: status as any,
+      firstScan: onlyFirstScan,
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+      limit,
+      offset,
+    });
+
+    const { logs, total } = reporting;
 
     let geocodeBudget = 40;
     const enrichedLogs = await Promise.all(
