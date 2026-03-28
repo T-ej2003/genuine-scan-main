@@ -3,12 +3,13 @@
 FROM node:20-bookworm-slim AS deps
 
 WORKDIR /workspace/backend
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 COPY backend/package*.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci \
+RUN --mount=type=cache,target=/root/.npm npm ci --prefer-offline --no-audit --no-fund \
   && ln -s /workspace/backend/node_modules /workspace/node_modules
 
 FROM deps AS builder
@@ -32,20 +33,22 @@ ARG GIT_SHA=unknown
 ENV NODE_ENV=production
 ENV PORT=4000
 ENV GIT_SHA=${GIT_SHA}
+ENV RUN_DB_MIGRATIONS_ON_START=false
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-COPY backend/package*.json ./
-COPY backend/prisma ./prisma
-COPY backend/scripts ./scripts
-COPY backend/local-print-agent ./local-print-agent
-COPY --from=builder /workspace/backend/node_modules ./node_modules
-COPY --from=builder /workspace/backend/dist ./dist
-RUN chown -R node:node /app
+COPY --chown=node:node backend/package*.json ./
+COPY --chown=node:node backend/prisma ./prisma
+COPY --chown=node:node backend/scripts ./scripts
+COPY --chown=node:node backend/local-print-agent ./local-print-agent
+COPY --chown=node:node backend/docker/start-runtime.sh /usr/local/bin/start-runtime.sh
+COPY --from=builder --chown=node:node /workspace/backend/node_modules ./node_modules
+COPY --from=builder --chown=node:node /workspace/backend/dist ./dist
+RUN chmod +x /usr/local/bin/start-runtime.sh
 
 EXPOSE 4000
 
 USER node
 
-CMD ["sh", "-c", "npx prisma migrate deploy && npm run start"]
+CMD ["/usr/local/bin/start-runtime.sh"]

@@ -68,6 +68,7 @@ services:
       NODE_ENV: production
       PORT: ${BACKEND_PORT:-4000}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
+      RUN_DB_MIGRATIONS_ON_START: ${RUN_DB_MIGRATIONS_ON_START:-false}
       RUN_BACKGROUND_WORKERS: "false"
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       OBJECT_STORAGE_ENDPOINT: ${OBJECT_STORAGE_ENDPOINT:-http://minio:9000}

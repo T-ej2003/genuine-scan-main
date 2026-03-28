@@ -3,9 +3,10 @@
 FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 
 COPY package*.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci --prefer-offline --no-audit --no-fund
 
 COPY components.json ./
 COPY eslint.config.js ./
