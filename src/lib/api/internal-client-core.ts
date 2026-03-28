@@ -9,6 +9,7 @@ export interface ApiResponse<T = any> {
   error?: string;
   message?: string;
   degraded?: boolean;
+  code?: string;
 }
 
 type RequestOptions = RequestInit & {
@@ -69,6 +70,15 @@ export function createApiClientCore(): ApiClientCore {
 
   const emitLogout = () => {
     window.dispatchEvent(new Event("auth:logout"));
+  };
+
+  const emitStepUpRequired = (detail: {
+    endpoint: string;
+    method: string;
+    stepUpMethod?: "ADMIN_MFA" | "PASSWORD_REAUTH" | null;
+    message?: string;
+  }) => {
+    window.dispatchEvent(new CustomEvent("auth:step-up-required", { detail }));
   };
 
   const readCookie = (name: string) => {
@@ -205,6 +215,23 @@ export function createApiClientCore(): ApiClientCore {
       if (!response.ok) {
         const message = normalizeErrorMessage(response.status, payload);
         pushNetworkLog({ status: response.status, ok: false, error: message });
+        const responseCode =
+          payload && typeof payload === "object" && typeof (payload as any).code === "string"
+            ? String((payload as any).code)
+            : undefined;
+        const responseData =
+          payload && typeof payload === "object" && "data" in payload ? (payload as any).data : undefined;
+        if (response.status === 428 && responseCode === "STEP_UP_REQUIRED") {
+          emitStepUpRequired({
+            endpoint,
+            method,
+            stepUpMethod:
+              responseData && typeof responseData === "object" && typeof (responseData as any).stepUpMethod === "string"
+                ? ((responseData as any).stepUpMethod as "ADMIN_MFA" | "PASSWORD_REAUTH")
+                : null,
+            message,
+          });
+        }
         if (response.status >= 500) {
           reportSupportRuntimeIssue({
             source: "network",
@@ -214,7 +241,8 @@ export function createApiClientCore(): ApiClientCore {
         return {
           success: false,
           error: message,
-          data: payload && typeof payload === "object" && "data" in payload ? (payload as any).data : undefined,
+          code: responseCode,
+          data: responseData,
         };
       }
 

@@ -1,5 +1,12 @@
 import { Request, Router } from "express";
-import { authenticate, authenticateAnySession, authenticateSSE, optionalAuth, requireRecentAdminMfa } from "../middleware/auth";
+import {
+  authenticate,
+  authenticateAnySession,
+  authenticateSSE,
+  optionalAuth,
+  requireRecentAdminMfa,
+  requireRecentSensitiveAuth,
+} from "../middleware/auth";
 import { optionalCustomerVerifyAuth, requireCustomerVerifyAuth } from "../middleware/customerVerifyAuth";
 import { enforceTenantIsolation } from "../middleware/tenantIsolation";
 import { sanitizeRequestInput } from "../middleware/requestSanitizer";
@@ -40,8 +47,12 @@ import {
   confirmAdminMfaSetupController,
   beginAdminMfaChallengeController,
   completeAdminMfaChallengeController,
+  adminMfaStepUpController,
   rotateAdminMfaBackupCodesController,
   disableAdminMfaController,
+  listSessions,
+  passwordStepUpController,
+  revokeSessionController,
 } from "../controllers/authController";
 import {
   downloadConnectorReleaseController,
@@ -171,6 +182,9 @@ import {
   gatewayHeartbeat,
 } from "../controllers/printerGatewayController";
 import auditRoutes from "./auditRoutes";
+import createAuthRoutes from "./modules/authRoutes";
+import createGovernanceRoutes from "./modules/governanceRoutes";
+import createRealtimeRoutes from "./modules/realtimeRoutes";
 import { updateMyProfile, changeMyPassword } from "../controllers/accountController";
 import {
   addIncidentEventNote,
@@ -202,7 +216,7 @@ import { listIrAlerts, patchIrAlert } from "../controllers/irAlertController";
 import { getDashboardStats } from "../controllers/dashboardController";
 import { dashboardEvents } from "../controllers/eventsController";
 import { healthCheck, latencySummary, liveHealthCheck, readyHealthCheck, versionCheck } from "../controllers/healthController";
-import { captureRouteTransitionMetric, getRouteTransitionSummary } from "../controllers/telemetryController";
+import { captureCspViolationReport, captureRouteTransitionMetric, getRouteTransitionSummary } from "../controllers/telemetryController";
 import { listNotifications, readAllNotifications, readNotification } from "../controllers/notificationController";
 import { notificationEvents } from "../controllers/notificationEventsController";
 import {
@@ -454,6 +468,15 @@ const telemetryLimiters = buildPublicRateLimitPair({
   resourceResolver: composeRequestResolvers(fromBodyFields("routeTo")),
 });
 
+const cspReportLimiters = buildPublicRateLimitPair({
+  scope: "telemetry.csp-report",
+  windowMs: 60 * 1000,
+  ipMax: parsePositiveIntEnv("PUBLIC_CSP_REPORT_RATE_LIMIT_PER_MIN", 120, 10, 3000),
+  actorMax: parsePositiveIntEnv("PUBLIC_CSP_REPORT_RATE_LIMIT_PER_MIN", 120, 10, 3000),
+  message: "Too many CSP reports. Please slow down and retry.",
+  actorResolver: publicClientActor,
+});
+
 const publicStatusLimiters = buildPublicRateLimitPair({
   scope: "public.status",
   windowMs: 60 * 1000,
@@ -542,13 +565,25 @@ const exportLimiters = buildAuthenticatedRateLimitPair({
   resourceResolver: composeRequestResolvers(fromParamFields("id", "fileName")),
 });
 
+router.use(
+  createAuthRoutes({
+    loginLimiters,
+    inviteAcceptanceLimiters,
+    verifyEmailLimiters,
+    forgotPasswordLimiters,
+    adminInviteLimiters,
+  })
+);
+
+router.use(createRealtimeRoutes());
+router.use(
+  createGovernanceRoutes({
+    exportLimiters,
+    incidentSupportMutationLimiters,
+  })
+);
+
 // ==================== PUBLIC ====================
-router.post("/auth/login", ...loginLimiters, login);
-router.post("/auth/accept-invite", ...inviteAcceptanceLimiters, acceptInviteController);
-router.get("/auth/invite-preview", ...inviteAcceptanceLimiters, invitePreviewController);
-router.post("/auth/verify-email", ...verifyEmailLimiters, verifyEmailController);
-router.post("/auth/forgot-password", ...forgotPasswordLimiters, forgotPassword);
-router.post("/auth/reset-password", ...forgotPasswordLimiters, resetPassword);
 router.get("/public/connector/releases", ...connectorManifestLimiters, listConnectorReleasesController);
 router.get("/public/connector/releases/latest", ...connectorManifestLimiters, getLatestConnectorReleaseController);
 router.get("/public/connector/download/:version/:platform", ...connectorDownloadLimiters, downloadConnectorReleaseController);
@@ -591,38 +626,13 @@ router.post(
 router.get("/support/tickets/track/:reference", ...supportTicketTrackLimiters, trackSupportTicketPublic);
 router.get("/scan", ...scanLimiters, optionalCustomerVerifyAuth, scanToken);
 router.post("/telemetry/route-transition", optionalAuth, ...telemetryLimiters, captureRouteTransitionMetric);
+router.post("/telemetry/csp-report", optionalAuth, ...cspReportLimiters, captureCspViolationReport);
 router.get("/health", ...publicStatusLimiters, healthCheck);
 router.get("/healthz", ...publicStatusLimiters, healthCheck);
 router.get("/health/live", ...publicStatusLimiters, liveHealthCheck);
 router.get("/health/ready", ...publicStatusLimiters, readyHealthCheck);
 router.get("/health/latency", ...publicStatusLimiters, latencySummary);
 router.get("/version", ...publicStatusLimiters, versionCheck);
-
-// ==================== AUTH ====================
-router.get("/auth/me", authenticateAnySession, me);
-router.post("/auth/refresh", requireCsrf, refresh);
-router.post("/auth/logout", authenticateAnySession, requireCsrf, logout);
-router.get("/auth/mfa/status", authenticateAnySession, getAdminMfaStatusController);
-router.post("/auth/mfa/setup/begin", authenticateAnySession, requireCsrf, beginAdminMfaSetupController);
-router.post("/auth/mfa/setup/confirm", authenticateAnySession, requireCsrf, confirmAdminMfaSetupController);
-router.post("/auth/mfa/challenge/begin", authenticateAnySession, requireCsrf, beginAdminMfaChallengeController);
-router.post("/auth/mfa/challenge/complete", authenticateAnySession, requireCsrf, completeAdminMfaChallengeController);
-router.post("/auth/mfa/backup-codes/rotate", authenticate, requireRecentAdminMfa, requireCsrf, rotateAdminMfaBackupCodesController);
-router.post("/auth/mfa/disable", authenticate, requireRecentAdminMfa, requireCsrf, disableAdminMfaController);
-router.post("/auth/invite", authenticate, requireAnyAdmin, requireRecentAdminMfa, ...adminInviteLimiters, requireCsrf, invite);
-
-// ==================== DASHBOARD ====================
-// ✅ Correct stats endpoint used by UI cards + chart + activity
-router.get("/dashboard/stats", authenticate, enforceTenantIsolation, getDashboardStats);
-
-// ✅ Real-time events (SSE). Browser sessions authenticate with secure cookies.
-router.get("/events/dashboard", authenticateSSE, enforceTenantIsolation, dashboardEvents);
-router.get("/events/notifications", authenticateSSE, notificationEvents);
-
-// ==================== NOTIFICATIONS ====================
-router.get("/notifications", authenticate, listNotifications);
-router.post("/notifications/read-all", authenticate, requireCsrf, readAllNotifications);
-router.post("/notifications/:id/read", authenticate, requireCsrf, readNotification);
 
 // ==================== LICENSEES (SUPER ADMIN) ====================
 router.get("/licensees/export", authenticate, requirePlatformAdmin, ...exportLimiters, exportLicenseesCsv);
@@ -760,31 +770,10 @@ router.post("/print-gateway/ipp/confirm", ...gatewayJobLimiters, confirmGatewayI
 router.post("/print-gateway/ipp/fail", ...gatewayJobLimiters, failGatewayIppJob);
 
 router.post(
-  "/manufacturer/printer-agent/heartbeat",
-  authenticate,
-  requireManufacturer,
-  enforceTenantIsolation,
-  requireCsrf,
-  reportPrinterHeartbeat
-);
-router.get(
-  "/manufacturer/printer-agent/status",
-  authenticate,
-  requireManufacturer,
-  enforceTenantIsolation,
-  getPrinterConnectionStatus
-);
-router.get(
-  "/manufacturer/printer-agent/events",
-  authenticateSSE,
-  requireManufacturer,
-  enforceTenantIsolation,
-  printerConnectionEvents
-);
-router.post(
   "/manufacturer/print-jobs",
   authenticate,
   requireManufacturer,
+  requireRecentSensitiveAuth,
   enforceTenantIsolation,
   ...printMutationLimiters,
   requireCsrf,
@@ -801,6 +790,7 @@ router.post(
   "/manufacturer/printers",
   authenticate,
   requireOpsUser,
+  requireRecentSensitiveAuth,
   enforceTenantIsolation,
   ...printMutationLimiters,
   requireCsrf,
@@ -810,6 +800,7 @@ router.patch(
   "/manufacturer/printers/:id",
   authenticate,
   requireOpsUser,
+  requireRecentSensitiveAuth,
   enforceTenantIsolation,
   ...printMutationLimiters,
   requireCsrf,
@@ -819,6 +810,7 @@ router.delete(
   "/manufacturer/printers/:id",
   authenticate,
   requireOpsUser,
+  requireRecentSensitiveAuth,
   enforceTenantIsolation,
   ...printMutationLimiters,
   requireCsrf,
@@ -828,6 +820,7 @@ router.post(
   "/manufacturer/printers/:id/test",
   authenticate,
   requireOpsUser,
+  requireRecentSensitiveAuth,
   enforceTenantIsolation,
   ...printMutationLimiters,
   requireCsrf,
@@ -837,6 +830,7 @@ router.post(
   "/manufacturer/printers/:id/test-label",
   authenticate,
   requireOpsUser,
+  requireRecentSensitiveAuth,
   enforceTenantIsolation,
   ...printMutationLimiters,
   requireCsrf,
@@ -846,6 +840,7 @@ router.post(
   "/manufacturer/printers/:id/discover",
   authenticate,
   requireOpsUser,
+  requireRecentSensitiveAuth,
   enforceTenantIsolation,
   ...printMutationLimiters,
   requireCsrf,
@@ -869,6 +864,7 @@ router.post(
   "/manufacturer/print-jobs/:id/reissue",
   authenticate,
   requireOpsUser,
+  requireRecentSensitiveAuth,
   enforceTenantIsolation,
   ...printMutationLimiters,
   requireCsrf,
@@ -886,6 +882,7 @@ router.post(
   "/manufacturer/print-jobs/:id/direct-print/tokens",
   authenticate,
   requireManufacturer,
+  requireRecentSensitiveAuth,
   enforceTenantIsolation,
   ...printMutationLimiters,
   requireCsrf,
@@ -922,6 +919,7 @@ router.post(
   "/manufacturer/print-jobs/:id/confirm",
   authenticate,
   requireManufacturer,
+  requireRecentSensitiveAuth,
   enforceTenantIsolation,
   ...printMutationLimiters,
   requireCsrf,
@@ -1029,76 +1027,6 @@ router.get(
   serveSupportIssueScreenshot
 );
 
-// ==================== GOVERNANCE ====================
-router.get("/governance/feature-flags", authenticate, requirePlatformAdmin, getFeatureFlags);
-router.post(
-  "/governance/feature-flags",
-  authenticate,
-  requirePlatformAdmin,
-  requireRecentAdminMfa,
-  requireCsrf,
-  upsertFeatureFlag
-);
-router.get(
-  "/governance/evidence-retention",
-  authenticate,
-  requirePlatformAdmin,
-  getRetentionPolicyController
-);
-router.patch(
-  "/governance/evidence-retention",
-  authenticate,
-  requirePlatformAdmin,
-  requireRecentAdminMfa,
-  requireCsrf,
-  patchRetentionPolicyController
-);
-router.post(
-  "/governance/evidence-retention/run",
-  authenticate,
-  requirePlatformAdmin,
-  requireRecentAdminMfa,
-  ...incidentSupportMutationLimiters,
-  requireCsrf,
-  runRetentionJobController
-);
-router.get(
-  "/governance/compliance/report",
-  authenticate,
-  requirePlatformAdmin,
-  ...exportLimiters,
-  generateComplianceReportController
-);
-router.post(
-  "/governance/compliance/pack/run",
-  authenticate,
-  requirePlatformAdmin,
-  requireRecentAdminMfa,
-  ...exportLimiters,
-  requireCsrf,
-  runCompliancePackController
-);
-router.get(
-  "/governance/compliance/pack/jobs",
-  authenticate,
-  requirePlatformAdmin,
-  listCompliancePackJobsController
-);
-router.get(
-  "/governance/compliance/pack/jobs/:id/download",
-  authenticate,
-  requirePlatformAdmin,
-  ...exportLimiters,
-  downloadCompliancePackJobController
-);
-router.get(
-  "/audit/export/incidents/:id/bundle",
-  authenticate,
-  requirePlatformAdmin,
-  ...exportLimiters,
-  exportIncidentEvidenceBundleController
-);
-
 // ==================== QR LOGS (ADMINS) ====================
 router.get("/admin/qr/scan-logs", authenticate, requireOpsUser, enforceTenantIsolation, getScanLogs);
 router.get("/admin/qr/batch-summary", authenticate, requireOpsUser, enforceTenantIsolation, getBatchSummary);
@@ -1195,7 +1123,7 @@ router.post("/admin/qrs/:id/block", authenticate, requirePlatformAdmin, requireR
 router.post("/admin/batches/:id/block", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, blockBatch);
 
 // ==================== ACCOUNT ====================
-router.patch("/account/profile", authenticate, requireRecentAdminMfa, ...secureAccountMutationLimiters, requireCsrf, updateMyProfile);
-router.patch("/account/password", authenticate, requireRecentAdminMfa, ...secureAccountMutationLimiters, requireCsrf, changeMyPassword);
+router.patch("/account/profile", authenticate, requireRecentSensitiveAuth, ...secureAccountMutationLimiters, requireCsrf, updateMyProfile);
+router.patch("/account/password", authenticate, requireRecentSensitiveAuth, ...secureAccountMutationLimiters, requireCsrf, changeMyPassword);
 
 export default router;

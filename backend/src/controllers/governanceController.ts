@@ -15,6 +15,7 @@ import {
 import { createAuditLog } from "../services/auditService";
 import prisma from "../config/database";
 import { listCompliancePackJobs, loadCompliancePackJobBuffer, runCompliancePackJob } from "../services/compliancePackService";
+import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
 
 const flagUpdateSchema = z.object({
   licenseeId: z.string().uuid().optional(),
@@ -116,28 +117,41 @@ export const upsertFeatureFlag = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: "licenseeId is required" });
     }
 
-    const row = await upsertTenantFeatureFlag({
+    const approval = await createSensitiveActionApproval({
+      actionKey: SENSITIVE_ACTION_KEYS.FEATURE_FLAG_UPSERT,
+      actor: {
+        userId: req.user.userId,
+        role: req.user.role,
+        orgId: req.user.orgId || null,
+        licenseeId: req.user.licenseeId || null,
+      },
+      orgId: req.user.orgId || null,
       licenseeId,
-      key: parsed.data.key,
-      enabled: parsed.data.enabled,
-      config: parsed.data.config,
-      updatedByUserId: req.user.userId,
+      entityType: "TenantFeatureFlag",
+      entityId: `${licenseeId}:${parsed.data.key}`,
+      summary: {
+        key: parsed.data.key,
+        enabled: parsed.data.enabled,
+      },
+      payload: {
+        licenseeId,
+        key: parsed.data.key,
+        enabled: parsed.data.enabled,
+        config: parsed.data.config,
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || null,
     });
 
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId,
-      action: "TENANT_FEATURE_FLAG_UPSERT",
-      entityType: "TenantFeatureFlag",
-      entityId: row.id,
-      ipAddress: req.ip,
-      details: {
-        key: row.key,
-        enabled: row.enabled,
+    return res.status(202).json({
+      success: true,
+      data: {
+        approvalRequired: true,
+        approvalId: approval.id,
+        status: approval.status,
+        expiresAt: approval.expiresAt,
       },
     });
-
-    return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("upsertFeatureFlag error:", error);
     return res.status(500).json({ success: false, error: "Failed to save feature flag" });
@@ -179,29 +193,43 @@ export const patchRetentionPolicyController = async (req: AuthRequest, res: Resp
       return res.status(400).json({ success: false, error: "licenseeId is required" });
     }
 
-    const policy = await updateRetentionPolicy({
+    const approval = await createSensitiveActionApproval({
+      actionKey: SENSITIVE_ACTION_KEYS.RETENTION_POLICY_PATCH,
+      actor: {
+        userId: req.user.userId,
+        role: req.user.role,
+        orgId: req.user.orgId || null,
+        licenseeId: req.user.licenseeId || null,
+      },
+      orgId: req.user.orgId || null,
       licenseeId,
-      retentionDays: parsed.data.retentionDays,
-      purgeEnabled: parsed.data.purgeEnabled,
-      exportBeforePurge: parsed.data.exportBeforePurge,
-      legalHoldTags: parsed.data.legalHoldTags,
-      updatedByUserId: req.user.userId,
+      entityType: "EvidenceRetentionPolicy",
+      entityId: licenseeId,
+      summary: {
+        retentionDays: parsed.data.retentionDays ?? null,
+        purgeEnabled: parsed.data.purgeEnabled ?? null,
+        exportBeforePurge: parsed.data.exportBeforePurge ?? null,
+      },
+      payload: {
+        licenseeId,
+        retentionDays: parsed.data.retentionDays,
+        purgeEnabled: parsed.data.purgeEnabled,
+        exportBeforePurge: parsed.data.exportBeforePurge,
+        legalHoldTags: parsed.data.legalHoldTags,
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || null,
     });
 
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId,
-      action: "EVIDENCE_RETENTION_POLICY_UPDATED",
-      entityType: "EvidenceRetentionPolicy",
-      entityId: policy.id,
-      ipAddress: req.ip,
-      details: {
-        retentionDays: policy.retentionDays,
-        purgeEnabled: policy.purgeEnabled,
+    return res.status(202).json({
+      success: true,
+      data: {
+        approvalRequired: true,
+        approvalId: approval.id,
+        status: approval.status,
+        expiresAt: approval.expiresAt,
       },
     });
-
-    return res.json({ success: true, data: policy });
   } catch (error) {
     console.error("patchRetentionPolicyController error:", error);
     return res.status(500).json({ success: false, error: "Failed to update retention policy" });
@@ -220,6 +248,40 @@ export const runRetentionJobController = async (req: AuthRequest, res: Response)
     const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
     if (!licenseeId) {
       return res.status(400).json({ success: false, error: "licenseeId is required" });
+    }
+
+    if (parsed.data.mode === "APPLY") {
+      const approval = await createSensitiveActionApproval({
+        actionKey: SENSITIVE_ACTION_KEYS.RETENTION_APPLY,
+        actor: {
+          userId: req.user.userId,
+          role: req.user.role,
+          orgId: req.user.orgId || null,
+          licenseeId: req.user.licenseeId || null,
+        },
+        orgId: req.user.orgId || null,
+        licenseeId,
+        entityType: "EvidenceRetentionJob",
+        entityId: licenseeId,
+        summary: {
+          mode: parsed.data.mode,
+        },
+        payload: {
+          licenseeId,
+        },
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") || null,
+      });
+
+      return res.status(202).json({
+        success: true,
+        data: {
+          approvalRequired: true,
+          approvalId: approval.id,
+          status: approval.status,
+          expiresAt: approval.expiresAt,
+        },
+      });
     }
 
     const result = await runRetentionLifecycle({

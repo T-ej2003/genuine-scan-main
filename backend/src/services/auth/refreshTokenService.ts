@@ -75,6 +75,73 @@ export const revokeAllUserRefreshTokens = async (input: {
   });
 };
 
+export const findRefreshTokenByRaw = async (rawToken: string) => {
+  const tokenHashCandidates = buildTokenHashCandidates(rawToken);
+  return prisma.refreshToken.findFirst({
+    where: {
+      tokenHash: { in: tokenHashCandidates },
+    },
+    select: {
+      id: true,
+      userId: true,
+      orgId: true,
+      expiresAt: true,
+      createdAt: true,
+      createdIpHash: true,
+      createdUserAgent: true,
+      authenticatedAt: true,
+      mfaVerifiedAt: true,
+      lastUsedAt: true,
+      revokedAt: true,
+      revokedReason: true,
+    },
+  });
+};
+
+export const listActiveRefreshTokensForUser = async (userId: string) =>
+  prisma.refreshToken.findMany({
+    where: {
+      userId,
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    orderBy: [{ createdAt: "desc" }],
+    select: {
+      id: true,
+      userId: true,
+      expiresAt: true,
+      createdAt: true,
+      createdIpHash: true,
+      createdUserAgent: true,
+      authenticatedAt: true,
+      mfaVerifiedAt: true,
+      lastUsedAt: true,
+    },
+  });
+
+export const revokeRefreshTokenById = async (input: {
+  sessionId: string;
+  userId: string;
+  reason: string;
+  now?: Date;
+}) => {
+  const now = input.now || new Date();
+  const updated = await prisma.refreshToken.updateMany({
+    where: {
+      id: input.sessionId,
+      userId: input.userId,
+      revokedAt: null,
+    },
+    data: {
+      revokedAt: now,
+      revokedReason: input.reason,
+      lastUsedAt: now,
+    },
+  });
+
+  return updated.count > 0;
+};
+
 export const rotateRefreshToken = async (input: {
   rawToken: string;
   ipHash: string | null;

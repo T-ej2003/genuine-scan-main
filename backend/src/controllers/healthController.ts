@@ -40,10 +40,15 @@ export const collectDependencyHealth = async () => {
 export const buildReadyPayload = async () => {
   const started = Date.now();
   const dependencies = await collectDependencyHealth();
+  const strictProductionDependencies = process.env.NODE_ENV === "production";
   const ready =
     dependencies.database.ready &&
-    (!dependencies.redis.configured || dependencies.redis.ready) &&
-    (!dependencies.objectStorage.configured || dependencies.objectStorage.ready);
+    (strictProductionDependencies
+      ? dependencies.redis.configured && dependencies.redis.ready
+      : !dependencies.redis.configured || dependencies.redis.ready) &&
+    (strictProductionDependencies
+      ? dependencies.objectStorage.configured && dependencies.objectStorage.ready
+      : !dependencies.objectStorage.configured || dependencies.objectStorage.ready);
 
   return {
     success: ready,

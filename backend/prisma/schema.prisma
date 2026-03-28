@@ -453,9 +453,14 @@ model User {
   emailVerificationTokens EmailVerificationToken[]
   refreshTokens RefreshToken[]
   adminMfaCredential AdminMfaCredential?
+  adminWebAuthnCredentials AdminWebAuthnCredential[]
   authMfaChallenges AuthMfaChallenge[]
+  authWebAuthnChallenges AuthWebAuthnChallenge[]
   authSessionRiskSignals AuthSessionRiskSignal[]
   policyRulesCreated PolicyRule[] @relation("PolicyRuleCreatedBy")
+  sensitiveActionApprovalsRequested SensitiveActionApproval[] @relation("SensitiveActionApprovalRequestedBy")
+  sensitiveActionApprovalsReviewed SensitiveActionApproval[] @relation("SensitiveActionApprovalReviewedBy")
+  sensitiveActionApprovalsExecuted SensitiveActionApproval[] @relation("SensitiveActionApprovalExecutedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1376,6 +1381,27 @@ model AdminMfaCredential {
   @@index([verifiedAt])
 }
 
+model AdminWebAuthnCredential {
+  id String @id @default(uuid())
+
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  label String?
+  credentialId String @unique
+  publicKeySpki String
+  publicKeyAlgorithm Int
+  counter Int @default(0)
+  transports String[]
+  lastUsedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([lastUsedAt])
+}
+
 model AuthMfaChallenge {
   id String @id @default(uuid())
 
@@ -1398,6 +1424,30 @@ model AuthMfaChallenge {
   @@index([consumedAt])
 }
 
+model AuthWebAuthnChallenge {
+  id String @id @default(uuid())
+
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  purpose String
+  ticketHash String @unique
+  challengeHash String
+  credentialIds String[]
+  createdIpHash String?
+  createdUserAgentHash String?
+  origin String?
+  rpId String?
+
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  consumedAt DateTime?
+
+  @@index([userId, purpose, createdAt])
+  @@index([expiresAt])
+  @@index([consumedAt])
+}
+
 model AuthSessionRiskSignal {
   id String @id @default(uuid())
 
@@ -1414,6 +1464,47 @@ model AuthSessionRiskSignal {
 
   @@index([userId, createdAt])
   @@index([riskLevel, createdAt])
+}
+
+model SensitiveActionApproval {
+  id String @id @default(uuid())
+
+  actionKey String
+  status String @default("PENDING")
+
+  requestedByUserId String
+  requestedByUser User @relation("SensitiveActionApprovalRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Cascade)
+
+  reviewedByUserId String?
+  reviewedByUser User? @relation("SensitiveActionApprovalReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  executedByUserId String?
+  executedByUser User? @relation("SensitiveActionApprovalExecutedBy", fields: [executedByUserId], references: [id], onDelete: SetNull)
+
+  orgId String?
+  licenseeId String?
+  entityType String?
+  entityId String?
+
+  payload Json
+  summary Json?
+
+  requestIpHash String?
+  requestUserAgentHash String?
+  reviewNote String?
+  executionError String?
+
+  expiresAt DateTime
+  reviewedAt DateTime?
+  executedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, expiresAt, createdAt])
+  @@index([requestedByUserId, createdAt])
+  @@index([reviewedByUserId, createdAt])
+  @@index([licenseeId, status, createdAt])
+  @@index([actionKey, entityType, entityId, status])
 }
 
 model SecurityEventOutbox {

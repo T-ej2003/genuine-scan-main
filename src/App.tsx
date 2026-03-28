@@ -8,6 +8,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import StepUpRecoveryDialog from "@/components/auth/StepUpRecoveryDialog";
 import HelpAssistantWidget from "@/components/help/HelpAssistantWidget";
 import { getRoleHelpHome } from "@/help/contextual-help";
 import RouteMetricsTracker from "@/components/RouteMetricsTracker";
@@ -498,6 +499,7 @@ export default function App() {
         <TooltipProvider>
           <Toaster />
           <Sonner />
+          <StepUpRecoveryDialog />
           <BrowserRouter
             future={{
               v7_startTransition: true,

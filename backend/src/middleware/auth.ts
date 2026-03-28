@@ -4,7 +4,12 @@ import { AuthenticatedSessionClaims, JWTPayload } from "../types";
 import { UserRole } from "@prisma/client";
 import { ACCESS_TOKEN_COOKIE, verifyAccessToken, verifyMfaBootstrapToken } from "../services/auth/tokenService";
 import { isManufacturerRole, listManufacturerLinkedLicenseeIds } from "../services/manufacturerScopeService";
-import { isAdminMfaRequiredRole } from "../services/auth/authService";
+import {
+  getAdminStepUpWindowMinutes,
+  getPasswordReauthWindowMinutes,
+  getSensitiveActionStepUpMethod,
+  isAdminMfaRequiredRole,
+} from "../services/auth/authService";
 
 export interface AuthRequest extends Request {
   user?: AuthenticatedSessionClaims;
@@ -151,11 +156,22 @@ export const authenticateSSE = async (req: AuthRequest, res: Response, next: Nex
   }
 };
 
-const parseStepUpWindowMinutes = () => {
-  const raw = Number(String(process.env.ADMIN_STEP_UP_WINDOW_MINUTES || "").trim());
-  if (!Number.isFinite(raw) || raw <= 0) return 30;
-  return Math.max(5, Math.min(720, Math.floor(raw)));
-};
+const stepUpRequired = (
+  res: Response,
+  input: {
+    message: string;
+    method: "ADMIN_MFA" | "PASSWORD_REAUTH";
+  }
+) =>
+  res.status(428).json({
+    success: false,
+    error: input.message,
+    code: "STEP_UP_REQUIRED",
+    data: {
+      stepUpRequired: true,
+      stepUpMethod: input.method,
+    },
+  });
 
 export const requireRecentAdminMfa = (req: AuthRequest, res: Response, next: NextFunction) => {
   if (!req.user) {
@@ -167,28 +183,60 @@ export const requireRecentAdminMfa = (req: AuthRequest, res: Response, next: Nex
   }
 
   if (req.user.sessionStage !== "ACTIVE") {
-    return res.status(428).json({
-      success: false,
-      error: "Admin MFA verification is required before continuing.",
-      code: "STEP_UP_REQUIRED",
+    return stepUpRequired(res, {
+      message: "Admin MFA verification is required before continuing.",
+      method: "ADMIN_MFA",
     });
   }
 
   const verifiedAt = req.user.mfaVerifiedAt ? new Date(req.user.mfaVerifiedAt) : null;
   if (!verifiedAt || Number.isNaN(verifiedAt.getTime())) {
-    return res.status(428).json({
-      success: false,
-      error: "Admin MFA verification is required before continuing.",
-      code: "STEP_UP_REQUIRED",
+    return stepUpRequired(res, {
+      message: "Admin MFA verification is required before continuing.",
+      method: "ADMIN_MFA",
     });
   }
 
-  const maxAgeMs = parseStepUpWindowMinutes() * 60_000;
+  const maxAgeMs = getAdminStepUpWindowMinutes() * 60_000;
   if (Date.now() - verifiedAt.getTime() > maxAgeMs) {
-    return res.status(428).json({
-      success: false,
-      error: "Your admin verification is no longer fresh enough for this action. Sign in again to continue.",
-      code: "STEP_UP_REQUIRED",
+    return stepUpRequired(res, {
+      message: "Your admin verification is no longer fresh enough for this action. Confirm your authenticator code to continue.",
+      method: "ADMIN_MFA",
+    });
+  }
+
+  return next();
+};
+
+export const requireRecentSensitiveAuth = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, error: "Authentication required" });
+  }
+
+  if (isAdminMfaRequiredRole(req.user.role)) {
+    return requireRecentAdminMfa(req, res, next);
+  }
+
+  if (req.user.sessionStage !== "ACTIVE") {
+    return stepUpRequired(res, {
+      message: "A fresh password confirmation is required before continuing.",
+      method: getSensitiveActionStepUpMethod(req.user.role),
+    });
+  }
+
+  const authenticatedAt = req.user.authenticatedAt ? new Date(req.user.authenticatedAt) : null;
+  if (!authenticatedAt || Number.isNaN(authenticatedAt.getTime())) {
+    return stepUpRequired(res, {
+      message: "A fresh password confirmation is required before continuing.",
+      method: getSensitiveActionStepUpMethod(req.user.role),
+    });
+  }
+
+  const maxAgeMs = getPasswordReauthWindowMinutes() * 60_000;
+  if (Date.now() - authenticatedAt.getTime() > maxAgeMs) {
+    return stepUpRequired(res, {
+      message: "Your password confirmation is no longer fresh enough for this action. Confirm your password to continue.",
+      method: getSensitiveActionStepUpMethod(req.user.role),
     });
   }
 

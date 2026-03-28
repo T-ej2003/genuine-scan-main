@@ -1,15 +1,22 @@
 export type UserRole = "super_admin" | "licensee_admin" | "manufacturer";
 export type AuthSessionStage = "ACTIVE" | "MFA_BOOTSTRAP";
 export type AuthAssuranceLevel = "PASSWORD" | "ADMIN_MFA";
+export type StepUpMethod = "ADMIN_MFA" | "PASSWORD_REAUTH";
+export type AdminMfaMethod = "TOTP" | "WEBAUTHN";
 
 export interface AuthState {
   sessionStage: AuthSessionStage;
   authAssurance: AuthAssuranceLevel;
   mfaRequired: boolean;
   mfaEnrolled: boolean;
+  availableMfaMethods?: AdminMfaMethod[];
+  preferredMfaMethod?: AdminMfaMethod | null;
   authenticatedAt?: string | null;
   mfaVerifiedAt?: string | null;
   stepUpRequired?: boolean;
+  stepUpMethod?: StepUpMethod | null;
+  sessionId?: string | null;
+  sessionExpiresAt?: string | null;
 }
 
 export interface PendingAuthSession {

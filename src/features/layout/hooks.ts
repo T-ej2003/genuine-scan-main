@@ -113,6 +113,10 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
 
     const stop = apiClient.streamNotifications(
       (payload) => {
+        if (payload.kind === "version") {
+          void loadNotifications();
+          return;
+        }
         const parsed = parseWithSchema(notificationsResponseSchema, payload, "Failed to stream notifications");
         applyNotificationSnapshot(parsed.notifications || [], Number(parsed.unread || 0));
       },

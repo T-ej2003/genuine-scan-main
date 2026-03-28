@@ -43,6 +43,7 @@ export default function Dashboard() {
 
   const pollRef = useRef<number | null>(null);
   const sseRef = useRef<EventSource | null>(null);
+  const refreshTimerRef = useRef<number | null>(null);
 
   const refreshDashboard = async () => {
     await dashboardQuery.refetch();
@@ -55,6 +56,8 @@ export default function Dashboard() {
     const closeRealtime = () => {
       if (pollRef.current) window.clearInterval(pollRef.current);
       pollRef.current = null;
+      if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = null;
       if (sseRef.current) {
         sseRef.current.close();
         sseRef.current = null;
@@ -88,26 +91,40 @@ export default function Dashboard() {
       sseRef.current = es;
       setSseConnected(true);
 
-      es.addEventListener("stats", (e: MessageEvent) => {
-        try {
-          const payload = JSON.parse(e.data);
-          setLiveSummary({
-            totalQRCodes: payload?.totalQRCodes ?? 0,
-            activeLicensees: payload?.activeLicensees ?? 0,
-            manufacturers: payload?.manufacturers ?? 0,
-            totalBatches: payload?.totalBatches ?? 0,
-          });
-          setLiveQrStats(payload?.qr || {});
-          setLastUpdated(new Date());
-        } catch {
-          // ignore parse errors
-        }
-      });
+      const scheduleSummaryRefresh = () => {
+        if (refreshTimerRef.current) return;
+        refreshTimerRef.current = window.setTimeout(() => {
+          refreshTimerRef.current = null;
+          void refreshDashboard();
+        }, 350);
+      };
 
-      es.addEventListener("audit", (e: MessageEvent) => {
+      es.addEventListener("realtime", (e: MessageEvent) => {
         try {
-          const log = JSON.parse(e.data);
-          setLiveLogs((prev) => [log, ...((prev || auditLogsQuery.data || []) as AuditLogDTO[])].slice(0, 10));
+          const envelope = JSON.parse(e.data || "{}");
+          if (envelope?.channel !== "dashboard") return;
+          if (envelope?.type === "snapshot") {
+            const payload = envelope?.payload || {};
+            setLiveSummary({
+              totalQRCodes: payload?.summary?.totalQRCodes ?? 0,
+              activeLicensees: payload?.summary?.activeLicensees ?? 0,
+              manufacturers: payload?.summary?.manufacturers ?? 0,
+              totalBatches: payload?.summary?.totalBatches ?? 0,
+            });
+            setLiveQrStats(payload?.qrStats || {});
+            setLastUpdated(new Date());
+            return;
+          }
+          if (envelope?.type === "audit.delta") {
+            const log = envelope?.payload?.log;
+            if (log) {
+              setLiveLogs((prev) => [log, ...((prev || auditLogsQuery.data || []) as AuditLogDTO[])].slice(0, 10));
+            }
+            return;
+          }
+          if (envelope?.type === "summary.refresh") {
+            scheduleSummaryRefresh();
+          }
         } catch {
           // ignore
         }

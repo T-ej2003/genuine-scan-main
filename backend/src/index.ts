@@ -25,6 +25,8 @@ import {
 } from "./middleware/publicRateLimit";
 import { hasConfiguredSecret, usesLegacySecretFallback } from "./utils/secretConfig";
 import { buildReadyPayload } from "./controllers/healthController";
+import { isObjectStorageConfigured } from "./services/objectStorageService";
+import { isRedisConfigured } from "./services/redisService";
 
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -122,6 +124,18 @@ if (process.env.NODE_ENV === "production") {
   if (missingStrongSecurityEnv.length > 0) {
     logger.error(
       `Refusing to start: production security hardening requires ${missingStrongSecurityEnv.join(", ")}`
+    );
+    process.exit(1);
+  }
+
+  if (!isRedisConfigured()) {
+    logger.error("Refusing to start: production requires Redis coordination (REDIS_URL or REDIS_HOST/REDIS_PORT).");
+    process.exit(1);
+  }
+
+  if (!isObjectStorageConfigured()) {
+    logger.error(
+      "Refusing to start: production requires S3-compatible object storage (OBJECT_STORAGE_* / S3_* / MINIO_*)."
     );
     process.exit(1);
   }
@@ -243,6 +257,7 @@ app.use((req, res, next) => {
   res.on("finish", () => {
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
     const pathName = req.originalUrl.split("?")[0] || req.path || "/";
+    const claims = (req as express.Request & { user?: any }).user || null;
 
     recordRequestMetric({
       at: Date.now(),
@@ -259,6 +274,12 @@ app.use((req, res, next) => {
       status: res.statusCode,
       durationMs: Math.round(durationMs * 10) / 10,
       release: releaseMetadata.release,
+      actorUserId: claims?.userId || null,
+      actorRole: claims?.role || null,
+      actorLicenseeId: claims?.licenseeId || null,
+      actorOrgId: claims?.orgId || null,
+      sessionStage: claims?.sessionStage || null,
+      authAssurance: claims?.authAssurance || null,
     };
 
     if (requestTelemetryDebugPaths.has(pathName)) {

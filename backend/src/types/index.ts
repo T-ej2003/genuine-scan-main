@@ -2,6 +2,7 @@ import { UserRole } from "@prisma/client";
 
 export type AuthSessionStage = "ACTIVE" | "MFA_BOOTSTRAP";
 export type AuthAssuranceLevel = "PASSWORD" | "ADMIN_MFA";
+export type StepUpMethod = "ADMIN_MFA" | "PASSWORD_REAUTH";
 
 export interface JWTPayload {
   userId: string;

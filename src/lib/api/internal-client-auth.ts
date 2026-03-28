@@ -9,9 +9,14 @@ export const createAuthApi = (core: ApiClientCore) => ({
         authAssurance: "PASSWORD" | "ADMIN_MFA";
         mfaRequired: boolean;
         mfaEnrolled: boolean;
+        availableMfaMethods?: Array<"TOTP" | "WEBAUTHN">;
+        preferredMfaMethod?: "TOTP" | "WEBAUTHN" | null;
         authenticatedAt?: string | null;
         mfaVerifiedAt?: string | null;
         stepUpRequired?: boolean;
+        stepUpMethod?: "ADMIN_MFA" | "PASSWORD_REAUTH" | null;
+        sessionId?: string | null;
+        sessionExpiresAt?: string | null;
       };
     }>("/auth/login", {
       method: "POST",
@@ -26,6 +31,45 @@ export const createAuthApi = (core: ApiClientCore) => ({
 
   async refreshSession() {
     return core.request<{ user: any; auth?: any }>("/auth/refresh", { method: "POST" });
+  },
+
+  async listSessions() {
+    return core.request<{
+      items: Array<{
+        id: string;
+        current: boolean;
+        createdAt: string;
+        lastUsedAt?: string | null;
+        expiresAt: string;
+        authenticatedAt?: string | null;
+        mfaVerifiedAt?: string | null;
+        userAgent?: string | null;
+        ipHash?: string | null;
+      }>;
+    }>("/auth/sessions");
+  },
+
+  async revokeSession(sessionId: string) {
+    return core.request<{ revoked: boolean; currentSessionRevoked?: boolean }>(
+      `/auth/sessions/${encodeURIComponent(sessionId)}/revoke`,
+      {
+        method: "POST",
+      }
+    );
+  },
+
+  async stepUpWithPassword(currentPassword: string) {
+    return core.request<{ user?: any; auth?: any }>("/auth/step-up/password", {
+      method: "POST",
+      body: JSON.stringify({ currentPassword }),
+    });
+  },
+
+  async stepUpWithAdminMfa(code: string) {
+    return core.request<{ user?: any; auth?: any }>("/auth/mfa/step-up", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    });
   },
 
   async logoutSession() {
@@ -50,9 +94,14 @@ export const createAuthApi = (core: ApiClientCore) => ({
         authAssurance: "PASSWORD" | "ADMIN_MFA";
         mfaRequired: boolean;
         mfaEnrolled: boolean;
+        availableMfaMethods?: Array<"TOTP" | "WEBAUTHN">;
+        preferredMfaMethod?: "TOTP" | "WEBAUTHN" | null;
         authenticatedAt?: string | null;
         mfaVerifiedAt?: string | null;
         stepUpRequired?: boolean;
+        stepUpMethod?: "ADMIN_MFA" | "PASSWORD_REAUTH" | null;
+        sessionId?: string | null;
+        sessionExpiresAt?: string | null;
       };
     }>("/auth/accept-invite", {
       method: "POST",
@@ -184,11 +233,23 @@ export const createAuthApi = (core: ApiClientCore) => ({
       sessionStage: "ACTIVE" | "MFA_BOOTSTRAP";
       enrolled: boolean;
       enabled: boolean;
+      totpEnabled?: boolean;
+      hasWebAuthn?: boolean;
+      methods?: Array<"TOTP" | "WEBAUTHN">;
+      preferredMethod?: "TOTP" | "WEBAUTHN" | null;
       backupCodesRemaining?: number;
       verifiedAt?: string | null;
       lastUsedAt?: string | null;
       createdAt?: string | null;
       updatedAt?: string | null;
+      webauthnCredentials?: Array<{
+        id: string;
+        label: string;
+        transports?: string[];
+        lastUsedAt?: string | null;
+        createdAt?: string | null;
+        updatedAt?: string | null;
+      }>;
     }>("/auth/mfa/status");
   },
 
@@ -220,6 +281,92 @@ export const createAuthApi = (core: ApiClientCore) => ({
       method: "POST",
       body: JSON.stringify({ ticket, code }),
     });
+  },
+
+  async beginAdminWebAuthnSetup() {
+    return core.request<{
+      ticket: string;
+      expiresAt: string;
+      options: {
+        rp: { name: string; id: string };
+        user: { id: string; name: string; displayName: string };
+        challenge: string;
+        timeout?: number;
+        attestation?: "none";
+        pubKeyCredParams: Array<{ alg: number; type: "public-key" }>;
+        excludeCredentials?: Array<{ id: string; type: "public-key" }>;
+      };
+    }>("/auth/mfa/webauthn/setup/begin", {
+      method: "POST",
+    });
+  },
+
+  async completeAdminWebAuthnSetup(payload: {
+    ticket: string;
+    label?: string;
+    credential: {
+      id: string;
+      rawId: string;
+      type: "public-key";
+      response: {
+        clientDataJSON: string;
+        attestationObject: string;
+        authenticatorData: string;
+        publicKey: string;
+        publicKeyAlgorithm: number;
+        transports?: string[];
+      };
+    };
+  }) {
+    return core.request<{ enrolled?: boolean; status?: any }>("/auth/mfa/webauthn/setup/finish", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async beginAdminWebAuthnChallenge() {
+    return core.request<{
+      ticket: string;
+      expiresAt: string;
+      options: {
+        challenge: string;
+        timeout?: number;
+        rpId: string;
+        userVerification?: "preferred";
+        allowCredentials?: Array<{ id: string; type: "public-key"; transports?: string[] }>;
+      };
+    }>("/auth/mfa/webauthn/challenge/begin", {
+      method: "POST",
+    });
+  },
+
+  async completeAdminWebAuthnChallenge(payload: {
+    ticket: string;
+    credential: {
+      id: string;
+      rawId: string;
+      type: "public-key";
+      response: {
+        clientDataJSON: string;
+        authenticatorData: string;
+        signature: string;
+        userHandle?: string | null;
+      };
+    };
+  }) {
+    return core.request<{ user?: any; auth?: any }>("/auth/mfa/webauthn/challenge/finish", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async deleteAdminWebAuthnCredential(credentialId: string) {
+    return core.request<{ deleted: boolean; status?: any }>(
+      `/auth/mfa/webauthn/credentials/${encodeURIComponent(credentialId)}`,
+      {
+        method: "DELETE",
+      }
+    );
   },
 
   async rotateAdminMfaBackupCodes(code: string) {

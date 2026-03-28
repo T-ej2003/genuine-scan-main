@@ -5,6 +5,7 @@ import { z } from "zod";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
+import { queueSecurityEvent } from "../services/siemOutboxService";
 
 const routeTransitionSchema = z.object({
   routeFrom: z.string().trim().max(300).optional().nullable(),
@@ -18,6 +19,14 @@ const routeTransitionSchema = z.object({
   networkType: z.string().trim().max(40).optional().nullable(),
   online: z.boolean().optional().default(true),
 }).strict();
+
+const cspReportEnvelopeSchema = z.union([
+  z.object({
+    "csp-report": z.record(z.unknown()),
+  }).strict(),
+  z.array(z.record(z.unknown())).min(1),
+  z.record(z.unknown()),
+]);
 
 const toDate = (value: unknown) => {
   const raw = String(value || "").trim();
@@ -163,5 +172,29 @@ export const getRouteTransitionSummary = async (req: AuthRequest, res: Response)
     }
     console.error("getRouteTransitionSummary error:", error);
     return res.status(500).json({ success: false, error: "Failed to load telemetry summary" });
+  }
+};
+
+export const captureCspViolationReport = async (req: AuthRequest, res: Response) => {
+  try {
+    const parsed = cspReportEnvelopeSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(204).end();
+    }
+
+    await queueSecurityEvent("CSP_VIOLATION", {
+      actorUserId: req.user?.userId || null,
+      actorRole: req.user?.role || null,
+      licenseeId: req.user?.licenseeId || null,
+      sourceIp: req.ip || null,
+      userAgent: req.get("user-agent") || null,
+      report: parsed.data,
+      capturedAt: new Date().toISOString(),
+    });
+
+    return res.status(204).end();
+  } catch (error) {
+    console.error("captureCspViolationReport error:", error);
+    return res.status(204).end();
   }
 };

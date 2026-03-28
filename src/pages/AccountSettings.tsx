@@ -10,24 +10,49 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/api-client";
+import {
+  isWebAuthnSupported,
+  startAdminWebAuthnAuthentication,
+  startAdminWebAuthnRegistration,
+  type AdminWebAuthnCredentialSummary,
+} from "@/lib/webauthn";
 
 type AdminMfaStatus = {
   required: boolean;
   sessionStage: "ACTIVE" | "MFA_BOOTSTRAP";
   enrolled: boolean;
   enabled: boolean;
+  totpEnabled?: boolean;
+  hasWebAuthn?: boolean;
+  methods?: Array<"TOTP" | "WEBAUTHN">;
+  preferredMethod?: "TOTP" | "WEBAUTHN" | null;
   backupCodesRemaining?: number;
   verifiedAt?: string | null;
   lastUsedAt?: string | null;
+  webauthnCredentials?: AdminWebAuthnCredentialSummary[];
+};
+
+type ActiveSession = {
+  id: string;
+  current: boolean;
+  createdAt: string;
+  lastUsedAt?: string | null;
+  expiresAt: string;
+  authenticatedAt?: string | null;
+  mfaVerifiedAt?: string | null;
+  userAgent?: string | null;
+  ipHash?: string | null;
 };
 
 export default function AccountSettings() {
-  const { user, refresh } = useAuth();
+  const { user, refresh, logout } = useAuth();
   const { toast } = useToast();
 
   const [profileLoading, setProfileLoading] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [mfaLoading, setMfaLoading] = useState(false);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [revokingSessionId, setRevokingSessionId] = useState<string | null>(null);
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -43,9 +68,30 @@ export default function AccountSettings() {
   const [mfaDisablePassword, setMfaDisablePassword] = useState("");
   const [mfaDisableCode, setMfaDisableCode] = useState("");
   const [mfaRotateCode, setMfaRotateCode] = useState("");
+  const [webauthnLabel, setWebauthnLabel] = useState("");
+  const [removingWebAuthnId, setRemovingWebAuthnId] = useState<string | null>(null);
   const [rotatedBackupCodes, setRotatedBackupCodes] = useState<string[] | null>(null);
+  const [sessions, setSessions] = useState<ActiveSession[]>([]);
 
   const isAdminUser = user?.role === "super_admin" || user?.role === "licensee_admin";
+  const webauthnAvailable = isWebAuthnSupported();
+
+  const loadSessions = async () => {
+    if (!user) {
+      setSessions([]);
+      return;
+    }
+
+    setSessionsLoading(true);
+    try {
+      const response = await apiClient.listSessions();
+      if (response.success && response.data) {
+        setSessions(response.data.items || []);
+      }
+    } finally {
+      setSessionsLoading(false);
+    }
+  };
 
   const loadMfaStatus = async () => {
     if (!isAdminUser) return;
@@ -64,6 +110,11 @@ export default function AccountSettings() {
     void loadMfaStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdminUser]);
+
+  useEffect(() => {
+    void loadSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   useEffect(() => {
     if (!mfaSetup?.otpauthUri) {
@@ -106,7 +157,10 @@ export default function AccountSettings() {
     setProfileLoading(true);
     try {
       const res = await apiClient.updateMyProfile({ name: n, email: em });
-      if (!res.success) throw new Error(res.error || "Update failed");
+      if (!res.success) {
+        if (res.code === "STEP_UP_REQUIRED") return;
+        throw new Error(res.error || "Update failed");
+      }
 
       const emailChange = (res.data as any)?.emailChange;
       if (emailChange?.verificationRequired && emailChange?.pendingEmail) {
@@ -118,6 +172,7 @@ export default function AccountSettings() {
         toast({ title: "Saved", description: "Your profile has been updated." });
       }
       await refresh();
+      await loadSessions();
     } catch (e: any) {
       toast({ title: "Save failed", description: e?.message || "Error", variant: "destructive" });
     } finally {
@@ -145,7 +200,10 @@ export default function AccountSettings() {
     setPasswordLoading(true);
     try {
       const res = await apiClient.changeMyPassword({ currentPassword, newPassword });
-      if (!res.success) throw new Error(res.error || "Password change failed");
+      if (!res.success) {
+        if (res.code === "STEP_UP_REQUIRED") return;
+        throw new Error(res.error || "Password change failed");
+      }
 
       toast({ title: "Password updated", description: "Your password has been changed successfully." });
       setCurrentPassword("");
@@ -155,6 +213,37 @@ export default function AccountSettings() {
       toast({ title: "Failed", description: e?.message || "Error", variant: "destructive" });
     } finally {
       setPasswordLoading(false);
+    }
+  };
+
+  const revokeSession = async (sessionId: string) => {
+    setRevokingSessionId(sessionId);
+    try {
+      const response = await apiClient.revokeSession(sessionId);
+      if (!response.success) {
+        if (response.code === "STEP_UP_REQUIRED") return;
+        throw new Error(response.error || "Could not revoke session.");
+      }
+
+      if (response.data?.currentSessionRevoked) {
+        toast({
+          title: "Current session revoked",
+          description: "This browser session was closed. Sign in again if you still need access.",
+        });
+        logout();
+        return;
+      }
+
+      toast({ title: "Session revoked", description: "That device can no longer use this session." });
+      await loadSessions();
+    } catch (error: any) {
+      toast({
+        title: "Session revoke failed",
+        description: error?.message || "Could not revoke that session.",
+        variant: "destructive",
+      });
+    } finally {
+      setRevokingSessionId(null);
     }
   };
 
@@ -238,6 +327,99 @@ export default function AccountSettings() {
     }
   };
 
+  const beginWebAuthnSetup = async () => {
+    setMfaLoading(true);
+    try {
+      const beginResponse = await apiClient.beginAdminWebAuthnSetup();
+      if (!beginResponse.success || !beginResponse.data) {
+        if (beginResponse.code === "STEP_UP_REQUIRED") return;
+        throw new Error(beginResponse.error || "Could not start WebAuthn setup.");
+      }
+
+      const registration = await startAdminWebAuthnRegistration(
+        beginResponse.data,
+        webauthnLabel.trim() || `${window.navigator.platform || "This device"} security key`
+      );
+      const finishResponse = await apiClient.completeAdminWebAuthnSetup(registration);
+      if (!finishResponse.success) {
+        if (finishResponse.code === "STEP_UP_REQUIRED") return;
+        throw new Error(finishResponse.error || "Could not save the WebAuthn credential.");
+      }
+
+      setWebauthnLabel("");
+      await loadMfaStatus();
+      await refresh();
+      toast({
+        title: "Security key added",
+        description: "WebAuthn is ready and will be preferred for future admin verification when available.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Security key setup failed",
+        description: error?.message || "Could not add this WebAuthn credential.",
+        variant: "destructive",
+      });
+    } finally {
+      setMfaLoading(false);
+    }
+  };
+
+  const verifyWithWebAuthn = async () => {
+    setMfaLoading(true);
+    try {
+      const beginResponse = await apiClient.beginAdminWebAuthnChallenge();
+      if (!beginResponse.success || !beginResponse.data) {
+        throw new Error(beginResponse.error || "Could not start WebAuthn verification.");
+      }
+
+      const assertion = await startAdminWebAuthnAuthentication(beginResponse.data);
+      const finishResponse = await apiClient.completeAdminWebAuthnChallenge(assertion);
+      if (!finishResponse.success) {
+        throw new Error(finishResponse.error || "Could not verify the WebAuthn credential.");
+      }
+
+      await refresh();
+      await loadMfaStatus();
+      toast({
+        title: "Verification refreshed",
+        description: "Your WebAuthn credential was accepted for admin verification.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Verification failed",
+        description: error?.message || "Could not verify the WebAuthn credential.",
+        variant: "destructive",
+      });
+    } finally {
+      setMfaLoading(false);
+    }
+  };
+
+  const removeWebAuthnCredential = async (credentialId: string) => {
+    setRemovingWebAuthnId(credentialId);
+    try {
+      const response = await apiClient.deleteAdminWebAuthnCredential(credentialId);
+      if (!response.success) {
+        if (response.code === "STEP_UP_REQUIRED") return;
+        throw new Error(response.error || "Could not remove the WebAuthn credential.");
+      }
+
+      await loadMfaStatus();
+      toast({
+        title: "Security key removed",
+        description: "That WebAuthn credential can no longer be used for admin verification.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Removal failed",
+        description: error?.message || "Could not remove the WebAuthn credential.",
+        variant: "destructive",
+      });
+    } finally {
+      setRemovingWebAuthnId(null);
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -291,6 +473,14 @@ export default function AccountSettings() {
             </div>
           </CardHeader>
           <CardContent>
+            {user?.auth?.stepUpRequired ? (
+              <Alert className="mb-4 border-amber-200 bg-amber-50 text-amber-950">
+                <AlertDescription>
+                  Sensitive actions are locked until you confirm{" "}
+                  {user.auth.stepUpMethod === "ADMIN_MFA" ? "your authenticator code" : "your current password"} again.
+                </AlertDescription>
+              </Alert>
+            ) : null}
             <form className="space-y-4" onSubmit={changePassword}>
               <div className="space-y-2">
                 <Label>Current password</Label>
@@ -316,6 +506,65 @@ export default function AccountSettings() {
           </CardContent>
         </Card>
 
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="font-semibold">Active Sessions</div>
+            <div className="text-sm text-muted-foreground">
+              Review browser sessions using this account and revoke the ones you do not recognize.
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {user?.auth?.sessionExpiresAt ? (
+              <Alert>
+                <AlertDescription>
+                  Current session expires on {new Date(user.auth.sessionExpiresAt).toLocaleString()}.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {sessionsLoading ? (
+              <div className="text-sm text-muted-foreground">Loading active sessions...</div>
+            ) : sessions.length === 0 ? (
+              <div className="text-sm text-muted-foreground">No active sessions are available right now.</div>
+            ) : (
+              <div className="space-y-3">
+                {sessions.map((session) => (
+                  <div key={session.id} className="rounded-xl border p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="space-y-1">
+                        <div className="font-medium">
+                          {session.current ? "Current browser session" : session.userAgent || "Saved browser session"}
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          Started {new Date(session.createdAt).toLocaleString()}.
+                          {session.lastUsedAt ? ` Last used ${new Date(session.lastUsedAt).toLocaleString()}.` : ""}
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          Expires {new Date(session.expiresAt).toLocaleString()}.
+                          {session.mfaVerifiedAt ? ` MFA confirmed ${new Date(session.mfaVerifiedAt).toLocaleString()}.` : ""}
+                        </div>
+                      </div>
+
+                      <Button
+                        type="button"
+                        variant={session.current ? "destructive" : "outline"}
+                        disabled={revokingSessionId === session.id}
+                        onClick={() => void revokeSession(session.id)}
+                      >
+                        {revokingSessionId === session.id
+                          ? "Revoking..."
+                          : session.current
+                            ? "Sign out this browser"
+                            : "Revoke session"}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         {isAdminUser ? (
           <Card>
             <CardHeader className="pb-2">
@@ -331,6 +580,7 @@ export default function AccountSettings() {
                     {mfaStatus.enabled
                       ? `MFA is enabled. Backup codes remaining: ${mfaStatus.backupCodesRemaining ?? 0}.`
                       : "MFA is not enabled for this admin account yet."}
+                    {mfaStatus.preferredMethod ? ` Preferred method: ${mfaStatus.preferredMethod === "WEBAUTHN" ? "Security key / passkey" : "Authenticator app"}.` : ""}
                     {mfaStatus.lastUsedAt ? ` Last used: ${new Date(mfaStatus.lastUsedAt).toLocaleString()}.` : ""}
                   </AlertDescription>
                 </Alert>
@@ -377,7 +627,68 @@ export default function AccountSettings() {
                   )}
                 </div>
               ) : (
-                <div className="grid gap-6 lg:grid-cols-2">
+                <div className="grid gap-6 lg:grid-cols-3">
+                  <div className="space-y-3 rounded-xl border p-4">
+                    <div className="font-medium">Security keys / passkeys</div>
+                    <div className="text-sm text-muted-foreground">
+                      Prefer WebAuthn security keys when this browser supports them. Authenticator codes stay available as a fallback.
+                    </div>
+                    {webauthnAvailable ? (
+                      <>
+                        <div className="space-y-2">
+                          <Label>Device label</Label>
+                          <Input
+                            value={webauthnLabel}
+                            onChange={(e) => setWebauthnLabel(e.target.value)}
+                            placeholder="Factory MacBook or Security key"
+                          />
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button onClick={() => void beginWebAuthnSetup()} disabled={mfaLoading}>
+                            {mfaLoading ? "Preparing..." : "Add security key"}
+                          </Button>
+                          {mfaStatus?.hasWebAuthn ? (
+                            <Button variant="outline" onClick={() => void verifyWithWebAuthn()} disabled={mfaLoading}>
+                              {mfaLoading ? "Waiting..." : "Verify with security key"}
+                            </Button>
+                          ) : null}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-sm text-muted-foreground">
+                        This browser does not support WebAuthn security keys. You can still use the authenticator-app flow below.
+                      </div>
+                    )}
+
+                    {mfaStatus?.webauthnCredentials?.length ? (
+                      <div className="space-y-3">
+                        {mfaStatus.webauthnCredentials.map((credential) => (
+                          <div key={credential.id} className="rounded-xl border bg-muted/30 p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="space-y-1">
+                                <div className="font-medium">{credential.label}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {(credential.transports || []).length ? `Transports: ${credential.transports?.join(", ")}.` : "Security key enrolled."}
+                                  {credential.lastUsedAt ? ` Last used ${new Date(credential.lastUsedAt).toLocaleString()}.` : ""}
+                                </div>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={removingWebAuthnId === credential.id}
+                                onClick={() => void removeWebAuthnCredential(credential.id)}
+                              >
+                                {removingWebAuthnId === credential.id ? "Removing..." : "Remove"}
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-muted-foreground">No WebAuthn security keys are enrolled yet.</div>
+                    )}
+                  </div>
+
                   <div className="space-y-3 rounded-xl border p-4">
                     <div className="font-medium">Rotate backup codes</div>
                     <div className="text-sm text-muted-foreground">

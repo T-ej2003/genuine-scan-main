@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { isWebAuthnSupported, startAdminWebAuthnAuthentication } from "@/lib/webauthn";
 
 type MfaMode = "setup" | "challenge";
 
@@ -27,6 +28,7 @@ export default function Login() {
   const [mfaQrDataUrl, setMfaQrDataUrl] = useState("");
   const [mfaLoading, setMfaLoading] = useState(false);
   const [mfaBackupCodesRevealed, setMfaBackupCodesRevealed] = useState(true);
+  const webauthnSupported = isWebAuthnSupported();
 
   const { login, logout, pendingAuth, completeMfaSession } = useAuth();
   const navigate = useNavigate();
@@ -185,6 +187,32 @@ export default function Login() {
 
       completeMfaSession({ user: response.data.user, auth: response.data.auth || null });
       navigate("/dashboard");
+    } finally {
+      setMfaLoading(false);
+    }
+  };
+
+  const handleCompleteWebAuthnChallenge = async () => {
+    setError("");
+    setMfaLoading(true);
+    try {
+      const beginResponse = await apiClient.beginAdminWebAuthnChallenge();
+      if (!beginResponse.success || !beginResponse.data) {
+        setError(humanizeAuthError(beginResponse.error || "Could not start WebAuthn verification."));
+        return;
+      }
+
+      const assertion = await startAdminWebAuthnAuthentication(beginResponse.data);
+      const response = await apiClient.completeAdminWebAuthnChallenge(assertion);
+      if (!response.success || !response.data?.user) {
+        setError(humanizeAuthError(response.error || "Could not complete WebAuthn verification."));
+        return;
+      }
+
+      completeMfaSession({ user: response.data.user, auth: response.data.auth || null });
+      navigate("/dashboard");
+    } catch (error: any) {
+      setError(humanizeAuthError(error?.message || "Could not verify the security key."));
     } finally {
       setMfaLoading(false);
     }
@@ -418,7 +446,24 @@ export default function Login() {
               Use your authenticator app or one of your saved backup codes. This keeps high-risk admin actions locked
               until the secure session is fully verified.
             </div>
+            {pendingAuth.auth.preferredMfaMethod === "WEBAUTHN" ? (
+              <div className="mt-2 text-xs font-medium text-emerald-800">
+                This account prefers a security key or passkey first. Authenticator codes still work as fallback.
+              </div>
+            ) : null}
           </div>
+
+          {webauthnSupported && pendingAuth.auth.availableMfaMethods?.includes("WEBAUTHN") ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              disabled={mfaLoading}
+              onClick={() => void handleCompleteWebAuthnChallenge()}
+            >
+              {mfaLoading ? "Waiting for security key..." : "Use security key / passkey"}
+            </Button>
+          ) : null}
 
           <div className="space-y-2">
             <Label htmlFor="mfa-challenge-code">Authenticator or backup code</Label>

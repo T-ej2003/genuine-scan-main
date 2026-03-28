@@ -107,7 +107,7 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
   },
 
   streamNotifications(
-    onSnapshot: (payload: { notifications: any[]; unread: number; total: number; reason?: string }) => void,
+    onEvent: (payload: { kind: "snapshot"; notifications: any[]; unread: number; total: number; reason?: string } | { kind: "version"; reason?: string }) => void,
     onError?: () => void,
     onOpen?: () => void,
     options?: { limit?: number }
@@ -124,20 +124,32 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
       eventSource = new EventSource(url);
     }
 
-    eventSource.addEventListener("notifications", (event: MessageEvent) => {
+    eventSource.addEventListener("realtime", (event: MessageEvent) => {
       try {
-        const payload = JSON.parse(event.data || "{}");
-        const notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
-        const unread = Number(payload.unread || 0);
-        const total = Number(payload.total || notifications.length);
-        onSnapshot({
-          notifications,
-          unread,
-          total,
-          reason: typeof payload.reason === "string" ? payload.reason : undefined,
-        });
+        const envelope = JSON.parse(event.data || "{}");
+        if (envelope?.channel !== "notifications") return;
+        const payload = envelope?.payload || {};
+        if (envelope?.type === "snapshot") {
+          const notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
+          const unread = Number(payload.unread || 0);
+          const total = Number(payload.total || notifications.length);
+          onEvent({
+            kind: "snapshot",
+            notifications,
+            unread,
+            total,
+            reason: typeof payload.reason === "string" ? payload.reason : undefined,
+          });
+          return;
+        }
+        if (envelope?.type === "version.bump") {
+          onEvent({
+            kind: "version",
+            reason: typeof payload.reason === "string" ? payload.reason : undefined,
+          });
+        }
       } catch {
-        // ignore malformed snapshots
+        // ignore malformed events
       }
     });
 
@@ -215,9 +227,11 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
       eventSource = new EventSource(url);
     }
 
-    eventSource.addEventListener("printer_status", (event: MessageEvent) => {
+    eventSource.addEventListener("realtime", (event: MessageEvent) => {
       try {
-        const payload = JSON.parse(event.data || "{}");
+        const envelope = JSON.parse(event.data || "{}");
+        if (envelope?.channel !== "printer" || envelope?.type !== "snapshot") return;
+        const payload = envelope?.payload || {};
         if (!payload || typeof payload !== "object" || !payload.status || typeof payload.status !== "object") return;
         onSnapshot({
           reason: typeof payload.reason === "string" ? payload.reason : undefined,

@@ -161,27 +161,61 @@ const normalizeRiskLevel = (level?: AuthRiskLevel | string | null): AuthRiskLeve
 };
 
 export const getAdminMfaStatus = async (userId: string) => {
-  const row = await prisma.adminMfaCredential.findUnique({
-    where: { userId },
-    select: {
-      id: true,
-      isEnabled: true,
-      verifiedAt: true,
-      lastUsedAt: true,
-      backupCodesHash: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  });
+  const [row, webauthnCredentials] = await Promise.all([
+    prisma.adminMfaCredential.findUnique({
+      where: { userId },
+      select: {
+        id: true,
+        isEnabled: true,
+        verifiedAt: true,
+        lastUsedAt: true,
+        backupCodesHash: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
+    prisma.adminWebAuthnCredential.findMany({
+      where: { userId },
+      orderBy: [{ lastUsedAt: "desc" }, { createdAt: "desc" }],
+      select: {
+        id: true,
+        label: true,
+        transports: true,
+        lastUsedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
+  ]);
+
+  const methods = [
+    ...(webauthnCredentials.length > 0 ? (["WEBAUTHN"] as const) : []),
+    ...(row?.isEnabled ? (["TOTP"] as const) : []),
+  ];
+  const lastUsedAtCandidates = [row?.lastUsedAt || null, ...webauthnCredentials.map((entry) => entry.lastUsedAt || null)]
+    .filter((value): value is Date => Boolean(value))
+    .sort((a, b) => b.getTime() - a.getTime());
 
   return {
-    enrolled: Boolean(row),
-    enabled: Boolean(row?.isEnabled),
+    enrolled: Boolean(row) || webauthnCredentials.length > 0,
+    enabled: Boolean(row?.isEnabled) || webauthnCredentials.length > 0,
+    totpEnabled: Boolean(row?.isEnabled),
+    hasWebAuthn: webauthnCredentials.length > 0,
+    methods,
+    preferredMethod: webauthnCredentials.length > 0 ? "WEBAUTHN" : row?.isEnabled ? "TOTP" : null,
     verifiedAt: row?.verifiedAt || null,
-    lastUsedAt: row?.lastUsedAt || null,
+    lastUsedAt: lastUsedAtCandidates[0] || row?.lastUsedAt || null,
     backupCodesRemaining: Array.isArray(row?.backupCodesHash) ? row.backupCodesHash.length : 0,
     createdAt: row?.createdAt || null,
     updatedAt: row?.updatedAt || null,
+    webauthnCredentials: webauthnCredentials.map((entry) => ({
+      id: entry.id,
+      label: entry.label || "Security key",
+      transports: entry.transports,
+      lastUsedAt: entry.lastUsedAt || null,
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+    })),
   };
 };
 

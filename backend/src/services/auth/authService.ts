@@ -1,14 +1,20 @@
 import prisma from "../../config/database";
 import { UserRole, UserStatus } from "@prisma/client";
 import { verifyPassword, hashPassword, shouldRehashPassword } from "./passwordService";
-import { signAccessToken, newCsrfToken, newRefreshToken, signMfaBootstrapToken } from "./tokenService";
+import {
+  signAccessToken,
+  newCsrfToken,
+  newRefreshToken,
+  signMfaBootstrapToken,
+  getMfaBootstrapTtlMinutes,
+} from "./tokenService";
 import { createRefreshToken, rotateRefreshToken, revokeAllUserRefreshTokens, revokeRefreshTokenByRaw } from "./refreshTokenService";
 import { createAuditLog } from "../auditService";
 import { assessAuthSessionRisk } from "./sessionRiskService";
 import { listManufacturerLicenseeLinks, normalizeLinkedLicensees } from "../manufacturerScopeService";
 import { isVerifiedAccount } from "./emailVerificationService";
 import { getAdminMfaStatus } from "./mfaService";
-import type { AuthAssuranceLevel, AuthSessionStage } from "../../types";
+import type { AuthAssuranceLevel, AuthSessionStage, StepUpMethod } from "../../types";
 
 const parseIntEnv = (key: string, fallback: number) => {
   const raw = String(process.env[key] || "").trim();
@@ -18,6 +24,8 @@ const parseIntEnv = (key: string, fallback: number) => {
 
 const getMaxLoginAttempts = () => parseIntEnv("AUTH_MAX_LOGIN_ATTEMPTS", 10);
 const getLockoutMinutes = () => parseIntEnv("AUTH_LOCKOUT_MINUTES", 15);
+export const getAdminStepUpWindowMinutes = () => parseIntEnv("ADMIN_STEP_UP_WINDOW_MINUTES", 30);
+export const getPasswordReauthWindowMinutes = () => parseIntEnv("AUTH_PASSWORD_STEP_UP_WINDOW_MINUTES", 30);
 
 const addMinutes = (d: Date, minutes: number) => new Date(d.getTime() + minutes * 60 * 1000);
 const DISABLED_STATUS = (UserStatus as unknown as { DISABLED?: string } | undefined)?.DISABLED || "DISABLED";
@@ -44,6 +52,9 @@ export const isAdminMfaRequiredRole = (role: UserRole) =>
 
 export const isManufacturerRole = (role: UserRole) =>
   role === UserRole.MANUFACTURER || role === UserRole.MANUFACTURER_ADMIN || role === UserRole.MANUFACTURER_USER;
+
+export const getSensitiveActionStepUpMethod = (role: UserRole): StepUpMethod =>
+  isAdminMfaRequiredRole(role) ? "ADMIN_MFA" : "PASSWORD_REAUTH";
 
 export const buildJwtPayloadForUser = (u: {
   id: string;
@@ -102,6 +113,7 @@ export const issueSessionForUser = async (input: {
   const linkedScope = isManufacturerRole(user.role)
     ? await mapLinkedLicenseesForSession(user.id)
     : { linkedLicensees: [], linkedLicenseeIds: [] as string[] };
+  const mfaStatus = isAdminMfaRequiredRole(user.role) ? await getAdminMfaStatus(user.id).catch(() => null) : null;
   const primaryLicensee =
     user.licensee ||
     linkedScope.linkedLicensees.find((row) => row.isPrimary) ||
@@ -140,6 +152,7 @@ export const issueSessionForUser = async (input: {
     accessToken,
     refreshToken,
     refreshTokenExpiresAt: created.expiresAt,
+    sessionId: created.row.id,
     csrfToken,
     user: {
       id: user.id,
@@ -163,10 +176,17 @@ export const issueSessionForUser = async (input: {
       sessionStage: "ACTIVE" as const,
       authAssurance,
       mfaRequired: isAdminMfaRequiredRole(user.role),
-      mfaEnrolled: authAssurance === "ADMIN_MFA",
+      mfaEnrolled: isAdminMfaRequiredRole(user.role)
+        ? Boolean(mfaStatus?.enabled || mfaStatus?.enrolled)
+        : authAssurance === "ADMIN_MFA",
+      availableMfaMethods: isAdminMfaRequiredRole(user.role) ? mfaStatus?.methods || [] : [],
+      preferredMfaMethod: isAdminMfaRequiredRole(user.role) ? mfaStatus?.preferredMethod || null : null,
       authenticatedAt: authenticatedAt.toISOString(),
       mfaVerifiedAt: mfaVerifiedAt?.toISOString?.() || null,
       stepUpRequired: false,
+      stepUpMethod: getSensitiveActionStepUpMethod(user.role),
+      sessionId: created.row.id,
+      sessionExpiresAt: created.expiresAt.toISOString(),
     },
   };
 };
@@ -188,6 +208,9 @@ type BootstrapSessionResult = {
     authenticatedAt: string;
     mfaVerifiedAt: null;
     stepUpRequired: boolean;
+    stepUpMethod: "ADMIN_MFA";
+    sessionId: null;
+    sessionExpiresAt: string;
   };
 };
 
@@ -212,6 +235,7 @@ const buildBootstrapSessionForUser = async (input: {
   const linkedScope = isManufacturerRole(input.user.role)
     ? await mapLinkedLicenseesForSession(input.user.id)
     : { linkedLicensees: [], linkedLicenseeIds: [] as string[] };
+  const mfaStatus = await getAdminMfaStatus(input.user.id).catch(() => null);
   const primaryLicensee =
     input.user.licensee ||
     linkedScope.linkedLicensees.find((row) => row.isPrimary) ||
@@ -256,9 +280,14 @@ const buildBootstrapSessionForUser = async (input: {
       authAssurance: "PASSWORD" as const,
       mfaRequired: true as const,
       mfaEnrolled: input.mfaEnrolled,
+      availableMfaMethods: mfaStatus?.methods || [],
+      preferredMfaMethod: mfaStatus?.preferredMethod || null,
       authenticatedAt: input.now.toISOString(),
       mfaVerifiedAt: null,
       stepUpRequired: true,
+      stepUpMethod: "ADMIN_MFA" as const,
+      sessionId: null,
+      sessionExpiresAt: new Date(input.now.getTime() + getMfaBootstrapTtlMinutes() * 60 * 1000).toISOString(),
     },
   };
 };

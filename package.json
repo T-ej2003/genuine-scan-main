@@ -20,6 +20,7 @@
     "check:security-guardrails": "node scripts/check-security-guardrails.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
+    "smoke:release": "node scripts/smoke-release.mjs",
     "test": "vitest run",
     "test:e2e": "playwright test --config=playwright.enterprise.config.ts",
     "test:e2e:headed": "playwright test --config=playwright.enterprise.config.ts --headed",

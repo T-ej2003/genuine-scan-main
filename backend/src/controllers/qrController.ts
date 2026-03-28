@@ -18,6 +18,7 @@ import {
 } from "../services/batchAllocationService";
 import { resolveScopedLicenseeAccess } from "../services/manufacturerScopeService";
 import { summarizeQrStatusCounts } from "../services/qrStatusMetrics";
+import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
 
 /* ===================== SCHEMAS ===================== */
 
@@ -1283,23 +1284,46 @@ export const blockQRCode = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid QR id" });
     }
     const id = paramsParsed.data.id;
-
-    const updated = await prisma.qRCode.update({
+    const qr = await prisma.qRCode.findUnique({
       where: { id },
-      data: { status: QRStatus.BLOCKED, blockedAt: new Date() },
+      select: { id: true, licenseeId: true, batchId: true },
     });
+    if (!qr) {
+      return res.status(404).json({ success: false, error: "QR code not found" });
+    }
 
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId: updated.licenseeId,
-      action: "BLOCKED",
+    const approval = await createSensitiveActionApproval({
+      actionKey: SENSITIVE_ACTION_KEYS.QR_BLOCK,
+      actor: {
+        userId: req.user.userId,
+        role: req.user.role,
+        orgId: req.user.orgId || null,
+        licenseeId: req.user.licenseeId || null,
+      },
+      licenseeId: qr.licenseeId,
       entityType: "QRCode",
-      entityId: updated.id,
-      details: { reason: parsed.data.reason || null, batchId: updated.batchId || null },
+      entityId: qr.id,
+      summary: {
+        reason: parsed.data.reason || null,
+        batchId: qr.batchId || null,
+      },
+      payload: {
+        qrId: qr.id,
+        reason: parsed.data.reason || null,
+      },
       ipAddress: req.ip,
+      userAgent: req.get("user-agent") || null,
     });
 
-    return res.json({ success: true, data: { id: updated.id } });
+    return res.status(202).json({
+      success: true,
+      data: {
+        approvalRequired: true,
+        approvalId: approval.id,
+        status: approval.status,
+        expiresAt: approval.expiresAt,
+      },
+    });
   } catch (e: any) {
     console.error("blockQRCode error:", e);
     return res.status(400).json({ success: false, error: e?.message || "Bad request" });
@@ -1329,22 +1353,37 @@ export const blockBatch = async (req: AuthRequest, res: Response) => {
     });
     if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
 
-    const updated = await prisma.qRCode.updateMany({
-      where: { batchId: batch.id },
-      data: { status: QRStatus.BLOCKED, blockedAt: new Date() },
-    });
-
-    await createAuditLog({
-      userId: req.user.userId,
+    const approval = await createSensitiveActionApproval({
+      actionKey: SENSITIVE_ACTION_KEYS.BATCH_BLOCK,
+      actor: {
+        userId: req.user.userId,
+        role: req.user.role,
+        orgId: req.user.orgId || null,
+        licenseeId: req.user.licenseeId || null,
+      },
       licenseeId: batch.licenseeId,
-      action: "BLOCKED",
       entityType: "Batch",
       entityId: batch.id,
-      details: { blockedCodes: updated.count, reason: parsed.data.reason || null },
+      summary: {
+        reason: parsed.data.reason || null,
+      },
+      payload: {
+        batchId: batch.id,
+        reason: parsed.data.reason || null,
+      },
       ipAddress: req.ip,
+      userAgent: req.get("user-agent") || null,
     });
 
-    return res.json({ success: true, data: { batchId: batch.id, blocked: updated.count } });
+    return res.status(202).json({
+      success: true,
+      data: {
+        approvalRequired: true,
+        approvalId: approval.id,
+        status: approval.status,
+        expiresAt: approval.expiresAt,
+      },
+    });
   } catch (e: any) {
     console.error("blockBatch error:", e);
     return res.status(400).json({ success: false, error: e?.message || "Bad request" });

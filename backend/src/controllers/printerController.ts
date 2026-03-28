@@ -17,6 +17,7 @@ import { isManufacturerRole, resolveAccessibleLicenseeIdsForUser } from "../serv
 import { resolvePrinterConfirmationMode } from "../services/printConfirmationService";
 import { printTestLabelForRegisteredPrinter } from "../services/printerTestLabelService";
 import { sanitizePrinterActionError } from "../utils/printerUserFacingErrors";
+import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
 
 const NETWORK_DIRECT_LANGUAGE_OPTIONS = [
   PrinterCommandLanguage.ZPL,
@@ -217,7 +218,7 @@ export const updateNetworkPrinter = async (req: AuthRequest, res: Response) => {
     }
 
     const connectionType = parsed.data.connectionType || current.connectionType;
-    const result = await upsertManagedNetworkPrinter({
+    const upsertPayload = {
       printerId,
       userId: scope.userId,
       orgId: scope.orgId,
@@ -260,7 +261,44 @@ export const updateNetworkPrinter = async (req: AuthRequest, res: Response) => {
       calibrationProfile: parsed.data.calibrationProfile ?? ((current.calibrationProfile as any) || null),
       isActive: parsed.data.isActive ?? current.isActive,
       isDefault: parsed.data.isDefault ?? current.isDefault,
-    });
+    };
+
+    if ("rotateGatewaySecret" in parsed.data && parsed.data.rotateGatewaySecret) {
+      const approval = await createSensitiveActionApproval({
+        actionKey: SENSITIVE_ACTION_KEYS.PRINTER_GATEWAY_SECRET_ROTATION,
+        actor: {
+          userId: req.user.userId,
+          role: req.user.role,
+          orgId: req.user.orgId || null,
+          licenseeId: req.user.licenseeId || null,
+        },
+        orgId: scope.orgId || null,
+        licenseeId: scope.licenseeId || current.licenseeId || null,
+        entityType: "Printer",
+        entityId: printerId,
+        summary: {
+          name: upsertPayload.name,
+          connectionType: upsertPayload.connectionType,
+          deliveryMode: upsertPayload.deliveryMode,
+          rotateGatewaySecret: true,
+        },
+        payload: upsertPayload,
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") || null,
+      });
+
+      return res.status(202).json({
+        success: true,
+        data: {
+          approvalRequired: true,
+          approvalId: approval.id,
+          status: approval.status,
+          expiresAt: approval.expiresAt,
+        },
+      });
+    }
+
+    const result = await upsertManagedNetworkPrinter(upsertPayload);
     const printer = result.printer;
 
     await createAuditLog({

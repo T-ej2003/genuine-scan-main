@@ -16,7 +16,7 @@ import { hmacSha256Hex } from "../utils/security";
 import { getPrinterSseSignSecret } from "../utils/secretConfig";
 import { boundedJsonSchema } from "../utils/boundedJson";
 import { isPrismaMissingTableError } from "../utils/prismaStorageGuard";
-
+import { writeSseRealtimeEnvelope } from "../utils/realtime";
 const MANUFACTURER_ROLES: UserRole[] = [
   UserRole.MANUFACTURER,
   UserRole.MANUFACTURER_ADMIN,
@@ -47,11 +47,6 @@ const heartbeatSchema = z.object({
   printers: z.array(boundedJsonSchema({ maxDepth: 3, maxKeys: 40, maxArrayLength: 40 })).max(50).optional(),
   calibrationProfile: boundedJsonSchema({ maxDepth: 4, maxKeys: 60, maxArrayLength: 40 }).optional(),
 }).strict();
-
-const writeSse = (res: Response, event: string, data: any) => {
-  res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
-};
 
 const sseKeepaliveSignature = (userId: string, nowIso: string) => {
   const secret = getPrinterSseSignSecret();
@@ -331,10 +326,14 @@ export const printerConnectionEvents = async (req: AuthRequest, res: Response) =
 
     const sendSnapshot = async (reason: string) => {
       const status = await getPrinterConnectionStatusForUser(req.user!.userId);
-      writeSse(res, "printer_status", {
-        reason,
-        status,
-        serverTime: new Date().toISOString(),
+      writeSseRealtimeEnvelope(res, {
+        channel: "printer",
+        type: "snapshot",
+        payload: {
+          reason,
+          status,
+          serverTime: new Date().toISOString(),
+        },
       });
     };
 
@@ -342,14 +341,28 @@ export const printerConnectionEvents = async (req: AuthRequest, res: Response) =
 
     const off = onPrinterConnectionEvent(async (event) => {
       if (event.userId !== req.user!.userId) return;
-      await sendSnapshot("changed");
+      writeSseRealtimeEnvelope(res, {
+        channel: "printer",
+        type: "snapshot",
+        payload: {
+          reason: "changed",
+          status: event.status,
+          serverTime: event.changedAt,
+        },
+        occurredAt: event.changedAt,
+      });
     });
 
     const keepAlive = setInterval(() => {
       const nowIso = new Date().toISOString();
-      writeSse(res, "keepalive", {
-        serverTime: nowIso,
-        signature: sseKeepaliveSignature(req.user!.userId, nowIso),
+      writeSseRealtimeEnvelope(res, {
+        channel: "printer",
+        type: "keepalive",
+        payload: {
+          serverTime: nowIso,
+          signature: sseKeepaliveSignature(req.user!.userId, nowIso),
+        },
+        occurredAt: nowIso,
       });
     }, 20_000);
 
