@@ -55,6 +55,8 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: genuine-scan-backend
     restart: unless-stopped
     init: true
@@ -63,7 +65,6 @@ services:
     environment:
       NODE_ENV: production
       PORT: ${BACKEND_PORT:-4000}
-      GIT_SHA: ${GIT_SHA:-unknown}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
       RUN_BACKGROUND_WORKERS: "false"
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
@@ -107,6 +108,8 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: genuine-scan-worker
     restart: unless-stopped
     init: true
@@ -114,7 +117,6 @@ services:
       - ./backend/.env
     environment:
       NODE_ENV: production
-      GIT_SHA: ${GIT_SHA:-unknown}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
       RUN_BACKGROUND_WORKERS: "true"
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
