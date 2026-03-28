@@ -3,6 +3,8 @@ node_modules
 build
 dist
 dist/
+dist-sourcemap
+dist-sourcemap/
 backend/dist
 backend/dist/
 backend/.connector-build
@@ -31,6 +33,8 @@ databasefiles/
 backend/uploads
 uploads
 .DS_Store
+DOCX
+DOCX/
 shared/contracts/runtime/*.js
 shared/contracts/runtime/*.js.map
 shared/contracts/runtime/*.d.ts
