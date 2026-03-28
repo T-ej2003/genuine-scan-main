@@ -1,7 +1,7 @@
 import { Response } from "express";
-import { auditStream } from "../events/auditStream";
 import { AuthRequest } from "../middleware/auth";
 import { UserRole } from "@prisma/client";
+import { onAuditLog } from "../services/auditService";
 
 export const streamAuditLogs = async (req: AuthRequest, res: Response) => {
   const user = req.user;
@@ -29,7 +29,7 @@ export const streamAuditLogs = async (req: AuthRequest, res: Response) => {
     res.write(`event: ping\ndata: {}\n\n`);
   }, 25000);
 
-  const off = auditStream.onLog((evt) => {
+  const off = onAuditLog((evt) => {
     // tenant filter (only works well if AuditLog has licenseeId)
     if (user.role === UserRole.LICENSEE_ADMIN || user.role === UserRole.ORG_ADMIN) {
       if (!user.licenseeId) return;

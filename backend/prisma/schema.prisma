@@ -608,6 +608,7 @@ model Batch {
   scanLogs            QrScanLog[]
   traceEvents         TraceEvent[]
   policyAlerts        PolicyAlert[]
+  inventoryRollup     InventoryStatusRollup?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -619,6 +620,31 @@ model Batch {
   @@index([printedAt])
   @@index([printPackDownloadedAt])
   @@index([suspendedAt])
+}
+
+model InventoryStatusRollup {
+  batchId String @id
+  batch   Batch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  licenseeId String
+  manufacturerId String?
+
+  totalCodes Int @default(0)
+  dormant Int @default(0)
+  active Int @default(0)
+  activated Int @default(0)
+  allocated Int @default(0)
+  printed Int @default(0)
+  redeemed Int @default(0)
+  blocked Int @default(0)
+  scanned Int @default(0)
+
+  refreshedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([licenseeId, refreshedAt])
+  @@index([manufacturerId, refreshedAt])
 }
 
 model PrintJob {
@@ -724,6 +750,8 @@ model QRCode {
   @@index([printJobId])
   @@index([tokenHash])
   @@index([underInvestigationAt])
+  @@index([licenseeId, batchId, status])
+  @@index([licenseeId, status, updatedAt])
 }
 
 model PrintRenderToken {
@@ -1168,6 +1196,7 @@ model QrScanLog {
   @@index([scannedAt])
   @@index([qrCodeId, scannedAt])
   @@index([qrCodeId, isTrustedOwnerContext, scannedAt])
+  @@index([licenseeId, batchId, scannedAt])
 }
 
 model BatchPrintPackToken {
@@ -1207,6 +1236,15 @@ model AuditLog {
   @@index([licenseeId])
   @@index([entityType])
   @@index([createdAt])
+  @@index([licenseeId, createdAt, id])
+}
+
+model SystemCheckpoint {
+  key String @id
+  value Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Invite {
@@ -1513,6 +1551,37 @@ model TraceEvent {
   @@index([manufacturerId])
   @@index([qrCodeId])
   @@index([createdAt])
+  @@index([licenseeId, createdAt, id])
+}
+
+model ScanMetricsHourlyRollup {
+  id String @id @default(uuid())
+  bucketKey String @unique
+  hourBucket DateTime
+
+  licenseeId String
+  batchId String?
+  manufacturerId String?
+
+  totalScanEvents Int @default(0)
+  firstScanEvents Int @default(0)
+  repeatScanEvents Int @default(0)
+  blockedEvents Int @default(0)
+  trustedOwnerEvents Int @default(0)
+  externalEvents Int @default(0)
+  namedLocationEvents Int @default(0)
+  knownDeviceEvents Int @default(0)
+  uniqueQrCodes Int @default(0)
+
+  firstScannedAt DateTime?
+  lastScannedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([licenseeId, hourBucket])
+  @@index([batchId, hourBucket])
+  @@index([manufacturerId, hourBucket])
 }
 
 model SecurityPolicy {
@@ -1899,6 +1968,7 @@ model Notification {
   @@index([orgId, createdAt])
   @@index([incidentId])
   @@index([channel, createdAt])
+  @@index([userId, createdAt, id])
 }
 
 model TenantFeatureFlag {

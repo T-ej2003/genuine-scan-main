@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 
 import prisma from "../config/database";
 import { logger } from "../utils/logger";
+import { withDistributedLease } from "./distributedLeaseService";
 
 const webhookUrl = () => String(process.env.SIEM_WEBHOOK_URL || "").trim();
 const webhookSecret = () => String(process.env.SIEM_WEBHOOK_SECRET || "").trim();
@@ -134,7 +135,7 @@ export const startSecurityEventOutboxWorker = () => {
   started = true;
   const pollMs = parseIntEnv("SIEM_OUTBOX_POLL_MS", 5000, 1000, 60000);
   timer = setInterval(() => {
-    void flushSecurityEventOutbox().catch((error) => {
+    void withDistributedLease("siem-outbox-worker", Math.max(15_000, pollMs * 3), flushSecurityEventOutbox).catch((error) => {
       logger.warn("SIEM outbox flush failed", {
         error: error instanceof Error ? error.message : String(error),
       });

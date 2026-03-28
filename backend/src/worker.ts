@@ -10,6 +10,7 @@ import { startCompliancePackScheduler, stopCompliancePackScheduler } from "./ser
 import { resumePendingNetworkDirectJobs } from "./services/networkDirectPrintService";
 import { resumePendingNetworkIppJobs } from "./services/networkIppPrintService";
 import { startPrintConfirmationReconciler } from "./services/printConfirmationReconciler";
+import { startAnalyticsRollupWorker } from "./services/analyticsRollupService";
 
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -17,6 +18,7 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 initBackendMonitoring();
 
 let stopPrintConfirmationReconcilerWorker: (() => void) | null = null;
+let stopAnalyticsRollupWorker: (() => void) | null = null;
 let keepAlive: NodeJS.Timeout | null = null;
 let shuttingDown = false;
 
@@ -36,6 +38,7 @@ const boot = async () => {
     logger.error("Worker failed to resume pending network IPP jobs", { error: error?.message || error });
   });
   stopPrintConfirmationReconcilerWorker = startPrintConfirmationReconciler();
+  stopAnalyticsRollupWorker = startAnalyticsRollupWorker();
 
   keepAlive = setInterval(() => {
     logger.debug("Worker heartbeat", {
@@ -53,6 +56,8 @@ const shutdown = async (signal: string) => {
   keepAlive = null;
   stopPrintConfirmationReconcilerWorker?.();
   stopPrintConfirmationReconcilerWorker = null;
+  stopAnalyticsRollupWorker?.();
+  stopAnalyticsRollupWorker = null;
   stopSecurityEventOutboxWorker();
   stopCompliancePackScheduler();
   await prisma.$disconnect().catch(() => undefined);

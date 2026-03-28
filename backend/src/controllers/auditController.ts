@@ -21,6 +21,7 @@ const fraudReportIdParamSchema = z.object({
 const auditLogQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).optional(),
   offset: z.coerce.number().int().min(0).max(20_000).optional(),
+  cursor: z.string().trim().max(512).optional(),
   entityType: z.string().trim().max(120).optional(),
   entityId: z.string().trim().max(160).optional(),
   action: z.string().trim().max(160).optional(),
@@ -63,6 +64,7 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
 
     const limit = parsed.data.limit ?? 50;
     const offset = parsed.data.offset ?? 0;
+    const cursor = parsed.data.cursor;
     const entityType = parsed.data.entityType;
     const entityId = parsed.data.entityId;
     const action = parsed.data.action;
@@ -106,6 +108,7 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
       userIds,
       limit,
       offset,
+      cursor,
     });
 
     const userIdsForMap = Array.from(new Set(result.logs.map((l) => l.userId).filter(Boolean))) as string[];
@@ -123,7 +126,16 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
       user: l.userId ? userMap.get(l.userId) || null : null,
     }));
 
-    return res.json({ success: true, data: { ...result, logs: enriched } });
+    return res.json({
+      success: true,
+      data: {
+        ...result,
+        logs: enriched,
+        limit,
+        offset: cursor ? 0 : offset,
+        cursor: cursor || null,
+      },
+    });
   } catch (err) {
     console.error("Audit logs error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });

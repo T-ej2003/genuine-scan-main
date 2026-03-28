@@ -5,6 +5,7 @@ import { logger } from "../utils/logger";
 import { resumePendingNetworkDirectJobs } from "./networkDirectPrintService";
 import { resumePendingNetworkIppJobs } from "./networkIppPrintService";
 import { failStopPrintSession } from "./printLifecycleService";
+import { withDistributedLease } from "./distributedLeaseService";
 
 const RECONCILE_INTERVAL_MS = Math.max(
   5_000,
@@ -97,7 +98,11 @@ export const startPrintConfirmationReconciler = () => {
   const tick = async () => {
     if (stopped) return;
     try {
-      await runPrintConfirmationReconciliationCycle();
+      await withDistributedLease(
+        "print-confirmation-reconciler",
+        Math.max(RECONCILE_INTERVAL_MS * 3, 60_000),
+        runPrintConfirmationReconciliationCycle
+      );
     } catch (error: any) {
       logger.error("Print confirmation reconciliation cycle failed", {
         error: error?.message || error,

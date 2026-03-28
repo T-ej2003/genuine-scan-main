@@ -13,6 +13,8 @@ import {
   hiddenNotificationTypesForRole,
 } from "./notificationVisibility";
 import { getRedisInstanceId, publishRedisJson, subscribeRedisJson } from "./redisService";
+import { bumpCacheNamespaceVersion, getOrComputeVersionedCache } from "./versionedCacheService";
+import { buildDateCursorWhere, encodeDateCursor } from "../utils/cursorPagination";
 
 export type NotificationRealtimeEvent = {
   type: "created" | "read" | "read_all";
@@ -29,6 +31,8 @@ type NotificationListener = (event: NotificationRealtimeEvent) => void;
 
 const listeners = new Set<NotificationListener>();
 const NOTIFICATION_EVENT_CHANNEL = "mscqr:realtime:notifications";
+const NOTIFICATION_CACHE_NAMESPACE = "notification-snapshot";
+const NOTIFICATION_CACHE_TTL_SEC = 5;
 let notificationChannelReady = false;
 
 const parseBool = (value: unknown, fallback = false) => {
@@ -119,6 +123,7 @@ const notifyLocalListeners = (event: NotificationRealtimeEvent) => {
 };
 
 const emitNotificationEvent = (event: NotificationRealtimeEvent) => {
+  void bumpCacheNamespaceVersion(NOTIFICATION_CACHE_NAMESPACE).catch(() => undefined);
   notifyLocalListeners(event);
   void publishRedisJson(NOTIFICATION_EVENT_CHANNEL, {
     origin: getRedisInstanceId(),
@@ -505,7 +510,7 @@ export const notifyIncidentLifecycle = async (params: {
   }
 };
 
-export const listNotificationsForUser = async (params: {
+const listNotificationsForUserUncached = async (params: {
   userId: string;
   role: UserRole;
   licenseeId?: string | null;
@@ -514,6 +519,7 @@ export const listNotificationsForUser = async (params: {
   limit: number;
   offset: number;
   unreadOnly?: boolean;
+  cursor?: string | null;
 }) => {
   const audience = normalizeRole(params.role);
   const hiddenTypes = hiddenNotificationTypesForRole(params.role);
@@ -559,15 +565,24 @@ export const listNotificationsForUser = async (params: {
     where.readAt = null;
   }
 
+  const cursorWhere = buildDateCursorWhere({
+    cursor: params.cursor,
+    createdAtField: "createdAt",
+    idField: "id",
+  });
+  if (cursorWhere) {
+    where.AND = [...(Array.isArray(where.AND) ? where.AND : []), cursorWhere];
+  }
+
   try {
     const [notifications, total] = await Promise.all([
       prisma.notification.findMany({
         where,
         orderBy: [{ createdAt: "desc" }],
         take: params.limit,
-        skip: params.offset,
+        skip: params.cursor ? 0 : params.offset,
       }),
-      prisma.notification.count({ where }),
+      params.cursor ? Promise.resolve<number | null>(null) : prisma.notification.count({ where }),
     ]);
 
     const unread = await prisma.notification.count({
@@ -577,25 +592,55 @@ export const listNotificationsForUser = async (params: {
       },
     });
 
-    return {
-      notifications,
-      total,
-      unread,
-    };
+    return { notifications, total, unread };
   } catch (error) {
     if (isPrismaMissingTableError(error, ["notification"])) {
       warnStorageUnavailableOnce(
         "notification-list",
         "[notification] Notification table is unavailable. Returning empty notification list."
       );
-      return {
-        notifications: [],
-        total: 0,
-        unread: 0,
-      };
+      return { notifications: [], total: 0, unread: 0 };
     }
     throw error;
   }
+};
+
+export const listNotificationsForUser = async (params: {
+  userId: string;
+  role: UserRole;
+  licenseeId?: string | null;
+  licenseeIds?: string[] | null;
+  orgId?: string | null;
+  limit: number;
+  offset: number;
+  unreadOnly?: boolean;
+  cursor?: string | null;
+}) => {
+  const scopeKey = [
+    params.userId,
+    params.role,
+    params.licenseeId || "none",
+    (params.licenseeIds || []).slice().sort().join(",") || "none",
+    params.orgId || "none",
+    params.limit,
+    params.offset,
+    params.unreadOnly ? "unread" : "all",
+    params.cursor || "offset",
+  ].join(":");
+
+  const payload = await getOrComputeVersionedCache(NOTIFICATION_CACHE_NAMESPACE, scopeKey, NOTIFICATION_CACHE_TTL_SEC, () =>
+    listNotificationsForUserUncached(params)
+  );
+
+  const nextCursor =
+    payload.notifications.length === params.limit
+      ? encodeDateCursor(payload.notifications[payload.notifications.length - 1])
+      : null;
+
+  return {
+    ...payload,
+    nextCursor,
+  };
 };
 
 export const markNotificationRead = async (params: {

@@ -1,5 +1,6 @@
 import { TraceEventType } from "@prisma/client";
 import prisma from "../config/database";
+import { buildDateCursorWhere, encodeDateCursor } from "../utils/cursorPagination";
 
 const backfillState = new Map<string, number>();
 const BACKFILL_COOLDOWN_MS = 5 * 60_000;
@@ -212,6 +213,7 @@ export const getTraceTimeline = async (opts: {
   qrCodeId?: string;
   limit: number;
   offset: number;
+  cursor?: string | null;
 }) => {
   const where: any = {};
   if (opts.licenseeId) where.licenseeId = opts.licenseeId;
@@ -220,12 +222,21 @@ export const getTraceTimeline = async (opts: {
   if (opts.manufacturerId) where.manufacturerId = opts.manufacturerId;
   if (opts.qrCodeId) where.qrCodeId = opts.qrCodeId;
 
+  const cursorWhere = buildDateCursorWhere({
+    cursor: opts.cursor,
+    createdAtField: "createdAt",
+    idField: "id",
+  });
+  if (cursorWhere) {
+    where.AND = [...(Array.isArray(where.AND) ? where.AND : []), cursorWhere];
+  }
+
   const [events, total] = await Promise.all([
     prisma.traceEvent.findMany({
       where,
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: opts.limit,
-      skip: opts.offset,
+      skip: opts.cursor ? 0 : opts.offset,
       include: {
         user: { select: { id: true, name: true, email: true } },
         manufacturer: { select: { id: true, name: true, email: true } },
@@ -233,8 +244,9 @@ export const getTraceTimeline = async (opts: {
         qrCode: { select: { id: true, code: true } },
       },
     }),
-    prisma.traceEvent.count({ where }),
+    opts.cursor ? Promise.resolve<number | null>(null) : prisma.traceEvent.count({ where }),
   ]);
 
-  return { events, total };
+  const nextCursor = events.length === opts.limit ? encodeDateCursor(events[events.length - 1]) : null;
+  return { events, total, nextCursor };
 };

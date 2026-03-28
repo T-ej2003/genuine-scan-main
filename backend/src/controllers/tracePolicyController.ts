@@ -3,7 +3,7 @@ import { AlertSeverity, NotificationAudience, NotificationChannel, PolicyAlertTy
 import { z } from "zod";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
-import { backfillTraceEventsFromAuditLogs, getTraceTimeline } from "../services/traceEventService";
+import { getTraceTimeline } from "../services/traceEventService";
 import { getBatchSlaAnalytics, getRiskAnalytics } from "../services/analyticsService";
 import { getOrCreateSecurityPolicy } from "../services/policyEngineService";
 import { createAuditLog } from "../services/auditService";
@@ -43,6 +43,7 @@ const batchAuditExportParamSchema = z.object({
 const traceTimelineQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
   offset: z.coerce.number().int().min(0).max(100000).optional(),
+  cursor: z.string().trim().max(512).optional(),
   licenseeId: z.string().uuid().optional(),
   eventType: z.nativeEnum(TraceEventType).optional(),
   batchId: z.string().uuid().optional(),
@@ -129,6 +130,7 @@ export const getTraceTimelineController = async (req: AuthRequest, res: Response
 
     const limit = parsed.data.limit ?? 50;
     const offset = parsed.data.offset ?? 0;
+    const cursor = parsed.data.cursor;
     const licenseeId = resolveScopedLicenseeId(req, parsed.data.licenseeId);
     const eventType = parsed.data.eventType;
 
@@ -141,12 +143,6 @@ export const getTraceTimelineController = async (req: AuthRequest, res: Response
       manufacturerId = req.user.userId;
     }
 
-    await backfillTraceEventsFromAuditLogs({
-      licenseeId,
-      limit: 2500,
-      force: Boolean(parsed.data.batchId || parsed.data.qrCodeId),
-    });
-
     const result = await getTraceTimeline({
       licenseeId,
       eventType,
@@ -155,6 +151,7 @@ export const getTraceTimelineController = async (req: AuthRequest, res: Response
       qrCodeId: parsed.data.qrCodeId,
       limit,
       offset,
+      cursor,
     });
 
     return res.json({
@@ -163,7 +160,9 @@ export const getTraceTimelineController = async (req: AuthRequest, res: Response
         events: result.events,
         total: result.total,
         limit,
-        offset,
+        offset: cursor ? 0 : offset,
+        cursor: cursor || null,
+        nextCursor: result.nextCursor || null,
       },
     });
   } catch (e) {

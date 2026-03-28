@@ -12,6 +12,7 @@ import { startCompliancePackScheduler, stopCompliancePackScheduler } from "./ser
 import { resumePendingNetworkDirectJobs } from "./services/networkDirectPrintService";
 import { resumePendingNetworkIppJobs } from "./services/networkIppPrintService";
 import { startPrintConfirmationReconciler } from "./services/printConfirmationReconciler";
+import { startAnalyticsRollupWorker } from "./services/analyticsRollupService";
 import { releaseMetadata } from "./observability/release";
 import { captureBackendException, flushBackendMonitoring, initBackendMonitoring } from "./observability/sentry";
 import { getLatencySummary, recordRequestMetric } from "./observability/requestMetrics";
@@ -421,6 +422,7 @@ const server = app.listen(PORT, () => {
       logger.error("Failed to resume pending network IPP jobs", { error: error?.message || error });
     });
     stopPrintConfirmationReconcilerWorker = startPrintConfirmationReconciler();
+    stopAnalyticsRollupWorker = startAnalyticsRollupWorker();
   } else {
     logger.info("Background workers disabled for this HTTP process");
   }
@@ -437,6 +439,7 @@ server.on("error", (err: NodeJS.ErrnoException) => {
 
 let shuttingDown = false;
 let stopPrintConfirmationReconcilerWorker: (() => void) | null = null;
+let stopAnalyticsRollupWorker: (() => void) | null = null;
 const shutdown = async (signal: string) => {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -457,6 +460,8 @@ const shutdown = async (signal: string) => {
     stopCompliancePackScheduler();
     stopPrintConfirmationReconcilerWorker?.();
     stopPrintConfirmationReconcilerWorker = null;
+    stopAnalyticsRollupWorker?.();
+    stopAnalyticsRollupWorker = null;
     await prisma.$disconnect();
     await flushBackendMonitoring();
     clearTimeout(forceExit);

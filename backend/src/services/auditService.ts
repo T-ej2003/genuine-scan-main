@@ -5,6 +5,8 @@ import { hashIp, normalizeUserAgent } from "../utils/security";
 import { queueSecurityEvent } from "./siemOutboxService";
 import { appendForensicChainFromAuditLog } from "./forensicChainService";
 import { getRedisInstanceId, publishRedisJson, subscribeRedisJson } from "./redisService";
+import { bumpCacheNamespaceVersion } from "./versionedCacheService";
+import { buildDateCursorWhere, encodeDateCursor } from "../utils/cursorPagination";
 
 export interface AuditLogInput {
   userId?: string;
@@ -122,6 +124,7 @@ export const createAuditLog = async (data: AuditLogInput) => {
     origin: getRedisInstanceId(),
     log,
   }).catch(() => undefined);
+  void bumpCacheNamespaceVersion("dashboard-snapshot").catch(() => undefined);
   await queueSecurityEvent("AUDIT_LOG", {
     id: log.id,
     action: log.action,
@@ -146,6 +149,7 @@ export const getAuditLogs = async (opts: {
   userIds?: string[];
   limit: number;
   offset: number;
+  cursor?: string | null;
 }) => {
   const where: any = {};
   if (opts.userId) where.userId = opts.userId;
@@ -167,15 +171,25 @@ export const getAuditLogs = async (opts: {
     where.licenseeId = opts.licenseeId;
   }
 
+  const cursorWhere = buildDateCursorWhere({
+    cursor: opts.cursor,
+    createdAtField: "createdAt",
+    idField: "id",
+  });
+  if (cursorWhere) {
+    where.AND = [...(Array.isArray(where.AND) ? where.AND : []), cursorWhere];
+  }
+
   const [logs, total] = await Promise.all([
     prisma.auditLog.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: opts.limit,
-      skip: opts.offset,
+      skip: opts.cursor ? 0 : opts.offset,
     }),
-    prisma.auditLog.count({ where }),
+    opts.cursor ? Promise.resolve<number | null>(null) : prisma.auditLog.count({ where }),
   ]);
 
-  return { logs, total };
+  const nextCursor = logs.length === opts.limit ? encodeDateCursor(logs[logs.length - 1]) : null;
+  return { logs, total, nextCursor };
 };

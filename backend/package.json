@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "prisma generate && tsx watch src/index.ts",
     "auth:mfa:break-glass": "tsx scripts/break-glass-mfa-reset.ts",
+    "analytics:refresh-rollups": "tsx scripts/refresh-analytics-rollups.ts",
     "data:backfill-batch-lineage": "tsx scripts/backfill-batch-lineage.ts",
+    "data:backfill-trace-events": "tsx scripts/backfill-trace-events.ts",
     "storage:migrate-local-uploads": "tsx scripts/migrate-local-uploads-to-object-storage.ts",
     "build": "tsc",
     "mock:printer": "node mock-printer/server.js",
