@@ -27,6 +27,8 @@ const paginationSchema = z.object({
 }).strict();
 
 const listIncidentsQuerySchema = z.object({
+  limit: z.union([z.string(), z.number()]).optional(),
+  offset: z.union([z.string(), z.number()]).optional(),
   status: z.string().trim().optional(),
   severity: z.string().trim().optional(),
   priority: z.string().trim().optional(),

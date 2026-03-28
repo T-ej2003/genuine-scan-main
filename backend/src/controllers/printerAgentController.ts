@@ -99,30 +99,34 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
       calibrationProfile: parsed.data.calibrationProfile || null,
     });
 
-    await syncLocalAgentPrintersFromHeartbeat({
-      userId: req.user.userId,
-      orgId: req.user.orgId,
-      licenseeId: scopedLicenseeId,
-      printerRegistrationId: update.status.registrationId || null,
-      agentId: update.status.agentId || parsed.data.agentId || null,
-      deviceFingerprint: update.status.deviceFingerprint || parsed.data.deviceFingerprint || null,
-      selectedPrinterId: update.status.selectedPrinterId || parsed.data.selectedPrinterId || null,
-      selectedPrinterName: update.status.selectedPrinterName || parsed.data.selectedPrinterName || null,
-      printers: Array.isArray(parsed.data.printers)
-        ? parsed.data.printers.filter(
-            (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item)
-          )
-        : [],
-      capabilitySummary:
-        update.status.capabilitySummary && typeof update.status.capabilitySummary === "object"
-          ? (update.status.capabilitySummary as unknown as Record<string, unknown>)
-          : null,
-      calibrationProfile:
-        update.status.calibrationProfile && typeof update.status.calibrationProfile === "object"
-          ? (update.status.calibrationProfile as Record<string, unknown>)
-          : null,
-      connected: update.status.connected,
-    });
+    try {
+      await syncLocalAgentPrintersFromHeartbeat({
+        userId: req.user.userId,
+        orgId: req.user.orgId,
+        licenseeId: scopedLicenseeId,
+        printerRegistrationId: update.status.registrationId || null,
+        agentId: update.status.agentId || parsed.data.agentId || null,
+        deviceFingerprint: update.status.deviceFingerprint || parsed.data.deviceFingerprint || null,
+        selectedPrinterId: update.status.selectedPrinterId || parsed.data.selectedPrinterId || null,
+        selectedPrinterName: update.status.selectedPrinterName || parsed.data.selectedPrinterName || null,
+        printers: Array.isArray(parsed.data.printers)
+          ? parsed.data.printers.filter(
+              (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item)
+            )
+          : [],
+        capabilitySummary:
+          update.status.capabilitySummary && typeof update.status.capabilitySummary === "object"
+            ? (update.status.capabilitySummary as unknown as Record<string, unknown>)
+            : null,
+        calibrationProfile:
+          update.status.calibrationProfile && typeof update.status.calibrationProfile === "object"
+            ? (update.status.calibrationProfile as Record<string, unknown>)
+            : null,
+        connected: update.status.connected,
+      });
+    } catch (syncError) {
+      console.error("reportPrinterHeartbeat local printer sync failed:", syncError);
+    }
 
     if (update.changed) {
       const action = update.status.connected
@@ -141,39 +145,38 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
           : `${update.status.printerName || "Connected printer"} is connected in compatibility mode. Direct-print is enabled while advanced trust enrollment is pending.`
         : `Printer unavailable for issuance${update.status.error ? `: ${update.status.error}` : "."} Direct-print jobs are blocked.`;
 
-      await createAuditLog({
-        userId: req.user.userId,
-        licenseeId: scopedLicenseeId || undefined,
-        action,
-        entityType: "PrinterAgent",
-        entityId: req.user.userId,
-        details: {
-          connected: update.status.connected,
-          trusted: update.status.trusted,
-          compatibilityMode: update.status.compatibilityMode,
-          compatibilityReason: update.status.compatibilityReason,
-          connectionClass: update.status.connectionClass,
-          trustStatus: update.status.trustStatus,
-          trustReason: update.status.trustReason,
-          printerName: update.status.printerName || null,
-          printerId: update.status.printerId || null,
-          selectedPrinterId: update.status.selectedPrinterId || null,
-          selectedPrinterName: update.status.selectedPrinterName || null,
-          capabilitySummary: update.status.capabilitySummary || null,
-          printers: update.status.printers || [],
-          calibrationProfile: update.status.calibrationProfile || null,
-          deviceName: update.status.deviceName || null,
-          agentVersion: update.status.agentVersion || null,
-          agentId: update.status.agentId || null,
-          deviceFingerprint: update.status.deviceFingerprint || null,
-          mtlsFingerprint: update.status.mtlsFingerprint || null,
-          error: update.status.error || null,
-        },
-        ipAddress: req.ip,
-        userAgent: req.get("user-agent") || undefined,
-      });
-
       await Promise.allSettled([
+        createAuditLog({
+          userId: req.user.userId,
+          licenseeId: scopedLicenseeId || undefined,
+          action,
+          entityType: "PrinterAgent",
+          entityId: req.user.userId,
+          details: {
+            connected: update.status.connected,
+            trusted: update.status.trusted,
+            compatibilityMode: update.status.compatibilityMode,
+            compatibilityReason: update.status.compatibilityReason,
+            connectionClass: update.status.connectionClass,
+            trustStatus: update.status.trustStatus,
+            trustReason: update.status.trustReason,
+            printerName: update.status.printerName || null,
+            printerId: update.status.printerId || null,
+            selectedPrinterId: update.status.selectedPrinterId || null,
+            selectedPrinterName: update.status.selectedPrinterName || null,
+            capabilitySummary: update.status.capabilitySummary || null,
+            printers: update.status.printers || [],
+            calibrationProfile: update.status.calibrationProfile || null,
+            deviceName: update.status.deviceName || null,
+            agentVersion: update.status.agentVersion || null,
+            agentId: update.status.agentId || null,
+            deviceFingerprint: update.status.deviceFingerprint || null,
+            mtlsFingerprint: update.status.mtlsFingerprint || null,
+            error: update.status.error || null,
+          },
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent") || undefined,
+        }),
         createRoleNotifications({
           audience: NotificationAudience.SUPER_ADMIN,
           type: "system_printer_status_changed",
