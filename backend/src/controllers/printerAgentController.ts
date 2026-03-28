@@ -1,4 +1,4 @@
-import { NotificationAudience, NotificationChannel, UserRole } from "@prisma/client";
+import { NotificationAudience, NotificationChannel, Prisma, UserRole } from "@prisma/client";
 import { Response } from "express";
 import { z } from "zod";
 
@@ -15,6 +15,7 @@ import { syncLocalAgentPrintersFromHeartbeat } from "../services/printerRegistry
 import { hmacSha256Hex } from "../utils/security";
 import { getPrinterSseSignSecret } from "../utils/secretConfig";
 import { boundedJsonSchema } from "../utils/boundedJson";
+import { isPrismaMissingTableError } from "../utils/prismaStorageGuard";
 
 const MANUFACTURER_ROLES: UserRole[] = [
   UserRole.MANUFACTURER,
@@ -58,6 +59,66 @@ const sseKeepaliveSignature = (userId: string, nowIso: string) => {
   return hmacSha256Hex(payload, secret);
 };
 
+const isRecoverableHeartbeatStorageError = (error: unknown) => {
+  if (isPrismaMissingTableError(error, ["printerregistration", "printerattestation"])) {
+    return true;
+  }
+
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    return ["P2002", "P2003", "P2010", "P2024"].includes(error.code);
+  }
+
+  return false;
+};
+
+const buildDegradedHeartbeatStatus = (input: z.infer<typeof heartbeatSchema>, currentStatus?: Record<string, any> | null) => {
+  const connected = Boolean(input.connected);
+  const nowIso = new Date().toISOString();
+  const selectedPrinterId = input.selectedPrinterId || input.printerId || currentStatus?.selectedPrinterId || currentStatus?.printerId || null;
+  const selectedPrinterName =
+    input.selectedPrinterName || input.printerName || currentStatus?.selectedPrinterName || currentStatus?.printerName || null;
+
+  return {
+    connected,
+    trusted: false,
+    compatibilityMode: connected,
+    compatibilityReason: connected
+      ? "Heartbeat accepted in degraded mode while secure printer storage is recovering."
+      : null,
+    eligibleForPrinting: connected,
+    connectionClass: connected ? "COMPATIBILITY" : "BLOCKED",
+    stale: false,
+    requiredForPrinting: true,
+    trustStatus: currentStatus?.trustStatus || "DEGRADED",
+    trustReason: connected
+      ? "Printer heartbeat storage is temporarily unavailable"
+      : input.error || currentStatus?.trustReason || "Local printer unavailable",
+    lastHeartbeatAt: nowIso,
+    ageSeconds: 0,
+    registrationId: currentStatus?.registrationId || null,
+    agentId: input.agentId || currentStatus?.agentId || null,
+    deviceFingerprint: input.deviceFingerprint || currentStatus?.deviceFingerprint || null,
+    mtlsFingerprint: currentStatus?.mtlsFingerprint || null,
+    printerName: input.printerName || selectedPrinterName || currentStatus?.printerName || null,
+    printerId: input.printerId || selectedPrinterId || currentStatus?.printerId || null,
+    selectedPrinterId,
+    selectedPrinterName,
+    deviceName: input.deviceName || currentStatus?.deviceName || null,
+    agentVersion: input.agentVersion || currentStatus?.agentVersion || null,
+    capabilitySummary:
+      (input.capabilitySummary && typeof input.capabilitySummary === "object" ? input.capabilitySummary : null) ||
+      currentStatus?.capabilitySummary ||
+      null,
+    printers: Array.isArray(input.printers) ? input.printers : currentStatus?.printers || [],
+    calibrationProfile:
+      (input.calibrationProfile && typeof input.calibrationProfile === "object" ? input.calibrationProfile : null) ||
+      currentStatus?.calibrationProfile ||
+      null,
+    error: connected ? null : input.error || currentStatus?.error || "Local printer unavailable",
+    degraded: true,
+  };
+};
+
 export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || !isManufacturerRole(req.user.role)) {
@@ -71,33 +132,55 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
     const scope = await resolveScopedLicenseeAccess(req.user, parsed.data.licenseeId || null);
     const scopedLicenseeId = scope.scopeLicenseeId || req.user.licenseeId || null;
 
-    const update = await upsertPrinterConnectionHeartbeat({
-      userId: req.user.userId,
-      role: req.user.role,
-      licenseeId: scopedLicenseeId,
-      orgId: req.user.orgId,
-      connected: parsed.data.connected,
-      printerName: parsed.data.printerName || null,
-      printerId: parsed.data.printerId || null,
-      selectedPrinterId: parsed.data.selectedPrinterId || null,
-      selectedPrinterName: parsed.data.selectedPrinterName || null,
-      deviceName: parsed.data.deviceName || null,
-      agentVersion: parsed.data.agentVersion || null,
-      error: parsed.data.error || null,
-      sourceIp: req.ip,
-      userAgent: req.get("user-agent") || null,
-      agentId: parsed.data.agentId || null,
-      deviceFingerprint: parsed.data.deviceFingerprint || null,
-      publicKeyPem: parsed.data.publicKeyPem || null,
-      clientCertFingerprint: parsed.data.clientCertFingerprint || null,
-      mtlsFingerprintHeader: req.get("x-client-cert-fingerprint") || req.get("x-ssl-client-fingerprint") || null,
-      heartbeatNonce: parsed.data.heartbeatNonce || null,
-      heartbeatIssuedAt: parsed.data.heartbeatIssuedAt || null,
-      heartbeatSignature: parsed.data.heartbeatSignature || null,
-      capabilitySummary: parsed.data.capabilitySummary || null,
-      printers: parsed.data.printers || [],
-      calibrationProfile: parsed.data.calibrationProfile || null,
-    });
+    let update;
+    try {
+      update = await upsertPrinterConnectionHeartbeat({
+        userId: req.user.userId,
+        role: req.user.role,
+        licenseeId: scopedLicenseeId,
+        orgId: req.user.orgId,
+        connected: parsed.data.connected,
+        printerName: parsed.data.printerName || null,
+        printerId: parsed.data.printerId || null,
+        selectedPrinterId: parsed.data.selectedPrinterId || null,
+        selectedPrinterName: parsed.data.selectedPrinterName || null,
+        deviceName: parsed.data.deviceName || null,
+        agentVersion: parsed.data.agentVersion || null,
+        error: parsed.data.error || null,
+        sourceIp: req.ip,
+        userAgent: req.get("user-agent") || null,
+        agentId: parsed.data.agentId || null,
+        deviceFingerprint: parsed.data.deviceFingerprint || null,
+        publicKeyPem: parsed.data.publicKeyPem || null,
+        clientCertFingerprint: parsed.data.clientCertFingerprint || null,
+        mtlsFingerprintHeader: req.get("x-client-cert-fingerprint") || req.get("x-ssl-client-fingerprint") || null,
+        heartbeatNonce: parsed.data.heartbeatNonce || null,
+        heartbeatIssuedAt: parsed.data.heartbeatIssuedAt || null,
+        heartbeatSignature: parsed.data.heartbeatSignature || null,
+        capabilitySummary: parsed.data.capabilitySummary || null,
+        printers: parsed.data.printers || [],
+        calibrationProfile: parsed.data.calibrationProfile || null,
+      });
+    } catch (heartbeatError) {
+      if (!isRecoverableHeartbeatStorageError(heartbeatError)) {
+        throw heartbeatError;
+      }
+
+      console.error("reportPrinterHeartbeat degraded storage fallback:", heartbeatError);
+
+      let currentStatus: Record<string, any> | null = null;
+      try {
+        currentStatus = await getPrinterConnectionStatusForUser(req.user.userId);
+      } catch (statusError) {
+        console.error("reportPrinterHeartbeat fallback status lookup failed:", statusError);
+      }
+
+      return res.json({
+        success: true,
+        degraded: true,
+        data: buildDegradedHeartbeatStatus(parsed.data, currentStatus),
+      });
+    }
 
     try {
       await syncLocalAgentPrintersFromHeartbeat({
