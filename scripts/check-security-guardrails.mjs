@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 const repoRoot = process.cwd();
@@ -47,6 +47,7 @@ const rules = [
 const findings = [];
 
 for (const target of scanTargets) {
+  if (!existsSync(target)) continue;
   if (!statSync(target).isDirectory()) continue;
 
   for (const filePath of walk(target)) {
