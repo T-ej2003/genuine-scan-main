@@ -209,7 +209,11 @@ export function createApiClientCore(): ApiClientCore {
             message: `Server error (${response.status}) on ${method} ${endpoint}`,
           });
         }
-        return { success: false, error: message };
+        return {
+          success: false,
+          error: message,
+          data: payload && typeof payload === "object" && "data" in payload ? (payload as any).data : undefined,
+        };
       }
 
       pushNetworkLog({ status: response.status, ok: true });

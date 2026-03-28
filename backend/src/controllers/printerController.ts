@@ -14,6 +14,8 @@ import {
 } from "../services/printerRegistryService";
 import { createAuditLog } from "../services/auditService";
 import { isManufacturerRole, resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
+import { resolvePrinterConfirmationMode } from "../services/printConfirmationService";
+import { printTestLabelForRegisteredPrinter } from "../services/printerTestLabelService";
 import { sanitizePrinterActionError } from "../utils/printerUserFacingErrors";
 
 const NETWORK_DIRECT_LANGUAGE_OPTIONS = [
@@ -37,6 +39,8 @@ const networkDirectPrinterSchema = z.object({
   commandLanguage: z.enum(NETWORK_DIRECT_LANGUAGE_OPTIONS).default(PrinterCommandLanguage.ZPL),
   ipAddress: z.string().trim().min(3).max(120),
   port: z.number().int().min(1).max(65535).default(9100),
+  deliveryMode: z.enum([PrinterDeliveryMode.DIRECT, PrinterDeliveryMode.SITE_GATEWAY]).default(PrinterDeliveryMode.DIRECT),
+  rotateGatewaySecret: z.boolean().optional(),
   capabilitySummary: z.record(z.any()).optional(),
   calibrationProfile: z.record(z.any()).optional(),
   isActive: z.boolean().optional(),
@@ -244,7 +248,7 @@ export const updateNetworkPrinter = async (req: AuthRequest, res: Response) => {
           ? ("printerUri" in parsed.data ? parsed.data.printerUri : current.printerUri) || undefined
           : undefined,
       deliveryMode:
-        connectionType === PrinterConnectionType.NETWORK_IPP
+        connectionType === PrinterConnectionType.NETWORK_IPP || connectionType === PrinterConnectionType.NETWORK_DIRECT
           ? ("deliveryMode" in parsed.data ? parsed.data.deliveryMode : current.deliveryMode) ?? PrinterDeliveryMode.DIRECT
           : PrinterDeliveryMode.DIRECT,
       rotateGatewaySecret: "rotateGatewaySecret" in parsed.data ? parsed.data.rotateGatewaySecret : false,
@@ -337,6 +341,133 @@ export const testPrinter = async (req: AuthRequest, res: Response) => {
     return res.status(400).json({
       success: false,
       error: sanitizePrinterActionError(error?.message, "This printer could not be checked right now."),
+    });
+  }
+};
+
+export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || !canManagePrinterProfiles(req.user.role)) {
+      return res.status(403).json({ success: false, error: "Access denied" });
+    }
+
+    const paramsParsed = printerIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid printer id" });
+    }
+    const printerId = paramsParsed.data.id;
+
+    const scope = await resolveScope(req);
+    const printer = await getRegisteredPrinterForManufacturer({
+      printerId,
+      userId: scope.userId,
+      orgId: scope.orgId,
+      licenseeId: scope.licenseeId,
+      licenseeIds: scope.licenseeIds,
+      includeInactive: true,
+    });
+    if (!printer) return res.status(404).json({ success: false, error: "Printer not found" });
+
+    const confirmationMode = resolvePrinterConfirmationMode(printer as any);
+    const validation = await testRegisteredPrinterConnection({ printer, userId: scope.userId });
+
+    if (!validation.ok) {
+      const data = {
+        outcome: "needs_attention" as const,
+        message: sanitizePrinterActionError(
+          validation.registryStatus?.detail || validation.registryStatus?.summary,
+          "This printer route still needs attention before a live test label can run."
+        ),
+        confirmationMode,
+        connectionType: printer.connectionType,
+        deliveryMode: printer.deliveryMode || PrinterDeliveryMode.DIRECT,
+        payloadType: null,
+        deviceJobRef: null,
+        dispatchedAt: null,
+        confirmedAt: null,
+      };
+
+      await createAuditLog({
+        userId: scope.userId,
+        licenseeId: scope.licenseeId || undefined,
+        action: "PRINTER_TEST_LABEL_ATTENTION",
+        entityType: "Printer",
+        entityId: printer.id,
+        details: {
+          connectionType: printer.connectionType,
+          deliveryMode: printer.deliveryMode,
+          confirmationMode,
+          validation,
+          result: data,
+        },
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") || undefined,
+      });
+
+      return res.json({ success: true, data });
+    }
+
+    try {
+      const result = await printTestLabelForRegisteredPrinter({
+        printer: printer as any,
+        actorUserId: scope.userId,
+      });
+
+      await createAuditLog({
+        userId: scope.userId,
+        licenseeId: scope.licenseeId || undefined,
+        action: "PRINTER_TEST_LABEL_CONFIRMED",
+        entityType: "Printer",
+        entityId: printer.id,
+        details: {
+          connectionType: printer.connectionType,
+          deliveryMode: printer.deliveryMode,
+          validation,
+          result,
+        },
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") || undefined,
+      });
+
+      return res.json({ success: true, data: result });
+    } catch (error: any) {
+      const data = {
+        outcome: "needs_attention" as const,
+        message: sanitizePrinterActionError(error?.message, "The live printer test could not complete right now."),
+        confirmationMode,
+        connectionType: printer.connectionType,
+        deliveryMode: printer.deliveryMode || PrinterDeliveryMode.DIRECT,
+        payloadType: null,
+        deviceJobRef: null,
+        dispatchedAt: null,
+        confirmedAt: null,
+      };
+
+      await createAuditLog({
+        userId: scope.userId,
+        licenseeId: scope.licenseeId || undefined,
+        action: "PRINTER_TEST_LABEL_ATTENTION",
+        entityType: "Printer",
+        entityId: printer.id,
+        details: {
+          connectionType: printer.connectionType,
+          deliveryMode: printer.deliveryMode,
+          confirmationMode,
+          validation,
+          error: error?.message || null,
+          result: data,
+        },
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") || undefined,
+      });
+
+      return res.json({ success: true, data });
+    }
+  } catch (error: any) {
+    console.error("testPrinterLabel error:", error);
+    return res.status(400).json({
+      success: false,
+      error: sanitizePrinterActionError(error?.message, "This live printer test could not start right now."),
     });
   }
 };

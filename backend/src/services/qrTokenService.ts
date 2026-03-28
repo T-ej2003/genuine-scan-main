@@ -20,6 +20,8 @@ export type QrTokenPayload = {
   nonce: string;
 };
 
+export const PRINTER_TEST_QR_ID_PREFIX = "printer-test:";
+
 type SignMode = "ed25519" | "hmac";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -170,3 +172,6 @@ export const buildScanUrl = (token: string) => {
   const normalized = base.replace(/\/+$/, "");
   return `${normalized}/scan?t=${encodeURIComponent(token)}`;
 };
+
+export const isPrinterTestQrId = (qrId: string | null | undefined) =>
+  String(qrId || "").trim().startsWith(PRINTER_TEST_QR_ID_PREFIX);

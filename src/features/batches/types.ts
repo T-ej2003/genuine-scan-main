@@ -189,6 +189,13 @@ export type PrintJobRow = {
   reprintOfJobId?: string | null;
   reprintReason?: string | null;
   failureReason?: string | null;
+  confirmationFailureReason?: string | null;
+  awaitingConfirmation?: boolean;
+  confirmationMode?: string | null;
+  dispatchReferenceSummary?: {
+    awaitingCount?: number;
+    outstandingJobRefs?: string[];
+  } | null;
   createdAt: string;
   updatedAt?: string;
   sentAt?: string | null;
@@ -208,6 +215,7 @@ export type PrintJobRow = {
     frozenItems?: number;
     failedReason?: string | null;
     remainingToPrint?: number;
+    awaitingConfirmationCount?: number;
     counts?: Record<string, number>;
   } | null;
 };

@@ -212,7 +212,7 @@ describe("DashboardLayout printer connection dialog", () => {
 
     expect(screen.queryByText("Set up printing on this workstation")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /printer ready/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /printer setup/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /printer setup/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /install connector/i })).not.toBeInTheDocument();
   });
 

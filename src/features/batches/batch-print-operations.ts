@@ -111,14 +111,26 @@ export const syncProgressFromPrintJob = (
     return;
   }
 
+  const awaitingConfirmation =
+    Boolean(job.awaitingConfirmation) ||
+    Number(job.session?.awaitingConfirmationCount || 0) > 0 ||
+    Number(job.session?.counts?.AGENT_ACKED || 0) > 0 ||
+    job.pipelineState === "PRINTER_ACKNOWLEDGED";
+
+  if (awaitingConfirmation) {
+    setPrintProgressPhase("Waiting for printer confirmation");
+    setPrintProgressError(null);
+    return;
+  }
+
   if (job.printMode === "NETWORK_DIRECT" || job.printMode === "NETWORK_IPP") {
     setPrintProgressPhase(
       job.printMode === "NETWORK_IPP"
         ? job.status === "SENT"
-          ? "Dispatching to registered IPP printer"
+          ? "Dispatched to registered IPP printer"
           : "Preparing network IPP dispatch"
         : job.status === "SENT"
-          ? "Dispatching to registered network printer"
+          ? "Dispatched to registered network printer"
           : "Preparing network printer dispatch"
     );
     return;
@@ -272,7 +284,7 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
       title: "Network printer needs attention",
       description: sanitizePrinterUiError(
         selectedPrinterProfile.registryStatus?.detail || selectedPrinterProfile.registryStatus?.summary,
-        "Open Printer Setup and run a check before printing."
+        "This saved printer route needs attention before printing."
       ),
       variant: "destructive",
     });
@@ -317,6 +329,45 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
   });
 
   if (!response.success) {
+    const activePrintJobId = String((response.data as any)?.activePrintJobId || (response.data as any)?.job?.id || "").trim();
+    if (activePrintJobId) {
+      setPrintJobId(activePrintJobId);
+      setPrintProgressOpen(true);
+      setPrintProgressError(null);
+      setPrintProgressCurrentCode(null);
+      syncProgressFromPrintJob(((response.data as any)?.job || null) as PrintJobRow | null, context);
+      toast({
+        title: "Active print run found",
+        description: "A live print job already exists for this batch, so MSCQR resumed its current status instead of creating a duplicate run.",
+      });
+
+      const pollResult = await pollPrintJobUntilSettled(activePrintJobId, context, 45_000);
+      if (pollResult.settled && pollResult.job?.status === "CONFIRMED") {
+        toast({
+          title: "Print job completed",
+          description: `${pollResult.job.session?.confirmedItems || pollResult.job.quantity} labels are confirmed.`,
+        });
+      } else if (pollResult.settled && pollResult.job?.status === "FAILED") {
+        toast({
+          title: "Print job needs attention",
+          description: sanitizePrinterUiError(
+            pollResult.job.failureReason || pollResult.job.session?.failedReason,
+            "The active print job needs attention before it can continue."
+          ),
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Print job still running",
+          description: "The existing print job is still active. The live status panel is tracking it now.",
+        });
+      }
+
+      await onBatchesChanged?.();
+      await loadRecentPrintJobs();
+      return;
+    }
+
     const raw = String(response.error || "Error").toLowerCase();
     const isBusy = raw.includes("conflict") || raw.includes("busy") || raw.includes("retry");
     const safeError = sanitizePrinterUiError(response.error, "The print job could not be started right now.");
@@ -409,7 +460,7 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
     } else {
       toast({
         title: "Network print continues in background",
-        description: "This print job is still running. Review the live status below or in Printer Setup.",
+        description: "This print job is still running. Review the live status below.",
       });
     }
   } else {

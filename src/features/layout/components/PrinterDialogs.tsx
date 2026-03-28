@@ -111,7 +111,6 @@ type PrinterOnboardingDialogProps = {
   selectedPrinterName?: string | null;
   onInstallConnector: () => void;
   onCheckAgain: () => void;
-  onOpenPrinterSetup: () => void;
   onOpenHelp: () => void;
   onCloseForNow: () => void;
 };
@@ -124,7 +123,6 @@ export function PrinterOnboardingDialog({
   selectedPrinterName,
   onInstallConnector,
   onCheckAgain,
-  onOpenPrinterSetup,
   onOpenHelp,
   onCloseForNow,
 }: PrinterOnboardingDialogProps) {
@@ -173,9 +171,6 @@ export function PrinterOnboardingDialog({
               Install Connector
             </Button>
             <Button onClick={onCheckAgain}>Check again</Button>
-            <Button variant="outline" onClick={onOpenPrinterSetup}>
-              Open Printer Setup
-            </Button>
             <Button variant="ghost" onClick={onOpenHelp}>
               Open Help
             </Button>
@@ -217,7 +212,6 @@ type PrinterStatusDialogProps = {
   onSelectedLocalPrinterChange: (printerId: string) => void;
   onRefreshStatus: () => void;
   onInstallConnector: () => void;
-  onOpenPrinterSetup: (options?: { managedProfiles?: boolean }) => void;
   onOpenBatches: () => void;
   onOpenHelp: () => void;
   onClose: () => void;
@@ -253,7 +247,6 @@ export function PrinterStatusDialog({
   onSelectedLocalPrinterChange,
   onRefreshStatus,
   onInstallConnector,
-  onOpenPrinterSetup,
   onOpenBatches,
   onOpenHelp,
   onClose,
@@ -392,7 +385,7 @@ export function PrinterStatusDialog({
 
           {managedNetworkPrinters.length > 0 ? (
             <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Managed network routes</div>
                   <div className="mt-1 text-lg font-semibold text-slate-950">
@@ -403,9 +396,6 @@ export function PrinterStatusDialog({
                     workstation printer list.
                   </p>
                 </div>
-                <Button variant="outline" onClick={() => onOpenPrinterSetup({ managedProfiles: true })}>
-                  Manage profiles
-                </Button>
               </div>
 
               <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -433,7 +423,7 @@ export function PrinterStatusDialog({
                       <div className="mt-3 text-xs leading-5 text-slate-600">
                         {sanitizePrinterUiError(
                           printer.registryStatus?.detail,
-                          "Open Printer Setup to check, update, or remove this managed route."
+                          "This managed printer route needs attention before it can be used."
                         )}
                       </div>
                     </div>
@@ -467,7 +457,7 @@ export function PrinterStatusDialog({
                 </div>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
                   {managedNetworkPrinters.length > 0
-                    ? "The workstation connector is not reporting a local printer right now, but your managed network routes are still available above and in Printer Setup."
+                    ? "The workstation connector is not reporting a local printer right now, but your managed network routes are still available above."
                     : "MSCQR could not find a ready printer on this workstation. Make sure the printer is available in the operating system, then refresh the connection status."}
                 </p>
                 <div className="mt-4 flex flex-wrap gap-3">
@@ -476,9 +466,6 @@ export function PrinterStatusDialog({
                   </Button>
                   <Button variant="outline" onClick={onOpenBatches}>
                     Open batches
-                  </Button>
-                  <Button variant="outline" onClick={() => onOpenPrinterSetup()}>
-                    Open printer setup
                   </Button>
                   <Button variant="ghost" onClick={onOpenHelp}>
                     Open help
@@ -594,15 +581,12 @@ export function PrinterStatusDialog({
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="text-sm font-semibold text-slate-950">Need setup help?</div>
+            <div className="text-sm font-semibold text-slate-950">Need printer help?</div>
             <p className="mt-1 text-sm text-slate-600">
-              Use Printer Setup & Support to validate managed network routes or workstation printers, then return here
-              for live status and final checks before batch printing.
+              Use these quick actions if the workstation connector or printer still needs attention before batch
+              printing.
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => onOpenPrinterSetup()}>
-                Open printer setup
-              </Button>
               {managedNetworkPrinters.length === 0 ? (
                 <Button variant="outline" onClick={onInstallConnector}>
                   Install Connector
@@ -615,9 +599,6 @@ export function PrinterStatusDialog({
           </div>
 
           <div className="flex flex-wrap justify-end gap-2">
-            <Button variant="outline" onClick={() => onOpenPrinterSetup()}>
-              Open printer setup
-            </Button>
             <Button variant="outline" onClick={onOpenHelp}>
               Open help
             </Button>

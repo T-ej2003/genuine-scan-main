@@ -23,6 +23,7 @@ import {
 import { getRegisteredPrinterForManufacturer } from "../../services/printerRegistryService";
 import { testNetworkPrinterConnectivity } from "../../services/networkPrinterSocketService";
 import { inspectIppPrinter } from "../../printing/ippClient";
+import { resolvePrinterConfirmationMode } from "../../services/printConfirmationService";
 import {
   beginIdempotentAction,
   extractIdempotencyKey,
@@ -210,6 +211,45 @@ export const ensureSelectedPrinterReady = async (params: {
   }
 
   if (printer.connectionType === PrinterConnectionType.NETWORK_DIRECT) {
+    const confirmationMode = resolvePrinterConfirmationMode(printer as any);
+    if (confirmationMode === "DIRECT_NOT_ALLOWED") {
+      const detail =
+        "This raw industrial printer does not yet expose a strict completion signal for safe direct printing. Use the workstation connector path or a certified Zebra profile.";
+      await prisma.printer.update({
+        where: { id: printer.id },
+        data: {
+          lastValidatedAt: new Date(),
+          lastValidationStatus: "BLOCKED",
+          lastValidationMessage: detail,
+        },
+      });
+      throw Object.assign(new Error("PRINTER_NETWORK_CONFIRMATION_UNSUPPORTED"), { reason: detail, printer });
+    }
+
+    if (printer.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY) {
+      if (!printer.gatewayId || !printer.gatewaySecretHash) {
+        throw Object.assign(new Error("PRINTER_GATEWAY_CONFIG_INVALID"), { printer });
+      }
+      const lastSeenAt = printer.gatewayLastSeenAt ? new Date(printer.gatewayLastSeenAt) : null;
+      const stale =
+        !lastSeenAt ||
+        Number.isNaN(lastSeenAt.getTime()) ||
+        Date.now() - lastSeenAt.getTime() >
+          (Math.max(10_000, Number(process.env.PRINT_GATEWAY_HEARTBEAT_TTL_MS || 45_000) || 45_000));
+      if (stale) {
+        throw Object.assign(new Error("PRINTER_GATEWAY_OFFLINE"), {
+          reason: printer.gatewayLastError || "Site gateway is offline.",
+          printer,
+        });
+      }
+      return {
+        printer,
+        printerStatus: null,
+        printMode: PrintDispatchMode.NETWORK_DIRECT,
+        payloadType: resolvePayloadType(printer as any),
+      };
+    }
+
     if (!printer.ipAddress || !printer.port) {
       throw new Error("PRINTER_NETWORK_CONFIG_INVALID");
     }

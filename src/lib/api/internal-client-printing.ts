@@ -93,6 +93,10 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     return core.request(`/manufacturer/printers/${encodeURIComponent(printerId)}/test`, { method: "POST" });
   },
 
+  async testPrinterLabel(printerId: string) {
+    return core.request<any>(`/manufacturer/printers/${encodeURIComponent(printerId)}/test-label`, { method: "POST" });
+  },
+
   async discoverRegisteredPrinter(printerId: string) {
     return core.request(`/manufacturer/printers/${encodeURIComponent(printerId)}/discover`, { method: "POST" });
   },

@@ -134,6 +134,7 @@ import {
   reportPrinterHeartbeat,
 } from "../controllers/printerAgentController";
 import {
+  ackLocalAgentPrintJob,
   claimLocalAgentPrintJob,
   confirmLocalAgentPrintJob,
   failLocalAgentPrintJob,
@@ -144,12 +145,22 @@ import {
   discoverPrinter,
   listPrinters,
   testPrinter,
+  testPrinterLabel,
   updateNetworkPrinter,
 } from "../controllers/printerController";
 import {
+  ackGatewayDirectJob,
+  ackGatewayIppJob,
+  ackGatewayTestJob,
+  claimGatewayDirectJob,
   claimGatewayIppJob,
+  claimGatewayTestJob,
+  confirmGatewayDirectJob,
   confirmGatewayIppJob,
+  confirmGatewayTestJob,
+  failGatewayDirectJob,
   failGatewayIppJob,
+  failGatewayTestJob,
   gatewayHeartbeat,
 } from "../controllers/printerGatewayController";
 import auditRoutes from "./auditRoutes";
@@ -708,8 +719,18 @@ router.delete("/qr/codes", authenticate, requireAnyAdmin, enforceTenantIsolation
 
 // ==================== MANUFACTURER PRINT JOBS ====================
 router.post("/print-gateway/heartbeat", ...gatewayHeartbeatLimiters, gatewayHeartbeat);
+router.post("/print-gateway/direct/claim", ...gatewayJobLimiters, claimGatewayDirectJob);
+router.post("/print-gateway/direct/ack", ...gatewayJobLimiters, ackGatewayDirectJob);
+router.post("/print-gateway/direct/confirm", ...gatewayJobLimiters, confirmGatewayDirectJob);
+router.post("/print-gateway/direct/fail", ...gatewayJobLimiters, failGatewayDirectJob);
 router.post("/print-gateway/ipp/claim", ...gatewayJobLimiters, claimGatewayIppJob);
+router.post("/print-gateway/ipp/ack", ...gatewayJobLimiters, ackGatewayIppJob);
+router.post("/print-gateway/test/claim", ...gatewayJobLimiters, claimGatewayTestJob);
+router.post("/print-gateway/test/ack", ...gatewayJobLimiters, ackGatewayTestJob);
+router.post("/print-gateway/test/confirm", ...gatewayJobLimiters, confirmGatewayTestJob);
+router.post("/print-gateway/test/fail", ...gatewayJobLimiters, failGatewayTestJob);
 router.post("/printer-agent/local/claim", ...gatewayJobLimiters, claimLocalAgentPrintJob);
+router.post("/printer-agent/local/ack", ...gatewayJobLimiters, ackLocalAgentPrintJob);
 router.post("/printer-agent/local/confirm", ...gatewayJobLimiters, confirmLocalAgentPrintJob);
 router.post("/printer-agent/local/fail", ...gatewayJobLimiters, failLocalAgentPrintJob);
 router.post("/print-gateway/ipp/confirm", ...gatewayJobLimiters, confirmGatewayIppJob);
@@ -788,6 +809,15 @@ router.post(
   ...printMutationLimiters,
   requireCsrf,
   testPrinter
+);
+router.post(
+  "/manufacturer/printers/:id/test-label",
+  authenticate,
+  requireOpsUser,
+  enforceTenantIsolation,
+  ...printMutationLimiters,
+  requireCsrf,
+  testPrinterLabel
 );
 router.post(
   "/manufacturer/printers/:id/discover",

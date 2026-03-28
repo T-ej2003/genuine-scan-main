@@ -4,7 +4,7 @@ import { Prisma, QRStatus } from "@prisma/client";
 import { z } from "zod";
 import { createAuditLog } from "../services/auditService";
 import { evaluateScanPolicy } from "../services/scanPolicy";
-import { hashToken, verifyQrToken } from "../services/qrTokenService";
+import { hashToken, isPrinterTestQrId, verifyQrToken } from "../services/qrTokenService";
 import { evaluateScanAndEnforcePolicy } from "../services/policyEngineService";
 import { reverseGeocode } from "../services/locationService";
 import { getScanInsight } from "../services/scanInsightService";
@@ -288,6 +288,40 @@ export const scanToken = async (req: CustomerVerifyRequest, res: Response) => {
           isAuthentic: false,
           message: "QR token expired.",
           scanOutcome: "EXPIRED",
+        },
+      });
+    }
+
+    if (isPrinterTestQrId(payload.qr_id)) {
+      return res.json({
+        success: true,
+        data: {
+          isAuthentic: true,
+          message: "MSCQR printer setup test label verified. This QR is for printer setup only and does not represent a product.",
+          scanOutcome: "PRINTER_SETUP_TEST",
+          classification: "LEGIT_REPEAT",
+          code: "PRINTER_SETUP_TEST",
+          status: "TEST_ONLY",
+          warningMessage: "Use this label only to confirm printer setup and print quality.",
+          ownershipStatus: {
+            isClaimed: false,
+            claimedAt: null,
+            isOwnedByRequester: false,
+            isClaimedByAnother: false,
+            canClaim: false,
+          },
+          verifyUxPolicy: {
+            showTimelineCard: false,
+            showRiskCards: false,
+            allowOwnershipClaim: false,
+            allowFraudReport: false,
+            mobileCameraAssist: true,
+          },
+          scanSummary: {
+            totalScans: 0,
+            firstVerifiedAt: null,
+            latestVerifiedAt: null,
+          },
         },
       });
     }

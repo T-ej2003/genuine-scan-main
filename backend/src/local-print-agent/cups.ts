@@ -80,6 +80,8 @@ type ParsedWindowsPrinter = {
 
 const COMMAND_TIMEOUT_MS = 1500;
 const MAX_BUFFER = 1024 * 1024 * 2;
+const JOB_POLL_MS = Math.max(500, Number(process.env.PRINT_AGENT_JOB_POLL_MS || 1200) || 1200);
+const JOB_WAIT_TIMEOUT_MS = Math.max(5_000, Number(process.env.PRINT_AGENT_JOB_WAIT_TIMEOUT_MS || 60_000) || 60_000);
 
 const toCleanString = (value: unknown, max = 180) => String(value || "").trim().slice(0, max);
 
@@ -570,4 +572,125 @@ export const listLocalPrinters = async (): Promise<{
       ? "No printers detected by macOS CUPS."
       : "No printers detected by the local CUPS spooler.");
   return { printers: [], error: fallbackError };
+};
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const normalizeJobRef = (value: string) => String(value || "").trim();
+
+const cupsQueueContainsJob = (stdout: string, jobRef: string) => {
+  const normalized = normalizeJobRef(jobRef);
+  if (!normalized) return false;
+  const tokens = String(stdout || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim().split(/\s+/)[0] || "")
+    .filter(Boolean);
+  return tokens.some((token) => token === normalized || token.endsWith(`-${normalized}`) || normalized.endsWith(`-${token}`));
+};
+
+const waitForCupsJobCompletion = async (params: { printerId: string; jobRef: string; timeoutMs?: number }) => {
+  const deadline = Date.now() + (params.timeoutMs || JOB_WAIT_TIMEOUT_MS);
+
+  while (Date.now() < deadline) {
+    const result = await maybeExecFile("/usr/bin/lpstat", ["-W", "not-completed", "-o", params.printerId]);
+    const stderr = String(result.stderr || "").trim();
+    if (stderr && /unknown destination|not found|no destinations added/i.test(stderr)) {
+      throw new Error(stderr);
+    }
+
+    if (!cupsQueueContainsJob(result.stdout, params.jobRef)) {
+      return {
+        confirmed: true as const,
+        queue: "cups" as const,
+        jobRef: params.jobRef,
+      };
+    }
+
+    await sleep(JOB_POLL_MS);
+  }
+
+  throw new Error(`Timed out waiting for local spool completion of job ${params.jobRef}.`);
+};
+
+const extractWindowsJobId = (jobRef: string) => {
+  const match = normalizeJobRef(jobRef).match(/:(\d+)$/);
+  if (match?.[1]) return Number(match[1]);
+  const direct = Number(jobRef);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  return null;
+};
+
+const waitForWindowsJobCompletion = async (params: { printerId: string; jobRef: string; timeoutMs?: number }) => {
+  const jobId = extractWindowsJobId(params.jobRef);
+  if (!jobId) {
+    throw new Error("Windows spooler did not provide a usable print job id for terminal confirmation.");
+  }
+
+  const deadline = Date.now() + (params.timeoutMs || JOB_WAIT_TIMEOUT_MS);
+
+  while (Date.now() < deadline) {
+    const script = [
+      "$ErrorActionPreference='Stop'",
+      `$job = Get-PrintJob -PrinterName '${String(params.printerId).replace(/'/g, "''")}' -ID ${jobId} -ErrorAction SilentlyContinue`,
+      "if ($null -eq $job) { Write-Output 'DONE'; exit 0 }",
+      "$job | Select-Object ID,JobStatus,SubmittedTime,DocumentName | ConvertTo-Json -Compress",
+    ].join("; ");
+
+    const result = await maybeExecFile("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      script,
+    ]);
+
+    const stdout = String(result.stdout || "").trim();
+    if (!stdout || stdout === "DONE") {
+      return {
+        confirmed: true as const,
+        queue: "windows" as const,
+        jobRef: params.jobRef,
+      };
+    }
+
+    const jobText = stdout.toLowerCase();
+    if (
+      jobText.includes("error") ||
+      jobText.includes("offline") ||
+      jobText.includes("blocked") ||
+      jobText.includes("paper")
+    ) {
+      throw new Error(`Windows spooler reported an error for job ${jobId}: ${stdout}`);
+    }
+
+    await sleep(JOB_POLL_MS);
+  }
+
+  throw new Error(`Timed out waiting for Windows spool completion of job ${jobId}.`);
+};
+
+export const waitForLocalPrintJobCompletion = async (params: {
+  printerId: string;
+  jobRef?: string | null;
+  timeoutMs?: number;
+}) => {
+  const jobRef = normalizeJobRef(params.jobRef || "");
+  if (!jobRef) {
+    throw new Error("Local spooler did not return a print job reference for confirmation.");
+  }
+
+  if (process.platform === "win32") {
+    return waitForWindowsJobCompletion({
+      printerId: params.printerId,
+      jobRef,
+      timeoutMs: params.timeoutMs,
+    });
+  }
+
+  return waitForCupsJobCompletion({
+    printerId: params.printerId,
+    jobRef,
+    timeoutMs: params.timeoutMs,
+  });
 };

@@ -47,6 +47,20 @@ export type IppPrinterInspection = {
   raw: Record<string, unknown>;
 };
 
+export type IppJobInspection = {
+  printerUri: string;
+  endpointUrl: string;
+  jobId: number;
+  jobUri: string | null;
+  jobState: number | null;
+  jobStateReasons: string[];
+  jobStateMessage: string | null;
+  impressionsCompleted: number | null;
+  mediaSheetsCompleted: number | null;
+  pagesCompleted: number | null;
+  raw: Record<string, unknown>;
+};
+
 export const buildIppConnectionInfo = (printer: IppPrinterProfile): IppConnectionInfo => {
   const explicitUri = String(printer.printerUri || "").trim();
   if (explicitUri) {
@@ -181,4 +195,48 @@ export const submitPdfToIppPrinter = async (params: {
     jobUri: String(jobAttributes["job-uri"] || "").trim() || null,
     response,
   };
+};
+
+export const inspectIppJob = async (params: {
+  profile: IppPrinterProfile;
+  jobId: number;
+}) => {
+  const printer = buildIppConnectionInfo(params.profile);
+  const response = await executeIppOperation(
+    "Get-Job-Attributes",
+    {
+      "operation-attributes-tag": {
+        "attributes-charset": "utf-8",
+        "attributes-natural-language": "en-us",
+        "printer-uri": printer.printerUri,
+        "job-id": params.jobId,
+        "requested-attributes": [
+          "job-id",
+          "job-uri",
+          "job-state",
+          "job-state-reasons",
+          "job-state-message",
+          "job-impressions-completed",
+          "job-media-sheets-completed",
+          "job-pages-completed",
+        ],
+      },
+    },
+    printer
+  );
+
+  const attributes = (response["job-attributes-tag"] || {}) as Record<string, unknown>;
+  return {
+    printerUri: printer.printerUri,
+    endpointUrl: printer.endpointUrl,
+    jobId: Number(attributes["job-id"] || params.jobId) || params.jobId,
+    jobUri: String(attributes["job-uri"] || "").trim() || null,
+    jobState: Number(attributes["job-state"] || 0) || null,
+    jobStateReasons: toStringList(attributes["job-state-reasons"]),
+    jobStateMessage: String(attributes["job-state-message"] || "").trim() || null,
+    impressionsCompleted: Number(attributes["job-impressions-completed"] || 0) || null,
+    mediaSheetsCompleted: Number(attributes["job-media-sheets-completed"] || 0) || null,
+    pagesCompleted: Number(attributes["job-pages-completed"] || 0) || null,
+    raw: response,
+  } satisfies IppJobInspection;
 };

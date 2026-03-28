@@ -106,6 +106,7 @@ export const printJobSessionSchema = z
     remainingToPrint: z.number().optional(),
     confirmedItems: z.number().optional(),
     frozenItems: z.number().optional(),
+    awaitingConfirmationCount: z.number().optional(),
     counts: z.record(z.string(), z.number()).optional(),
   })
   .passthrough();
@@ -122,6 +123,16 @@ export const printJobSchema = z
     reprintOfJobId: z.string().nullable().optional(),
     reprintReason: z.string().nullable().optional(),
     failureReason: z.string().nullable().optional(),
+    confirmationFailureReason: z.string().nullable().optional(),
+    awaitingConfirmation: z.boolean().optional(),
+    confirmationMode: z.string().nullable().optional(),
+    dispatchReferenceSummary: z
+      .object({
+        awaitingCount: z.number().optional(),
+        outstandingJobRefs: z.array(z.string()).optional(),
+      })
+      .nullable()
+      .optional(),
     createdAt: z.string(),
     updatedAt: z.string().optional(),
     sentAt: z.string().nullable().optional(),

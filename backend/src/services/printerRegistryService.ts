@@ -20,6 +20,7 @@ import { testNetworkPrinterConnectivity } from "./networkPrinterSocketService";
 import { isGatewayFresh } from "./networkIppPrintService";
 import { getPrinterConnectionStatusForUser, type PrinterConnectionStatus } from "./printerConnectionService";
 import { supportsNetworkDirectCommandLanguage, supportsNetworkDirectPayload } from "./printPayloadService";
+import { resolvePrinterConfirmationMode } from "./printConfirmationService";
 
 const toCleanString = (value: unknown, max = 180) => String(value || "").trim().slice(0, max);
 const toNullableString = (value: unknown, max = 180) => {
@@ -247,12 +248,31 @@ export const buildPrinterRegistryStatus = async (
   userContext?: { userId: string }
 ): Promise<PrinterRegistryStatus> => {
   if (printer.connectionType === PrinterConnectionType.NETWORK_DIRECT) {
+    if (printer.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY) {
+      if (resolvePrinterConfirmationMode(printer) === "DIRECT_NOT_ALLOWED") {
+        return {
+          state: "BLOCKED",
+          summary: "Direct industrial route not certified",
+          detail:
+            "This raw label printer does not yet expose a production-safe completion proof for strict direct printing. Use the workstation connector path or a certified Zebra profile.",
+        };
+      }
+      return buildGatewayPrinterStatus(printer);
+    }
     if (!supportsNetworkDirectPayload(printer as any)) {
       return {
         state: "BLOCKED",
         summary: "Language not available for network-direct dispatch",
         detail:
           "Network-direct printing currently supports certified industrial language profiles such as ZPL, TSPL, EPL, DPL, Honeywell DP/Fingerprint, IPL, SBPL, ZSim, and CPCL.",
+      };
+    }
+    if (resolvePrinterConfirmationMode(printer) === "DIRECT_NOT_ALLOWED") {
+      return {
+        state: "BLOCKED",
+        summary: "Direct confirmation not available",
+        detail:
+          "This raw printer can receive data, but MSCQR cannot prove label completion safely in direct mode yet. Use the workstation connector path or a certified Zebra profile.",
       };
     }
     if (!printer.ipAddress || !printer.port) {
@@ -600,17 +620,19 @@ export const upsertManagedNetworkPrinter = async (params: {
     }
   }
 
-  const deliveryMode = params.connectionType === PrinterConnectionType.NETWORK_IPP
-    ? params.deliveryMode || PrinterDeliveryMode.DIRECT
-    : PrinterDeliveryMode.DIRECT;
+  const deliveryMode =
+    params.connectionType === PrinterConnectionType.NETWORK_IPP || params.connectionType === PrinterConnectionType.NETWORK_DIRECT
+      ? params.deliveryMode || PrinterDeliveryMode.DIRECT
+      : PrinterDeliveryMode.DIRECT;
   const nextGatewaySecret =
-    params.connectionType === PrinterConnectionType.NETWORK_IPP &&
+    (params.connectionType === PrinterConnectionType.NETWORK_IPP || params.connectionType === PrinterConnectionType.NETWORK_DIRECT) &&
     deliveryMode === PrinterDeliveryMode.SITE_GATEWAY &&
     (!params.printerId || params.rotateGatewaySecret)
       ? randomBytes(24).toString("base64url")
       : null;
   const gatewayId =
-    params.connectionType === PrinterConnectionType.NETWORK_IPP && deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
+    (params.connectionType === PrinterConnectionType.NETWORK_IPP || params.connectionType === PrinterConnectionType.NETWORK_DIRECT) &&
+    deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
       ? toNullableString(current?.gatewayId, 64) || `gw-${randomBytes(9).toString("hex")}`
       : null;
   const data = {
@@ -652,21 +674,25 @@ export const upsertManagedNetworkPrinter = async (params: {
     deliveryMode,
     gatewayId,
     gatewaySecretHash:
-      params.connectionType === PrinterConnectionType.NETWORK_IPP && deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
+      (params.connectionType === PrinterConnectionType.NETWORK_IPP || params.connectionType === PrinterConnectionType.NETWORK_DIRECT) &&
+      deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
         ? nextGatewaySecret
           ? hashGatewaySecret(nextGatewaySecret)
           : current?.gatewaySecretHash || undefined
         : null,
     gatewayStatus:
-      params.connectionType === PrinterConnectionType.NETWORK_IPP && deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
+      (params.connectionType === PrinterConnectionType.NETWORK_IPP || params.connectionType === PrinterConnectionType.NETWORK_DIRECT) &&
+      deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
         ? "PENDING"
         : null,
     gatewayLastError:
-      params.connectionType === PrinterConnectionType.NETWORK_IPP && deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
+      (params.connectionType === PrinterConnectionType.NETWORK_IPP || params.connectionType === PrinterConnectionType.NETWORK_DIRECT) &&
+      deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
         ? "Gateway has not checked in yet."
         : null,
     gatewayLastSeenAt:
-      params.connectionType === PrinterConnectionType.NETWORK_IPP && deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
+      (params.connectionType === PrinterConnectionType.NETWORK_IPP || params.connectionType === PrinterConnectionType.NETWORK_DIRECT) &&
+      deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
         ? null
         : undefined,
     orgId: params.orgId || null,
@@ -827,6 +853,44 @@ export const testRegisteredPrinterConnection = async (params: {
           lastValidationStatus: "BLOCKED",
           lastValidationMessage: validationMessage,
         } as RegisteredPrinterRecord),
+      };
+    }
+
+    const confirmationMode = resolvePrinterConfirmationMode(params.printer);
+    if (confirmationMode === "DIRECT_NOT_ALLOWED") {
+      const validationMessage =
+        "This raw industrial printer does not yet expose a strict completion signal for safe direct printing. Use the workstation connector path or a certified Zebra profile.";
+      await prisma.printer.update({
+        where: { id: params.printer.id },
+        data: {
+          lastValidatedAt: new Date(),
+          lastValidationStatus: "BLOCKED",
+          lastValidationMessage: validationMessage,
+        },
+      });
+      return {
+        ok: false,
+        registryStatus: buildNetworkPrinterStatus({
+          ...params.printer,
+          lastValidationStatus: "BLOCKED",
+          lastValidationMessage: validationMessage,
+        } as RegisteredPrinterRecord),
+      };
+    }
+
+    if (params.printer.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY) {
+      const registryStatus = buildGatewayPrinterStatus(params.printer);
+      await prisma.printer.update({
+        where: { id: params.printer.id },
+        data: {
+          lastValidatedAt: new Date(),
+          lastValidationStatus: registryStatus.state,
+          lastValidationMessage: registryStatus.detail || registryStatus.summary,
+        },
+      });
+      return {
+        ok: registryStatus.state === "READY",
+        registryStatus,
       };
     }
 

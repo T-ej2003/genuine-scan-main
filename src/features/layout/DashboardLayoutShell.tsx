@@ -46,7 +46,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const notificationCenter = useDashboardNotificationCenter(user?.id, NOTIFICATION_FETCH_LIMIT);
   const printerConnection = useManufacturerPrinterConnection({
     user,
-    pathname: location.pathname,
     contextualHelpRoute,
     navigate,
     toast,
@@ -142,7 +141,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             selectedPrinterName={printerConnection.selectedPrinterName}
             onInstallConnector={printerConnection.goToConnectorDownload}
             onCheckAgain={printerConnection.refreshPrinterConnectionStatus}
-            onOpenPrinterSetup={printerConnection.openPrinterConnectionDialog}
             onOpenHelp={printerConnection.goToHelp}
             onCloseForNow={printerConnection.dismissPrinterOnboarding}
           />
@@ -201,17 +199,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               className="mr-1 hidden md:inline-flex"
             >
               Install Connector
-            </Button>
-          ) : null}
-
-          {printerConnection.isManufacturer && printerConnection.managedNetworkPrinters.length > 0 ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate(APP_PATHS.printerSetup)}
-              className="mr-1 hidden md:inline-flex"
-            >
-              Printer Setup
             </Button>
           ) : null}
 
@@ -287,7 +274,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             onSelectedLocalPrinterChange={printerConnection.setSelectedLocalPrinterId}
             onRefreshStatus={printerConnection.refreshPrinterConnectionStatus}
             onInstallConnector={printerConnection.goToConnectorDownload}
-            onOpenPrinterSetup={printerConnection.openPrinterSetup}
             onOpenBatches={printerConnection.goToBatches}
             onOpenHelp={printerConnection.goToHelp}
             onClose={() => printerConnection.setPrinterDialogOpen(false)}

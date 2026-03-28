@@ -83,6 +83,7 @@ export const printerProfileStatusConfigSchema = z
   .object({
     supportsStatusQuery: z.boolean().optional(),
     statusMethod: z.string().nullable().optional(),
+    confirmationMode: z.string().nullable().optional(),
     supportsConfigQuery: z.boolean().optional(),
     configMethod: z.string().nullable().optional(),
     snmpVersion: z.string().nullable().optional(),

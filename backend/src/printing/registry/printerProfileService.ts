@@ -47,6 +47,13 @@ const mapCommandLanguage = (value: PrinterCommandLanguage | string | null | unde
   return PrinterLanguageKind.AUTO;
 };
 
+const inferConfirmationMode = (printer: Pick<Printer, "connectionType" | "vendor" | "model" | "name">) => {
+  if (printer.connectionType === PrinterConnectionType.LOCAL_AGENT) return "LOCAL_QUEUE";
+  if (printer.connectionType === PrinterConnectionType.NETWORK_IPP) return "IPP_JOB_STATE";
+  const signature = [printer.vendor, printer.model, printer.name].filter(Boolean).join(" ");
+  return /\bzebra\b/i.test(signature) ? "ZEBRA_ODOMETER" : "DIRECT_NOT_ALLOWED";
+};
+
 const transportKindFromPrinter = (printer: Pick<Printer, "connectionType" | "deliveryMode">): PrinterTransportKind => {
   if (printer.connectionType === "NETWORK_DIRECT") return PrinterTransportKind.RAW_TCP;
   if (printer.connectionType === "NETWORK_IPP") {
@@ -117,13 +124,16 @@ const modelFromPrinter = (printer: Pick<Printer, "vendor" | "model" | "name" | "
       toNumber((capabilitySummary as Record<string, unknown>).dpi) ||
       (Array.isArray(capabilitySummary.dpiOptions) ? toNumber(capabilitySummary.dpiOptions[0]) : null),
     statusConfig: {
-      supportsStatusQuery: printer.connectionType !== "LOCAL_AGENT",
+      supportsStatusQuery: printer.connectionType !== "NETWORK_DIRECT" || inferConfirmationMode(printer) !== "DIRECT_NOT_ALLOWED",
       statusMethod:
         printer.connectionType === "NETWORK_DIRECT"
-          ? "socket_probe"
+          ? inferConfirmationMode(printer) === "ZEBRA_ODOMETER"
+            ? "zebra_odometer"
+            : "socket_probe"
           : printer.connectionType === "NETWORK_IPP"
             ? "ipp_inspection"
             : "workstation_inventory",
+      confirmationMode: inferConfirmationMode(printer),
       supportsConfigQuery: printer.connectionType !== "LOCAL_AGENT",
       configMethod:
         printer.connectionType === "NETWORK_IPP"

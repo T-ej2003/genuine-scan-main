@@ -43,7 +43,7 @@ export const buildPrinterAgentHeartbeatPayload = (input: {
   ].join("|");
 
 export const buildPrinterAgentActionPayload = (input: {
-  action: "claim" | "confirm" | "fail";
+  action: "claim" | "ack" | "confirm" | "fail";
   agentId: string;
   deviceFingerprint: string;
   printerId: string;

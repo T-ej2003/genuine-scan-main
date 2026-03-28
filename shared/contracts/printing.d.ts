@@ -58,6 +58,7 @@ export type PrintJobSessionDTO = {
   remainingToPrint?: number;
   confirmedItems?: number;
   frozenItems?: number;
+  awaitingConfirmationCount?: number;
   counts?: Record<string, number>;
   [key: string]: unknown;
 };
@@ -81,6 +82,13 @@ export type PrintJobDTO = {
   reprintOfJobId?: string | null;
   reprintReason?: string | null;
   failureReason?: string | null;
+  confirmationFailureReason?: string | null;
+  awaitingConfirmation?: boolean;
+  confirmationMode?: string | null;
+  dispatchReferenceSummary?: {
+    awaitingCount?: number;
+    outstandingJobRefs?: string[];
+  } | null;
   createdAt: string;
   updatedAt?: string;
   sentAt?: string | null;

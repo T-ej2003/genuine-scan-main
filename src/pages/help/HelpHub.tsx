@@ -33,7 +33,6 @@ const SCREENSHOTS: ScreenshotNeed[] = [
   { filename: "licensee-create-manufacturer.png", whereToCapture: "Manufacturers page with Add Manufacturer modal open (Invite mode shown).", usedIn: "Licensee/Admin" },
   { filename: "manufacturer-connector-download.png", whereToCapture: "Illustrative connector download page showing Mac and Windows installer choices plus the simple workstation setup steps.", usedIn: "Manufacturer" },
   { filename: "manufacturer-create-print-job.png", whereToCapture: "Illustrative Create Print Job dialog showing the saved printer profile, readiness note, and Start print action.", usedIn: "Manufacturer" },
-  { filename: "manufacturer-printer-diagnostics.png", whereToCapture: "Illustrative Printer Setup & Support page showing the compatibility matrix, setup guidance, and profile validation actions.", usedIn: "Manufacturer" },
   { filename: "manufacturer-print-status.png", whereToCapture: "Illustrative print progress view showing current status and recent print confirmations.", usedIn: "Manufacturer" },
   { filename: "customer-first-verification.png", whereToCapture: "Public verify page showing Verified Authentic (first scan).", usedIn: "Customer" },
   { filename: "customer-verified-again.png", whereToCapture: "Public verify page showing Verified Again (repeat scan).", usedIn: "Customer" },

@@ -14,7 +14,7 @@ export default function ManufacturerHelp() {
   return (
     <HelpShell
       title="Manufacturer Admin"
-      subtitle="Handle assigned batches, printer setup, and controlled print jobs for your factory."
+      subtitle="Handle assigned batches, printer readiness, and controlled print jobs for your factory."
     >
       <div className="space-y-6">
         <Card>
@@ -94,13 +94,10 @@ export default function ManufacturerHelp() {
         </section>
 
         <section className="space-y-3">
-          <h2 className="text-lg font-semibold text-foreground">Printer setup and troubleshooting</h2>
+          <h2 className="text-lg font-semibold text-foreground">Printer readiness and troubleshooting</h2>
           <div className="flex flex-wrap gap-3">
             <Button asChild variant="outline">
               <Link to="/connector-download">Install Connector</Link>
-            </Button>
-            <Button asChild variant="ghost">
-              <Link to="/printer-diagnostics">Open Printer Setup</Link>
             </Button>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
@@ -118,7 +115,7 @@ export default function ManufacturerHelp() {
                   <li>Let the installer verify whether the workstation can see a usable printer before you leave setup.</li>
                   <li>Confirm it is configured to auto-start at login and run in the background.</li>
                   <li>Make sure the operating system already lists the printer and driver correctly.</li>
-                  <li>Open <Badge variant="outline">Printer Setup</Badge> in MSCQR and use <Badge variant="outline">Refresh status</Badge>.</li>
+                  <li>Use the <Badge variant="outline">Printer</Badge> status button in MSCQR and choose <Badge variant="outline">Refresh status</Badge>.</li>
                   <li>Confirm the workstation printer or saved network printer shows a ready state before returning to batches.</li>
                 </ol>
               </CardContent>
@@ -133,9 +130,9 @@ export default function ManufacturerHelp() {
                   <li><Badge variant="outline">Connector unavailable</Badge> means MSCQR cannot detect the workstation connector on that device.</li>
                   <li><Badge variant="outline">Connector installed, printer needs attention</Badge> means setup succeeded, but Windows or macOS is not exposing a usable online printer yet.</li>
                   <li><Badge variant="outline">No printer detected</Badge> means the connector is running but the operating system is not exposing a usable printer yet.</li>
-                  <li><Badge variant="outline">Needs attention</Badge> means the saved printer setup or secure connection still needs review.</li>
+                  <li><Badge variant="outline">Needs attention</Badge> means the saved printer route or secure connection still needs review.</li>
                   <li>If the connector is not installed yet, return to <Badge variant="outline">Install Connector</Badge> first.</li>
-                  <li>Open <Badge variant="outline">Printer Setup</Badge> to separate those cases and copy the support summary.</li>
+                  <li>Use the <Badge variant="outline">Printer</Badge> status button to separate those cases and gather support details.</li>
                 </ul>
               </CardContent>
             </Card>
@@ -157,7 +154,7 @@ export default function ManufacturerHelp() {
                 <div className="rounded-xl border bg-muted/20 p-4">
                   <div className="font-semibold text-foreground">NETWORK_DIRECT</div>
                   <p className="mt-2">
-                    Use this for controlled LAN label printers saved in Printer Setup. Certified raw TCP profiles can run{" "}
+                    Use this for controlled LAN label printers saved as approved printer profiles. Certified raw TCP profiles can run{" "}
                     <strong>{NETWORK_DIRECT_SUPPORTED_LANGUAGE_LABEL}</strong>.
                   </p>
                 </div>
@@ -196,18 +193,6 @@ export default function ManufacturerHelp() {
               ]}
             />
             <WorkflowScreenshotCard
-              title="Check printer readiness"
-              description="Use Printer Setup to confirm the connector, selected printer, and saved routes are ready before you print any live quantity."
-              filename="manufacturer-printer-diagnostics.png"
-              alt="Printer setup and support"
-              caption="Printer Setup: review readiness, saved routes, and the action needed before printing."
-              highlights={[
-                "Confirm the printer is ready before you open the print dialog.",
-                "Use this page to separate connector issues from printer issues.",
-                "Copy the support summary from here when you need help.",
-              ]}
-            />
-            <WorkflowScreenshotCard
               title="Create the print job"
               description="Open your assigned batch, choose the approved printer path, and start the secure print run from the controlled dialog."
               filename="manufacturer-create-print-job.png"
@@ -242,10 +227,6 @@ export default function ManufacturerHelp() {
               {
                 filename: "manufacturer-create-print-job.png",
                 whereToCapture: "Illustrative Create Print Job dialog showing quantity, saved printer profile, readiness summary, and Start print action.",
-              },
-              {
-                filename: "manufacturer-printer-diagnostics.png",
-                whereToCapture: "Illustrative Printer Setup & Support page showing connector readiness, compatibility guidance, and saved printer checks.",
               },
               {
                 filename: "manufacturer-print-status.png",

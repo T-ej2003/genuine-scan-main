@@ -300,7 +300,7 @@ export const getPrinterDiagnosticSummary = (params: {
       tone: "success",
       nextSteps: [
         "Continue to the batch workflow when you are ready to print.",
-        "If output alignment changes, review printer setup before the next run.",
+        "If output alignment changes, review the printer settings before the next run.",
       ],
       selectedPrinter,
     };
@@ -432,7 +432,7 @@ export const getPrinterDiagnosticSummary = (params: {
     detail: sanitizePrinterUiError(remote?.error || remote?.trustReason, "This printer connection needs support attention before printing."),
     tone: "danger",
     nextSteps: [
-      "Review printer setup and connector status before retrying.",
+      "Review the printer connection and connector status before retrying.",
       "If needed, send a support summary to your support team.",
     ],
     selectedPrinter,
@@ -502,7 +502,7 @@ export const getManagedPrinterDiagnosticSummary = (
       tone: "success",
       nextSteps: [
         "Open the batch workflow and choose this managed printer profile.",
-        "Run Check again after any printer, network, or gateway change.",
+        "If this route changes later, ask an admin to revalidate it before the next run.",
       ],
       selectedPrinter: pseudoPrinter,
     };
@@ -520,8 +520,8 @@ export const getManagedPrinterDiagnosticSummary = (
       ),
       tone: "warning",
       nextSteps: [
-        "Open the managed printer dialog and run Check.",
-        "Confirm the printer or site connector is online, then recheck.",
+        "Confirm the printer or site connector is online.",
+        "Ask an admin to validate this saved printer route before printing.",
       ],
       selectedPrinter: pseudoPrinter,
     };
@@ -535,12 +535,12 @@ export const getManagedPrinterDiagnosticSummary = (
       summary: `${printerName} cannot be used in its current configuration.`,
       detail: sanitizePrinterUiError(
         printer.registryStatus?.detail,
-        "Review the printer setup, then run Check again."
+        "Review the saved printer route, then validate it again."
       ),
       tone: "danger",
       nextSteps: [
         "Update the managed printer profile.",
-        "Run Check again after correcting the endpoint or language.",
+        "Validate it again after correcting the endpoint or language.",
       ],
       selectedPrinter: pseudoPrinter,
     };

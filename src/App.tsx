@@ -17,14 +17,13 @@ const Login = lazy(() => import("@/pages/Login"));
 const AcceptInvite = lazy(() => import("@/pages/AcceptInvite"));
 const VerifyEmail = lazy(() => import("@/pages/VerifyEmail"));
 const ConnectorDownload = lazy(() => import("@/pages/ConnectorDownload"));
+const PrinterSetup = lazy(() => import("@/pages/PrinterSetup"));
 const ForgotPassword = lazy(() => import("@/pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Licensees = lazy(() => import("@/pages/Licensees"));
 const QRRequests = lazy(() => import("@/pages/QRRequests"));
 const Batches = lazy(() => import("@/pages/Batches"));
-const PrinterDiagnostics = lazy(() => import("@/pages/PrinterDiagnostics"));
-const PrinterSetupAdvancedPage = lazy(() => import("@/features/printing/PrinterSetupAdvancedPage"));
 const QRTracking = lazy(() => import("@/pages/QRTracking"));
 const Manufacturers = lazy(() => import("@/pages/Manufacturers"));
 const AuditLogs = lazy(() => import("@/pages/AuditLogs"));
@@ -348,29 +347,7 @@ function AppRoutes() {
           path={APP_PATHS.printerSetup}
           element={
             <ProtectedRoute allowedRoles={["manufacturer"]}>
-              <PrinterDiagnostics />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path={APP_PATHS.printerSetupAdvanced}
-          element={
-            <ProtectedRoute
-              allowedRoles={["manufacturer", "super_admin"]}
-              allowedRawRoles={["MANUFACTURER", "MANUFACTURER_ADMIN", "SUPER_ADMIN", "PLATFORM_SUPER_ADMIN"]}
-            >
-              <PrinterSetupAdvancedPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/printer-diagnostics"
-          element={
-            <ProtectedRoute
-              allowedRoles={["manufacturer", "super_admin"]}
-              allowedRawRoles={["MANUFACTURER", "MANUFACTURER_ADMIN", "SUPER_ADMIN", "PLATFORM_SUPER_ADMIN"]}
-            >
-              <RedirectWithQuery to={APP_PATHS.printerSetupAdvanced} />
+              <PrinterSetup />
             </ProtectedRoute>
           }
         />

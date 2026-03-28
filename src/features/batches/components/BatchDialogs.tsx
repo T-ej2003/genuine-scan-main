@@ -1,4 +1,5 @@
 import { RefreshCw } from "lucide-react";
+import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -136,7 +137,6 @@ type PrintJobDialogProps = {
   onPrintQuantityChange: (value: string) => void;
   readyToPrintCount: number;
   registeredPrinters: RegisteredPrinterRow[];
-  onOpenPrinterSetup: () => void;
   onRefreshPrinters: () => void;
   selectedPrinterProfileId: string;
   onSelectedPrinterProfileIdChange: (value: string) => void;
@@ -168,7 +168,6 @@ export function BatchPrintJobDialog({
   onPrintQuantityChange,
   readyToPrintCount,
   registeredPrinters,
-  onOpenPrinterSetup,
   onRefreshPrinters,
   selectedPrinterProfileId,
   onSelectedPrinterProfileIdChange,
@@ -245,12 +244,9 @@ export function BatchPrintJobDialog({
               <div className="text-sm font-medium">Printer selection</div>
               {registeredPrinters.length === 0 ? (
                 <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                  No saved printer profiles are available yet. Open Printer Setup, add or check a printer, then return
-                  here and refresh this dialog.
+                  No saved printer profiles are available yet. Refresh printers after connector or admin changes, then
+                  retry this dialog.
                   <div className="mt-2 flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" onClick={onOpenPrinterSetup}>
-                      Open Printer Setup
-                    </Button>
                     <Button size="sm" variant="ghost" onClick={onRefreshPrinters}>
                       Refresh printers
                     </Button>
@@ -321,8 +317,8 @@ export function BatchPrintJobDialog({
                     </div>
                   </div>
                   <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-                    Use <strong>Printer Setup</strong> if this workstation printer needs alignment or setup changes before
-                    the next run.
+                    Workstation printing depends on the active printer on this device. Switch it here before the next
+                    run if needed.
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
                     <Button
@@ -332,9 +328,6 @@ export function BatchPrintJobDialog({
                       onClick={onSwitchSelectedPrinter}
                     >
                       {switchingPrinter ? "Switching..." : "Switch workstation printer"}
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={onOpenPrinterSetup}>
-                      Open Printer Setup
                     </Button>
                   </div>
                 </>
@@ -352,22 +345,20 @@ export function BatchPrintJobDialog({
                         : "MSCQR will send the approved job to this factory label printer using its saved setup."
                     )}
                   </div>
-                  <div className="mt-3 flex justify-end">
-                    <Button variant="outline" size="sm" onClick={onOpenPrinterSetup}>
-                      Open Printer Setup
-                    </Button>
-                  </div>
                 </div>
               )}
             </div>
 
             <div className="flex gap-2">
+              <Button asChild variant="outline">
+                <Link to="/printer-setup">Printer setup</Link>
+              </Button>
               <Button
                 data-testid="print-job-start-button"
                 onClick={onStartPrint}
                 disabled={printing || !selectedPrinterProfile || !selectedPrinterCanPrint}
               >
-                {printing ? "Starting..." : "Start print"}
+                {printing ? "Starting..." : printJobId ? "Resume active print" : "Start print"}
               </Button>
             </div>
 
@@ -382,6 +373,7 @@ export function BatchPrintJobDialog({
                 {directRemainingToPrint != null ? (
                   <div className="text-xs text-muted-foreground">Remaining to print: {directRemainingToPrint}</div>
                 ) : null}
+                <div className="text-xs text-muted-foreground">MSCQR waits for final printer confirmation before marking these labels printed.</div>
               </div>
             ) : null}
 

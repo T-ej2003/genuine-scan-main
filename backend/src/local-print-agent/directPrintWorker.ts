@@ -1,6 +1,6 @@
 import os from "os";
 
-import { listLocalPrinters, resolveSelectedPrinter } from "./cups";
+import { listLocalPrinters, resolveSelectedPrinter, waitForLocalPrintJobCompletion } from "./cups";
 import { printLabel } from "./render";
 import { loadAgentState } from "./state";
 import { buildPrinterAgentActionPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
@@ -20,7 +20,7 @@ const resolveBackendUrl = async () => {
 };
 
 const buildSignedBody = async (params: {
-  action: "claim" | "confirm" | "fail";
+  action: "claim" | "ack" | "confirm" | "fail";
   printerId: string;
   printJobId?: string | null;
   printItemId?: string | null;
@@ -90,6 +90,39 @@ const claimNextLocalJob = async () => {
   });
 };
 
+const ackLocalJob = async (payload: {
+  printerId: string;
+  printJobId: string;
+  printItemId: string;
+  payloadHash: string;
+  printPath: string;
+  labelLanguage: string;
+  jobRef?: string | null;
+}) => {
+  const signed = await buildSignedBody({
+    action: "ack",
+    printerId: payload.printerId,
+    printJobId: payload.printJobId,
+    printItemId: payload.printItemId,
+  });
+
+  await postBackend("/printer-agent/local/ack", {
+    ...signed.body,
+    printJobId: payload.printJobId,
+    printItemId: payload.printItemId,
+    payloadHash: payload.payloadHash,
+    bytesWritten: Math.max(1, payload.payloadHash.length),
+    deviceJobRef: payload.jobRef || null,
+    agentMetadata: {
+      deviceName: os.hostname(),
+      agentVersion: AGENT_VERSION,
+      printPath: payload.printPath,
+      labelLanguage: payload.labelLanguage,
+      jobRef: payload.jobRef || null,
+    },
+  });
+};
+
 const confirmLocalJob = async (payload: {
   printerId: string;
   printJobId: string;
@@ -112,6 +145,7 @@ const confirmLocalJob = async (payload: {
     printItemId: payload.printItemId,
     payloadHash: payload.payloadHash,
     bytesWritten: Math.max(1, payload.payloadHash.length),
+    deviceJobRef: payload.jobRef || null,
     agentMetadata: {
       deviceName: os.hostname(),
       agentVersion: AGENT_VERSION,
@@ -190,6 +224,19 @@ const runOnce = async () => {
       },
     });
 
+    await ackLocalJob({
+      printerId,
+      printJobId: String(payload.printJobId || "").trim(),
+      printItemId: String(payload.printItemId || "").trim(),
+      payloadHash: String(payload.payloadHash || "").trim(),
+      printPath: result.printPath,
+      labelLanguage: result.labelLanguage,
+      jobRef: result.jobRef,
+    });
+    await waitForLocalPrintJobCompletion({
+      printerId,
+      jobRef: result.jobRef,
+    });
     await confirmLocalJob({
       printerId,
       printJobId: String(payload.printJobId || "").trim(),

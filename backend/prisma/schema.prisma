@@ -799,9 +799,14 @@ model PrintItem {
   issueSequence Int?
   attemptCount Int @default(0)
   currentRenderTokenHash String?
+  deviceJobRef String?
+  dispatchMetadata Json?
+  confirmationEvidence Json?
 
   issuedAt DateTime?
+  dispatchedAt DateTime?
   agentAckedAt DateTime?
+  confirmationDeadlineAt DateTime?
   printConfirmedAt DateTime?
   closedAt DateTime?
   frozenAt DateTime?
@@ -818,6 +823,8 @@ model PrintItem {
   @@index([state, updatedAt])
   @@index([pipelineState, updatedAt])
   @@index([currentRenderTokenHash])
+  @@index([deviceJobRef])
+  @@index([confirmationDeadlineAt, state])
 }
 
 model PrintItemEvent {

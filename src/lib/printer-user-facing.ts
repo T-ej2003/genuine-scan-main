@@ -25,7 +25,7 @@ export const sanitizePrinterUiError = (raw?: string | null, fallback = "Printing
       "p2002",
     ])
   ) {
-    return "A saved printer profile already uses this connection. Open the existing setup to edit it or remove it first.";
+    return "A saved printer profile already uses this connection. Update or remove the existing profile first.";
   }
   if (hasAny(value, ["busy", "conflict", "please retry"])) {
     return "Another printing action is already using this batch. Please wait a moment and try again.";
@@ -43,7 +43,7 @@ export const sanitizePrinterUiError = (raw?: string | null, fallback = "Printing
     return "This office printer does not support the required MSCQR print format.";
   }
   if (hasAny(value, ["ipp", "ipps"]) && hasAny(value, ["unreachable", "validation failed", "not reachable"])) {
-    return "The saved office printer could not be reached. Check the printer setup and try again.";
+    return "The saved office printer could not be reached. Check the printer connection and try again.";
   }
   if (hasAny(value, ["tcp", "socket", "host and port", "9100", "jetdirect", "network-direct"])) {
     return "The saved factory printer could not be reached. Check the printer or network connection and try again.";

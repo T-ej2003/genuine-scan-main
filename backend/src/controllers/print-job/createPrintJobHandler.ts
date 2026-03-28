@@ -62,6 +62,66 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
       return res.status(404).json({ success: false, error: "Batch not found or not assigned to you" });
     }
 
+    const activeJob = await prisma.printJob.findFirst({
+      where: {
+        batchId: batch.id,
+        manufacturerId: user.userId,
+        status: { in: [PrintJobStatus.PENDING, PrintJobStatus.SENT] },
+        printSession: {
+          is: {
+            status: "ACTIVE",
+          },
+        },
+      },
+      orderBy: [{ createdAt: "desc" }],
+      select: {
+        id: true,
+        status: true,
+        pipelineState: true,
+        printMode: true,
+        quantity: true,
+        itemCount: true,
+        printer: {
+          select: {
+            id: true,
+            name: true,
+            connectionType: true,
+            commandLanguage: true,
+            deliveryMode: true,
+          },
+        },
+        printSession: {
+          select: {
+            id: true,
+            status: true,
+            totalItems: true,
+            confirmedItems: true,
+            frozenItems: true,
+          },
+        },
+      },
+    });
+    if (activeJob) {
+      return res.status(409).json({
+        success: false,
+        error: "An active print run already exists for this batch. Resume the current job instead of starting a duplicate run.",
+        data: {
+          activePrintJobId: activeJob.id,
+          activePrintSessionId: activeJob.printSession?.id || null,
+          job: {
+            id: activeJob.id,
+            status: activeJob.status,
+            pipelineState: activeJob.pipelineState,
+            printMode: activeJob.printMode,
+            quantity: activeJob.quantity,
+            itemCount: activeJob.itemCount,
+            printer: activeJob.printer,
+            session: activeJob.printSession,
+          },
+        },
+      });
+    }
+
     const printerSelection = await ensureSelectedPrinterReady({
       printerId,
       userId: user.userId,
@@ -313,14 +373,18 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
     }
 
     if (printerSelection.printMode === PrintDispatchMode.NETWORK_DIRECT) {
-      await startNetworkDirectDispatch({
+      void startNetworkDirectDispatch({
         jobId: created.job.id,
         actorUserId: user.userId,
+      }).catch((error) => {
+        console.error("startNetworkDirectDispatch error:", error);
       });
     } else if (printerSelection.printMode === PrintDispatchMode.NETWORK_IPP) {
-      await startNetworkIppDispatch({
+      void startNetworkIppDispatch({
         jobId: created.job.id,
         actorUserId: user.userId,
+      }).catch((error) => {
+        console.error("startNetworkIppDispatch error:", error);
       });
     }
 
@@ -387,6 +451,13 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
       return res.status(409).json({
         success: false,
         error: sanitizePrinterActionError((e as any)?.reason, "The site print connector needs attention before this printer can be used."),
+      });
+    }
+    if (msg.includes("PRINTER_NETWORK_CONFIRMATION_UNSUPPORTED")) {
+      return res.status(409).json({
+        success: false,
+        error:
+          "This saved raw printer route cannot prove terminal label completion safely yet. Use the MSCQR connector or switch to a certified Zebra direct profile.",
       });
     }
     if (msg.includes("PRINTER_IPP_FORMAT_UNSUPPORTED")) {

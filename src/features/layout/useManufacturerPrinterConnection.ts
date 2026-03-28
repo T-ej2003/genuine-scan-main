@@ -27,7 +27,6 @@ type ToastLike = (options: {
 
 type UseManufacturerPrinterConnectionParams = {
   user: User | null;
-  pathname: string;
   contextualHelpRoute: string;
   navigate: (to: string) => void;
   toast: ToastLike;
@@ -68,7 +67,6 @@ const defaultPrinterStatus: PrinterConnectionStatusDTO = {
 
 export function useManufacturerPrinterConnection({
   user,
-  pathname,
   contextualHelpRoute,
   navigate,
   toast,
@@ -549,18 +547,6 @@ export function useManufacturerPrinterConnection({
     void syncManufacturerPrinterStatus({ silent: true });
   };
 
-  const openPrinterSetup = (options?: { managedProfiles?: boolean }) => {
-    setPrinterDialogOpen(false);
-    if (options?.managedProfiles) {
-      navigate("/printer-setup?managedProfiles=open");
-      return;
-    }
-    if (pathname === "/printer-setup" || pathname === "/printer-diagnostics") {
-      return;
-    }
-    navigate("/printer-setup");
-  };
-
   const refreshPrinterConnectionStatus = () => {
     void syncManufacturerPrinterStatus({ silent: true });
   };
@@ -639,7 +625,6 @@ export function useManufacturerPrinterConnection({
     selectedPrinterName: printerStatus.selectedPrinterName || printerStatus.printerName || "None yet",
     printerName: printerStatus.printerName,
     openPrinterConnectionDialog,
-    openPrinterSetup,
     refreshPrinterConnectionStatus,
     dismissPrinterOnboarding,
     reopenPrinterOnboarding,
