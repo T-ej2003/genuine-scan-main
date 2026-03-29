@@ -15,6 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/api-client";
 import { getOrCreateAnonDeviceId } from "@/lib/anon-device";
 import { friendlyReferenceLabel } from "@/lib/friendly-reference";
+import { getSupportStatusLabel, getVerificationCopy } from "@/lib/ui-copy";
 import { cn } from "@/lib/utils";
 import { PremiumScanLoader } from "@/components/premium/PremiumScanLoader";
 import { PREMIUM_PALETTE } from "@/components/premium/palette";
@@ -206,6 +207,7 @@ export default function VerifyExperience() {
   const displayedCode = result?.code || codeParam || "—";
   const classification = useMemo(() => inferClassification(result), [result]);
   const classMeta = CLASS_META[classification];
+  const verificationCopy = useMemo(() => getVerificationCopy(classification), [classification]);
   const reasons = useMemo(() => deriveReasons(result, classification), [classification, result]);
   const scanSummary = useMemo(() => deriveScanSummary(result), [result]);
   const activitySummary = result?.activitySummary || null;
@@ -219,14 +221,14 @@ export default function VerifyExperience() {
   const showOwnerTransferSignInPrompt = ownershipStatus.isOwnedByRequester && !customerToken;
   const showRecipientTransferSignInPrompt = Boolean(transferToken) && !customerToken && !transferLinkIsInvalid;
   const signInCardTitle = showRecipientTransferSignInPrompt
-    ? "Sign in to accept transfer"
+      ? "Sign in to accept transfer"
     : queueTransferDialogAfterSignIn
       ? "Sign in to start transfer"
       : "Sign in for better protection (optional)";
   const signInCardDescription = showRecipientTransferSignInPrompt
     ? "Accepting a transfer links this product to your signed-in customer account."
     : queueTransferDialogAfterSignIn
-      ? "Complete sign-in below. The resale transfer form will open automatically."
+      ? "Complete sign-in below. The transfer form will open automatically."
       : "Sign-in makes ownership portable across devices. Device-only claim may be less reliable if your network changes.";
   const showAuthenticStamp = classification === "FIRST_SCAN" || classification === "LEGIT_REPEAT";
   const confidenceScore = useMemo(
@@ -766,7 +768,7 @@ export default function VerifyExperience() {
 
   const handleCreateTransfer = async () => {
     if (!customerToken || !displayedCode || displayedCode === "—") {
-      toast({ title: "Sign-in required", description: "Sign in before starting a resale transfer.", variant: "destructive" });
+      toast({ title: "Sign-in required", description: "Sign in before starting a transfer.", variant: "destructive" });
       return;
     }
 
@@ -825,7 +827,7 @@ export default function VerifyExperience() {
         });
         return;
       }
-      toast({ title: "Transfer cancelled", description: response.data?.message || "Pending resale transfer cancelled." });
+      toast({ title: "Transfer cancelled", description: response.data?.message || "Pending transfer cancelled." });
       syncPersistedTransferToken(null);
       setIssuedTransferLink(null);
       setResult((prev) =>
@@ -1040,7 +1042,7 @@ export default function VerifyExperience() {
             : "Checking secure registry."
           : error
             ? "Verification service unavailable."
-            : `${classMeta.title}. ${classMeta.subtitle}`}
+            : `${verificationCopy.title}. ${verificationCopy.subtitle}`}
       </div>
       <div className="mx-auto w-full max-w-4xl space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1183,8 +1185,8 @@ export default function VerifyExperience() {
                         <div className="flex min-w-0 gap-4">
                           <div className="mt-0.5 rounded-xl bg-white/15 p-2.5 ring-1 ring-white/25">{classMeta.icon}</div>
                           <div className="min-w-0">
-                            <h1 className="mt-1 text-2xl font-semibold tracking-tight">{classMeta.title}</h1>
-                            <p className="mt-2 text-sm leading-relaxed text-white/90">{classMeta.subtitle}</p>
+                            <h1 className="mt-1 text-2xl font-semibold tracking-tight">{verificationCopy.title}</h1>
+                            <p className="mt-2 text-sm leading-relaxed text-white/90">{verificationCopy.subtitle}</p>
                             <p className="mt-2 text-sm leading-relaxed text-white/90">{result?.message || "Verification completed."}</p>
                             {result?.warningMessage ? (
                               <p className="mt-2 text-sm leading-relaxed text-white/90">{result.warningMessage}</p>
@@ -1194,7 +1196,7 @@ export default function VerifyExperience() {
                         </div>
                         <div className="flex items-start gap-2 sm:gap-3">
                           <Badge className={cn("h-fit text-[11px] font-semibold uppercase tracking-wide", classMeta.badgeClass)}>
-                            {classMeta.badge}
+                            {verificationCopy.badge}
                           </Badge>
                           <VerificationConfidenceMeter
                             classification={classification}
@@ -1264,7 +1266,7 @@ export default function VerifyExperience() {
                           value: "verification-reasons",
                           title: "Verification Reasons",
                           subtitle: "Human-readable summary mapped from scan signals",
-                          badge: <Badge className="border-[#8d9db65e] bg-[#bccad638] text-[#4f5b75]">{classMeta.badge}</Badge>,
+                          badge: <Badge className="border-[#8d9db65e] bg-[#bccad638] text-[#4f5b75]">{verificationCopy.badge}</Badge>,
                           content: (
                             <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                               <p className="text-xs uppercase tracking-wide text-slate-500">Verified Code</p>
@@ -1421,17 +1423,17 @@ export default function VerifyExperience() {
 
                   <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-slate-900">Ownership</p>
+                      <p className="text-sm font-semibold text-slate-900">Protection</p>
                       {customerToken ? <Badge variant="outline">Signed in for protection</Badge> : null}
                     </div>
                     <div className="mt-3 space-y-4">
                       <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                        <p className="font-medium">Claim ownership</p>
+                        <p className="font-medium">Protect this item</p>
                         <p className="mt-1">
-                          Claiming helps protect you from duplicates and supports faster help if something looks wrong.
+                          Protecting this item helps MSCQR recognise trusted repeat checks and speeds up help if something looks wrong.
                         </p>
                         <p className="mt-2 text-xs text-slate-600">
-                          Device claim uses a secure device cookie plus hashed network evidence. Raw IP is never shown.
+                          You can protect it on this device right away, or sign in for protection that follows you across devices.
                         </p>
                       </div>
 
@@ -1464,12 +1466,12 @@ export default function VerifyExperience() {
                                 Claiming
                               </>
                             ) : (
-                              "Claim on this device"
+                              "Protect on this device"
                             )}
                           </Button>
                           {googleOauthUrl && !customerToken ? (
                             <Button asChild variant="outline" className={motionButtonClass} disabled={loading || claiming}>
-                              <a href={googleOauthUrl}>Sign in with Google for better protection</a>
+                              <a href={googleOauthUrl}>Sign in with Google for stronger protection</a>
                             </Button>
                           ) : null}
                         </div>
@@ -1494,7 +1496,7 @@ export default function VerifyExperience() {
                               Linking
                             </>
                           ) : (
-                            "Link this device claim to your account"
+                            "Move this device protection to your account"
                           )}
                         </Button>
                       ) : null}
@@ -1502,9 +1504,9 @@ export default function VerifyExperience() {
                       <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
-                            <p className="font-medium text-slate-900">Resale / ownership transfer</p>
+                            <p className="font-medium text-slate-900">Transfer to a new owner</p>
                             <p className="mt-1 text-xs text-slate-600">
-                              Use this when selling a genuine item to the next owner. The new buyer accepts the transfer from a secure link.
+                              Use this when selling or handing over a genuine item. The next owner accepts from a secure link.
                             </p>
                           </div>
                           {ownershipTransfer?.state && ownershipTransfer.state !== "none" ? (
@@ -1523,11 +1525,11 @@ export default function VerifyExperience() {
                             <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
                               <p className="font-medium">
                                 {ownershipTransfer?.active
-                                  ? "Sign in below to manage or resend your active resale transfer."
-                                  : "Sign in below to start a secure resale transfer."}
+                                  ? "Sign in below to manage or resend your active transfer."
+                                  : "Sign in below to start a secure ownership transfer."}
                               </p>
                               <p className="mt-1">
-                                Resale transfer runs from a signed-in customer session so the next owner can accept from a secure link.
+                                Transfers start from a signed-in customer session so the next owner can accept from a secure link.
                               </p>
                               <Button
                                 type="button"
@@ -1557,11 +1559,11 @@ export default function VerifyExperience() {
                           {ownershipTransfer?.canCreate ? (
                             <div className="flex flex-wrap items-center gap-2">
                               <Button type="button" variant="outline" onClick={() => setTransferOpen(true)} className={motionButtonClass}>
-                                Start resale transfer
+                                Start ownership transfer
                               </Button>
                               {issuedTransferLink ? (
                                 <Button type="button" variant="outline" onClick={handleCopyTransferLink}>
-                                  Copy latest transfer link
+                                  Copy latest handover link
                                 </Button>
                               ) : null}
                             </div>
@@ -1577,7 +1579,7 @@ export default function VerifyExperience() {
                             <div className="space-y-2">
                               <div className="flex flex-wrap items-center gap-2">
                                 <Button type="button" variant="outline" onClick={handleCopyTransferLink} disabled={!shareableTransferLink}>
-                                  Copy transfer link
+                                  Copy handover link
                                 </Button>
                                 <Button
                                   type="button"
@@ -1630,10 +1632,10 @@ export default function VerifyExperience() {
                                     Accepting
                                   </>
                                 ) : (
-                                  "Accept ownership transfer"
+                                  "Accept transfer"
                                 )}
                               </Button>
-                              <p className="text-xs text-slate-600">Sign-in is required so the new owner gets portable proof of ownership.</p>
+                              <p className="text-xs text-slate-600">Sign-in is required so the new owner gets protection that follows their account.</p>
                             </div>
                           ) : null}
                         </div>
@@ -1723,7 +1725,7 @@ export default function VerifyExperience() {
 
                   <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-slate-900">Report</p>
+                      <p className="text-sm font-semibold text-slate-900">Get help with this product</p>
                       {verifyUxPolicy.allowFraudReport ? (
                         <Button
                           data-testid="verify-open-incident-drawer"
@@ -1740,20 +1742,20 @@ export default function VerifyExperience() {
                           }}
                           className={cn("border-rose-300 text-rose-800 hover:bg-rose-50 hover:text-rose-900", motionButtonClass)}
                         >
-                          Open incident drawer
+                          Report a problem
                         </Button>
                       ) : (
-                        <Badge variant="outline">Reporting managed by tenant policy</Badge>
+                        <Badge variant="outline">Help requests are handled by your product team</Badge>
                       )}
                     </div>
                     <p className="mt-3 text-sm leading-relaxed text-slate-700">
                       {verifyUxPolicy.allowFraudReport
-                        ? "Reporting sends classification, reason summary, scan summary, ownership status, and tamper checks automatically."
-                        : "Counterfeit reporting is currently handled through your product owner support channel."}
+                        ? "MSCQR adds the verification result, safety signals, and product details for you automatically."
+                        : "Help for this product is currently handled through the product owner's support channel."}
                     </p>
 
                     <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Track existing support ticket</p>
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Track an existing help request</p>
                       <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_auto]">
                         <Input
                           value={trackReference}
@@ -1765,14 +1767,14 @@ export default function VerifyExperience() {
                           onChange={(e) => setTrackEmail(e.target.value)}
                           placeholder="Contact email (optional)"
                         />
-                        <Button variant="outline" onClick={handleTrackTicket} disabled={trackingTicket || loading}>
+                        <Button data-testid="verify-track-ticket" variant="outline" onClick={handleTrackTicket} disabled={trackingTicket || loading}>
                           {trackingTicket ? (
                             <>
                               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                               Tracking
                             </>
                           ) : (
-                            "Track status"
+                            "Check status"
                           )}
                         </Button>
                       </div>
@@ -1786,8 +1788,8 @@ export default function VerifyExperience() {
                             </span>
                           </p>
                           <p className="font-mono text-[11px] text-slate-500">{trackedTicket.referenceCode || trackReference}</p>
-                          <p>Status: {toLabel(trackedTicket.status || "open")}</p>
-                          {trackedTicket.handoffStage ? <p>Workflow stage: {toLabel(trackedTicket.handoffStage)}</p> : null}
+                          <p>Status: {getSupportStatusLabel(trackedTicket.status || "open")}</p>
+                          {trackedTicket.handoffStage ? <p>Current stage: {toLabel(trackedTicket.handoffStage)}</p> : null}
                           {trackedTicket.sla?.dueAt ? (
                             <p>
                               SLA due: {new Date(trackedTicket.sla.dueAt).toLocaleString()}
@@ -1835,16 +1837,16 @@ export default function VerifyExperience() {
       <Dialog open={claimConfirmOpen} onOpenChange={setClaimConfirmOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Confirm device claim</DialogTitle>
+            <DialogTitle>Confirm protection on this device</DialogTitle>
             <DialogDescription>
-              This will claim ownership on this device using secure device and network evidence.
+              This will protect the item on this device first.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
             <p>
-              This claim is tied to this device/network and may be weaker if your network changes. For stronger, portable ownership, sign in with Google or OTP and link the claim.
+              This protection stays tied to this device first. For stronger protection that follows your account, sign in with Google or email code.
             </p>
-            <p className="text-xs text-slate-600">Privacy: IP is hashed server-side and never displayed.</p>
+            <p className="text-xs text-slate-600">MSCQR does not show your raw IP address in the product UI.</p>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setClaimConfirmOpen(false)} disabled={claiming}>
@@ -1859,10 +1861,10 @@ export default function VerifyExperience() {
               {claiming ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Claiming
+                  Protecting
                 </>
               ) : (
-                "Confirm claim"
+                "Confirm protection"
               )}
             </Button>
           </DialogFooter>
@@ -1872,9 +1874,9 @@ export default function VerifyExperience() {
       <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Start resale transfer</DialogTitle>
+            <DialogTitle>Start ownership transfer</DialogTitle>
             <DialogDescription>
-              Create a short-lived secure transfer link for the next owner. They will verify the product and accept the transfer from that link.
+              Create a short-lived secure link for the next owner. They can verify the product and accept the handover from that link.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -1888,12 +1890,12 @@ export default function VerifyExperience() {
                 disabled={transferSubmitting}
               />
               <p className="text-xs text-slate-600">
-                Leave this blank if you only want to copy the transfer link and share it manually.
+                Leave this blank if you only want to copy the link and share it yourself.
               </p>
             </div>
             {issuedTransferLink ? (
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
-                <p className="font-medium text-slate-900">Latest transfer link</p>
+                <p className="font-medium text-slate-900">Latest handover link</p>
                 <p className="mt-2 break-all font-mono">{issuedTransferLink}</p>
               </div>
             ) : null}
@@ -1919,7 +1921,7 @@ export default function VerifyExperience() {
                   Creating
                 </>
               ) : (
-                "Create transfer"
+                "Create handover link"
               )}
             </Button>
           </DialogFooter>
@@ -1934,9 +1936,9 @@ export default function VerifyExperience() {
         >
           <div className="flex h-full flex-col">
             <SheetHeader className="border-b border-[#8d9db63f] bg-white/70 px-6 py-5 text-left">
-              <SheetTitle className="text-[#4f5b75]">Report Suspected Counterfeit</SheetTitle>
+              <SheetTitle className="text-[#4f5b75]">Report a problem with this product</SheetTitle>
               <SheetDescription>
-                Provide investigation details. Verification metadata will be attached automatically.
+                Tell us what looked wrong. MSCQR adds the verification details for you automatically.
               </SheetDescription>
             </SheetHeader>
 
@@ -1986,7 +1988,7 @@ export default function VerifyExperience() {
                       data-testid="verify-report-description"
                       value={reportDescription}
                       onChange={(e) => setReportDescription(e.target.value)}
-                      placeholder="Describe what looked suspicious."
+                      placeholder="Describe what looked wrong or unexpected."
                       rows={4}
                       maxLength={2000}
                     />
@@ -2011,7 +2013,7 @@ export default function VerifyExperience() {
                       accept="image/png,image/jpeg,image/jpg,image/webp"
                       onChange={(e) => setReportPhotos(Array.from(e.target.files || []))}
                     />
-                    <p className="text-xs text-slate-500">Up to 4 images can be uploaded.</p>
+                    <p className="text-xs text-slate-500">You can upload up to 4 images.</p>
                   </div>
                 </div>
               )}
@@ -2035,7 +2037,7 @@ export default function VerifyExperience() {
                       Submitting
                     </>
                   ) : (
-                    "Submit report"
+                    "Send help request"
                   )}
                 </Button>
               ) : null}

@@ -3,6 +3,7 @@ import { format } from "date-fns";
 import { AlertTriangle, CheckCircle2, FileText, Filter, Loader2, Mail, RefreshCw, Search, ShieldAlert, Upload } from "lucide-react";
 
 import { friendlyReferenceLabel, shortRawReference } from "@/lib/friendly-reference";
+import { ActionButton } from "@/components/ui/action-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -11,6 +12,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { createUiActionState } from "@/lib/ui-actions";
+import { getIncidentSeverityLabel, getIncidentStageLabel, getIncidentStatusLabel } from "@/lib/ui-copy";
 
 import {
   incidentPayloadValueToText,
@@ -114,27 +117,36 @@ export function IncidentResponseWorkspace({
             <ShieldAlert className="h-5 w-5 text-red-600" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Incident Response</h1>
-            <p className="text-sm text-slate-600">Triage customer fraud reports, assign actions, and track resolution.</p>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Incident Desk</h1>
+            <p className="text-sm text-slate-600">Review reports, assign ownership, update customers, and close each case clearly.</p>
           </div>
         </div>
-        <Button variant="outline" onClick={() => void onRefresh()}>
-          <RefreshCw className="mr-2 h-4 w-4" />
-          Refresh
-        </Button>
+        <ActionButton
+          variant="outline"
+          onClick={() => void onRefresh()}
+          state={loading ? createUiActionState("pending", "Refreshing the latest case list.") : createUiActionState("enabled")}
+          idleLabel={
+            <>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Refresh
+            </>
+          }
+          pendingLabel="Refreshing..."
+          showReasonBelow={false}
+        />
       </div>
 
       <Card className="border-slate-200">
         <CardHeader className="flex flex-col gap-3 border-b bg-slate-50/70 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
             <Filter className="h-4 w-4 text-slate-500" />
-            <span className="font-semibold">Filters</span>
+            <span className="font-semibold">Find cases</span>
           </div>
           <div className="relative w-full sm:max-w-sm">
             <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
             <Input
               className="pl-9"
-              placeholder="Search by code / description / contact"
+              placeholder="Search by code, message, or contact"
               value={filters.search}
               onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
             />
@@ -193,17 +205,21 @@ export function IncidentResponseWorkspace({
             <Label className="text-xs font-medium text-slate-600">To date</Label>
             <Input type="date" value={filters.dateTo} onChange={(e) => setFilters((prev) => ({ ...prev, dateTo: e.target.value }))} />
           </div>
-          <Button onClick={() => void onRefresh()} disabled={loading} className="bg-slate-900 text-white hover:bg-slate-800">
-            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Apply
-          </Button>
+          <ActionButton
+            data-testid="incident-apply-filters"
+            onClick={() => void onRefresh()}
+            state={loading ? createUiActionState("pending", "Refreshing the case list with these filters.") : createUiActionState("enabled")}
+            idleLabel="Refresh results"
+            pendingLabel="Refreshing..."
+            showReasonBelow={false}
+          />
         </CardContent>
       </Card>
 
       <div className="grid gap-6 xl:grid-cols-[1.1fr,1fr]">
         <Card className="border-slate-200">
           <CardHeader className="flex flex-row items-center justify-between border-b bg-slate-50/70">
-            <span className="font-semibold">Incidents</span>
+            <span className="font-semibold">Cases</span>
             <Badge className="border-slate-200 bg-white text-slate-700">{incidents.length} items</Badge>
           </CardHeader>
           <CardContent className="pt-4">
@@ -243,12 +259,12 @@ export function IncidentResponseWorkspace({
                         <TableCell className="text-sm text-slate-700">{toIncidentLabel(item.incidentType)}</TableCell>
                         <TableCell>
                           <Badge className={INCIDENT_SEVERITY_TONE[item.severity] || "border-slate-300 bg-slate-100 text-slate-700"}>
-                            {toIncidentLabel(item.severity)}
+                            {getIncidentSeverityLabel(item.severity)}
                           </Badge>
                         </TableCell>
                         <TableCell>
                           <Badge className={INCIDENT_STATUS_TONE[item.status] || "border-slate-300 bg-slate-100 text-slate-700"}>
-                            {toIncidentLabel(item.status)}
+                            {getIncidentStatusLabel(item.status)}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-xs text-slate-600">{format(new Date(item.createdAt), "PPp")}</TableCell>
@@ -263,10 +279,10 @@ export function IncidentResponseWorkspace({
 
         <Card className="border-slate-200">
           <CardHeader className="flex flex-row items-center justify-between border-b bg-slate-50/70">
-            <span className="font-semibold">Incident Detail</span>
+            <span className="font-semibold">Case details</span>
             {selectedIncident ? (
               <Badge className={INCIDENT_STATUS_TONE[selectedIncident.status] || "border-slate-300 bg-slate-100 text-slate-700"}>
-                {toIncidentLabel(selectedIncident.status)}
+                {getIncidentStatusLabel(selectedIncident.status)}
               </Badge>
             ) : null}
           </CardHeader>
@@ -296,7 +312,7 @@ export function IncidentResponseWorkspace({
                     </div>
                     <div>
                       <span className="text-slate-500">Workflow stage</span>
-                      <div>{toIncidentLabel(detail.handoff?.currentStage || "INTAKE")}</div>
+                      <div>{getIncidentStageLabel(detail.handoff?.currentStage || "INTAKE")}</div>
                     </div>
                     <div>
                       <span className="text-slate-500">Support ticket</span>
@@ -317,7 +333,7 @@ export function IncidentResponseWorkspace({
                     </p>
                   ) : null}
                   <p className="mt-2 text-xs text-slate-600">
-                    Guided handoff: Intake to Review to Containment to Documentation to Resolution.
+                    Case flow: New report to Review to Containment to Documentation to Resolution.
                   </p>
                 </div>
 
@@ -331,23 +347,23 @@ export function IncidentResponseWorkspace({
                       <SelectContent>
                         {["NEW", "TRIAGED", "INVESTIGATING", "AWAITING_CUSTOMER", "AWAITING_LICENSEE", "MITIGATED", "RESOLVED", "CLOSED", "REJECTED_SPAM"].map((status) => (
                           <SelectItem key={status} value={status}>
-                            {toIncidentLabel(status)}
+                            {getIncidentStatusLabel(status)}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Assign to</Label>
+                    <Label>Owner</Label>
                     <Select
                       value={updatePayload.assignedToUserId || "unassigned"}
                       onValueChange={(value) => setUpdatePayload((prev) => ({ ...prev, assignedToUserId: value }))}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select admin" />
+                        <SelectValue placeholder="Choose team owner" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="unassigned">Unassigned</SelectItem>
+                        <SelectItem value="unassigned">No owner yet</SelectItem>
                         {users.map((userOption) => (
                           <SelectItem key={userOption.id} value={userOption.id}>
                             {userOption.name || userOption.email}
@@ -368,14 +384,14 @@ export function IncidentResponseWorkspace({
                       <SelectContent>
                         {["LOW", "MEDIUM", "HIGH", "CRITICAL"].map((severity) => (
                           <SelectItem key={severity} value={severity}>
-                            {toIncidentLabel(severity)}
+                            {getIncidentSeverityLabel(severity)}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Resolution outcome</Label>
+                    <Label>Outcome</Label>
                     <Select
                       value={updatePayload.resolutionOutcome || "none"}
                       onValueChange={(value) => setUpdatePayload((prev) => ({ ...prev, resolutionOutcome: value }))}
@@ -394,7 +410,7 @@ export function IncidentResponseWorkspace({
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Tags (comma separated)</Label>
+                  <Label>Tags</Label>
                   <Input
                     value={updatePayload.tags}
                     onChange={(e) => setUpdatePayload((prev) => ({ ...prev, tags: e.target.value }))}
@@ -403,7 +419,7 @@ export function IncidentResponseWorkspace({
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Internal notes</Label>
+                  <Label>Team notes</Label>
                   <Textarea rows={3} value={updatePayload.internalNotes} onChange={(e) => setUpdatePayload((prev) => ({ ...prev, internalNotes: e.target.value }))} />
                 </div>
 
@@ -413,10 +429,20 @@ export function IncidentResponseWorkspace({
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <Button onClick={() => void onSaveUpdates()} disabled={saving} className="bg-slate-900 text-white hover:bg-slate-800">
-                    {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
-                    Save updates
-                  </Button>
+                  <ActionButton
+                    data-testid="incident-save-updates"
+                    onClick={() => void onSaveUpdates()}
+                    state={saving ? createUiActionState("pending", "Saving the latest case changes.") : createUiActionState("enabled")}
+                    idleLabel={
+                      <>
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        Save case changes
+                      </>
+                    }
+                    pendingLabel="Saving..."
+                    className="bg-slate-900 text-white hover:bg-slate-800"
+                    showReasonBelow={false}
+                  />
                   <Button variant="outline" onClick={() => void onExportPdf()} disabled={exportingPdf}>
                     {exportingPdf ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
                     Export PDF
@@ -425,24 +451,24 @@ export function IncidentResponseWorkspace({
                     Mark resolved
                   </Button>
                   <Button variant="outline" onClick={() => void onQuickStatus("REJECTED_SPAM")} disabled={saving}>
-                    Reject as spam
+                    Mark as spam
                   </Button>
                 </div>
 
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="mb-2 text-sm font-semibold">Customer update</p>
+                  <p className="mb-2 text-sm font-semibold">Customer message</p>
                   <div className="mb-2 space-y-1 text-xs text-slate-500">
                     <p>To: {detail.customerEmail || "No customer email on file"}</p>
                     <p>Consent: {detail.consentToContact ? "Yes" : "No"}</p>
                     {canUseSystemIncidentSender ? (
                       <div className="max-w-xs">
-                        <Label className="mb-1 block text-xs font-medium text-slate-600">Sender mode</Label>
+                        <Label className="mb-1 block text-xs font-medium text-slate-600">Send from</Label>
                         <Select value={customerSenderMode} onValueChange={(value) => setCustomerSenderMode(value as "actor" | "system")}>
                           <SelectTrigger className="h-8 bg-white text-xs">
-                            <SelectValue placeholder="Sender mode" />
+                            <SelectValue placeholder="Choose sender" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="system">System sender (superadmin mailbox)</SelectItem>
+                            <SelectItem value="system">System mailbox</SelectItem>
                             <SelectItem value="actor">My profile email</SelectItem>
                           </SelectContent>
                         </Select>
@@ -458,20 +484,30 @@ export function IncidentResponseWorkspace({
                   <div className="space-y-2">
                     <Input value={customerSubject} onChange={(e) => setCustomerSubject(e.target.value)} placeholder="Email subject" />
                     <Textarea rows={3} value={customerMessage} onChange={(e) => setCustomerMessage(e.target.value)} placeholder="Write update message..." />
-                    <Button
+                    <ActionButton
+                      data-testid="incident-send-customer-update"
                       onClick={() => void onSendCustomerUpdate()}
-                      disabled={
-                        sendingCustomerEmail ||
-                        !detail.customerEmail ||
-                        !detail.consentToContact ||
-                        customerSubject.trim().length < 3 ||
-                        customerMessage.trim().length < 3
+                      state={
+                        sendingCustomerEmail
+                          ? createUiActionState("pending", "Sending the customer update now.")
+                          : !detail.customerEmail
+                            ? createUiActionState("disabled", "Add a customer email before you send an update.")
+                            : !detail.consentToContact
+                              ? createUiActionState("disabled", "Customer contact consent is required before you send this message.")
+                              : customerSubject.trim().length < 3 || customerMessage.trim().length < 3
+                                ? createUiActionState("disabled", "Add a subject and message before sending.")
+                                : createUiActionState("enabled")
                       }
+                      idleLabel={
+                        <>
+                          <Mail className="mr-2 h-4 w-4" />
+                          Send customer update
+                        </>
+                      }
+                      pendingLabel="Sending..."
                       className="bg-cyan-700 text-white hover:bg-cyan-800"
-                    >
-                      <Mail className="mr-2 h-4 w-4" />
-                      {sendingCustomerEmail ? "Sending..." : "Send update to customer"}
-                    </Button>
+                      showReasonBelow={false}
+                    />
                     {lastCustomerEmailDelivery ? (
                       <div
                         className={`rounded-md border px-3 py-2 text-xs ${
@@ -500,13 +536,21 @@ export function IncidentResponseWorkspace({
                 </div>
 
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="mb-2 text-sm font-semibold">Evidence</p>
+                  <p className="mb-2 text-sm font-semibold">Files</p>
                   <div className="flex flex-wrap items-center gap-2">
                     <Input type="file" onChange={(e) => setEvidenceFile(e.target.files?.[0] || null)} />
-                    <Button onClick={() => void onUploadEvidence()} disabled={!evidenceFile}>
-                      <Upload className="mr-2 h-4 w-4" />
-                      Upload
-                    </Button>
+                    <ActionButton
+                      data-testid="incident-upload-evidence"
+                      onClick={() => void onUploadEvidence()}
+                      state={!evidenceFile ? createUiActionState("disabled", "Choose a file before you upload it.") : createUiActionState("enabled")}
+                      idleLabel={
+                        <>
+                          <Upload className="mr-2 h-4 w-4" />
+                          Upload file
+                        </>
+                      }
+                      showReasonBelow={false}
+                    />
                   </div>
                   <div className="mt-3 space-y-2">
                     {detail.evidence.length === 0 ? (
@@ -528,7 +572,7 @@ export function IncidentResponseWorkspace({
                 </div>
 
                 <div className="rounded-xl border border-slate-200 bg-white p-3">
-                  <p className="mb-2 text-sm font-semibold">Timeline</p>
+                  <p className="mb-2 text-sm font-semibold">Case timeline</p>
                   <div className="max-h-56 space-y-2 overflow-auto">
                     {detail.events.length === 0 ? (
                       <p className="text-xs text-slate-500">No timeline events yet.</p>
@@ -554,10 +598,18 @@ export function IncidentResponseWorkspace({
 
                   <div className="mt-3 space-y-2">
                     <Textarea rows={2} value={newNote} onChange={(e) => setNewNote(e.target.value)} placeholder="Add investigation note..." />
-                    <Button variant="outline" onClick={() => void onAddNote()} disabled={!newNote.trim()}>
-                      <AlertTriangle className="mr-2 h-4 w-4" />
-                      Add note
-                    </Button>
+                    <ActionButton
+                      variant="outline"
+                      onClick={() => void onAddNote()}
+                      state={!newNote.trim() ? createUiActionState("disabled", "Write the note before you add it.") : createUiActionState("enabled")}
+                      idleLabel={
+                        <>
+                          <AlertTriangle className="mr-2 h-4 w-4" />
+                          Add timeline note
+                        </>
+                      }
+                      showReasonBelow={false}
+                    />
                   </div>
                 </div>
               </>

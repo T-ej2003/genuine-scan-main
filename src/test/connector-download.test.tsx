@@ -80,7 +80,7 @@ describe("ConnectorDownload", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("Install MSCQR Connector")).toBeInTheDocument();
+    expect(await screen.findByText("Install printer helper")).toBeInTheDocument();
     expect(screen.getByText(/Acme Factory 1/i)).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: /download for mac/i })).toHaveAttribute(
       "href",
@@ -92,7 +92,7 @@ describe("ConnectorDownload", () => {
     );
     expect(screen.getByText(/Extract the ZIP fully before running/i)).toBeInTheDocument();
     expect(screen.getByText(/Run the installer once/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/verifies local printer readiness/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/checks whether the local printer is really ready/i).length).toBeGreaterThan(0);
   });
 
   it("repairs legacy connector links that still point at /public instead of /api/public", async () => {

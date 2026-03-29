@@ -130,10 +130,10 @@ export function PrinterOnboardingDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[680px]">
         <DialogHeader>
-          <DialogTitle>Set up printing on this workstation</DialogTitle>
+          <DialogTitle>Set up printing on this computer</DialogTitle>
           <DialogDescription>
-            Install the MSCQR Connector once on the printing computer. After that it starts automatically and MSCQR
-            can detect the printer without any manual launch steps.
+            Install the MSCQR printer helper once on the computer that prints. After that it starts automatically and
+            MSCQR can find the printer without any extra launch steps.
           </DialogDescription>
         </DialogHeader>
 
@@ -141,26 +141,26 @@ export function PrinterOnboardingDialog({
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
             <div className="font-semibold text-slate-950">What this does not do</div>
             <p className="mt-2 leading-6">
-              The browser cannot install printers, drivers, or native apps by itself. Those remain workstation setup
-              steps.
+              The browser cannot install printers, drivers, or desktop apps by itself. Those still need to be set up on
+              the computer first.
             </p>
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <div className="font-semibold text-slate-950">What the manufacturer should do once per device</div>
+            <div className="font-semibold text-slate-950">What to do once on each printing computer</div>
             <ol className="mt-3 list-decimal space-y-2 pl-5">
-              <li>Install or connect the printer in the operating system first.</li>
-              <li>Open <strong>Install Connector</strong> and download the Mac or Windows installer for that same device.</li>
-              <li>Run the installer once. The connector will auto-start at sign-in after that.</li>
+              <li>Make sure the printer already appears in the computer&apos;s printer list.</li>
+              <li>Open <strong>Install printer helper</strong> and download the Mac or Windows installer for this computer.</li>
+              <li>Run the installer once. The helper starts automatically after that.</li>
               <li>Return here and use <strong>Check again</strong>.</li>
-              <li>If the OS can see the printer, MSCQR will detect it and it will appear automatically.</li>
+              <li>If the computer can see the printer, MSCQR will pick it up automatically.</li>
             </ol>
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-white p-4">
             <div className="font-semibold text-slate-950">Current readiness</div>
             <ul className="mt-3 list-disc space-y-2 pl-5">
-              <li>Connector online: {localPrinterAgent.reachable ? "Yes" : "No"}</li>
+              <li>Printer helper online: {localPrinterAgent.reachable ? "Yes" : "No"}</li>
               <li>Printer detected: {printerHasInventory ? "Yes" : "No"}</li>
               <li>Selected printer: {selectedPrinterName || "None yet"}</li>
             </ul>
@@ -168,11 +168,11 @@ export function PrinterOnboardingDialog({
 
           <div className="flex flex-wrap gap-3">
             <Button variant="outline" onClick={onInstallConnector}>
-              Install Connector
+              Install printer helper
             </Button>
             <Button onClick={onCheckAgain}>Check again</Button>
             <Button variant="ghost" onClick={onOpenHelp}>
-              Open Help
+              Open help
             </Button>
             <Button variant="ghost" onClick={onCloseForNow}>
               Close for now
@@ -263,8 +263,8 @@ export function PrinterStatusDialog({
         <DialogHeader>
           <DialogTitle>Printing Status</DialogTitle>
           <DialogDescription>
-            Review live printer readiness, switch workstation printers when needed, and keep managed
-            `NETWORK_DIRECT` and `NETWORK_IPP` routes visible before you print.
+            Check whether printing is ready, switch printers on this computer when needed, and keep saved network
+            printers visible before you start a print run.
           </DialogDescription>
         </DialogHeader>
 
@@ -310,7 +310,7 @@ export function PrinterStatusDialog({
                           variant="outline"
                           className="border-amber-300 bg-amber-100 text-amber-900"
                         >
-                          Degraded connector mode
+                          Recovery mode
                         </Badge>
                       ) : null}
                     </div>
@@ -400,8 +400,8 @@ export function PrinterStatusDialog({
                   <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
                     <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-700" />
                     <div>
-                      <div className="font-medium text-amber-950">Connector mode</div>
-                      <div className="text-xs text-amber-800">Degraded mode active while secure printer storage recovers</div>
+                      <div className="font-medium text-amber-950">Recovery mode</div>
+                      <div className="text-xs text-amber-800">Printing is staying available while secure printer settings catch up</div>
                     </div>
                   </div>
                 ) : null}
@@ -413,13 +413,12 @@ export function PrinterStatusDialog({
             <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div>
                 <div>
-                  <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Managed network routes</div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Saved network printers</div>
                   <div className="mt-1 text-lg font-semibold text-slate-950">
-                    {managedNetworkPrinters.length === 1 ? "1 managed printer route" : `${managedNetworkPrinters.length} managed printer routes`}
+                    {managedNetworkPrinters.length === 1 ? "1 saved network printer" : `${managedNetworkPrinters.length} saved network printers`}
                   </div>
                   <p className="mt-1 text-sm text-slate-600">
-                    These saved `NETWORK_DIRECT` and `NETWORK_IPP` routes print through MSCQR without depending on the
-                    workstation printer list.
+                    These saved printers work through MSCQR without depending on the printer list on this computer.
                   </p>
                 </div>
               </div>
@@ -449,7 +448,7 @@ export function PrinterStatusDialog({
                       <div className="mt-3 text-xs leading-5 text-slate-600">
                         {sanitizePrinterUiError(
                           printer.registryStatus?.detail,
-                          "This managed printer route needs attention before it can be used."
+                          "This saved printer needs attention before it can be used."
                         )}
                       </div>
                     </div>
@@ -467,7 +466,7 @@ export function PrinterStatusDialog({
                   {detectedPrinters.length > 0 ? printerDiscoveryCountLabel : "No printer connection detected"}
                 </div>
                 <p className="mt-1 text-sm text-slate-600">
-                  Review the printers available on this workstation and choose the one you want MSCQR to use.
+                  Review the printers available on this computer and choose the one you want MSCQR to use.
                 </p>
               </div>
               <Button variant="outline" className="gap-2" onClick={onRefreshStatus} disabled={printerSwitching}>
@@ -483,15 +482,15 @@ export function PrinterStatusDialog({
                 </div>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
                   {managedNetworkPrinters.length > 0
-                    ? "The workstation connector is not reporting a local printer right now, but your managed network routes are still available above."
-                    : "MSCQR could not find a ready printer on this workstation. Make sure the printer is available in the operating system, then refresh the connection status."}
+                    ? "The printer helper is not reporting a local printer right now, but your saved network printers are still available above."
+                    : "MSCQR could not find a ready printer on this computer. Make sure the printer is available in the operating system, then refresh the status."}
                 </p>
                 <div className="mt-4 flex flex-wrap gap-3">
                   <Button onClick={onRefreshStatus} disabled={printerSwitching}>
                     Refresh status
                   </Button>
                   <Button variant="outline" onClick={onOpenBatches}>
-                    Open batches
+                    Go to batches
                   </Button>
                   <Button variant="ghost" onClick={onOpenHelp}>
                     Open help
@@ -543,7 +542,7 @@ export function PrinterStatusDialog({
                               {row.connection ? ` · ${row.connection}` : ""}
                             </div>
                             <div className="mt-2 text-xs text-slate-500">
-                              {row.languages?.join(", ") || "AUTO"} · {row.mediaSizes?.join(", ") || "Auto media"}
+                              {row.languages?.join(", ") || "Automatic"} · {row.mediaSizes?.join(", ") || "Auto paper size"}
                             </div>
                           </div>
                         </button>
@@ -554,7 +553,7 @@ export function PrinterStatusDialog({
                           disabled={printerSwitching || isActive}
                           onClick={() => onSwitchLocalPrinter(row.printerId)}
                         >
-                          {isActive ? "Active printer" : "Make active"}
+                          {isActive ? "Active printer" : "Use this printer"}
                         </Button>
                       </div>
                     </div>
@@ -570,7 +569,7 @@ export function PrinterStatusDialog({
                 <Label className="text-sm font-medium text-slate-900">Select printer</Label>
                 <Select value={selectedLocalPrinterId} onValueChange={onSelectedLocalPrinterChange}>
                   <SelectTrigger className="md:w-[24rem]">
-                    <SelectValue placeholder="Select connected printer" />
+                    <SelectValue placeholder="Choose a printer on this computer" />
                   </SelectTrigger>
                   <SelectContent>
                     {detectedPrinters.length === 0 ? (
@@ -597,25 +596,24 @@ export function PrinterStatusDialog({
                   disabled={printerSwitching || !selectedLocalPrinterId || selectedPrinterIsActive}
                   onClick={() => onSwitchLocalPrinter()}
                 >
-                  {printerSwitching ? "Switching..." : "Switch printer"}
+                  {printerSwitching ? "Saving..." : "Use selected printer"}
                 </Button>
                 <Button size="sm" variant="ghost" onClick={onOpenBatches}>
-                  Open batches
+                  Go to batches
                 </Button>
               </div>
             </div>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="text-sm font-semibold text-slate-950">Need printer help?</div>
+            <div className="text-sm font-semibold text-slate-950">Need help getting ready?</div>
             <p className="mt-1 text-sm text-slate-600">
-              Use these quick actions if the workstation connector or printer still needs attention before batch
-              printing.
+              Use these quick actions if the printer helper or printer still needs attention before you print.
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               {managedNetworkPrinters.length === 0 ? (
                 <Button variant="outline" onClick={onInstallConnector}>
-                  Install Connector
+                  Install printer helper
                 </Button>
               ) : null}
               <Button variant="ghost" onClick={onOpenHelp}>

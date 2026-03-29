@@ -134,7 +134,7 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     return {
       success: false as const,
       error:
-        "Browser-mediated direct printing has been disabled. Create a controlled print job and let the MSCQR connector claim it directly from the server.",
+        "Direct browser printing is no longer available. Start a print run in MSCQR and let the printer helper handle it securely.",
     };
   },
 
@@ -142,7 +142,7 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     return {
       success: false as const,
       error:
-        "Browser-mediated direct printing has been disabled. Create a controlled print job and let the MSCQR connector claim it directly from the server.",
+        "Direct browser printing is no longer available. Start a print run in MSCQR and let the printer helper handle it securely.",
     };
   },
 
@@ -157,7 +157,7 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     return {
       success: false as const,
       error:
-        "Browser-mediated direct printing has been disabled. The MSCQR connector now confirms printed labels directly with the server.",
+        "Manual browser confirmation is no longer available. MSCQR now waits for the printer helper or saved printer to confirm completion.",
     };
   },
 
@@ -174,7 +174,7 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     return {
       success: false as const,
       error:
-        "Browser-mediated direct printing has been disabled. The MSCQR connector now reports print failures directly to the server.",
+        "Manual browser failure reporting is no longer available. MSCQR now waits for the printer helper or saved printer to report the result.",
     };
   },
 
@@ -182,7 +182,7 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     return {
       success: false as const,
       error:
-        "Manual browser print confirmation has been disabled. Wait for the MSCQR connector or certified printer route to confirm the job.",
+        "Manual browser confirmation is no longer available. Wait for the printer helper or saved printer to confirm the print run.",
     };
   },
 
@@ -557,7 +557,7 @@ export const createPrintingApi = (core: ApiClientCore) => ({
       return { success: false, error: "Local print agent does not expose calibration endpoint" };
     } catch (error: any) {
       const aborted = error?.name === "AbortError";
-      return { success: false, error: aborted ? "Local calibration request timed out" : "Local print agent is unavailable" };
+      return { success: false, error: aborted ? "Printer setup check timed out" : "Printer helper is unavailable" };
     } finally {
       window.clearTimeout(timeout);
     }
@@ -584,7 +584,7 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     return {
       success: false as const,
       error:
-        "Legacy browser-submitted local printing has been disabled. Create a controlled MSCQR print job so the connector can claim approved work directly from the server.",
+        "Direct browser printing is no longer available. Start a print run in MSCQR and let the printer helper handle it securely.",
     };
   },
 

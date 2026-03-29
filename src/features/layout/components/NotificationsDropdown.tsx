@@ -179,6 +179,7 @@ export function NotificationsDropdown({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
+          data-testid="open-notifications"
           variant="ghost"
           size="icon"
           className="relative mr-1 overflow-visible rounded-full border-white/50 bg-white/65 shadow-[0_12px_22px_-18px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-white/5"

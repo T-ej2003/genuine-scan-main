@@ -239,7 +239,7 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
         title: "Printer unavailable",
         description: sanitizePrinterUiError(
           livePrinterStatus.error,
-          "Reconnect the MSCQR Connector or choose a ready workstation printer before creating a job."
+          "Make sure the printer helper is running or choose a ready printer on this computer before starting a print run."
         ),
         variant: "destructive",
       });
@@ -273,8 +273,8 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
       selectedPrinterProfile.nativePrinterId !== activeLocalPrinterId
     ) {
       toast({
-        title: "Active workstation printer mismatch",
-        description: "Switch the local agent to the registered printer profile you selected, then retry.",
+        title: "Selected printer changed",
+        description: "Choose the same printer in MSCQR and on this computer, then try again.",
         variant: "destructive",
       });
       return;
@@ -419,14 +419,14 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
       description:
         createdMode === "NETWORK_IPP"
           ? `Sending ${quantity} label${quantity === 1 ? "" : "s"} to ${selectedPrinterProfile.name} over ${
-              selectedPrinterProfile.deliveryMode === "SITE_GATEWAY" ? "the site connector" : "the office printer route"
+              selectedPrinterProfile.deliveryMode === "SITE_GATEWAY" ? "the site print link" : "the saved office printer"
             }.`
           : `Dispatching ${quantity} label${quantity === 1 ? "" : "s"} to ${selectedPrinterProfile.name}.`,
     });
     setPrintProgressPhase(
       createdMode === "NETWORK_IPP"
         ? selectedPrinterProfile.deliveryMode === "SITE_GATEWAY"
-          ? "Waiting for site connector dispatch"
+          ? "Waiting for site print link"
           : "Sending to saved office printer"
         : "Sending to saved factory printer"
     );
@@ -465,28 +465,28 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
     }
   } else {
     toast({
-      title: "Connector print started",
-      description: `MSCQR has queued approved labels for ${selectedPrinterProfile.name}. The connector will claim and print them securely.`,
+      title: "Print run started",
+      description: `MSCQR queued approved labels for ${selectedPrinterProfile.name}. The printer helper will pick them up and print them securely.`,
     });
     setPrintProgressPhase(
-      data.pipelineState === "QUEUED" ? "Waiting for connector claim" : "Connector print session active"
+      data.pipelineState === "QUEUED" ? "Waiting for printer helper" : "Print run active on this computer"
     );
 
     const pollResult = await pollPrintJobUntilSettled(createdJobId, context, 60_000);
     if (pollResult.settled && pollResult.job?.status === "CONFIRMED") {
       toast({
-        title: "Connector print complete",
-        description: `${pollResult.job.session?.confirmedItems || quantity} labels were confirmed through the controlled connector pipeline.`,
+        title: "Print run complete",
+        description: `${pollResult.job.session?.confirmedItems || quantity} labels were confirmed after printing finished.`,
       });
       setPrintProgressPhase("Completed");
       setPrintProgressError(null);
     } else if (pollResult.settled && pollResult.job?.status === "FAILED") {
       const safeError = sanitizePrinterUiError(
         pollResult.job.failureReason || pollResult.job.session?.failedReason,
-        "The connector or printer could not complete this label run."
+        "The printer helper or printer could not finish this label run."
       );
       toast({
-        title: "Connector print needs attention",
+        title: "Print run needs attention",
         description: safeError,
         variant: "destructive",
       });
@@ -503,8 +503,8 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
       });
     } else {
       toast({
-        title: "Connector print continues in background",
-        description: "The secure connector is still processing this job. Refresh the print status to see the latest confirmed count.",
+        title: "Print run continues in background",
+        description: "Printing is still in progress. Refresh the print status to see the latest confirmed count.",
       });
     }
   }
@@ -564,14 +564,14 @@ export const retryPendingDirectPrint = async (context: BatchPrintOperationContex
       title: "Print job needs attention",
       description: sanitizePrinterUiError(
         pollResult.job.failureReason || pollResult.job.session?.failedReason,
-        "The connector or printer could not complete the remaining labels."
+        "The printer helper or printer could not finish the remaining labels."
       ),
       variant: "destructive",
     });
   } else {
     toast({
       title: "Print job still running",
-      description: `The connector still has ${remaining} label${remaining === 1 ? "" : "s"} to confirm.`,
+      description: `There are still ${remaining} label${remaining === 1 ? "" : "s"} waiting for printer confirmation.`,
     });
   }
   await loadRecentPrintJobs();

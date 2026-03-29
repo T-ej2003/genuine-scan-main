@@ -20,7 +20,7 @@ describe("printer diagnostics summary", () => {
     });
 
     expect(summary.state).toBe("agent_unreachable");
-    expect(summary.badgeLabel).toBe("Connector offline");
+    expect(summary.badgeLabel).toBe("Helper offline");
   });
 
   it("flags no printers detected when agent is reachable without printer inventory", () => {

@@ -12,8 +12,8 @@ export const PRINTER_FAILURE_AUTO_REPORT_COOLDOWN_MS = 3 * 60 * 1000;
 
 export const formatDispatchModeLabel = (mode?: string | null) => {
   if (mode === "NETWORK_DIRECT") return "Factory label printer";
-  if (mode === "NETWORK_IPP") return "Office / AirPrint printer";
-  if (mode === "LOCAL_AGENT") return "Workstation printer";
+  if (mode === "NETWORK_IPP") return "Office printer";
+  if (mode === "LOCAL_AGENT") return "Printer on this computer";
   return "Printer";
 };
 
@@ -72,7 +72,7 @@ export const buildManagedNetworkPrinterNotice = (
       summary: `${printer.name} is saved, but it is not reachable right now.`,
       detail: sanitizePrinterUiError(
         printer.registryStatus?.detail,
-        "Bring the printer or site connector online and run the check again before printing."
+        "Bring the printer or site print link online and run the check again before printing."
       ),
       tone: "danger",
     };

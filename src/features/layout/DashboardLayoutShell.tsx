@@ -148,110 +148,123 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         ) : null}
 
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-card px-4 lg:px-6">
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="rounded-md p-2 hover:bg-muted lg:hidden"
-            aria-label="Open sidebar"
-          >
-            <Menu className="h-6 w-6" />
-          </button>
-
-          <div className="flex-1" />
-
-          <NotificationsDropdown
-            unreadNotifications={notificationCenter.unreadNotifications}
-            visibleNotifications={notificationCenter.visibleNotifications}
-            notificationsLoading={notificationCenter.notificationsLoading}
-            notificationsLive={notificationCenter.notificationsLive}
-            clearingNotificationIdSet={notificationCenter.clearingNotificationIdSet}
-            clearingNotifications={notificationCenter.clearingNotifications}
-            hasVisibleNotifications={notificationCenter.hasVisibleNotifications}
-            notificationPanelCleared={notificationCenter.notificationPanelCleared}
-            canClearNotifications={notificationCenter.canClearNotifications}
-            onMarkAllNotificationsRead={notificationCenter.markAllNotificationsRead}
-            onNotificationOpen={async (notification) => {
-              await notificationCenter.markNotificationRead(notification.id);
-              navigate(notificationTarget(notification));
-            }}
-            onClearNotifications={notificationCenter.clearNotifications}
-          />
-
-          {printerConnection.isManufacturer ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={printerConnection.openPrinterConnectionDialog}
-              className={cn("mr-1 gap-2", printerConnection.printerToneClass)}
-              title={printerConnection.printerTitle}
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="rounded-md p-2 hover:bg-muted lg:hidden"
+              aria-label="Open sidebar"
             >
-              <Printer className="h-4 w-4" />
-              <span className="hidden md:inline">{`Printer ${printerConnection.printerModeLabel}`}</span>
-              <span className="md:hidden">{printerConnection.printerModeLabel}</span>
-              {printerConnection.printerDegraded ? (
-                <Badge
-                  variant="outline"
-                  className="border-amber-300 bg-amber-100/80 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-800"
-                >
-                  Degraded
-                </Badge>
-              ) : null}
-            </Button>
-          ) : null}
+              <Menu className="h-6 w-6" />
+            </button>
 
-          {printerConnection.isManufacturer &&
-          !printerConnection.effectivePrinterReady &&
-          printerConnection.managedNetworkPrinters.length === 0 ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={printerConnection.goToConnectorDownload}
-              className="mr-1 hidden md:inline-flex"
-            >
-              Install Connector
-            </Button>
-          ) : null}
+            <div className="hidden min-w-0 sm:block">
+              <p className="truncate text-sm font-semibold text-foreground">
+                {breadcrumbs[breadcrumbs.length - 1]?.label || "Workspace"}
+              </p>
+              <p className="truncate text-xs text-muted-foreground">
+                {user?.role === "manufacturer"
+                  ? "Stay focused on setup, printing, and batch progress."
+                  : "Review work, take action, and keep each queue moving."}
+              </p>
+            </div>
+          </div>
 
-          <SupportIssueLauncher />
+          <div className="ml-3 flex items-center gap-1 sm:gap-2">
+            <NotificationsDropdown
+              unreadNotifications={notificationCenter.unreadNotifications}
+              visibleNotifications={notificationCenter.visibleNotifications}
+              notificationsLoading={notificationCenter.notificationsLoading}
+              notificationsLive={notificationCenter.notificationsLive}
+              clearingNotificationIdSet={notificationCenter.clearingNotificationIdSet}
+              clearingNotifications={notificationCenter.clearingNotifications}
+              hasVisibleNotifications={notificationCenter.hasVisibleNotifications}
+              notificationPanelCleared={notificationCenter.notificationPanelCleared}
+              canClearNotifications={notificationCenter.canClearNotifications}
+              onMarkAllNotificationsRead={notificationCenter.markAllNotificationsRead}
+              onNotificationOpen={async (notification) => {
+                await notificationCenter.markNotificationRead(notification.id);
+                navigate(notificationTarget(notification));
+              }}
+              onClearNotifications={notificationCenter.clearNotifications}
+            />
 
-          <Button asChild variant="ghost" className="mr-1 gap-2">
-            <Link to={contextualHelpRoute}>
-              <CircleHelp className="h-4 w-4 text-muted-foreground" />
-              <span className="hidden sm:inline">Help</span>
-            </Link>
-          </Button>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
-                  <span className="text-sm font-semibold text-primary">{user?.name?.charAt(0) || "U"}</span>
-                </div>
-                <span className="hidden sm:inline">{user?.name || "User"}</span>
-                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            {printerConnection.isManufacturer ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={printerConnection.openPrinterConnectionDialog}
+                className={cn("mr-1 gap-2", printerConnection.printerToneClass)}
+                title={printerConnection.printerTitle}
+              >
+                <Printer className="h-4 w-4" />
+                <span className="hidden md:inline">{`Printing ${printerConnection.printerModeLabel}`}</span>
+                <span className="md:hidden">{printerConnection.printerModeLabel}</span>
+                {printerConnection.printerDegraded ? (
+                  <Badge
+                    variant="outline"
+                    className="border-amber-300 bg-amber-100/80 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-800"
+                  >
+                    Recovery mode
+                  </Badge>
+                ) : null}
               </Button>
-            </DropdownMenuTrigger>
+            ) : null}
 
-            <DropdownMenuContent align="end" className="w-56">
-              <div className="px-3 py-2">
-                <p className="text-sm font-medium">{user?.name}</p>
-                <p className="text-xs text-muted-foreground">{user?.email}</p>
-              </div>
+            {printerConnection.isManufacturer &&
+            !printerConnection.effectivePrinterReady &&
+            printerConnection.managedNetworkPrinters.length === 0 ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={printerConnection.goToConnectorDownload}
+                className="mr-1 hidden md:inline-flex"
+              >
+                Install printer helper
+              </Button>
+            ) : null}
 
-              <DropdownMenuSeparator />
+            <SupportIssueLauncher />
 
-              <DropdownMenuItem onClick={() => navigate("/account")}>
-                <Settings className="mr-2 h-4 w-4" />
-                Account
-              </DropdownMenuItem>
+            <Button asChild variant="ghost" className="mr-1 gap-2">
+              <Link to={contextualHelpRoute} data-testid="open-help">
+                <CircleHelp className="h-4 w-4 text-muted-foreground" />
+                <span className="hidden sm:inline">Help</span>
+              </Link>
+            </Button>
 
-              <DropdownMenuSeparator />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
+                    <span className="text-sm font-semibold text-primary">{user?.name?.charAt(0) || "U"}</span>
+                  </div>
+                  <span className="hidden sm:inline">{user?.name || "User"}</span>
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                </Button>
+              </DropdownMenuTrigger>
 
-              <DropdownMenuItem onClick={handleLogout} className="text-destructive">
-                <LogOut className="mr-2 h-4 w-4" />
-                Log out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+              <DropdownMenuContent align="end" className="w-56">
+                <div className="px-3 py-2">
+                  <p className="text-sm font-medium">{user?.name}</p>
+                  <p className="text-xs text-muted-foreground">{user?.email}</p>
+                </div>
+
+                <DropdownMenuSeparator />
+
+                <DropdownMenuItem onClick={() => navigate("/account")}>
+                  <Settings className="mr-2 h-4 w-4" />
+                  Account
+                </DropdownMenuItem>
+
+                <DropdownMenuSeparator />
+
+                <DropdownMenuItem onClick={handleLogout} className="text-destructive">
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Log out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </header>
 
         {printerConnection.isManufacturer ? (

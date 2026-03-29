@@ -151,17 +151,19 @@ describe("DashboardLayout printer connection dialog", () => {
       expect(vi.mocked(apiClient.getLocalPrintAgentStatus)).toHaveBeenCalled();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /connector offline/i }));
+    fireEvent.click(screen.getByRole("button", { name: /printing needs help/i }));
 
     await waitFor(() => {
       expect(screen.getByText("Printing Status")).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/review live printer readiness/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/check whether printing is ready, switch printers on this computer when needed/i)
+    ).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Refresh status" }).length).toBeGreaterThan(0);
   });
 
-  it("shows first-run workstation printer onboarding for manufacturers", async () => {
+  it("shows first-run printer onboarding for manufacturers", async () => {
     renderWithQueryClient(
       <MemoryRouter>
         <DashboardLayout>
@@ -174,14 +176,14 @@ describe("DashboardLayout printer connection dialog", () => {
       expect(vi.mocked(apiClient.getLocalPrintAgentStatus)).toHaveBeenCalled();
     });
 
-    expect(screen.getByText("Set up printing on this workstation")).toBeInTheDocument();
-    expect(screen.getByText(/The browser cannot install printers, drivers, or native apps by itself/i)).toBeInTheDocument();
-    expect(screen.getByText(/If the OS can see the printer, MSCQR will detect it and it will appear automatically/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /install connector/i })).toBeInTheDocument();
-    expect(screen.getByText(/download the Mac or Windows installer for that same device/i)).toBeInTheDocument();
+    expect(screen.getByText("Set up printing on this computer")).toBeInTheDocument();
+    expect(screen.getByText(/The browser cannot install printers, drivers, or desktop apps by itself/i)).toBeInTheDocument();
+    expect(screen.getByText(/If the computer can see the printer, MSCQR will pick it up automatically/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /install printer helper/i })).toBeInTheDocument();
+    expect(screen.getByText(/download the Mac or Windows installer for this computer/i)).toBeInTheDocument();
   });
 
-  it("keeps managed network routes visible instead of pushing connector install when a saved route is ready", async () => {
+  it("keeps saved network printers visible instead of pushing helper install when a saved route is ready", async () => {
     localStorageState.set("manufacturer-printer-onboarding:v1:manufacturer-1", "dismissed");
     vi.mocked(apiClient.listRegisteredPrinters).mockResolvedValue({
       success: true,
@@ -214,10 +216,10 @@ describe("DashboardLayout printer connection dialog", () => {
       expect(vi.mocked(apiClient.listRegisteredPrinters)).toHaveBeenCalled();
     });
 
-    expect(screen.queryByText("Set up printing on this workstation")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /printer ready/i })).toBeInTheDocument();
+    expect(screen.queryByText("Set up printing on this computer")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /printing ready/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /printer setup/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /install connector/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /install printer helper/i })).not.toBeInTheDocument();
   });
 
   it("only auto-opens the ready printer dialog once per manufacturer browser session", async () => {
@@ -295,11 +297,11 @@ describe("DashboardLayout printer connection dialog", () => {
       expect(vi.mocked(apiClient.getPrinterConnectionStatus)).toHaveBeenCalledTimes(2);
     });
 
-    expect(screen.getByRole("button", { name: /printer ready/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /printing ready/i })).toBeInTheDocument();
     expect(screen.queryByText("Printing Status")).not.toBeInTheDocument();
   });
 
-  it("surfaces degraded connector mode when heartbeat falls back to recovery mode", async () => {
+  it("surfaces recovery mode when heartbeat falls back to recovery mode", async () => {
     localStorageState.set("manufacturer-printer-onboarding:v1:manufacturer-1", "dismissed");
     vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
       success: true,
@@ -382,10 +384,10 @@ describe("DashboardLayout printer connection dialog", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("Degraded connector mode")).toBeInTheDocument();
+    expect((await screen.findAllByText("Recovery mode")).length).toBeGreaterThan(0);
     expect(vi.mocked(apiClient.getPrinterConnectionStatus)).not.toHaveBeenCalled();
     expect(
-      screen.getByText(/degraded mode active while secure printer storage recovers/i)
+      screen.getByText(/printing is staying available while secure printer settings catch up/i)
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getAllByRole("button", { name: /^close$/i })[0]);
@@ -394,6 +396,6 @@ describe("DashboardLayout printer connection dialog", () => {
       expect(screen.queryByText("Printing Status")).not.toBeInTheDocument();
     });
 
-    expect(screen.getByRole("button", { name: /printer .*degraded/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /printing .*recovery mode/i })).toBeInTheDocument();
   });
 });

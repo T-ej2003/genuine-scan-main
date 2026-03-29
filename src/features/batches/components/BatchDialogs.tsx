@@ -3,11 +3,14 @@ import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ActionButton } from "@/components/ui/action-button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getPrinterDispatchLabel, sanitizePrinterUiError } from "@/lib/printer-user-facing";
+import { getPlainPrintStatusLabel } from "@/lib/ui-copy";
+import { createUiActionState } from "@/lib/ui-actions";
 
 import type {
   BatchRow,
@@ -193,10 +196,9 @@ export function BatchPrintJobDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-testid="create-print-job-dialog" className="max-h-[85vh] overflow-y-auto sm:max-w-[640px]">
         <DialogHeader>
-          <DialogTitle>Create Print Job</DialogTitle>
+          <DialogTitle>Start print run</DialogTitle>
           <DialogDescription>
-            Select quantity and a saved printer. MSCQR will use the approved printing path for that printer
-            automatically.
+            Choose how many labels to print and the saved printer MSCQR should use for this run.
           </DialogDescription>
         </DialogHeader>
 
@@ -244,8 +246,7 @@ export function BatchPrintJobDialog({
               <div className="text-sm font-medium">Printer selection</div>
               {registeredPrinters.length === 0 ? (
                 <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                  No saved printer profiles are available yet. Refresh printers after connector or admin changes, then
-                  retry this dialog.
+                  No saved printers are ready yet. Refresh after printer setup changes, then try this print run again.
                   <div className="mt-2 flex flex-wrap gap-2">
                     <Button size="sm" variant="ghost" onClick={onRefreshPrinters}>
                       Refresh printers
@@ -256,23 +257,23 @@ export function BatchPrintJobDialog({
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="space-y-1">
-                  <Label className="text-xs">Registered printer profile</Label>
+                  <Label className="text-xs">Saved printer</Label>
                   <Select
                     value={selectedPrinterProfileId || "__none__"}
                     onValueChange={(value) => onSelectedPrinterProfileIdChange(value === "__none__" ? "" : value)}
                   >
                     <SelectTrigger data-testid="print-job-printer-profile">
-                      <SelectValue placeholder="Select printer profile" />
+                      <SelectValue placeholder="Choose saved printer" />
                     </SelectTrigger>
                     <SelectContent>
                       {registeredPrinters.length === 0 ? (
-                        <SelectItem value="__none__">No registered printers</SelectItem>
+                        <SelectItem value="__none__">No saved printers</SelectItem>
                       ) : (
                         registeredPrinters.map((row) => (
                           <SelectItem key={row.id} value={row.id}>
                             {row.name}
                             {` · ${getPrinterDispatchLabel(row)}`}
-                            {!row.isActive ? " · inactive" : ""}
+                            {!row.isActive ? " · unavailable" : ""}
                           </SelectItem>
                         ))
                       )}
@@ -292,23 +293,23 @@ export function BatchPrintJobDialog({
                 <>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div className="space-y-1">
-                      <Label className="text-xs">Active workstation printer</Label>
+                      <Label className="text-xs">Printer on this computer</Label>
                       <Select
                         value={selectedPrinterId || "__none__"}
                         onValueChange={(value) => onSelectedPrinterIdChange(value === "__none__" ? "" : value)}
                       >
                         <SelectTrigger data-testid="print-job-workstation-printer">
-                          <SelectValue placeholder="Select printer" />
+                          <SelectValue placeholder="Choose printer" />
                         </SelectTrigger>
                         <SelectContent>
                           {detectedPrinters.length === 0 ? (
-                            <SelectItem value="__none__">No printers discovered</SelectItem>
+                            <SelectItem value="__none__">No printers found yet</SelectItem>
                           ) : (
                             detectedPrinters.map((row) => (
                               <SelectItem key={row.printerId} value={row.printerId}>
                                 {row.printerName}
                                 {row.connection ? ` · ${row.connection}` : ""}
-                                {row.online === false ? " · offline" : ""}
+                                {row.online === false ? " · needs review" : ""}
                               </SelectItem>
                             ))
                           )}
@@ -317,18 +318,25 @@ export function BatchPrintJobDialog({
                     </div>
                   </div>
                   <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-                    Workstation printing depends on the active printer on this device. Switch it here before the next
-                    run if needed.
+                    Printing from this computer uses the printer selected here. Change it before the next run if needed.
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
-                    <Button
+                    <ActionButton
                       variant="outline"
                       size="sm"
-                      disabled={switchingPrinter || !selectedPrinterId || detectedPrinters.length <= 1}
+                      state={
+                        switchingPrinter
+                          ? createUiActionState("pending", "Saving the printer choice on this computer.")
+                          : !selectedPrinterId
+                            ? createUiActionState("disabled", "Choose a printer on this computer first.")
+                            : detectedPrinters.length <= 1
+                              ? createUiActionState("disabled", "Only one printer is available on this computer right now.")
+                              : createUiActionState("enabled")
+                      }
                       onClick={onSwitchSelectedPrinter}
-                    >
-                      {switchingPrinter ? "Switching..." : "Switch workstation printer"}
-                    </Button>
+                      idleLabel="Use selected printer"
+                      pendingLabel="Saving..."
+                    />
                   </div>
                 </>
               ) : (
@@ -341,8 +349,8 @@ export function BatchPrintJobDialog({
                     {sanitizePrinterUiError(
                       selectedPrinterProfile?.registryStatus?.detail,
                       selectedPrinterProfile?.connectionType === "NETWORK_IPP"
-                        ? "MSCQR will send the approved job to this office printer using its saved setup."
-                        : "MSCQR will send the approved job to this factory label printer using its saved setup."
+                        ? "MSCQR will send this run to the saved office printer using its saved setup."
+                        : "MSCQR will send this run to the saved label printer using its saved setup."
                     )}
                   </div>
                 </div>
@@ -351,23 +359,31 @@ export function BatchPrintJobDialog({
 
             <div className="flex gap-2">
               <Button asChild variant="outline">
-                <Link to="/printer-setup">Printer setup</Link>
+                <Link to="/printer-setup">Open printer setup</Link>
               </Button>
-              <Button
+              <ActionButton
                 data-testid="print-job-start-button"
                 onClick={onStartPrint}
-                disabled={printing || !selectedPrinterProfile || !selectedPrinterCanPrint}
-              >
-                {printing ? "Starting..." : printJobId ? "Resume active print" : "Start print"}
-              </Button>
+                state={
+                  printing
+                    ? createUiActionState("pending", "Starting the print run now.")
+                    : !selectedPrinterProfile
+                      ? createUiActionState("disabled", "Choose a saved printer before you start this run.")
+                      : !selectedPrinterCanPrint
+                        ? createUiActionState("disabled", selectedPrinterNotice.detail || "This printer needs attention before it can print.")
+                        : createUiActionState("enabled")
+                }
+                idleLabel={printJobId ? "Resume print run" : "Start print run"}
+                pendingLabel="Starting..."
+              />
             </div>
 
             {printJobId ? (
               <div className="space-y-2 rounded-md border p-3 text-sm">
-                <div className="text-xs text-muted-foreground">Current print job</div>
+                <div className="text-xs text-muted-foreground">Current print run</div>
                 <div className="font-medium">Printing in progress</div>
                 <div className="text-xs text-muted-foreground">
-                  Target printer: {printProgressPrinterName || selectedPrinterProfile?.name || "—"} ·{" "}
+                  Using {printProgressPrinterName || selectedPrinterProfile?.name || "—"} ·{" "}
                   {formatDispatchModeLabel(printProgressDispatchMode || selectedPrinterProfile?.connectionType || null)}
                 </div>
                 {directRemainingToPrint != null ? (
@@ -379,28 +395,40 @@ export function BatchPrintJobDialog({
 
             {printJobId && selectedPrinterProfile?.connectionType === "LOCAL_AGENT" && directRemainingToPrint !== 0 ? (
               <div className="space-y-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm">
-                <div className="font-medium text-emerald-900">Connector is processing this run</div>
+                <div className="font-medium text-emerald-900">Printer helper is finishing this run</div>
                 <div className="text-xs text-emerald-900">
-                  The connector continues claiming and confirming labels in the background. Refresh the job status when you
-                  need the latest confirmed count.
+                  The printer helper keeps printing and confirming labels in the background. Refresh when you want the latest confirmed count.
                 </div>
                 <div className="flex justify-end">
-                  <Button variant="outline" onClick={onRefreshPrintStatus} disabled={printing || !printJobId}>
-                    Refresh print status
-                  </Button>
+                  <ActionButton
+                    variant="outline"
+                    onClick={onRefreshPrintStatus}
+                    state={
+                      printing
+                        ? createUiActionState("pending", "Refreshing the live print progress.")
+                        : !printJobId
+                          ? createUiActionState("disabled", "Start a print run first.")
+                          : createUiActionState("enabled")
+                    }
+                    idleLabel="Refresh print progress"
+                    pendingLabel="Refreshing..."
+                    showReasonBelow={false}
+                  />
                 </div>
               </div>
             ) : null}
 
             {recentPrintJobs.length > 0 ? (
               <div className="space-y-3 rounded-md border p-3 text-sm">
-                <div className="font-medium">Recent print jobs</div>
+                <div className="font-medium">Recent print runs</div>
                 <div className="space-y-2">
                   {recentPrintJobs.map((job) => (
                     <div key={job.id} className="rounded-md border bg-muted/20 px-3 py-2">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="font-medium">{job.jobNumber || "Print job"}</div>
-                        <Badge variant={job.status === "FAILED" ? "destructive" : "secondary"}>{job.status}</Badge>
+                        <div className="font-medium">{job.jobNumber || "Print run"}</div>
+                        <Badge variant={job.status === "FAILED" ? "destructive" : "secondary"}>
+                          {getPlainPrintStatusLabel(job.status)}
+                        </Badge>
                       </div>
                       <div className="mt-1 text-xs text-muted-foreground">
                         {formatDispatchModeLabel(job.printMode)} · {job.printer?.name || "Unknown printer"} ·{" "}

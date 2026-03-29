@@ -152,18 +152,18 @@ const platformCopy: Record<
 > = {
   macos: {
     title: "Mac installer",
-    description: "One install. The connector starts automatically whenever that Mac user signs in.",
+    description: "One install. The printer helper starts automatically whenever that Mac user signs in.",
     action: "Download for Mac",
     icon: Apple,
-    helper: "Signed package target with LaunchAgent auto-start.",
+    helper: "Signed Mac package with automatic background startup.",
     iconSurfaceClass: "bg-emerald-100 text-emerald-700",
   },
   windows: {
     title: "Windows installer",
-    description: "Download the Windows ZIP, extract it to a normal folder, then run Install Connector once on the printing PC.",
+    description: "Download the Windows ZIP, extract it to a normal folder, then run Install Printer Helper once on the printing computer.",
     action: "Download for Windows",
     icon: MonitorSmartphone,
-    helper: "Extract first, then install. The connector uses a per-user Startup entry and verifies local printer readiness before claiming success.",
+    helper: "Extract first, then install. The helper starts with that Windows user and checks whether the local printer is really ready.",
     iconSurfaceClass: "bg-sky-100 text-sky-700",
   },
 };
@@ -172,12 +172,12 @@ const workspaceHighlights = [
   {
     icon: ShieldCheck,
     title: "Approved printer access",
-    detail: "Keep printing on the workstation that already sees the device instead of forcing the browser to manage local printers.",
+    detail: "Keep printing on the computer that already sees the printer instead of asking the browser to manage local printers.",
   },
   {
     icon: Sparkles,
     title: "Single install",
-    detail: "Run the package once and the connector keeps starting automatically in the background after sign-in, then verifies whether Windows or macOS can actually use the printer.",
+    detail: "Run the package once and the printer helper keeps starting automatically in the background after sign-in, then checks whether Windows or macOS can actually use the printer.",
   },
   {
     icon: Printer,
@@ -189,14 +189,14 @@ const workspaceHighlights = [
 const setupSteps = [
   "Open this page on the same computer that is already connected to the printer.",
   "Choose the Mac or Windows installer that matches that computer.",
-  "Run the installer once. The connector will start automatically at sign-in after that.",
+  "Run the installer once. The printer helper will start automatically at sign-in after that.",
   "The installer verifies local printer readiness before it tells you setup is complete.",
-  "If the printer still needs OS-side attention, MSCQR opens Printer Setup and keeps the connector installed.",
+  "If the printer still needs OS-side attention, MSCQR opens Printer Setup and keeps the helper installed.",
   "Return to Batches and create the print job.",
 ];
 
 const automaticBehaviors = [
-  "The connector starts automatically whenever that workstation user signs in.",
+  "The printer helper starts automatically whenever that computer user signs in.",
   "MSCQR keeps reading the operating-system printer list and surfaces business-safe readiness states.",
   "Manufacturers stay inside the normal batch workflow instead of launching scripts or extra local tools.",
 ];
@@ -234,7 +234,7 @@ export default function ConnectorDownload() {
       if (cancelled) return;
 
       if (!releaseRes?.success || !releaseRes.data) {
-        setError(releaseRes?.error || "Connector downloads are not available right now.");
+        setError(releaseRes?.error || "Printer helper downloads are not available right now.");
       } else {
         setRelease(releaseRes.data as LatestConnectorRelease);
       }
@@ -316,7 +316,7 @@ export default function ConnectorDownload() {
 
               <div className="flex flex-wrap gap-3">
                 <Button asChild size="sm" variant="outline">
-                  <Link to={release?.setupGuidePath || "/help/manufacturer"}>
+                  <Link to={release?.setupGuidePath || "/help/manufacturer"} data-testid="open-printer-helper-guide">
                     <Workflow className="h-4 w-4" />
                     Setup guide
                   </Link>
@@ -335,14 +335,14 @@ export default function ConnectorDownload() {
             {loading ? (
               <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Checking the latest connector release...
+                Checking the latest printer helper release...
               </div>
             ) : null}
 
             {error ? (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
-                <AlertTitle>Connector download unavailable</AlertTitle>
+                <AlertTitle>Printer helper download unavailable</AlertTitle>
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             ) : null}
@@ -353,14 +353,14 @@ export default function ConnectorDownload() {
                 <AlertTitle>Onboarding for {preview.licenseeName || "your factory team"}</AlertTitle>
                 <AlertDescription className="space-y-3">
                   <div>
-                    Your invite is ready for <strong>{preview.email}</strong>. Install the connector on the computer that
+                    Your invite is ready for <strong>{preview.email}</strong>. Install the printer helper on the computer that
                     will print, then return to the activation email to set the password.
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button asChild size="sm">
                       <Link to={`/accept-invite?token=${encodeURIComponent(inviteToken)}`}>Open activation link</Link>
                     </Button>
-                    <Button asChild size="sm" variant="outline">
+                    <Button asChild size="sm" variant="outline" data-testid="open-printer-helper-guide">
                       <Link to={release?.setupGuidePath || "/help/manufacturer"}>View setup guide</Link>
                     </Button>
                   </div>
@@ -381,18 +381,18 @@ export default function ConnectorDownload() {
                 <div className="relative space-y-8">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge className="border border-emerald-300/20 bg-emerald-400/15 text-emerald-100 hover:bg-emerald-400/15">
-                      Workstation printing
+                      Printing on this computer
                     </Badge>
                     {release ? (
                       <Badge className="border border-white/10 bg-white/10 text-slate-100 hover:bg-white/10">
-                        Latest connector {release.latestVersion}
+                        Latest printer helper {release.latestVersion}
                       </Badge>
                     ) : null}
                   </div>
 
                   <div className="space-y-4">
                     <h1 className="max-w-3xl text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl">
-                      Install the MSCQR Connector on the workstation that actually prints.
+                      Install the MSCQR printer helper on the computer that actually prints.
                     </h1>
                     <p className="max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
                       This page is now dedicated to installation only: more room, less congestion, and a direct download
@@ -434,8 +434,8 @@ export default function ConnectorDownload() {
                   </h2>
                   <p className="text-base leading-7 text-slate-600">
                     Open this page on the same Mac or Windows computer that is already connected to the printer. Choose
-                    the installer below, run it once, and the connector starts automatically every time that user signs
-                    in after that. Windows setup now verifies the local printer before it claims the workstation is ready.
+                    the installer below, run it once, and the printer helper starts automatically every time that user signs
+                    in after that. Windows setup now checks the local printer before it says the computer is ready.
                   </p>
                 </div>
 
@@ -460,7 +460,7 @@ export default function ConnectorDownload() {
                       <div>
                         <div className="text-sm font-semibold text-slate-950">After install</div>
                         <div className="text-sm leading-6 text-slate-600">
-                          The connector keeps starting in the background automatically at sign-in.
+                          The printer helper keeps starting in the background automatically at sign-in.
                         </div>
                       </div>
                     </div>
@@ -470,7 +470,7 @@ export default function ConnectorDownload() {
                 <div className="mt-6 flex flex-wrap gap-3">
                   {recommendedCard ? (
                     <Button asChild size="lg" className="sm:min-w-[240px]">
-                      <a href={recommendedCard.href}>
+                      <a href={recommendedCard.href} data-testid={`download-printer-helper-${recommendedCard.platform}`}>
                         <Download className="h-4 w-4" />
                         Get installer for this device
                       </a>
@@ -490,9 +490,9 @@ export default function ConnectorDownload() {
               <section className="rounded-[32px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.92))] p-6 sm:p-8 lg:p-10">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                   <div className="space-y-3">
-                    <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">Install MSCQR Connector</Badge>
+                    <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">Install printer helper</Badge>
                     <h2 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-[2.2rem]">
-                      Choose the installer for the production workstation
+                      Choose the installer for the printing computer
                     </h2>
                     <p className="max-w-3xl text-base leading-7 text-slate-600">
                       {release.release.summary} Download the package that matches that computer and keep everything else
@@ -552,7 +552,7 @@ export default function ConnectorDownload() {
                                   <AlertCircle className="h-4 w-4 text-amber-700" />
                                   <AlertTitle>Important for Windows</AlertTitle>
                                   <AlertDescription>
-                                    Extract the ZIP fully before running <strong>Install Connector.cmd</strong>. Do not run it from the ZIP preview in File Explorer. The installer will tell you whether the connector is ready, needs printer attention, or failed.
+                                    Extract the ZIP fully before running <strong>Install Printer Helper.cmd</strong>. Do not run it from the ZIP preview in File Explorer. The installer will tell you whether printing is ready, needs printer attention, or failed.
                                   </AlertDescription>
                                 </Alert>
                               ) : null}
@@ -600,7 +600,7 @@ export default function ConnectorDownload() {
 
                           <div className="flex flex-col gap-3 sm:flex-row">
                             <Button asChild size="lg" className="sm:min-w-[230px]">
-                              <a href={item.href}>
+                              <a href={item.href} data-testid={`download-printer-helper-${item.platform}`}>
                                 <Download className="h-4 w-4" />
                                 {item.action}
                               </a>
@@ -630,7 +630,7 @@ export default function ConnectorDownload() {
                     <div>
                       <h3 className="text-2xl font-semibold tracking-tight text-slate-950">Simple setup steps for factory teams</h3>
                       <p className="mt-1 text-sm leading-6 text-slate-600">
-                        Share these steps with the workstation user who will print labels.
+                        Share these steps with the person who will print labels on that computer.
                       </p>
                     </div>
                   </div>
@@ -663,8 +663,8 @@ export default function ConnectorDownload() {
                   </div>
 
                   <div className="mt-6 rounded-[24px] border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300">
-                    If your printer is a shared office AirPrint or IPP printer, your admin can also save it as a managed
-                    network printer. Use the connector when printing depends on the workstation's local printer setup.
+                    If your printer is a shared office AirPrint or IPP printer, your admin can also save it as a shared
+                    network printer. Use the printer helper when printing depends on that computer&apos;s local printer setup.
                   </div>
                 </section>
               </div>

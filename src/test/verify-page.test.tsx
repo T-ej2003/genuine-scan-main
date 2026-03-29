@@ -144,7 +144,7 @@ describe("Verify page", () => {
     expect(vi.mocked(apiClient.verifyQRCode)).toHaveBeenCalledTimes(1);
   });
 
-  it("explains that an owner must sign in before starting a resale transfer", async () => {
+  it("explains that an owner must sign in before starting a transfer", async () => {
     vi.mocked(apiClient.verifyQRCode).mockResolvedValue(
       buildVerifyResponse({
         ownershipStatus: {
@@ -160,7 +160,7 @@ describe("Verify page", () => {
 
     renderVerifyPage();
 
-    expect(await screen.findByText("Sign in below to start a secure resale transfer.")).toBeInTheDocument();
+    expect(await screen.findByText("Sign in below to start a secure ownership transfer.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign in to continue" })).toBeInTheDocument();
   });
 
@@ -244,7 +244,7 @@ describe("Verify page", () => {
       );
     });
 
-    expect(await screen.findByRole("button", { name: "Copy transfer link" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Copy handover link" })).toBeInTheDocument();
   });
 
   it("hydrates stored customer auth before the first scan request so refresh does not double-hit the public endpoint", async () => {

@@ -7,6 +7,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { DataTablePagePattern, PageEmptyState, PageInlineNotice, PageSection } from "@/components/page-patterns/PagePatterns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ActionButton } from "@/components/ui/action-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -33,6 +34,8 @@ import {
 } from "@/features/support/hooks";
 import { friendlyReferenceLabel, shortRawReference } from "@/lib/friendly-reference";
 import apiClient from "@/lib/api-client";
+import { createUiActionState } from "@/lib/ui-actions";
+import { getSupportStatusLabel } from "@/lib/ui-copy";
 import { useToast } from "@/hooks/use-toast";
 
 const DEFAULT_FILTERS: SupportQueueFilters = {
@@ -193,10 +196,23 @@ export default function SupportCenterPage() {
   };
 
   const actions = (
-    <Button variant="outline" onClick={() => void refreshAll()} disabled={ticketsQuery.isFetching || reportsQuery.isFetching}>
-      <RefreshCw className="mr-2 h-4 w-4" />
-      {ticketsQuery.isFetching || reportsQuery.isFetching ? "Refreshing..." : "Refresh"}
-    </Button>
+    <ActionButton
+      variant="outline"
+      onClick={() => void refreshAll()}
+      state={
+        ticketsQuery.isFetching || reportsQuery.isFetching
+          ? createUiActionState("pending", "Refreshing the latest help requests and case details.")
+          : createUiActionState("enabled")
+      }
+      idleLabel={
+        <>
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Refresh
+        </>
+      }
+      pendingLabel="Refreshing..."
+      showReasonBelow={false}
+    />
   );
 
   const filters = (
@@ -234,14 +250,18 @@ export default function SupportCenterPage() {
           ))}
         </SelectContent>
       </Select>
-      <Button
+      <ActionButton
         data-testid="support-apply-filters"
         onClick={() => setAppliedFilters(draftFilters)}
-        disabled={ticketsQuery.isFetching}
-      >
-        {ticketsQuery.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-        Apply
-      </Button>
+        state={
+          ticketsQuery.isFetching
+            ? createUiActionState("pending", "Refreshing the help queue with these filters.")
+            : createUiActionState("enabled")
+        }
+        idleLabel="Apply filters"
+        pendingLabel="Refreshing..."
+        showReasonBelow={false}
+      />
     </div>
   );
 
@@ -249,8 +269,8 @@ export default function SupportCenterPage() {
     <DashboardLayout>
       <DataTablePagePattern
         eyebrow="Operations"
-        title="Support"
-        description="Work the support inbox, respond to incoming issue reports, and keep every ticket moving to the next clear action."
+        title="Help Desk"
+        description="Review new help requests, reply to users, and keep every case moving to the next clear step."
         actions={actions}
         filters={filters}
       >
@@ -263,16 +283,16 @@ export default function SupportCenterPage() {
         ) : null}
 
         <PageSection
-          title="Incoming issue reports"
-          description="Respond to newly reported issues without leaving the support workspace."
+          title="New help requests"
+          description="Reply to newly reported issues without leaving the help desk."
           action={<Badge variant="outline">{issueReports.length}</Badge>}
         >
           {reportsQuery.isLoading ? (
             <div className="text-sm text-muted-foreground">Loading issue reports...</div>
           ) : issueReports.length === 0 ? (
             <PageEmptyState
-              title="No incoming issue reports"
-              description="When a user submits a support issue from the app, it will appear here."
+              title="No new help requests"
+              description="When a user asks for help from the app, it will appear here."
             />
           ) : (
             <div className="grid gap-3 md:grid-cols-2">
@@ -342,24 +362,32 @@ export default function SupportCenterPage() {
                             [report.id]: event.target.value,
                           }))
                         }
-                        placeholder="Send remediation guidance, status update, or next step."
+                        placeholder="Tell the user what happens next."
                       />
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-[11px] text-muted-foreground">
-                          This reply is delivered through email and the reporter&apos;s notification feed.
+                          This reply is sent by email and also appears in the user&apos;s notification feed.
                         </p>
-                        <Button
+                        <ActionButton
+                          data-testid="support-issue-report-reply"
                           size="sm"
                           onClick={() => void respondToIssueReport(report)}
-                          disabled={respondToReportMutation.isPending && respondToReportMutation.variables?.reportId === report.id}
-                        >
-                          {respondToReportMutation.isPending && respondToReportMutation.variables?.reportId === report.id ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <Send className="mr-2 h-4 w-4" />
-                          )}
-                          {report.responseMessage ? "Update response" : "Send response"}
-                        </Button>
+                          state={
+                            respondToReportMutation.isPending && respondToReportMutation.variables?.reportId === report.id
+                              ? createUiActionState("pending", "Sending the reply now.")
+                              : !String(issueReplyDrafts[report.id] || "").trim()
+                                ? createUiActionState("disabled", "Write the reply before you send it.")
+                                : createUiActionState("enabled")
+                          }
+                          idleLabel={
+                            <>
+                              <Send className="mr-2 h-4 w-4" />
+                              {report.responseMessage ? "Update reply" : "Send reply"}
+                            </>
+                          }
+                          pendingLabel="Sending..."
+                          showReasonBelow={false}
+                        />
                       </div>
                     </div>
                   ) : null}
@@ -370,13 +398,13 @@ export default function SupportCenterPage() {
         </PageSection>
 
         <PageSection
-          title="Support inbox"
-          description="Select a ticket on the left, then update its workflow, assignee, and messages on the right."
+          title="Case queue"
+          description="Choose a case on the left, then update its status, owner, and notes on the right."
           action={<Badge variant="outline">{total} tickets</Badge>}
         >
           <div className="grid gap-6 xl:grid-cols-[1.05fr,1fr]">
             <div className="rounded-2xl border">
-              <div className="border-b px-5 py-4 text-sm font-semibold">Ticket queue</div>
+              <div className="border-b px-5 py-4 text-sm font-semibold">Case list</div>
               <div className="max-h-[680px] overflow-auto">
                 <Table>
                   <TableHeader>
@@ -411,7 +439,9 @@ export default function SupportCenterPage() {
                             <div className="line-clamp-1 text-xs text-slate-600">{ticket.subject}</div>
                           </TableCell>
                           <TableCell>
-                            <Badge className={STATUS_TONE[ticket.status] || STATUS_TONE.OPEN}>{toLabel(ticket.status)}</Badge>
+                            <Badge className={STATUS_TONE[ticket.status] || STATUS_TONE.OPEN}>
+                              {getSupportStatusLabel(ticket.status)}
+                            </Badge>
                           </TableCell>
                           <TableCell>
                             <Badge className={PRIORITY_TONE[ticket.priority] || PRIORITY_TONE.P3}>{ticket.priority}</Badge>
@@ -436,8 +466,8 @@ export default function SupportCenterPage() {
             <div className="rounded-2xl border bg-card p-5">
               {!detailQuery.data ? (
                 <PageEmptyState
-                  title={ticketsQuery.isLoading ? "Loading ticket detail" : "Select a support ticket"}
-                  description="Choose a ticket from the queue to review workflow status, SLA, and message history."
+                  title={ticketsQuery.isLoading ? "Loading case details" : "Select a case"}
+                  description="Choose a case from the list to review status, SLA, and message history."
                 />
               ) : (
                 <div className="space-y-4">
@@ -451,11 +481,11 @@ export default function SupportCenterPage() {
                         <div className="font-mono text-xs text-muted-foreground">{detailQuery.data.referenceCode}</div>
                       </div>
                       <div>
-                        <span className="text-muted-foreground">Incident status</span>
-                        <div className="font-medium">{toLabel(detailQuery.data.incident?.status)}</div>
+                        <span className="text-muted-foreground">Case status</span>
+                        <div className="font-medium">{getSupportStatusLabel(detailQuery.data.status)}</div>
                       </div>
                       <div>
-                        <span className="text-muted-foreground">Workflow stage</span>
+                        <span className="text-muted-foreground">Case stage</span>
                         <div className="font-medium">{toLabel(detailQuery.data.incident?.handoff?.currentStage || "intake")}</div>
                       </div>
                       <div>
@@ -512,18 +542,28 @@ export default function SupportCenterPage() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    <Button
+                    <ActionButton
                       data-testid="support-ticket-save"
                       onClick={() => void saveTicket()}
-                      disabled={!canEdit || updateTicketMutation.isPending}
-                    >
-                      {updateTicketMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <TimerReset className="mr-2 h-4 w-4" />}
-                      Save workflow update
-                    </Button>
+                      state={
+                        updateTicketMutation.isPending
+                          ? createUiActionState("pending", "Saving the latest case changes.")
+                          : !canEdit
+                            ? createUiActionState("disabled", "Only super admins can change case owner or status.")
+                            : createUiActionState("enabled")
+                      }
+                      idleLabel={
+                        <>
+                          <TimerReset className="mr-2 h-4 w-4" />
+                          Save changes
+                        </>
+                      }
+                      pendingLabel="Saving..."
+                    />
                   </div>
 
                   <div className="rounded-xl border bg-muted/20 p-4">
-                    <p className="mb-2 text-sm font-semibold">Ticket messages</p>
+                    <p className="mb-2 text-sm font-semibold">Conversation</p>
                     <div className="max-h-48 space-y-2 overflow-auto rounded-md border bg-white p-2">
                       {detailQuery.data.messages?.length ? (
                         detailQuery.data.messages.map((message) => (
@@ -547,7 +587,7 @@ export default function SupportCenterPage() {
                         rows={3}
                         value={newMessage}
                         onChange={(event) => setNewMessage(event.target.value)}
-                        placeholder="Add handoff or customer-support note..."
+                        placeholder="Add an internal handoff note or customer-ready message..."
                       />
                       <div className="flex flex-wrap items-center gap-3">
                         <label className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -558,10 +598,25 @@ export default function SupportCenterPage() {
                           />
                           Internal note
                         </label>
-                        <Button data-testid="support-ticket-message-submit" onClick={() => void sendMessage()} disabled={!newMessage.trim() || addMessageMutation.isPending}>
-                          {addMessageMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageSquareText className="mr-2 h-4 w-4" />}
-                          Add message
-                        </Button>
+                        <ActionButton
+                          data-testid="support-ticket-message-submit"
+                          onClick={() => void sendMessage()}
+                          state={
+                            addMessageMutation.isPending
+                              ? createUiActionState("pending", "Adding the note to this case.")
+                              : !newMessage.trim()
+                                ? createUiActionState("disabled", "Write the note before you add it.")
+                                : createUiActionState("enabled")
+                          }
+                          idleLabel={
+                            <>
+                              <MessageSquareText className="mr-2 h-4 w-4" />
+                              Add note
+                            </>
+                          }
+                          pendingLabel="Adding..."
+                          showReasonBelow={false}
+                        />
                       </div>
                     </div>
                   </div>

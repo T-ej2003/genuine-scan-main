@@ -78,10 +78,10 @@ describe("Incidents filters", () => {
     });
 
     fireEvent.change(
-      screen.getByPlaceholderText("Search by code / description / contact"),
+      screen.getByPlaceholderText("Search by code, message, or contact"),
       { target: { value: "TT0000000068" } }
     );
-    fireEvent.click(screen.getByText("Apply"));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh results" }));
 
     await waitFor(() => {
       expect(vi.mocked(apiClient.getIncidents)).toHaveBeenLastCalledWith(
@@ -107,7 +107,7 @@ describe("Incidents filters", () => {
       );
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Reject as spam" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark as spam" }));
     await waitFor(() => {
       expect(vi.mocked(apiClient.patchIncident)).toHaveBeenLastCalledWith(
         incidentRow.id,

@@ -531,7 +531,14 @@ export function useManufacturerPrinterConnection({
     shouldUseManagedPrinterSummary && managedPrinterDiagnostics ? managedPrinterDiagnostics : printerDiagnostics;
   const effectivePrinterReady = printerReady || managedPrinterDiagnostics?.tone === "success";
   const printerUnavailable = !effectivePrinterReady && !printerHasInventory && managedNetworkPrinters.length === 0;
-  const printerModeLabel = effectivePrinterDiagnostics.badgeLabel;
+  const printerModeLabel =
+    effectivePrinterDiagnostics.tone === "success"
+      ? "Ready"
+      : effectivePrinterDiagnostics.tone === "warning"
+        ? "Needs review"
+        : effectivePrinterDiagnostics.tone === "neutral"
+          ? "Check setup"
+          : "Needs help";
   const printerToneClass =
     effectivePrinterDiagnostics.tone === "success"
       ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
@@ -557,13 +564,13 @@ export function useManufacturerPrinterConnection({
       : selectedPrinter?.model || null,
     deviceName: shouldUseManagedPrinterSummary ? null : printerStatus.deviceName,
   });
-  const printerFeedLabel = printerStatusLive ? "Live updates" : "Automatic refresh";
+  const printerFeedLabel = printerStatusLive ? "Live status" : "Checking status";
   const printerUpdatedLabel = formatPrinterTimestamp(printerStatusUpdatedAt || printerStatus.lastHeartbeatAt);
   const printerDegraded = Boolean(printerStatus.degraded);
   const printerDegradedMessage = printerDegraded
     ? sanitizePrinterUiError(
         printerStatus.compatibilityReason || printerStatus.trustReason || printerStatus.error,
-        "MSCQR is running in degraded connector mode while secure printer storage finishes recovering."
+        "MSCQR is keeping printing available while secure printer settings catch up."
       )
     : "";
   const printerSummaryMessage = effectivePrinterReady
@@ -573,9 +580,9 @@ export function useManufacturerPrinterConnection({
     : effectivePrinterDiagnostics.summary;
   const printerNextStep = effectivePrinterReady
     ? shouldUseManagedPrinterSummary
-      ? "Open batches and choose the managed printer profile when you are ready to print."
-      : "You can continue to batch operations."
-    : effectivePrinterDiagnostics.nextSteps[0] || "Refresh printer status before starting a print job.";
+      ? "Open batches and choose this saved printer when you are ready to print."
+      : "You can go back to batches and start printing."
+    : effectivePrinterDiagnostics.nextSteps[0] || "Refresh printer status before starting a print run.";
   const selectedPrinterIsActive = Boolean(selectedPrinter && selectedPrinter.printerId === activePrinterId);
   const printerDiscoveryCountLabel =
     detectedPrinters.length === 1 ? "1 printer detected" : `${detectedPrinters.length} printers detected`;

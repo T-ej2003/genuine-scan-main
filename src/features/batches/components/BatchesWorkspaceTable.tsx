@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/select";
 import { DataTablePagePattern } from "@/components/page-patterns/PagePatterns";
 import { buildStableBatchOverviewRows, type StableBatchOverviewRow } from "@/lib/batch-workspace";
+import { ActionButton } from "@/components/ui/action-button";
+import { createUiActionState } from "@/lib/ui-actions";
 
 import type { BatchRow } from "@/features/batches/types";
 
@@ -87,8 +89,8 @@ export function BatchesWorkspaceTable({
       title="Batches"
       description={
         isManufacturer
-          ? "Your assigned batches for controlled print runs, job recovery, and post-print confirmation."
-          : "Manage received source batches through a stable workspace for allocation, printing review, and audit."
+          ? "See your assigned batches, start print runs, recover interrupted work, and confirm what has finished printing."
+          : "Review source batches, assign stock, check print progress, and open each batch workspace without split-row confusion."
       }
       actions={
         <>
@@ -107,13 +109,23 @@ export function BatchesWorkspaceTable({
               }
               title={printerDiagnostics.summary}
             >
-              {`Printer ${printerDiagnostics.badgeLabel}`}
+              {`Printing ${printerDiagnostics.badgeLabel}`}
             </Button>
           ) : null}
-          <Button variant="outline" onClick={onRefreshBatches} disabled={loading}>
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Refresh
-          </Button>
+          <ActionButton
+            variant="outline"
+            onClick={onRefreshBatches}
+            state={loading ? createUiActionState("pending", "Refreshing the latest batch and print status.") : createUiActionState("enabled")}
+            idleLabel={
+              <>
+                <RefreshCw className="h-4 w-4" />
+                Refresh
+              </>
+            }
+            pendingLabel="Refreshing..."
+            showReasonBelow={false}
+            data-testid="refresh-batches"
+          />
         </>
       }
     >
@@ -220,7 +232,7 @@ export function BatchesWorkspaceTable({
                                     {batch.licensee.name} ({batch.licensee.prefix})
                                   </div>
                                 ) : (
-                                  <div className="text-xs text-muted-foreground">Licensee scope</div>
+                                  <div className="text-xs text-muted-foreground">Brand owner view</div>
                                 )}
                                 <div className="flex items-center gap-2 text-xs">
                                   <Badge variant="default">Allocated batch</Badge>
@@ -242,7 +254,7 @@ export function BatchesWorkspaceTable({
                                   {getAvailabilityTitle(batch)}: {getAvailableInventory(batch).toLocaleString()}
                                 </Badge>
                                 <div className="text-[11px] text-muted-foreground">
-                                  Printed {Number(batch.printedCodes || 0).toLocaleString()} · Redeemed {Number(batch.redeemedCodes || 0).toLocaleString()}
+                                  Printed {Number(batch.printedCodes || 0).toLocaleString()} · Scanned {Number(batch.redeemedCodes || 0).toLocaleString()}
                                 </div>
                                 <div className="text-[11px] text-muted-foreground font-mono break-all">
                                   {batch.remainingStartCode && batch.remainingEndCode
@@ -278,18 +290,26 @@ export function BatchesWorkspaceTable({
                             </TableCell>
 
                             <TableCell>
-                              <div className="flex flex-wrap gap-2">
-                                <Button
-                                  data-testid="manufacturer-create-print-job"
-                                  size="sm"
-                                  variant="outline"
-                                  disabled={loading || getAvailableInventory(batch) <= 0}
-                                  onClick={() => onOpenPrintPack(batch)}
-                                >
-                                  <Download className="mr-2 h-4 w-4" />
-                                  Create Print Job
-                                </Button>
-                              </div>
+                              <ActionButton
+                                data-testid="manufacturer-create-print-job"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => onOpenPrintPack(batch)}
+                                state={
+                                  loading
+                                    ? createUiActionState("pending", "Checking whether this batch is ready to print.")
+                                    : getAvailableInventory(batch) <= 0
+                                      ? createUiActionState("disabled", "Nothing is waiting to print in this batch right now.")
+                                      : createUiActionState("enabled")
+                                }
+                                idleLabel={
+                                  <>
+                                    <Download className="h-4 w-4" />
+                                    Start print run
+                                  </>
+                                }
+                                pendingLabel="Checking..."
+                              />
                             </TableCell>
                           </TableRow>
                         );
@@ -300,13 +320,13 @@ export function BatchesWorkspaceTable({
               </div>
 
               <div className="mt-3 text-sm text-muted-foreground">
-                Showing {filteredRows.length} of {rows.length}
+                Showing {filteredRows.length} of {rows.length} batches
               </div>
             </>
           ) : (
             <>
               <div className="mb-4 rounded-2xl border bg-muted/10 px-4 py-3 text-sm text-muted-foreground">
-                One stable row is shown for each source batch. Open the workspace to allocate more quantity, review manufacturer distribution, inspect print status, and download audit evidence without split-row confusion in the main list.
+                Each source batch appears once here. Open the workspace to assign more stock, review manufacturer distribution, check print progress, and download audit evidence without split rows in the main list.
               </div>
 
               <div className="rounded-md border">
@@ -352,7 +372,7 @@ export function BatchesWorkspaceTable({
                                   <div className="font-medium break-words">{row.sourceBatchName}</div>
                                 </div>
                                 <div className="text-xs text-muted-foreground">
-                                  {row.licensee?.name ? `${row.licensee.name} (${row.licensee.prefix})` : "Licensee scope"}
+                                  {row.licensee?.name ? `${row.licensee.name} (${row.licensee.prefix})` : "Brand owner view"}
                                 </div>
                                 <div className="flex flex-wrap gap-2">
                                   <Badge variant="secondary">Source batch</Badge>
@@ -408,7 +428,7 @@ export function BatchesWorkspaceTable({
                                   {row.printedCodes.toLocaleString()} printed
                                 </Badge>
                                 <div className="text-xs text-muted-foreground">
-                                  Ready {row.pendingPrintableCodes.toLocaleString()} · Redeemed {row.redeemedCodes.toLocaleString()}
+                                  Ready {row.pendingPrintableCodes.toLocaleString()} · Scanned {row.redeemedCodes.toLocaleString()}
                                 </div>
                               </div>
                             </TableCell>
@@ -418,17 +438,18 @@ export function BatchesWorkspaceTable({
                             </TableCell>
 
                             <TableCell className="text-right">
-                              <Button
+                              <ActionButton
                                 data-testid="batch-workspace-open"
                                 size="sm"
                                 variant="outline"
+                                state={createUiActionState("enabled")}
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   onOpenWorkspace(row);
                                 }}
-                              >
-                                Open
-                              </Button>
+                                idleLabel="Review batch"
+                                showReasonBelow={false}
+                              />
                             </TableCell>
                           </TableRow>
                         );
@@ -439,7 +460,7 @@ export function BatchesWorkspaceTable({
               </div>
 
               <div className="mt-3 text-sm text-muted-foreground">
-                Showing {filteredStableRows.length} of {stableRows.length}
+                Showing {filteredStableRows.length} of {stableRows.length} batches
               </div>
             </>
           )}

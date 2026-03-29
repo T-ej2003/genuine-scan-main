@@ -156,11 +156,11 @@ export function useBatchPrintWorkflow({
     return {
       title: printerDiagnostics.title,
       summary: printerReady
-        ? `${printerStatus.selectedPrinterName || printerStatus.printerName || "Workstation printer"} is ready.`
+        ? `${printerStatus.selectedPrinterName || printerStatus.printerName || "Printer on this computer"} is ready.`
         : printerDiagnostics.summary,
       detail: !printerReady
         ? printerDiagnostics.detail
-        : "The workstation printer is ready for approved MSCQR printing.",
+        : "This printer is ready for approved MSCQR printing.",
       tone: printerDiagnostics.tone,
     };
   }, [
@@ -414,13 +414,13 @@ export function useBatchPrintWorkflow({
       if (!response.success) {
         toast({
           title: "Switch failed",
-          description: sanitizePrinterUiError(response.error, "Could not switch the workstation printer."),
+          description: sanitizePrinterUiError(response.error, "Could not switch the printer on this computer."),
           variant: "destructive",
         });
         return;
       }
 
-      toast({ title: "Printer switched", description: "The workstation printer has been updated." });
+      toast({ title: "Printer updated", description: "The printer on this computer has been updated." });
       await loadPrinterStatus();
     } finally {
       setSwitchingPrinter(false);

@@ -297,7 +297,7 @@ export const getPrinterDiagnosticSummary = (params: {
       badgeLabel: "Ready",
       title: "Printer ready",
       summary: `${remote.selectedPrinterName || remote.printerName || selectedPrinter?.printerName || "Selected printer"} is connected and ready to print.`,
-      detail: "The workstation connector and MSCQR are both ready for this printer.",
+      detail: "The printer helper and MSCQR are both ready for this printer.",
       tone: "success",
       nextSteps: [
         "Continue to the batch workflow when you are ready to print.",
@@ -313,7 +313,7 @@ export const getPrinterDiagnosticSummary = (params: {
       badgeLabel: "Ready",
       title: "Printer ready",
       summary: `${remote.selectedPrinterName || remote.printerName || selectedPrinter?.printerName || "Selected printer"} is connected and can be used.`,
-      detail: sanitizePrinterUiError(remote.compatibilityReason || remote.error || remote.trustReason, "The secure connection is still finishing setup."),
+      detail: sanitizePrinterUiError(remote.compatibilityReason || remote.error || remote.trustReason, "The secure setup is still finishing in the background."),
       tone: "warning",
       nextSteps: [
         "You can continue printing if this is the expected setup.",
@@ -326,14 +326,14 @@ export const getPrinterDiagnosticSummary = (params: {
   if (!params.localAgent.reachable) {
     return {
       state: "agent_unreachable",
-      badgeLabel: "Connector offline",
-      title: "Workstation connector is not available",
-      summary: "MSCQR could not reach the printing connector on this workstation.",
-      detail: sanitizePrinterUiError(params.localAgent.error, "The workstation connector is unavailable."),
+      badgeLabel: "Helper offline",
+      title: "Printer helper is not available",
+      summary: "MSCQR could not reach the printer helper on this computer.",
+      detail: sanitizePrinterUiError(params.localAgent.error, "The printer helper is unavailable."),
       tone: "danger",
       nextSteps: [
-        "Make sure the workstation connector is installed and running on this device.",
-        "Refresh this page after the connector and printer are ready.",
+        "Make sure the printer helper is installed and running on this computer.",
+        "Refresh this page after the helper and printer are ready.",
       ],
       selectedPrinter,
     };
@@ -344,11 +344,11 @@ export const getPrinterDiagnosticSummary = (params: {
       state: "no_printers_detected",
       badgeLabel: "No printer",
       title: "No printer connection detected",
-      summary: "MSCQR can reach the workstation connector, but no usable printer was detected.",
-      detail: sanitizePrinterUiError(params.localAgent.error || remote?.error, "No printers were reported by the workstation connector."),
+      summary: "MSCQR can reach the printer helper, but no ready printer was found.",
+      detail: sanitizePrinterUiError(params.localAgent.error || remote?.error, "No printers were reported by the printer helper."),
       tone: "neutral",
       nextSteps: [
-        "Check the operating system printer list and driver installation.",
+        "Check the computer's printer list and driver setup.",
         "Reconnect or power on the printer, then refresh this page.",
       ],
       selectedPrinter,
@@ -396,7 +396,7 @@ export const getPrinterDiagnosticSummary = (params: {
       detail: sanitizePrinterUiError(remote.error || remote.trustReason, "MSCQR has not received a fresh printer update yet."),
       tone: "warning",
       nextSteps: [
-        "Keep the workstation connector running on this device.",
+        "Keep the printer helper running on this computer.",
         "Refresh this page and confirm the printer becomes ready again.",
       ],
       selectedPrinter,
@@ -418,7 +418,7 @@ export const getPrinterDiagnosticSummary = (params: {
       detail: sanitizePrinterUiError(remote?.error || remote?.trustReason, "MSCQR is still syncing this printer connection."),
       tone: "warning",
       nextSteps: [
-        "Keep the workstation connector running and refresh this page.",
+        "Keep the printer helper running and refresh this page.",
         "If this persists, contact your setup or support team.",
       ],
       selectedPrinter,
@@ -473,9 +473,9 @@ export const getManagedPrinterDiagnosticSummary = (
   const networkLabel =
     printer.connectionType === "NETWORK_IPP"
       ? printer.deliveryMode === "SITE_GATEWAY"
-        ? "Private site printer"
-        : "Office printer"
-      : "Factory printer";
+        ? "Saved site printer"
+        : "Saved office printer"
+      : "Saved label printer";
   const printerName = String(printer.name || networkLabel).trim() || networkLabel;
   const pseudoPrinter: PrinterInventoryRow = {
     printerId: String(printer.id || printerName).trim() || printerName,
@@ -495,15 +495,15 @@ export const getManagedPrinterDiagnosticSummary = (
       state: "compatibility_ready",
       badgeLabel: "Ready",
       title: `${networkLabel} ready`,
-      summary: `${printerName} is registered and ready for controlled dispatch.`,
+      summary: `${printerName} is saved and ready to print.`,
       detail: sanitizePrinterUiError(
         printer.registryStatus?.detail,
         "This saved printer has already been checked and is ready."
       ),
       tone: "success",
       nextSteps: [
-        "Open the batch workflow and choose this managed printer profile.",
-        "If this route changes later, ask an admin to revalidate it before the next run.",
+        "Open batches and choose this saved printer when you are ready.",
+        "If this printer changes later, ask an admin to check it again before the next run.",
       ],
       selectedPrinter: pseudoPrinter,
     };
@@ -514,15 +514,15 @@ export const getManagedPrinterDiagnosticSummary = (
       state: "server_sync_pending",
       badgeLabel: "Needs validation",
       title: `${networkLabel} needs validation`,
-      summary: `${printerName} is registered, but readiness still needs a live check.`,
+      summary: `${printerName} is saved, but it still needs a live check.`,
       detail: sanitizePrinterUiError(
         printer.registryStatus?.detail,
         "Run a printer check to confirm this setup is ready."
       ),
       tone: "warning",
       nextSteps: [
-        "Confirm the printer or site connector is online.",
-        "Ask an admin to validate this saved printer route before printing.",
+        "Confirm the printer or site link is online.",
+        "Ask an admin to check this saved printer before printing.",
       ],
       selectedPrinter: pseudoPrinter,
     };
@@ -540,8 +540,8 @@ export const getManagedPrinterDiagnosticSummary = (
       ),
       tone: "danger",
       nextSteps: [
-        "Update the managed printer profile.",
-        "Validate it again after correcting the endpoint or language.",
+        "Update the saved printer details.",
+        "Check it again after correcting the connection or printer language.",
       ],
       selectedPrinter: pseudoPrinter,
     };
@@ -559,8 +559,8 @@ export const getManagedPrinterDiagnosticSummary = (
       ),
       tone: "danger",
       nextSteps: [
-        "Bring the printer or site connector online.",
-        "Run Check again once the managed route is reachable.",
+        "Bring the printer or site link online.",
+        "Run Check again once the saved printer is reachable.",
       ],
       selectedPrinter: pseudoPrinter,
     };
@@ -571,11 +571,11 @@ export const getManagedPrinterDiagnosticSummary = (
     badgeLabel: "Preparing",
     title: `${networkLabel} setup in progress`,
     summary: `${printerName} has been saved, but MSCQR still needs a live readiness check.`,
-    detail: "Open the managed printer dialog and run Check to confirm the route end to end.",
+    detail: "Open the printer panel and run Check to confirm the connection end to end.",
     tone: "warning",
     nextSteps: [
       "Complete the profile details and run Check.",
-      "Use the batch workflow once the managed route shows Ready.",
+      "Use the batch workflow once this saved printer shows Ready.",
     ],
     selectedPrinter: pseudoPrinter,
   };

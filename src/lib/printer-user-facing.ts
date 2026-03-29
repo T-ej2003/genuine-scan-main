@@ -10,6 +10,18 @@ const normalize = (value?: string | null) => String(value || "").trim();
 
 const hasAny = (value: string, patterns: string[]) => patterns.some((pattern) => value.includes(pattern));
 
+const toPlainPrinterSupportText = (raw?: string | null, fallback = "Printing needs review.") => {
+  const original = normalize(raw);
+  if (!original) return fallback;
+
+  return original
+    .replace(/workstation connector/gi, "printer helper")
+    .replace(/printing connector on this workstation/gi, "printer helper on this computer")
+    .replace(/printing connector/gi, "printer helper")
+    .replace(/local print agent/gi, "printer helper")
+    .replace(/workstation/gi, "this computer");
+};
+
 export const sanitizePrinterUiError = (raw?: string | null, fallback = "Printing is unavailable right now.") => {
   const original = normalize(raw);
   if (!original) return fallback;
@@ -31,13 +43,13 @@ export const sanitizePrinterUiError = (raw?: string | null, fallback = "Printing
     return "Another printing action is already using this batch. Please wait a moment and try again.";
   }
   if (hasAny(value, ["127.0.0.1", "localhost", "local print agent", "printer switch failed", "calibration failed"])) {
-    return "The workstation connector is not available on this device right now.";
+    return "The printer helper is not available on this computer right now.";
   }
   if (hasAny(value, ["heartbeat", "trust", "attestation", "signature", "fingerprint", "certificate", "mtls"])) {
-    return "The secure printer connection is not ready yet. Refresh and try again in a moment.";
+    return "MSCQR is still checking the secure printer connection. Refresh and try again in a moment.";
   }
   if (hasAny(value, ["gateway", "private-lan"]) && hasAny(value, ["offline", "credentials", "missing"])) {
-    return "The site print connector needs attention before this printer can be used.";
+    return "The site print link needs attention before this printer can be used.";
   }
   if (hasAny(value, ["application/pdf", "pdf is not advertised", "format unsupported"])) {
     return "This office printer does not support the required MSCQR print format.";
@@ -69,20 +81,20 @@ export const sanitizePrinterUiError = (raw?: string | null, fallback = "Printing
 
 export const getPrinterProfileLabel = (printer?: ManagedPrinterSummary | null) => {
   if (!printer) return "printer";
-  if (printer.connectionType === "NETWORK_DIRECT") return "factory label printer";
+  if (printer.connectionType === "NETWORK_DIRECT") return "saved label printer";
   if (printer.connectionType === "NETWORK_IPP") {
-    return printer.deliveryMode === "SITE_GATEWAY" ? "private site printer" : "office printer";
+    return printer.deliveryMode === "SITE_GATEWAY" ? "saved site printer" : "saved office printer";
   }
-  return "workstation printer";
+  return "printer on this computer";
 };
 
 export const getPrinterDispatchLabel = (printer?: ManagedPrinterSummary | null) => {
-  if (!printer) return "Workstation printing";
-  if (printer.connectionType === "NETWORK_DIRECT") return "Factory label printer";
+  if (!printer) return "Printer on this computer";
+  if (printer.connectionType === "NETWORK_DIRECT") return "Saved label printer";
   if (printer.connectionType === "NETWORK_IPP") {
-    return printer.deliveryMode === "SITE_GATEWAY" ? "Private site printer" : "Office / AirPrint printer";
+    return printer.deliveryMode === "SITE_GATEWAY" ? "Saved site printer" : "Saved office printer";
   }
-  return "Workstation printer";
+  return "Printer on this computer";
 };
 
 export const buildPrinterSupportSummary = (params: {
@@ -96,16 +108,19 @@ export const buildPrinterSupportSummary = (params: {
   const lines = [
     "MSCQR printing support summary",
     `Generated: ${new Date().toISOString()}`,
-    `Workstation connector: ${params.localAgent.reachable ? "Online" : "Offline"}`,
-    `Printer detected on workstation: ${params.localAgent.connected ? "Yes" : "No"}`,
+    `Printer helper: ${params.localAgent.reachable ? "Online" : "Offline"}`,
+    `Printer found on this computer: ${params.localAgent.connected ? "Yes" : "No"}`,
     `Selected printer: ${normalize(params.selectedPrinterName) || "Not selected"}`,
-    `Current status: ${params.printerSummaryTitle}`,
-    `What the user sees: ${params.printerSummaryBody}`,
+    `Current status: ${toPlainPrinterSupportText(params.printerSummaryTitle, "Printing needs review")}`,
+    `What the user sees: ${toPlainPrinterSupportText(
+      params.printerSummaryBody,
+      "MSCQR is still checking the printer connection on this computer."
+    )}`,
   ];
 
   if (params.managedPrinter?.name) {
-    lines.push(`Managed printer profile: ${params.managedPrinter.name}`);
-    lines.push(`Managed printer type: ${getPrinterDispatchLabel(params.managedPrinter)}`);
+    lines.push(`Saved printer: ${params.managedPrinter.name}`);
+    lines.push(`Saved printer type: ${getPrinterDispatchLabel(params.managedPrinter)}`);
   }
 
   const remote = params.remoteStatus;

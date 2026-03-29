@@ -4,12 +4,14 @@ import QRCode from "qrcode";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { ActionButton } from "@/components/ui/action-button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/api-client";
+import { createUiActionState } from "@/lib/ui-actions";
 import {
   isWebAuthnSupported,
   startAdminWebAuthnAuthentication,
@@ -424,8 +426,8 @@ export default function AccountSettings() {
     <DashboardLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold">Account Settings</h1>
-          <p className="text-muted-foreground">Manage your profile and security.</p>
+          <h1 className="text-3xl font-bold">Account & Security</h1>
+          <p className="text-muted-foreground">Manage your profile, sign-in safety, and active sessions.</p>
         </div>
 
         <Card>
@@ -457,9 +459,14 @@ export default function AccountSettings() {
               </div>
 
               <div className="flex justify-end">
-                <Button type="submit" disabled={profileLoading}>
-                  {profileLoading ? "Saving..." : "Save changes"}
-                </Button>
+                <ActionButton
+                  data-testid="account-save-profile"
+                  type="submit"
+                  state={profileLoading ? createUiActionState("pending", "Saving your latest profile details.") : createUiActionState("enabled")}
+                  idleLabel="Save changes"
+                  pendingLabel="Saving..."
+                  showReasonBelow={false}
+                />
               </div>
             </form>
           </CardContent>
@@ -498,9 +505,18 @@ export default function AccountSettings() {
               </div>
 
               <div className="flex justify-end">
-                <Button type="submit" disabled={passwordLoading}>
-                  {passwordLoading ? "Updating..." : "Update password"}
-                </Button>
+                <ActionButton
+                  data-testid="account-change-password"
+                  type="submit"
+                  state={
+                    passwordLoading
+                      ? createUiActionState("pending", "Saving your new password now.")
+                      : createUiActionState("enabled")
+                  }
+                  idleLabel="Update password"
+                  pendingLabel="Updating..."
+                  showReasonBelow={false}
+                />
               </div>
             </form>
           </CardContent>
@@ -546,6 +562,7 @@ export default function AccountSettings() {
                       </div>
 
                       <Button
+                        data-testid="account-revoke-session"
                         type="button"
                         variant={session.current ? "destructive" : "outline"}
                         disabled={revokingSessionId === session.id}

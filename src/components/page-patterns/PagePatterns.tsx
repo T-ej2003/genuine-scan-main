@@ -35,16 +35,24 @@ export function DashboardPagePattern({
 }: PagePatternProps) {
   return (
     <section className={cn("mx-auto w-full max-w-7xl space-y-6", className)}>
-      <header className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-2">
-          {eyebrow ? <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">{eyebrow}</div> : null}
-          <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
-          {description ? <p className="max-w-3xl text-sm text-muted-foreground">{description}</p> : null}
+      <header className="overflow-hidden rounded-[28px] border border-border/80 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(246,249,252,0.94))] px-5 py-5 shadow-[0_24px_60px_-48px_rgba(15,23,42,0.45)] sm:px-7 sm:py-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-3">
+            {eyebrow ? (
+              <div className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-800">
+                {eyebrow}
+              </div>
+            ) : null}
+            <div className="space-y-2">
+              <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-[2.1rem]">{title}</h1>
+              {description ? <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p> : null}
+            </div>
+          </div>
+          {actions ? <div className="flex flex-wrap gap-2 lg:justify-end">{actions}</div> : null}
         </div>
-        {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
       </header>
       {filters ? (
-        <div className="rounded-2xl border bg-card p-4 shadow-sm">
+        <div className="rounded-[24px] border border-border/80 bg-card/95 p-4 shadow-[0_20px_44px_-40px_rgba(15,23,42,0.5)]">
           {filters}
         </div>
       ) : null}
@@ -98,11 +106,11 @@ export function PageSection({
   className?: string;
 }) {
   return (
-    <section className={cn("rounded-2xl border bg-card p-6 shadow-sm", className)}>
-      <div className="flex flex-col gap-3 border-b pb-4 sm:flex-row sm:items-start sm:justify-between">
+    <section className={cn("rounded-[26px] border border-border/80 bg-card/95 p-6 shadow-[0_24px_56px_-44px_rgba(15,23,42,0.45)]", className)}>
+      <div className="flex flex-col gap-3 border-b border-border/80 pb-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
           <h2 className="text-lg font-semibold text-foreground">{title}</h2>
-          {description ? <p className="max-w-3xl text-sm text-muted-foreground">{description}</p> : null}
+          {description ? <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p> : null}
         </div>
         {action ? <div className="flex shrink-0 flex-wrap gap-2">{action}</div> : null}
       </div>
@@ -125,10 +133,10 @@ export function PageEmptyState({
   className?: string;
 }) {
   return (
-    <div className={cn("rounded-2xl border border-dashed bg-muted/20 px-6 py-10 text-center", className)}>
+    <div className={cn("rounded-[24px] border border-dashed border-border/80 bg-muted/20 px-6 py-10 text-center", className)}>
       <div className="mx-auto max-w-xl space-y-3">
         <h3 className="text-lg font-semibold text-foreground">{title}</h3>
-        <p className="text-sm text-muted-foreground">{description}</p>
+        <p className="text-sm leading-6 text-muted-foreground">{description}</p>
         {actionLabel && onAction ? (
           <div className="pt-1">
             <Button onClick={onAction}>{actionLabel}</Button>

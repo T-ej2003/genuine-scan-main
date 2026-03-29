@@ -16,7 +16,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/api-client";
 import { deriveManagedPrinterAutoDetect, normalizePrinterInventoryRows, type PrinterInventoryRow } from "@/lib/printer-diagnostics";
-import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
+import { getPrinterDispatchLabel, sanitizePrinterUiError } from "@/lib/printer-user-facing";
 import { useManufacturerPrinterRuntime } from "@/features/printing/hooks";
 import type { RegisteredPrinterDTO } from "../../shared/contracts/runtime/printing";
 
@@ -141,18 +141,18 @@ export default function PrinterSetupPage() {
 
   const recommendedPathLabel = useMemo(() => {
     if (!suggestion) return "Select a printer to begin";
-    if (suggestion.routeType === "LOCAL_ONLY") return "Recommended: keep using the workstation connector";
-    if (suggestion.routeType === "NETWORK_IPP") return "Recommended: managed IPP printer route";
+    if (suggestion.routeType === "LOCAL_ONLY") return "Recommended: use the printer already set up on this computer";
+    if (suggestion.routeType === "NETWORK_IPP") return "Recommended: save this as an office printer";
     return form.deliveryMode === "SITE_GATEWAY"
-      ? "Recommended: managed raw printer through the site connector"
-      : "Recommended: direct Zebra label printer route";
+      ? "Recommended: save this as a label printer through the site print link"
+      : "Recommended: save this as a direct label printer";
   }, [form.deliveryMode, suggestion]);
 
   const saveRecommendedPrinter = async () => {
     if (!suggestion || suggestion.routeType === "LOCAL_ONLY") {
       toast({
-        title: "Connector path is already the right choice",
-        description: "This printer is best used through the workstation connector, so there is no separate network profile to save.",
+        title: "This printer is already ready to use here",
+        description: "Keep using the printer already set up on this computer. You do not need to save a separate network printer.",
       });
       return;
     }
@@ -263,12 +263,12 @@ export default function PrinterSetupPage() {
             <div className="text-sm font-medium text-muted-foreground">Manufacturer Printer Setup</div>
             <h1 className="text-3xl font-semibold tracking-tight">Connect a printer in one pass</h1>
             <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-              Choose the printer this device can already see, let MSCQR recommend the safest route, save it, and print one live test label.
+              Choose the printer this computer already sees, let MSCQR recommend the safest setup, save it, and print one live test label.
             </p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => navigate("/connector-download")}>
-              Install Connector
+              Install printer helper
             </Button>
             <Button onClick={() => navigate("/batches")}>Back to Batches</Button>
           </div>
@@ -279,23 +279,23 @@ export default function PrinterSetupPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <PlugZap className="h-5 w-5" />
-                Connector Readiness
+                Printer helper
               </CardTitle>
-              <CardDescription>The workstation connector should be online before you save or test a printer route.</CardDescription>
+              <CardDescription>The printer helper should be online before you save or test a printer.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="flex items-center justify-between rounded-lg border p-3">
                 <div>
-                  <div className="font-medium">Connector status</div>
+                  <div className="font-medium">Helper status</div>
                   <div className="text-xs text-muted-foreground">
-                    {remoteStatus?.error || (localReady ? "The connector is online and printer-aware." : "MSCQR is waiting for the connector heartbeat.")}
+                    {remoteStatus?.error || (localReady ? "The helper is online and can see the printer." : "MSCQR is waiting for the next printer update.")}
                   </div>
                 </div>
                 <Badge variant={localReady ? "default" : "secondary"}>{localReady ? "Ready" : "Waiting"}</Badge>
               </div>
               <div className="flex items-center justify-between rounded-lg border p-3">
                 <div>
-                  <div className="font-medium">Detected workstation printers</div>
+                  <div className="font-medium">Printers found on this computer</div>
                   <div className="text-xs text-muted-foreground">
                     {inventory.length > 0 ? `${inventory.length} printers detected on this device.` : "No printers detected on this device yet."}
                   </div>
@@ -303,7 +303,7 @@ export default function PrinterSetupPage() {
                 <Badge variant={inventory.length > 0 ? "default" : "secondary"}>{inventory.length}</Badge>
               </div>
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-950">
-                Once the connector shows the printer here, the manufacturer can usually finish setup without typing hostnames or ports manually.
+                Once the helper shows the printer here, most people can finish setup without typing network details manually.
               </div>
             </CardContent>
           </Card>
@@ -334,7 +334,7 @@ export default function PrinterSetupPage() {
                 </>
               ) : (
                 <div className="rounded-lg border p-3 text-xs text-muted-foreground">
-                  Choose the printer this workstation can see and MSCQR will recommend the safest route automatically.
+                  Choose the printer this computer can already see and MSCQR will recommend the safest setup automatically.
                 </div>
               )}
             </CardContent>
@@ -352,7 +352,7 @@ export default function PrinterSetupPage() {
           <CardContent className="space-y-5">
             <div className="grid gap-4 md:grid-cols-[1fr_auto]">
               <div className="space-y-2">
-                <Label htmlFor="detected-printer">Printer this workstation can already see</Label>
+                <Label htmlFor="detected-printer">Printer already available on this computer</Label>
                 <Select value={selectedPrinterId} onValueChange={setSelectedPrinterId}>
                   <SelectTrigger id="detected-printer">
                     <SelectValue placeholder="Choose a printer" />
@@ -395,7 +395,7 @@ export default function PrinterSetupPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="DIRECT">Direct from server</SelectItem>
-                    <SelectItem value="SITE_GATEWAY">Through site connector</SelectItem>
+                    <SelectItem value="SITE_GATEWAY">Through site print link</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -403,7 +403,7 @@ export default function PrinterSetupPage() {
 
             {suggestion?.routeType === "LOCAL_ONLY" ? (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
-                This printer is best kept on the workstation connector path. Once the connector is ready, the manufacturer can return to batches and print without creating a separate network profile.
+                This printer is best kept on the built-in helper path. Once the helper is ready, you can go back to batches and print without saving a separate network printer.
               </div>
             ) : (
               <>
@@ -494,7 +494,7 @@ export default function PrinterSetupPage() {
                 ) : null}
 
                 <div className="flex flex-wrap gap-2">
-                  <Button onClick={saveRecommendedPrinter} disabled={saving || !suggestion}>
+                  <Button data-testid="save-printer-setup" onClick={saveRecommendedPrinter} disabled={saving || !suggestion}>
                     {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                     Save and print live test label
                   </Button>
@@ -509,13 +509,13 @@ export default function PrinterSetupPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Saved printer routes</CardTitle>
-            <CardDescription>These are the printer profiles the manufacturer can already use from the batch workflow.</CardDescription>
+            <CardTitle>Saved printers</CardTitle>
+            <CardDescription>These printers are already ready to choose from the batch workflow.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {registeredPrinters.length === 0 ? (
               <div className="rounded-lg border p-4 text-sm text-muted-foreground">
-                No saved printer routes yet. Use the recommendation above to save the first one.
+                No saved printers yet. Use the recommendation above to save the first one.
               </div>
             ) : (
               registeredPrinters.map((printer) => (
@@ -530,8 +530,8 @@ export default function PrinterSetupPage() {
                         {printer.isDefault ? <Badge variant="outline">Default</Badge> : null}
                       </div>
                       <div className="mt-1 text-xs text-muted-foreground">
-                        {printer.connectionType}
-                        {printer.deliveryMode ? ` · ${printer.deliveryMode}` : ""}
+                        {getPrinterDispatchLabel(printer)}
+                        {printer.deliveryMode ? ` · ${printer.deliveryMode === "SITE_GATEWAY" ? "site print link" : "direct"}` : ""}
                         {printer.commandLanguage ? ` · ${printer.commandLanguage}` : ""}
                       </div>
                       <div className="mt-2 text-xs text-muted-foreground">
@@ -540,6 +540,7 @@ export default function PrinterSetupPage() {
                     </div>
                     <div className="flex gap-2">
                       <Button
+                        data-testid="run-test-print"
                         variant="outline"
                         onClick={() => testExistingPrinter(printer.id)}
                         disabled={testingPrinterId === printer.id}
