@@ -205,4 +205,61 @@ describe("ConnectorDownload", () => {
       "https://example.test/api/public/connector/download/2026.3.12/windows",
     );
   });
+
+  it("does not offer the Windows installer as the detected-device download on a Mac when no signed Mac package is published", async () => {
+    const userAgentSpy = vi
+      .spyOn(window.navigator, "userAgent", "get")
+      .mockReturnValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)");
+    const platformSpy = vi.spyOn(window.navigator, "platform", "get").mockReturnValue("MacIntel");
+
+    vi.mocked(apiClient.getInvitePreview).mockResolvedValue({ success: false, error: "No invite" } as any);
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue({
+      success: true,
+      data: {
+        productName: "MSCQR Connector",
+        latestVersion: "2026.3.12",
+        supportPath: "/help/manufacturer",
+        helpPath: "/connector-download",
+        setupGuidePath: "/help/manufacturer",
+        release: {
+          version: "2026.3.12",
+          publishedAt: "2026-03-12T20:00:00.000Z",
+          summary: "Install once and print without manual startup.",
+          notes: [],
+          platforms: {
+            macos: null,
+            windows: {
+              platform: "windows",
+              label: "Windows package",
+              installerKind: "zip",
+              filename: "MSCQR-Connector-Windows-2026.3.12.zip",
+              architecture: "x64",
+              bytes: 2048,
+              sha256: "b".repeat(64),
+              notes: ["Run Install Connector.cmd once."],
+              contentType: "application/zip",
+              downloadPath: "/api/public/connector/download/2026.3.12/windows",
+              downloadUrl: "https://example.test/api/public/connector/download/2026.3.12/windows",
+            },
+          },
+        },
+      },
+    } as any);
+
+    render(
+      <MemoryRouter initialEntries={["/connector-download"]}>
+        <ConnectorDownload />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/signed Mac installer not published yet/i)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /get installer for this device/i })).not.toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /download for windows/i })).toHaveAttribute(
+      "href",
+      "https://example.test/api/public/connector/download/2026.3.12/windows",
+    );
+
+    userAgentSpy.mockRestore();
+    platformSpy.mockRestore();
+  });
 });

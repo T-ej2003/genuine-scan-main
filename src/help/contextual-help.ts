@@ -137,6 +137,15 @@ export const getPageGuidance = (pathname: string, role?: UserRole | null): PageG
     };
   }
 
+  if (starts(pathname, "/settings")) {
+    return {
+      title: "Choose the right settings area",
+      summary: "Use this page as the home for account, printer, and system setup.",
+      firstAction: "Open the section that matches what you want to change: account, printer, or system controls.",
+      note: "Manufacturer users see printer tools here. Super Admin users also see system controls.",
+    };
+  }
+
   if (starts(pathname, "/account")) {
     return {
       title: "Keep your account secure",

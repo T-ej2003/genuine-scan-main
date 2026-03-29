@@ -213,8 +213,8 @@ export const deriveManagedPrinterAutoDetect = (
     return {
       routeType: "NETWORK_IPP",
       readiness: "READY",
-      summary: "Detected as IPP/IPPS printer",
-      detail: `MSCQR can prefill a managed IPP route for ${printer.printerName}.`,
+      summary: "Looks like an office printer",
+      detail: `MSCQR can fill in most of the shared office printer details for ${printer.printerName}.`,
       host: ippEndpoint.host,
       port: ippEndpoint.port,
       resourcePath: ippEndpoint.resourcePath,
@@ -229,10 +229,10 @@ export const deriveManagedPrinterAutoDetect = (
     return {
       routeType: "NETWORK_DIRECT",
       readiness: supportedLanguage ? "READY" : "NEEDS_DETAILS",
-      summary: supportedLanguage ? "Detected as raw TCP label printer" : "Detected as raw TCP network printer",
+      summary: supportedLanguage ? "Looks like a factory label printer" : "Looks like a network printer",
       detail: supportedLanguage
-        ? `MSCQR can prefill a managed ${supportedLanguage} route for ${printer.printerName}.`
-        : "The connector found a raw TCP endpoint, but you still need to confirm the printer language before saving.",
+        ? `MSCQR can fill in most of the factory label printer details for ${printer.printerName}.`
+        : "MSCQR found the printer address, but you still need to confirm what label type this printer uses before you save it.",
       host: rawEndpoint.host,
       port: rawEndpoint.port,
       commandLanguage: supportedLanguage,
@@ -243,9 +243,9 @@ export const deriveManagedPrinterAutoDetect = (
     return {
       routeType: "NETWORK_IPP",
       readiness: "NEEDS_DETAILS",
-      summary: "Detected as AirPrint / IPP printer",
+      summary: "Looks like an office printer",
       detail:
-        "The connector can see an IPP-capable printer, but MSCQR still needs a stable host or printer URI before it can save a managed route.",
+        "MSCQR can see an office printer here, but it still needs a stable printer address before it can save this setup.",
       tlsEnabled: protocols.includes("IPPS") || connection === "ipps",
     };
   }
@@ -257,9 +257,9 @@ export const deriveManagedPrinterAutoDetect = (
     return {
       routeType: "NETWORK_DIRECT",
       readiness: "NEEDS_DETAILS",
-      summary: "Detected as network label printer",
+      summary: "Looks like a factory label printer",
       detail:
-        "The connector can see a supported label printer language, but you still need to confirm the raw TCP host or port before saving a managed route.",
+        "MSCQR can see the label printer type, but it still needs the printer address before it can save this setup.",
       commandLanguage: supportedLanguage,
     };
   }
@@ -267,9 +267,9 @@ export const deriveManagedPrinterAutoDetect = (
   return {
     routeType: "LOCAL_ONLY",
     readiness: "NEEDS_DETAILS",
-    summary: "Detected as workstation-managed printer",
+    summary: "Use the printer already set up on this computer",
     detail:
-      "This printer is visible to the workstation connector, but it does not expose enough network details for a managed MSCQR route. Keep it on LOCAL_AGENT or enter a managed endpoint manually.",
+      "MSCQR can see this printer on this computer, but it does not expose enough network details to save as a shared printer. Keep using it on this computer and return to batches when ready.",
     commandLanguage: supportedLanguage,
   };
 };

@@ -37,6 +37,7 @@ const Verify = lazy(() => import("@/pages/Verify"));
 const VerifyLanding = lazy(() => import("@/pages/VerifyLanding"));
 const Index = lazy(() => import("@/pages/Index"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
+const SettingsPage = lazy(() => import("@/pages/Settings"));
 const AccountSettings = lazy(() => import("@/pages/AccountSettings"));
 const HelpHub = lazy(() => import("@/pages/help/HelpHub"));
 const HelpAuthOverview = lazy(() => import("@/pages/help/AuthOverview"));
@@ -471,6 +472,15 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRoles={["super_admin"]}>
               <IRIncidentDetail />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path={APP_PATHS.settings}
+          element={
+            <ProtectedRoute>
+              <SettingsPage />
             </ProtectedRoute>
           }
         />

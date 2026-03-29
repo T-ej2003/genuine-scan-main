@@ -255,32 +255,30 @@ export function BatchPrintJobDialog({
                 </div>
               ) : null}
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">Saved printer</Label>
-                  <Select
-                    value={selectedPrinterProfileId || "__none__"}
-                    onValueChange={(value) => onSelectedPrinterProfileIdChange(value === "__none__" ? "" : value)}
-                  >
-                    <SelectTrigger data-testid="print-job-printer-profile">
-                      <SelectValue placeholder="Choose saved printer" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {registeredPrinters.length === 0 ? (
-                        <SelectItem value="__none__">No saved printers</SelectItem>
-                      ) : (
-                        registeredPrinters.map((row) => (
+              {registeredPrinters.length > 0 ? (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Saved printer</Label>
+                    <Select
+                      value={selectedPrinterProfileId || "__none__"}
+                      onValueChange={(value) => onSelectedPrinterProfileIdChange(value === "__none__" ? "" : value)}
+                    >
+                      <SelectTrigger data-testid="print-job-printer-profile">
+                        <SelectValue placeholder="Choose saved printer" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {registeredPrinters.map((row) => (
                           <SelectItem key={row.id} value={row.id}>
                             {row.name}
                             {` · ${getPrinterDispatchLabel(row)}`}
                             {!row.isActive ? " · unavailable" : ""}
                           </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-              </div>
+              ) : null}
 
               {selectedPrinterProfile ? (
                 <div className="rounded-md border bg-muted/20 px-3 py-3 text-sm">

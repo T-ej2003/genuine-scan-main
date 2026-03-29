@@ -14,6 +14,18 @@ export type UiRouteActionInventoryItem = {
 
 export const UI_ACTION_INVENTORY = [
   {
+    route: APP_PATHS.settings,
+    primaryActions: [
+      { id: "settings-open-account", state: "working" },
+      { id: "settings-open-printer-setup", state: "working" },
+      {
+        id: "settings-open-system-settings",
+        state: "hidden_by_design",
+        reason: "Only Super Admin users see system settings.",
+      },
+    ],
+  },
+  {
     route: APP_PATHS.dashboard,
     primaryActions: [
       { id: "open-notifications", state: "working" },
@@ -82,7 +94,11 @@ export const UI_ACTION_INVENTORY = [
         state: "needs_step_up",
         reason: "Password changes may ask the user to confirm their identity again.",
       },
-      { id: "account-revoke-session", state: "working" },
+      {
+        id: "account-manage-sessions",
+        state: "hidden_by_design",
+        reason: "Session controls were moved out of the manufacturer account page.",
+      },
     ],
   },
 ] as const;

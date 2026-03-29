@@ -67,6 +67,7 @@ const routeLabel = (route: string) => {
     "/incident-response": "Incident Response",
     "/printer-diagnostics": "Printer Setup",
     "/printer-setup": "Printer Setup",
+    "/settings": "Settings",
     "/account": "Account settings",
     "/login": "Sign in",
     "/accept-invite": "Accept invite",

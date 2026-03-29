@@ -44,7 +44,7 @@ export const buildManagedNetworkPrinterNotice = (
     return {
       title: "Select a saved printer",
       summary: "Choose a saved printer profile before starting this print job.",
-      detail: "Only checked printer setups can receive managed network jobs.",
+      detail: "Save and check a printer in Printer Setup before you start this print run.",
       tone: "neutral",
     };
   }

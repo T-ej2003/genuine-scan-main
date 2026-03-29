@@ -34,27 +34,13 @@ type AdminMfaStatus = {
   webauthnCredentials?: AdminWebAuthnCredentialSummary[];
 };
 
-type ActiveSession = {
-  id: string;
-  current: boolean;
-  createdAt: string;
-  lastUsedAt?: string | null;
-  expiresAt: string;
-  authenticatedAt?: string | null;
-  mfaVerifiedAt?: string | null;
-  userAgent?: string | null;
-  ipHash?: string | null;
-};
-
 export default function AccountSettings() {
-  const { user, refresh, logout } = useAuth();
+  const { user, refresh } = useAuth();
   const { toast } = useToast();
 
   const [profileLoading, setProfileLoading] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [mfaLoading, setMfaLoading] = useState(false);
-  const [sessionsLoading, setSessionsLoading] = useState(false);
-  const [revokingSessionId, setRevokingSessionId] = useState<string | null>(null);
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -73,27 +59,9 @@ export default function AccountSettings() {
   const [webauthnLabel, setWebauthnLabel] = useState("");
   const [removingWebAuthnId, setRemovingWebAuthnId] = useState<string | null>(null);
   const [rotatedBackupCodes, setRotatedBackupCodes] = useState<string[] | null>(null);
-  const [sessions, setSessions] = useState<ActiveSession[]>([]);
 
   const isAdminUser = user?.role === "super_admin" || user?.role === "licensee_admin";
   const webauthnAvailable = isWebAuthnSupported();
-
-  const loadSessions = async () => {
-    if (!user) {
-      setSessions([]);
-      return;
-    }
-
-    setSessionsLoading(true);
-    try {
-      const response = await apiClient.listSessions();
-      if (response.success && response.data) {
-        setSessions(response.data.items || []);
-      }
-    } finally {
-      setSessionsLoading(false);
-    }
-  };
 
   const loadMfaStatus = async () => {
     if (!isAdminUser) return;
@@ -112,11 +80,6 @@ export default function AccountSettings() {
     void loadMfaStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdminUser]);
-
-  useEffect(() => {
-    void loadSessions();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
 
   useEffect(() => {
     if (!mfaSetup?.otpauthUri) {
@@ -174,7 +137,6 @@ export default function AccountSettings() {
         toast({ title: "Saved", description: "Your profile has been updated." });
       }
       await refresh();
-      await loadSessions();
     } catch (e: any) {
       toast({ title: "Save failed", description: e?.message || "Error", variant: "destructive" });
     } finally {
@@ -215,37 +177,6 @@ export default function AccountSettings() {
       toast({ title: "Failed", description: e?.message || "Error", variant: "destructive" });
     } finally {
       setPasswordLoading(false);
-    }
-  };
-
-  const revokeSession = async (sessionId: string) => {
-    setRevokingSessionId(sessionId);
-    try {
-      const response = await apiClient.revokeSession(sessionId);
-      if (!response.success) {
-        if (response.code === "STEP_UP_REQUIRED") return;
-        throw new Error(response.error || "Could not revoke session.");
-      }
-
-      if (response.data?.currentSessionRevoked) {
-        toast({
-          title: "Current session revoked",
-          description: "This browser session was closed. Sign in again if you still need access.",
-        });
-        logout();
-        return;
-      }
-
-      toast({ title: "Session revoked", description: "That device can no longer use this session." });
-      await loadSessions();
-    } catch (error: any) {
-      toast({
-        title: "Session revoke failed",
-        description: error?.message || "Could not revoke that session.",
-        variant: "destructive",
-      });
-    } finally {
-      setRevokingSessionId(null);
     }
   };
 
@@ -427,7 +358,7 @@ export default function AccountSettings() {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold">Account & Security</h1>
-          <p className="text-muted-foreground">Manage your profile, sign-in safety, and active sessions.</p>
+          <p className="text-muted-foreground">Manage your profile, password, and sign-in safety.</p>
         </div>
 
         <Card>
@@ -519,66 +450,6 @@ export default function AccountSettings() {
                 />
               </div>
             </form>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <div className="font-semibold">Active Sessions</div>
-            <div className="text-sm text-muted-foreground">
-              Review browser sessions using this account and revoke the ones you do not recognize.
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {user?.auth?.sessionExpiresAt ? (
-              <Alert>
-                <AlertDescription>
-                  Current session expires on {new Date(user.auth.sessionExpiresAt).toLocaleString()}.
-                </AlertDescription>
-              </Alert>
-            ) : null}
-
-            {sessionsLoading ? (
-              <div className="text-sm text-muted-foreground">Loading active sessions...</div>
-            ) : sessions.length === 0 ? (
-              <div className="text-sm text-muted-foreground">No active sessions are available right now.</div>
-            ) : (
-              <div className="space-y-3">
-                {sessions.map((session) => (
-                  <div key={session.id} className="rounded-xl border p-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="space-y-1">
-                        <div className="font-medium">
-                          {session.current ? "Current browser session" : session.userAgent || "Saved browser session"}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          Started {new Date(session.createdAt).toLocaleString()}.
-                          {session.lastUsedAt ? ` Last used ${new Date(session.lastUsedAt).toLocaleString()}.` : ""}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          Expires {new Date(session.expiresAt).toLocaleString()}.
-                          {session.mfaVerifiedAt ? ` MFA confirmed ${new Date(session.mfaVerifiedAt).toLocaleString()}.` : ""}
-                        </div>
-                      </div>
-
-                      <Button
-                        data-testid="account-revoke-session"
-                        type="button"
-                        variant={session.current ? "destructive" : "outline"}
-                        disabled={revokingSessionId === session.id}
-                        onClick={() => void revokeSession(session.id)}
-                      >
-                        {revokingSessionId === session.id
-                          ? "Revoking..."
-                          : session.current
-                            ? "Sign out this browser"
-                            : "Revoke session"}
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </CardContent>
         </Card>
 

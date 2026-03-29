@@ -251,9 +251,9 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
                 <DropdownMenuSeparator />
 
-                <DropdownMenuItem onClick={() => navigate("/account")}>
+                <DropdownMenuItem onClick={() => navigate(APP_PATHS.settings)}>
                   <Settings className="mr-2 h-4 w-4" />
-                  Account
+                  Settings
                 </DropdownMenuItem>
 
                 <DropdownMenuSeparator />

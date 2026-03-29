@@ -182,7 +182,7 @@ const workspaceHighlights = [
   {
     icon: Printer,
     title: "Cleaner rollout",
-    detail: "Mac and Windows installers, setup help, and the live version number all stay on one page without the cramped split-screen shell.",
+    detail: "Published installers, setup help, and the live version number all stay on one page without the cramped split-screen shell.",
   },
 ];
 
@@ -280,10 +280,17 @@ export default function ConnectorDownload() {
       .filter(Boolean) as DownloadCard[];
   }, [detectedPlatform, release]);
 
-  const recommendedCard = useMemo(
-    () => downloadCards.find((item) => item.recommended) || downloadCards[0] || null,
-    [downloadCards],
+  const detectedCard = useMemo(
+    () => (detectedPlatform === "unknown" ? null : downloadCards.find((item) => item.platform === detectedPlatform) || null),
+    [detectedPlatform, downloadCards],
   );
+
+  const recommendedCard = useMemo(
+    () => detectedCard || (detectedPlatform === "unknown" ? downloadCards[0] || null : null),
+    [detectedCard, detectedPlatform, downloadCards],
+  );
+
+  const missingDetectedPlatformRelease = detectedPlatform !== "unknown" && !detectedCard;
 
   const detectedPlatformLabel =
     detectedPlatform === "macos"
@@ -291,6 +298,14 @@ export default function ConnectorDownload() {
       : detectedPlatform === "windows"
         ? "This computer looks like Windows."
         : "Choose the installer that matches the computer connected to the printer.";
+
+  const recommendedBadgeLabel = missingDetectedPlatformRelease
+    ? detectedPlatform === "macos"
+      ? "Signed Mac installer not published yet"
+      : "Installer not published for this device yet"
+    : recommendedCard
+      ? `${recommendedCard.title} available`
+      : "Choose Mac or Windows";
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.16),transparent_26%),radial-gradient(circle_at_top_right,rgba(15,23,42,0.12),transparent_30%),linear-gradient(180deg,#eef8f4_0%,#f8fafc_46%,#ffffff_100%)] text-slate-950">
@@ -396,7 +411,7 @@ export default function ConnectorDownload() {
                     </h1>
                     <p className="max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
                       This page is now dedicated to installation only: more room, less congestion, and a direct download
-                      flow for the live Mac and Windows packages. Open it on the printer computer, install once, and keep
+                      flow for the latest published installer packages. Open it on the printer computer, install once, and keep
                       the rest of the workflow inside MSCQR.
                     </p>
                   </div>
@@ -423,7 +438,7 @@ export default function ConnectorDownload() {
               <section className="rounded-[32px] border border-emerald-200/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(238,248,244,0.88))] p-6 shadow-[0_30px_80px_-60px_rgba(15,23,42,0.45)] sm:p-8">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
-                    {recommendedCard ? `${recommendedCard.title} available` : "Choose Mac or Windows"}
+                    {recommendedBadgeLabel}
                   </Badge>
                   {release ? <Badge variant="outline">Published {formatPublishedDate(release.release.publishedAt)}</Badge> : null}
                 </div>
@@ -438,6 +453,22 @@ export default function ConnectorDownload() {
                     in after that. Windows setup now checks the local printer before it says the computer is ready.
                   </p>
                 </div>
+
+                {missingDetectedPlatformRelease ? (
+                  <Alert className="mt-5 border-amber-200 bg-amber-50 text-amber-950">
+                    <AlertCircle className="h-4 w-4 text-amber-700" />
+                    <AlertTitle>
+                      {detectedPlatform === "macos"
+                        ? "This Mac does not have a published signed installer yet"
+                        : "No installer is published for this device yet"}
+                    </AlertTitle>
+                    <AlertDescription>
+                      {detectedPlatform === "macos"
+                        ? "MSCQR should not send a Windows download to this Mac. If this Mac already has the printer helper and the printer is working, keep using the current helper until the signed Mac update is published."
+                        : "Use the setup guide for now and install the helper only when the matching device download is published."}
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
 
                 <div className="mt-6 grid gap-3 sm:grid-cols-2">
                   <div className="rounded-[24px] border border-slate-200 bg-white/80 p-4">
@@ -474,6 +505,13 @@ export default function ConnectorDownload() {
                         <Download className="h-4 w-4" />
                         Get installer for this device
                       </a>
+                    </Button>
+                  ) : missingDetectedPlatformRelease ? (
+                    <Button asChild size="lg" variant="outline" className="sm:min-w-[240px]">
+                      <Link to="/printer-setup">
+                        Open printer setup
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
                     </Button>
                   ) : null}
                   <Button asChild size="lg" variant="outline">

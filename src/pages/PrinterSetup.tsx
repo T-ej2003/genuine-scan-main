@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Loader2, Network, PlugZap, ShieldCheck } from "lucide-react";
+import { ArrowLeft, CheckCircle2, CircleHelp, Loader2, Network, PlugZap, ShieldCheck } from "lucide-react";
 
+import { ActionButton } from "@/components/ui/action-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,12 +13,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/api-client";
 import { deriveManagedPrinterAutoDetect, normalizePrinterInventoryRows, type PrinterInventoryRow } from "@/lib/printer-diagnostics";
 import { getPrinterDispatchLabel, sanitizePrinterUiError } from "@/lib/printer-user-facing";
+import { createUiActionState } from "@/lib/ui-actions";
 import { useManufacturerPrinterRuntime } from "@/features/printing/hooks";
+import { APP_PATHS } from "@/app/route-metadata";
 import type { RegisteredPrinterDTO } from "../../shared/contracts/runtime/printing";
 
 type ManagedRouteForm = {
@@ -39,6 +41,16 @@ type PrinterTestLabelResponse = {
   outcome?: "confirmed" | "needs_attention";
   message?: string | null;
 };
+
+type LatestConnectorReleaseInfo = {
+  latestVersion?: string;
+  release?: {
+    platforms?: {
+      macos?: unknown;
+      windows?: unknown;
+    };
+  };
+} | null;
 
 const NETWORK_DIRECT_LANGUAGES: ManagedRouteForm["commandLanguage"][] = [
   "ZPL",
@@ -80,10 +92,63 @@ const defaultForm: ManagedRouteForm = {
   deliveryMode: "DIRECT",
 };
 
+const detectCurrentPlatform = (): "macos" | "windows" | "unknown" => {
+  if (typeof navigator === "undefined") return "unknown";
+  const source = `${navigator.userAgent || ""} ${(navigator as { platform?: string }).platform || ""}`.toLowerCase();
+  if (source.includes("mac")) return "macos";
+  if (source.includes("win")) return "windows";
+  return "unknown";
+};
+
+const getSuggestedPathTitle = (form: ManagedRouteForm, suggestion: ReturnType<typeof deriveManagedPrinterAutoDetect> | null) => {
+  if (!suggestion) return "Choose a printer to see the safest setup.";
+  if (suggestion.routeType === "LOCAL_ONLY") return "Best fit: keep using the printer already set up on this computer.";
+  if (suggestion.routeType === "NETWORK_IPP") return "Best fit: save this as an office printer.";
+  return form.deliveryMode === "SITE_GATEWAY"
+    ? "Best fit: save this as a label printer through the site print link."
+    : "Best fit: save this as a direct label printer.";
+};
+
+const getSuggestedPathState = (suggestion: ReturnType<typeof deriveManagedPrinterAutoDetect> | null) => {
+  if (!suggestion) return { label: "Waiting", tone: "secondary" as const };
+  if (suggestion.routeType === "LOCAL_ONLY") return { label: "Use this computer", tone: "default" as const };
+  if (suggestion.readiness === "READY") return { label: "Ready to save", tone: "default" as const };
+  return { label: "Needs one more detail", tone: "secondary" as const };
+};
+
+const joinHumanList = (items: string[]) => {
+  if (items.length === 0) return "";
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+};
+
+const getMissingSetupDetails = (
+  form: ManagedRouteForm,
+  suggestion: ReturnType<typeof deriveManagedPrinterAutoDetect> | null,
+) => {
+  const missing: string[] = [];
+
+  if (!form.name.trim()) missing.push("a saved printer name");
+  if (!suggestion || suggestion.routeType === "LOCAL_ONLY") return missing;
+
+  if (form.connectionType === "NETWORK_IPP") {
+    if (!form.host.trim() && !form.printerUri.trim()) missing.push("a printer address");
+    if (!form.printerUri.trim() && !String(form.port || "").trim()) missing.push("a printer port");
+    if (!form.printerUri.trim() && !form.resourcePath.trim()) missing.push("a printer path");
+    return missing;
+  }
+
+  if (!form.ipAddress.trim()) missing.push("a printer IP address");
+  if (!String(form.port || "").trim()) missing.push("a printer port");
+  if (!form.commandLanguage.trim()) missing.push("the label type");
+  return missing;
+};
+
 export default function PrinterSetupPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { user } = useAuth();
+  const detectedPlatform = useMemo(() => detectCurrentPlatform(), []);
   const runtimeQuery = useManufacturerPrinterRuntime(true, true);
   const inventoryQuery = useQuery({
     queryKey: ["printer-setup", "inventory"],
@@ -92,6 +157,14 @@ export default function PrinterSetupPage() {
       const response = await apiClient.getLocalPrintAgentStatus();
       if (!response.success) return [] as PrinterInventoryRow[];
       return normalizePrinterInventoryRows((response.data as { printers?: unknown[] } | undefined)?.printers || []);
+    },
+  });
+  const connectorReleaseQuery = useQuery({
+    queryKey: ["printer-setup", "connector-release"],
+    staleTime: 60_000,
+    queryFn: async () => {
+      const response = await apiClient.getLatestConnectorRelease();
+      return response.success && response.data ? (response.data as LatestConnectorReleaseInfo) : null;
     },
   });
 
@@ -105,6 +178,13 @@ export default function PrinterSetupPage() {
   const registeredPrinters = (runtimeQuery.data?.registeredPrinters || []) as RegisteredPrinterDTO[];
   const remoteStatus = runtimeQuery.data?.remoteStatus || null;
   const localReady = Boolean(remoteStatus?.connected && remoteStatus?.eligibleForPrinting);
+  const helperVersion = String(remoteStatus?.agentVersion || "").trim();
+  const latestHelperVersion = String(connectorReleaseQuery.data?.latestVersion || "").trim();
+  const detectedPlatformRelease =
+    detectedPlatform === "unknown"
+      ? null
+      : connectorReleaseQuery.data?.release?.platforms?.[detectedPlatform] || null;
+  const helperNeedsUpdate = Boolean(helperVersion && latestHelperVersion && helperVersion !== latestHelperVersion);
 
   useEffect(() => {
     if (selectedPrinterId) return;
@@ -147,6 +227,31 @@ export default function PrinterSetupPage() {
       ? "Recommended: save this as a label printer through the site print link"
       : "Recommended: save this as a direct label printer";
   }, [form.deliveryMode, suggestion]);
+
+  const suggestedPathState = getSuggestedPathState(suggestion);
+  const missingSetupDetails = useMemo(() => getMissingSetupDetails(form, suggestion), [form, suggestion]);
+
+  const saveActionState = useMemo(() => {
+    if (!selectedPrinter) {
+      return createUiActionState("disabled", "Choose the printer this computer is already using first.");
+    }
+    if (!suggestion) {
+      return createUiActionState("disabled", "Wait for MSCQR to finish checking the selected printer.");
+    }
+    if (suggestion.routeType === "LOCAL_ONLY") {
+      return createUiActionState("hidden");
+    }
+    if (saving) {
+      return createUiActionState("pending", "Saving the printer and running one live test label.");
+    }
+    if (missingSetupDetails.length > 0) {
+      return createUiActionState(
+        "disabled",
+        `Finish ${joinHumanList(missingSetupDetails)} before you save this printer.`,
+      );
+    }
+    return createUiActionState("enabled");
+  }, [missingSetupDetails, saving, selectedPrinter, suggestion]);
 
   const saveRecommendedPrinter = async () => {
     if (!suggestion || suggestion.routeType === "LOCAL_ONLY") {
@@ -267,10 +372,18 @@ export default function PrinterSetupPage() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => navigate("/connector-download")}>
+            <Button variant="outline" onClick={() => navigate(APP_PATHS.connectorDownload)}>
               Install printer helper
             </Button>
-            <Button onClick={() => navigate("/batches")}>Back to Batches</Button>
+            <Button variant="outline" asChild>
+              <Link to={APP_PATHS.settings}>
+                <ArrowLeft className="h-4 w-4" />
+                Back to settings
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link to={APP_PATHS.dashboard}>Back to dashboard</Link>
+            </Button>
           </div>
         </div>
 
@@ -295,6 +408,17 @@ export default function PrinterSetupPage() {
               </div>
               <div className="flex items-center justify-between rounded-lg border p-3">
                 <div>
+                  <div className="font-medium">Installed helper version</div>
+                  <div className="text-xs text-muted-foreground">
+                    {helperVersion || "MSCQR will show the installed version after the printer helper checks in."}
+                  </div>
+                </div>
+                <Badge variant={helperVersion ? "outline" : "secondary"}>
+                  {latestHelperVersion ? `Latest ${latestHelperVersion}` : "Checking release"}
+                </Badge>
+              </div>
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div>
                   <div className="font-medium">Printers found on this computer</div>
                   <div className="text-xs text-muted-foreground">
                     {inventory.length > 0 ? `${inventory.length} printers detected on this device.` : "No printers detected on this device yet."}
@@ -302,6 +426,22 @@ export default function PrinterSetupPage() {
                 </div>
                 <Badge variant={inventory.length > 0 ? "default" : "secondary"}>{inventory.length}</Badge>
               </div>
+              {helperNeedsUpdate && detectedPlatformRelease ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                  A newer printer helper is published for this {detectedPlatform === "macos" ? "Mac" : "Windows"} device.
+                  <div className="mt-2">
+                    <Button size="sm" variant="outline" onClick={() => navigate(APP_PATHS.connectorDownload)}>
+                      Open helper download
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+              {helperNeedsUpdate && detectedPlatform === "macos" && !detectedPlatformRelease ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                  This Mac is still running an older printer helper, but the latest signed Mac installer is not published yet.
+                  Keep using the current helper on this Mac until the signed update is available.
+                </div>
+              ) : null}
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-950">
                 Once the helper shows the printer here, most people can finish setup without typing network details manually.
               </div>
@@ -320,17 +460,18 @@ export default function PrinterSetupPage() {
               {suggestion ? (
                 <>
                   <div className="rounded-lg border p-3">
-                    <div className="font-medium">{suggestion.summary}</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="font-medium">{getSuggestedPathTitle(form, suggestion)}</div>
+                      <Badge variant={suggestedPathState.tone}>{suggestedPathState.label}</Badge>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">{suggestion.summary}</div>
                     <div className="mt-1 text-xs text-muted-foreground">{suggestion.detail}</div>
                   </div>
-                  <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-                    <div>Route type: {suggestion.routeType}</div>
-                    <div>Readiness: {suggestion.readiness}</div>
-                    {suggestion.host ? <div>Host: {suggestion.host}</div> : null}
-                    {suggestion.port ? <div>Port: {suggestion.port}</div> : null}
-                    {suggestion.commandLanguage ? <div>Language: {suggestion.commandLanguage}</div> : null}
-                    {suggestion.printerUri ? <div className="break-all">URI: {suggestion.printerUri}</div> : null}
-                  </div>
+                  {missingSetupDetails.length > 0 ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                      MSCQR still needs {joinHumanList(missingSetupDetails)} before it can finish this setup.
+                    </div>
+                  ) : null}
                 </>
               ) : (
                 <div className="rounded-lg border p-3 text-xs text-muted-foreground">
@@ -342,13 +483,17 @@ export default function PrinterSetupPage() {
         </div>
 
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Network className="h-5 w-5" />
-              Save the Recommended Printer
-            </CardTitle>
-            <CardDescription>Advanced fields stay hidden unless MSCQR still needs a missing host, port, or language detail.</CardDescription>
-          </CardHeader>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Network className="h-5 w-5" />
+                {suggestion?.routeType === "LOCAL_ONLY" ? "Use the printer on this computer" : "Save this printer"}
+              </CardTitle>
+              <CardDescription>
+                {suggestion?.routeType === "LOCAL_ONLY"
+                  ? "This printer works best on this computer without saving a shared setup."
+                  : "Advanced fields stay hidden unless MSCQR still needs one more printer detail."}
+              </CardDescription>
+            </CardHeader>
           <CardContent className="space-y-5">
             <div className="grid gap-4 md:grid-cols-[1fr_auto]">
               <div className="space-y-2">
@@ -379,39 +524,54 @@ export default function PrinterSetupPage() {
               </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="route-name">Saved printer name</Label>
-                <Input id="route-name" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="delivery-mode">Connection path</Label>
-                <Select
-                  value={form.deliveryMode}
-                  onValueChange={(value: "DIRECT" | "SITE_GATEWAY") => setForm((current) => ({ ...current, deliveryMode: value }))}
-                >
-                  <SelectTrigger id="delivery-mode">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="DIRECT">Direct from server</SelectItem>
-                    <SelectItem value="SITE_GATEWAY">Through site print link</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
             {suggestion?.routeType === "LOCAL_ONLY" ? (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
-                This printer is best kept on the built-in helper path. Once the helper is ready, you can go back to batches and print without saving a separate network printer.
+                This printer is best kept on the built-in printer helper path. Once the helper is ready, go back to batches and start printing without saving a separate shared printer.
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button variant="outline" onClick={() => navigate(APP_PATHS.dashboard)}>
+                    Back to dashboard
+                  </Button>
+                  <Button onClick={() => navigate(APP_PATHS.batches)}>Go to batches</Button>
+                </div>
               </div>
             ) : (
               <>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="route-name">Saved printer name</Label>
+                    <Input id="route-name" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
+                  </div>
+                  {form.connectionType === "NETWORK_DIRECT" ? (
+                    <div className="space-y-2">
+                      <Label htmlFor="delivery-mode">Connection path</Label>
+                      <Select
+                        value={form.deliveryMode}
+                        onValueChange={(value: "DIRECT" | "SITE_GATEWAY") => setForm((current) => ({ ...current, deliveryMode: value }))}
+                      >
+                        <SelectTrigger id="delivery-mode">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="DIRECT">Connect directly from MSCQR</SelectItem>
+                          <SelectItem value="SITE_GATEWAY">Send through the site print link</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border p-3 text-sm">
+                      <div className="font-medium">Shared office printer</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        MSCQR will save this as a shared office printer and use the printer address shown here.
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex items-center justify-between rounded-lg border p-3">
                   <div>
-                    <div className="font-medium">Show advanced connection fields</div>
+                    <div className="font-medium">Edit printer details manually</div>
                     <div className="text-xs text-muted-foreground">
-                      Only open this if the detected recommendation still needs manual correction.
+                      Only open this if MSCQR still needs one more printer detail or the detected address looks wrong.
                     </div>
                   </div>
                   <Switch checked={showAdvanced} onCheckedChange={setShowAdvanced} />
@@ -494,12 +654,19 @@ export default function PrinterSetupPage() {
                 ) : null}
 
                 <div className="flex flex-wrap gap-2">
-                  <Button data-testid="save-printer-setup" onClick={saveRecommendedPrinter} disabled={saving || !suggestion}>
-                    {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    Save and print live test label
+                  <ActionButton
+                    data-testid="save-printer-setup"
+                    onClick={saveRecommendedPrinter}
+                    state={saveActionState}
+                    idleLabel="Save and print live test label"
+                    pendingLabel="Saving and testing..."
+                  />
+                  <Button variant="outline" onClick={() => navigate(APP_PATHS.batches)}>
+                    Go to batches
                   </Button>
-                  <Button variant="outline" onClick={() => navigate("/batches")}>
-                    Finish setup and return
+                  <Button variant="ghost" onClick={() => navigate(APP_PATHS.settings)}>
+                    <CircleHelp className="h-4 w-4" />
+                    Back to settings
                   </Button>
                 </div>
               </>
