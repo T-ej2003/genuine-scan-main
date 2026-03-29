@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { APP_PATHS } from "@/app/route-metadata";
 import apiClient from "@/lib/api-client";
 import {
   getManagedPrinterDiagnosticSummary,
@@ -653,8 +654,9 @@ export function useManufacturerPrinterConnection({
   };
 
   const goToHelp = () => navigate(contextualHelpRoute);
-  const goToConnectorDownload = () => navigate("/connector-download");
-  const goToBatches = () => navigate("/batches");
+  const goToConnectorDownload = () => navigate(APP_PATHS.connectorDownload);
+  const goToPrinterSetup = () => navigate(APP_PATHS.printerSetup);
+  const goToBatches = () => navigate(APP_PATHS.batches);
 
   return {
     isManufacturer: user?.role === "manufacturer",
@@ -675,6 +677,7 @@ export function useManufacturerPrinterConnection({
     reopenPrinterOnboarding,
     goToHelp,
     goToConnectorDownload,
+    goToPrinterSetup,
     goToBatches,
     printerToneClass,
     printerTitle,

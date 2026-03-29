@@ -298,6 +298,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             onSelectedLocalPrinterChange={printerConnection.setSelectedLocalPrinterId}
             onRefreshStatus={printerConnection.refreshPrinterConnectionStatus}
             onInstallConnector={printerConnection.goToConnectorDownload}
+            onOpenPrinterSetup={printerConnection.goToPrinterSetup}
             onOpenBatches={printerConnection.goToBatches}
             onOpenHelp={printerConnection.goToHelp}
             onClose={() => printerConnection.setPrinterDialogOpen(false)}

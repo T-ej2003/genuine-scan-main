@@ -45,6 +45,12 @@ export const sanitizePrinterUiError = (raw?: string | null, fallback = "Printing
   if (hasAny(value, ["127.0.0.1", "localhost", "local print agent", "printer switch failed", "calibration failed"])) {
     return "The printer helper is not available on this computer right now.";
   }
+  if (hasAny(value, ["mtls client certificate fingerprint header missing", "compatibility mode active"])) {
+    return "Advanced secure printer verification is not set up yet. Printing can stay available while setup finishes.";
+  }
+  if (hasAny(value, ["mismatch", "not approved for this printer"]) && hasAny(value, ["fingerprint", "certificate", "mtls"])) {
+    return "MSCQR and the printer helper are not using the same approved secure printer identity yet.";
+  }
   if (hasAny(value, ["heartbeat", "trust", "attestation", "signature", "fingerprint", "certificate", "mtls"])) {
     return "MSCQR is still checking the secure printer connection. Refresh and try again in a moment.";
   }

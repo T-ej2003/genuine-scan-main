@@ -7,6 +7,7 @@ import apiClient from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { onMutationEvent } from "@/lib/mutation-events";
 import { useToast } from "@/hooks/use-toast";
+import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -83,23 +84,67 @@ const toLabel = (value: string) =>
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
-const readableDetailEntries = (details: Record<string, any>) => {
+const PRINTER_AUDIT_ACTION_LABELS: Record<string, string> = {
+  PRINTER_CONNECTION_COMPAT_MODE_ONLINE: "Printer connected in recovery mode",
+  PRINTER_CONNECTION_TRUSTED_ONLINE: "Printer connected",
+  PRINTER_CONNECTION_UNTRUSTED_OR_OFFLINE: "Printer connection needs attention",
+};
+
+const formatAuditActionLabel = (value?: string | null) =>
+  PRINTER_AUDIT_ACTION_LABELS[String(value || "").trim().toUpperCase()] || String(value || "");
+
+const isPrinterAuditEntry = (log: any) =>
+  String(log?.entityType || "").trim().toLowerCase() === "printeragent" ||
+  String(log?.action || "").trim().toUpperCase().startsWith("PRINTER_CONNECTION_");
+
+const formatAuditDetailValue = (log: any, key: string, rawValue: unknown) => {
+  if (rawValue == null || rawValue === "") return "";
+
+  if (typeof rawValue === "boolean") {
+    return rawValue ? "Yes" : "No";
+  }
+
+  const normalizedKey = String(key || "").trim().toLowerCase();
+  if (isPrinterAuditEntry(log) && ["error", "trustreason", "compatibilityreason"].includes(normalizedKey)) {
+    return sanitizePrinterUiError(String(rawValue), "Printer connection needs attention.");
+  }
+  if (isPrinterAuditEntry(log) && normalizedKey === "connectionclass") {
+    const value = String(rawValue || "").trim().toUpperCase();
+    if (value === "TRUSTED") return "Trusted";
+    if (value === "COMPATIBILITY") return "Recovery mode";
+    if (value === "BLOCKED") return "Blocked";
+  }
+  if (Array.isArray(rawValue)) {
+    if (rawValue.length === 0) return "";
+    if (rawValue.every((item) => item && typeof item === "object")) {
+      return rawValue
+        .map((item) => {
+          const row = item as Record<string, unknown>;
+          return String(row.printerName || row.name || row.printerId || row.id || "").trim();
+        })
+        .filter(Boolean)
+        .join(", ");
+    }
+    return rawValue.map((value) => String(value)).join(", ");
+  }
+
+  return String(rawValue);
+};
+
+const readableDetailEntries = (log: any, details: Record<string, any>) => {
   const entries: Array<{ label: string; value: string }> = [];
   for (const [key, rawValue] of Object.entries(details || {})) {
     if (rawValue == null || rawValue === "") continue;
     if (typeof rawValue === "object" && !Array.isArray(rawValue)) {
       const nested = Object.entries(rawValue)
         .filter(([, v]) => v != null && v !== "")
-        .map(([nestedKey, nestedValue]) => `${humanKey(nestedKey)}: ${String(nestedValue)}`);
+        .map(([nestedKey, nestedValue]) => `${humanKey(nestedKey)}: ${formatAuditDetailValue(log, nestedKey, nestedValue)}`);
       if (nested.length > 0) entries.push({ label: humanKey(key), value: nested.join(" • ") });
       continue;
     }
-    if (Array.isArray(rawValue)) {
-      if (rawValue.length === 0) continue;
-      entries.push({ label: humanKey(key), value: rawValue.map((v) => String(v)).join(", ") });
-      continue;
-    }
-    entries.push({ label: humanKey(key), value: String(rawValue) });
+    const formattedValue = formatAuditDetailValue(log, key, rawValue);
+    if (!formattedValue) continue;
+    entries.push({ label: humanKey(key), value: formattedValue });
   }
   return entries;
 };
@@ -173,6 +218,12 @@ export default function AuditLogs() {
       case "ALLOCATE_QR_RANGE":
       case "ALLOCATE_QR_RANGE_LICENSEE":
         return `Allocated QR range ${range || "—"}${d.created || d.quantity ? ` (${d.created || d.quantity} codes)` : ""}.`;
+      case "PRINTER_CONNECTION_COMPAT_MODE_ONLINE":
+        return "Printer connected in recovery mode while advanced secure verification is still being set up.";
+      case "PRINTER_CONNECTION_TRUSTED_ONLINE":
+        return "Printer connected and trusted for secure printing.";
+      case "PRINTER_CONNECTION_UNTRUSTED_OR_OFFLINE":
+        return "Printer connection needs attention before secure printing can continue.";
       default: {
         const name = d.name || d.batchName || d.licenseeName || d.manufacturerName || null;
         const parts: string[] = [];
@@ -508,14 +559,14 @@ export default function AuditLogs() {
                     filtered.map((l) => {
                       const tone = actionTone(String(l.action || ""));
                       const details = asObject(l.details);
-                      const detailEntries = readableDetailEntries(details);
+                      const detailEntries = readableDetailEntries(l, details);
                       const expanded = Boolean(expandedRows[l.id]);
                       return (
                         <TableRow key={l.id} className={String(l.action || "").includes("FRAUD") ? "bg-red-50/30" : undefined}>
                           <TableCell>
                             <Badge className={tone.className}>
                               {tone.icon}
-                              {l.action}
+                              {formatAuditActionLabel(l.action)}
                             </Badge>
                           </TableCell>
                           <TableCell className="text-xs text-slate-600">{userLabel(l)}</TableCell>

@@ -11,6 +11,10 @@ describe("printer user-facing helpers", () => {
     expect(sanitizePrinterUiError("Heartbeat signature verification failed")).toBe(
       "MSCQR is still checking the secure printer connection. Refresh and try again in a moment."
     );
+
+    expect(sanitizePrinterUiError("mTLS client certificate fingerprint header missing")).toBe(
+      "Advanced secure printer verification is not set up yet. Printing can stay available while setup finishes."
+    );
   });
 
   it("redacts duplicate printer registration errors", () => {

@@ -161,6 +161,7 @@ describe("DashboardLayout printer connection dialog", () => {
       screen.getByText(/check whether printing is ready, switch printers on this computer when needed/i)
     ).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Refresh status" }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /open printer setup/i })).toBeInTheDocument();
   });
 
   it("shows first-run printer onboarding for manufacturers", async () => {

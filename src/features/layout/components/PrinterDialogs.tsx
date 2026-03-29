@@ -214,6 +214,7 @@ type PrinterStatusDialogProps = {
   onSelectedLocalPrinterChange: (printerId: string) => void;
   onRefreshStatus: () => void;
   onInstallConnector: () => void;
+  onOpenPrinterSetup: () => void;
   onOpenBatches: () => void;
   onOpenHelp: () => void;
   onClose: () => void;
@@ -251,6 +252,7 @@ export function PrinterStatusDialog({
   onSelectedLocalPrinterChange,
   onRefreshStatus,
   onInstallConnector,
+  onOpenPrinterSetup,
   onOpenBatches,
   onOpenHelp,
   onClose,
@@ -492,8 +494,8 @@ export function PrinterStatusDialog({
                   <Button variant="outline" onClick={onOpenBatches}>
                     Go to batches
                   </Button>
-                  <Button variant="ghost" onClick={onOpenHelp}>
-                    Open help
+                  <Button variant="ghost" onClick={onOpenPrinterSetup}>
+                    Open printer setup
                   </Button>
                 </div>
               </div>
@@ -616,9 +618,15 @@ export function PrinterStatusDialog({
                   Install printer helper
                 </Button>
               ) : null}
-              <Button variant="ghost" onClick={onOpenHelp}>
-                Open help
-              </Button>
+              {detectedPrinters.length > 0 ? (
+                <Button variant="ghost" onClick={onOpenPrinterSetup}>
+                  Open printer setup
+                </Button>
+              ) : (
+                <Button variant="ghost" onClick={onOpenHelp}>
+                  Open help
+                </Button>
+              )}
             </div>
           </div>
 

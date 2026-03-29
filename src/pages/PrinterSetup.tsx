@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, CheckCircle2, CircleHelp, Loader2, Network, PlugZap, ShieldCheck } from "lucide-react";
@@ -145,6 +145,48 @@ const getMissingSetupDetails = (
   return missing;
 };
 
+const buildRecommendedPrinterForm = (
+  printer: PrinterInventoryRow,
+  suggestion: NonNullable<ReturnType<typeof deriveManagedPrinterAutoDetect>>,
+): ManagedRouteForm => {
+  const vendor = detectVendor(printer);
+  return {
+    name: printer.printerName,
+    vendor,
+    model: printer.model || "",
+    connectionType: suggestion.routeType === "NETWORK_IPP" ? "NETWORK_IPP" : "NETWORK_DIRECT",
+    ipAddress: suggestion.host || "",
+    host: suggestion.host || "",
+    port: String(suggestion.port || (suggestion.routeType === "NETWORK_IPP" ? 631 : 9100)),
+    resourcePath: suggestion.resourcePath || "/ipp/print",
+    tlsEnabled: suggestion.tlsEnabled ?? true,
+    printerUri: suggestion.printerUri || "",
+    commandLanguage: (suggestion.commandLanguage as ManagedRouteForm["commandLanguage"] | null) || "ZPL",
+    deliveryMode:
+      suggestion.routeType === "LOCAL_ONLY"
+        ? "DIRECT"
+        : recommendedDeliveryMode(printer, suggestion.routeType === "NETWORK_IPP" ? "NETWORK_IPP" : "NETWORK_DIRECT"),
+  };
+};
+
+const buildRecommendedPrinterSignature = (
+  printer: PrinterInventoryRow,
+  suggestion: NonNullable<ReturnType<typeof deriveManagedPrinterAutoDetect>>,
+) =>
+  JSON.stringify({
+    printerId: printer.printerId,
+    printerName: printer.printerName,
+    model: printer.model || "",
+    routeType: suggestion.routeType,
+    readiness: suggestion.readiness,
+    host: suggestion.host || "",
+    port: suggestion.port || "",
+    resourcePath: suggestion.resourcePath || "",
+    printerUri: suggestion.printerUri || "",
+    commandLanguage: suggestion.commandLanguage || "",
+    tlsEnabled: suggestion.tlsEnabled ?? null,
+  });
+
 export default function PrinterSetupPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -173,6 +215,7 @@ export default function PrinterSetupPage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testingPrinterId, setTestingPrinterId] = useState<string | null>(null);
+  const lastRecommendedSignatureRef = useRef("");
 
   const inventory = inventoryQuery.data || [];
   const registeredPrinters = (runtimeQuery.data?.registeredPrinters || []) as RegisteredPrinterDTO[];
@@ -192,32 +235,31 @@ export default function PrinterSetupPage() {
     if (preferred) setSelectedPrinterId(preferred.printerId);
   }, [inventory, selectedPrinterId]);
 
-  const selectedPrinter =
-    inventory.find((row) => row.printerId === selectedPrinterId) || inventory.find((row) => row.isDefault) || inventory[0] || null;
-  const suggestion = selectedPrinter ? deriveManagedPrinterAutoDetect(selectedPrinter) : null;
+  const selectedPrinter = useMemo(
+    () =>
+      inventory.find((row) => row.printerId === selectedPrinterId) ||
+      inventory.find((row) => row.isDefault) ||
+      inventory[0] ||
+      null,
+    [inventory, selectedPrinterId]
+  );
+  const suggestion = useMemo(
+    () => (selectedPrinter ? deriveManagedPrinterAutoDetect(selectedPrinter) : null),
+    [selectedPrinter]
+  );
+  const recommendedSignature = useMemo(
+    () => (selectedPrinter && suggestion ? buildRecommendedPrinterSignature(selectedPrinter, suggestion) : ""),
+    [selectedPrinter, suggestion]
+  );
 
   useEffect(() => {
-    if (!selectedPrinter || !suggestion) return;
-    const vendor = detectVendor(selectedPrinter);
-    setForm({
-      name: selectedPrinter.printerName,
-      vendor,
-      model: selectedPrinter.model || "",
-      connectionType: suggestion.routeType === "NETWORK_IPP" ? "NETWORK_IPP" : "NETWORK_DIRECT",
-      ipAddress: suggestion.host || "",
-      host: suggestion.host || "",
-      port: String(suggestion.port || (suggestion.routeType === "NETWORK_IPP" ? 631 : 9100)),
-      resourcePath: suggestion.resourcePath || "/ipp/print",
-      tlsEnabled: suggestion.tlsEnabled ?? true,
-      printerUri: suggestion.printerUri || "",
-      commandLanguage: (suggestion.commandLanguage as ManagedRouteForm["commandLanguage"] | null) || "ZPL",
-      deliveryMode:
-        suggestion.routeType === "LOCAL_ONLY"
-          ? "DIRECT"
-          : recommendedDeliveryMode(selectedPrinter, suggestion.routeType === "NETWORK_IPP" ? "NETWORK_IPP" : "NETWORK_DIRECT"),
-    });
+    if (!selectedPrinter || !suggestion || !recommendedSignature) return;
+    if (lastRecommendedSignatureRef.current === recommendedSignature) return;
+    lastRecommendedSignatureRef.current = recommendedSignature;
+
+    setForm(buildRecommendedPrinterForm(selectedPrinter, suggestion));
     setShowAdvanced(suggestion.readiness !== "READY");
-  }, [selectedPrinter, suggestion]);
+  }, [recommendedSignature, selectedPrinter, suggestion]);
 
   const recommendedPathLabel = useMemo(() => {
     if (!suggestion) return "Select a printer to begin";
