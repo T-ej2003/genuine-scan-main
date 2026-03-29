@@ -65,6 +65,7 @@ const MAX_SIGNATURE_SKEW_SECONDS = parsePositiveIntEnv("PRINT_AGENT_MAX_SIGNATUR
 const REQUIRE_SIGNATURE = parseBoolEnv("PRINT_AGENT_REQUIRE_SIGNATURE", true);
 const REQUIRE_MTLS = parseBoolEnv("PRINT_AGENT_REQUIRE_MTLS", true);
 const ALLOW_COMPATIBILITY_MODE = parseBoolEnv("PRINT_AGENT_ALLOW_COMPATIBILITY_MODE", true);
+const LEGACY_HEARTBEAT_SUBJECTS = ["manufacturer-browser-heartbeat"];
 
 const normalizePem = (value: string) => String(value || "").replace(/\\n/g, "\n").trim();
 const looksLikePem = (value: string) => normalizePem(value).includes("BEGIN");
@@ -133,6 +134,28 @@ const buildHeartbeatSignedPayload = (input: {
   ].join("|");
 };
 
+const buildHeartbeatSignedPayloadCandidates = (input: {
+  userId: string;
+  agentId: string;
+  deviceFingerprint: string;
+  printerId: string;
+  connected: boolean;
+  heartbeatNonce: string;
+  heartbeatIssuedAt: string;
+}) => {
+  const candidates = new Set<string>();
+  candidates.add(buildHeartbeatSignedPayload(input));
+  for (const legacyUserId of LEGACY_HEARTBEAT_SUBJECTS) {
+    candidates.add(
+      buildHeartbeatSignedPayload({
+        ...input,
+        userId: legacyUserId,
+      })
+    );
+  }
+  return Array.from(candidates);
+};
+
 const verifyAgentSignature = (params: {
   publicKeyPem: string;
   signature: string;
@@ -153,6 +176,25 @@ const verifyAgentSignature = (params: {
   } catch {
     return false;
   }
+};
+
+const verifyAgentSignatureAcrossPayloads = (params: {
+  publicKeyPem: string;
+  signature: string;
+  signedPayloads: string[];
+}) => {
+  for (const signedPayload of params.signedPayloads) {
+    if (
+      verifyAgentSignature({
+        publicKeyPem: params.publicKeyPem,
+        signature: params.signature,
+        signedPayload,
+      })
+    ) {
+      return signedPayload;
+    }
+  }
+  return null;
 };
 
 const normalizeCapabilitySummary = (source: any): PrinterCapabilitySummary | null => {
@@ -433,6 +475,7 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
   const heartbeatNonce = String(input.heartbeatNonce || "").trim() || randomOpaqueToken(12);
   const heartbeatIssuedAt = String(input.heartbeatIssuedAt || "").trim();
   const heartbeatSignature = String(input.heartbeatSignature || "").trim();
+  const incomingPublicKeyPem = looksLikePem(publicKeyPem) ? normalizePem(publicKeyPem) : "";
 
   const metadata = {
     connected: Boolean(input.connected),
@@ -497,14 +540,14 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
     registration &&
     publicKeyPem &&
     !String(registration.publicKeyPem || "").startsWith("compat:") &&
-    normalizePem(publicKeyPem) !== normalizePem(registration.publicKeyPem)
+    incomingPublicKeyPem !== normalizePem(registration.publicKeyPem)
   ) {
     rejectionReason = "Printer public key mismatch";
   }
 
-  const signedPayload =
+  const signedPayloadCandidates =
     registration && heartbeatIssuedAt
-      ? buildHeartbeatSignedPayload({
+      ? buildHeartbeatSignedPayloadCandidates({
           userId: input.userId,
           agentId: agentId || registration.agentId,
           deviceFingerprint: deviceFingerprint || registration.deviceFingerprint,
@@ -513,36 +556,75 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
           heartbeatNonce,
           heartbeatIssuedAt,
         })
-      : null;
+      : [];
+  const heartbeatIssuedAtMs = heartbeatIssuedAt ? new Date(heartbeatIssuedAt).getTime() : NaN;
+  const heartbeatIssuedAtValid = Number.isFinite(heartbeatIssuedAtMs);
+  const heartbeatSkewSeconds = heartbeatIssuedAtValid ? Math.abs(Date.now() - heartbeatIssuedAtMs) / 1000 : NaN;
+
+  let resolvedPublicKeyPem = normalizePem(String(registration?.publicKeyPem || ""));
+  let verifiedHeartbeatPayload: string | null = null;
+  const canRotateTrustedKey =
+    Boolean(registration) &&
+    Boolean(incomingPublicKeyPem) &&
+    signedPayloadCandidates.length > 0 &&
+    Boolean(heartbeatSignature) &&
+    registration?.trustStatus !== PrinterTrustStatus.REVOKED &&
+    incomingPublicKeyPem !== normalizePem(String(registration?.publicKeyPem || "")) &&
+    heartbeatIssuedAtValid &&
+    heartbeatSkewSeconds <= MAX_SIGNATURE_SKEW_SECONDS &&
+    Boolean(
+      (verifiedHeartbeatPayload = verifyAgentSignatureAcrossPayloads({
+        publicKeyPem: incomingPublicKeyPem,
+        signature: heartbeatSignature,
+        signedPayloads: signedPayloadCandidates,
+      }))
+    );
+
+  if (canRotateTrustedKey) {
+    resolvedPublicKeyPem = incomingPublicKeyPem;
+    rejectionReason = null;
+  } else if (
+    registration &&
+    publicKeyPem &&
+    !String(registration.publicKeyPem || "").startsWith("compat:") &&
+    incomingPublicKeyPem &&
+    incomingPublicKeyPem !== normalizePem(registration.publicKeyPem)
+  ) {
+    rejectionReason = "Printer public key mismatch";
+  } else if (!resolvedPublicKeyPem && incomingPublicKeyPem) {
+    resolvedPublicKeyPem = incomingPublicKeyPem;
+  }
 
   if (!input.connected) {
     trustValid = false;
   } else {
     const requiresIdentity = REQUIRE_SIGNATURE;
-    if (requiresIdentity && (!registration || !signedPayload || !heartbeatSignature)) {
+    if (requiresIdentity && (!registration || signedPayloadCandidates.length === 0 || !heartbeatSignature)) {
       rejectionReason = rejectionReason || "Missing signature identity fields";
     }
 
-    if (requiresIdentity && registration && signedPayload && heartbeatSignature) {
-      if (!looksLikePem(registration.publicKeyPem)) {
+    if (requiresIdentity && registration && signedPayloadCandidates.length > 0 && heartbeatSignature) {
+      if (!looksLikePem(resolvedPublicKeyPem)) {
         rejectionReason = rejectionReason || "Printer public key is not enrolled";
       }
-      const issuedAtMs = new Date(heartbeatIssuedAt).getTime();
-      if (!Number.isFinite(issuedAtMs)) {
+      if (!heartbeatIssuedAtValid) {
         rejectionReason = "Invalid heartbeatIssuedAt";
       } else {
-        const skewSeconds = Math.abs(Date.now() - issuedAtMs) / 1000;
-        if (skewSeconds > MAX_SIGNATURE_SKEW_SECONDS) {
-          rejectionReason = `Heartbeat signature timestamp skew exceeded (${Math.round(skewSeconds)}s)`;
+        if (heartbeatSkewSeconds > MAX_SIGNATURE_SKEW_SECONDS) {
+          rejectionReason = `Heartbeat signature timestamp skew exceeded (${Math.round(heartbeatSkewSeconds)}s)`;
         }
       }
 
       if (!rejectionReason) {
-        signatureValid = verifyAgentSignature({
-          publicKeyPem: registration.publicKeyPem,
-          signature: heartbeatSignature,
-          signedPayload,
-        });
+        const matchingPayload =
+          verifiedHeartbeatPayload ||
+          verifyAgentSignatureAcrossPayloads({
+            publicKeyPem: resolvedPublicKeyPem,
+            signature: heartbeatSignature,
+            signedPayloads: signedPayloadCandidates,
+          });
+        verifiedHeartbeatPayload = matchingPayload;
+        signatureValid = Boolean(matchingPayload);
         if (!signatureValid) {
           rejectionReason = "Heartbeat signature verification failed";
         }
@@ -583,8 +665,13 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
         licenseeId: input.licenseeId || registration.licenseeId,
         agentId: agentId || registration.agentId,
         publicKeyPem:
-          publicKeyPem && (String(registration.publicKeyPem || "").startsWith("compat:") || !registration.publicKeyPem)
-            ? publicKeyPem
+          looksLikePem(resolvedPublicKeyPem) &&
+          (
+            String(registration.publicKeyPem || "").startsWith("compat:") ||
+            !registration.publicKeyPem ||
+            normalizePem(String(registration.publicKeyPem || "")) !== resolvedPublicKeyPem
+          )
+            ? resolvedPublicKeyPem
             : registration.publicKeyPem,
         certFingerprint: registration.certFingerprint || clientCertFingerprint || mtlsFingerprintHeader || null,
         trustStatus: nextTrustStatus,
@@ -594,7 +681,7 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
       },
     });
 
-    const hashSource = signedPayload || stableStringify(metadata);
+    const hashSource = verifiedHeartbeatPayload || signedPayloadCandidates[0] || stableStringify(metadata);
     await prisma.printerAttestation.create({
       data: {
         printerRegistrationId: registration.id,

@@ -304,6 +304,16 @@ const buildCreateShadowSql = (
   return lines;
 };
 
+const buildCreateArchiveTableSql = (sourceTable: string, archiveTable: string) => {
+  const baseName = normalizeBaseName(archiveTable);
+  return [
+    `CREATE TABLE IF NOT EXISTS ${q(archiveTable)} (LIKE ${q(sourceTable)} INCLUDING ALL);`,
+    `CREATE INDEX IF NOT EXISTS ${q(`${baseName}_scanned_at_idx`)} ON ${q(archiveTable)} (${q("scannedAt")} DESC, ${q("id")});`,
+    `CREATE INDEX IF NOT EXISTS ${q(`${baseName}_licensee_scanned_at_idx`)} ON ${q(archiveTable)} (${q("licenseeId")}, ${q("scannedAt")} DESC);`,
+    `CREATE INDEX IF NOT EXISTS ${q(`${baseName}_batch_scanned_at_idx`)} ON ${q(archiveTable)} (${q("batchId")}, ${q("scannedAt")} DESC);`,
+  ];
+};
+
 const buildDeltaSyncSql = (
   sourceTable: string,
   shadowTable: string,
@@ -637,17 +647,15 @@ export const ensureQrScanLogArchiveInfrastructure = async (opts?: {
   await ensureDuplicateGuardFunction();
 
   if (!archiveExists) {
-    for (const statement of buildCreateShadowSql(
-      QR_SCAN_ARCHIVE_SPEC.sourceTable,
-      QR_SCAN_ARCHIVE_SPEC.tableName,
-      QR_SCAN_ARCHIVE_SPEC.timeColumn,
-      windows,
-      QR_SCAN_ARCHIVE_SPEC.tableName
-    )) {
+    for (const statement of buildCreateArchiveTableSql(QR_SCAN_ARCHIVE_SPEC.sourceTable, QR_SCAN_ARCHIVE_SPEC.tableName)) {
       await executeRawStatement(statement);
     }
-  } else {
+  } else if (await isPartitionedTable(QR_SCAN_ARCHIVE_SPEC.tableName)) {
     await ensureMonthlyPartitions(QR_SCAN_ARCHIVE_SPEC.tableName, QR_SCAN_ARCHIVE_SPEC.timeColumn, windows);
+  } else {
+    for (const statement of buildCreateArchiveTableSql(QR_SCAN_ARCHIVE_SPEC.sourceTable, QR_SCAN_ARCHIVE_SPEC.tableName)) {
+      await executeRawStatement(statement);
+    }
   }
 
   await ensureInsertGuardTrigger(QR_SCAN_ARCHIVE_SPEC.tableName);
@@ -837,20 +845,7 @@ export const buildHotEventPartitionSqlPreview = async (opts?: {
   }
 
   preview[QR_SCAN_ARCHIVE_SPEC.tableName] = [
-    ...buildCreateShadowSql(
-      QR_SCAN_ARCHIVE_SPEC.sourceTable,
-      QR_SCAN_ARCHIVE_SPEC.tableName,
-      QR_SCAN_ARCHIVE_SPEC.timeColumn,
-      buildWindowPlan({
-        minTimestamp: null,
-        maxTimestamp: new Date(),
-        referenceNow: new Date(),
-        tableName: QR_SCAN_ARCHIVE_SPEC.tableName,
-        historicMonths: opts?.historicMonths ?? 24,
-        futureMonths: opts?.futureMonths ?? DEFAULT_FUTURE_MONTHS,
-      }),
-      QR_SCAN_ARCHIVE_SPEC.tableName
-    ),
+    ...buildCreateArchiveTableSql(QR_SCAN_ARCHIVE_SPEC.sourceTable, QR_SCAN_ARCHIVE_SPEC.tableName),
     buildArchiveViewSql(),
   ];
 
@@ -886,20 +881,7 @@ export const buildOfflineHotEventPartitionSqlPreview = (opts?: {
   }
 
   preview[QR_SCAN_ARCHIVE_SPEC.tableName] = [
-    ...buildCreateShadowSql(
-      QR_SCAN_ARCHIVE_SPEC.sourceTable,
-      QR_SCAN_ARCHIVE_SPEC.tableName,
-      QR_SCAN_ARCHIVE_SPEC.timeColumn,
-      buildWindowPlan({
-        minTimestamp: null,
-        maxTimestamp: referenceNow,
-        referenceNow,
-        tableName: QR_SCAN_ARCHIVE_SPEC.tableName,
-        historicMonths,
-        futureMonths,
-      }),
-      QR_SCAN_ARCHIVE_SPEC.tableName
-    ),
+    ...buildCreateArchiveTableSql(QR_SCAN_ARCHIVE_SPEC.sourceTable, QR_SCAN_ARCHIVE_SPEC.tableName),
     buildArchiveViewSql(),
   ];
 

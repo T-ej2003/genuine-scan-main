@@ -84,8 +84,14 @@ const {
     "preview should include the live-to-legacy rename"
   );
   assert(
-    preview.QrScanLogArchive.some((statement) => statement.includes('pt_qrscanlogarchive_default')),
-    "archive SQL should use a stable archive default partition name"
+    preview.QrScanLogArchive.some((statement) =>
+      statement.includes('CREATE TABLE IF NOT EXISTS "QrScanLogArchive" (LIKE "QrScanLog" INCLUDING ALL);')
+    ),
+    "archive SQL should provision the archive table without partitioned-table DDL"
+  );
+  assert(
+    preview.QrScanLogArchive.every((statement) => !statement.includes("PARTITION OF")),
+    "archive SQL should not attempt to build partitioned archive children"
   );
 
   console.log("hot event partition plan tests passed");
