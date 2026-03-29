@@ -213,8 +213,8 @@ export const deriveManagedPrinterAutoDetect = (
     return {
       routeType: "NETWORK_IPP",
       readiness: "READY",
-      summary: "Looks like an office printer",
-      detail: `MSCQR can fill in most of the shared office printer details for ${printer.printerName}.`,
+      summary: "Looks like a shared printer",
+      detail: `MSCQR can fill in most of the shared printer details for ${printer.printerName}.`,
       host: ippEndpoint.host,
       port: ippEndpoint.port,
       resourcePath: ippEndpoint.resourcePath,
@@ -243,9 +243,9 @@ export const deriveManagedPrinterAutoDetect = (
     return {
       routeType: "NETWORK_IPP",
       readiness: "NEEDS_DETAILS",
-      summary: "Looks like an office printer",
+      summary: "Looks like a shared printer",
       detail:
-        "MSCQR can see an office printer here, but it still needs a stable printer address before it can save this setup.",
+        "MSCQR can see a shared printer here, but it still needs a stable printer address before it can save this setup.",
       tlsEnabled: protocols.includes("IPPS") || connection === "ipps",
     };
   }
@@ -474,7 +474,7 @@ export const getManagedPrinterDiagnosticSummary = (
     printer.connectionType === "NETWORK_IPP"
       ? printer.deliveryMode === "SITE_GATEWAY"
         ? "Saved site printer"
-        : "Saved office printer"
+        : "Saved shared printer"
       : "Saved label printer";
   const printerName = String(printer.name || networkLabel).trim() || networkLabel;
   const pseudoPrinter: PrinterInventoryRow = {

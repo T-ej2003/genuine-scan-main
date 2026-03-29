@@ -59,7 +59,7 @@ export const buildManagedNetworkPrinterNotice = (
       detail: sanitizePrinterUiError(
         printer.registryStatus?.detail,
         printer.connectionType === "NETWORK_IPP"
-          ? "This office printer is ready for standards-based printing."
+          ? "This shared printer is ready for standards-based printing."
           : "This factory label printer is ready for controlled dispatch."
       ),
       tone: "success",

@@ -55,7 +55,7 @@ describe("printer user-facing helpers", () => {
 
     expect(summary).toContain("MSCQR printing support summary");
     expect(summary).toContain("Printer found on this computer: No");
-    expect(summary).toContain("Saved printer type: Saved office printer");
+    expect(summary).toContain("Saved printer type: Saved shared printer");
     expect(summary).toContain("Current status: Printer helper is not available");
     expect(summary).not.toContain("localhost");
     expect(summary).not.toContain("signature verification");

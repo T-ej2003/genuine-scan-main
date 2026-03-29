@@ -110,7 +110,7 @@ const roleScopedIntro = (activeRole: HelpKbRole) => {
     return "Licensee/Admin mode: ask about inventory requests, the batch workspace, manufacturers, tracking, and account access.";
   }
   if (activeRole === "manufacturer") {
-    return "Manufacturer mode: ask about assigned batches, printer setup, workstation printing, saved factory printers, office printers, and status updates.";
+    return "Manufacturer mode: ask about assigned batches, printer setup, workstation printing, saved factory printers, shared printers, and status updates.";
   }
   return "Customer mode: ask about verification results, repeat scans, ownership claim, and counterfeit reporting.";
 };

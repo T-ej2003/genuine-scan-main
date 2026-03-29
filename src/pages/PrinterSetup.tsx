@@ -103,9 +103,9 @@ const detectCurrentPlatform = (): "macos" | "windows" | "unknown" => {
 const getSuggestedPathTitle = (form: ManagedRouteForm, suggestion: ReturnType<typeof deriveManagedPrinterAutoDetect> | null) => {
   if (!suggestion) return "Choose a printer to see the safest setup.";
   if (suggestion.routeType === "LOCAL_ONLY") return "Best fit: keep using the printer already set up on this computer.";
-  if (suggestion.routeType === "NETWORK_IPP") return "Best fit: save this as an office printer.";
+  if (suggestion.routeType === "NETWORK_IPP") return "Best fit: save this as a shared printer.";
   return form.deliveryMode === "SITE_GATEWAY"
-    ? "Best fit: save this as a label printer through the site print link."
+    ? "Best fit: save this label printer through the site print link."
     : "Best fit: save this as a direct label printer.";
 };
 
@@ -113,7 +113,7 @@ const getSuggestedPathState = (suggestion: ReturnType<typeof deriveManagedPrinte
   if (!suggestion) return { label: "Waiting", tone: "secondary" as const };
   if (suggestion.routeType === "LOCAL_ONLY") return { label: "Use this computer", tone: "default" as const };
   if (suggestion.readiness === "READY") return { label: "Ready to save", tone: "default" as const };
-  return { label: "Needs one more detail", tone: "secondary" as const };
+  return { label: "Needs one more field", tone: "secondary" as const };
 };
 
 const joinHumanList = (items: string[]) => {
@@ -264,7 +264,7 @@ export default function PrinterSetupPage() {
   const recommendedPathLabel = useMemo(() => {
     if (!suggestion) return "Select a printer to begin";
     if (suggestion.routeType === "LOCAL_ONLY") return "Recommended: use the printer already set up on this computer";
-    if (suggestion.routeType === "NETWORK_IPP") return "Recommended: save this as an office printer";
+    if (suggestion.routeType === "NETWORK_IPP") return "Recommended: save this as a shared printer";
     return form.deliveryMode === "SITE_GATEWAY"
       ? "Recommended: save this as a label printer through the site print link"
       : "Recommended: save this as a direct label printer";
@@ -533,7 +533,7 @@ export default function PrinterSetupPage() {
               <CardDescription>
                 {suggestion?.routeType === "LOCAL_ONLY"
                   ? "This printer works best on this computer without saving a shared setup."
-                  : "Advanced fields stay hidden unless MSCQR still needs one more printer detail."}
+                  : "Extra fields stay hidden unless MSCQR still needs a printer address or label type."}
               </CardDescription>
             </CardHeader>
           <CardContent className="space-y-5">
@@ -601,9 +601,9 @@ export default function PrinterSetupPage() {
                     </div>
                   ) : (
                     <div className="rounded-lg border p-3 text-sm">
-                      <div className="font-medium">Shared office printer</div>
+                      <div className="font-medium">Shared printer</div>
                       <div className="mt-1 text-xs text-muted-foreground">
-                        MSCQR will save this as a shared office printer and use the printer address shown here.
+                        MSCQR will save this as a shared printer and use the printer address shown here.
                       </div>
                     </div>
                   )}
@@ -611,9 +611,9 @@ export default function PrinterSetupPage() {
 
                 <div className="flex items-center justify-between rounded-lg border p-3">
                   <div>
-                    <div className="font-medium">Edit printer details manually</div>
+                    <div className="font-medium">Add printer details manually</div>
                     <div className="text-xs text-muted-foreground">
-                      Only open this if MSCQR still needs one more printer detail or the detected address looks wrong.
+                      Open this only if MSCQR could not fill in the printer address correctly.
                     </div>
                   </div>
                   <Switch checked={showAdvanced} onCheckedChange={setShowAdvanced} />

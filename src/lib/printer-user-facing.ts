@@ -58,10 +58,10 @@ export const sanitizePrinterUiError = (raw?: string | null, fallback = "Printing
     return "The site print link needs attention before this printer can be used.";
   }
   if (hasAny(value, ["application/pdf", "pdf is not advertised", "format unsupported"])) {
-    return "This office printer does not support the required MSCQR print format.";
+    return "This shared printer does not support the required MSCQR print format.";
   }
   if (hasAny(value, ["ipp", "ipps"]) && hasAny(value, ["unreachable", "validation failed", "not reachable"])) {
-    return "The saved office printer could not be reached. Check the printer connection and try again.";
+    return "The saved shared printer could not be reached. Check the printer connection and try again.";
   }
   if (hasAny(value, ["tcp", "socket", "host and port", "9100", "jetdirect", "network-direct"])) {
     return "The saved factory printer could not be reached. Check the printer or network connection and try again.";
@@ -89,7 +89,7 @@ export const getPrinterProfileLabel = (printer?: ManagedPrinterSummary | null) =
   if (!printer) return "printer";
   if (printer.connectionType === "NETWORK_DIRECT") return "saved label printer";
   if (printer.connectionType === "NETWORK_IPP") {
-    return printer.deliveryMode === "SITE_GATEWAY" ? "saved site printer" : "saved office printer";
+    return printer.deliveryMode === "SITE_GATEWAY" ? "saved site printer" : "saved shared printer";
   }
   return "printer on this computer";
 };
@@ -98,7 +98,7 @@ export const getPrinterDispatchLabel = (printer?: ManagedPrinterSummary | null) 
   if (!printer) return "Printer on this computer";
   if (printer.connectionType === "NETWORK_DIRECT") return "Saved label printer";
   if (printer.connectionType === "NETWORK_IPP") {
-    return printer.deliveryMode === "SITE_GATEWAY" ? "Saved site printer" : "Saved office printer";
+    return printer.deliveryMode === "SITE_GATEWAY" ? "Saved site printer" : "Saved shared printer";
   }
   return "Printer on this computer";
 };

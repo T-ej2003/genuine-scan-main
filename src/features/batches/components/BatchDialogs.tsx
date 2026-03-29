@@ -347,7 +347,7 @@ export function BatchPrintJobDialog({
                     {sanitizePrinterUiError(
                       selectedPrinterProfile?.registryStatus?.detail,
                       selectedPrinterProfile?.connectionType === "NETWORK_IPP"
-                        ? "MSCQR will send this run to the saved office printer using its saved setup."
+                        ? "MSCQR will send this run to the saved shared printer using its saved setup."
                         : "MSCQR will send this run to the saved label printer using its saved setup."
                     )}
                   </div>

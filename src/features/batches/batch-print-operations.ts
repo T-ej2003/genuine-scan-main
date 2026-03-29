@@ -415,11 +415,11 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
 
   if (isServerDispatchedMode) {
     toast({
-      title: createdMode === "NETWORK_IPP" ? "Office printer job started" : "Factory printer job started",
+      title: createdMode === "NETWORK_IPP" ? "Shared printer job started" : "Factory printer job started",
       description:
         createdMode === "NETWORK_IPP"
           ? `Sending ${quantity} label${quantity === 1 ? "" : "s"} to ${selectedPrinterProfile.name} over ${
-              selectedPrinterProfile.deliveryMode === "SITE_GATEWAY" ? "the site print link" : "the saved office printer"
+              selectedPrinterProfile.deliveryMode === "SITE_GATEWAY" ? "the site print link" : "the saved shared printer"
             }.`
           : `Dispatching ${quantity} label${quantity === 1 ? "" : "s"} to ${selectedPrinterProfile.name}.`,
     });
@@ -427,14 +427,14 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
       createdMode === "NETWORK_IPP"
         ? selectedPrinterProfile.deliveryMode === "SITE_GATEWAY"
           ? "Waiting for site print link"
-          : "Sending to saved office printer"
+          : "Sending to saved shared printer"
         : "Sending to saved factory printer"
     );
 
     const pollResult = await pollPrintJobUntilSettled(createdJobId, context);
     if (pollResult.settled && pollResult.job?.status === "CONFIRMED") {
       toast({
-        title: createdMode === "NETWORK_IPP" ? "Office printer job complete" : "Factory printer job complete",
+        title: createdMode === "NETWORK_IPP" ? "Shared printer job complete" : "Factory printer job complete",
         description: `${pollResult.job.session?.confirmedItems || quantity} labels confirmed by the server.`,
       });
       setPrintProgressPhase("Completed");
@@ -443,7 +443,7 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
       const message = sanitizePrinterUiError(
         pollResult.job.failureReason || pollResult.job.session?.failedReason,
         createdMode === "NETWORK_IPP"
-          ? "The office printer could not complete this job."
+          ? "The shared printer could not complete this job."
           : "The factory printer could not complete this job."
       );
       toast({
