@@ -23,7 +23,7 @@ import {
   fromUserAgent,
   parsePositiveIntEnv,
 } from "./middleware/publicRateLimit";
-import { hasConfiguredSecret, usesLegacySecretFallback } from "./utils/secretConfig";
+import { hasConfiguredSecret } from "./utils/secretConfig";
 import { buildReadyPayload } from "./controllers/healthController";
 import { isObjectStorageConfigured } from "./services/objectStorageService";
 import { isRedisConfigured } from "./services/redisService";
@@ -141,29 +141,35 @@ if (process.env.NODE_ENV === "production") {
   }
 }
 
+const usesLegacyFallback = (primaryKeys: string[], fallbackKeys: string[] = []) =>
+  !primaryKeys.some((key) => hasConfiguredSecret(key)) && fallbackKeys.some((key) => hasConfiguredSecret(key));
+
 const legacyFallbackWarnings = [
   {
-    primary: "QR_SIGN_HMAC_SECRET",
-    fallback: ["JWT_SECRET"],
+    primaryKeys: ["QR_SIGN_HMAC_SECRET_CURRENT", "QR_SIGN_HMAC_SECRET"],
+    fallbackKeys: ["JWT_SECRET"],
     enabled: !hasConfiguredSecret("QR_SIGN_PRIVATE_KEY"),
-    message: "QR signing HMAC is falling back to JWT_SECRET. Configure QR_SIGN_HMAC_SECRET so it can be rotated independently.",
+    message:
+      "QR signing HMAC is falling back to JWT_SECRET. Configure QR_SIGN_HMAC_SECRET_CURRENT so it can be rotated independently.",
   },
   {
-    primary: "PRINTER_SSE_SIGN_SECRET",
-    fallback: ["JWT_SECRET"],
+    primaryKeys: ["PRINTER_SSE_SIGN_SECRET_CURRENT", "PRINTER_SSE_SIGN_SECRET"],
+    fallbackKeys: ["JWT_SECRET"],
     enabled: true,
-    message: "Printer SSE signing is falling back to JWT_SECRET. Configure PRINTER_SSE_SIGN_SECRET to isolate that channel.",
+    message:
+      "Printer SSE signing is falling back to JWT_SECRET. Configure PRINTER_SSE_SIGN_SECRET_CURRENT to isolate that channel.",
   },
   {
-    primary: "INCIDENT_HASH_SALT",
-    fallback: ["JWT_SECRET"],
+    primaryKeys: ["INCIDENT_HASH_SALT_CURRENT", "INCIDENT_HASH_SALT"],
+    fallbackKeys: ["JWT_SECRET"],
     enabled: true,
-    message: "Incident hashing is falling back to JWT_SECRET. Configure INCIDENT_HASH_SALT for independent rotation.",
+    message:
+      "Incident hashing is falling back to JWT_SECRET. Configure INCIDENT_HASH_SALT_CURRENT for independent rotation.",
   },
 ];
 
 for (const warning of legacyFallbackWarnings) {
-  if (warning.enabled && usesLegacySecretFallback(warning.primary, warning.fallback)) {
+  if (warning.enabled && usesLegacyFallback(warning.primaryKeys, warning.fallbackKeys)) {
     logger.warn(warning.message);
   }
 }
