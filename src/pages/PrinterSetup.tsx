@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
@@ -65,6 +66,81 @@ const NETWORK_DIRECT_LANGUAGES: ManagedRouteForm["commandLanguage"][] = [
   "CPCL",
 ];
 
+type ManualFieldHelpKey = "vendor" | "model" | "host" | "port" | "resourcePath" | "printerUri";
+
+type ManualFieldGuide = {
+  title: string;
+  intro: string;
+  steps: string[];
+  example?: string;
+  note?: string;
+};
+
+const MANUAL_FIELD_GUIDES: Record<ManualFieldHelpKey, ManualFieldGuide> = {
+  vendor: {
+    title: "Vendor",
+    intro: "Use the printer brand name. This is mostly for your records and support.",
+    steps: [
+      "Look at the printer name already shown on this page.",
+      "Copy the brand only, such as Canon, Zebra, Brother, or TSC.",
+      "If the brand is printed on the front of the printer, match that wording.",
+    ],
+    example: "Canon",
+  },
+  model: {
+    title: "Model",
+    intro: "Use the model name or number shown for the printer.",
+    steps: [
+      "Look at the printer name shown on this page or in your Mac printer list.",
+      "Copy the model part after the brand name.",
+      "If the printer has a sticker or label, you can copy the model from there instead.",
+    ],
+    example: "TS4100i",
+  },
+  host: {
+    title: "Host",
+    intro: "This is the printer's real network address. MSCQR needs this to reach the printer again later.",
+    steps: [
+      "Check the printer screen, network sheet, or printer web page for its IP address or network name.",
+      "If your router shows connected devices, find the printer there and copy its address.",
+      "If MSCQR only found 'local' or a 'dnssd://' address, replace it with the real printer IP or host name.",
+    ],
+    example: "192.168.1.44 or canon-office.local",
+    note: "For a shared printer setup, 'local' is not enough because it only describes this Mac.",
+  },
+  port: {
+    title: "Port",
+    intro: "This is the network port the printer listens on.",
+    steps: [
+      "Keep 631 for most AirPrint or IPP printers.",
+      "Only change it if your printer or IT team gave you a different port.",
+      "If you already have a full printer address, copy the number after the colon.",
+    ],
+    example: "631",
+  },
+  resourcePath: {
+    title: "Resource path",
+    intro: "This is the last part of the printer address after the host and port.",
+    steps: [
+      "Keep '/ipp/print' unless your printer shows a different path.",
+      "If you have a full printer address, copy everything after the host and port.",
+      "Make sure it starts with a forward slash.",
+    ],
+    example: "/ipp/print",
+  },
+  printerUri: {
+    title: "Printer URI",
+    intro: "This is the full printer address. If you know it, MSCQR can use it directly.",
+    steps: [
+      "Look for a full IPP address in your printer web page, Mac CUPS page, or IT notes.",
+      "It should start with 'ipp://' or 'ipps://'.",
+      "If you fill this in, MSCQR can often work without separate host, port, and path values.",
+    ],
+    example: "ipps://192.168.1.44:631/ipp/print",
+    note: "Do not use a 'dnssd://' address here for a saved shared printer.",
+  },
+};
+
 const detectVendor = (printer: PrinterInventoryRow | null) => {
   const combined = `${printer?.printerName || ""} ${printer?.model || ""}`;
   const vendors = ["Zebra", "SATO", "Honeywell", "TSC", "Brother", "Godex", "Bixolon", "Citizen", "Toshiba", "Epson"];
@@ -100,6 +176,78 @@ const detectCurrentPlatform = (): "macos" | "windows" | "unknown" => {
   return "unknown";
 };
 
+const isLocalHostPlaceholder = (value?: string | null) => {
+  const trimmed = String(value || "").trim().toLowerCase();
+  return trimmed === "local" || trimmed === "localhost";
+};
+
+const isNonRoutablePrinterUri = (value?: string | null) => {
+  const trimmed = String(value || "").trim().toLowerCase();
+  if (!trimmed) return false;
+  return trimmed.startsWith("dnssd://") || /:\/\/(local|localhost)([:/]|$)/i.test(trimmed);
+};
+
+const hasUsableIppAddress = (form: ManagedRouteForm) => {
+  const printerUri = String(form.printerUri || "").trim();
+  if (printerUri) return !isNonRoutablePrinterUri(printerUri);
+  const host = String(form.host || "").trim();
+  return Boolean(host) && !isLocalHostPlaceholder(host);
+};
+
+function ManualFieldHelpButton({ field }: { field: ManualFieldHelpKey }) {
+  const guide = MANUAL_FIELD_GUIDES[field];
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 rounded-full text-muted-foreground hover:text-foreground"
+          aria-label={`How to find ${guide.title}`}
+        >
+          <CircleHelp className="h-4 w-4" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 space-y-3 rounded-2xl p-4">
+        <div>
+          <div className="font-semibold">{guide.title}</div>
+          <p className="mt-1 text-xs text-muted-foreground">{guide.intro}</p>
+        </div>
+        <ol className="list-decimal space-y-2 pl-4 text-xs text-muted-foreground">
+          {guide.steps.map((step) => (
+            <li key={step}>{step}</li>
+          ))}
+        </ol>
+        {guide.example ? (
+          <div className="rounded-lg border bg-muted/40 p-3 text-xs">
+            <span className="font-medium text-foreground">Example:</span> {guide.example}
+          </div>
+        ) : null}
+        {guide.note ? <div className="text-xs text-amber-700">{guide.note}</div> : null}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function FieldLabelWithHelp({
+  htmlFor,
+  label,
+  field,
+}: {
+  htmlFor: string;
+  label: string;
+  field: ManualFieldHelpKey;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <Label htmlFor={htmlFor}>{label}</Label>
+      <ManualFieldHelpButton field={field} />
+    </div>
+  );
+}
+
 const getSuggestedPathTitle = (form: ManagedRouteForm, suggestion: ReturnType<typeof deriveManagedPrinterAutoDetect> | null) => {
   if (!suggestion) return "Choose a printer to see the safest setup.";
   if (suggestion.routeType === "LOCAL_ONLY") return "Best fit: keep using the printer already set up on this computer.";
@@ -133,7 +281,7 @@ const getMissingSetupDetails = (
   if (!suggestion || suggestion.routeType === "LOCAL_ONLY") return missing;
 
   if (form.connectionType === "NETWORK_IPP") {
-    if (!form.host.trim() && !form.printerUri.trim()) missing.push("a printer address");
+    if (!hasUsableIppAddress(form)) missing.push("a real printer address");
     if (!form.printerUri.trim() && !String(form.port || "").trim()) missing.push("a printer port");
     if (!form.printerUri.trim() && !form.resourcePath.trim()) missing.push("a printer path");
     return missing;
@@ -272,6 +420,13 @@ export default function PrinterSetupPage() {
 
   const suggestedPathState = getSuggestedPathState(suggestion);
   const missingSetupDetails = useMemo(() => getMissingSetupDetails(form, suggestion), [form, suggestion]);
+  const hasLocalOnlyIppAddress = useMemo(
+    () =>
+      form.connectionType === "NETWORK_IPP" &&
+      showAdvanced &&
+      (isLocalHostPlaceholder(form.host) || isNonRoutablePrinterUri(form.printerUri)),
+    [form.connectionType, form.host, form.printerUri, showAdvanced],
+  );
 
   const saveActionState = useMemo(() => {
     if (!selectedPrinter) {
@@ -620,27 +775,38 @@ export default function PrinterSetupPage() {
                 </div>
 
                 {showAdvanced ? (
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <>
+                    <div className="rounded-lg border bg-slate-50 p-3 text-xs text-muted-foreground">
+                      Most people only need the printer&apos;s real network address here. Keep <span className="font-mono text-foreground">631</span> and <span className="font-mono text-foreground">/ipp/print</span> unless your printer shows different values. Click the <span className="inline-flex items-center gap-1 font-medium text-foreground"><CircleHelp className="h-3.5 w-3.5" /> info buttons</span> beside each field if you need help finding them.
+                    </div>
+
+                    {hasLocalOnlyIppAddress ? (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                        MSCQR found this printer through your Mac, but the saved setup still needs the printer&apos;s real network address. Replace <span className="font-mono">local</span> or any <span className="font-mono">dnssd://</span> address with the printer IP or network name.
+                      </div>
+                    ) : null}
+
+                    <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label htmlFor="vendor">Vendor</Label>
+                      <FieldLabelWithHelp htmlFor="vendor" label="Vendor" field="vendor" />
                       <Input id="vendor" value={form.vendor} onChange={(event) => setForm((current) => ({ ...current, vendor: event.target.value }))} />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="model">Model</Label>
+                      <FieldLabelWithHelp htmlFor="model" label="Model" field="model" />
                       <Input id="model" value={form.model} onChange={(event) => setForm((current) => ({ ...current, model: event.target.value }))} />
                     </div>
                     {form.connectionType === "NETWORK_IPP" ? (
                       <>
                         <div className="space-y-2">
-                          <Label htmlFor="host">Host</Label>
+                          <FieldLabelWithHelp htmlFor="host" label="Host" field="host" />
                           <Input id="host" value={form.host} onChange={(event) => setForm((current) => ({ ...current, host: event.target.value }))} />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="port">Port</Label>
+                          <FieldLabelWithHelp htmlFor="port" label="Port" field="port" />
                           <Input id="port" value={form.port} onChange={(event) => setForm((current) => ({ ...current, port: event.target.value }))} />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="resource-path">Resource path</Label>
+                          <FieldLabelWithHelp htmlFor="resource-path" label="Resource path" field="resourcePath" />
                           <Input
                             id="resource-path"
                             value={form.resourcePath}
@@ -648,7 +814,7 @@ export default function PrinterSetupPage() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="printer-uri">Printer URI</Label>
+                          <FieldLabelWithHelp htmlFor="printer-uri" label="Printer URI" field="printerUri" />
                           <Input
                             id="printer-uri"
                             value={form.printerUri}
@@ -692,7 +858,8 @@ export default function PrinterSetupPage() {
                         </div>
                       </>
                     )}
-                  </div>
+                    </div>
+                  </>
                 ) : null}
 
                 <div className="flex flex-wrap gap-2">

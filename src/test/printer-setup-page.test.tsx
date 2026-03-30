@@ -87,13 +87,31 @@ describe("PrinterSetupPage", () => {
       </MemoryRouter>
     );
 
-    const hostInput = await screen.findByLabelText(/host/i);
+    const hostInput = await screen.findByRole("textbox", { name: /^host$/i });
     fireEvent.change(hostInput, { target: { value: "192.168.1.44" } });
 
     await waitFor(() => {
-      expect(screen.getByLabelText(/host/i)).toHaveValue("192.168.1.44");
+      expect(screen.getByRole("textbox", { name: /^host$/i })).toHaveValue("192.168.1.44");
     });
 
     expect(screen.getByRole("button", { name: /save and print live test label/i })).toBeEnabled();
+  });
+
+  it("shows inline help for manual printer fields", async () => {
+    renderWithQueryClient(
+      <MemoryRouter>
+        <PrinterSetupPage />
+      </MemoryRouter>
+    );
+
+    const helpButton = await screen.findByRole("button", { name: /how to find host/i });
+    fireEvent.click(helpButton);
+
+    expect(
+      await screen.findByText(/this is the printer's real network address/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/replace it with the real printer ip or host name/i),
+    ).toBeInTheDocument();
   });
 });
