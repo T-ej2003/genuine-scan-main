@@ -178,6 +178,11 @@ mockModule("services/duplicateRiskService.js", {
 
 process.env.NODE_ENV = "production";
 
+mockModule("services/auditService.js", {
+  createAuditLog: async () => ({ id: "audit-1" }),
+  createAuditLogSafely: async () => ({ log: { id: "audit-1" }, persisted: true, queued: false, outboxId: null }),
+});
+
 const { publicVerify } = require("../dist/controllers/publicController");
 
 const req = {

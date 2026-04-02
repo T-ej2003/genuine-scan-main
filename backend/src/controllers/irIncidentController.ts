@@ -1,6 +1,7 @@
 import { Response } from "express";
 import { z } from "zod";
 import {
+  CustomerTrustReviewState,
   IncidentActorType,
   IncidentEventType,
   IncidentPriority,
@@ -14,12 +15,17 @@ import {
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { createAuditLog } from "../services/auditService";
+import {
+  listCustomerTrustCredentialsForQr,
+  updateCustomerTrustCredentialReview,
+} from "../services/customerTrustService";
 import { computeSlaDueAt, recordIncidentEvent, sanitizeResolutionOutcome, sanitizeIncidentStatus, sanitizeIncidentSeverity } from "../services/incidentService";
 import { sendIncidentEmail } from "../services/incidentEmailService";
 import { applyContainmentAction, type IrContainmentAction } from "../services/ir/incidentActionsService";
 import { ensureIncidentWorkflowArtifacts } from "../services/supportWorkflowService";
 import { notifyIncidentLifecycle } from "../services/notificationService";
 import { runIncidentAutoContainment } from "../services/soarService";
+import { listLatestDecisionByQrCodeIds } from "../services/verificationDecisionReadService";
 
 const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -96,11 +102,34 @@ const commSchema = z.object({
   senderMode: z.enum(["actor", "system"]).optional(),
 }).strict();
 
+const customerTrustReviewSchema = z
+  .object({
+    credentialId: z.string().uuid(),
+    reviewState: z.nativeEnum(CustomerTrustReviewState),
+    reviewNote: z.string().trim().max(1000).optional(),
+  })
+  .strict();
+
 const incidentIdParamSchema = z.object({
   id: z.string().uuid("Invalid incident id"),
 }).strict();
 
 const normalizeCode = (value: string) => String(value || "").trim().toUpperCase();
+
+const attachLatestDecision = async <T extends { qrCode?: { id?: string | null } | null }>(rows: T[]) => {
+  const qrCodeIds = Array.from(
+    new Set(
+      rows
+        .map((row) => String(row?.qrCode?.id || "").trim())
+        .filter(Boolean)
+    )
+  );
+  const decisionMap = await listLatestDecisionByQrCodeIds(qrCodeIds);
+  return rows.map((row) => ({
+    ...row,
+    latestDecision: row?.qrCode?.id ? decisionMap.get(row.qrCode.id) || null : null,
+  }));
+};
 
 export const listIrIncidents = async (req: AuthRequest, res: Response) => {
   try {
@@ -174,10 +203,12 @@ export const listIrIncidents = async (req: AuthRequest, res: Response) => {
       prisma.incident.count({ where }),
     ]);
 
+    const incidentsWithDecision = await attachLatestDecision(incidents as any[]);
+
     return res.json({
       success: true,
       data: {
-        incidents,
+        incidents: incidentsWithDecision,
         total,
         limit: paged.data.limit,
         offset: paged.data.offset,
@@ -322,7 +353,18 @@ export const getIrIncident = async (req: AuthRequest, res: Response) => {
     });
     if (!incident) return res.status(404).json({ success: false, error: "Incident not found" });
 
-    return res.json({ success: true, data: incident });
+    const [incidentWithDecision] = await attachLatestDecision([incident as any]);
+    const customerTrustCredentials = incident.qrCode?.id
+      ? await listCustomerTrustCredentialsForQr(incident.qrCode.id)
+      : [];
+
+    return res.json({
+      success: true,
+      data: {
+        ...incidentWithDecision,
+        customerTrustCredentials,
+      },
+    });
   } catch (e) {
     console.error("getIrIncident error:", e);
     return res.status(500).json({ success: false, error: "Failed to load incident" });
@@ -509,6 +551,80 @@ export const addIrIncidentEvent = async (req: AuthRequest, res: Response) => {
   } catch (e) {
     console.error("addIrIncidentEvent error:", e);
     return res.status(500).json({ success: false, error: "Failed to add event" });
+  }
+};
+
+export const reviewIrIncidentCustomerTrust = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+    const paramsParsed = incidentIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid incident id" });
+    }
+
+    const parsed = customerTrustReviewSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid trust review payload" });
+    }
+
+    const incident = await prisma.incident.findUnique({
+      where: { id: paramsParsed.data.id },
+      select: { id: true, licenseeId: true, qrCodeId: true },
+    });
+    if (!incident) {
+      return res.status(404).json({ success: false, error: "Incident not found" });
+    }
+    if (!incident.qrCodeId) {
+      return res.status(409).json({ success: false, error: "This incident is not linked to a QR trust record." });
+    }
+
+    const existingCredentials = await listCustomerTrustCredentialsForQr(incident.qrCodeId);
+    const targetCredential = existingCredentials.find((row: any) => row.id === parsed.data.credentialId);
+    if (!targetCredential) {
+      return res.status(404).json({ success: false, error: "Customer trust credential not found for this incident QR." });
+    }
+
+    const updated = await updateCustomerTrustCredentialReview({
+      credentialId: parsed.data.credentialId,
+      reviewState: parsed.data.reviewState,
+      reviewedByUserId: req.user.userId,
+      reviewNote: parsed.data.reviewNote || null,
+    });
+    if (!updated) {
+      return res.status(500).json({ success: false, error: "Could not update customer trust review state." });
+    }
+
+    await recordIncidentEvent({
+      incidentId: incident.id,
+      actorType: IncidentActorType.ADMIN,
+      actorUserId: req.user.userId,
+      eventType: IncidentEventType.UPDATED_FIELDS,
+      eventPayload: {
+        changedFields: ["customerTrustReviewState"],
+        credentialId: updated.id,
+        reviewState: updated.reviewState,
+      },
+    });
+
+    await createAuditLog({
+      userId: req.user.userId,
+      licenseeId: incident.licenseeId || undefined,
+      action: "IR_INCIDENT_CUSTOMER_TRUST_REVIEWED",
+      entityType: "CustomerTrustCredential",
+      entityId: updated.id,
+      details: {
+        incidentId: incident.id,
+        qrCodeId: incident.qrCodeId,
+        reviewState: updated.reviewState,
+        reviewNote: parsed.data.reviewNote || null,
+      },
+      ipAddress: req.ip,
+    });
+
+    return res.json({ success: true, data: updated });
+  } catch (e) {
+    console.error("reviewIrIncidentCustomerTrust error:", e);
+    return res.status(500).json({ success: false, error: "Failed to review customer trust" });
   }
 };
 

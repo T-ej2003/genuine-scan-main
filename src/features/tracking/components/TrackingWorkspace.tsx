@@ -13,6 +13,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
+  decisionOutcomeTone,
+  decisionRiskTone,
+  decisionTrustTone,
+  titleCaseDecisionValue,
+} from "@/lib/verification-decision";
+import {
   describeScanContext,
   formatBatchCreatedDate,
   formatLocation,
@@ -192,6 +198,10 @@ export function TrackingWorkspace({
                           fromDate: "",
                           toDate: "",
                           licenseeId: "all",
+                          outcome: "all",
+                          riskBand: "all",
+                          replacementStatus: "all",
+                          customerTrustReviewState: "all",
                         };
                         onFiltersChange(reset);
                         onLoad({ override: reset });
@@ -262,6 +272,63 @@ export function TrackingWorkspace({
                       </SelectContent>
                     </Select>
 
+                    <Select value={filters.outcome} onValueChange={(value) => onFiltersChange((prev) => ({ ...prev, outcome: value }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Decision outcome" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All outcomes</SelectItem>
+                        <SelectItem value="AUTHENTIC">Authentic</SelectItem>
+                        <SelectItem value="SUSPICIOUS_DUPLICATE">Suspicious duplicate</SelectItem>
+                        <SelectItem value="BLOCKED">Blocked</SelectItem>
+                        <SelectItem value="NOT_READY">Not ready</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <Select value={filters.riskBand} onValueChange={(value) => onFiltersChange((prev) => ({ ...prev, riskBand: value }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Risk band" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All risk bands</SelectItem>
+                        <SelectItem value="LOW">Low</SelectItem>
+                        <SelectItem value="ELEVATED">Elevated</SelectItem>
+                        <SelectItem value="HIGH">High</SelectItem>
+                        <SelectItem value="CRITICAL">Critical</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <Select
+                      value={filters.replacementStatus}
+                      onValueChange={(value) => onFiltersChange((prev) => ({ ...prev, replacementStatus: value }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Replacement state" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All replacement states</SelectItem>
+                        <SelectItem value="NONE">Primary label</SelectItem>
+                        <SelectItem value="ACTIVE_REPLACEMENT">Active replacement</SelectItem>
+                        <SelectItem value="REPLACED_LABEL">Superseded label</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <Select
+                      value={filters.customerTrustReviewState}
+                      onValueChange={(value) => onFiltersChange((prev) => ({ ...prev, customerTrustReviewState: value }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Trust review" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All trust review states</SelectItem>
+                        <SelectItem value="UNREVIEWED">Unreviewed</SelectItem>
+                        <SelectItem value="VERIFIED">Verified</SelectItem>
+                        <SelectItem value="DISPUTED">Disputed</SelectItem>
+                        <SelectItem value="REVOKED">Revoked</SelectItem>
+                      </SelectContent>
+                    </Select>
+
                     <div className="space-y-1">
                       <Label className="text-xs font-medium text-slate-600">From date</Label>
                       <Input type="date" value={filters.fromDate} onChange={(event) => onFiltersChange((prev) => ({ ...prev, fromDate: event.target.value }))} />
@@ -299,6 +366,7 @@ export function TrackingWorkspace({
                           <TableHead>In Scope</TableHead>
                           <TableHead>Inventory Total</TableHead>
                           <TableHead>Events</TableHead>
+                          <TableHead>Latest verifier state</TableHead>
                           <TableHead>Dormant</TableHead>
                           <TableHead>Allocated</TableHead>
                           <TableHead>Printed</TableHead>
@@ -310,10 +378,10 @@ export function TrackingWorkspace({
                       <TableBody>
                         {summary.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={12} className="text-slate-500">
-                              No batches found for current filters.
-                            </TableCell>
-                          </TableRow>
+                              <TableCell colSpan={13} className="text-slate-500">
+                                No batches found for current filters.
+                              </TableCell>
+                            </TableRow>
                         ) : (
                           summary.map((batch) => {
                             const counts = batch.counts || {};
@@ -344,6 +412,25 @@ export function TrackingWorkspace({
                                 <TableCell>{Number(batch.scopeCodeCount || 0).toLocaleString()}</TableCell>
                                 <TableCell>{Number(batch.batchInventoryTotal || batch.totalCodes || 0).toLocaleString()}</TableCell>
                                 <TableCell>{Number(batch.scanEventCount || 0).toLocaleString()}</TableCell>
+                                <TableCell className="space-y-1">
+                                  {batch.latestDecision ? (
+                                    <>
+                                      <Badge className={decisionOutcomeTone(batch.latestDecision.outcome)}>
+                                        {titleCaseDecisionValue(batch.latestDecision.outcome)}
+                                      </Badge>
+                                      <div className="flex flex-wrap gap-1">
+                                        <Badge className={decisionRiskTone(batch.latestDecision.riskBand)}>
+                                          {titleCaseDecisionValue(batch.latestDecision.riskBand)}
+                                        </Badge>
+                                        <Badge className={decisionTrustTone(batch.latestDecision.customerTrustReviewState)}>
+                                          {titleCaseDecisionValue(batch.latestDecision.customerTrustReviewState)}
+                                        </Badge>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <span className="text-xs text-slate-500">No verifier decision</span>
+                                  )}
+                                </TableCell>
                                 <TableCell>
                                   <Badge className={statusTone("DORMANT")}>{dormant}</Badge>
                                 </TableCell>
@@ -388,6 +475,7 @@ export function TrackingWorkspace({
                             <TableHead>Status</TableHead>
                             <TableHead>Scan #</TableHead>
                             <TableHead>Context</TableHead>
+                            <TableHead>Verifier decision</TableHead>
                             <TableHead>Location</TableHead>
                             <TableHead>Device</TableHead>
                             <TableHead>IP</TableHead>
@@ -397,7 +485,7 @@ export function TrackingWorkspace({
                         <TableBody>
                           {logs.length === 0 ? (
                             <TableRow>
-                              <TableCell colSpan={9} className="text-slate-500">
+                              <TableCell colSpan={10} className="text-slate-500">
                                 No scan logs found.
                               </TableCell>
                             </TableRow>
@@ -437,6 +525,25 @@ export function TrackingWorkspace({
                                       {log.isTrustedOwnerContext ? "Trusted owner" : "External"}
                                     </Badge>
                                     <div className="mt-1 text-[11px] text-slate-500">{describeScanContext(log)}</div>
+                                  </TableCell>
+                                  <TableCell className="space-y-1 text-xs">
+                                    {log.latestDecision ? (
+                                      <>
+                                        <Badge className={decisionOutcomeTone(log.latestDecision.outcome)}>
+                                          {titleCaseDecisionValue(log.latestDecision.outcome)}
+                                        </Badge>
+                                        <div className="flex flex-wrap gap-1">
+                                          <Badge className={decisionRiskTone(log.latestDecision.riskBand)}>
+                                            {titleCaseDecisionValue(log.latestDecision.riskBand)}
+                                          </Badge>
+                                          <Badge className={decisionTrustTone(log.latestDecision.customerTrustReviewState)}>
+                                            {titleCaseDecisionValue(log.latestDecision.customerTrustReviewState)}
+                                          </Badge>
+                                        </div>
+                                      </>
+                                    ) : (
+                                      <span className="text-slate-500">No verifier decision</span>
+                                    )}
                                   </TableCell>
                                   <TableCell className="text-xs text-slate-700">{formatLocation(log)}</TableCell>
                                   <TableCell className="max-w-[220px] text-xs text-slate-600">

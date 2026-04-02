@@ -125,6 +125,12 @@ import {
   verifyQRCode,
   reportFraud,
   submitProductFeedback,
+  beginCustomerPasskeyAssertion,
+  beginCustomerPasskeyRegistration,
+  deleteCustomerPasskeyCredential,
+  finishCustomerPasskeyAssertion,
+  finishCustomerPasskeyRegistration,
+  listCustomerPasskeyCredentials,
   requestCustomerEmailOtp,
   verifyCustomerEmailOtp,
   claimProductOwnership,
@@ -207,6 +213,7 @@ import {
   patchIrIncident,
   addIrIncidentEvent,
   applyIrIncidentAction,
+  reviewIrIncidentCustomerTrust,
   sendIrIncidentCommunication,
 } from "../controllers/irIncidentController";
 
@@ -590,6 +597,12 @@ router.get("/public/connector/download/:version/:platform", ...connectorDownload
 router.get("/verify/:code", ...verifyCodeLimiters, optionalCustomerVerifyAuth, verifyQRCode);
 router.post("/verify/auth/email-otp/request", ...verifyOtpRequestLimiters, requestCustomerEmailOtp);
 router.post("/verify/auth/email-otp/verify", ...verifyOtpVerifyLimiters, verifyCustomerEmailOtp);
+router.post("/verify/auth/passkey/register/begin", ...verifyOtpVerifyLimiters, requireCustomerVerifyAuth, beginCustomerPasskeyRegistration);
+router.post("/verify/auth/passkey/register/finish", ...verifyOtpVerifyLimiters, requireCustomerVerifyAuth, finishCustomerPasskeyRegistration);
+router.post("/verify/auth/passkey/assertion/begin", ...verifyOtpVerifyLimiters, optionalCustomerVerifyAuth, beginCustomerPasskeyAssertion);
+router.post("/verify/auth/passkey/assertion/finish", ...verifyOtpVerifyLimiters, optionalCustomerVerifyAuth, finishCustomerPasskeyAssertion);
+router.get("/verify/auth/passkey/credentials", ...verifyOtpVerifyLimiters, requireCustomerVerifyAuth, listCustomerPasskeyCredentials);
+router.delete("/verify/auth/passkey/credentials/:id", ...verifyOtpVerifyLimiters, requireCustomerVerifyAuth, deleteCustomerPasskeyCredential);
 router.post("/verify/:code/claim", ...verifyClaimLimiters, optionalCustomerVerifyAuth, claimProductOwnership);
 router.post("/verify/:code/link-claim", ...verifyClaimLimiters, requireCustomerVerifyAuth, linkDeviceClaimToCustomer);
 router.post("/verify/:code/transfer", ...verifyClaimLimiters, requireCustomerVerifyAuth, createOwnershipTransfer);
@@ -1091,6 +1104,7 @@ router.post("/ir/incidents", authenticate, requirePlatformAdmin, requireRecentAd
 router.get("/ir/incidents/:id", authenticate, requirePlatformAdmin, getIrIncident);
 router.patch("/ir/incidents/:id", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, patchIrIncident);
 router.post("/ir/incidents/:id/events", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, addIrIncidentEvent);
+router.post("/ir/incidents/:id/customer-trust/review", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, reviewIrIncidentCustomerTrust);
 router.post("/ir/incidents/:id/actions", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, applyIrIncidentAction);
 router.post(
   "/ir/incidents/:id/communications",

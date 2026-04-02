@@ -18,6 +18,16 @@ export type OwnershipStatus = {
 };
 
 export type VerificationProofSource = "SIGNED_LABEL" | "MANUAL_CODE_LOOKUP";
+export type VerificationProofTier = "SIGNED_LABEL" | "MANUAL_REGISTRY_LOOKUP" | "DEGRADED";
+export type VerificationRiskBand = "LOW" | "ELEVATED" | "HIGH" | "CRITICAL";
+export type VerificationReplacementStatus = "NONE" | "ACTIVE_REPLACEMENT" | "REPLACED_LABEL";
+export type VerificationDegradationMode = "NORMAL" | "QUEUE_AND_RETRY" | "FAIL_CLOSED";
+export type CustomerTrustLevel =
+  | "ANONYMOUS"
+  | "DEVICE_TRUSTED"
+  | "ACCOUNT_TRUSTED"
+  | "PASSKEY_VERIFIED"
+  | "OPERATOR_REVIEWED";
 
 export type OwnershipTransferView = {
   state?:
@@ -65,9 +75,21 @@ export type VerificationActivitySummary = {
 
 export type VerifyPayload = {
   isAuthentic: boolean;
+  decisionId?: string | null;
+  decisionVersion?: number;
   message?: string;
   warningMessage?: string | null;
   proofSource?: VerificationProofSource;
+  proofTier?: VerificationProofTier;
+  reasonCodes?: string[];
+  riskBand?: VerificationRiskBand;
+  replacementStatus?: VerificationReplacementStatus;
+  degradationMode?: VerificationDegradationMode;
+  customerTrustLevel?: CustomerTrustLevel;
+  replacementChainId?: string | null;
+  labelState?: string;
+  printTrustState?: string;
+  latestDecisionOutcome?: string | null;
   proof?: {
     title?: string;
     detail?: string;

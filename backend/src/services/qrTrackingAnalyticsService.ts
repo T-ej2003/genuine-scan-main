@@ -13,6 +13,7 @@ import {
   getScanLogReportingRelationName,
   listScanLogsForReporting,
 } from "./scanLogReportingService";
+import { listLatestDecisionByBatchIds, listLatestDecisionByQrCodeIds, type InternalLatestDecision } from "./verificationDecisionReadService";
 
 export type TrackingAnalyticsScopeMode = "inventory" | "activity";
 
@@ -73,6 +74,7 @@ export type TrackingAnalyticsBatchRow = {
   scanEventCount: number;
   createdAt: string;
   counts: Record<string, number>;
+  latestDecision?: InternalLatestDecision | null;
 };
 
 const TRACKING_STATUSES: QRStatus[] = [
@@ -671,6 +673,23 @@ export const getQrTrackingAnalytics = async (filters: TrackingAnalyticsFilters) 
     scopeMode === "activity" ? buildActivityAnalytics(filters) : buildInventoryAnalytics(filters),
     loadLogs(filters),
   ]);
+  const [batchDecisionMap, qrDecisionMap] = await Promise.all([
+    listLatestDecisionByBatchIds(analytics.batches.map((row) => row.id)),
+    listLatestDecisionByQrCodeIds(
+      logsPayload.logs
+        .map((row) => String(row.qrCode?.id || row.qrCodeId || "").trim())
+        .filter(Boolean)
+    ),
+  ]);
+
+  const batches = analytics.batches.map((row) => ({
+    ...row,
+    latestDecision: batchDecisionMap.get(row.id) || null,
+  }));
+  const logs = logsPayload.logs.map((row) => ({
+    ...row,
+    latestDecision: qrDecisionMap.get(String(row.qrCode?.id || row.qrCodeId || "").trim()) || null,
+  }));
 
   return {
     scope: {
@@ -685,8 +704,8 @@ export const getQrTrackingAnalytics = async (filters: TrackingAnalyticsFilters) 
     totals: analytics.totals,
     eventSummary: analytics.eventSummary || emptyEventSummary(),
     trend: analytics.trend,
-    batches: analytics.batches,
-    logs: logsPayload.logs,
+    batches,
+    logs,
     pagination: {
       total: logsPayload.total,
       limit: filters.limit,

@@ -7,6 +7,7 @@ import { appendForensicChainFromAuditLog } from "./forensicChainService";
 import { getRedisInstanceId, publishRedisJson, subscribeRedisJson } from "./redisService";
 import { bumpCacheNamespaceVersion } from "./versionedCacheService";
 import { buildDateCursorWhere, encodeDateCursor } from "../utils/cursorPagination";
+import { queueAuditLogOutbox } from "./auditLogOutboxService";
 
 export interface AuditLogInput {
   userId?: string;
@@ -58,20 +59,23 @@ const resolveOrgId = async (input: { orgId?: string; licenseeId?: string }) => {
   return derived || undefined;
 };
 
-export const createAuditLog = async (data: AuditLogInput) => {
+const resolveAuditPayload = async (data: AuditLogInput) => {
   const storeRawIp = ["1", "true", "yes", "on"].includes(String(process.env.AUDIT_LOG_STORE_RAW_IP || "").trim().toLowerCase());
   const resolvedOrgId = await resolveOrgId({ orgId: data.orgId, licenseeId: data.licenseeId });
   const resolvedIpHash = data.ipHash ?? hashIp(data.ipAddress);
   const resolvedUserAgent = normalizeUserAgent(data.userAgent);
 
-  const payload = {
+  return {
     ...data,
     orgId: resolvedOrgId,
     ipHash: resolvedIpHash || undefined,
     userAgent: resolvedUserAgent || undefined,
     ipAddress: storeRawIp ? data.ipAddress : undefined,
   } as any;
+};
 
+export const createAuditLog = async (data: AuditLogInput) => {
+  const payload = await resolveAuditPayload(data);
   let log;
   try {
     log = await prisma.auditLog.create({ data: payload });
@@ -137,6 +141,29 @@ export const createAuditLog = async (data: AuditLogInput) => {
     createdAt: log.createdAt instanceof Date ? log.createdAt.toISOString() : String(log.createdAt || ""),
   });
   return log;
+};
+
+export const createAuditLogSafely = async (data: AuditLogInput) => {
+  const payload = await resolveAuditPayload(data);
+
+  try {
+    const log = await createAuditLog(payload);
+    return {
+      log,
+      persisted: true,
+      queued: false,
+      outboxId: null as string | null,
+    };
+  } catch (error) {
+    const outboxId = await queueAuditLogOutbox(payload, error);
+    return {
+      log: null,
+      persisted: false,
+      queued: Boolean(outboxId),
+      outboxId,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    };
+  }
 };
 
 export const getAuditLogs = async (opts: {

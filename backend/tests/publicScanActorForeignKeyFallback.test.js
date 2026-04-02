@@ -171,7 +171,10 @@ const fakePrisma = {
 };
 
 mockModule("config/database.js", { __esModule: true, default: fakePrisma });
-mockModule("services/auditService.js", { createAuditLog: async () => {} });
+mockModule("services/auditService.js", {
+  createAuditLog: async () => {},
+  createAuditLogSafely: async () => ({ log: { id: "audit-1" }, persisted: true, queued: false, outboxId: null }),
+});
 mockModule("services/locationService.js", { reverseGeocode: async () => null });
 mockModule("services/policyEngineService.js", { evaluateScanAndEnforcePolicy: async () => neutralPolicy });
 mockModule("services/scanInsightService.js", { getScanInsight: async () => emptyScanInsight });

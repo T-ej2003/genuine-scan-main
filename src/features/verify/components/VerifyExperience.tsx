@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AlertTriangle, Ban, Clock3, Loader2, Lock, SearchX, Shield, ShieldCheck, WifiOff } from "lucide-react";
 
@@ -25,6 +25,12 @@ import {
 } from "@/components/premium/VerificationConfidenceMeter";
 import { VerifiedAuthenticStamp } from "@/components/premium/VerifiedAuthenticStamp";
 import { PremiumSectionAccordion } from "@/components/premium/PremiumSectionAccordion";
+import {
+  isWebAuthnSupported,
+  startWebAuthnAuthentication,
+  startWebAuthnRegistration,
+  type WebAuthnCredentialSummary,
+} from "@/lib/webauthn";
 import {
   APP_NAME,
   CUSTOMER_EMAIL_KEY,
@@ -149,6 +155,11 @@ export default function VerifyExperience() {
   const [otpCode, setOtpCode] = useState("");
   const [otpSending, setOtpSending] = useState(false);
   const [otpVerifying, setOtpVerifying] = useState(false);
+  const [passkeyCredentials, setPasskeyCredentials] = useState<WebAuthnCredentialSummary[]>([]);
+  const [loadingPasskeys, setLoadingPasskeys] = useState(false);
+  const [registeringPasskey, setRegisteringPasskey] = useState(false);
+  const [assertingPasskey, setAssertingPasskey] = useState(false);
+  const [deletingPasskeyId, setDeletingPasskeyId] = useState("");
 
   const [claiming, setClaiming] = useState(false);
   const [linkingClaim, setLinkingClaim] = useState(false);
@@ -309,6 +320,38 @@ export default function VerifyExperience() {
           detail: "This result confirms registry state and lifecycle, but not the physical label binding.",
         }
   );
+  const proofTierLabel =
+    result?.proofTier === "SIGNED_LABEL"
+      ? "Proof tier: signed label"
+      : result?.proofTier === "MANUAL_REGISTRY_LOOKUP"
+        ? "Proof tier: manual registry lookup"
+        : result?.proofTier === "DEGRADED"
+          ? "Proof tier: degraded"
+          : null;
+  const trustLevelLabel =
+    result?.customerTrustLevel === "ACCOUNT_TRUSTED"
+      ? "Requester trust: signed-in account"
+      : result?.customerTrustLevel === "PASSKEY_VERIFIED"
+        ? "Requester trust: passkey verified"
+      : result?.customerTrustLevel === "DEVICE_TRUSTED"
+        ? "Requester trust: trusted device"
+        : result?.customerTrustLevel === "OPERATOR_REVIEWED"
+          ? "Requester trust: operator reviewed"
+          : "Requester trust: anonymous";
+  const replacementStatusLabel =
+    result?.replacementStatus === "ACTIVE_REPLACEMENT"
+      ? "Replacement state: active replacement label"
+      : result?.replacementStatus === "REPLACED_LABEL"
+        ? "Replacement state: superseded label"
+        : null;
+  const degradationLabel =
+    result?.degradationMode === "QUEUE_AND_RETRY"
+      ? "Audit mode: queue and retry"
+      : result?.degradationMode === "FAIL_CLOSED"
+        ? "Audit mode: fail closed"
+        : result?.degradationMode === "NORMAL"
+          ? "Audit mode: normal"
+          : null;
   const trustedRepeatCount = Number(activitySummary?.trustedOwnerScanCount24h ?? result?.scanSignals?.trustedOwnerScanCount24h ?? 0);
   const externalScanCount = Number(activitySummary?.untrustedScanCount24h ?? result?.scanSignals?.untrustedScanCount24h ?? 0);
   const externalDeviceCount = Number(
@@ -316,6 +359,8 @@ export default function VerifyExperience() {
   );
 
   const googleOauthUrl = String(import.meta.env.VITE_GOOGLE_OAUTH_URL || "").trim();
+  const passkeySupported = isWebAuthnSupported();
+  const hasPasskeyTrust = result?.customerTrustLevel === "PASSKEY_VERIFIED";
   const showSkeleton = loading && !result && !error;
   const motionButtonClass = "transition-transform duration-200 hover:scale-[1.02] active:scale-[0.99]";
 
@@ -339,6 +384,76 @@ export default function VerifyExperience() {
       }
     },
     [legacyTransferStorageKey, transferStorageKey, transferToken]
+  );
+
+  const persistCustomerSession = useCallback((nextToken: string, nextEmail: string) => {
+    const tokenValue = String(nextToken || "").trim();
+    const emailValue = String(nextEmail || "").trim();
+
+    setCustomerToken(tokenValue);
+    setCustomerEmail(emailValue);
+    if (emailValue) setOtpEmail(emailValue);
+
+    try {
+      if (tokenValue) {
+        window.localStorage.setItem(CUSTOMER_TOKEN_KEY, tokenValue);
+      } else {
+        window.localStorage.removeItem(CUSTOMER_TOKEN_KEY);
+      }
+
+      if (emailValue) {
+        window.localStorage.setItem(CUSTOMER_EMAIL_KEY, emailValue);
+      } else {
+        window.localStorage.removeItem(CUSTOMER_EMAIL_KEY);
+      }
+
+      window.localStorage.removeItem(LEGACY_CUSTOMER_TOKEN_KEY);
+      window.localStorage.removeItem(LEGACY_CUSTOMER_EMAIL_KEY);
+    } catch {
+      // ignore storage issues
+    }
+  }, []);
+
+  const clearCustomerSession = useCallback(() => {
+    setCustomerToken("");
+    setCustomerEmail("");
+    setPasskeyCredentials([]);
+    setOtpChallengeToken("");
+    setOtpCode("");
+    setQueueTransferDialogAfterSignIn(false);
+
+    try {
+      window.localStorage.removeItem(CUSTOMER_TOKEN_KEY);
+      window.localStorage.removeItem(CUSTOMER_EMAIL_KEY);
+      window.localStorage.removeItem(LEGACY_CUSTOMER_TOKEN_KEY);
+      window.localStorage.removeItem(LEGACY_CUSTOMER_EMAIL_KEY);
+    } catch {
+      // ignore storage issues
+    }
+  }, []);
+
+  const loadCustomerPasskeys = useCallback(
+    async (sessionToken?: string) => {
+      const activeToken = String(sessionToken || customerToken || "").trim();
+      if (!activeToken || !passkeySupported) {
+        startTransition(() => {
+          setPasskeyCredentials([]);
+          setLoadingPasskeys(false);
+        });
+        return;
+      }
+
+      setLoadingPasskeys(true);
+      try {
+        const response = await apiClient.getCustomerPasskeyCredentials(activeToken);
+        startTransition(() => {
+          setPasskeyCredentials(response.success ? response.data?.items || [] : []);
+        });
+      } finally {
+        setLoadingPasskeys(false);
+      }
+    },
+    [customerToken, passkeySupported]
   );
 
   const fetchVerification = useCallback(async () => {
@@ -525,6 +640,10 @@ export default function VerifyExperience() {
   }, [fetchVerification]);
 
   useEffect(() => {
+    loadCustomerPasskeys();
+  }, [loadCustomerPasskeys]);
+
+  useEffect(() => {
     if (ownershipTransfer?.acceptUrl) {
       setIssuedTransferLink(ownershipTransfer.acceptUrl);
     }
@@ -661,19 +780,9 @@ export default function VerifyExperience() {
       const tokenValue = response.data.token;
       const emailValue = response.data.customer?.email || otpEmail.trim();
 
-      setCustomerToken(tokenValue);
-      setCustomerEmail(emailValue);
+      persistCustomerSession(tokenValue, emailValue);
       setOtpChallengeToken("");
       setOtpCode("");
-
-      try {
-        window.localStorage.setItem(CUSTOMER_TOKEN_KEY, tokenValue);
-        window.localStorage.setItem(CUSTOMER_EMAIL_KEY, emailValue);
-        window.localStorage.removeItem(LEGACY_CUSTOMER_TOKEN_KEY);
-        window.localStorage.removeItem(LEGACY_CUSTOMER_EMAIL_KEY);
-      } catch {
-        // ignore storage issues
-      }
 
       toast({ title: "Signed in", description: "Protection sign-in is active for this device." });
     } finally {
@@ -682,19 +791,132 @@ export default function VerifyExperience() {
   };
 
   const handleSignOut = async () => {
-    setCustomerToken("");
-    setCustomerEmail("");
-    setOtpChallengeToken("");
-    setOtpCode("");
-    setQueueTransferDialogAfterSignIn(false);
+    clearCustomerSession();
+  };
 
+  const handleRegisterPasskey = async () => {
+    if (!customerToken) {
+      toast({ title: "Sign-in required", description: "Sign in before adding a passkey.", variant: "destructive" });
+      return;
+    }
+
+    if (!passkeySupported) {
+      toast({ title: "Passkeys unavailable", description: "This browser does not support WebAuthn passkeys.", variant: "destructive" });
+      return;
+    }
+
+    setRegisteringPasskey(true);
     try {
-      window.localStorage.removeItem(CUSTOMER_TOKEN_KEY);
-      window.localStorage.removeItem(CUSTOMER_EMAIL_KEY);
-      window.localStorage.removeItem(LEGACY_CUSTOMER_TOKEN_KEY);
-      window.localStorage.removeItem(LEGACY_CUSTOMER_EMAIL_KEY);
-    } catch {
-      // ignore storage issues
+      const beginResponse = await apiClient.beginCustomerPasskeyRegistration(customerToken);
+      if (!beginResponse.success || !beginResponse.data) {
+        toast({
+          title: "Could not start passkey setup",
+          description: beginResponse.error || "Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const credential = await startWebAuthnRegistration(beginResponse.data, `${APP_NAME} protection`);
+      const finishResponse = await apiClient.finishCustomerPasskeyRegistration(customerToken, credential);
+      if (!finishResponse.success || !finishResponse.data?.token) {
+        toast({
+          title: "Could not finish passkey setup",
+          description: finishResponse.error || "Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const nextEmail = finishResponse.data.customer?.email || customerEmail || otpEmail.trim();
+      persistCustomerSession(finishResponse.data.token, nextEmail);
+      await loadCustomerPasskeys(finishResponse.data.token);
+      toast({
+        title: "Passkey added",
+        description: "Future ownership checks can use this passkey for stronger protection.",
+      });
+    } catch (error: unknown) {
+      toast({
+        title: "Could not add passkey",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setRegisteringPasskey(false);
+    }
+  };
+
+  const handleAssertPasskey = async () => {
+    if (!customerToken) {
+      toast({ title: "Sign-in required", description: "Sign in before using a passkey.", variant: "destructive" });
+      return;
+    }
+
+    if (!passkeySupported) {
+      toast({ title: "Passkeys unavailable", description: "This browser does not support WebAuthn passkeys.", variant: "destructive" });
+      return;
+    }
+
+    setAssertingPasskey(true);
+    try {
+      const beginResponse = await apiClient.beginCustomerPasskeyAssertion(undefined, customerToken);
+      if (!beginResponse.success || !beginResponse.data) {
+        toast({
+          title: "Could not start passkey check",
+          description: beginResponse.error || "Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const assertion = await startWebAuthnAuthentication(beginResponse.data);
+      const finishResponse = await apiClient.finishCustomerPasskeyAssertion(assertion, customerToken);
+      if (!finishResponse.success || !finishResponse.data?.token) {
+        toast({
+          title: "Passkey verification failed",
+          description: finishResponse.error || "Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const nextEmail = finishResponse.data.customer?.email || customerEmail || otpEmail.trim();
+      persistCustomerSession(finishResponse.data.token, nextEmail);
+      await loadCustomerPasskeys(finishResponse.data.token);
+      toast({
+        title: "Passkey verified",
+        description: "This session now carries stronger ownership proof.",
+      });
+    } catch (error: unknown) {
+      toast({
+        title: "Passkey verification failed",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setAssertingPasskey(false);
+    }
+  };
+
+  const handleDeletePasskey = async (credentialId: string) => {
+    if (!customerToken || !credentialId) return;
+
+    setDeletingPasskeyId(credentialId);
+    try {
+      const response = await apiClient.deleteCustomerPasskeyCredential(customerToken, credentialId);
+      if (!response.success) {
+        toast({
+          title: "Could not remove passkey",
+          description: response.error || "Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      await loadCustomerPasskeys(customerToken);
+      toast({ title: "Passkey removed", description: "That passkey can no longer be used for ownership step-up." });
+    } finally {
+      setDeletingPasskeyId("");
     }
   };
 
@@ -1239,6 +1461,18 @@ export default function VerifyExperience() {
                         <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" />
                         <span>{proofDescriptor.detail}</span>
                         <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" />
+                        {proofTierLabel ? <span className="font-medium text-slate-700">{proofTierLabel}</span> : null}
+                        {proofTierLabel ? <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" /> : null}
+                        <span className="font-medium text-slate-700">{trustLevelLabel}</span>
+                        <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" />
+                        <span className="font-medium text-slate-700">
+                          Print trust: {result?.printTrustState ? toLabel(result.printTrustState) : "not disclosed"}
+                        </span>
+                        {replacementStatusLabel ? <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" /> : null}
+                        {replacementStatusLabel ? <span className="font-medium text-slate-700">{replacementStatusLabel}</span> : null}
+                        {degradationLabel ? <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" /> : null}
+                        {degradationLabel ? <span className="font-medium text-slate-700">{degradationLabel}</span> : null}
+                        <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" />
                         <span className="font-medium text-slate-700">Scan history recorded server-side for fraud review</span>
                         <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" />
                         <span className="font-medium text-slate-700">Confidence {confidenceScore}%</span>
@@ -1295,6 +1529,47 @@ export default function VerifyExperience() {
                                   ))}
                                 </ul>
                               </div>
+                            </div>
+                          ),
+                        },
+                        {
+                          value: "decision-trace",
+                          title: "Decision Trace",
+                          subtitle: "Versioned proof, trust, and lifecycle evidence behind this result",
+                          content: (
+                            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                              <div className="grid gap-3 text-sm text-slate-700 sm:grid-cols-2">
+                                <div>
+                                  <p className="text-xs uppercase tracking-wide text-slate-500">Decision version</p>
+                                  <p className="mt-1 font-medium text-slate-900">
+                                    {result?.decisionVersion ? `v${result.decisionVersion}` : "Current"}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="text-xs uppercase tracking-wide text-slate-500">Decision id</p>
+                                  <p className="mt-1 font-mono text-xs text-slate-900">{result?.decisionId || "Not disclosed"}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs uppercase tracking-wide text-slate-500">Label state</p>
+                                  <p className="mt-1 font-medium text-slate-900">{toLabel(result?.labelState || result?.status || "unknown")}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs uppercase tracking-wide text-slate-500">Latest decision outcome</p>
+                                  <p className="mt-1 font-medium text-slate-900">{toLabel(result?.latestDecisionOutcome || result?.scanOutcome || "unknown")}</p>
+                                </div>
+                              </div>
+                              {Array.isArray(result?.reasonCodes) && result.reasonCodes.length ? (
+                                <div className="mt-4">
+                                  <p className="text-xs uppercase tracking-wide text-slate-500">Decision reason codes</p>
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                    {result.reasonCodes.slice(0, 6).map((code) => (
+                                      <Badge key={code} variant="outline" className="border-slate-200 bg-slate-50 text-slate-700">
+                                        {code}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
                             </div>
                           ),
                         },
@@ -1727,13 +2002,120 @@ export default function VerifyExperience() {
                           ) : null}
                         </div>
                       ) : (
-                        <div className="flex flex-wrap items-center gap-3">
-                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                            Signed in as {customerEmail}
+                        <div className="space-y-3">
+                          <div className="flex flex-wrap items-center gap-3">
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                              Signed in as {customerEmail}
+                            </div>
+                            <Button type="button" variant="outline" onClick={handleSignOut} disabled={loading} className={motionButtonClass}>
+                              Sign out
+                            </Button>
                           </div>
-                          <Button type="button" variant="outline" onClick={handleSignOut} disabled={loading} className={motionButtonClass}>
-                            Sign out
-                          </Button>
+
+                          {passkeySupported ? (
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div>
+                                  <p className="font-medium text-slate-900">Passkey protection</p>
+                                  <p className="mt-1 text-xs text-slate-600">
+                                    {hasPasskeyTrust
+                                      ? "This session is currently backed by a passkey assertion."
+                                      : passkeyCredentials.length
+                                        ? "Use your passkey to strengthen this session before sensitive ownership actions."
+                                        : "Add a passkey to make future ownership recovery and transfer checks harder to spoof."}
+                                  </p>
+                                </div>
+                                <Badge variant="outline">
+                                  {hasPasskeyTrust ? "Passkey verified" : passkeyCredentials.length ? `${passkeyCredentials.length} enrolled` : "Optional"}
+                                </Badge>
+                              </div>
+
+                              <div className="mt-3 flex flex-wrap items-center gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={handleRegisterPasskey}
+                                  disabled={registeringPasskey || loadingPasskeys}
+                                  className={motionButtonClass}
+                                >
+                                  {registeringPasskey ? (
+                                    <>
+                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                      Adding passkey
+                                    </>
+                                  ) : passkeyCredentials.length ? (
+                                    "Add another passkey"
+                                  ) : (
+                                    "Add passkey for stronger ownership protection"
+                                  )}
+                                </Button>
+                                {passkeyCredentials.length ? (
+                                  <Button
+                                    type="button"
+                                    onClick={handleAssertPasskey}
+                                    disabled={assertingPasskey || loadingPasskeys || hasPasskeyTrust}
+                                    className={cn("bg-slate-900 text-white hover:bg-slate-800", motionButtonClass)}
+                                  >
+                                    {assertingPasskey ? (
+                                      <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        Verifying passkey
+                                      </>
+                                    ) : hasPasskeyTrust ? (
+                                      "Passkey active"
+                                    ) : (
+                                      "Use passkey on this device"
+                                    )}
+                                  </Button>
+                                ) : null}
+                              </div>
+
+                              {loadingPasskeys ? (
+                                <p className="mt-3 text-xs text-slate-500">Loading enrolled passkeys...</p>
+                              ) : passkeyCredentials.length ? (
+                                <div className="mt-3 space-y-2">
+                                  {passkeyCredentials.map((credential) => (
+                                    <div
+                                      key={credential.id}
+                                      className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2"
+                                    >
+                                      <div className="min-w-0">
+                                        <p className="font-medium text-slate-900">{credential.label || "Passkey"}</p>
+                                        <p className="mt-1 text-xs text-slate-600">
+                                          Added {formatDateTime(credential.createdAt)}. Last used {formatDateTime(credential.lastUsedAt)}.
+                                        </p>
+                                      </div>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleDeletePasskey(credential.id)}
+                                        disabled={deletingPasskeyId === credential.id}
+                                        className="text-slate-600 hover:text-rose-800"
+                                      >
+                                        {deletingPasskeyId === credential.id ? (
+                                          <>
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            Removing
+                                          </>
+                                        ) : (
+                                          "Remove"
+                                        )}
+                                      </Button>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="mt-3 text-xs text-slate-600">
+                                  Email sign-in still works, but passkeys give higher-assurance ownership proof on supported devices.
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                              Passkey protection is available on browsers and devices that support WebAuthn security keys.
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

@@ -36,6 +36,7 @@ const Governance = lazy(() => import("@/pages/Governance"));
 const Verify = lazy(() => import("@/pages/Verify"));
 const VerifyLanding = lazy(() => import("@/pages/VerifyLanding"));
 const Index = lazy(() => import("@/pages/Index"));
+const TrustCenter = lazy(() => import("@/pages/TrustCenter"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 const SettingsPage = lazy(() => import("@/pages/Settings"));
 const AccountSettings = lazy(() => import("@/pages/AccountSettings"));
@@ -145,6 +146,7 @@ function AppRoutes() {
       <Routes>
         {/* Public */}
         <Route path="/" element={<Index />} />
+        <Route path="/trust" element={<TrustCenter />} />
         <Route path="/verify" element={<VerifyLanding />} />
         <Route path="/verify/:code" element={<Verify />} />
         <Route path="/scan" element={<Verify />} />

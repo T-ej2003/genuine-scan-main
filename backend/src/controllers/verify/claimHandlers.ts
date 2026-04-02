@@ -1,7 +1,8 @@
 import { Response } from "express";
 
 import { CustomerVerifyRequest } from "../../middleware/customerVerifyAuth";
-import { createAuditLog } from "../../services/auditService";
+import { createAuditLogSafely } from "../../services/auditService";
+import { recordCustomerTrustCredential, resolveCustomerTrustLevel } from "../../services/customerTrustService";
 import { resolveVerifyUxPolicy } from "../../services/governanceService";
 import { normalizeUserAgent } from "../../utils/security";
 import {
@@ -124,7 +125,7 @@ export const claimProductOwnership = async (req: CustomerVerifyRequest, res: Res
             },
           });
 
-          await createAuditLog({
+          await createAuditLogSafely({
             action: "VERIFY_CLAIM_LINKED_TO_USER",
             entityType: "Ownership",
             entityId: qrCode.id,
@@ -135,6 +136,28 @@ export const claimProductOwnership = async (req: CustomerVerifyRequest, res: Res
               qrCodeId: qrCode.id,
               customerUserId,
             },
+          });
+
+          await recordCustomerTrustCredential({
+            qrCodeId: qrCode.id,
+            customerUserId,
+            customerEmail: req.customer?.email || null,
+            deviceTokenHash,
+            trustLevel: resolveCustomerTrustLevel({
+              customerUserId,
+              deviceTokenHash,
+              ownershipStatus: {
+                isOwnedByRequester: true,
+                matchMethod: "user",
+              },
+              customerAuthStrength: req.customer?.authStrength || null,
+            }),
+            source: "OWNERSHIP_LINK",
+            linkedAt: new Date(),
+            lastAssertionAt:
+              req.customer?.authStrength === "PASSKEY" && req.customer?.webauthnVerifiedAt
+                ? new Date(req.customer.webauthnVerifiedAt)
+                : null,
           });
 
           return res.json({
@@ -157,7 +180,7 @@ export const claimProductOwnership = async (req: CustomerVerifyRequest, res: Res
         });
       }
 
-      await createAuditLog({
+      await createAuditLogSafely({
         action: "VERIFY_CLAIM_CONFLICT",
         entityType: "Ownership",
         entityId: qrCode.id,
@@ -263,7 +286,7 @@ export const claimProductOwnership = async (req: CustomerVerifyRequest, res: Res
       throw error;
     }
 
-    await createAuditLog({
+    await createAuditLogSafely({
       action: "VERIFY_CLAIM_SUCCESS",
       entityType: "Ownership",
       entityId: qrCode.id,
@@ -275,6 +298,28 @@ export const claimProductOwnership = async (req: CustomerVerifyRequest, res: Res
         customerUserId,
         claimSource: customerUserId ? "USER" : "DEVICE",
       },
+    });
+
+    await recordCustomerTrustCredential({
+      qrCodeId: qrCode.id,
+      customerUserId,
+      customerEmail: req.customer?.email || null,
+      deviceTokenHash,
+      trustLevel: resolveCustomerTrustLevel({
+        customerUserId,
+        deviceTokenHash,
+        ownershipStatus: {
+          isOwnedByRequester: true,
+          matchMethod: customerUserId ? "user" : "device_token",
+        },
+        customerAuthStrength: req.customer?.authStrength || null,
+      }),
+      source: "OWNERSHIP_CLAIM",
+      claimedAt: new Date(),
+      lastAssertionAt:
+        req.customer?.authStrength === "PASSKEY" && req.customer?.webauthnVerifiedAt
+          ? new Date(req.customer.webauthnVerifiedAt)
+          : null,
     });
 
     return res.status(201).json({
@@ -451,7 +496,7 @@ export const linkDeviceClaimToCustomer = async (req: CustomerVerifyRequest, res:
       },
     });
 
-    await createAuditLog({
+    await createAuditLogSafely({
       action: "VERIFY_CLAIM_LINKED_TO_USER",
       entityType: "Ownership",
       entityId: qrCode.id,
@@ -462,6 +507,28 @@ export const linkDeviceClaimToCustomer = async (req: CustomerVerifyRequest, res:
         qrCodeId: qrCode.id,
         customerUserId: customer.userId,
       },
+    });
+
+    await recordCustomerTrustCredential({
+      qrCodeId: qrCode.id,
+      customerUserId: customer.userId,
+      customerEmail: customer.email,
+      deviceTokenHash,
+      trustLevel: resolveCustomerTrustLevel({
+        customerUserId: customer.userId,
+        deviceTokenHash,
+        ownershipStatus: {
+          isOwnedByRequester: true,
+          matchMethod: "user",
+        },
+        customerAuthStrength: req.customer?.authStrength || null,
+      }),
+      source: "OWNERSHIP_LINK",
+      linkedAt: new Date(),
+      lastAssertionAt:
+        req.customer?.authStrength === "PASSKEY" && req.customer?.webauthnVerifiedAt
+          ? new Date(req.customer.webauthnVerifiedAt)
+          : null,
     });
 
     return res.json({

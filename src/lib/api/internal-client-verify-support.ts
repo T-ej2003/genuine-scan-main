@@ -1,4 +1,5 @@
 import { BASE_URL, type ApiClientCore, type ApiResponse } from "@/lib/api/internal-client-core";
+import type { WebAuthnAuthenticationOptionsResponse, WebAuthnRegistrationOptionsResponse } from "@/lib/webauthn";
 
 export const createVerifySupportApi = (core: ApiClientCore) => ({
   async verifyQRCode(
@@ -75,6 +76,92 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     }>(`/verify/auth/email-otp/verify`, {
       method: "POST",
       body: JSON.stringify({ challengeToken, otp }),
+    });
+  },
+
+  async beginCustomerPasskeyRegistration(customerToken: string, label?: string) {
+    return core.request<WebAuthnRegistrationOptionsResponse>(`/verify/auth/passkey/register/begin`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${customerToken}` },
+      body: JSON.stringify({ label }),
+    });
+  },
+
+  async finishCustomerPasskeyRegistration(
+    customerToken: string,
+    payload: {
+      ticket: string;
+      label?: string;
+      credential: Record<string, unknown>;
+    }
+  ) {
+    return core.request<{
+      enrolled: boolean;
+      token: string;
+      customer: {
+        userId: string;
+        email: string;
+        maskedEmail: string;
+      };
+    }>(`/verify/auth/passkey/register/finish`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${customerToken}` },
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async beginCustomerPasskeyAssertion(payload?: { email?: string }, customerToken?: string) {
+    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
+    return core.request<WebAuthnAuthenticationOptionsResponse>(`/verify/auth/passkey/assertion/begin`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload || {}),
+    });
+  },
+
+  async finishCustomerPasskeyAssertion(
+    payload: {
+      ticket: string;
+      credential: Record<string, unknown>;
+    },
+    customerToken?: string
+  ) {
+    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
+    return core.request<{
+      token: string;
+      assertedAt?: string;
+      customer: {
+        userId: string;
+        email: string;
+        maskedEmail: string;
+      };
+    }>(`/verify/auth/passkey/assertion/finish`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async getCustomerPasskeyCredentials(customerToken: string) {
+    return core.request<{
+      items: Array<{
+        id: string;
+        label: string;
+        transports?: string[];
+        lastUsedAt?: string | null;
+        createdAt?: string | null;
+        updatedAt?: string | null;
+      }>;
+    }>(`/verify/auth/passkey/credentials`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${customerToken}` },
+    });
+  },
+
+  async deleteCustomerPasskeyCredential(customerToken: string, credentialId: string) {
+    return core.request<{ deleted: boolean }>(`/verify/auth/passkey/credentials/${encodeURIComponent(credentialId)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${customerToken}` },
     });
   },
 
@@ -388,6 +475,20 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
   ) {
     return core.request(`/ir/incidents/${encodeURIComponent(id)}`, {
       method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async reviewIrIncidentCustomerTrust(
+    id: string,
+    payload: {
+      credentialId: string;
+      reviewState: "UNREVIEWED" | "VERIFIED" | "DISPUTED" | "REVOKED";
+      reviewNote?: string;
+    }
+  ) {
+    return core.request(`/ir/incidents/${encodeURIComponent(id)}/customer-trust/review`, {
+      method: "POST",
       body: JSON.stringify(payload),
     });
   },

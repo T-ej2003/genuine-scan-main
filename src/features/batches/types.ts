@@ -1,3 +1,5 @@
+import type { LatestDecision } from "@/lib/verification-decision";
+
 export type BatchRow = {
   id: string;
   name: string;
@@ -219,4 +221,5 @@ export type PrintJobRow = {
     awaitingConfirmationCount?: number;
     counts?: Record<string, number>;
   } | null;
+  latestDecision?: LatestDecision | null;
 };

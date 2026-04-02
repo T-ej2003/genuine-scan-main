@@ -30,6 +30,13 @@ import { Search, QrCode, Filter, Download } from "lucide-react";
 import { format } from "date-fns";
 
 import apiClient from "@/lib/api-client";
+import {
+  decisionOutcomeTone,
+  decisionRiskTone,
+  decisionTrustTone,
+  titleCaseDecisionValue,
+  type LatestDecision,
+} from "@/lib/verification-decision";
 import { saveAs } from "file-saver";
 import { onMutationEvent } from "@/lib/mutation-events";
 
@@ -73,6 +80,7 @@ type QrRow = {
   id?: string;
   code: string;
   status: string;
+  latestDecision?: LatestDecision | null;
   batchId?: string | null;
   scanCount?: number | null;
   createdAt?: string | Date | null;
@@ -441,6 +449,7 @@ export default function QRCodes() {
                     </TableHead>
                     <TableHead>QR Code</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Decision</TableHead>
                     <TableHead>Batch</TableHead>
                     <TableHead>Scan</TableHead>
                     <TableHead>Created</TableHead>
@@ -451,13 +460,13 @@ export default function QRCodes() {
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-muted-foreground">
+                      <TableCell colSpan={8} className="text-muted-foreground">
                         Loading...
                       </TableCell>
                     </TableRow>
                   ) : qrCodes.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-muted-foreground">
+                      <TableCell colSpan={8} className="text-muted-foreground">
                         No QR codes found.
                       </TableCell>
                     </TableRow>
@@ -466,6 +475,7 @@ export default function QRCodes() {
                       const uiStatus = toUIStatus(qr.status);
                       const created = safeDate(qr.createdAt);
                       const scanned = safeDate(qr.scannedAt);
+                      const latestDecision = qr.latestDecision || null;
 
                       return (
                         <TableRow key={qr.id || qr.code}>
@@ -489,6 +499,43 @@ export default function QRCodes() {
 
                           <TableCell>
                             <Badge className={statusColors[uiStatus]}>{uiStatus}</Badge>
+                          </TableCell>
+
+                          <TableCell className="space-y-1">
+                            {latestDecision ? (
+                              <>
+                                <div className="flex flex-wrap gap-1">
+                                  <Badge className={decisionOutcomeTone(latestDecision.outcome)}>
+                                    {titleCaseDecisionValue(latestDecision.outcome)}
+                                  </Badge>
+                                  <Badge className={decisionRiskTone(latestDecision.riskBand)}>
+                                    {titleCaseDecisionValue(latestDecision.riskBand)}
+                                  </Badge>
+                                </div>
+                                <div className="flex flex-wrap gap-1">
+                                  <Badge className={decisionTrustTone(latestDecision.customerTrustReviewState)}>
+                                    {titleCaseDecisionValue(latestDecision.customerTrustReviewState)}
+                                  </Badge>
+                                  <Badge variant="outline">
+                                    {latestDecision.proofTier === "SIGNED_LABEL"
+                                      ? "Signed label"
+                                      : latestDecision.proofTier === "DEGRADED"
+                                        ? "Degraded"
+                                        : "Manual lookup"}
+                                  </Badge>
+                                </div>
+                                <div className="text-[11px] text-muted-foreground">
+                                  {latestDecision.printTrustState
+                                    ? titleCaseDecisionValue(latestDecision.printTrustState)
+                                    : "No print trust state"}
+                                  {latestDecision.replacementStatus && latestDecision.replacementStatus !== "NONE"
+                                    ? ` · ${titleCaseDecisionValue(latestDecision.replacementStatus)}`
+                                    : ""}
+                                </div>
+                              </>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">No verifier decision yet</span>
+                            )}
                           </TableCell>
 
                           <TableCell>

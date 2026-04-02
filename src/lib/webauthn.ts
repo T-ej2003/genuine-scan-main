@@ -9,6 +9,8 @@ export type AdminWebAuthnCredentialSummary = {
   updatedAt?: string | null;
 };
 
+export type WebAuthnCredentialSummary = AdminWebAuthnCredentialSummary;
+
 export type WebAuthnRegistrationOptionsResponse = {
   ticket: string;
   options: {
@@ -136,6 +138,8 @@ export const startAdminWebAuthnRegistration = async (
   };
 };
 
+export const startWebAuthnRegistration = startAdminWebAuthnRegistration;
+
 export const startAdminWebAuthnAuthentication = async (payload: WebAuthnAuthenticationOptionsResponse) => {
   requireWebAuthnSupport();
 
@@ -172,3 +176,5 @@ export const startAdminWebAuthnAuthentication = async (payload: WebAuthnAuthenti
     },
   };
 };
+
+export const startWebAuthnAuthentication = startAdminWebAuthnAuthentication;

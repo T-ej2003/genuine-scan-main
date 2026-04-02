@@ -62,6 +62,10 @@ export default function QRTracking() {
     fromDate: "",
     toDate: "",
     licenseeId: "all",
+    outcome: "all",
+    riskBand: "all",
+    replacementStatus: "all",
+    customerTrustReviewState: "all",
   });
 
   const isSuperAdmin = user?.role === "super_admin";
@@ -174,6 +178,28 @@ export default function QRTracking() {
     return map;
   }, [summary]);
 
+  const matchesDecisionFilters = (latestDecision?: BatchSummaryRow["latestDecision"] | ScanLogRow["latestDecision"] | null) => {
+    if (filters.outcome !== "all" && String(latestDecision?.outcome || "") !== filters.outcome) return false;
+    if (filters.riskBand !== "all" && String(latestDecision?.riskBand || "") !== filters.riskBand) return false;
+    if (filters.replacementStatus !== "all" && String(latestDecision?.replacementStatus || "") !== filters.replacementStatus) return false;
+    if (
+      filters.customerTrustReviewState !== "all" &&
+      String(latestDecision?.customerTrustReviewState || "") !== filters.customerTrustReviewState
+    ) {
+      return false;
+    }
+    return true;
+  };
+
+  const filteredSummary = useMemo(
+    () => summary.filter((batch) => matchesDecisionFilters(batch.latestDecision || null)),
+    [filters.customerTrustReviewState, filters.outcome, filters.replacementStatus, filters.riskBand, summary]
+  );
+  const filteredLogs = useMemo(
+    () => logs.filter((log) => matchesDecisionFilters(log.latestDecision || null)),
+    [filters.customerTrustReviewState, filters.outcome, filters.replacementStatus, filters.riskBand, logs]
+  );
+
   const friendlyError = useMemo(() => {
     const message = String(error || "").toLowerCase();
     if (!message) return "";
@@ -231,8 +257,8 @@ export default function QRTracking() {
         isSuperAdmin={isSuperAdmin}
         scopedLicenseeId={scopedLicenseeId}
         licensees={licensees}
-        summary={summary}
-        logs={logs}
+        summary={filteredSummary}
+        logs={filteredLogs}
         batchNameById={batchNameById}
         onOpenAllocationMap={openAllocationMap}
         onCopyBatchId={copyBatchId}

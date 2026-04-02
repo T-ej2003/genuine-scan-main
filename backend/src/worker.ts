@@ -6,6 +6,7 @@ import { logger } from "./utils/logger";
 import { releaseMetadata } from "./observability/release";
 import { initBackendMonitoring } from "./observability/sentry";
 import { startSecurityEventOutboxWorker, stopSecurityEventOutboxWorker } from "./services/siemOutboxService";
+import { startAuditLogOutboxWorker, stopAuditLogOutboxWorker } from "./services/auditLogOutboxService";
 import { startCompliancePackScheduler, stopCompliancePackScheduler } from "./services/compliancePackService";
 import { resumePendingNetworkDirectJobs } from "./services/networkDirectPrintService";
 import { resumePendingNetworkIppJobs } from "./services/networkIppPrintService";
@@ -35,6 +36,7 @@ const boot = async () => {
   });
 
   startSecurityEventOutboxWorker();
+  startAuditLogOutboxWorker();
   startCompliancePackScheduler();
   await resumePendingNetworkDirectJobs().catch((error) => {
     logger.error("Worker failed to resume pending network-direct jobs", { error: error?.message || error });
@@ -68,6 +70,7 @@ const shutdown = async (signal: string) => {
   stopHotEventPartitionWorker = null;
   stopHotEventPartitionMaintenanceWorker();
   stopSecurityEventOutboxWorker();
+  stopAuditLogOutboxWorker();
   stopCompliancePackScheduler();
   await prisma.$disconnect().catch(() => undefined);
   process.exit(0);

@@ -1,8 +1,9 @@
 import { Response } from "express";
 
 import { CustomerVerifyRequest } from "../../middleware/customerVerifyAuth";
-import { createAuditLog } from "../../services/auditService";
+import { createAuditLogSafely } from "../../services/auditService";
 import { sendAuthEmail } from "../../services/auth/authEmailService";
+import { recordCustomerTrustCredential, resolveCustomerTrustLevel } from "../../services/customerTrustService";
 import { normalizeUserAgent } from "../../utils/security";
 import {
   OwnershipTransferStatus,
@@ -147,7 +148,7 @@ export const acceptOwnershipTransfer = async (req: CustomerVerifyRequest, res: R
       return { updatedOwnership, acceptedTransfer };
     });
 
-    await createAuditLog({
+    await createAuditLogSafely({
       action: "VERIFY_TRANSFER_ACCEPTED",
       entityType: "OwnershipTransfer",
       entityId: transfer.id,
@@ -158,6 +159,29 @@ export const acceptOwnershipTransfer = async (req: CustomerVerifyRequest, res: R
         qrCodeId: qrCode.id,
         recipientCustomerId: customer.userId,
       },
+    });
+
+    await recordCustomerTrustCredential({
+      qrCodeId: qrCode.id,
+      customerUserId: customer.userId,
+      customerEmail: customer.email,
+      deviceTokenHash: result.updatedOwnership.deviceTokenHash || null,
+      trustLevel: resolveCustomerTrustLevel({
+        customerUserId: customer.userId,
+        deviceTokenHash: result.updatedOwnership.deviceTokenHash || null,
+        ownershipStatus: {
+          isOwnedByRequester: true,
+          matchMethod: "user",
+        },
+        customerAuthStrength: req.customer?.authStrength || null,
+      }),
+      source: "OWNERSHIP_TRANSFER_ACCEPT",
+      claimedAt: result.updatedOwnership.claimedAt,
+      linkedAt: result.updatedOwnership.linkedAt,
+      lastAssertionAt:
+        req.customer?.authStrength === "PASSKEY" && req.customer?.webauthnVerifiedAt
+          ? new Date(req.customer.webauthnVerifiedAt)
+          : null,
     });
 
     await Promise.allSettled(

@@ -22,6 +22,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { friendlyReferenceLabel, shortRawReference } from "@/lib/friendly-reference";
+import {
+  decisionOutcomeTone,
+  decisionRiskTone,
+  decisionTrustTone,
+  titleCaseDecisionValue,
+} from "@/lib/verification-decision";
 
 const STATUS_TONE: Record<string, string> = {
   NEW: "border-red-200 bg-red-50 text-red-700",
@@ -169,6 +175,20 @@ type IRIncidentDetailWorkspaceProps = {
   >;
   applyingAction: boolean;
   onApplyAction: () => Promise<void> | void;
+  trustReview: {
+    credentialId: string;
+    reviewState: string;
+    reviewNote: string;
+  };
+  onTrustReviewChange: React.Dispatch<
+    React.SetStateAction<{
+      credentialId: string;
+      reviewState: string;
+      reviewNote: string;
+    }>
+  >;
+  reviewingTrust: boolean;
+  onApplyTrustReview: () => Promise<void> | void;
 };
 
 export function IRIncidentDetailWorkspace({
@@ -204,11 +224,19 @@ export function IRIncidentDetailWorkspace({
   onActionDialogChange,
   applyingAction,
   onApplyAction,
+  trustReview,
+  onTrustReviewChange,
+  reviewingTrust,
+  onApplyTrustReview,
 }: IRIncidentDetailWorkspaceProps) {
   const evidenceRows = useMemo(() => (Array.isArray(incident?.evidence) ? incident.evidence.filter(Boolean) : []), [incident?.evidence]);
   const commRows = useMemo(() => (Array.isArray(incident?.communications) ? incident.communications.filter(Boolean) : []), [incident?.communications]);
   const eventRows = useMemo(() => (Array.isArray(incident?.events) ? incident.events.filter(Boolean) : []), [incident?.events]);
   const policyAlertRows = useMemo(() => (Array.isArray(incident?.policyAlerts) ? incident.policyAlerts.filter(Boolean) : []), [incident?.policyAlerts]);
+  const trustCredentialRows = useMemo(
+    () => (Array.isArray(incident?.customerTrustCredentials) ? incident.customerTrustCredentials.filter(Boolean) : []),
+    [incident?.customerTrustCredentials]
+  );
   const codeValue = incident?.qrCodeValue || incident?.qrCode?.code || "";
 
   if (!incident && !loading) {
@@ -345,6 +373,122 @@ export function IRIncidentDetailWorkspace({
                       {saving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Saving...</> : <><CheckCircle2 className="mr-2 h-4 w-4" />Save</>}
                     </Button>
                   </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-4">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <ShieldAlert className="h-4 w-4" />
+                    Verifier decision and customer trust
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {incident?.latestDecision ? (
+                    <div className="rounded-lg border bg-slate-50 p-3">
+                      <div className="flex flex-wrap gap-2">
+                        <Badge className={decisionOutcomeTone(incident.latestDecision.outcome)}>
+                          {titleCaseDecisionValue(incident.latestDecision.outcome)}
+                        </Badge>
+                        <Badge className={decisionRiskTone(incident.latestDecision.riskBand)}>
+                          {titleCaseDecisionValue(incident.latestDecision.riskBand)}
+                        </Badge>
+                        <Badge className={decisionTrustTone(incident.latestDecision.customerTrustReviewState)}>
+                          {titleCaseDecisionValue(incident.latestDecision.customerTrustReviewState)}
+                        </Badge>
+                        {incident.latestDecision.printTrustState ? (
+                          <Badge variant="outline">{titleCaseDecisionValue(incident.latestDecision.printTrustState)}</Badge>
+                        ) : null}
+                      </div>
+                      <div className="mt-2 text-sm text-slate-700">
+                        Proof tier: {titleCaseDecisionValue(incident.latestDecision.proofTier)}.
+                        {incident.latestDecision.replacementStatus && incident.latestDecision.replacementStatus !== "NONE"
+                          ? ` Replacement: ${titleCaseDecisionValue(incident.latestDecision.replacementStatus)}.`
+                          : ""}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border p-4 text-sm text-muted-foreground">No verification decision has been recorded for this QR yet.</div>
+                  )}
+
+                  {trustCredentialRows.length > 0 ? (
+                    <div className="space-y-4 rounded-lg border p-4">
+                      <div>
+                        <div className="font-medium">Operator trust review</div>
+                        <div className="text-sm text-muted-foreground">
+                          Review the customer trust record linked to this QR so operator and public trust states stay aligned.
+                        </div>
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Trust record</Label>
+                          <Select
+                            value={trustReview.credentialId || "none"}
+                            onValueChange={(value) =>
+                              onTrustReviewChange((previous) => ({
+                                ...previous,
+                                credentialId: value === "none" ? "" : value,
+                              }))
+                            }
+                          >
+                            <SelectTrigger><SelectValue placeholder="Select trust record" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Select trust record</SelectItem>
+                              {trustCredentialRows.map((row: any) => (
+                                <SelectItem key={row.id} value={row.id}>
+                                  {row.customerEmail || row.customerUserId || row.deviceTokenHash || row.id}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Review state</Label>
+                          <Select
+                            value={trustReview.reviewState}
+                            onValueChange={(value) =>
+                              onTrustReviewChange((previous) => ({
+                                ...previous,
+                                reviewState: value,
+                              }))
+                            }
+                          >
+                            <SelectTrigger><SelectValue placeholder="Review state" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="UNREVIEWED">Unreviewed</SelectItem>
+                              <SelectItem value="VERIFIED">Verified</SelectItem>
+                              <SelectItem value="DISPUTED">Disputed</SelectItem>
+                              <SelectItem value="REVOKED">Revoked</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Review note</Label>
+                        <Textarea
+                          value={trustReview.reviewNote}
+                          onChange={(event) =>
+                            onTrustReviewChange((previous) => ({
+                              ...previous,
+                              reviewNote: event.target.value,
+                            }))
+                          }
+                          rows={3}
+                          placeholder="Why was this trust state reviewed, disputed, or revoked?"
+                        />
+                      </div>
+
+                      <div className="flex justify-end">
+                        <Button type="button" onClick={onApplyTrustReview} disabled={reviewingTrust || !trustReview.credentialId}>
+                          {reviewingTrust ? "Updating..." : "Apply trust review"}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border p-4 text-sm text-muted-foreground">No customer trust records exist for this QR yet.</div>
+                  )}
                 </CardContent>
               </Card>
 

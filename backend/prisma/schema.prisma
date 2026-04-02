@@ -381,6 +381,70 @@ enum CompliancePackJobStatus {
   FAILED
 }
 
+enum VerificationDecisionOutcome {
+  AUTHENTIC
+  SUSPICIOUS_DUPLICATE
+  BLOCKED
+  NOT_READY
+  NOT_FOUND
+  INVALID_SIGNATURE
+  INVALID_PAYLOAD
+  EXPIRED
+  TOKEN_MISMATCH
+  UNAVAILABLE
+}
+
+enum VerificationProofTier {
+  SIGNED_LABEL
+  MANUAL_REGISTRY_LOOKUP
+  DEGRADED
+}
+
+enum VerificationRiskBand {
+  LOW
+  ELEVATED
+  HIGH
+  CRITICAL
+}
+
+enum VerificationReplacementStatus {
+  NONE
+  ACTIVE_REPLACEMENT
+  REPLACED_LABEL
+}
+
+enum VerificationDegradationMode {
+  NORMAL
+  QUEUE_AND_RETRY
+  FAIL_CLOSED
+}
+
+enum CustomerTrustLevel {
+  ANONYMOUS
+  DEVICE_TRUSTED
+  ACCOUNT_TRUSTED
+  PASSKEY_VERIFIED
+  OPERATOR_REVIEWED
+}
+
+enum CustomerTrustReviewState {
+  UNREVIEWED
+  VERIFIED
+  DISPUTED
+  REVOKED
+}
+
+enum ReplacementChainStatus {
+  ACTIVE
+  SUPERSEDED
+}
+
+enum AuditLogOutboxStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
@@ -1242,6 +1306,190 @@ model AuditLog {
   @@index([entityType])
   @@index([createdAt])
   @@index([licenseeId, createdAt, id])
+}
+
+model VerificationDecision {
+  id String @id @default(uuid())
+
+  decisionVersion Int @default(1)
+  qrCodeId String?
+  code String?
+  licenseeId String?
+  batchId String?
+
+  proofSource String?
+  proofTier VerificationProofTier
+  outcome VerificationDecisionOutcome
+  classification String?
+  reasonCodes String[]
+  riskBand VerificationRiskBand @default(LOW)
+  replacementStatus VerificationReplacementStatus @default(NONE)
+  degradationMode VerificationDegradationMode @default(NORMAL)
+  customerTrustLevel CustomerTrustLevel @default(ANONYMOUS)
+
+  isAuthentic Boolean @default(false)
+  scanCount Int?
+  riskScore Int?
+  actorIpHash String?
+  actorDeviceHash String?
+  metadata Json?
+
+  evidenceSnapshots VerificationEvidenceSnapshot[]
+
+  createdAt DateTime @default(now())
+
+  @@index([qrCodeId, createdAt])
+  @@index([code, createdAt])
+  @@index([licenseeId, createdAt])
+  @@index([outcome, createdAt])
+  @@index([riskBand, createdAt])
+}
+
+model VerificationEvidenceSnapshot {
+  id String @id @default(uuid())
+
+  verificationDecisionId String
+  verificationDecision VerificationDecision @relation(fields: [verificationDecisionId], references: [id], onDelete: Cascade)
+
+  scanSummary Json?
+  ownershipSnapshot Json?
+  riskSignals Json?
+  policySnapshot Json?
+  lifecycleSnapshot Json?
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([verificationDecisionId, createdAt])
+}
+
+model ReplacementChain {
+  id String @id @default(uuid())
+
+  status ReplacementChainStatus @default(ACTIVE)
+  originalQrCodeId String
+  replacementQrCodeId String @unique
+  originalPrintJobId String?
+  replacementPrintJobId String?
+  reissueRequestId String? @unique
+  reason String?
+  metadata Json?
+
+  createdAt DateTime @default(now())
+  supersededAt DateTime?
+
+  @@index([originalQrCodeId, createdAt])
+  @@index([replacementQrCodeId, createdAt])
+  @@index([replacementPrintJobId, createdAt])
+}
+
+model DegradationEvent {
+  id String @id @default(uuid())
+
+  dependencyKey String
+  mode VerificationDegradationMode
+  code String
+  message String
+  context Json?
+
+  createdAt DateTime @default(now())
+  resolvedAt DateTime?
+
+  @@index([dependencyKey, createdAt])
+  @@index([mode, createdAt])
+}
+
+model CustomerTrustCredential {
+  id String @id @default(uuid())
+
+  qrCodeId String
+  customerUserId String?
+  customerEmail String?
+  deviceTokenHash String?
+  trustLevel CustomerTrustLevel
+  reviewState CustomerTrustReviewState @default(UNREVIEWED)
+  source String
+  reviewNote String?
+  reviewedByUserId String?
+  reviewedAt DateTime?
+  revokedAt DateTime?
+  revokedReason String?
+  lastAssertionAt DateTime?
+  metadata Json?
+
+  lastVerifiedAt DateTime?
+  claimedAt DateTime?
+  linkedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([qrCodeId, trustLevel, updatedAt])
+  @@index([qrCodeId, reviewState, updatedAt])
+  @@index([customerUserId, updatedAt])
+  @@index([deviceTokenHash, updatedAt])
+}
+
+model CustomerWebAuthnCredential {
+  id String @id @default(uuid())
+
+  customerUserId String
+  customerEmail String?
+
+  label String?
+  credentialId String @unique
+  publicKeySpki String
+  publicKeyAlgorithm Int
+  counter Int @default(0)
+  transports String[]
+  lastUsedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerUserId, createdAt])
+  @@index([lastUsedAt])
+}
+
+model CustomerWebAuthnChallenge {
+  id String @id @default(uuid())
+
+  customerUserId String
+  customerEmail String?
+
+  purpose String
+  ticketHash String @unique
+  challengeHash String
+  credentialIds String[]
+  createdIpHash String?
+  createdUserAgentHash String?
+  origin String?
+  rpId String?
+
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  consumedAt DateTime?
+
+  @@index([customerUserId, purpose, createdAt])
+  @@index([expiresAt])
+  @@index([consumedAt])
+}
+
+model AuditLogOutbox {
+  id String @id @default(uuid())
+
+  payload Json
+  status AuditLogOutboxStatus @default(QUEUED)
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now())
+  lastError String?
+  flushedAuditLogId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([createdAt])
 }
 
 model SystemCheckpoint {

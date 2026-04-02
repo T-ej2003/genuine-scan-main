@@ -128,7 +128,10 @@ mockModule("services/governanceService.js", {
   }),
 });
 mockModule("services/scanInsightService.js", { getScanInsight: async () => emptyScanInsight });
-mockModule("services/auditService.js", { createAuditLog: async () => ({ id: "audit-1" }) });
+mockModule("services/auditService.js", {
+  createAuditLog: async () => ({ id: "audit-1" }),
+  createAuditLogSafely: async () => ({ log: { id: "audit-1" }, persisted: true, queued: false, outboxId: null }),
+});
 
 process.env.QR_SIGN_HMAC_SECRET = "public-scan-not-ready-test-secret";
 delete process.env.QR_SIGN_PRIVATE_KEY;
@@ -185,6 +188,9 @@ const res = {
   );
   assert.strictEqual(res.body?.data?.status, "ACTIVATED", "the public response should preserve the underlying label status");
   assert.strictEqual(res.body?.data?.proofSource, "SIGNED_LABEL", "signed scan responses should preserve their proof source");
+  assert.strictEqual(res.body?.data?.proofTier, "SIGNED_LABEL", "signed scans should expose the signed proof tier");
+  assert.strictEqual(res.body?.data?.printTrustState, "AWAITING_PRINT_CONFIRMATION", "not-ready scans should expose the print trust state");
+  assert.strictEqual(res.body?.data?.decisionVersion, 1, "not-ready scans should expose the decision contract version");
   assert.strictEqual(transactionCalled, false, "not-ready signed scans should not mutate scan or redemption state");
 
   console.log("public scan not-ready no-mutation test passed");

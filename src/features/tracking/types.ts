@@ -1,4 +1,5 @@
 import { format } from "date-fns";
+import type { LatestDecision } from "@/lib/verification-decision";
 
 export type BatchSummaryRow = {
   id: string;
@@ -12,6 +13,7 @@ export type BatchSummaryRow = {
   scanEventCount: number;
   createdAt: string;
   counts?: Record<string, number>;
+  latestDecision?: LatestDecision | null;
 };
 
 export type ScanLogRow = {
@@ -34,6 +36,7 @@ export type ScanLogRow = {
   ownershipId?: string | null;
   ownershipMatchMethod?: string | null;
   isTrustedOwnerContext?: boolean | null;
+  latestDecision?: LatestDecision | null;
   licensee?: { id: string; name: string; prefix: string };
   qrCode?: { id: string; code: string; status: string };
 };
@@ -57,6 +60,10 @@ export type TrackingFilterState = {
   fromDate: string;
   toDate: string;
   licenseeId: string;
+  outcome: string;
+  riskBand: string;
+  replacementStatus: string;
+  customerTrustReviewState: string;
 };
 
 export const toCount = (counts: Record<string, number> | undefined, key: string) => counts?.[key] ?? 0;
@@ -89,7 +96,6 @@ export const describeScanContext = (log: ScanLogRow) => {
   if (log.isTrustedOwnerContext) {
     if (log.ownershipMatchMethod === "user") return "Trusted owner account";
     if (log.ownershipMatchMethod === "device_token") return "Trusted claimed device";
-    if (log.ownershipMatchMethod === "ip_fallback") return "Trusted network fallback";
     return "Trusted owner context";
   }
   return "External / anonymous context";

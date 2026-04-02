@@ -12,6 +12,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { friendlyReferenceLabel, shortRawReference } from "@/lib/friendly-reference";
 import {
+  decisionOutcomeTone,
+  decisionRiskTone,
+  decisionTrustTone,
+  titleCaseDecisionValue,
+} from "@/lib/verification-decision";
+import {
   ALERT_TYPE_LABEL,
   RULE_TYPE_LABEL,
   SEVERITY_TONE,
@@ -178,6 +184,7 @@ export function IncidentResponseAdminTabs({
                       <TableHead>Priority</TableHead>
                       <TableHead>Licensee</TableHead>
                       <TableHead>Code</TableHead>
+                      <TableHead>Verifier</TableHead>
                       <TableHead>Assignee</TableHead>
                       <TableHead>Created</TableHead>
                     </TableRow>
@@ -202,6 +209,25 @@ export function IncidentResponseAdminTabs({
                         <TableCell className="font-medium">{row.priority}</TableCell>
                         <TableCell className="text-sm">{row.licensee ? `${row.licensee.name} (${row.licensee.prefix})` : "—"}</TableCell>
                         <TableCell className="font-mono text-xs">{row.qrCodeValue || "—"}</TableCell>
+                        <TableCell className="space-y-1">
+                          {row.latestDecision ? (
+                            <>
+                              <Badge className={decisionOutcomeTone(row.latestDecision.outcome)}>
+                                {titleCaseDecisionValue(row.latestDecision.outcome)}
+                              </Badge>
+                              <div className="flex flex-wrap gap-1">
+                                <Badge className={decisionRiskTone(row.latestDecision.riskBand)}>
+                                  {titleCaseDecisionValue(row.latestDecision.riskBand)}
+                                </Badge>
+                                <Badge className={decisionTrustTone(row.latestDecision.customerTrustReviewState)}>
+                                  {titleCaseDecisionValue(row.latestDecision.customerTrustReviewState)}
+                                </Badge>
+                              </div>
+                            </>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">No verifier decision</span>
+                          )}
+                        </TableCell>
                         <TableCell className="text-sm">{row.assignedToUser?.name || row.assignedToUser?.email || "Unassigned"}</TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {row.createdAt ? formatDistanceToNow(new Date(row.createdAt), { addSuffix: true }) : "—"}

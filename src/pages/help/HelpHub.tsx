@@ -73,6 +73,14 @@ const START_CARDS: HubCardConfig[] = [
     href: "/help/roles-permissions",
     roles: ["all"],
   },
+  {
+    title: "Trust Center",
+    description: "Public proof tiers, lifecycle trust, replacement handling, and degraded verification behavior.",
+    icon: Shield,
+    href: "/trust",
+    badge: "Public",
+    roles: ["all"],
+  },
 ];
 
 const ROLE_CARDS: HubCardConfig[] = [

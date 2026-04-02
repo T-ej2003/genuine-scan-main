@@ -431,6 +431,14 @@ export default function Index() {
                 internal
               />
               <SupportLink
+                href="/trust"
+                icon={ShieldCheck}
+                title="Trust Center"
+                body="Review MSCQR proof tiers, lifecycle trust rules, replacement handling, and degraded-mode behavior."
+                cta="Open trust center"
+                internal
+              />
+              <SupportLink
                 href={`mailto:${CONTACT_EMAIL}?subject=MSCQR%20Platform%20Support`}
                 icon={Mail}
                 title="Contact MSCQR administration"
@@ -451,6 +459,9 @@ export default function Index() {
             </Link>
             <Link to="/login" className="transition-colors hover:text-slate-200">
               Platform access
+            </Link>
+            <Link to="/trust" className="transition-colors hover:text-slate-200">
+              Trust Center
             </Link>
             <a href={`mailto:${CONTACT_EMAIL}`} className="transition-colors hover:text-slate-200">
               {CONTACT_EMAIL}

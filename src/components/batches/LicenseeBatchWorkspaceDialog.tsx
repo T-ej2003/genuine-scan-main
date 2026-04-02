@@ -25,6 +25,12 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { PrintJobRow } from "@/features/batches/types";
+import {
+  decisionOutcomeTone,
+  decisionRiskTone,
+  decisionTrustTone,
+  titleCaseDecisionValue,
+} from "@/lib/verification-decision";
 
 type ManufacturerRow = {
   id: string;
@@ -508,6 +514,22 @@ export function LicenseeBatchWorkspaceDialog({
                                       </div>
                                       {job.reprintReason ? (
                                         <div className="text-xs text-muted-foreground">Reason: {job.reprintReason}</div>
+                                      ) : null}
+                                      {job.latestDecision ? (
+                                        <div className="flex flex-wrap gap-1">
+                                          <Badge className={decisionOutcomeTone(job.latestDecision.outcome)}>
+                                            {titleCaseDecisionValue(job.latestDecision.outcome)}
+                                          </Badge>
+                                          <Badge className={decisionRiskTone(job.latestDecision.riskBand)}>
+                                            {titleCaseDecisionValue(job.latestDecision.riskBand)}
+                                          </Badge>
+                                          <Badge className={decisionTrustTone(job.latestDecision.customerTrustReviewState)}>
+                                            {titleCaseDecisionValue(job.latestDecision.customerTrustReviewState)}
+                                          </Badge>
+                                          {job.latestDecision.printTrustState ? (
+                                            <Badge variant="outline">{titleCaseDecisionValue(job.latestDecision.printTrustState)}</Badge>
+                                          ) : null}
+                                        </div>
                                       ) : null}
                                       {job.failureReason ? (
                                         <div className="text-xs text-destructive">Failure: {job.failureReason}</div>

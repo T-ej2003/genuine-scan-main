@@ -166,6 +166,13 @@ mockModule("services/auditService.js", {
   createAuditLog: async () => {
     throw missingAuditLogError;
   },
+  createAuditLogSafely: async () => ({
+    log: null,
+    persisted: false,
+    queued: false,
+    outboxId: null,
+    errorMessage: missingAuditLogError.message,
+  }),
 });
 mockModule("services/locationService.js", { reverseGeocode: async () => null });
 mockModule("services/policyEngineService.js", { evaluateScanAndEnforcePolicy: async () => neutralPolicy });
@@ -246,6 +253,9 @@ const res = {
   assert.strictEqual(res.body.data.isAuthentic, true, "valid first scan should remain authentic");
   assert.strictEqual(res.body.data.ownershipStatus.isClaimed, false, "missing ownership storage should not block verify");
   assert.strictEqual(res.body.data.scanCount, 1, "audit log failure should not interrupt the verification response");
+  assert.strictEqual(res.body.data.proofTier, "SIGNED_LABEL", "signed public scans should expose the signed proof tier");
+  assert.strictEqual(res.body.data.decisionVersion, 1, "public scans should expose the current decision contract version");
+  assert.strictEqual(res.body.data.customerTrustLevel, "ANONYMOUS", "anonymous scans should expose their trust tier honestly");
 
   console.log("public scan fallback test passed");
 })().catch((error) => {

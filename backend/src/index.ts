@@ -8,6 +8,7 @@ import routes from "./routes";
 import prisma from "./config/database";
 import { logger } from "./utils/logger";
 import { startSecurityEventOutboxWorker, stopSecurityEventOutboxWorker } from "./services/siemOutboxService";
+import { startAuditLogOutboxWorker, stopAuditLogOutboxWorker } from "./services/auditLogOutboxService";
 import { startCompliancePackScheduler, stopCompliancePackScheduler } from "./services/compliancePackService";
 import { resumePendingNetworkDirectJobs } from "./services/networkDirectPrintService";
 import { resumePendingNetworkIppJobs } from "./services/networkIppPrintService";
@@ -440,6 +441,7 @@ const server = app.listen(PORT, () => {
   logger.info(`🔍 Health check at http://localhost:${PORT}/health`);
   logger.info(`⏱️ Latency summary at http://localhost:${PORT}/health/latency`);
   if (runBackgroundWorkers) {
+    startAuditLogOutboxWorker();
     startSecurityEventOutboxWorker();
     startCompliancePackScheduler();
     void resumePendingNetworkDirectJobs().catch((error) => {
@@ -483,8 +485,9 @@ const shutdown = async (signal: string) => {
     await new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));
     });
-    stopSecurityEventOutboxWorker();
-    stopCompliancePackScheduler();
+  stopSecurityEventOutboxWorker();
+  stopAuditLogOutboxWorker();
+  stopCompliancePackScheduler();
     stopPrintConfirmationReconcilerWorker?.();
     stopPrintConfirmationReconcilerWorker = null;
     stopAnalyticsRollupWorker?.();

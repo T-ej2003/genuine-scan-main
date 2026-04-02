@@ -60,6 +60,12 @@ export default function IRIncidentDetail() {
     reason: string;
   }>({ open: false, action: null, reason: "" });
   const [applyingAction, setApplyingAction] = useState(false);
+  const [trustReview, setTrustReview] = useState({
+    credentialId: "",
+    reviewState: "VERIFIED",
+    reviewNote: "",
+  });
+  const [reviewingTrust, setReviewingTrust] = useState(false);
 
   const load = async () => {
     if (!id) return;
@@ -74,6 +80,15 @@ export default function IRIncidentDetail() {
       const data: any = response.data;
       setIncident(data);
       setLastEmailDelivery(null);
+      const trustCredentials = Array.isArray(data?.customerTrustCredentials) ? data.customerTrustCredentials : [];
+      setTrustReview((previous) => ({
+        credentialId:
+          trustCredentials.some((row: any) => row.id === previous.credentialId)
+            ? previous.credentialId
+            : String(trustCredentials[0]?.id || ""),
+        reviewState: previous.reviewState || "VERIFIED",
+        reviewNote: previous.reviewNote || "",
+      }));
       setPatch({
         status: data.status || "NEW",
         severity: data.severity || "MEDIUM",
@@ -236,6 +251,31 @@ export default function IRIncidentDetail() {
     }
   };
 
+  const applyTrustReview = async () => {
+    if (!id || !trustReview.credentialId) {
+      toast({ title: "Select a trust record", description: "Choose a customer trust record first.", variant: "destructive" });
+      return;
+    }
+
+    setReviewingTrust(true);
+    try {
+      const response = await apiClient.reviewIrIncidentCustomerTrust(id, {
+        credentialId: trustReview.credentialId,
+        reviewState: trustReview.reviewState as "UNREVIEWED" | "VERIFIED" | "DISPUTED" | "REVOKED",
+        reviewNote: trustReview.reviewNote.trim() || undefined,
+      });
+      if (!response.success) {
+        toast({ title: "Trust review failed", description: response.error || "Could not update trust review.", variant: "destructive" });
+        return;
+      }
+      toast({ title: "Trust review updated", description: "Customer trust state was updated for this incident QR." });
+      setTrustReview((previous) => ({ ...previous, reviewNote: "" }));
+      await load();
+    } finally {
+      setReviewingTrust(false);
+    }
+  };
+
   if (!id) {
     return (
       <DashboardLayout>
@@ -279,6 +319,10 @@ export default function IRIncidentDetail() {
         onActionDialogChange={setActionDialog}
         applyingAction={applyingAction}
         onApplyAction={applyAction}
+        trustReview={trustReview}
+        onTrustReviewChange={setTrustReview}
+        reviewingTrust={reviewingTrust}
+        onApplyTrustReview={applyTrustReview}
       />
     </DashboardLayout>
   );

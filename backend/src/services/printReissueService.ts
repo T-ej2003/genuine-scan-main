@@ -15,6 +15,7 @@ import { startNetworkDirectDispatch } from "./networkDirectPrintService";
 import { startNetworkIppDispatch } from "./networkIppPrintService";
 import { ensureSelectedPrinterReady, generatePrintJobNumber } from "../controllers/print-job/shared";
 import { buildScopedPrintJobWhere, type PrintJobScope } from "./printJobScopeService";
+import { materializeReplacementChainsForReissue } from "./replacementChainService";
 
 const BLOCKING_REISSUE_STATUSES = new Set<PrintJobStatus>([PrintJobStatus.PENDING, PrintJobStatus.SENT]);
 
@@ -204,6 +205,14 @@ export const createAuthorizedPrintReissue = async (params: {
           approvedAt: now,
           executedAt: now,
         },
+      });
+
+      await materializeReplacementChainsForReissue({
+        tx,
+        originalPrintJobId: originalJob.id,
+        replacementPrintJobId: replacementJob.id,
+        reissueRequestId: reissueRequest.id,
+        reason: params.reason,
       });
 
       return { replacementJob, session, reissueRequest };

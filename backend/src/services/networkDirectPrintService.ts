@@ -28,6 +28,7 @@ import {
   resolvePrinterConfirmationMode,
 } from "./printConfirmationService";
 import { getZebraTotalLabelCount, waitForZebraLabelConfirmation } from "./zebraPrinterStatusService";
+import { listLatestDecisionByBatchIds } from "./verificationDecisionReadService";
 
 const activeDispatches = new Set<string>();
 const NETWORK_DIRECT_CHUNK_SIZE = Math.max(
@@ -491,7 +492,11 @@ export const getPrintJobOperationalView = async (params: {
   });
   if (!job) return null;
 
-  return buildPrintJobView(job);
+  const latestDecisionMap = await listLatestDecisionByBatchIds(job.batchId ? [job.batchId] : []);
+  return {
+    ...(await buildPrintJobView(job)),
+    latestDecision: job.batchId ? latestDecisionMap.get(job.batchId) || null : null,
+  };
 };
 
 export const listPrintJobsForManufacturer = async (params: {
@@ -546,7 +551,16 @@ export const listPrintJobsForManufacturer = async (params: {
     take: Math.max(1, Math.min(100, params.limit || 20)),
   });
 
-  return Promise.all(jobs.map((job) => buildPrintJobView(job)));
+  const latestDecisionMap = await listLatestDecisionByBatchIds(
+    jobs.map((job) => String(job.batchId || "").trim()).filter(Boolean)
+  );
+
+  return Promise.all(
+    jobs.map(async (job) => ({
+      ...(await buildPrintJobView(job)),
+      latestDecision: job.batchId ? latestDecisionMap.get(job.batchId) || null : null,
+    }))
+  );
 };
 
 const failDispatch = async (params: {

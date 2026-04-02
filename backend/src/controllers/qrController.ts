@@ -17,6 +17,7 @@ import {
 import { resolveScopedLicenseeAccess } from "../services/manufacturerScopeService";
 import { summarizeQrStatusCounts } from "../services/qrStatusMetrics";
 import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
+import { listLatestDecisionByQrCodeIds } from "../services/verificationDecisionReadService";
 
 /* ===================== SCHEMAS ===================== */
 
@@ -1340,7 +1341,13 @@ export const getQRCodes = async (req: AuthRequest, res: Response) => {
       }),
     ]);
 
-    return res.json({ success: true, data: { qrCodes, total, limit, offset } });
+    const decisionMap = await listLatestDecisionByQrCodeIds(qrCodes.map((row) => row.id));
+    const enrichedQRCodes = qrCodes.map((row) => ({
+      ...row,
+      latestDecision: decisionMap.get(row.id) || null,
+    }));
+
+    return res.json({ success: true, data: { qrCodes: enrichedQRCodes, total, limit, offset } });
   } catch (e: any) {
     console.error("getQRCodes error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });
