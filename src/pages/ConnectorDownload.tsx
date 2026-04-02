@@ -28,6 +28,10 @@ type ConnectorPlatformRelease = {
   label: string;
   installerKind: "pkg" | "zip" | "exe" | "msi";
   trustLevel: "trusted" | "unsigned";
+  signatureStatus?: "signed" | "unsigned" | "unknown";
+  publisherName?: string | null;
+  signedAt?: string | null;
+  windowsTrustMode?: "trusted" | "unsigned-test";
   filename: string;
   architecture: string;
   bytes: number;
@@ -169,6 +173,53 @@ const platformCopy: Record<
   },
 };
 
+const formatTrustLabel = (item: ConnectorPlatformRelease) => {
+  if (item.platform !== "windows") {
+    return item.trustLevel === "trusted" ? "Signed release" : "Unsigned release";
+  }
+
+  if (item.trustLevel === "trusted") {
+    return "Trusted Windows installer";
+  }
+
+  return item.installerKind === "zip" ? "Unsigned test package" : "Unsigned test installer";
+};
+
+const formatSignatureLabel = (item: ConnectorPlatformRelease) => {
+  if (item.signatureStatus === "signed") return "Signed";
+  if (item.signatureStatus === "unknown") return "Signature not recorded";
+  if (item.signatureStatus === "unsigned") return "Unsigned";
+  return item.trustLevel === "trusted" ? "Signed" : "Unsigned";
+};
+
+const getWindowsUnsignedCopy = (
+  item: ConnectorPlatformRelease,
+): Pick<DownloadCard, "title" | "description" | "action" | "helper" | "icon" | "iconSurfaceClass"> => {
+  if (item.installerKind === "zip") {
+    return {
+      title: "Windows test package",
+      description:
+        "Download the Windows test package, extract it to a normal folder, then run Install Connector.cmd on the printing computer.",
+      action: "Download Windows test package",
+      icon: MonitorSmartphone,
+      helper:
+        "This unsigned ZIP is only for internal validation. Smart App Control can block it until a signed Windows installer is published.",
+      iconSurfaceClass: "bg-amber-100 text-amber-800",
+    };
+  }
+
+  return {
+    title: "Windows test installer",
+    description:
+      "Download the unsigned Windows test installer for internal validation on the printing computer.",
+    action: "Download Windows test installer",
+    icon: MonitorSmartphone,
+    helper:
+      "This unsigned installer is only for internal validation. Windows can still warn until the signed Windows installer is published.",
+    iconSurfaceClass: "bg-amber-100 text-amber-800",
+  };
+};
+
 const getDownloadCardCopy = (
   item: ConnectorPlatformRelease,
 ): Pick<DownloadCard, "title" | "description" | "action" | "helper" | "icon" | "iconSurfaceClass"> => {
@@ -177,16 +228,7 @@ const getDownloadCardCopy = (
   }
 
   if (item.trustLevel === "unsigned") {
-    return {
-      title: "Windows setup package",
-      description:
-        "Download the Windows setup package, extract it to a normal folder, then run Install Connector.cmd on the printing computer.",
-      action: "Download Windows setup package",
-      icon: MonitorSmartphone,
-      helper:
-        "This is the current unsigned Windows package. Smart App Control can block it until a signed Windows installer is published.",
-      iconSurfaceClass: "bg-amber-100 text-amber-800",
-    };
+    return getWindowsUnsignedCopy(item);
   }
 
   return platformCopy.windows;
@@ -316,6 +358,7 @@ export default function ConnectorDownload() {
 
   const missingDetectedPlatformRelease = detectedPlatform !== "unknown" && !detectedCard;
   const recommendedCardIsUnsignedWindows = recommendedCard?.platform === "windows" && recommendedCard.trustLevel === "unsigned";
+  const recommendedCardIsUnsignedWindowsZip = recommendedCardIsUnsignedWindows && recommendedCard?.installerKind === "zip";
 
   const detectedPlatformLabel =
     detectedPlatform === "macos"
@@ -498,11 +541,25 @@ export default function ConnectorDownload() {
                 {recommendedCardIsUnsignedWindows ? (
                   <Alert className="mt-5 border-amber-200 bg-amber-50 text-amber-950">
                     <AlertCircle className="h-4 w-4 text-amber-700" />
-                    <AlertTitle>Windows can block this unsigned setup package</AlertTitle>
+                    <AlertTitle>
+                      {recommendedCardIsUnsignedWindowsZip
+                        ? "Windows can block this unsigned test package"
+                        : "Windows can still warn on this unsigned test installer"}
+                    </AlertTitle>
                     <AlertDescription>
-                      Smart App Control can block the current Windows download because it is a ZIP with a setup script, not a
-                      signed Windows installer yet. Extract it fully first. If Windows still blocks <strong>Install Connector.cmd</strong>,
-                      stop there and use a signed Windows rollout instead of retrying the blocked file.
+                      {recommendedCardIsUnsignedWindowsZip ? (
+                        <>
+                          Smart App Control can block the current Windows download because it is a ZIP with a setup script, not a
+                          signed Windows installer yet. Extract it fully first. If Windows still blocks{" "}
+                          <strong>Install Connector.cmd</strong>, stop there and use a signed Windows rollout instead of retrying
+                          the blocked file.
+                        </>
+                      ) : (
+                        <>
+                          This Windows test installer is only for internal validation. Smart App Control can still warn because it
+                          is not signed yet. Use the signed Windows installer for normal customer rollout.
+                        </>
+                      )}
                     </AlertDescription>
                   </Alert>
                 ) : null}
@@ -625,11 +682,24 @@ export default function ConnectorDownload() {
                               {item.platform === "windows" && item.trustLevel === "unsigned" ? (
                                 <Alert className="border-amber-200 bg-amber-50 text-amber-950">
                                   <AlertCircle className="h-4 w-4 text-amber-700" />
-                                  <AlertTitle>Windows can block this unsigned setup package</AlertTitle>
+                                  <AlertTitle>
+                                    {item.installerKind === "zip"
+                                      ? "Windows can block this unsigned test package"
+                                      : "Windows can still warn on this unsigned test installer"}
+                                  </AlertTitle>
                                   <AlertDescription>
-                                    Extract the ZIP fully before running <strong>Install Connector.cmd</strong>. Do not run it from the ZIP
-                                    preview in File Explorer. If Smart App Control still blocks it, stop there and use a signed Windows
-                                    installer rollout instead of retrying the blocked file.
+                                    {item.installerKind === "zip" ? (
+                                      <>
+                                        Extract the ZIP fully before running <strong>Install Connector.cmd</strong>. Do not run it from the
+                                        ZIP preview in File Explorer. If Smart App Control still blocks it, stop there and use a signed
+                                        Windows installer rollout instead of retrying the blocked file.
+                                      </>
+                                    ) : (
+                                      <>
+                                        This unsigned Windows test installer is only for internal validation. Windows can still show a
+                                        warning until a signed Windows installer is published.
+                                      </>
+                                    )}
                                   </AlertDescription>
                                 </Alert>
                               ) : null}
@@ -663,7 +733,29 @@ export default function ConnectorDownload() {
                                     <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Size</div>
                                     <div className="mt-1 font-medium text-slate-900">{formatBytes(item.bytes)}</div>
                                   </div>
+                                  <div className="rounded-2xl bg-white px-3 py-2">
+                                    <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Trust</div>
+                                    <div className="mt-1 font-medium text-slate-900">{formatTrustLabel(item)}</div>
+                                  </div>
+                                  <div className="rounded-2xl bg-white px-3 py-2">
+                                    <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Signature</div>
+                                    <div className="mt-1 font-medium text-slate-900">{formatSignatureLabel(item)}</div>
+                                  </div>
                                 </div>
+
+                                {item.publisherName ? (
+                                  <div>
+                                    <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Publisher</div>
+                                    <div className="mt-1 font-medium text-slate-900">{item.publisherName}</div>
+                                  </div>
+                                ) : null}
+
+                                {item.signedAt ? (
+                                  <div>
+                                    <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Signed</div>
+                                    <div className="mt-1 font-medium text-slate-900">{formatPublishedDate(item.signedAt)}</div>
+                                  </div>
+                                ) : null}
 
                                 <div>
                                   <div className="text-xs uppercase tracking-[0.16em] text-slate-400">SHA-256</div>

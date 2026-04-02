@@ -27,8 +27,22 @@ const windowsPackageName = `MSCQR-Connector-Windows-${version}.zip`;
 const normalizeEnv = (value) => String(value || "").trim();
 const isTruthy = (value) => /^(1|true|yes|on)$/i.test(normalizeEnv(value));
 const hasEnvOverride = (name) => Object.prototype.hasOwnProperty.call(process.env, name);
+const normalizeOptionalIsoTimestamp = (value, envName) => {
+  const normalized = normalizeEnv(value);
+  if (!normalized) return null;
+
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`${envName} must be an ISO 8601 timestamp if it is provided.`);
+  }
+
+  return parsed.toISOString();
+};
 const webAppBaseUrl = normalizeEnv(process.env.WEB_APP_BASE_URL).replace(/\/+$/g, "");
+const windowsUnsignedInstallerSource = normalizeEnv(process.env.WINDOWS_CONNECTOR_UNSIGNED_INSTALLER_PATH);
 const windowsSignedInstallerSource = normalizeEnv(process.env.WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH);
+const windowsPublisherName = normalizeEnv(process.env.WINDOWS_CONNECTOR_PUBLISHER_NAME);
+const windowsSignedAt = normalizeOptionalIsoTimestamp(process.env.WINDOWS_CONNECTOR_SIGNED_AT, "WINDOWS_CONNECTOR_SIGNED_AT");
 const macSigningIdentity = normalizeEnv(process.env.MACOS_CONNECTOR_SIGN_IDENTITY);
 const macApplicationSigningIdentity = normalizeEnv(process.env.MACOS_CONNECTOR_APP_SIGN_IDENTITY);
 const requireMacNotarization = hasEnvOverride("MACOS_CONNECTOR_REQUIRE_NOTARIZATION")
@@ -461,54 +475,116 @@ const buildWindowsPackage = async (binaries, stagingRoot) => {
   return zipPath;
 };
 
+const resolveArtifactSourcePath = (value, envName) => {
+  const sourcePath = path.isAbsolute(value)
+    ? value
+    : path.resolve(backendRoot, value);
+
+  if (!fs.existsSync(sourcePath)) {
+    throw new Error(`${envName} does not exist: ${sourcePath}`);
+  }
+
+  return sourcePath;
+};
+
 const publishWindowsArtifact = (windowsZipPath) => {
-  if (!windowsSignedInstallerSource) {
+  if (windowsSignedInstallerSource) {
+    const sourcePath = resolveArtifactSourcePath(
+      windowsSignedInstallerSource,
+      "WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH"
+    );
+    const installerKind = resolveWindowsInstallerKind(sourcePath);
+
+    if (installerKind === "zip") {
+      throw new Error(
+        "WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH must point to a signed .exe or .msi, not a ZIP package."
+      );
+    }
+
+    if (!windowsPublisherName) {
+      throw new Error(
+        "WINDOWS_CONNECTOR_PUBLISHER_NAME is required when publishing a signed Windows installer."
+      );
+    }
+
+    const publishedName = `MSCQR-Connector-Windows-${version}${path.extname(sourcePath).toLowerCase()}`;
+    const publishedPath = path.join(windowsReleaseDir, publishedName);
+
+    if (path.resolve(sourcePath) !== path.resolve(publishedPath)) {
+      fs.copyFileSync(sourcePath, publishedPath);
+    }
+
+    return {
+      artifactPath: publishedPath,
+      installerKind,
+      trustLevel: "trusted",
+      signatureStatus: "signed",
+      publisherName: windowsPublisherName,
+      signedAt: windowsSignedAt || publishedAt,
+      windowsTrustMode: "trusted",
+      label: "Windows installer",
+      notes: [
+        "Run the signed Windows installer once on the Windows computer that will print.",
+        "The installer should install the connector, configure auto-start, and verify local printer readiness.",
+        `Publisher shown in Windows should be ${windowsPublisherName}.`,
+      ],
+    };
+  }
+
+  if (windowsUnsignedInstallerSource) {
+    const sourcePath = resolveArtifactSourcePath(
+      windowsUnsignedInstallerSource,
+      "WINDOWS_CONNECTOR_UNSIGNED_INSTALLER_PATH"
+    );
+    const installerKind = resolveWindowsInstallerKind(sourcePath);
+
+    if (installerKind === "zip") {
+      throw new Error(
+        "WINDOWS_CONNECTOR_UNSIGNED_INSTALLER_PATH must point to a .exe or .msi test installer, not a ZIP package."
+      );
+    }
+
+    const publishedName = `MSCQR-Connector-Windows-${version}-unsigned${path.extname(sourcePath).toLowerCase()}`;
+    const publishedPath = path.join(windowsReleaseDir, publishedName);
+
+    if (path.resolve(sourcePath) !== path.resolve(publishedPath)) {
+      fs.copyFileSync(sourcePath, publishedPath);
+    }
+
+    return {
+      artifactPath: publishedPath,
+      installerKind,
+      trustLevel: "unsigned",
+      signatureStatus: "unsigned",
+      publisherName: null,
+      signedAt: null,
+      windowsTrustMode: "unsigned-test",
+      label: "Windows test installer",
+      notes: [
+        "Run this Windows test installer only for internal verification on the Windows computer that will print.",
+        "Windows Smart App Control can still block this unsigned test installer until the signed release is published.",
+        "Use the signed Windows installer for customer-facing rollout.",
+      ],
+    };
+  }
+
+  {
     return {
       artifactPath: windowsZipPath,
       installerKind: "zip",
       trustLevel: "unsigned",
-      label: "Windows setup package",
+      signatureStatus: "unsigned",
+      publisherName: null,
+      signedAt: null,
+      windowsTrustMode: "unsigned-test",
+      label: "Windows test package",
       notes: [
-        "Extract the ZIP package on the Windows computer that will print.",
+        "Extract this Windows test package on the Windows computer that will print.",
         "Run Install Connector.cmd once to install, auto-start, and locally verify the connector.",
         "Windows Smart App Control can block this unsigned setup package until a signed Windows installer is published.",
       ],
     };
   }
-
-  const sourcePath = path.isAbsolute(windowsSignedInstallerSource)
-    ? windowsSignedInstallerSource
-    : path.resolve(backendRoot, windowsSignedInstallerSource);
-
-  if (!fs.existsSync(sourcePath)) {
-    throw new Error(`WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH does not exist: ${sourcePath}`);
-  }
-
-  const installerKind = resolveWindowsInstallerKind(sourcePath);
-  const publishedName = `MSCQR-Connector-Windows-${version}${path.extname(sourcePath).toLowerCase()}`;
-  const publishedPath = path.join(windowsReleaseDir, publishedName);
-
-  if (path.resolve(sourcePath) !== path.resolve(publishedPath)) {
-    fs.copyFileSync(sourcePath, publishedPath);
-  }
-
-  return {
-    artifactPath: publishedPath,
-    installerKind,
-    trustLevel: installerKind === "zip" ? "unsigned" : "trusted",
-    label: installerKind === "zip" ? "Windows setup package" : "Windows installer",
-    notes:
-      installerKind === "zip"
-        ? [
-            "Extract the ZIP package on the Windows computer that will print.",
-            "Run Install Connector.cmd once to install, auto-start, and locally verify the connector.",
-            "Windows Smart App Control can block this unsigned setup package until a signed Windows installer is published.",
-          ]
-        : [
-            "Run the signed Windows installer once on the Windows computer that will print.",
-            "The installer should install the connector, configure auto-start, and verify local printer readiness.",
-          ],
-  };
 };
 
 const updateManifest = (macArtifact, windowsArtifact) => {
@@ -534,6 +610,10 @@ const updateManifest = (macArtifact, windowsArtifact) => {
       label: windowsArtifact.label,
       installerKind: windowsArtifact.installerKind,
       trustLevel: windowsArtifact.trustLevel,
+      signatureStatus: windowsArtifact.signatureStatus,
+      publisherName: windowsArtifact.publisherName,
+      signedAt: windowsArtifact.signedAt,
+      windowsTrustMode: windowsArtifact.windowsTrustMode,
       filename: path.basename(windowsArtifact.artifactPath),
       relativePath: windowsRelativePath,
       contentType:
@@ -575,10 +655,16 @@ const updateManifest = (macArtifact, windowsArtifact) => {
       "Use the Mac package on the Mac that is connected to the printer.",
       windowsArtifact.trustLevel === "trusted"
         ? "Use the signed Windows installer on the Windows PC that is connected to the printer."
-        : "Use the Windows setup package on the Windows PC that is connected to the printer.",
+        : windowsArtifact.installerKind === "zip"
+          ? "Use the Windows test package only for internal validation on the Windows PC that is connected to the printer."
+          : "Use the Windows test installer only for internal validation on the Windows PC that is connected to the printer.",
       "Windows installation now verifies local printer readiness before claiming success and opens Printer Setup automatically when attention is still needed.",
       ...(windowsArtifact.trustLevel === "unsigned"
-        ? ["Windows Smart App Control can block the unsigned Windows setup package until a signed Windows installer is published."]
+        ? [
+            windowsArtifact.installerKind === "zip"
+              ? "Windows Smart App Control can block the unsigned Windows test package until a signed Windows installer is published."
+              : "Windows Smart App Control can still warn on the unsigned Windows test installer until a signed Windows installer is published.",
+          ]
         : []),
     ],
     platforms,
@@ -621,9 +707,9 @@ const main = async () => {
 
   console.log("");
   console.log(`Created macOS package: ${macArtifact.pkgPath}`);
-  console.log(`Created Windows setup package: ${windowsZipPath}`);
+  console.log(`Created Windows test package: ${windowsZipPath}`);
   if (path.resolve(windowsArtifact.artifactPath) !== path.resolve(windowsZipPath)) {
-    console.log(`Published Windows installer artifact: ${windowsArtifact.artifactPath}`);
+    console.log(`Published Windows ${windowsArtifact.trustLevel === "trusted" ? "installer" : "test installer"} artifact: ${windowsArtifact.artifactPath}`);
   }
   console.log(`Updated manifest: ${path.join(releaseRoot, "manifest.json")}`);
 
@@ -641,6 +727,14 @@ const main = async () => {
     console.log(
       "macOS package was not added to manifest.json because it is not Gatekeeper-ready. Only signed, notarized, stapled, validated macOS releases are published."
     );
+  }
+
+  if (windowsArtifact.trustLevel === "trusted") {
+    console.log(`Windows artifact is published as a trusted installer${windowsArtifact.publisherName ? ` for ${windowsArtifact.publisherName}` : ""}.`);
+  } else if (windowsArtifact.installerKind === "zip") {
+    console.log("Windows artifact is published as an unsigned test package. Smart App Control can still block it.");
+  } else {
+    console.log("Windows artifact is published as an unsigned test installer. Smart App Control can still warn until the signed release is published.");
   }
 };
 

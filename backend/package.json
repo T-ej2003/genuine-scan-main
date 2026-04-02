@@ -26,6 +26,8 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:studio": "prisma studio",
     "connector:release": "node local-print-agent/packaging/build-connector-release.mjs",
+    "connector:windows:build-installer": "node local-print-agent/packaging/build-windows-installer.mjs",
+    "connector:windows:verify": "node local-print-agent/packaging/verify-windows-installer.mjs",
     "print:agent:install:macos": "sh local-print-agent/install/macos/install-launch-agent.sh",
     "print:agent:uninstall:macos": "sh local-print-agent/install/macos/uninstall-launch-agent.sh",
     "print:agent:install:linux": "sh local-print-agent/install/linux/install-systemd-user.sh",

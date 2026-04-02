@@ -31,6 +31,28 @@ const run = async () => {
     "windows",
     "Install Connector.cmd"
   );
+  const installerBuilderPath = path.join(
+    __dirname,
+    "..",
+    "local-print-agent",
+    "packaging",
+    "build-windows-installer.mjs"
+  );
+  const installerVerifierPath = path.join(
+    __dirname,
+    "..",
+    "local-print-agent",
+    "packaging",
+    "verify-windows-installer.mjs"
+  );
+  const installerTemplatePath = path.join(
+    __dirname,
+    "..",
+    "local-print-agent",
+    "install",
+    "windows",
+    "MSCQR-Connector.iss.template"
+  );
   const readmePath = path.join(
     __dirname,
     "..",
@@ -51,6 +73,9 @@ const run = async () => {
 
   const installScript = fs.readFileSync(installScriptPath, "utf8");
   const installCmd = fs.readFileSync(installCmdPath, "utf8");
+  const installerBuilder = fs.readFileSync(installerBuilderPath, "utf8");
+  const installerVerifier = fs.readFileSync(installerVerifierPath, "utf8");
+  const installerTemplate = fs.readFileSync(installerTemplatePath, "utf8");
   const readme = fs.readFileSync(readmePath, "utf8");
 
   assert(
@@ -66,13 +91,39 @@ const run = async () => {
     "Release packaging should support publishing a separately signed Windows installer"
   );
   assert(
-    packagingScript.includes('trustLevel: "unsigned"') && packagingScript.includes('trustLevel: installerKind === "zip" ? "unsigned" : "trusted"'),
-    "Release packaging should mark unsigned ZIP packages differently from signed Windows installers"
+    packagingScript.includes("WINDOWS_CONNECTOR_UNSIGNED_INSTALLER_PATH"),
+    "Release packaging should support publishing an unsigned Windows test installer"
   );
   assert(
-    installScript.includes("setupVerification"),
-    "Canonical Windows installer should inspect setupVerification from the local agent status payload"
+    packagingScript.includes('windowsTrustMode: "unsigned-test"') && packagingScript.includes('windowsTrustMode: "trusted"'),
+    "Release packaging should publish explicit Windows trust modes"
   );
+  assert(
+    packagingScript.includes("WINDOWS_CONNECTOR_PUBLISHER_NAME"),
+    "Release packaging should capture the Windows publisher name for signed installers"
+  );
+  assert(
+    packagingScript.includes('label: "Windows test package"') &&
+      packagingScript.includes('label: "Windows test installer"') &&
+      packagingScript.includes('label: "Windows installer"'),
+    "Release packaging should distinguish unsigned packages, unsigned installers, and signed installers"
+  );
+  assert(
+    installerBuilder.includes("MSCQR-Connector.iss.template") &&
+      installerBuilder.includes("Inno Setup compiler was not found on this machine."),
+    "Windows installer builder should scaffold the Inno Setup project and explain the next step when Inno Setup is missing"
+  );
+  assert(
+    installerVerifier.includes("Get-AuthenticodeSignature"),
+    "Windows installer verifier should inspect Authenticode signatures on Windows"
+  );
+  assert(
+    installerTemplate.includes("PrivilegesRequired=lowest") &&
+      installerTemplate.includes("Install Connector.cmd") &&
+      installerTemplate.includes("Uninstall Connector.cmd"),
+    "Windows installer template should run the packaged install and uninstall entry points without elevation"
+  );
+  assert(installScript.includes("setupVerification"), "Canonical Windows installer should inspect setupVerification from the local agent status payload");
   assert(
     installScript.includes('state -eq "READY"'),
     "Windows installer should implement a READY install path"
@@ -108,6 +159,10 @@ const run = async () => {
   assert(
     readme.includes("Windows Smart App Control blocks"),
     "Windows README should explain the Smart App Control block path"
+  );
+  assert(
+    readme.includes("unsigned Windows test package for internal validation only"),
+    "Windows README should call the ZIP release an internal test package"
   );
 
   const releaseZip = await JSZip.loadAsync(fs.readFileSync(releaseZipPath));

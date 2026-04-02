@@ -16,6 +16,14 @@ Build the latest packaged connector artifacts from the `backend` folder with:
 npm run connector:release
 ```
 
+Prepare the Windows installer scaffold from the `backend` folder with:
+
+```bash
+npm run connector:windows:build-installer
+```
+
+That command stages a real Windows installer project and, on a Windows machine with Inno Setup installed, can produce an unsigned `.exe` installer for internal testing before signing is added.
+
 When the Apple release credentials are configured, that single command now:
 
 1. builds the backend and connector binaries
@@ -114,7 +122,13 @@ The repository now includes installer-ready service scripts, and the release scr
 
 - macOS signed package path: wrap `macos/install-launch-agent.sh` with `pkgbuild` and sign with `productsign`.
 - macOS notarized package path: set `MACOS_CONNECTOR_APP_SIGN_IDENTITY`, `MACOS_CONNECTOR_SIGN_IDENTITY`, plus either `MACOS_CONNECTOR_NOTARY_PROFILE` or the Apple ID / team ID / password variables, then run `npm run connector:release`.
-- Windows signed installer path: wrap `windows/install-startup-task.ps1` in MSI/Intune/Win32 packaging and sign with `signtool`. The unsigned ZIP can still be used for local testing, but Windows Smart App Control can block it until the signed MSI or EXE is published.
+- Windows release prep path: run `npm run connector:windows:build-installer` to generate the staging folder and `MSCQR-Connector.iss` project. Publish the resulting unsigned `.exe` with `WINDOWS_CONNECTOR_UNSIGNED_INSTALLER_PATH` for internal testing, or publish the signed `.exe` / `.msi` with `WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH` and `WINDOWS_CONNECTOR_PUBLISHER_NAME` for customer rollout.
 - MDM / IT rollout: Jamf, Kandji, Intune, or similar can run these same scripts directly.
+
+See the full Windows release guide in:
+
+```text
+backend/local-print-agent/install/windows/WINDOWS_SIGNED_RELEASE.md
+```
 
 By default, `npm run connector:release` now treats macOS notarization as required for public distribution. If you explicitly set `MACOS_CONNECTOR_REQUIRE_NOTARIZATION=false`, the script can still build a local test package, but it keeps that Mac artifact out of `manifest.json` so the download page does not publish a Gatekeeper-blocked installer.

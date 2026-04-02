@@ -1,6 +1,9 @@
 MSCQR Connector for Windows
 Version: __MSCQR_CONNECTOR_VERSION__
 
+This ZIP is an unsigned Windows test package for internal validation only.
+Customer-facing rollout should use the signed Windows installer once it is published.
+
 Setup steps:
 1. Extract this ZIP to a normal folder on the Windows computer that is connected to the printer.
 2. Do not run the installer from inside the ZIP preview in File Explorer.

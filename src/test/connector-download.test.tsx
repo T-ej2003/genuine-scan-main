@@ -53,9 +53,13 @@ describe("ConnectorDownload", () => {
             },
             windows: {
               platform: "windows",
-              label: "Windows setup package",
+              label: "Windows test package",
               installerKind: "zip",
               trustLevel: "unsigned",
+              signatureStatus: "unsigned",
+              publisherName: null,
+              signedAt: null,
+              windowsTrustMode: "unsigned-test",
               filename: "MSCQR-Connector-Windows-2026.3.12.zip",
               architecture: "x64",
               bytes: 2048,
@@ -96,13 +100,14 @@ describe("ConnectorDownload", () => {
       "https://example.test/api/public/connector/download/2026.3.12/macos",
     );
     expectAllLinksToMatch(
-      await screen.findAllByRole("link", { name: /download windows setup package/i }),
+      await screen.findAllByRole("link", { name: /download windows test package/i }),
       "https://example.test/api/public/connector/download/2026.3.12/windows",
     );
-    expect(screen.getAllByText(/Windows can block this unsigned setup package/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Windows can block this unsigned test package/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Extract the ZIP fully before running/i)).toBeInTheDocument();
     expect(screen.getByText(/Run the installer once/i)).toBeInTheDocument();
     expect(screen.getByText(/Smart App Control can block the current Windows download/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Unsigned test package/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/verifies local printer readiness before it tells you setup is complete/i).length).toBeGreaterThan(0);
   });
 
@@ -138,9 +143,13 @@ describe("ConnectorDownload", () => {
             },
             windows: {
               platform: "windows",
-              label: "Windows setup package",
+              label: "Windows test package",
               installerKind: "zip",
               trustLevel: "unsigned",
+              signatureStatus: "unsigned",
+              publisherName: null,
+              signedAt: null,
+              windowsTrustMode: "unsigned-test",
               filename: "MSCQR-Connector-Windows-2026.3.12.zip",
               architecture: "x64",
               bytes: 2048,
@@ -166,7 +175,7 @@ describe("ConnectorDownload", () => {
       "https://example.test/api/public/connector/download/2026.3.12/macos",
     );
     expectAllLinksToMatch(
-      await screen.findAllByRole("link", { name: /download windows setup package/i }),
+      await screen.findAllByRole("link", { name: /download windows test package/i }),
       "https://example.test/api/public/connector/download/2026.3.12/windows",
     );
   });
@@ -190,9 +199,13 @@ describe("ConnectorDownload", () => {
             macos: null,
             windows: {
               platform: "windows",
-              label: "Windows setup package",
+              label: "Windows test package",
               installerKind: "zip",
               trustLevel: "unsigned",
+              signatureStatus: "unsigned",
+              publisherName: null,
+              signedAt: null,
+              windowsTrustMode: "unsigned-test",
               filename: "MSCQR-Connector-Windows-2026.3.12.zip",
               architecture: "x64",
               bytes: 2048,
@@ -215,7 +228,7 @@ describe("ConnectorDownload", () => {
 
     expect(screen.queryByRole("link", { name: /download for mac/i })).not.toBeInTheDocument();
     expectAllLinksToMatch(
-      await screen.findAllByRole("link", { name: /download windows setup package/i }),
+      await screen.findAllByRole("link", { name: /download windows test package/i }),
       "https://example.test/api/public/connector/download/2026.3.12/windows",
     );
   });
@@ -244,9 +257,13 @@ describe("ConnectorDownload", () => {
             macos: null,
             windows: {
               platform: "windows",
-              label: "Windows setup package",
+              label: "Windows test package",
               installerKind: "zip",
               trustLevel: "unsigned",
+              signatureStatus: "unsigned",
+              publisherName: null,
+              signedAt: null,
+              windowsTrustMode: "unsigned-test",
               filename: "MSCQR-Connector-Windows-2026.3.12.zip",
               architecture: "x64",
               bytes: 2048,
@@ -270,11 +287,64 @@ describe("ConnectorDownload", () => {
     expect(await screen.findByText(/signed Mac installer not published yet/i)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /get installer for this device/i })).not.toBeInTheDocument();
     expectAllLinksToMatch(
-      await screen.findAllByRole("link", { name: /download windows setup package/i }),
+      await screen.findAllByRole("link", { name: /download windows test package/i }),
       "https://example.test/api/public/connector/download/2026.3.12/windows",
     );
 
     userAgentSpy.mockRestore();
     platformSpy.mockRestore();
+  });
+
+  it("labels an unsigned Windows installer honestly for internal validation", async () => {
+    vi.mocked(apiClient.getInvitePreview).mockResolvedValue({ success: false, error: "No invite" } as any);
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue({
+      success: true,
+      data: {
+        productName: "MSCQR Connector",
+        latestVersion: "2026.3.12",
+        supportPath: "/help/manufacturer",
+        helpPath: "/connector-download",
+        setupGuidePath: "/help/manufacturer",
+        release: {
+          version: "2026.3.12",
+          publishedAt: "2026-03-12T20:00:00.000Z",
+          summary: "Install once and print without manual startup.",
+          notes: [],
+          platforms: {
+            macos: null,
+            windows: {
+              platform: "windows",
+              label: "Windows test installer",
+              installerKind: "exe",
+              trustLevel: "unsigned",
+              signatureStatus: "unsigned",
+              publisherName: null,
+              signedAt: null,
+              windowsTrustMode: "unsigned-test",
+              filename: "MSCQR-Connector-Windows-2026.3.12-unsigned.exe",
+              architecture: "x64",
+              bytes: 4096,
+              sha256: "c".repeat(64),
+              notes: ["Run this Windows test installer only for internal verification."],
+              contentType: "application/vnd.microsoft.portable-executable",
+              downloadPath: "/api/public/connector/download/2026.3.12/windows",
+              downloadUrl: "https://example.test/api/public/connector/download/2026.3.12/windows",
+            },
+          },
+        },
+      },
+    } as any);
+
+    render(
+      <MemoryRouter initialEntries={["/connector-download"]}>
+        <ConnectorDownload />
+      </MemoryRouter>,
+    );
+
+    expectAllLinksToMatch(
+      await screen.findAllByRole("link", { name: /download windows test installer/i }),
+      "https://example.test/api/public/connector/download/2026.3.12/windows",
+    );
+    expect(screen.getAllByText(/Windows can still warn on this unsigned test installer/i).length).toBeGreaterThan(0);
   });
 });

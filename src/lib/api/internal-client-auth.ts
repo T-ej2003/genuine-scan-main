@@ -144,7 +144,12 @@ export const createAuthApi = (core: ApiClientCore) => ({
           macos: null | {
             platform: "macos";
             label: string;
-            installerKind: "pkg" | "zip" | "exe";
+            installerKind: "pkg" | "zip" | "exe" | "msi";
+            trustLevel: "trusted" | "unsigned";
+            signatureStatus?: "signed" | "unsigned" | "unknown";
+            publisherName?: string | null;
+            signedAt?: string | null;
+            windowsTrustMode?: "trusted" | "unsigned-test";
             filename: string;
             architecture: string;
             bytes: number;
@@ -157,7 +162,12 @@ export const createAuthApi = (core: ApiClientCore) => ({
           windows: null | {
             platform: "windows";
             label: string;
-            installerKind: "pkg" | "zip" | "exe";
+            installerKind: "pkg" | "zip" | "exe" | "msi";
+            trustLevel: "trusted" | "unsigned";
+            signatureStatus?: "signed" | "unsigned" | "unknown";
+            publisherName?: string | null;
+            signedAt?: string | null;
+            windowsTrustMode?: "trusted" | "unsigned-test";
             filename: string;
             architecture: string;
             bytes: number;
@@ -188,7 +198,12 @@ export const createAuthApi = (core: ApiClientCore) => ({
           macos: null | {
             platform: "macos";
             label: string;
-            installerKind: "pkg" | "zip" | "exe";
+            installerKind: "pkg" | "zip" | "exe" | "msi";
+            trustLevel: "trusted" | "unsigned";
+            signatureStatus?: "signed" | "unsigned" | "unknown";
+            publisherName?: string | null;
+            signedAt?: string | null;
+            windowsTrustMode?: "trusted" | "unsigned-test";
             filename: string;
             architecture: string;
             bytes: number;
@@ -201,7 +216,12 @@ export const createAuthApi = (core: ApiClientCore) => ({
           windows: null | {
             platform: "windows";
             label: string;
-            installerKind: "pkg" | "zip" | "exe";
+            installerKind: "pkg" | "zip" | "exe" | "msi";
+            trustLevel: "trusted" | "unsigned";
+            signatureStatus?: "signed" | "unsigned" | "unknown";
+            publisherName?: string | null;
+            signedAt?: string | null;
+            windowsTrustMode?: "trusted" | "unsigned-test";
             filename: string;
             architecture: string;
             bytes: number;

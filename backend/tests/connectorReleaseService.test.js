@@ -17,6 +17,22 @@ const run = () => {
     "Unsigned Windows setup packages should expose the trust level"
   );
   assert(
+    latest.release.platforms.windows.signatureStatus === "unsigned",
+    "Unsigned Windows releases should expose the signature status"
+  );
+  assert(
+    latest.release.platforms.windows.windowsTrustMode === "unsigned-test",
+    "Unsigned Windows releases should expose the Windows trust mode"
+  );
+  assert(
+    latest.release.platforms.windows.publisherName === null,
+    "Unsigned Windows releases should not report a publisher"
+  );
+  assert(
+    latest.release.platforms.windows.signedAt === null,
+    "Unsigned Windows releases should not report a signed timestamp"
+  );
+  assert(
     latest.release.platforms.windows.downloadUrl ===
       "https://mscqr.example.com/api/public/connector/download/2026.3.12/windows",
     "Windows download URL should be based on the public API base"
