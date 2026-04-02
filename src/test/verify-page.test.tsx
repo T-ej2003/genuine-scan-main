@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { render, screen, waitFor } from "@testing-library/react";
 import Verify from "@/pages/Verify";
 import apiClient from "@/lib/api-client";
@@ -48,6 +48,7 @@ const renderVerifyPage = (path = `/verify/${CODE}`) =>
   render(
     <React.StrictMode>
       <MemoryRouter initialEntries={[path]}>
+        <LocationProbe />
         <Routes>
           <Route path="/verify/:code" element={<Verify />} />
           <Route path="/scan" element={<Verify />} />
@@ -55,6 +56,11 @@ const renderVerifyPage = (path = `/verify/${CODE}`) =>
       </MemoryRouter>
     </React.StrictMode>
   );
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location-probe">{`${location.pathname}${location.search}`}</div>;
+}
 
 const buildVerifyResponse = (overrides: Record<string, unknown> = {}) => ({
   success: true,
@@ -268,5 +274,20 @@ describe("Verify page", () => {
       })
     );
     expect(await screen.findByText("Verified Authentic")).toBeInTheDocument();
+  });
+
+  it("keeps the signed token on the canonical verify URL after a successful signed scan", async () => {
+    vi.mocked(apiClient.scanToken).mockResolvedValue(
+      buildVerifyResponse({
+        code: CODE,
+        proofSource: "SIGNED_LABEL",
+      }) as unknown as Awaited<ReturnType<typeof apiClient.scanToken>>
+    );
+
+    renderVerifyPage("/scan?t=signed-scan-token");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location-probe")).toHaveTextContent(`/verify/${CODE}?t=signed-scan-token`);
+    });
   });
 });

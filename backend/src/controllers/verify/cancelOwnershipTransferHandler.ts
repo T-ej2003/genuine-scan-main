@@ -9,9 +9,9 @@ import {
   cancelOwnershipTransferSchema,
   createOwnershipTransferView,
   expirePendingOwnershipTransfers,
-  isQrReadyForCustomerUse,
   normalizeCode,
   prisma,
+  resolvePublicVerificationReadiness,
 } from "./shared";
 
 export const cancelOwnershipTransfer = async (req: CustomerVerifyRequest, res: Response) => {
@@ -36,7 +36,26 @@ export const cancelOwnershipTransfer = async (req: CustomerVerifyRequest, res: R
 
     const qrCode = await prisma.qRCode.findUnique({
       where: { code: normalizedCode },
-      select: { id: true, code: true, licenseeId: true, status: true },
+      select: {
+        id: true,
+        code: true,
+        licenseeId: true,
+        status: true,
+        printJobId: true,
+        printJob: {
+          select: {
+            status: true,
+            pipelineState: true,
+            confirmedAt: true,
+            printSession: {
+              select: {
+                status: true,
+                completedAt: true,
+              },
+            },
+          },
+        },
+      },
     });
     if (!qrCode) {
       return res.status(404).json({ success: false, error: "QR code not found" });
@@ -141,7 +160,7 @@ export const cancelOwnershipTransfer = async (req: CustomerVerifyRequest, res: R
             state: "owned_by_you",
             matchMethod: "user",
           },
-          isReady: isQrReadyForCustomerUse(qrCode.status),
+          isReady: resolvePublicVerificationReadiness(qrCode).isReady,
           isBlocked: qrCode.status === QRStatus.BLOCKED,
         }),
       },

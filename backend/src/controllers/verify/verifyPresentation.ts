@@ -1,8 +1,13 @@
-import { QRStatus } from "@prisma/client";
+import { PrintJobStatus, PrintPipelineState, PrintSessionStatus, QRStatus } from "@prisma/client";
 
 import { type VerificationActivitySummary } from "../../services/duplicateRiskService";
 import type { OwnershipStatus } from "./verifyOwnership";
-import type { ReportIncidentType, ScanSummary, VerifyClassification } from "./verifySchemas";
+import type {
+  ReportIncidentType,
+  ScanSummary,
+  VerificationProofSource,
+  VerifyClassification,
+} from "./verifySchemas";
 
 export const mapLicensee = (licensee: any) =>
   licensee
@@ -53,6 +58,61 @@ export const statusNotReadyReason = (status: QRStatus) => {
     return "Code is awaiting print confirmation before customer use.";
   }
   return "Code is not ready for customer verification.";
+};
+
+export const statusNotReadyMessage = (status: QRStatus) => {
+  if (status === "ALLOCATED") {
+    return "This QR code is allocated but not yet printed.";
+  }
+  if (status === "ACTIVATED") {
+    return "This QR code is awaiting confirmed print completion.";
+  }
+  return "This QR code has not been assigned to a product yet.";
+};
+
+const isPrintLifecycleConfirmed = (qrCode: any) => {
+  if (!qrCode?.printJobId && !qrCode?.printJob) return true;
+
+  const printJob = qrCode?.printJob;
+  if (!printJob) return false;
+
+  if (printJob.confirmedAt) return true;
+  if (printJob.status === PrintJobStatus.CONFIRMED) return true;
+  if (
+    printJob.pipelineState === PrintPipelineState.LOCKED ||
+    printJob.pipelineState === PrintPipelineState.PRINT_CONFIRMED
+  ) {
+    return true;
+  }
+  if (printJob.printSession?.status === PrintSessionStatus.COMPLETED || printJob.printSession?.completedAt) {
+    return true;
+  }
+
+  return false;
+};
+
+export const resolvePublicVerificationReadiness = (qrCode: any) => {
+  if (!isQrReadyForCustomerUse(qrCode?.status)) {
+    return {
+      isReady: false,
+      message: statusNotReadyMessage(qrCode?.status),
+      reason: statusNotReadyReason(qrCode?.status),
+    };
+  }
+
+  if (!isPrintLifecycleConfirmed(qrCode)) {
+    return {
+      isReady: false,
+      message: "This QR code is awaiting confirmed print completion.",
+      reason: "Code is assigned to a controlled print run, but print confirmation is not complete.",
+    };
+  }
+
+  return {
+    isReady: true,
+    message: null,
+    reason: null,
+  };
 };
 
 export const buildContainment = (qrCode: any) => ({
@@ -180,6 +240,20 @@ export const buildRiskExplanation = (params: {
         : params.scanSummary.totalScans > 1
           ? "Keep purchase proof and monitor future scans."
           : "No action required.",
+  };
+};
+
+export const describeVerificationProof = (proofSource?: VerificationProofSource | null) => {
+  if (proofSource === "SIGNED_LABEL") {
+    return {
+      title: "Signed label verification",
+      detail: "This result is tied to an issued MSCQR label signature.",
+    };
+  }
+
+  return {
+    title: "Manual registry lookup",
+    detail: "This result confirms registry state and lifecycle, but not the physical label binding.",
   };
 };
 

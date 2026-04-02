@@ -5,11 +5,9 @@ import { QRStatus, UserRole } from "@prisma/client";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { createAuditLog } from "../services/auditService";
-import { generateQRCode, markBatchAsPrinted, buildVerifyUrl, getQRStats } from "../services/qrService";
+import { getQRStats } from "../services/qrService";
 import { allocateQrRange, getNextLicenseeQrNumber, lockLicenseeAllocation } from "../services/qrAllocationService";
-import { createHash, randomBytes } from "crypto";
-import { buildScanUrl, getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
-import { resolveQrZipProfile, streamQrZipToResponse } from "../services/qrZipStreamService";
+import { getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
 import { createUserNotification } from "../services/notificationService";
 import {
   buildLineageSuccessMessage,
@@ -94,10 +92,6 @@ const generateQRCodesSchema = z.object({
   quantity: z.number().int().positive().max(200000),
 }).strict();
 
-const generateSignedLinksSchema = z.object({
-  codes: z.array(z.string().trim().min(2).max(128)).min(1).max(2000),
-}).strict();
-
 const blockQRSschema = z.object({
   reason: z.string().trim().max(500).optional(),
 }).strict();
@@ -127,22 +121,6 @@ const isManufacturerRole = (role?: UserRole | null) =>
   role === UserRole.MANUFACTURER ||
   role === UserRole.MANUFACTURER_ADMIN ||
   role === UserRole.MANUFACTURER_USER;
-
-const safeFilePart = (s: string) => {
-  return (
-    String(s || "")
-      .trim()
-      .replace(/[^\w.-]+/g, "_")
-      .replace(/^_+|_+$/g, "")
-      .slice(0, 80) || "file"
-  );
-};
-
-const buildPublicQrUrl = (code: string, baseUrl?: string) => {
-  const base = String(baseUrl || "").trim().replace(/\/+$/, "");
-  if (base) return `${base}/verify/${encodeURIComponent(code)}`;
-  return buildVerifyUrl(code);
-};
 
 const escapeCsv = (v: any) => {
   if (v === null || v === undefined) return "";
@@ -966,202 +944,37 @@ export const renameBatch = async (req: AuthRequest, res: Response) => {
 /* ===================== PRINT ===================== */
 
 export const markPrinted = async (req: AuthRequest, res: Response) => {
-  try {
-    const code = String(req.params.code || "").trim();
-    if (!code) return res.status(400).json({ success: false, error: "Missing code" });
-
-    const qr = await prisma.qRCode.findUnique({
-      where: { code },
-      include: { batch: true },
-    });
-
-    if (!qr?.batch) return res.status(404).json({ success: false, error: "QR or batch not found" });
-
-    const count = await markBatchAsPrinted(qr.batch.id, req.user!.userId);
-    return res.json({ success: true, data: { count } });
-  } catch (e: any) {
-    return res.status(400).json({ success: false, error: e.message || "Bad request" });
-  }
+  return res.status(410).json({
+    success: false,
+    error:
+      "Legacy manual print confirmation is retired. Start a controlled MSCQR print job and let the printer helper or registered printer confirm completion.",
+  });
 };
 
 export const confirmBatchPrint = async (req: AuthRequest, res: Response) => {
-  try {
-    const batchId = req.params.id;
-
-    const batch = await prisma.batch.findFirst({
-      where: { id: batchId, manufacturerId: req.user!.userId },
-      select: { id: true },
-    });
-
-    if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
-
-    const count = await markBatchAsPrinted(batch.id, req.user!.userId);
-    return res.json({ success: true, data: { count } });
-  } catch (e: any) {
-    return res.status(400).json({ success: false, error: e.message || "Bad request" });
-  }
+  return res.status(410).json({
+    success: false,
+    error:
+      "Legacy batch print confirmation is retired. Use the managed MSCQR print workflow so printed labels are confirmed through the print job lifecycle.",
+  });
 };
 
 /* ===================== MANUFACTURER PRINT PACK (BATCH) ===================== */
 
 export const createBatchPrintToken = async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.user?.userId;
-    if (!userId) return res.status(401).json({ success: false, error: "Not authenticated" });
-
-    const id = req.params.id;
-    const batch = await prisma.batch.findFirst({
-      where: { id, manufacturerId: userId },
-      select: { id: true, printedAt: true, printPackDownloadedAt: true },
-    });
-    if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
-
-    if (batch.printPackDownloadedAt || batch.printedAt) {
-      return res.status(409).json({ success: false, error: "Print pack already downloaded/printed" });
-    }
-
-    const token = randomBytes(32).toString("base64url");
-    const tokenHash = createHash("sha256").update(token).digest("hex");
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-
-    await prisma.$transaction(async (tx) => {
-      await tx.batchPrintPackToken.deleteMany({
-        where: { batchId: batch.id, usedAt: null },
-      });
-      await tx.batchPrintPackToken.create({
-        data: {
-          tokenHash,
-          batchId: batch.id,
-          createdByUserId: userId,
-          expiresAt,
-        },
-      });
-    });
-
-    return res.json({ success: true, data: { token, expiresAt } });
-  } catch (e: any) {
-    console.error("createBatchPrintToken error:", e);
-    return res.status(400).json({ success: false, error: e?.message || "Bad request" });
-  }
+  return res.status(410).json({
+    success: false,
+    error:
+      "Legacy batch print packs are retired. Start a controlled MSCQR print job to generate printable labels through the managed print pipeline.",
+  });
 };
 
 export const downloadBatchPrintPack = async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.user?.userId;
-    if (!userId) return res.status(401).json({ success: false, error: "Not authenticated" });
-
-    const rawToken = String(req.params.token || "").trim().replace(/\.zip$/i, "");
-    if (!rawToken) return res.status(400).json({ success: false, error: "Missing token" });
-
-    const tokenHash = createHash("sha256").update(rawToken).digest("hex");
-    const now = new Date();
-
-    const tokenRow = await prisma.batchPrintPackToken.findUnique({
-      where: { tokenHash },
-      include: {
-        batch: { include: { licensee: { select: { id: true, prefix: true } } } },
-      },
-    });
-
-    if (!tokenRow) return res.status(404).json({ success: false, error: "Token not found" });
-    if (tokenRow.usedAt) return res.status(409).json({ success: false, error: "Token already used" });
-    if (tokenRow.expiresAt.getTime() <= now.getTime()) {
-      return res.status(410).json({ success: false, error: "Token expired" });
-    }
-
-    const batch = tokenRow.batch;
-    if (!batch || batch.manufacturerId !== userId) {
-      return res.status(403).json({ success: false, error: "Access denied" });
-    }
-
-    const markUsed = await prisma.batchPrintPackToken.updateMany({
-      where: { tokenHash, usedAt: null, expiresAt: { gt: now } },
-      data: { usedAt: now },
-    });
-    if (markUsed.count === 0) {
-      return res.status(409).json({ success: false, error: "Token already used" });
-    }
-
-    const totalCodes = await prisma.qRCode.count({
-      where: { batchId: batch.id },
-    });
-    if (totalCodes === 0) {
-      return res.status(404).json({ success: false, error: "No QR codes found for this batch" });
-    }
-
-    const publicBaseUrl = String(req.query.publicBaseUrl || "").trim();
-    const profile = resolveQrZipProfile(totalCodes);
-
-    await prisma.$transaction(async (tx) => {
-      await tx.batch.update({
-        where: { id: batch.id },
-        data: {
-          printPackDownloadedAt: now,
-          printPackDownloadedByUserId: userId,
-          printedAt: batch.printedAt || now,
-        },
-      });
-
-      await tx.qRCode.updateMany({
-        where: { batchId: batch.id, status: { in: [QRStatus.ALLOCATED, QRStatus.ACTIVE, QRStatus.DORMANT] } },
-        data: { status: QRStatus.PRINTED, printedAt: now, printedByUserId: userId },
-      });
-    });
-
-    await createAuditLog({
-      userId,
-      licenseeId: batch.licenseeId,
-      action: "DOWNLOAD_BATCH_PRINT_PACK",
-      entityType: "Batch",
-      entityId: batch.id,
-      details: { codes: totalCodes },
-      ipAddress: req.ip,
-    });
-
-    const fileName = `batch-${safeFilePart(batch.name || batch.id)}-print-pack.zip`;
-    const entries = (async function* () {
-      let cursorCode: string | undefined;
-      while (true) {
-        const rows = await prisma.qRCode.findMany({
-          where: { batchId: batch.id },
-          orderBy: { code: "asc" },
-          take: profile.dbChunkSize,
-          ...(cursorCode ? { cursor: { code: cursorCode }, skip: 1 } : {}),
-          select: { code: true },
-        });
-
-        if (rows.length === 0) break;
-
-        for (const row of rows) {
-          const urlInsideQr = buildPublicQrUrl(row.code, publicBaseUrl);
-          yield {
-            code: row.code,
-            url: urlInsideQr,
-            manifestValues: [row.code, urlInsideQr],
-          };
-        }
-
-        cursorCode = rows[rows.length - 1].code;
-      }
-    })();
-
-    await streamQrZipToResponse({
-      res,
-      fileName,
-      totalCount: totalCodes,
-      profile,
-      manifestHeader: ["code", "url"],
-      entries,
-    });
-    return;
-  } catch (e: any) {
-    console.error("downloadBatchPrintPack error:", e);
-    if (res.headersSent) {
-      res.destroy(e instanceof Error ? e : new Error(String(e?.message || "Download failed")));
-      return;
-    }
-    return res.status(400).json({ success: false, error: e?.message || "Bad request" });
-  }
+  return res.status(410).json({
+    success: false,
+    error:
+      "Legacy downloadable print packs are retired. Use the managed MSCQR print pipeline so issued labels stay tied to authoritative print state.",
+  });
 };
 
 /* ===================== ADMIN GENERATE SIGNED QRS ===================== */
@@ -1534,141 +1347,12 @@ export const getQRCodes = async (req: AuthRequest, res: Response) => {
   }
 };
 
-const canIssueNewSignedLink = (status: QRStatus) =>
-  status === QRStatus.DORMANT ||
-  status === QRStatus.ACTIVE ||
-  status === QRStatus.ALLOCATED ||
-  status === QRStatus.ACTIVATED;
-
 export const generateSignedScanLinks = async (req: AuthRequest, res: Response) => {
-  try {
-    const role = req.user?.role;
-    const userId = req.user?.userId;
-    if (!role || !userId) return res.status(401).json({ success: false, error: "Not authenticated" });
-    if (role !== UserRole.SUPER_ADMIN && role !== UserRole.PLATFORM_SUPER_ADMIN) {
-      return res.status(403).json({ success: false, error: "Access denied" });
-    }
-
-    const parsed = generateSignedLinksSchema.safeParse(req.body || {});
-    if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
-    }
-
-    const requestedCodes = Array.from(
-      new Set(
-        parsed.data.codes
-          .map((code) => String(code || "").trim().toUpperCase())
-          .filter(Boolean)
-      )
-    );
-
-    const qrRows = await prisma.qRCode.findMany({
-      where: { code: { in: requestedCodes } },
-      select: {
-        id: true,
-        code: true,
-        status: true,
-        licenseeId: true,
-        batchId: true,
-        batch: {
-          select: {
-            manufacturerId: true,
-          },
-        },
-      },
-    });
-
-    const byCode = new Map(qrRows.map((row) => [row.code, row]));
-    const missingCodes = requestedCodes.filter((code) => !byCode.has(code));
-    if (missingCodes.length > 0) {
-      return res.status(404).json({
-        success: false,
-        error: `Some codes were not found: ${missingCodes.slice(0, 20).join(", ")}`,
-      });
-    }
-
-    const ineligible = qrRows
-      .filter((row) => !canIssueNewSignedLink(row.status))
-      .map((row) => `${row.code} (${row.status})`);
-    if (ineligible.length > 0) {
-      return res.status(409).json({
-        success: false,
-        error:
-          "Signed link generation is allowed only for unprinted lifecycle stages (DORMANT/ACTIVE/ALLOCATED/ACTIVATED). " +
-          `Blocked entries: ${ineligible.slice(0, 20).join(", ")}`,
-      });
-    }
-
-    const now = new Date();
-    const expAt = getQrTokenExpiryDate(now);
-    const links: Array<{ code: string; scanUrl: string; expiresAt: string }> = [];
-
-    await prisma.$transaction(async (tx) => {
-      for (const code of requestedCodes) {
-        const qr = byCode.get(code)!;
-        const nonce = randomNonce();
-        const payload = {
-          qr_id: qr.id,
-          batch_id: qr.batchId ?? null,
-          licensee_id: qr.licenseeId,
-          manufacturer_id: qr.batch?.manufacturerId ?? null,
-          iat: Math.floor(now.getTime() / 1000),
-          exp: Math.floor(expAt.getTime() / 1000),
-          nonce,
-        };
-        const token = signQrPayload(payload);
-        const tokenHash = hashToken(token);
-        const scanUrl = buildScanUrl(token);
-
-        const updated = await tx.qRCode.updateMany({
-          where: {
-            id: qr.id,
-            status: {
-              in: [QRStatus.DORMANT, QRStatus.ACTIVE, QRStatus.ALLOCATED, QRStatus.ACTIVATED],
-            },
-          },
-          data: {
-            tokenNonce: nonce,
-            tokenIssuedAt: now,
-            tokenExpiresAt: expAt,
-            tokenHash,
-          },
-        });
-        if (updated.count !== 1) {
-          throw new Error(`Code ${code} changed state during signed-link generation. Please retry.`);
-        }
-
-        links.push({
-          code,
-          scanUrl,
-          expiresAt: expAt.toISOString(),
-        });
-      }
-    });
-
-    await createAuditLog({
-      userId,
-      action: "GENERATED_SIGNED_LINKS",
-      entityType: "QRCode",
-      details: {
-        count: links.length,
-        codes: links.slice(0, 50).map((item) => item.code),
-      },
-      ipAddress: req.ip,
-    });
-
-    return res.json({
-      success: true,
-      data: {
-        issuedAt: now.toISOString(),
-        expiresAt: expAt.toISOString(),
-        links,
-      },
-    });
-  } catch (e: any) {
-    console.error("generateSignedScanLinks error:", e);
-    return res.status(500).json({ success: false, error: e?.message || "Internal server error" });
-  }
+  return res.status(410).json({
+    success: false,
+    error:
+      "Ad hoc signed label export is retired. Create labels through MSCQR print jobs so signed scans remain tied to controlled issuance and print confirmation.",
+  });
 };
 
 export const getStats = async (req: AuthRequest, res: Response) => {

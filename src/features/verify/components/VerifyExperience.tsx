@@ -46,6 +46,7 @@ import {
   toLabel,
   writeCachedGeo,
   type VerificationClassification,
+  type VerificationProofSource,
   type VerifyPayload,
   type VerifyRequestResponse,
 } from "@/features/verify/verify-model";
@@ -229,7 +230,7 @@ export default function VerifyExperience() {
     ? "Accepting a transfer links this product to your signed-in customer account."
     : queueTransferDialogAfterSignIn
       ? "Complete sign-in below. The transfer form will open automatically."
-      : "Sign-in makes ownership portable across devices. Device-only claim may be less reliable if your network changes.";
+      : "Sign-in makes ownership portable across devices. Device-only claims stay on this browser and device until you sign in.";
   const showAuthenticStamp = classification === "FIRST_SCAN" || classification === "LEGIT_REPEAT";
   const confidenceScore = useMemo(
     () =>
@@ -296,6 +297,18 @@ export default function VerifyExperience() {
           ? "Normal re-checks are fine. Keep proof of purchase for future verification."
           : "Keep proof of purchase for future verification.",
   };
+  const proofSource = (result?.proofSource || (token ? "SIGNED_LABEL" : "MANUAL_CODE_LOOKUP")) as VerificationProofSource;
+  const proofDescriptor = result?.proof || (
+    proofSource === "SIGNED_LABEL"
+      ? {
+          title: "Signed label verification",
+          detail: "This result is tied to an issued MSCQR label signature.",
+        }
+      : {
+          title: "Manual registry lookup",
+          detail: "This result confirms registry state and lifecycle, but not the physical label binding.",
+        }
+  );
   const trustedRepeatCount = Number(activitySummary?.trustedOwnerScanCount24h ?? result?.scanSignals?.trustedOwnerScanCount24h ?? 0);
   const externalScanCount = Number(activitySummary?.untrustedScanCount24h ?? result?.scanSignals?.untrustedScanCount24h ?? 0);
   const externalDeviceCount = Number(
@@ -442,7 +455,10 @@ export default function VerifyExperience() {
       setResult((response.data as VerifyPayload) || null);
       setRetryNotice("");
       if (token && typeof (response.data as VerifyPayload | null)?.code === "string") {
-        navigate(`/verify/${encodeURIComponent(String((response.data as VerifyPayload).code || "").trim())}`, { replace: true });
+        navigate(
+          `/verify/${encodeURIComponent(String((response.data as VerifyPayload).code || "").trim())}?t=${encodeURIComponent(token)}`,
+          { replace: true }
+        );
       }
       const finalClassification = inferClassification((response.data as VerifyPayload) || null);
       const now = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -1217,13 +1233,13 @@ export default function VerifyExperience() {
                     <div className="rounded-xl border border-[#8d9db65e] bg-white/90 px-3 py-2 shadow-sm premium-surface-in">
                       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
                         <span className="inline-flex items-center gap-1.5">
-                          <Lock className="h-3.5 w-3.5 text-slate-700" />
-                          Encrypted verification
+                          <Shield className="h-3.5 w-3.5 text-slate-700" />
+                          {proofDescriptor.title}
                         </span>
                         <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" />
-                        <span>Scan securely recorded for fraud prevention</span>
+                        <span>{proofDescriptor.detail}</span>
                         <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" />
-                        <span className="font-medium text-slate-700">Secured by {APP_NAME}</span>
+                        <span className="font-medium text-slate-700">Scan history recorded server-side for fraud review</span>
                         <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" />
                         <span className="font-medium text-slate-700">Confidence {confidenceScore}%</span>
                       </div>
@@ -1441,9 +1457,9 @@ export default function VerifyExperience() {
                         <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
                           <p className="font-semibold">Owned by you</p>
                           <p className="mt-1">Claimed at: {formatDateTime(ownershipStatus.claimedAt)}</p>
-                          {ownershipStatus.matchMethod && ownershipStatus.matchMethod !== "user" ? (
+                          {ownershipStatus.matchMethod === "device_token" ? (
                             <p className="mt-1 text-xs text-emerald-800">
-                              Current proof: {ownershipStatus.matchMethod === "device_token" ? "this device" : "network evidence"}.
+                              Current proof: this device.
                             </p>
                           ) : null}
                         </div>

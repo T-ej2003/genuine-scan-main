@@ -94,17 +94,6 @@ export const createLicenseeQrApi = (core: ApiClientCore) => ({
     return core.request(`/qr/codes${query}`);
   },
 
-  async generateSignedQrLinks(codes: string[]) {
-    return core.request<{
-      issuedAt: string;
-      expiresAt: string;
-      links: Array<{ code: string; scanUrl: string; expiresAt: string }>;
-    }>("/qr/codes/signed-links", {
-      method: "POST",
-      body: JSON.stringify({ codes }),
-    });
-  },
-
   async getQRStats(licenseeId?: string) {
     const query = licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : "";
     return core.request(`/qr/stats${query}`);

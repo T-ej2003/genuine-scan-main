@@ -1,4 +1,4 @@
-import type { VerifyClassification, OwnershipStatus, ScanSummary } from "./shared";
+import type { VerificationProofSource, VerifyClassification, OwnershipStatus, ScanSummary } from "./shared";
 import {
   buildRiskExplanation,
   buildSecurityContainmentReasons,
@@ -25,9 +25,10 @@ const emptyOwnershipTransfer = (): OwnershipTransferStatusView => ({
 });
 
 export const buildMissingQrVerificationPayload = (params: {
-  normalizedCode: string;
+  normalizedCode?: string | null;
   reasons: string[];
   verifyUxPolicy: VerifyUxPolicy;
+  proofSource: VerificationProofSource;
 }) => {
   const emptySummary: ScanSummary = {
     totalScans: 0,
@@ -47,7 +48,8 @@ export const buildMissingQrVerificationPayload = (params: {
   return {
     isAuthentic: false,
     message: "This QR code is not registered in our system.",
-    code: params.normalizedCode,
+    code: params.normalizedCode || undefined,
+    proofSource: params.proofSource,
     classification: "NOT_READY_FOR_CUSTOMER_USE" as VerifyClassification,
     reasons: params.reasons,
     scanSummary: emptySummary,
@@ -129,13 +131,9 @@ export const buildNotReadyVerificationPayload = (params: {
   ownershipTransfer: OwnershipTransferStatusView;
   verifyUxPolicy: VerifyUxPolicy;
   reasons: string[];
+  message?: string | null;
 }) => {
-  const message =
-    params.status === "ALLOCATED"
-      ? "This QR code is allocated but not yet printed."
-      : params.status === "ACTIVATED"
-        ? "This QR code has not been activated (print not confirmed)."
-        : "This QR code has not been assigned to a product yet.";
+  const message = params.message || "This QR code is not ready for customer verification.";
 
   const verificationTimeline = buildVerificationTimeline({
     scanSummary: params.scanSummary,

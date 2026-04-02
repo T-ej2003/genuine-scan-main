@@ -20,6 +20,14 @@ const missingOwnershipError = new Prisma.PrismaClientKnownRequestError("Ownershi
   meta: { modelName: "Ownership" },
 });
 
+const verifyUxPolicy = {
+  showTimelineCard: true,
+  showRiskCards: true,
+  allowOwnershipClaim: true,
+  allowFraudReport: true,
+  mobileCameraAssist: true,
+};
+
 const licensee = {
   id: "lic-1",
   name: "MSCQR Demo",
@@ -74,6 +82,10 @@ const fakePrisma = {
     findUnique: async () => {
       throw missingOwnershipError;
     },
+  },
+  ownershipTransfer: {
+    updateMany: async () => ({ count: 0 }),
+    findFirst: async () => null,
   },
 };
 
@@ -133,6 +145,7 @@ mockModule("services/scanInsightService.js", {
   }),
 });
 mockModule("services/governanceService.js", {
+  resolveVerifyUxPolicy: async () => verifyUxPolicy,
   resolveDuplicateRiskProfile: async () => ({
     tenantRiskLevel: "MEDIUM",
     productRiskLevel: "MEDIUM",

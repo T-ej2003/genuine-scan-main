@@ -17,11 +17,11 @@ import {
   getDeviceClaimTokenFromRequest,
   hashIp,
   hashToken,
-  isQrReadyForCustomerUse,
   loadOwnershipByQrCodeId,
   normalizeCode,
   prisma,
   randomOpaqueToken,
+  resolvePublicVerificationReadiness,
 } from "./shared";
 
 export const createOwnershipTransfer = async (req: CustomerVerifyRequest, res: Response) => {
@@ -51,6 +51,20 @@ export const createOwnershipTransfer = async (req: CustomerVerifyRequest, res: R
         code: true,
         status: true,
         licenseeId: true,
+        printJobId: true,
+        printJob: {
+          select: {
+            status: true,
+            pipelineState: true,
+            confirmedAt: true,
+            printSession: {
+              select: {
+                status: true,
+                completedAt: true,
+              },
+            },
+          },
+        },
       },
     });
     if (!qrCode) {
@@ -60,7 +74,7 @@ export const createOwnershipTransfer = async (req: CustomerVerifyRequest, res: R
     const verifyUxPolicy = await resolveVerifyUxPolicy(qrCode.licenseeId || null);
     const allowClaim = verifyUxPolicy.allowOwnershipClaim !== false;
     const isBlocked = qrCode.status === QRStatus.BLOCKED;
-    const isReady = isQrReadyForCustomerUse(qrCode.status);
+    const isReady = resolvePublicVerificationReadiness(qrCode).isReady;
     if (!allowClaim || isBlocked || !isReady) {
       return res.status(409).json({
         success: false,

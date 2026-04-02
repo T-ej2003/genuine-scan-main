@@ -13,7 +13,7 @@ export type OwnershipStatus = {
   isClaimedByAnother: boolean;
   canClaim: boolean;
   state?: "unclaimed" | "owned_by_you" | "owned_by_someone_else" | "claim_not_available";
-  matchMethod?: "user" | "device_token" | "ip_fallback" | null;
+  matchMethod?: "user" | "device_token" | null;
 };
 
 export type OwnershipRecord = {

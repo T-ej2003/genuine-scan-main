@@ -12,9 +12,9 @@ import {
   createOwnershipTransferView,
   hashIp,
   hashToken,
-  isQrReadyForCustomerUse,
   loadOwnershipTransferByRawToken,
   prisma,
+  resolvePublicVerificationReadiness,
 } from "./shared";
 
 export const acceptOwnershipTransfer = async (req: CustomerVerifyRequest, res: Response) => {
@@ -47,6 +47,20 @@ export const acceptOwnershipTransfer = async (req: CustomerVerifyRequest, res: R
         code: true,
         status: true,
         licenseeId: true,
+        printJobId: true,
+        printJob: {
+          select: {
+            status: true,
+            pipelineState: true,
+            confirmedAt: true,
+            printSession: {
+              select: {
+                status: true,
+                completedAt: true,
+              },
+            },
+          },
+        },
       },
     });
     if (!qrCode) {
@@ -54,7 +68,7 @@ export const acceptOwnershipTransfer = async (req: CustomerVerifyRequest, res: R
     }
 
     const isBlocked = qrCode.status === QRStatus.BLOCKED;
-    const isReady = isQrReadyForCustomerUse(qrCode.status);
+    const isReady = resolvePublicVerificationReadiness(qrCode).isReady;
     if (isBlocked || !isReady) {
       return res.status(409).json({
         success: false,

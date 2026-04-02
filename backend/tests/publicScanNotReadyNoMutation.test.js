@@ -1,6 +1,6 @@
 const assert = require("assert");
 const path = require("path");
-const { Prisma, QRStatus } = require("@prisma/client");
+const { QRStatus } = require("@prisma/client");
 
 const distRoot = path.resolve(__dirname, "../dist");
 
@@ -14,43 +14,12 @@ const mockModule = (relativePath, exportsValue) => {
   };
 };
 
-const missingOwnershipError = new Prisma.PrismaClientKnownRequestError("Ownership table missing", {
-  code: "P2021",
-  clientVersion: "test",
-  meta: { modelName: "Ownership" },
-});
-
-const missingAuditLogError = new Prisma.PrismaClientKnownRequestError("AuditLog table missing", {
-  code: "P2021",
-  clientVersion: "test",
-  meta: { modelName: "AuditLog" },
-});
-
 const verifyUxPolicy = {
   showTimelineCard: true,
   showRiskCards: true,
   allowOwnershipClaim: true,
   allowFraudReport: true,
   mobileCameraAssist: true,
-};
-
-const neutralPolicy = {
-  policy: {
-    autoBlockEnabled: true,
-    autoBlockBatchOnVelocity: false,
-    multiScanThreshold: 2,
-    geoDriftThresholdKm: 300,
-    velocitySpikeThresholdPerMin: 80,
-    stuckBatchHours: 24,
-  },
-  triggered: {
-    multiScan: false,
-    geoDrift: false,
-    velocitySpike: false,
-  },
-  autoBlockedQr: false,
-  autoBlockedBatch: false,
-  alerts: [],
 };
 
 const emptyScanInsight = {
@@ -100,7 +69,7 @@ const licensee = {
 const batch = {
   id: "batch-1",
   name: "Batch 1",
-  printedAt: new Date("2026-03-13T08:00:00.000Z"),
+  printedAt: null,
   suspendedAt: null,
   suspendedReason: null,
   manufacturer: {
@@ -114,15 +83,14 @@ const batch = {
 
 const qrRecord = {
   id: "qr-1",
-  code: "MSC0001",
-  status: QRStatus.PRINTED,
+  code: "MSC0002",
+  status: QRStatus.ACTIVATED,
   tokenHash: null,
-  tokenNonce: "nonce-1",
+  tokenNonce: "nonce-2",
   batchId: batch.id,
   licenseeId: licensee.id,
   scannedAt: null,
   redeemedAt: null,
-  redeemedDeviceFingerprint: null,
   scanCount: 0,
   underInvestigationAt: null,
   underInvestigationReason: null,
@@ -130,46 +98,27 @@ const qrRecord = {
   batch,
 };
 
+let transactionCalled = false;
+
 const fakePrisma = {
   qRCode: {
     findUnique: async () => qrRecord,
   },
   ownership: {
-    findUnique: async () => {
-      throw missingOwnershipError;
-    },
+    findUnique: async () => null,
   },
   ownershipTransfer: {
     updateMany: async () => ({ count: 0 }),
     findFirst: async () => null,
   },
-  $transaction: async (callback) =>
-    callback({
-      qRCode: {
-        update: async () => ({
-          ...qrRecord,
-          status: QRStatus.REDEEMED,
-          scannedAt: new Date("2026-03-13T08:45:00.000Z"),
-          redeemedAt: new Date("2026-03-13T08:45:00.000Z"),
-          scanCount: 1,
-        }),
-      },
-      qrScanLog: {
-        findFirst: async () => null,
-        create: async (args) => ({ id: "scan-log-1", ...(args?.data || {}) }),
-      },
-    }),
+  $transaction: async () => {
+    transactionCalled = true;
+    throw new Error("recordScan should not run for not-ready labels");
+  },
 };
 
 mockModule("config/database.js", { __esModule: true, default: fakePrisma });
-mockModule("services/auditService.js", {
-  createAuditLog: async () => {
-    throw missingAuditLogError;
-  },
-});
 mockModule("services/locationService.js", { reverseGeocode: async () => null });
-mockModule("services/policyEngineService.js", { evaluateScanAndEnforcePolicy: async () => neutralPolicy });
-mockModule("services/scanInsightService.js", { getScanInsight: async () => emptyScanInsight });
 mockModule("services/governanceService.js", {
   resolveVerifyUxPolicy: async () => verifyUxPolicy,
   resolveDuplicateRiskProfile: async () => ({
@@ -178,27 +127,14 @@ mockModule("services/governanceService.js", {
     anomalyWeight: 0.25,
   }),
 });
-mockModule("services/duplicateRiskService.js", {
-  assessDuplicateRisk: () => ({
-    classification: "LEGIT_REPEAT",
-    reasons: ["No suspicious repeat activity detected."],
-    riskScore: 4,
-    threshold: 65,
-    signals: emptyScanInsight.signals,
-    activitySummary: null,
-  }),
-  deriveAnomalyModelScore: () => 0,
-});
-mockModule("utils/requestFingerprint.js", {
-  deriveRequestDeviceFingerprint: () => "device-fingerprint-1",
-});
+mockModule("services/scanInsightService.js", { getScanInsight: async () => emptyScanInsight });
+mockModule("services/auditService.js", { createAuditLog: async () => ({ id: "audit-1" }) });
 
-process.env.QR_SIGN_HMAC_SECRET = "public-scan-fallback-test-secret";
+process.env.QR_SIGN_HMAC_SECRET = "public-scan-not-ready-test-secret";
 delete process.env.QR_SIGN_PRIVATE_KEY;
 delete process.env.QR_SIGN_PUBLIC_KEY;
 
-const { signQrPayload } = require("../dist/services/qrTokenService");
-const { hashToken } = require("../dist/services/qrTokenService");
+const { signQrPayload, hashToken } = require("../dist/services/qrTokenService");
 
 const token = signQrPayload({
   qr_id: qrRecord.id,
@@ -216,9 +152,9 @@ const { scanToken } = require("../dist/controllers/scanController");
 
 const req = {
   query: { t: token },
-  ip: "198.51.100.12",
+  ip: "198.51.100.24",
   get(name) {
-    if (String(name).toLowerCase() === "user-agent") return "public-scan-test-agent";
+    if (String(name).toLowerCase() === "user-agent") return "public-scan-not-ready-test-agent";
     return "";
   },
   customer: null,
@@ -240,14 +176,18 @@ const res = {
 (async () => {
   await scanToken(req, res);
 
-  assert.strictEqual(res.statusCode, 200, "scan fallback should not return 500");
-  assert(res.body && res.body.success === true, "scan fallback should return a success payload");
-  assert.strictEqual(res.body.data.scanOutcome, "FIRST_SCAN", "first scan should remain classified as the initial verification");
-  assert.strictEqual(res.body.data.isAuthentic, true, "valid first scan should remain authentic");
-  assert.strictEqual(res.body.data.ownershipStatus.isClaimed, false, "missing ownership storage should not block verify");
-  assert.strictEqual(res.body.data.scanCount, 1, "audit log failure should not interrupt the verification response");
+  assert.strictEqual(res.statusCode, 200, "not-ready signed scans should return a normal verification response");
+  assert.strictEqual(res.body?.success, true, "not-ready signed scans should still return a structured payload");
+  assert.strictEqual(
+    res.body?.data?.classification,
+    "NOT_READY_FOR_CUSTOMER_USE",
+    "not-ready signed scans should be classified consistently"
+  );
+  assert.strictEqual(res.body?.data?.status, "ACTIVATED", "the public response should preserve the underlying label status");
+  assert.strictEqual(res.body?.data?.proofSource, "SIGNED_LABEL", "signed scan responses should preserve their proof source");
+  assert.strictEqual(transactionCalled, false, "not-ready signed scans should not mutate scan or redemption state");
 
-  console.log("public scan fallback test passed");
+  console.log("public scan not-ready no-mutation test passed");
 })().catch((error) => {
   console.error(error);
   process.exit(1);

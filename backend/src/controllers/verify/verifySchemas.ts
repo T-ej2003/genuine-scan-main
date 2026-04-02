@@ -11,6 +11,8 @@ export type VerifyClassification =
   | "BLOCKED_BY_SECURITY"
   | "NOT_READY_FOR_CUSTOMER_USE";
 
+export type VerificationProofSource = "SIGNED_LABEL" | "MANUAL_CODE_LOOKUP";
+
 export type ScanSummary = {
   totalScans: number;
   firstVerifiedAt: string | null;

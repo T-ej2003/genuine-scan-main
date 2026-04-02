@@ -13,10 +13,10 @@ import {
   hashIp,
   hashToken,
   isOwnershipStorageMissingError,
-  isQrReadyForCustomerUse,
   loadOwnershipByQrCodeId,
   normalizeCode,
   prisma,
+  resolvePublicVerificationReadiness,
   verifyStepUpChallenge,
   type OwnershipRecord,
 } from "./shared";
@@ -38,6 +38,20 @@ export const claimProductOwnership = async (req: CustomerVerifyRequest, res: Res
         code: true,
         status: true,
         licenseeId: true,
+        printJobId: true,
+        printJob: {
+          select: {
+            status: true,
+            pipelineState: true,
+            confirmedAt: true,
+            printSession: {
+              select: {
+                status: true,
+                completedAt: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -50,7 +64,7 @@ export const claimProductOwnership = async (req: CustomerVerifyRequest, res: Res
 
     const verifyUxPolicy = await resolveVerifyUxPolicy(qrCode.licenseeId || null);
     const isBlocked = qrCode.status === QRStatus.BLOCKED;
-    const isReady = isQrReadyForCustomerUse(qrCode.status);
+    const isReady = resolvePublicVerificationReadiness(qrCode).isReady;
     const allowClaim = verifyUxPolicy.allowOwnershipClaim !== false;
     const customerUserId = req.customer?.userId || null;
     const deviceClaimToken = ensureDeviceClaimToken(req, res);
@@ -306,6 +320,20 @@ export const linkDeviceClaimToCustomer = async (req: CustomerVerifyRequest, res:
         id: true,
         status: true,
         licenseeId: true,
+        printJobId: true,
+        printJob: {
+          select: {
+            status: true,
+            pipelineState: true,
+            confirmedAt: true,
+            printSession: {
+              select: {
+                status: true,
+                completedAt: true,
+              },
+            },
+          },
+        },
       },
     });
     if (!qrCode) {
@@ -318,7 +346,7 @@ export const linkDeviceClaimToCustomer = async (req: CustomerVerifyRequest, res:
     const verifyUxPolicy = await resolveVerifyUxPolicy(qrCode.licenseeId || null);
     const allowClaim = verifyUxPolicy.allowOwnershipClaim !== false;
     const isBlocked = qrCode.status === QRStatus.BLOCKED;
-    const isReady = isQrReadyForCustomerUse(qrCode.status);
+    const isReady = resolvePublicVerificationReadiness(qrCode).isReady;
 
     if (!allowClaim || isBlocked || !isReady) {
       return res.status(409).json({
