@@ -62,6 +62,14 @@ const run = async () => {
     "Release packaging should source the canonical Windows install CMD entry point"
   );
   assert(
+    packagingScript.includes("WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH"),
+    "Release packaging should support publishing a separately signed Windows installer"
+  );
+  assert(
+    packagingScript.includes('trustLevel: "unsigned"') && packagingScript.includes('trustLevel: installerKind === "zip" ? "unsigned" : "trusted"'),
+    "Release packaging should mark unsigned ZIP packages differently from signed Windows installers"
+  );
+  assert(
     installScript.includes("setupVerification"),
     "Canonical Windows installer should inspect setupVerification from the local agent status payload"
   );
@@ -96,6 +104,10 @@ const run = async () => {
   assert(
     readme.includes("Needs attention: connector installed and running"),
     "Windows README should describe the partial-success outcome"
+  );
+  assert(
+    readme.includes("Windows Smart App Control blocks"),
+    "Windows README should explain the Smart App Control block path"
   );
 
   const releaseZip = await JSZip.loadAsync(fs.readFileSync(releaseZipPath));

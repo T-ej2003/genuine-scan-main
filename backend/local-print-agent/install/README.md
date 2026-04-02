@@ -114,7 +114,7 @@ The repository now includes installer-ready service scripts, and the release scr
 
 - macOS signed package path: wrap `macos/install-launch-agent.sh` with `pkgbuild` and sign with `productsign`.
 - macOS notarized package path: set `MACOS_CONNECTOR_APP_SIGN_IDENTITY`, `MACOS_CONNECTOR_SIGN_IDENTITY`, plus either `MACOS_CONNECTOR_NOTARY_PROFILE` or the Apple ID / team ID / password variables, then run `npm run connector:release`.
-- Windows signed installer path: wrap `windows/install-startup-task.ps1` in MSI/Intune/Win32 packaging and sign with `signtool`.
+- Windows signed installer path: wrap `windows/install-startup-task.ps1` in MSI/Intune/Win32 packaging and sign with `signtool`. The unsigned ZIP can still be used for local testing, but Windows Smart App Control can block it until the signed MSI or EXE is published.
 - MDM / IT rollout: Jamf, Kandji, Intune, or similar can run these same scripts directly.
 
 By default, `npm run connector:release` now treats macOS notarization as required for public distribution. If you explicitly set `MACOS_CONNECTOR_REQUIRE_NOTARIZATION=false`, the script can still build a local test package, but it keeps that Mac artifact out of `manifest.json` so the download page does not publish a Gatekeeper-blocked installer.

@@ -13,6 +13,10 @@ const run = () => {
     "Windows download path should route through the API prefix"
   );
   assert(
+    latest.release.platforms.windows.trustLevel === "unsigned",
+    "Unsigned Windows setup packages should expose the trust level"
+  );
+  assert(
     latest.release.platforms.windows.downloadUrl ===
       "https://mscqr.example.com/api/public/connector/download/2026.3.12/windows",
     "Windows download URL should be based on the public API base"

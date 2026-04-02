@@ -28,6 +28,7 @@ const normalizeEnv = (value) => String(value || "").trim();
 const isTruthy = (value) => /^(1|true|yes|on)$/i.test(normalizeEnv(value));
 const hasEnvOverride = (name) => Object.prototype.hasOwnProperty.call(process.env, name);
 const webAppBaseUrl = normalizeEnv(process.env.WEB_APP_BASE_URL).replace(/\/+$/g, "");
+const windowsSignedInstallerSource = normalizeEnv(process.env.WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH);
 const macSigningIdentity = normalizeEnv(process.env.MACOS_CONNECTOR_SIGN_IDENTITY);
 const macApplicationSigningIdentity = normalizeEnv(process.env.MACOS_CONNECTOR_APP_SIGN_IDENTITY);
 const requireMacNotarization = hasEnvOverride("MACOS_CONNECTOR_REQUIRE_NOTARIZATION")
@@ -145,6 +146,14 @@ const archiveDirectory = async (sourceDir, outputFile) =>
     archive.directory(sourceDir, false);
     archive.finalize();
   });
+
+const resolveWindowsInstallerKind = (filePath) => {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".msi") return "msi";
+  if (ext === ".exe") return "exe";
+  if (ext === ".zip") return "zip";
+  throw new Error(`Unsupported Windows installer artifact: ${filePath}`);
+};
 
 const renderMacWrapper = () => `#!/bin/sh
 set -eu
@@ -452,7 +461,57 @@ const buildWindowsPackage = async (binaries, stagingRoot) => {
   return zipPath;
 };
 
-const updateManifest = (macArtifact, windowsZipPath) => {
+const publishWindowsArtifact = (windowsZipPath) => {
+  if (!windowsSignedInstallerSource) {
+    return {
+      artifactPath: windowsZipPath,
+      installerKind: "zip",
+      trustLevel: "unsigned",
+      label: "Windows setup package",
+      notes: [
+        "Extract the ZIP package on the Windows computer that will print.",
+        "Run Install Connector.cmd once to install, auto-start, and locally verify the connector.",
+        "Windows Smart App Control can block this unsigned setup package until a signed Windows installer is published.",
+      ],
+    };
+  }
+
+  const sourcePath = path.isAbsolute(windowsSignedInstallerSource)
+    ? windowsSignedInstallerSource
+    : path.resolve(backendRoot, windowsSignedInstallerSource);
+
+  if (!fs.existsSync(sourcePath)) {
+    throw new Error(`WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH does not exist: ${sourcePath}`);
+  }
+
+  const installerKind = resolveWindowsInstallerKind(sourcePath);
+  const publishedName = `MSCQR-Connector-Windows-${version}${path.extname(sourcePath).toLowerCase()}`;
+  const publishedPath = path.join(windowsReleaseDir, publishedName);
+
+  if (path.resolve(sourcePath) !== path.resolve(publishedPath)) {
+    fs.copyFileSync(sourcePath, publishedPath);
+  }
+
+  return {
+    artifactPath: publishedPath,
+    installerKind,
+    trustLevel: installerKind === "zip" ? "unsigned" : "trusted",
+    label: installerKind === "zip" ? "Windows setup package" : "Windows installer",
+    notes:
+      installerKind === "zip"
+        ? [
+            "Extract the ZIP package on the Windows computer that will print.",
+            "Run Install Connector.cmd once to install, auto-start, and locally verify the connector.",
+            "Windows Smart App Control can block this unsigned setup package until a signed Windows installer is published.",
+          ]
+        : [
+            "Run the signed Windows installer once on the Windows computer that will print.",
+            "The installer should install the connector, configure auto-start, and verify local printer readiness.",
+          ],
+  };
+};
+
+const updateManifest = (macArtifact, windowsArtifact) => {
   ensureDir(releaseRoot);
   const manifestPath = path.join(releaseRoot, "manifest.json");
   let existing = {
@@ -468,22 +527,25 @@ const updateManifest = (macArtifact, windowsZipPath) => {
     existing = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   }
 
-  const windowsRelativePath = path.relative(releaseRoot, windowsZipPath).replace(/\\/g, "/");
+  const windowsRelativePath = path.relative(releaseRoot, windowsArtifact.artifactPath).replace(/\\/g, "/");
 
   const platforms = {
     windows: {
-      label: "Windows package",
-      installerKind: "zip",
-      filename: path.basename(windowsZipPath),
+      label: windowsArtifact.label,
+      installerKind: windowsArtifact.installerKind,
+      trustLevel: windowsArtifact.trustLevel,
+      filename: path.basename(windowsArtifact.artifactPath),
       relativePath: windowsRelativePath,
-      contentType: "application/zip",
+      contentType:
+        windowsArtifact.installerKind === "msi"
+          ? "application/x-msi"
+          : windowsArtifact.installerKind === "exe"
+            ? "application/vnd.microsoft.portable-executable"
+            : "application/zip",
       architecture: "x64",
-      bytes: fs.statSync(windowsZipPath).size,
-      sha256: sha256ForFile(windowsZipPath),
-      notes: [
-        "Extract the ZIP package on the Windows computer that will print.",
-        "Run Install Connector.cmd once to install, auto-start, and locally verify the connector.",
-      ],
+      bytes: fs.statSync(windowsArtifact.artifactPath).size,
+      sha256: sha256ForFile(windowsArtifact.artifactPath),
+      notes: windowsArtifact.notes,
     },
   };
 
@@ -511,8 +573,13 @@ const updateManifest = (macArtifact, windowsZipPath) => {
     summary: "Install once on the printing computer, then the MSCQR Connector starts automatically in the background.",
     notes: [
       "Use the Mac package on the Mac that is connected to the printer.",
-      "Use the Windows package on the Windows PC that is connected to the printer.",
+      windowsArtifact.trustLevel === "trusted"
+        ? "Use the signed Windows installer on the Windows PC that is connected to the printer."
+        : "Use the Windows setup package on the Windows PC that is connected to the printer.",
       "Windows installation now verifies local printer readiness before claiming success and opens Printer Setup automatically when attention is still needed.",
+      ...(windowsArtifact.trustLevel === "unsigned"
+        ? ["Windows Smart App Control can block the unsigned Windows setup package until a signed Windows installer is published."]
+        : []),
     ],
     platforms,
   };
@@ -548,12 +615,16 @@ const main = async () => {
   const binaries = buildSelfContainedBinaries(binariesDir);
   const macArtifact = buildMacPackage(binaries, stagingRoot);
   const windowsZipPath = await buildWindowsPackage(binaries, stagingRoot);
+  const windowsArtifact = publishWindowsArtifact(windowsZipPath);
 
-  updateManifest(macArtifact, windowsZipPath);
+  updateManifest(macArtifact, windowsArtifact);
 
   console.log("");
   console.log(`Created macOS package: ${macArtifact.pkgPath}`);
-  console.log(`Created Windows package: ${windowsZipPath}`);
+  console.log(`Created Windows setup package: ${windowsZipPath}`);
+  if (path.resolve(windowsArtifact.artifactPath) !== path.resolve(windowsZipPath)) {
+    console.log(`Published Windows installer artifact: ${windowsArtifact.artifactPath}`);
+  }
   console.log(`Updated manifest: ${path.join(releaseRoot, "manifest.json")}`);
 
   if (!macArtifact.signed) {

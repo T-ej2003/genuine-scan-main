@@ -4,7 +4,8 @@ import { z } from "zod";
 
 const connectorPlatformSchema = z.object({
   label: z.string().min(2),
-  installerKind: z.enum(["pkg", "zip", "exe"]),
+  installerKind: z.enum(["pkg", "zip", "exe", "msi"]),
+  trustLevel: z.enum(["trusted", "unsigned"]).default("trusted"),
   filename: z.string().min(3),
   relativePath: z.string().min(3),
   contentType: z.string().min(3),
@@ -83,6 +84,7 @@ const toPublicPlatform = (
     platform: platformKey,
     label: platform.label,
     installerKind: platform.installerKind,
+    trustLevel: platform.trustLevel,
     filename: platform.filename,
     architecture: platform.architecture,
     bytes: platform.bytes,

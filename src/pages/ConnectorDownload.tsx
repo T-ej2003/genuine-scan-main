@@ -26,7 +26,8 @@ import apiClient from "@/lib/api-client";
 type ConnectorPlatformRelease = {
   platform: "macos" | "windows";
   label: string;
-  installerKind: "pkg" | "zip" | "exe";
+  installerKind: "pkg" | "zip" | "exe" | "msi";
+  trustLevel: "trusted" | "unsigned";
   filename: string;
   architecture: string;
   bytes: number;
@@ -160,12 +161,35 @@ const platformCopy: Record<
   },
   windows: {
     title: "Windows installer",
-    description: "Download the Windows ZIP, extract it to a normal folder, then run Install Printer Helper once on the printing computer.",
-    action: "Download for Windows",
+    description: "Run the signed Windows installer once on the computer that is connected to the printer.",
+    action: "Download Windows installer",
     icon: MonitorSmartphone,
-    helper: "Extract first, then install. The helper starts with that Windows user and checks whether the local printer is really ready.",
+    helper: "Signed Windows installer with automatic background startup and local printer readiness checks.",
     iconSurfaceClass: "bg-sky-100 text-sky-700",
   },
+};
+
+const getDownloadCardCopy = (
+  item: ConnectorPlatformRelease,
+): Pick<DownloadCard, "title" | "description" | "action" | "helper" | "icon" | "iconSurfaceClass"> => {
+  if (item.platform === "macos") {
+    return platformCopy.macos;
+  }
+
+  if (item.trustLevel === "unsigned") {
+    return {
+      title: "Windows setup package",
+      description:
+        "Download the Windows setup package, extract it to a normal folder, then run Install Connector.cmd on the printing computer.",
+      action: "Download Windows setup package",
+      icon: MonitorSmartphone,
+      helper:
+        "This is the current unsigned Windows package. Smart App Control can block it until a signed Windows installer is published.",
+      iconSurfaceClass: "bg-amber-100 text-amber-800",
+    };
+  }
+
+  return platformCopy.windows;
 };
 
 const workspaceHighlights = [
@@ -182,13 +206,13 @@ const workspaceHighlights = [
   {
     icon: Printer,
     title: "Cleaner rollout",
-    detail: "Published installers, setup help, and the live version number all stay on one page without the cramped split-screen shell.",
+    detail: "Published packages, setup help, and the live version number all stay on one page without the cramped split-screen shell.",
   },
 ];
 
 const setupSteps = [
   "Open this page on the same computer that is already connected to the printer.",
-  "Choose the Mac or Windows installer that matches that computer.",
+  "Choose the Mac or Windows package that matches that computer.",
   "Run the installer once. The printer helper will start automatically at sign-in after that.",
   "The installer verifies local printer readiness before it tells you setup is complete.",
   "If the printer still needs OS-side attention, MSCQR opens Printer Setup and keeps the helper installed.",
@@ -272,7 +296,7 @@ export default function ConnectorDownload() {
 
         return {
           ...item,
-          ...platformCopy[platformKey],
+          ...getDownloadCardCopy(item),
           recommended: detectedPlatform === platformKey,
           href: normalizeDownloadHref(item.downloadUrl, item.downloadPath),
         };
@@ -291,6 +315,7 @@ export default function ConnectorDownload() {
   );
 
   const missingDetectedPlatformRelease = detectedPlatform !== "unknown" && !detectedCard;
+  const recommendedCardIsUnsignedWindows = recommendedCard?.platform === "windows" && recommendedCard.trustLevel === "unsigned";
 
   const detectedPlatformLabel =
     detectedPlatform === "macos"
@@ -411,7 +436,7 @@ export default function ConnectorDownload() {
                     </h1>
                     <p className="max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
                       This page is now dedicated to installation only: more room, less congestion, and a direct download
-                      flow for the latest published installer packages. Open it on the printer computer, install once, and keep
+                      flow for the latest published printer-helper packages. Open it on the printer computer, install once, and keep
                       the rest of the workflow inside MSCQR.
                     </p>
                   </div>
@@ -449,8 +474,8 @@ export default function ConnectorDownload() {
                   </h2>
                   <p className="text-base leading-7 text-slate-600">
                     Open this page on the same Mac or Windows computer that is already connected to the printer. Choose
-                    the installer below, run it once, and the printer helper starts automatically every time that user signs
-                    in after that. Windows setup now checks the local printer before it says the computer is ready.
+                    the package below, run it once, and the printer helper starts automatically every time that user signs
+                    in after that. Windows setup checks the local printer before it says the computer is ready.
                   </p>
                 </div>
 
@@ -466,6 +491,18 @@ export default function ConnectorDownload() {
                       {detectedPlatform === "macos"
                         ? "MSCQR should not send a Windows download to this Mac. If this Mac already has the printer helper and the printer is working, keep using the current helper until the signed Mac update is published."
                         : "Use the setup guide for now and install the helper only when the matching device download is published."}
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+
+                {recommendedCardIsUnsignedWindows ? (
+                  <Alert className="mt-5 border-amber-200 bg-amber-50 text-amber-950">
+                    <AlertCircle className="h-4 w-4 text-amber-700" />
+                    <AlertTitle>Windows can block this unsigned setup package</AlertTitle>
+                    <AlertDescription>
+                      Smart App Control can block the current Windows download because it is a ZIP with a setup script, not a
+                      signed Windows installer yet. Extract it fully first. If Windows still blocks <strong>Install Connector.cmd</strong>,
+                      stop there and use a signed Windows rollout instead of retrying the blocked file.
                     </AlertDescription>
                   </Alert>
                 ) : null}
@@ -503,7 +540,7 @@ export default function ConnectorDownload() {
                     <Button asChild size="lg" className="sm:min-w-[240px]">
                       <a href={recommendedCard.href} data-testid={`download-printer-helper-${recommendedCard.platform}`}>
                         <Download className="h-4 w-4" />
-                        Get installer for this device
+                        {recommendedCard.action}
                       </a>
                     </Button>
                   ) : missingDetectedPlatformRelease ? (
@@ -585,12 +622,14 @@ export default function ConnectorDownload() {
                             <div className="space-y-4">
                               <p className="text-sm leading-6 text-slate-600">{item.helper}</p>
 
-                              {item.platform === "windows" && item.installerKind === "zip" ? (
+                              {item.platform === "windows" && item.trustLevel === "unsigned" ? (
                                 <Alert className="border-amber-200 bg-amber-50 text-amber-950">
                                   <AlertCircle className="h-4 w-4 text-amber-700" />
-                                  <AlertTitle>Important for Windows</AlertTitle>
+                                  <AlertTitle>Windows can block this unsigned setup package</AlertTitle>
                                   <AlertDescription>
-                                    Extract the ZIP fully before running <strong>Install Printer Helper.cmd</strong>. Do not run it from the ZIP preview in File Explorer. The installer will tell you whether printing is ready, needs printer attention, or failed.
+                                    Extract the ZIP fully before running <strong>Install Connector.cmd</strong>. Do not run it from the ZIP
+                                    preview in File Explorer. If Smart App Control still blocks it, stop there and use a signed Windows
+                                    installer rollout instead of retrying the blocked file.
                                   </AlertDescription>
                                 </Alert>
                               ) : null}
