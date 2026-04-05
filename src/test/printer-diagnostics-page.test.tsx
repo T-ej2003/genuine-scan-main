@@ -132,14 +132,20 @@ describe("PrinterDiagnostics managed printer controls", () => {
       expect(vi.mocked(apiClient.listRegisteredPrinters)).toHaveBeenCalled();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /register factory printer/i }));
+    fireEvent.click(screen.getAllByRole("button", { name: /open network routes/i })[0]);
 
     await waitFor(() => {
-      expect(screen.getByText("Create factory label printer")).toBeInTheDocument();
+      expect(screen.getByText("Network printer routes")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /new factory route/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Managed network setup/i)).toBeInTheDocument();
     });
 
     expect(screen.getByRole("button", { name: /save setup/i })).toBeInTheDocument();
-    expect(screen.getByText(/Save a raw TCP endpoint for ZPL, TSPL, EPL, or CPCL dispatch/i)).toBeInTheDocument();
+    expect(screen.getByText(/Save a controlled printer route for/i)).toBeInTheDocument();
   });
 
   it("can prefill the network route form from an auto-detected raw TCP printer", async () => {
@@ -184,7 +190,7 @@ describe("PrinterDiagnostics managed printer controls", () => {
     fireEvent.click(screen.getByRole("button", { name: /use detected route/i }));
 
     await waitFor(() => {
-      expect(screen.getByText("Create factory label printer")).toBeInTheDocument();
+      expect(screen.getByText(/Managed network setup/i)).toBeInTheDocument();
     });
 
     expect(screen.getByDisplayValue("192.168.1.55")).toBeInTheDocument();

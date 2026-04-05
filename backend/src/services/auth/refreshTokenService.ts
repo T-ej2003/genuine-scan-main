@@ -1,4 +1,5 @@
 import prisma from "../../config/database";
+import { buildTokenHashCandidates } from "../../utils/security";
 import { hashRefreshToken, getRefreshTokenTtlDays, newRefreshToken } from "./tokenService";
 
 const addDays = (d: Date, days: number) => new Date(d.getTime() + days * 24 * 60 * 60 * 1000);
@@ -9,6 +10,8 @@ export const createRefreshToken = async (input: {
   rawToken: string;
   ipHash: string | null;
   userAgent: string | null;
+  authenticatedAt?: Date | null;
+  mfaVerifiedAt?: Date | null;
   now?: Date;
 }) => {
   const now = input.now || new Date();
@@ -23,6 +26,8 @@ export const createRefreshToken = async (input: {
       expiresAt,
       createdIpHash: input.ipHash,
       createdUserAgent: input.userAgent,
+      authenticatedAt: input.authenticatedAt || now,
+      mfaVerifiedAt: input.mfaVerifiedAt || null,
       lastUsedAt: now,
     },
   });
@@ -36,11 +41,11 @@ export const revokeRefreshTokenByRaw = async (input: {
   now?: Date;
 }) => {
   const now = input.now || new Date();
-  const tokenHash = hashRefreshToken(input.rawToken);
+  const tokenHashCandidates = buildTokenHashCandidates(input.rawToken);
 
   await prisma.refreshToken.updateMany({
     where: {
-      tokenHash,
+      tokenHash: { in: tokenHashCandidates },
       revokedAt: null,
     },
     data: {
@@ -70,6 +75,73 @@ export const revokeAllUserRefreshTokens = async (input: {
   });
 };
 
+export const findRefreshTokenByRaw = async (rawToken: string) => {
+  const tokenHashCandidates = buildTokenHashCandidates(rawToken);
+  return prisma.refreshToken.findFirst({
+    where: {
+      tokenHash: { in: tokenHashCandidates },
+    },
+    select: {
+      id: true,
+      userId: true,
+      orgId: true,
+      expiresAt: true,
+      createdAt: true,
+      createdIpHash: true,
+      createdUserAgent: true,
+      authenticatedAt: true,
+      mfaVerifiedAt: true,
+      lastUsedAt: true,
+      revokedAt: true,
+      revokedReason: true,
+    },
+  });
+};
+
+export const listActiveRefreshTokensForUser = async (userId: string) =>
+  prisma.refreshToken.findMany({
+    where: {
+      userId,
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    orderBy: [{ createdAt: "desc" }],
+    select: {
+      id: true,
+      userId: true,
+      expiresAt: true,
+      createdAt: true,
+      createdIpHash: true,
+      createdUserAgent: true,
+      authenticatedAt: true,
+      mfaVerifiedAt: true,
+      lastUsedAt: true,
+    },
+  });
+
+export const revokeRefreshTokenById = async (input: {
+  sessionId: string;
+  userId: string;
+  reason: string;
+  now?: Date;
+}) => {
+  const now = input.now || new Date();
+  const updated = await prisma.refreshToken.updateMany({
+    where: {
+      id: input.sessionId,
+      userId: input.userId,
+      revokedAt: null,
+    },
+    data: {
+      revokedAt: now,
+      revokedReason: input.reason,
+      lastUsedAt: now,
+    },
+  });
+
+  return updated.count > 0;
+};
+
 export const rotateRefreshToken = async (input: {
   rawToken: string;
   ipHash: string | null;
@@ -82,6 +154,8 @@ export const rotateRefreshToken = async (input: {
       orgId: string | null;
       newRawToken: string;
       newExpiresAt: Date;
+      authenticatedAt: Date | null;
+      mfaVerifiedAt: Date | null;
     }
   | {
       ok: false;
@@ -90,11 +164,11 @@ export const rotateRefreshToken = async (input: {
     }
 > => {
   const now = input.now || new Date();
-  const presentedHash = hashRefreshToken(input.rawToken);
+  const presentedHashCandidates = buildTokenHashCandidates(input.rawToken);
 
   return prisma.$transaction(async (tx) => {
-    const tokenRow = await tx.refreshToken.findUnique({
-      where: { tokenHash: presentedHash },
+    const tokenRow = await tx.refreshToken.findFirst({
+      where: { tokenHash: { in: presentedHashCandidates } },
       select: {
         id: true,
         userId: true,
@@ -103,6 +177,8 @@ export const rotateRefreshToken = async (input: {
         expiresAt: true,
         revokedAt: true,
         replacedByTokenHash: true,
+        authenticatedAt: true,
+        mfaVerifiedAt: true,
       },
     });
 
@@ -146,6 +222,8 @@ export const rotateRefreshToken = async (input: {
         expiresAt: newExpiresAt,
         createdIpHash: input.ipHash,
         createdUserAgent: input.userAgent,
+        authenticatedAt: tokenRow.authenticatedAt || now,
+        mfaVerifiedAt: tokenRow.mfaVerifiedAt || null,
         lastUsedAt: now,
       },
     });
@@ -166,7 +244,8 @@ export const rotateRefreshToken = async (input: {
       orgId: tokenRow.orgId,
       newRawToken,
       newExpiresAt,
+      authenticatedAt: tokenRow.authenticatedAt || now,
+      mfaVerifiedAt: tokenRow.mfaVerifiedAt || null,
     } as const;
   });
 };
-

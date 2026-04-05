@@ -31,6 +31,8 @@ describe("Index page navigation", () => {
     fireEvent.click(supportButton);
 
     expect(supportButton).toHaveAttribute("aria-current", "true");
-    expect(screen.getByText("Viewing Support")).toBeInTheDocument();
+    expect(screen.getByText("Current focus")).toBeInTheDocument();
+    expect(screen.getByText("Response path")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Trust Center" })).toBeInTheDocument();
   });
 });

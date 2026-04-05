@@ -1,6 +1,7 @@
 import cors from "cors";
 import express from "express";
 import os from "os";
+import { z } from "zod";
 
 import {
   buildCapabilitySummary,
@@ -10,15 +11,18 @@ import {
   type LocalAgentPrinter,
   type LocalAgentSetupVerification,
 } from "./cups";
-import { printLabel } from "./render";
 import {
   loadAgentState,
   mergeCalibrationProfile,
   saveAgentState,
+  setAgentBackendUrl,
   type AgentState,
   type CalibrationProfile,
 } from "./state";
 import { startGatewayWorker } from "./gateway";
+import { startDirectPrintWorker } from "./directPrintWorker";
+import { buildPrinterAgentHeartbeatPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
+import { randomOpaqueToken } from "../utils/security";
 
 const app = express();
 
@@ -38,6 +42,11 @@ type AgentSnapshot = {
   error: string | null;
   agentId: string;
   deviceFingerprint: string;
+  publicKeyPem: string;
+  backendConfigured: boolean;
+  heartbeatNonce: string;
+  heartbeatIssuedAt: string;
+  heartbeatSignature: string;
   capabilitySummary: ReturnType<typeof buildCapabilitySummary>;
   printers: LocalAgentPrinter[];
   calibrationProfile: CalibrationProfile | null;
@@ -129,6 +138,13 @@ const buildSnapshot = async (forceRefresh = false): Promise<{ state: AgentState;
     error,
     agentId: state.agentId,
     deviceFingerprint: state.deviceFingerprint,
+    publicKeyPem: state.publicKeyPem,
+    backendConfigured: Boolean(state.backendUrl || process.env.PRINT_AGENT_BACKEND_URL || process.env.PRINT_GATEWAY_BACKEND_URL),
+    ...buildSignedHeartbeat({
+      state,
+      printerId: selectedPrinter?.printerId || null,
+      connected,
+    }),
     capabilitySummary: buildCapabilitySummary(printers, selection.printerId),
     printers,
     calibrationProfile: selectedPrinter ? state.calibrationProfiles[selectedPrinter.printerId] || null : null,
@@ -145,6 +161,30 @@ const buildSnapshot = async (forceRefresh = false): Promise<{ state: AgentState;
 
 const invalidateInventoryCache = () => {
   inventoryCache = null;
+};
+
+const buildSignedHeartbeat = (params: {
+  state: AgentState;
+  printerId: string | null;
+  connected: boolean;
+}) => {
+  const heartbeatNonce = randomOpaqueToken(12);
+  const heartbeatIssuedAt = new Date().toISOString();
+  const payload = buildPrinterAgentHeartbeatPayload({
+    userId: "manufacturer-browser-heartbeat",
+    agentId: params.state.agentId,
+    deviceFingerprint: params.state.deviceFingerprint,
+    printerId: params.printerId || "unknown-printer",
+    connected: params.connected,
+    heartbeatNonce,
+    heartbeatIssuedAt,
+  });
+
+  return {
+    heartbeatNonce,
+    heartbeatIssuedAt,
+    heartbeatSignature: signPrinterAgentPayload(params.state.privateKeyPem, payload),
+  };
 };
 
 const requirePrinter = async (printerId: string | null | undefined) => {
@@ -267,68 +307,46 @@ const saveCalibration = async (req: express.Request, res: express.Response) => {
 app.post("/printer/calibration", saveCalibration);
 app.post("/printers/calibration", saveCalibration);
 
-app.post("/print", async (req, res) => {
+const backendConfigSchema = z
+  .object({
+    backendUrl: z.string().trim().url().max(500),
+  })
+  .strict();
+
+app.post("/backend/config", async (req, res) => {
   try {
-    const code = String(req.body?.code || "").trim();
-    const scanUrl = String(req.body?.scanUrl || "").trim();
-    if (!code || !scanUrl) {
-      return res.status(400).json({ success: false, error: "code and scanUrl are required" });
+    const parsed = backendConfigSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "backendUrl is required" });
     }
 
-    const printerId = String(req.body?.printerId || "").trim() || null;
-    const { state, printer } = await requirePrinter(printerId);
-
-    let nextState = state;
-    if (req.body?.printerId && req.body.printerId !== state.selectedPrinterId) {
-      nextState = {
-        ...state,
-        selectedPrinterId: printer.printerId,
-      };
-    }
-    if (req.body?.calibrationProfile && typeof req.body.calibrationProfile === "object") {
-      nextState = mergeCalibrationProfile(nextState, printer.printerId, req.body.calibrationProfile);
-    }
-    if (nextState !== state) {
-      await saveAgentState(nextState);
-      invalidateInventoryCache();
-    }
-
-    const result = await printLabel({
-      printerId: printer.printerId,
-      printerName: printer.printerName,
-      printerLanguages: printer.languages,
-      calibrationProfile: nextState.calibrationProfiles[printer.printerId] || null,
-      request: {
-        code,
-        scanUrl,
-        payloadType: req.body?.payloadType || null,
-        payloadContent: req.body?.payloadContent || null,
-        payloadHash: req.body?.payloadHash || null,
-        previewLabel: req.body?.previewLabel || null,
-        copies: Number(req.body?.copies || 1) || 1,
-        printPath: req.body?.printPath || null,
-        labelLanguage: req.body?.labelLanguage || null,
-        mediaSize: req.body?.mediaSize || null,
-      },
-    });
+    const state = await loadAgentState();
+    const nextState = setAgentBackendUrl(state, parsed.data.backendUrl);
+    await saveAgentState(nextState);
+    invalidateInventoryCache();
 
     return res.json({
       success: true,
-      queued: true,
-      printerName: result.printerName,
-      jobRef: result.jobRef,
-      printPath: result.printPath,
-      labelLanguage: result.labelLanguage,
+      backendUrl: nextState.backendUrl,
     });
   } catch (error: any) {
-    return res.status(error?.statusCode || 500).json({
+    return res.status(500).json({
       success: false,
-      error: error?.message || "Local print failed.",
+      error: error?.message || "Could not save backend connection details.",
     });
   }
+});
+
+app.post("/print", async (_req, res) => {
+  return res.status(410).json({
+    success: false,
+    error:
+      "Legacy browser-submitted local printing has been disabled. Create a controlled MSCQR print job so the connector can claim approved work directly from the server.",
+  });
 });
 
 app.listen(PORT, HOST, () => {
   console.log(`MSCQR local print agent listening on http://${HOST}:${PORT}`);
   startGatewayWorker();
+  startDirectPrintWorker();
 });

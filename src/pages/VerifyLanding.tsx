@@ -86,7 +86,7 @@ export default function VerifyLanding() {
   const handleCameraCapture = async (file: File) => {
     if (!file) return;
     if (!cameraAssistSupported) {
-      setCameraError("Camera QR decode is not supported in this browser. Enter the code manually.");
+      setCameraError("Camera code scanning is not supported in this browser. Enter the code manually.");
       return;
     }
 
@@ -95,7 +95,7 @@ export default function VerifyLanding() {
     try {
       const Detector = browserWindow?.BarcodeDetector;
       if (!Detector) {
-        setCameraError("Camera QR decode is not supported in this browser. Enter the code manually.");
+        setCameraError("Camera code scanning is not supported in this browser. Enter the code manually.");
         return;
       }
       const detector = new Detector({ formats: ["qr_code"] });
@@ -103,12 +103,12 @@ export default function VerifyLanding() {
       const [result] = await detector.detect(bitmap);
       const rawValue = String(result?.rawValue || "").trim();
       if (!rawValue) {
-        setCameraError("No QR code detected in the captured image. Try again with better lighting.");
+        setCameraError("No code was detected in the captured image. Try again with better lighting.");
         return;
       }
 
       setCode(rawValue);
-      toast({ title: "QR captured", description: "Code detected successfully. Starting verification." });
+      toast({ title: "Code captured", description: "Code detected successfully. Starting verification." });
       apiClient
         .captureRouteTransition({
           routeFrom: "/verify",
@@ -163,7 +163,7 @@ export default function VerifyLanding() {
           <CardTitle className="flex items-center gap-2 text-[#4f5b75]">
             <QrCode className="h-5 w-5" /> Verify a Product
           </CardTitle>
-          <CardDescription>Paste a QR code value (or scan to open the verify URL directly).</CardDescription>
+          <CardDescription>Paste a code value (or scan to open the verify URL directly).</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <Input
@@ -183,7 +183,7 @@ export default function VerifyLanding() {
             {isRedirecting ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                <span className="sr-only">{scanStage === 0 ? "Scanning QR" : "Preparing verification"}</span>
+                <span className="sr-only">{scanStage === 0 ? "Scanning code" : "Preparing verification"}</span>
               </>
             ) : (
               "Verify"
@@ -212,7 +212,7 @@ export default function VerifyLanding() {
             {cameraDecoding ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Decoding QR image...
+                Decoding code image...
               </>
             ) : (
               <>

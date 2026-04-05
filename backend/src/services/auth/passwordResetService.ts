@@ -1,7 +1,7 @@
 import prisma from "../../config/database";
 import { UserStatus } from "@prisma/client";
 import { hashPassword } from "./passwordService";
-import { hashToken, randomOpaqueToken } from "../../utils/security";
+import { buildTokenHashCandidates, hashToken, randomOpaqueToken } from "../../utils/security";
 import { sendAuthEmail } from "./authEmailService";
 import { createAuditLog } from "../auditService";
 
@@ -100,12 +100,12 @@ export const resetPasswordWithToken = async (input: {
   ipHash: string | null;
   userAgent: string | null;
 }) => {
-  const tokenHash = hashToken(input.rawToken);
   const now = new Date();
+  const tokenHashCandidates = buildTokenHashCandidates(input.rawToken);
 
   const out = await prisma.$transaction(async (tx) => {
-    const pr = await tx.passwordReset.findUnique({
-      where: { tokenHash },
+    const pr = await tx.passwordReset.findFirst({
+      where: { tokenHash: { in: tokenHashCandidates } },
       select: { id: true, userId: true, usedAt: true, expiresAt: true },
     });
 
@@ -119,6 +119,7 @@ export const resetPasswordWithToken = async (input: {
       data: {
         passwordHash,
         status: UserStatus.ACTIVE,
+        emailVerifiedAt: now,
         failedLoginAttempts: 0,
         lockedUntil: null,
       },
@@ -153,4 +154,3 @@ export const resetPasswordWithToken = async (input: {
 
   return out;
 };
-

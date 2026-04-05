@@ -5,20 +5,19 @@ import { QRStatus, UserRole } from "@prisma/client";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { createAuditLog } from "../services/auditService";
-import { generateQRCode, markBatchAsPrinted, buildVerifyUrl, getQRStats } from "../services/qrService";
+import { getQRStats } from "../services/qrService";
 import { allocateQrRange, getNextLicenseeQrNumber, lockLicenseeAllocation } from "../services/qrAllocationService";
-import { createHash, randomBytes } from "crypto";
-import { buildScanUrl, getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
-import { resolveQrZipProfile, streamQrZipToResponse } from "../services/qrZipStreamService";
+import { getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
 import { createUserNotification } from "../services/notificationService";
 import {
-  backfillBatchLineageFromAuditLogs,
   buildLineageSuccessMessage,
   enrichBatchSummaries,
   getBatchAllocationMap as loadBatchAllocationMap,
 } from "../services/batchAllocationService";
 import { resolveScopedLicenseeAccess } from "../services/manufacturerScopeService";
 import { summarizeQrStatusCounts } from "../services/qrStatusMetrics";
+import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
+import { listLatestDecisionByQrCodeIds } from "../services/verificationDecisionReadService";
 
 /* ===================== SCHEMAS ===================== */
 
@@ -29,6 +28,7 @@ const allocateRangeSchema = z
     endNumber: z.number().int().positive(),
     receivedBatchName: z.string().trim().min(2).max(120).optional(),
   })
+  .strict()
   .refine((d) => d.endNumber >= d.startNumber, {
     message: "End number must be >= start number",
   });
@@ -40,6 +40,7 @@ const allocateLicenseeTopupSchema = z
     quantity: z.number().int().positive().max(500000).optional(),
     receivedBatchName: z.string().trim().min(2).max(120).optional(),
   })
+  .strict()
   .refine(
     (d) => {
       const hasRange = d.startNumber != null || d.endNumber != null;
@@ -60,35 +61,37 @@ const createBatchSchema = z
     name: z.string().trim().min(2).max(120),
     quantity: z.number().int().positive().max(500000),
     manufacturerId: z.string().uuid().optional(),
-  });
+  })
+  .strict();
 
 const assignManufacturerSchema = z.object({
   manufacturerId: z.string().uuid(),
   quantity: z.number().int().positive().max(500000),
   name: z.string().trim().min(2).max(120).optional(),
-});
+}).strict();
 
 const renameBatchSchema = z.object({
   name: z.string().trim().min(2).max(120),
-});
+}).strict();
 
 const bulkDeleteQRCodesSchema = z
   .object({
     ids: z.array(z.string().uuid()).optional(),
     codes: z.array(z.string().min(1)).optional(),
   })
+  .strict()
   .refine((d) => (d.ids && d.ids.length) || (d.codes && d.codes.length), {
     message: "Provide ids or codes to delete",
   });
 
 const bulkDeleteBatchesSchema = z.object({
   ids: z.array(z.string().uuid()).min(1, "Provide batch ids"),
-});
+}).strict();
 
 const generateQRCodesSchema = z.object({
   licenseeId: z.string().uuid(),
   quantity: z.number().int().positive().max(200000),
-});
+}).strict();
 
 const generateSignedLinksSchema = z.object({
   codes: z.array(z.string().trim().min(2).max(128)).min(1).max(2000),
@@ -96,7 +99,19 @@ const generateSignedLinksSchema = z.object({
 
 const blockQRSschema = z.object({
   reason: z.string().trim().max(500).optional(),
-});
+}).strict();
+
+const batchIdParamSchema = z.object({
+  id: z.string().uuid("Invalid batch id"),
+}).strict();
+
+const qrCodeIdParamSchema = z.object({
+  id: z.string().uuid("Invalid QR id"),
+}).strict();
+
+const licenseeIdParamSchema = z.object({
+  licenseeId: z.string().uuid("Invalid licensee id"),
+}).strict();
 
 /* ===================== HELPERS ===================== */
 
@@ -111,22 +126,6 @@ const isManufacturerRole = (role?: UserRole | null) =>
   role === UserRole.MANUFACTURER ||
   role === UserRole.MANUFACTURER_ADMIN ||
   role === UserRole.MANUFACTURER_USER;
-
-const safeFilePart = (s: string) => {
-  return (
-    String(s || "")
-      .trim()
-      .replace(/[^\w.-]+/g, "_")
-      .replace(/^_+|_+$/g, "")
-      .slice(0, 80) || "file"
-  );
-};
-
-const buildPublicQrUrl = (code: string, baseUrl?: string) => {
-  const base = String(baseUrl || "").trim().replace(/\/+$/, "");
-  if (base) return `${base}/verify/${encodeURIComponent(code)}`;
-  return buildVerifyUrl(code);
-};
 
 const escapeCsv = (v: any) => {
   if (v === null || v === undefined) return "";
@@ -223,11 +222,11 @@ export const allocateQRRangeForLicensee = async (req: AuthRequest, res: Response
     const auth = ensureAuth(req);
     if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    const licenseeIdParsed = z.string().uuid().safeParse(req.params.licenseeId);
-    if (!licenseeIdParsed.success) {
-      return res.status(400).json({ success: false, error: "Invalid licenseeId" });
+    const paramsParsed = licenseeIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid licenseeId" });
     }
-    const licenseeId = licenseeIdParsed.data;
+    const { licenseeId } = paramsParsed.data;
 
     const parsed = allocateLicenseeTopupSchema.safeParse(req.body || {});
     if (!parsed.success) {
@@ -476,7 +475,11 @@ export const deleteBatch = async (req: AuthRequest, res: Response) => {
     const auth = ensureAuth(req);
     if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    const batchId = req.params.id;
+    const paramsParsed = batchIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid batch id" });
+    }
+    const batchId = paramsParsed.data.id;
 
     const batch = await prisma.batch.findUnique({
       where: { id: batchId },
@@ -662,7 +665,11 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const batchId = req.params.id;
+    const paramsParsed = batchIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid batch id" });
+    }
+    const batchId = paramsParsed.data.id;
 
     const batch = await prisma.batch.findUnique({
       where: { id: batchId },
@@ -894,8 +901,11 @@ export const renameBatch = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const batchId = String(req.params.id || "").trim();
-    if (!batchId) return res.status(400).json({ success: false, error: "Missing batch id" });
+    const paramsParsed = batchIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid batch id" });
+    }
+    const batchId = paramsParsed.data.id;
 
     const existing = await prisma.batch.findUnique({
       where: { id: batchId },
@@ -939,202 +949,37 @@ export const renameBatch = async (req: AuthRequest, res: Response) => {
 /* ===================== PRINT ===================== */
 
 export const markPrinted = async (req: AuthRequest, res: Response) => {
-  try {
-    const code = String(req.params.code || "").trim();
-    if (!code) return res.status(400).json({ success: false, error: "Missing code" });
-
-    const qr = await prisma.qRCode.findUnique({
-      where: { code },
-      include: { batch: true },
-    });
-
-    if (!qr?.batch) return res.status(404).json({ success: false, error: "QR or batch not found" });
-
-    const count = await markBatchAsPrinted(qr.batch.id, req.user!.userId);
-    return res.json({ success: true, data: { count } });
-  } catch (e: any) {
-    return res.status(400).json({ success: false, error: e.message || "Bad request" });
-  }
+  return res.status(410).json({
+    success: false,
+    error:
+      "Legacy manual print confirmation is retired. Start a controlled MSCQR print job and let the printer helper or registered printer confirm completion.",
+  });
 };
 
 export const confirmBatchPrint = async (req: AuthRequest, res: Response) => {
-  try {
-    const batchId = req.params.id;
-
-    const batch = await prisma.batch.findFirst({
-      where: { id: batchId, manufacturerId: req.user!.userId },
-      select: { id: true },
-    });
-
-    if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
-
-    const count = await markBatchAsPrinted(batch.id, req.user!.userId);
-    return res.json({ success: true, data: { count } });
-  } catch (e: any) {
-    return res.status(400).json({ success: false, error: e.message || "Bad request" });
-  }
+  return res.status(410).json({
+    success: false,
+    error:
+      "Legacy batch print confirmation is retired. Use the managed MSCQR print workflow so printed labels are confirmed through the print job lifecycle.",
+  });
 };
 
 /* ===================== MANUFACTURER PRINT PACK (BATCH) ===================== */
 
 export const createBatchPrintToken = async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.user?.userId;
-    if (!userId) return res.status(401).json({ success: false, error: "Not authenticated" });
-
-    const id = req.params.id;
-    const batch = await prisma.batch.findFirst({
-      where: { id, manufacturerId: userId },
-      select: { id: true, printedAt: true, printPackDownloadedAt: true },
-    });
-    if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
-
-    if (batch.printPackDownloadedAt || batch.printedAt) {
-      return res.status(409).json({ success: false, error: "Print pack already downloaded/printed" });
-    }
-
-    const token = randomBytes(32).toString("base64url");
-    const tokenHash = createHash("sha256").update(token).digest("hex");
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-
-    await prisma.$transaction(async (tx) => {
-      await tx.batchPrintPackToken.deleteMany({
-        where: { batchId: batch.id, usedAt: null },
-      });
-      await tx.batchPrintPackToken.create({
-        data: {
-          tokenHash,
-          batchId: batch.id,
-          createdByUserId: userId,
-          expiresAt,
-        },
-      });
-    });
-
-    return res.json({ success: true, data: { token, expiresAt } });
-  } catch (e: any) {
-    console.error("createBatchPrintToken error:", e);
-    return res.status(400).json({ success: false, error: e?.message || "Bad request" });
-  }
+  return res.status(410).json({
+    success: false,
+    error:
+      "Legacy batch print packs are retired. Start a controlled MSCQR print job to generate printable labels through the managed print pipeline.",
+  });
 };
 
 export const downloadBatchPrintPack = async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.user?.userId;
-    if (!userId) return res.status(401).json({ success: false, error: "Not authenticated" });
-
-    const rawToken = String(req.params.token || "").trim().replace(/\.zip$/i, "");
-    if (!rawToken) return res.status(400).json({ success: false, error: "Missing token" });
-
-    const tokenHash = createHash("sha256").update(rawToken).digest("hex");
-    const now = new Date();
-
-    const tokenRow = await prisma.batchPrintPackToken.findUnique({
-      where: { tokenHash },
-      include: {
-        batch: { include: { licensee: { select: { id: true, prefix: true } } } },
-      },
-    });
-
-    if (!tokenRow) return res.status(404).json({ success: false, error: "Token not found" });
-    if (tokenRow.usedAt) return res.status(409).json({ success: false, error: "Token already used" });
-    if (tokenRow.expiresAt.getTime() <= now.getTime()) {
-      return res.status(410).json({ success: false, error: "Token expired" });
-    }
-
-    const batch = tokenRow.batch;
-    if (!batch || batch.manufacturerId !== userId) {
-      return res.status(403).json({ success: false, error: "Access denied" });
-    }
-
-    const markUsed = await prisma.batchPrintPackToken.updateMany({
-      where: { tokenHash, usedAt: null, expiresAt: { gt: now } },
-      data: { usedAt: now },
-    });
-    if (markUsed.count === 0) {
-      return res.status(409).json({ success: false, error: "Token already used" });
-    }
-
-    const totalCodes = await prisma.qRCode.count({
-      where: { batchId: batch.id },
-    });
-    if (totalCodes === 0) {
-      return res.status(404).json({ success: false, error: "No QR codes found for this batch" });
-    }
-
-    const publicBaseUrl = String(req.query.publicBaseUrl || "").trim();
-    const profile = resolveQrZipProfile(totalCodes);
-
-    await prisma.$transaction(async (tx) => {
-      await tx.batch.update({
-        where: { id: batch.id },
-        data: {
-          printPackDownloadedAt: now,
-          printPackDownloadedByUserId: userId,
-          printedAt: batch.printedAt || now,
-        },
-      });
-
-      await tx.qRCode.updateMany({
-        where: { batchId: batch.id, status: { in: [QRStatus.ALLOCATED, QRStatus.ACTIVE, QRStatus.DORMANT] } },
-        data: { status: QRStatus.PRINTED, printedAt: now, printedByUserId: userId },
-      });
-    });
-
-    await createAuditLog({
-      userId,
-      licenseeId: batch.licenseeId,
-      action: "DOWNLOAD_BATCH_PRINT_PACK",
-      entityType: "Batch",
-      entityId: batch.id,
-      details: { codes: totalCodes },
-      ipAddress: req.ip,
-    });
-
-    const fileName = `batch-${safeFilePart(batch.name || batch.id)}-print-pack.zip`;
-    const entries = (async function* () {
-      let cursorCode: string | undefined;
-      while (true) {
-        const rows = await prisma.qRCode.findMany({
-          where: { batchId: batch.id },
-          orderBy: { code: "asc" },
-          take: profile.dbChunkSize,
-          ...(cursorCode ? { cursor: { code: cursorCode }, skip: 1 } : {}),
-          select: { code: true },
-        });
-
-        if (rows.length === 0) break;
-
-        for (const row of rows) {
-          const urlInsideQr = buildPublicQrUrl(row.code, publicBaseUrl);
-          yield {
-            code: row.code,
-            url: urlInsideQr,
-            manifestValues: [row.code, urlInsideQr],
-          };
-        }
-
-        cursorCode = rows[rows.length - 1].code;
-      }
-    })();
-
-    await streamQrZipToResponse({
-      res,
-      fileName,
-      totalCount: totalCodes,
-      profile,
-      manifestHeader: ["code", "url"],
-      entries,
-    });
-    return;
-  } catch (e: any) {
-    console.error("downloadBatchPrintPack error:", e);
-    if (res.headersSent) {
-      res.destroy(e instanceof Error ? e : new Error(String(e?.message || "Download failed")));
-      return;
-    }
-    return res.status(400).json({ success: false, error: e?.message || "Bad request" });
-  }
+  return res.status(410).json({
+    success: false,
+    error:
+      "Legacy downloadable print packs are retired. Use the managed MSCQR print pipeline so issued labels stay tied to authoritative print state.",
+  });
 };
 
 /* ===================== ADMIN GENERATE SIGNED QRS ===================== */
@@ -1252,25 +1097,51 @@ export const blockQRCode = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Missing QR id" });
-
-    const updated = await prisma.qRCode.update({
+    const paramsParsed = qrCodeIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid QR id" });
+    }
+    const id = paramsParsed.data.id;
+    const qr = await prisma.qRCode.findUnique({
       where: { id },
-      data: { status: QRStatus.BLOCKED, blockedAt: new Date() },
+      select: { id: true, licenseeId: true, batchId: true },
     });
+    if (!qr) {
+      return res.status(404).json({ success: false, error: "QR code not found" });
+    }
 
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId: updated.licenseeId,
-      action: "BLOCKED",
+    const approval = await createSensitiveActionApproval({
+      actionKey: SENSITIVE_ACTION_KEYS.QR_BLOCK,
+      actor: {
+        userId: req.user.userId,
+        role: req.user.role,
+        orgId: req.user.orgId || null,
+        licenseeId: req.user.licenseeId || null,
+      },
+      licenseeId: qr.licenseeId,
       entityType: "QRCode",
-      entityId: updated.id,
-      details: { reason: parsed.data.reason || null, batchId: updated.batchId || null },
+      entityId: qr.id,
+      summary: {
+        reason: parsed.data.reason || null,
+        batchId: qr.batchId || null,
+      },
+      payload: {
+        qrId: qr.id,
+        reason: parsed.data.reason || null,
+      },
       ipAddress: req.ip,
+      userAgent: req.get("user-agent") || null,
     });
 
-    return res.json({ success: true, data: { id: updated.id } });
+    return res.status(202).json({
+      success: true,
+      data: {
+        approvalRequired: true,
+        approvalId: approval.id,
+        status: approval.status,
+        expiresAt: approval.expiresAt,
+      },
+    });
   } catch (e: any) {
     console.error("blockQRCode error:", e);
     return res.status(400).json({ success: false, error: e?.message || "Bad request" });
@@ -1288,8 +1159,11 @@ export const blockBatch = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Missing batch id" });
+    const paramsParsed = batchIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid batch id" });
+    }
+    const id = paramsParsed.data.id;
 
     const batch = await prisma.batch.findUnique({
       where: { id },
@@ -1297,22 +1171,37 @@ export const blockBatch = async (req: AuthRequest, res: Response) => {
     });
     if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
 
-    const updated = await prisma.qRCode.updateMany({
-      where: { batchId: batch.id },
-      data: { status: QRStatus.BLOCKED, blockedAt: new Date() },
-    });
-
-    await createAuditLog({
-      userId: req.user.userId,
+    const approval = await createSensitiveActionApproval({
+      actionKey: SENSITIVE_ACTION_KEYS.BATCH_BLOCK,
+      actor: {
+        userId: req.user.userId,
+        role: req.user.role,
+        orgId: req.user.orgId || null,
+        licenseeId: req.user.licenseeId || null,
+      },
       licenseeId: batch.licenseeId,
-      action: "BLOCKED",
       entityType: "Batch",
       entityId: batch.id,
-      details: { blockedCodes: updated.count, reason: parsed.data.reason || null },
+      summary: {
+        reason: parsed.data.reason || null,
+      },
+      payload: {
+        batchId: batch.id,
+        reason: parsed.data.reason || null,
+      },
       ipAddress: req.ip,
+      userAgent: req.get("user-agent") || null,
     });
 
-    return res.json({ success: true, data: { batchId: batch.id, blocked: updated.count } });
+    return res.status(202).json({
+      success: true,
+      data: {
+        approvalRequired: true,
+        approvalId: approval.id,
+        status: approval.status,
+        expiresAt: approval.expiresAt,
+      },
+    });
   } catch (e: any) {
     console.error("blockBatch error:", e);
     return res.status(400).json({ success: false, error: e?.message || "Bad request" });
@@ -1337,30 +1226,33 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
       where.manufacturerId = req.user.userId;
     }
 
-    await backfillBatchLineageFromAuditLogs({
-      licenseeId: where.licenseeId,
-      force: Boolean(req.query.forceLineage),
-    });
+    const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 500);
+    const offset = Math.max(0, parseInt(String(req.query.offset ?? "0"), 10) || 0);
 
-    const batches = await prisma.batch.findMany({
-      where,
-      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-      include: {
-        licensee: { select: { id: true, name: true, prefix: true } },
-        manufacturer: { select: { id: true, name: true, email: true } },
-        parentBatch: { select: { id: true, name: true } },
-        rootBatch: { select: { id: true, name: true } },
-        _count: { select: { qrCodes: true } },
-      },
-    });
+    const [batches, total] = await Promise.all([
+      prisma.batch.findMany({
+        where,
+        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+        include: {
+          licensee: { select: { id: true, name: true, prefix: true } },
+          manufacturer: { select: { id: true, name: true, email: true } },
+          parentBatch: { select: { id: true, name: true } },
+          rootBatch: { select: { id: true, name: true } },
+          _count: { select: { qrCodes: true } },
+        },
+        take: limit,
+        skip: offset,
+      }),
+      prisma.batch.count({ where }),
+    ]);
 
     if (!batches.length) {
-      return res.json({ success: true, data: batches });
+      return res.json({ success: true, data: batches, meta: { total, limit, offset } });
     }
 
     const enriched = await enrichBatchSummaries(batches as any);
 
-    return res.json({ success: true, data: enriched });
+    return res.json({ success: true, data: enriched, meta: { total, limit, offset } });
   } catch (e) {
     console.error("getBatches error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });
@@ -1397,11 +1289,6 @@ export const getBatchAllocationMap = async (req: AuthRequest, res: Response) => 
     ) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
-
-    await backfillBatchLineageFromAuditLogs({
-      licenseeId: focusBatch.licenseeId,
-      force: true,
-    });
 
     const allocationMap = await loadBatchAllocationMap(batchId, { licenseeId: focusBatch.licenseeId });
     if (!allocationMap) {
@@ -1458,148 +1345,25 @@ export const getQRCodes = async (req: AuthRequest, res: Response) => {
       }),
     ]);
 
-    return res.json({ success: true, data: { qrCodes, total, limit, offset } });
+    const decisionMap = await listLatestDecisionByQrCodeIds(qrCodes.map((row) => row.id));
+    const enrichedQRCodes = qrCodes.map((row) => ({
+      ...row,
+      latestDecision: decisionMap.get(row.id) || null,
+    }));
+
+    return res.json({ success: true, data: { qrCodes: enrichedQRCodes, total, limit, offset } });
   } catch (e: any) {
     console.error("getQRCodes error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 };
 
-const canIssueNewSignedLink = (status: QRStatus) =>
-  status === QRStatus.DORMANT ||
-  status === QRStatus.ACTIVE ||
-  status === QRStatus.ALLOCATED ||
-  status === QRStatus.ACTIVATED;
-
 export const generateSignedScanLinks = async (req: AuthRequest, res: Response) => {
-  try {
-    const role = req.user?.role;
-    const userId = req.user?.userId;
-    if (!role || !userId) return res.status(401).json({ success: false, error: "Not authenticated" });
-    if (role !== UserRole.SUPER_ADMIN && role !== UserRole.PLATFORM_SUPER_ADMIN) {
-      return res.status(403).json({ success: false, error: "Access denied" });
-    }
-
-    const parsed = generateSignedLinksSchema.safeParse(req.body || {});
-    if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
-    }
-
-    const requestedCodes = Array.from(
-      new Set(
-        parsed.data.codes
-          .map((code) => String(code || "").trim().toUpperCase())
-          .filter(Boolean)
-      )
-    );
-
-    const qrRows = await prisma.qRCode.findMany({
-      where: { code: { in: requestedCodes } },
-      select: {
-        id: true,
-        code: true,
-        status: true,
-        licenseeId: true,
-        batchId: true,
-        batch: {
-          select: {
-            manufacturerId: true,
-          },
-        },
-      },
-    });
-
-    const byCode = new Map(qrRows.map((row) => [row.code, row]));
-    const missingCodes = requestedCodes.filter((code) => !byCode.has(code));
-    if (missingCodes.length > 0) {
-      return res.status(404).json({
-        success: false,
-        error: `Some codes were not found: ${missingCodes.slice(0, 20).join(", ")}`,
-      });
-    }
-
-    const ineligible = qrRows
-      .filter((row) => !canIssueNewSignedLink(row.status))
-      .map((row) => `${row.code} (${row.status})`);
-    if (ineligible.length > 0) {
-      return res.status(409).json({
-        success: false,
-        error:
-          "Signed link generation is allowed only for unprinted lifecycle stages (DORMANT/ACTIVE/ALLOCATED/ACTIVATED). " +
-          `Blocked entries: ${ineligible.slice(0, 20).join(", ")}`,
-      });
-    }
-
-    const now = new Date();
-    const expAt = getQrTokenExpiryDate(now);
-    const links: Array<{ code: string; scanUrl: string; expiresAt: string }> = [];
-
-    await prisma.$transaction(async (tx) => {
-      for (const code of requestedCodes) {
-        const qr = byCode.get(code)!;
-        const nonce = randomNonce();
-        const payload = {
-          qr_id: qr.id,
-          batch_id: qr.batchId ?? null,
-          licensee_id: qr.licenseeId,
-          manufacturer_id: qr.batch?.manufacturerId ?? null,
-          iat: Math.floor(now.getTime() / 1000),
-          exp: Math.floor(expAt.getTime() / 1000),
-          nonce,
-        };
-        const token = signQrPayload(payload);
-        const tokenHash = hashToken(token);
-        const scanUrl = buildScanUrl(token);
-
-        const updated = await tx.qRCode.updateMany({
-          where: {
-            id: qr.id,
-            status: {
-              in: [QRStatus.DORMANT, QRStatus.ACTIVE, QRStatus.ALLOCATED, QRStatus.ACTIVATED],
-            },
-          },
-          data: {
-            tokenNonce: nonce,
-            tokenIssuedAt: now,
-            tokenExpiresAt: expAt,
-            tokenHash,
-          },
-        });
-        if (updated.count !== 1) {
-          throw new Error(`Code ${code} changed state during signed-link generation. Please retry.`);
-        }
-
-        links.push({
-          code,
-          scanUrl,
-          expiresAt: expAt.toISOString(),
-        });
-      }
-    });
-
-    await createAuditLog({
-      userId,
-      action: "GENERATED_SIGNED_LINKS",
-      entityType: "QRCode",
-      details: {
-        count: links.length,
-        codes: links.slice(0, 50).map((item) => item.code),
-      },
-      ipAddress: req.ip,
-    });
-
-    return res.json({
-      success: true,
-      data: {
-        issuedAt: now.toISOString(),
-        expiresAt: expAt.toISOString(),
-        links,
-      },
-    });
-  } catch (e: any) {
-    console.error("generateSignedScanLinks error:", e);
-    return res.status(500).json({ success: false, error: e?.message || "Internal server error" });
-  }
+  return res.status(410).json({
+    success: false,
+    error:
+      "Ad hoc signed label export is retired. Create labels through MSCQR print jobs so signed scans remain tied to controlled issuance and print confirmation.",
+  });
 };
 
 export const getStats = async (req: AuthRequest, res: Response) => {

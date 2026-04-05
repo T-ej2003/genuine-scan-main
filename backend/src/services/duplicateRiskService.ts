@@ -36,7 +36,7 @@ type OwnershipSignal = {
   isClaimed?: boolean;
   isOwnedByRequester?: boolean;
   isClaimedByAnother?: boolean;
-  matchMethod?: "user" | "device_token" | "ip_fallback" | null;
+  matchMethod?: "user" | "device_token" | null;
 };
 
 export type DuplicateRiskInput = {

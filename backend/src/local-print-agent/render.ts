@@ -45,6 +45,14 @@ const parseLpJobRef = (output: string) => {
   return match?.[1] || null;
 };
 
+const parseWindowsJobRef = (output: string, printerId: string) => {
+  const match = String(output || "").match(/JOB_ID=(\d+)/i);
+  if (match?.[1]) {
+    return `winspool:${printerId}:${match[1]}`;
+  }
+  return `winspool:${printerId}:${Date.now()}`;
+};
+
 const writeFileEnsured = async (filename: string, content: string | Buffer) => {
   await fs.mkdir(TMP_DIR, { recursive: true });
   const filePath = path.join(TMP_DIR, filename);
@@ -137,6 +145,8 @@ const printWithWindowsSpooler = async (params: {
       "$doc.PrinterSettings.PrinterName = $PrinterName",
       "if (-not $doc.PrinterSettings.IsValid) { throw \"Printer '$PrinterName' is not installed.\" }",
       "$doc.PrinterSettings.Copies = [Math]::Max(1, [Math]::Min(5, $Copies))",
+      "$beforeIds = @()",
+      "try { $beforeIds = @(Get-PrintJob -PrinterName $PrinterName -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ID) } catch { $beforeIds = @() }",
       "$paperWidth = [int][Math]::Round(($WidthMm / 25.4) * 100)",
       "$paperHeight = [int][Math]::Round(($HeightMm / 25.4) * 100)",
       "$doc.DefaultPageSettings.PaperSize = New-Object System.Drawing.Printing.PaperSize('MSCQR', $paperWidth, $paperHeight)",
@@ -165,13 +175,18 @@ const printWithWindowsSpooler = async (params: {
       "  $e.HasMorePages = $false",
       "})",
       "$doc.Print()",
+      "Start-Sleep -Milliseconds 400",
+      "$afterJobs = @()",
+      "try { $afterJobs = @(Get-PrintJob -PrinterName $PrinterName -ErrorAction SilentlyContinue | Sort-Object ID -Descending) } catch { $afterJobs = @() }",
+      "$newJob = $afterJobs | Where-Object { $beforeIds -notcontains $_.ID } | Select-Object -First 1",
+      "if (-not $newJob) { $newJob = $afterJobs | Select-Object -First 1 }",
       "$qrImage.Dispose()",
-      "Write-Output 'PRINTED'",
+      "if ($newJob) { Write-Output ('JOB_ID=' + $newJob.ID) } else { Write-Output 'PRINTED' }",
     ].join(os.EOL)
   );
 
   try {
-    await execFileAsync(
+    const result = await execFileAsync(
       "powershell.exe",
       [
         "-NoProfile",
@@ -200,7 +215,7 @@ const printWithWindowsSpooler = async (params: {
         maxBuffer: 1024 * 1024,
       }
     );
-    return `winspool-${Date.now()}`;
+    return parseWindowsJobRef(`${result.stdout || ""} ${result.stderr || ""}`, params.printerId);
   } finally {
     await fs.unlink(scriptPath).catch(() => undefined);
     await fs.unlink(qrPath).catch(() => undefined);

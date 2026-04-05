@@ -9,7 +9,7 @@ import { createAuditLog } from "../services/auditService";
 const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
-});
+}).strict();
 
 const createPolicyRuleSchema = z.object({
   name: z.string().trim().min(3).max(120),
@@ -24,8 +24,8 @@ const createPolicyRuleSchema = z.object({
   incidentPriority: z.enum(["P1", "P2", "P3", "P4"]).optional(),
   licenseeId: z.string().uuid().optional(),
   manufacturerId: z.string().uuid().optional(),
-  actionConfig: z.any().optional(),
-});
+  actionConfig: z.unknown().optional(),
+}).strict();
 
 const updatePolicyRuleSchema = createPolicyRuleSchema
   .partial()
@@ -34,7 +34,12 @@ const updatePolicyRuleSchema = createPolicyRuleSchema
     threshold: z.number().int().min(1).max(100000).optional(),
     windowMinutes: z.number().int().min(1).max(60 * 24 * 30).optional(),
   })
+  .strict()
   .refine((val) => Object.keys(val).length > 0, { message: "No fields provided" });
+
+const policyIdParamSchema = z.object({
+  id: z.string().uuid("Invalid policy id"),
+}).strict();
 
 export const listIrPolicies = async (req: AuthRequest, res: Response) => {
   try {
@@ -139,8 +144,11 @@ export const createIrPolicy = async (req: AuthRequest, res: Response) => {
 export const patchIrPolicy = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Missing policy id" });
+    const paramsParsed = policyIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid policy id" });
+    }
+    const id = paramsParsed.data.id;
 
     const parsed = updatePolicyRuleSchema.safeParse(req.body || {});
     if (!parsed.success) {
@@ -177,4 +185,3 @@ export const patchIrPolicy = async (req: AuthRequest, res: Response) => {
     return res.status(500).json({ success: false, error: "Failed to update policy" });
   }
 };
-

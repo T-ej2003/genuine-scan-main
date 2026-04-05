@@ -12,8 +12,8 @@ export type BatchWorkspaceRow = {
   printedAt: string | null;
   createdAt: string;
   updatedAt?: string;
-  licensee?: { id: string; name: string; prefix: string };
-  manufacturer?: { id: string; name: string; email: string };
+  licensee?: { id: string; name: string; prefix: string } | null;
+  manufacturer?: { id: string; name: string; email: string } | null;
   availableCodes?: number;
   unassignedRemainingCodes?: number;
   assignedCodes?: number;
@@ -48,7 +48,7 @@ export type StableBatchOverviewRow = {
   focusBatchId: string;
   sourceBatchName: string;
   sourceBatchRow: BatchWorkspaceRow | null;
-  licensee?: { id: string; name: string; prefix: string };
+  licensee?: { id: string; name: string; prefix: string } | null;
   sourceCreatedAt: string;
   sourceUpdatedAt: string;
   sourceOriginalRangeStart: string;
@@ -65,6 +65,31 @@ export type StableBatchOverviewRow = {
   manufacturerCount: number;
   allocations: BatchWorkspaceAllocation[];
   manufacturerSummary: BatchWorkspaceAllocation[];
+  printedAt?: string | null;
+};
+
+type BatchWorkspaceGroup = {
+  sourceBatchId: string;
+  focusBatchId: string;
+  sourceBatchName: string;
+  sourceBatchRow: BatchWorkspaceRow | null;
+  licensee?: { id: string; name: string; prefix: string } | null;
+  sourceCreatedAt: string;
+  sourceUpdatedAt: string;
+  sourceOriginalRangeStart: string | null;
+  sourceOriginalRangeEnd: string | null;
+  originalTotalCodes: number;
+  remainingUnassignedCodes: number;
+  remainingRangeStart: string | null;
+  remainingRangeEnd: string | null;
+  assignedCodes: number;
+  pendingPrintableCodes: number;
+  printedCodes: number;
+  redeemedCodes: number;
+  blockedCodes: number;
+  allocations: BatchWorkspaceAllocation[];
+  allocationsByManufacturer: Map<string, BatchWorkspaceAllocation>;
+  latestTouchedAt: string;
   printedAt?: string | null;
 };
 
@@ -99,37 +124,11 @@ const asNumber = (value: unknown) => {
 const batchSourceKey = (row: BatchWorkspaceRow) => String(row.rootBatchId || row.parentBatchId || row.id).trim();
 
 export const buildStableBatchOverviewRows = (rows: BatchWorkspaceRow[]) => {
-  const groups = new Map<
-    string,
-    {
-      sourceBatchId: string;
-      focusBatchId: string;
-      sourceBatchName: string;
-      sourceBatchRow: BatchWorkspaceRow | null;
-      licensee?: { id: string; name: string; prefix: string };
-      sourceCreatedAt: string;
-      sourceUpdatedAt: string;
-      sourceOriginalRangeStart: string | null;
-      sourceOriginalRangeEnd: string | null;
-      originalTotalCodes: number;
-      remainingUnassignedCodes: number;
-      remainingRangeStart: string | null;
-      remainingRangeEnd: string | null;
-      assignedCodes: number;
-      pendingPrintableCodes: number;
-      printedCodes: number;
-      redeemedCodes: number;
-      blockedCodes: number;
-      allocations: BatchWorkspaceAllocation[];
-      allocationsByManufacturer: Map<string, BatchWorkspaceAllocation>;
-      latestTouchedAt: string;
-      printedAt?: string | null;
-    }
-  >();
+  const groups = new Map<string, BatchWorkspaceGroup>();
 
   for (const row of rows) {
     const groupKey = batchSourceKey(row);
-    const current =
+    const current: BatchWorkspaceGroup =
       groups.get(groupKey) ||
       {
         sourceBatchId: groupKey,

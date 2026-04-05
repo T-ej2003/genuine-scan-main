@@ -1,11 +1,20 @@
 import prisma from "../../config/database";
 import { UserRole, UserStatus } from "@prisma/client";
 import { verifyPassword, hashPassword, shouldRehashPassword } from "./passwordService";
-import { signAccessToken, newCsrfToken, newRefreshToken } from "./tokenService";
+import {
+  signAccessToken,
+  newCsrfToken,
+  newRefreshToken,
+  signMfaBootstrapToken,
+  getMfaBootstrapTtlMinutes,
+} from "./tokenService";
 import { createRefreshToken, rotateRefreshToken, revokeAllUserRefreshTokens, revokeRefreshTokenByRaw } from "./refreshTokenService";
 import { createAuditLog } from "../auditService";
 import { assessAuthSessionRisk } from "./sessionRiskService";
 import { listManufacturerLicenseeLinks, normalizeLinkedLicensees } from "../manufacturerScopeService";
+import { isVerifiedAccount } from "./emailVerificationService";
+import { getAdminMfaStatus } from "./mfaService";
+import type { AuthAssuranceLevel, AuthSessionStage, StepUpMethod } from "../../types";
 
 const parseIntEnv = (key: string, fallback: number) => {
   const raw = String(process.env[key] || "").trim();
@@ -15,6 +24,8 @@ const parseIntEnv = (key: string, fallback: number) => {
 
 const getMaxLoginAttempts = () => parseIntEnv("AUTH_MAX_LOGIN_ATTEMPTS", 10);
 const getLockoutMinutes = () => parseIntEnv("AUTH_LOCKOUT_MINUTES", 15);
+export const getAdminStepUpWindowMinutes = () => parseIntEnv("ADMIN_STEP_UP_WINDOW_MINUTES", 30);
+export const getPasswordReauthWindowMinutes = () => parseIntEnv("AUTH_PASSWORD_STEP_UP_WINDOW_MINUTES", 30);
 
 const addMinutes = (d: Date, minutes: number) => new Date(d.getTime() + minutes * 60 * 1000);
 const DISABLED_STATUS = (UserStatus as unknown as { DISABLED?: string } | undefined)?.DISABLED || "DISABLED";
@@ -36,8 +47,14 @@ export const isPlatformSuperAdminRole = (role: UserRole) =>
 export const isOrgAdminRole = (role: UserRole) =>
   role === UserRole.LICENSEE_ADMIN || role === UserRole.ORG_ADMIN;
 
+export const isAdminMfaRequiredRole = (role: UserRole) =>
+  isPlatformSuperAdminRole(role) || isOrgAdminRole(role);
+
 export const isManufacturerRole = (role: UserRole) =>
   role === UserRole.MANUFACTURER || role === UserRole.MANUFACTURER_ADMIN || role === UserRole.MANUFACTURER_USER;
+
+export const getSensitiveActionStepUpMethod = (role: UserRole): StepUpMethod =>
+  isAdminMfaRequiredRole(role) ? "ADMIN_MFA" : "PASSWORD_REAUTH";
 
 export const buildJwtPayloadForUser = (u: {
   id: string;
@@ -46,6 +63,9 @@ export const buildJwtPayloadForUser = (u: {
   licenseeId: string | null;
   orgId: string | null;
   linkedLicenseeIds?: string[] | null;
+  authAssurance: AuthAssuranceLevel;
+  authenticatedAt?: Date | null;
+  mfaVerifiedAt?: Date | null;
 }) => ({
   userId: u.id,
   email: u.email,
@@ -53,6 +73,10 @@ export const buildJwtPayloadForUser = (u: {
   licenseeId: u.licenseeId,
   orgId: u.orgId,
   linkedLicenseeIds: u.linkedLicenseeIds || null,
+  sessionStage: "ACTIVE" as const,
+  authAssurance: u.authAssurance,
+  authenticatedAt: u.authenticatedAt?.toISOString?.() || null,
+  mfaVerifiedAt: u.mfaVerifiedAt?.toISOString?.() || null,
 });
 
 const mapLinkedLicenseesForSession = async (userId: string) => {
@@ -66,9 +90,15 @@ export const issueSessionForUser = async (input: {
   userId: string;
   ipHash: string | null;
   userAgent: string | null;
+  authAssurance?: AuthAssuranceLevel;
+  authenticatedAt?: Date | null;
+  mfaVerifiedAt?: Date | null;
   now?: Date;
 }) => {
   const now = input.now || new Date();
+  const authAssurance = input.authAssurance || "PASSWORD";
+  const authenticatedAt = input.authenticatedAt || now;
+  const mfaVerifiedAt = input.mfaVerifiedAt || null;
 
   const user = await prisma.user.findUnique({
     where: { id: input.userId },
@@ -83,6 +113,7 @@ export const issueSessionForUser = async (input: {
   const linkedScope = isManufacturerRole(user.role)
     ? await mapLinkedLicenseesForSession(user.id)
     : { linkedLicensees: [], linkedLicenseeIds: [] as string[] };
+  const mfaStatus = isAdminMfaRequiredRole(user.role) ? await getAdminMfaStatus(user.id).catch(() => null) : null;
   const primaryLicensee =
     user.licensee ||
     linkedScope.linkedLicensees.find((row) => row.isPrimary) ||
@@ -96,6 +127,9 @@ export const issueSessionForUser = async (input: {
     licenseeId: primaryLicensee?.id || user.licenseeId,
     orgId: user.orgId || primaryLicensee?.orgId || null,
     linkedLicenseeIds: linkedScope.linkedLicenseeIds,
+    authAssurance,
+    authenticatedAt,
+    mfaVerifiedAt,
   });
 
   const accessToken = signAccessToken(payload);
@@ -108,13 +142,17 @@ export const issueSessionForUser = async (input: {
     rawToken: refreshToken,
     ipHash: input.ipHash,
     userAgent: input.userAgent,
+    authenticatedAt,
+    mfaVerifiedAt,
     now,
   });
 
   return {
+    sessionStage: "ACTIVE" as AuthSessionStage,
     accessToken,
     refreshToken,
     refreshTokenExpiresAt: created.expiresAt,
+    sessionId: created.row.id,
     csrfToken,
     user: {
       id: user.id,
@@ -132,13 +170,127 @@ export const issueSessionForUser = async (input: {
           }
         : null,
       linkedLicensees: linkedScope.linkedLicensees,
+      emailVerifiedAt: user.emailVerifiedAt,
+    },
+    auth: {
+      sessionStage: "ACTIVE" as const,
+      authAssurance,
+      mfaRequired: isAdminMfaRequiredRole(user.role),
+      mfaEnrolled: isAdminMfaRequiredRole(user.role)
+        ? Boolean(mfaStatus?.enabled || mfaStatus?.enrolled)
+        : authAssurance === "ADMIN_MFA",
+      availableMfaMethods: isAdminMfaRequiredRole(user.role) ? mfaStatus?.methods || [] : [],
+      preferredMfaMethod: isAdminMfaRequiredRole(user.role) ? mfaStatus?.preferredMethod || null : null,
+      authenticatedAt: authenticatedAt.toISOString(),
+      mfaVerifiedAt: mfaVerifiedAt?.toISOString?.() || null,
+      stepUpRequired: false,
+      stepUpMethod: getSensitiveActionStepUpMethod(user.role),
+      sessionId: created.row.id,
+      sessionExpiresAt: created.expiresAt.toISOString(),
     },
   };
 };
 
 type SessionIssueResult = Awaited<ReturnType<typeof issueSessionForUser>>;
 
-export type PasswordLoginResult = SessionIssueResult;
+type BootstrapSessionResult = {
+  sessionStage: "MFA_BOOTSTRAP";
+  accessToken: string;
+  refreshToken: null;
+  refreshTokenExpiresAt: null;
+  csrfToken: string;
+  user: SessionIssueResult["user"];
+  auth: {
+    sessionStage: "MFA_BOOTSTRAP";
+    authAssurance: "PASSWORD";
+    mfaRequired: true;
+    mfaEnrolled: boolean;
+    authenticatedAt: string;
+    mfaVerifiedAt: null;
+    stepUpRequired: boolean;
+    stepUpMethod: "ADMIN_MFA";
+    sessionId: null;
+    sessionExpiresAt: string;
+  };
+};
+
+export type PasswordLoginResult = SessionIssueResult | BootstrapSessionResult;
+
+const buildBootstrapSessionForUser = async (input: {
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    role: UserRole;
+    licenseeId: string | null;
+    orgId: string | null;
+    emailVerifiedAt: Date | null;
+    licensee?: { id: string; name: string; prefix: string; brandName?: string | null; orgId?: string | null } | null;
+  };
+  ipHash: string | null;
+  userAgent: string | null;
+  now: Date;
+  mfaEnrolled: boolean;
+}) => {
+  const linkedScope = isManufacturerRole(input.user.role)
+    ? await mapLinkedLicenseesForSession(input.user.id)
+    : { linkedLicensees: [], linkedLicenseeIds: [] as string[] };
+  const mfaStatus = await getAdminMfaStatus(input.user.id).catch(() => null);
+  const primaryLicensee =
+    input.user.licensee ||
+    linkedScope.linkedLicensees.find((row) => row.isPrimary) ||
+    linkedScope.linkedLicensees[0] ||
+    null;
+
+  const accessToken = signMfaBootstrapToken({
+    userId: input.user.id,
+    email: input.user.email,
+    role: input.user.role,
+    licenseeId: primaryLicensee?.id || input.user.licenseeId,
+    orgId: input.user.orgId || primaryLicensee?.orgId || null,
+    linkedLicenseeIds: linkedScope.linkedLicenseeIds,
+  });
+
+  return {
+    sessionStage: "MFA_BOOTSTRAP" as const,
+    accessToken,
+    refreshToken: null,
+    refreshTokenExpiresAt: null,
+    csrfToken: newCsrfToken(),
+    user: {
+      id: input.user.id,
+      email: input.user.email,
+      name: input.user.name,
+      role: input.user.role,
+      licenseeId: primaryLicensee?.id || input.user.licenseeId,
+      orgId: input.user.orgId || primaryLicensee?.orgId || null,
+      licensee: primaryLicensee
+        ? {
+            id: primaryLicensee.id,
+            name: primaryLicensee.name,
+            prefix: primaryLicensee.prefix,
+            brandName: "brandName" in primaryLicensee ? primaryLicensee.brandName ?? null : null,
+          }
+        : null,
+      linkedLicensees: linkedScope.linkedLicensees,
+      emailVerifiedAt: input.user.emailVerifiedAt,
+    },
+    auth: {
+      sessionStage: "MFA_BOOTSTRAP" as const,
+      authAssurance: "PASSWORD" as const,
+      mfaRequired: true as const,
+      mfaEnrolled: input.mfaEnrolled,
+      availableMfaMethods: mfaStatus?.methods || [],
+      preferredMfaMethod: mfaStatus?.preferredMethod || null,
+      authenticatedAt: input.now.toISOString(),
+      mfaVerifiedAt: null,
+      stepUpRequired: true,
+      stepUpMethod: "ADMIN_MFA" as const,
+      sessionId: null,
+      sessionExpiresAt: new Date(input.now.getTime() + getMfaBootstrapTtlMinutes() * 60 * 1000).toISOString(),
+    },
+  };
+};
 
 export const loginWithPassword = async (input: {
   email: string;
@@ -189,6 +341,10 @@ export const loginWithPassword = async (input: {
 
   if (!user.passwordHash) {
     throw new Error("Account not activated. Please accept your invite or reset your password.");
+  }
+
+  if (!isVerifiedAccount(user)) {
+    throw new Error("Verify your email before signing in.");
   }
 
   const ok = await verifyPassword(user.passwordHash, password);
@@ -263,10 +419,46 @@ export const loginWithPassword = async (input: {
     throw new Error("High-risk login blocked. Try from a trusted network or contact administrator.");
   }
 
+  const mfaStatus = isAdminMfaRequiredRole(user.role)
+    ? await getAdminMfaStatus(user.id)
+    : { enabled: false };
+
+  if (isAdminMfaRequiredRole(user.role)) {
+    const bootstrapSession = await buildBootstrapSessionForUser({
+      user,
+      ipHash: input.ipHash,
+      userAgent: input.userAgent,
+      now,
+      mfaEnrolled: Boolean(mfaStatus.enabled),
+    });
+
+    await createAuditLog({
+      userId: user.id,
+      licenseeId: user.licenseeId || undefined,
+      orgId: user.orgId || undefined,
+      action: mfaStatus.enabled ? "AUTH_LOGIN_MFA_CHALLENGE_REQUIRED" : "AUTH_LOGIN_MFA_SETUP_REQUIRED",
+      entityType: "User",
+      entityId: user.id,
+      details: {
+        role: user.role,
+        riskScore: risk.score,
+        riskLevel: risk.riskLevel,
+        mfaEnabled: Boolean(mfaStatus.enabled),
+      },
+      ipHash: input.ipHash || undefined,
+      userAgent: input.userAgent || undefined,
+    } as any);
+
+    return bootstrapSession;
+  }
+
   const session = await issueSessionForUser({
     userId: user.id,
     ipHash: input.ipHash,
     userAgent: input.userAgent,
+    authAssurance: "PASSWORD",
+    authenticatedAt: now,
+    mfaVerifiedAt: null,
     now,
   });
 
@@ -320,6 +512,9 @@ export const refreshSession = async (input: {
     userId: rotated.userId,
     ipHash: input.ipHash,
     userAgent: input.userAgent,
+    authAssurance: rotated.mfaVerifiedAt ? "ADMIN_MFA" : "PASSWORD",
+    authenticatedAt: rotated.authenticatedAt,
+    mfaVerifiedAt: rotated.mfaVerifiedAt,
   });
 
   // Override with rotated refresh token
@@ -330,6 +525,7 @@ export const refreshSession = async (input: {
     refreshTokenExpiresAt: rotated.newExpiresAt,
     csrfToken: session.csrfToken,
     user: session.user,
+    auth: session.auth,
   };
 };
 

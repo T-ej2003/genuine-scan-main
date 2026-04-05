@@ -8,10 +8,18 @@ import prisma from "../config/database";
 import { sendIncidentEmail } from "./incidentEmailService";
 import { sendAuthEmail } from "./auth/authEmailService";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
+import {
+  canAudienceReceiveNotificationType,
+  hiddenNotificationTypesForRole,
+} from "./notificationVisibility";
+import { getRedisInstanceId, publishRedisJson, subscribeRedisJson } from "./redisService";
+import { bumpCacheNamespaceVersion, getOrComputeVersionedCache } from "./versionedCacheService";
+import { buildDateCursorWhere, encodeDateCursor } from "../utils/cursorPagination";
 
 export type NotificationRealtimeEvent = {
   type: "created" | "read" | "read_all";
   audience: NotificationAudience;
+  notificationType?: string | null;
   licenseeId?: string | null;
   orgId?: string | null;
   incidentId?: string | null;
@@ -22,6 +30,10 @@ export type NotificationRealtimeEvent = {
 type NotificationListener = (event: NotificationRealtimeEvent) => void;
 
 const listeners = new Set<NotificationListener>();
+const NOTIFICATION_EVENT_CHANNEL = "mscqr:realtime:notifications";
+const NOTIFICATION_CACHE_NAMESPACE = "notification-snapshot";
+const NOTIFICATION_CACHE_TTL_SEC = 5;
+let notificationChannelReady = false;
 
 const parseBool = (value: unknown, fallback = false) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -89,11 +101,18 @@ const sendRealtimeAlertEmailForNotification = async (params: {
 };
 
 export const onNotificationEvent = (cb: NotificationListener) => {
+  if (!notificationChannelReady) {
+    notificationChannelReady = true;
+    void subscribeRedisJson(NOTIFICATION_EVENT_CHANNEL, (payload) => {
+      if (!payload || payload.origin === getRedisInstanceId()) return;
+      notifyLocalListeners(payload.event);
+    });
+  }
   listeners.add(cb);
   return () => listeners.delete(cb);
 };
 
-const emitNotificationEvent = (event: NotificationRealtimeEvent) => {
+const notifyLocalListeners = (event: NotificationRealtimeEvent) => {
   for (const cb of listeners) {
     try {
       cb(event);
@@ -101,6 +120,15 @@ const emitNotificationEvent = (event: NotificationRealtimeEvent) => {
       // ignore listener failures
     }
   }
+};
+
+const emitNotificationEvent = (event: NotificationRealtimeEvent) => {
+  void bumpCacheNamespaceVersion(NOTIFICATION_CACHE_NAMESPACE).catch(() => undefined);
+  notifyLocalListeners(event);
+  void publishRedisJson(NOTIFICATION_EVENT_CHANNEL, {
+    origin: getRedisInstanceId(),
+    event,
+  }).catch(() => undefined);
 };
 
 const normalizeRole = (role: UserRole): NotificationAudience => {
@@ -153,6 +181,10 @@ export const createRoleNotifications = async (params: {
   data?: any;
   channels?: NotificationChannel[];
 }) => {
+  if (!canAudienceReceiveNotificationType(params.audience, params.type)) {
+    return [] as any[];
+  }
+
   const channels = params.channels && params.channels.length > 0 ? params.channels : [NotificationChannel.WEB];
 
   const userWhere: any = {
@@ -232,6 +264,7 @@ export const createRoleNotifications = async (params: {
         emitNotificationEvent({
           type: "created",
           audience: params.audience,
+          notificationType: params.type,
           licenseeId: params.licenseeId || null,
           orgId: params.orgId || null,
           incidentId: params.incidentId || null,
@@ -335,6 +368,7 @@ export const createUserNotification = async (params: {
       emitNotificationEvent({
         type: "created",
         audience: NotificationAudience.ALL,
+        notificationType: params.type,
         licenseeId: params.licenseeId || null,
         orgId: params.orgId || null,
         incidentId: params.incidentId || null,
@@ -476,7 +510,7 @@ export const notifyIncidentLifecycle = async (params: {
   }
 };
 
-export const listNotificationsForUser = async (params: {
+const listNotificationsForUserUncached = async (params: {
   userId: string;
   role: UserRole;
   licenseeId?: string | null;
@@ -485,8 +519,10 @@ export const listNotificationsForUser = async (params: {
   limit: number;
   offset: number;
   unreadOnly?: boolean;
+  cursor?: string | null;
 }) => {
   const audience = normalizeRole(params.role);
+  const hiddenTypes = hiddenNotificationTypesForRole(params.role);
 
   const scopedBroadcast: any = {
     userId: null,
@@ -521,9 +557,21 @@ export const listNotificationsForUser = async (params: {
   const where: any = {
     OR: scopedOr,
   };
+  if (hiddenTypes.length > 0) {
+    where.type = { notIn: hiddenTypes };
+  }
 
   if (params.unreadOnly) {
     where.readAt = null;
+  }
+
+  const cursorWhere = buildDateCursorWhere({
+    cursor: params.cursor,
+    createdAtField: "createdAt",
+    idField: "id",
+  });
+  if (cursorWhere) {
+    where.AND = [...(Array.isArray(where.AND) ? where.AND : []), cursorWhere];
   }
 
   try {
@@ -532,9 +580,9 @@ export const listNotificationsForUser = async (params: {
         where,
         orderBy: [{ createdAt: "desc" }],
         take: params.limit,
-        skip: params.offset,
+        skip: params.cursor ? 0 : params.offset,
       }),
-      prisma.notification.count({ where }),
+      params.cursor ? Promise.resolve<number | null>(null) : prisma.notification.count({ where }),
     ]);
 
     const unread = await prisma.notification.count({
@@ -544,25 +592,55 @@ export const listNotificationsForUser = async (params: {
       },
     });
 
-    return {
-      notifications,
-      total,
-      unread,
-    };
+    return { notifications, total, unread };
   } catch (error) {
     if (isPrismaMissingTableError(error, ["notification"])) {
       warnStorageUnavailableOnce(
         "notification-list",
         "[notification] Notification table is unavailable. Returning empty notification list."
       );
-      return {
-        notifications: [],
-        total: 0,
-        unread: 0,
-      };
+      return { notifications: [], total: 0, unread: 0 };
     }
     throw error;
   }
+};
+
+export const listNotificationsForUser = async (params: {
+  userId: string;
+  role: UserRole;
+  licenseeId?: string | null;
+  licenseeIds?: string[] | null;
+  orgId?: string | null;
+  limit: number;
+  offset: number;
+  unreadOnly?: boolean;
+  cursor?: string | null;
+}) => {
+  const scopeKey = [
+    params.userId,
+    params.role,
+    params.licenseeId || "none",
+    (params.licenseeIds || []).slice().sort().join(",") || "none",
+    params.orgId || "none",
+    params.limit,
+    params.offset,
+    params.unreadOnly ? "unread" : "all",
+    params.cursor || "offset",
+  ].join(":");
+
+  const payload = await getOrComputeVersionedCache(NOTIFICATION_CACHE_NAMESPACE, scopeKey, NOTIFICATION_CACHE_TTL_SEC, () =>
+    listNotificationsForUserUncached(params)
+  );
+
+  const nextCursor =
+    payload.notifications.length === params.limit
+      ? encodeDateCursor(payload.notifications[payload.notifications.length - 1])
+      : null;
+
+  return {
+    ...payload,
+    nextCursor,
+  };
 };
 
 export const markNotificationRead = async (params: {
@@ -574,6 +652,7 @@ export const markNotificationRead = async (params: {
   orgId?: string | null;
 }) => {
   const audience = normalizeRole(params.role);
+  const hiddenTypes = hiddenNotificationTypesForRole(params.role);
   try {
     const sharedScope: any = {
       userId: null,
@@ -603,6 +682,7 @@ export const markNotificationRead = async (params: {
     const existing = await prisma.notification.findFirst({
       where: {
         id: params.notificationId,
+        ...(hiddenTypes.length > 0 ? { type: { notIn: hiddenTypes } } : {}),
         OR: [
           { userId: params.userId, channel: NotificationChannel.WEB },
           sharedScope,
@@ -648,6 +728,7 @@ export const markAllNotificationsRead = async (params: {
   orgId?: string | null;
 }) => {
   const audience = normalizeRole(params.role);
+  const hiddenTypes = hiddenNotificationTypesForRole(params.role);
 
   const sharedScope: any = {
     userId: null,
@@ -681,6 +762,9 @@ export const markAllNotificationsRead = async (params: {
       sharedScope,
     ],
   };
+  if (hiddenTypes.length > 0) {
+    where.type = { notIn: hiddenTypes };
+  }
 
   try {
     const result = await prisma.notification.updateMany({

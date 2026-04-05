@@ -4,7 +4,12 @@ import { z } from "zod";
 
 const connectorPlatformSchema = z.object({
   label: z.string().min(2),
-  installerKind: z.enum(["pkg", "zip", "exe"]),
+  installerKind: z.enum(["pkg", "zip", "exe", "msi"]),
+  trustLevel: z.enum(["trusted", "unsigned"]).default("trusted"),
+  signatureStatus: z.enum(["signed", "unsigned", "unknown"]).optional(),
+  publisherName: z.string().min(2).nullable().optional(),
+  signedAt: z.string().min(10).nullable().optional(),
+  windowsTrustMode: z.enum(["trusted", "unsigned-test"]).optional(),
   filename: z.string().min(3),
   relativePath: z.string().min(3),
   contentType: z.string().min(3),
@@ -79,10 +84,18 @@ const toPublicPlatform = (
 ) => {
   const normalizedBase = normalizeBaseUrl(baseUrl);
   const downloadPath = buildDownloadPath(version, platformKey);
+  const trustLevel = platform.trustLevel;
+  const signatureStatus = platform.signatureStatus || (trustLevel === "trusted" ? "signed" : "unsigned");
+  const windowsTrustMode = platform.windowsTrustMode || (trustLevel === "trusted" ? "trusted" : "unsigned-test");
   return {
     platform: platformKey,
     label: platform.label,
     installerKind: platform.installerKind,
+    trustLevel,
+    signatureStatus,
+    publisherName: platform.publisherName || null,
+    signedAt: platform.signedAt || null,
+    windowsTrustMode,
     filename: platform.filename,
     architecture: platform.architecture,
     bytes: platform.bytes,

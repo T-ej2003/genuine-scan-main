@@ -52,9 +52,9 @@ describe("Incident report form", () => {
       </React.StrictMode>
     );
 
-    expect(await screen.findByText("Open incident drawer")).toBeTruthy();
-    fireEvent.click(screen.getByText("Open incident drawer"));
-    fireEvent.click(screen.getByText("Submit report"));
+    expect(await screen.findByTestId("verify-open-incident-drawer")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("verify-open-incident-drawer"));
+    fireEvent.click(screen.getByTestId("verify-report-submit"));
     expect(vi.mocked(apiClient.submitFraudReport)).toHaveBeenCalledTimes(0);
   });
 });

@@ -3,7 +3,8 @@ import prisma from "../config/database";
 import { createAuditLog } from "./auditService";
 import { evaluatePolicyRulesForScan } from "./ir/policyRuleEngineService";
 import { createRoleNotifications } from "./notificationService";
-import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
+import { isPrismaMissingTableError } from "../utils/prismaStorageGuard";
+import { guardPublicIntegrityFallback } from "../utils/publicIntegrityGuard";
 
 const ALERT_DEDUPE_WINDOW_MS = 15 * 60_000;
 
@@ -136,6 +137,7 @@ export type PolicyScanInput = {
   longitude?: number | null;
   ipAddress?: string | null;
   userAgent?: string | null;
+  strictStorage?: boolean;
 };
 
 export type PolicyScanResult = {
@@ -478,10 +480,13 @@ export const evaluateScanAndEnforcePolicy = async (input: PolicyScanInput): Prom
     };
   } catch (error) {
     if (isPrismaMissingTableError(error, ["securitypolicy", "policyalert", "qrscanlog"])) {
-      warnStorageUnavailableOnce(
-        "scan-policy-storage",
-        "[scan] Policy storage is unavailable. Continuing verification with a neutral policy result."
-      );
+      guardPublicIntegrityFallback({
+        strictStorage: input.strictStorage,
+        warningKey: "scan-policy-storage",
+        warningMessage: "[scan] Policy storage is unavailable. Continuing verification with a neutral policy result.",
+        degradedMessage: "Verification is temporarily unavailable because policy enforcement storage is not ready.",
+        degradedCode: "PUBLIC_POLICY_UNAVAILABLE",
+      });
       return buildNeutralPolicyResult();
     }
     throw error;

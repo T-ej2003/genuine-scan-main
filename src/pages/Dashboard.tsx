@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { APP_PATHS, getRoleDisplayLabel } from "@/app/route-metadata";
 import { useAuth } from "@/contexts/AuthContext";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { DashboardPagePattern } from "@/components/page-patterns/PagePatterns";
 import { StatsCard } from "@/components/dashboard/StatsCard";
 import { QRStatusChart } from "@/components/dashboard/QRStatusChart";
 import { RecentActivityCard } from "@/components/dashboard/RecentActivityCard";
 import { QrCode, Building2, Factory, FileText, RefreshCw, ArrowRight, Boxes } from "lucide-react";
-import apiClient from "@/lib/api-client";
-import { onMutationEvent } from "@/lib/mutation-events";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,9 @@ import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
+import { useDashboardAuditLogs, useDashboardStats } from "@/features/dashboard/hooks";
+
+import type { AuditLogDTO, DashboardStatsDTO, QrStatsDTO } from "../../shared/contracts/runtime/dashboard.ts";
 
 const STATS_POLL_MS = 5000;
 const API_BASE = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
@@ -24,60 +27,28 @@ type StatusFocus = "all" | "dormant" | "allocated" | "printed" | "scanned";
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const scopedLicenseeId = user?.role === "manufacturer" ? undefined : user?.licenseeId;
+  const canReadAuditFeed = user?.role === "super_admin" || user?.role === "licensee_admin";
+  const dashboardQuery = useDashboardStats(scopedLicenseeId);
+  const auditLogsQuery = useDashboardAuditLogs(canReadAuditFeed, 5);
 
-  const [summary, setSummary] = useState<any>(null);
-  const [qrStats, setQrStats] = useState<any>(null);
-  const [logs, setLogs] = useState<any[]>([]);
+  const [liveSummary, setLiveSummary] = useState<DashboardStatsDTO | null>(null);
+  const [liveQrStats, setLiveQrStats] = useState<QrStatsDTO | null>(null);
+  const [liveLogs, setLiveLogs] = useState<AuditLogDTO[] | null>(null);
   const [liveUpdates, setLiveUpdates] = useState(true);
   const [sseConnected, setSseConnected] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [statusFocus, setStatusFocus] = useState<StatusFocus>("all");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
 
   const pollRef = useRef<number | null>(null);
   const sseRef = useRef<EventSource | null>(null);
+  const refreshTimerRef = useRef<number | null>(null);
 
-  const load = async (opts?: { silent?: boolean }) => {
-    if (!opts?.silent) {
-      setLoading(true);
-      setError(null);
-    }
-
-    try {
-      const scopedLicenseeId = user?.role === "manufacturer" ? undefined : user?.licenseeId;
-      const [summaryRes, qrRes] = await Promise.all([
-        apiClient.getDashboardStats(scopedLicenseeId),
-        apiClient.getQRStats(scopedLicenseeId),
-      ]);
-
-      if (!summaryRes.success) throw new Error(summaryRes.error || "Failed to load dashboard stats");
-      if (!qrRes.success) throw new Error(qrRes.error || "Failed to load QR stats");
-
-      setSummary(summaryRes.data || {});
-      setQrStats(qrRes.data || {});
-      setLastUpdated(new Date());
-
-      if (user?.role === "super_admin" || user?.role === "licensee_admin") {
-        const logsRes = await apiClient.getAuditLogs({ limit: 5 });
-        if (logsRes.success) {
-          const payload: any = logsRes.data;
-          const list = Array.isArray(payload) ? payload : Array.isArray(payload?.logs) ? payload.logs : [];
-          setLogs(list);
-        } else {
-          setLogs([]);
-        }
-      } else {
-        setLogs([]);
-      }
-    } catch (e: any) {
-      setError(e?.message || "Failed to load dashboard");
-      setSummary(null);
-      setQrStats(null);
-      setLogs([]);
-    } finally {
-      if (!opts?.silent) setLoading(false);
+  const refreshDashboard = async () => {
+    await dashboardQuery.refetch();
+    if (canReadAuditFeed) {
+      await auditLogsQuery.refetch();
     }
   };
 
@@ -85,6 +56,8 @@ export default function Dashboard() {
     const closeRealtime = () => {
       if (pollRef.current) window.clearInterval(pollRef.current);
       pollRef.current = null;
+      if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = null;
       if (sseRef.current) {
         sseRef.current.close();
         sseRef.current = null;
@@ -92,10 +65,12 @@ export default function Dashboard() {
       setSseConnected(false);
     };
 
-    // initial load
-    load();
+    void refreshDashboard();
 
     if (!liveUpdates) {
+      setLiveSummary(null);
+      setLiveQrStats(null);
+      setLiveLogs(null);
       closeRealtime();
       return () => {
         closeRealtime();
@@ -107,7 +82,7 @@ export default function Dashboard() {
     pollRef.current = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
       if (sseRef.current) return;
-      load({ silent: true });
+      void refreshDashboard();
     }, STATS_POLL_MS);
 
     // setup SSE for realtime (cookie-auth; do not put tokens in URLs)
@@ -116,26 +91,40 @@ export default function Dashboard() {
       sseRef.current = es;
       setSseConnected(true);
 
-      es.addEventListener("stats", (e: MessageEvent) => {
-        try {
-          const payload = JSON.parse(e.data);
-          setSummary({
-            totalQRCodes: payload?.totalQRCodes ?? 0,
-            activeLicensees: payload?.activeLicensees ?? 0,
-            manufacturers: payload?.manufacturers ?? 0,
-            totalBatches: payload?.totalBatches ?? 0,
-          });
-          setQrStats(payload?.qr || {});
-          setLastUpdated(new Date());
-        } catch {
-          // ignore parse errors
-        }
-      });
+      const scheduleSummaryRefresh = () => {
+        if (refreshTimerRef.current) return;
+        refreshTimerRef.current = window.setTimeout(() => {
+          refreshTimerRef.current = null;
+          void refreshDashboard();
+        }, 350);
+      };
 
-      es.addEventListener("audit", (e: MessageEvent) => {
+      es.addEventListener("realtime", (e: MessageEvent) => {
         try {
-          const log = JSON.parse(e.data);
-          setLogs((prev) => [log, ...(prev || [])].slice(0, 10));
+          const envelope = JSON.parse(e.data || "{}");
+          if (envelope?.channel !== "dashboard") return;
+          if (envelope?.type === "snapshot") {
+            const payload = envelope?.payload || {};
+            setLiveSummary({
+              totalQRCodes: payload?.summary?.totalQRCodes ?? 0,
+              activeLicensees: payload?.summary?.activeLicensees ?? 0,
+              manufacturers: payload?.summary?.manufacturers ?? 0,
+              totalBatches: payload?.summary?.totalBatches ?? 0,
+            });
+            setLiveQrStats(payload?.qrStats || {});
+            setLastUpdated(new Date());
+            return;
+          }
+          if (envelope?.type === "audit.delta") {
+            const log = envelope?.payload?.log;
+            if (log) {
+              setLiveLogs((prev) => [log, ...((prev || auditLogsQuery.data || []) as AuditLogDTO[])].slice(0, 10));
+            }
+            return;
+          }
+          if (envelope?.type === "summary.refresh") {
+            scheduleSummaryRefresh();
+          }
         } catch {
           // ignore
         }
@@ -153,15 +142,21 @@ export default function Dashboard() {
       closeRealtime();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.licenseeId, user?.role, liveUpdates]);
+  }, [auditLogsQuery.data, canReadAuditFeed, liveUpdates, scopedLicenseeId, user?.role]);
 
   useEffect(() => {
-    const off = onMutationEvent(() => {
-      load({ silent: true });
-    });
-    return off;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (dashboardQuery.dataUpdatedAt) {
+      setLastUpdated(new Date(dashboardQuery.dataUpdatedAt));
+    }
+  }, [dashboardQuery.dataUpdatedAt]);
+
+  const summary = liveSummary ?? dashboardQuery.data?.summary ?? null;
+  const qrStats = liveQrStats ?? dashboardQuery.data?.qrStats ?? null;
+  const logs = liveLogs ?? auditLogsQuery.data ?? [];
+  const loading = dashboardQuery.isLoading && !dashboardQuery.data && !liveSummary;
+  const error =
+    (dashboardQuery.error instanceof Error ? dashboardQuery.error.message : null) ||
+    (auditLogsQuery.error instanceof Error ? auditLogsQuery.error.message : null);
 
   // totals (support multiple backend shapes)
   const totalQRCodes = summary?.totalQRCodes ?? 0;
@@ -212,7 +207,7 @@ export default function Dashboard() {
         label: "Redeemed",
         value: qrStatusData.scanned,
         description: "Customer verifications completed",
-        href: "/qr-tracking",
+        href: APP_PATHS.scanActivity,
         pct: total > 0 ? Math.round((qrStatusData.scanned / total) * 100) : 0,
       },
     ];
@@ -224,44 +219,38 @@ export default function Dashboard() {
   const fulfillmentPct = totalTracked > 0 ? Math.round((fulfilled / totalTracked) * 100) : 0;
   const redemptionPct = fulfilled > 0 ? Math.round((qrStatusData.scanned / fulfilled) * 100) : 0;
 
-  const roleLabel = useMemo(() => {
-    if (user?.role === "super_admin") return "Super User";
-    if (user?.role === "licensee_admin") return "Licensee User";
-    if (user?.role === "manufacturer") return "Manufacturer User";
-    return "User";
-  }, [user?.role]);
+  const roleLabel = useMemo(() => getRoleDisplayLabel(user?.role), [user?.role]);
 
   const quickActions = useMemo(() => {
     if (user?.role === "super_admin") {
       return [
-        { label: "Licensees", description: "Onboard and manage tenants", href: "/licensees" },
-        { label: "QR Requests", description: "Review pending allocations", href: "/qr-requests" },
-        { label: "Tracking", description: "Inspect scans and risk", href: "/qr-tracking" },
-        { label: "Audit Logs", description: "Review recent operations", href: "/audit-logs" },
+        { label: "Licensees", description: "Onboard and manage tenants", href: APP_PATHS.licensees },
+        { label: "Code Requests", description: "Review pending allocations", href: APP_PATHS.codeRequests },
+        { label: "Scan Activity", description: "Inspect scans and risk", href: APP_PATHS.scanActivity },
+        { label: "Audit History", description: "Review recent operations", href: APP_PATHS.auditHistory },
       ];
     }
     if (user?.role === "licensee_admin") {
       return [
-        { label: "Batches", description: "Assign and monitor production", href: "/batches" },
-        { label: "Manufacturers", description: "Manage factory users", href: "/manufacturers" },
-        { label: "QR Requests", description: "Raise range requests", href: "/qr-requests" },
-        { label: "Tracking", description: "Monitor scans and alerts", href: "/qr-tracking" },
+        { label: "Batches", description: "Assign and monitor production", href: APP_PATHS.batches },
+        { label: "Manufacturers", description: "Manage factory users", href: APP_PATHS.manufacturers },
+        { label: "Code Requests", description: "Request more codes", href: APP_PATHS.codeRequests },
+        { label: "Scan Activity", description: "Monitor scans and alerts", href: APP_PATHS.scanActivity },
       ];
     }
     return [
-      { label: "My Batches", description: "Create and print jobs", href: "/batches" },
-      { label: "QR Tracking", description: "Track scans for your assigned batches", href: "/qr-tracking" },
-      { label: "Verify Page", description: "Open customer verification", href: "/verify" },
-      { label: "Account", description: "Manage account settings", href: "/account" },
+      { label: "My Batches", description: "Create and print jobs", href: APP_PATHS.batches },
+      { label: "Printer Setup", description: "Check printer readiness", href: APP_PATHS.printerSetup },
+      { label: "Scan Activity", description: "Track scans for your assigned batches", href: APP_PATHS.scanActivity },
+      { label: "Verify Product", description: "Open customer verification", href: APP_PATHS.verify },
     ];
   }, [user?.role]);
 
   const cards = useMemo(() => {
-    const totalQrHref =
-      user?.role === "super_admin" ? "/qr-codes" : "/qr-tracking";
+    const totalQrHref = APP_PATHS.scanActivity;
     const totalQrCta =
       user?.role === "super_admin" ? "Inspect master inventory" : "Inspect tenant inventory";
-    const manufacturersHref = user?.role === "manufacturer" ? "/qr-tracking" : "/manufacturers";
+    const manufacturersHref = user?.role === "manufacturer" ? APP_PATHS.scanActivity : APP_PATHS.manufacturers;
     const manufacturersCta =
       user?.role === "manufacturer" ? "View manufacturer telemetry" : "Manage manufacturers";
     const scopeCard =
@@ -300,7 +289,7 @@ export default function Dashboard() {
 
     const items = [
       {
-        title: "Total QR Codes",
+        title: "Total Codes",
         value: totalQRCodes,
         icon: QrCode,
         variant: "default" as const,
@@ -319,7 +308,7 @@ export default function Dashboard() {
         ctaLabel: manufacturersCta,
       },
       {
-        title: "QR Batches",
+        title: "Batches",
         value: batchesCount,
         icon: FileText,
         variant: "success" as const,
@@ -347,15 +336,11 @@ export default function Dashboard() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
-        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">Dashboard</h1>
-            <p className="text-muted-foreground">
-              Welcome back, {user?.name}. {roleLabel} overview with live operational signals.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+      <DashboardPagePattern
+        title="Dashboard"
+        description={`Welcome back, ${user?.name}. Review the activity, queues, and next actions for your ${roleLabel.toLowerCase()} workspace.`}
+        actions={
+          <>
             <Badge variant={liveUpdates && sseConnected ? "default" : "secondary"}>
               {liveUpdates && sseConnected ? "Live Connected" : liveUpdates ? "Live Polling" : "Live Paused"}
             </Badge>
@@ -366,12 +351,13 @@ export default function Dashboard() {
               <span className="text-xs text-muted-foreground">Live</span>
               <Switch checked={liveUpdates} onCheckedChange={setLiveUpdates} />
             </div>
-            <Button variant="outline" size="sm" onClick={() => load()} className="gap-2">
-              <RefreshCw className="h-4 w-4" />
+            <Button variant="outline" size="sm" onClick={() => void refreshDashboard()} className="gap-2">
+              <RefreshCw className={cn("h-4 w-4", dashboardQuery.isFetching ? "animate-spin" : "")} />
               Refresh
             </Button>
-          </div>
-        </div>
+          </>
+        }
+      >
 
         {error && (
           <div className="rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
@@ -388,7 +374,7 @@ export default function Dashboard() {
               icon={item.icon}
               subtitle={item.subtitle}
               variant={item.variant}
-              onClick={() => (item.action === "scope" ? setScopeDialogOpen(true) : navigate(item.href))}
+              onClick={() => (("action" in item && item.action === "scope") ? setScopeDialogOpen(true) : navigate(item.href))}
               ctaLabel={item.ctaLabel}
             />
           ))}
@@ -461,7 +447,7 @@ export default function Dashboard() {
                 <div className="rounded-md border bg-muted/40 p-3">
                   <div className="font-medium">{focusedRow.label} focus</div>
                   <p className="text-xs text-muted-foreground">
-                    {focusedRow.value.toLocaleString()} QR codes currently {focusedRow.description.toLowerCase()}.
+                    {focusedRow.value.toLocaleString()} codes currently {focusedRow.description.toLowerCase()}.
                   </p>
                   <Button
                     variant="ghost"
@@ -480,13 +466,18 @@ export default function Dashboard() {
         <div className="grid gap-6 md:grid-cols-2 mt-6">
           <QRStatusChart data={qrStatusData} selectedStatus={statusFocus} onStatusSelect={setStatusFocus} />
           <RecentActivityCard
-            logs={logs}
+            logs={logs.map((log) => ({
+              ...log,
+              action: log.action || "Activity",
+              entityType: log.entityType || "System",
+              entityId: log.entityId || log.id,
+            }))}
             emptyMessage={
               canViewAudit
                 ? "No recent activity yet. Actions in batches, users, and requests will appear here."
                 : "Activity feed is available for admin roles. Use Batches for your print operations."
             }
-            onViewAll={canViewAudit ? () => navigate("/audit-logs") : undefined}
+            onViewAll={canViewAudit ? () => navigate(APP_PATHS.auditHistory) : undefined}
           />
         </div>
 
@@ -528,9 +519,9 @@ export default function Dashboard() {
                 <button
                   type="button"
                   className="rounded-xl border p-4 text-left hover:bg-slate-50"
-                  onClick={() => navigate("/qr-tracking")}
+                  onClick={() => navigate(APP_PATHS.scanActivity)}
                 >
-                  <p className="font-medium text-slate-900">QR Tracking</p>
+                  <p className="font-medium text-slate-900">Scan Activity</p>
                   <p className="mt-1 text-xs text-slate-600">Review scan analytics within your production scope.</p>
                 </button>
                 <button
@@ -545,7 +536,7 @@ export default function Dashboard() {
             </div>
           </DialogContent>
         </Dialog>
-      </div>
+      </DashboardPagePattern>
     </DashboardLayout>
   );
 }

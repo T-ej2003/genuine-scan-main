@@ -30,8 +30,13 @@ import { Search, QrCode, Filter, Download } from "lucide-react";
 import { format } from "date-fns";
 
 import apiClient from "@/lib/api-client";
-import QRCode from "qrcode";
-import JSZip from "jszip";
+import {
+  decisionOutcomeTone,
+  decisionRiskTone,
+  decisionTrustTone,
+  titleCaseDecisionValue,
+  type LatestDecision,
+} from "@/lib/verification-decision";
 import { saveAs } from "file-saver";
 import { onMutationEvent } from "@/lib/mutation-events";
 
@@ -75,6 +80,7 @@ type QrRow = {
   id?: string;
   code: string;
   status: string;
+  latestDecision?: LatestDecision | null;
   batchId?: string | null;
   scanCount?: number | null;
   createdAt?: string | Date | null;
@@ -253,84 +259,6 @@ export default function QRCodes() {
     }
   };
 
-  const getSignedScanLinks = async (codes: string[]) => {
-    const normalized = Array.from(
-      new Set(
-        codes
-          .map((code) => String(code || "").trim().toUpperCase())
-          .filter(Boolean)
-      )
-    );
-
-    if (!normalized.length) {
-      throw new Error("No QR codes selected.");
-    }
-
-    const response = await apiClient.generateSignedQrLinks(normalized);
-    if (!response.success || !response.data?.links?.length) {
-      throw new Error(response.error || "Failed to generate signed scan links");
-    }
-
-    const map = new Map<string, string>();
-    for (const link of response.data.links) {
-      if (link?.code && link?.scanUrl) {
-        map.set(String(link.code).toUpperCase(), link.scanUrl);
-      }
-    }
-    return map;
-  };
-
-  // png helpers
-  const qrPngDataUrl = async (urlInsideQr: string) => {
-    return QRCode.toDataURL(urlInsideQr, { width: 768, margin: 2, errorCorrectionLevel: "M" });
-  };
-
-  const downloadSinglePng = async (code: string) => {
-    try {
-      setUiError(null);
-      setDownloading(true);
-      const links = await getSignedScanLinks([code]);
-      const signedUrl = links.get(String(code).trim().toUpperCase());
-      if (!signedUrl) throw new Error("Signed scan URL is unavailable for this code.");
-      const dataUrl = await qrPngDataUrl(signedUrl);
-      const blob = await (await fetch(dataUrl)).blob();
-      saveAs(blob, `${code}.png`);
-    } catch (e: any) {
-      setUiError(e?.message || "Failed to download PNG");
-    } finally {
-      setDownloading(false);
-    }
-  };
-
-  const downloadZipSelected = async () => {
-    const codes = Object.entries(selectedCodes).filter(([, v]) => v).map(([k]) => k);
-    if (codes.length === 0) {
-      setUiError("Select at least 1 QR code to download PNG ZIP.");
-      return;
-    }
-
-    try {
-      setUiError(null);
-      setDownloading(true);
-      const signedLinks = await getSignedScanLinks(codes);
-      const zip = new JSZip();
-      for (const code of codes) {
-        const signedUrl = signedLinks.get(String(code).trim().toUpperCase());
-        if (!signedUrl) throw new Error(`Signed scan URL missing for code ${code}`);
-        const dataUrl = await qrPngDataUrl(signedUrl);
-        const blob = await (await fetch(dataUrl)).blob();
-        zip.file(`${code}.png`, blob);
-      }
-
-      const out = await zip.generateAsync({ type: "blob" });
-      saveAs(out, `qr-png.zip`);
-    } catch (e: any) {
-      setUiError(e?.message || "Failed to download PNG ZIP");
-    } finally {
-      setDownloading(false);
-    }
-  };
-
   const deleteSelectedQRCodes = async () => {
     const codes = Object.entries(selectedCodes).filter(([, v]) => v).map(([k]) => k);
 
@@ -372,7 +300,9 @@ export default function QRCodes() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold">QR Codes</h1>
-            <p className="text-muted-foreground">View inventory, export reports, and generate signed PNG QR codes</p>
+            <p className="text-muted-foreground">
+              View QR inventory and export reports. Production labels now ship only through managed MSCQR print jobs.
+            </p>
           </div>
 
           <div className="flex gap-2 flex-wrap">
@@ -394,11 +324,6 @@ export default function QRCodes() {
               <Download className="mr-2 h-4 w-4" />
               Export CSV
             </Button>
-
-            <Button variant="outline" onClick={downloadZipSelected} disabled={loading || downloading}>
-              <Download className="mr-2 h-4 w-4" />
-              {downloading ? "Generating signed PNGs..." : `Download PNG ZIP${selectedCount ? ` (${selectedCount})` : ""}`}
-            </Button>
           </div>
         </div>
 
@@ -407,6 +332,11 @@ export default function QRCodes() {
             {uiError}
           </div>
         )}
+
+        <div className="rounded-xl border border-border/70 bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+          Printable signed labels are now issued only through MSCQR print jobs and printer confirmations. Inventory
+          export remains available here for audit and reconciliation.
+        </div>
 
         {/* Stats */}
         <div className="grid gap-4 md:grid-cols-4">
@@ -520,11 +450,11 @@ export default function QRCodes() {
                     </TableHead>
                     <TableHead>QR Code</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Decision</TableHead>
                     <TableHead>Batch</TableHead>
                     <TableHead>Scan</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead>Scanned</TableHead>
-                    <TableHead className="text-right">PNG</TableHead>
                   </TableRow>
                 </TableHeader>
 
@@ -546,6 +476,7 @@ export default function QRCodes() {
                       const uiStatus = toUIStatus(qr.status);
                       const created = safeDate(qr.createdAt);
                       const scanned = safeDate(qr.scannedAt);
+                      const latestDecision = qr.latestDecision || null;
 
                       return (
                         <TableRow key={qr.id || qr.code}>
@@ -565,13 +496,47 @@ export default function QRCodes() {
                               </div>
                               <span className="font-mono font-medium">{qr.code}</span>
                             </div>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              Signed scan URL is generated server-side at download time.
-                            </div>
                           </TableCell>
 
                           <TableCell>
                             <Badge className={statusColors[uiStatus]}>{uiStatus}</Badge>
+                          </TableCell>
+
+                          <TableCell className="space-y-1">
+                            {latestDecision ? (
+                              <>
+                                <div className="flex flex-wrap gap-1">
+                                  <Badge className={decisionOutcomeTone(latestDecision.outcome)}>
+                                    {titleCaseDecisionValue(latestDecision.outcome)}
+                                  </Badge>
+                                  <Badge className={decisionRiskTone(latestDecision.riskBand)}>
+                                    {titleCaseDecisionValue(latestDecision.riskBand)}
+                                  </Badge>
+                                </div>
+                                <div className="flex flex-wrap gap-1">
+                                  <Badge className={decisionTrustTone(latestDecision.customerTrustReviewState)}>
+                                    {titleCaseDecisionValue(latestDecision.customerTrustReviewState)}
+                                  </Badge>
+                                  <Badge variant="outline">
+                                    {latestDecision.proofTier === "SIGNED_LABEL"
+                                      ? "Signed label"
+                                      : latestDecision.proofTier === "DEGRADED"
+                                        ? "Degraded"
+                                        : "Manual lookup"}
+                                  </Badge>
+                                </div>
+                                <div className="text-[11px] text-muted-foreground">
+                                  {latestDecision.printTrustState
+                                    ? titleCaseDecisionValue(latestDecision.printTrustState)
+                                    : "No print trust state"}
+                                  {latestDecision.replacementStatus && latestDecision.replacementStatus !== "NONE"
+                                    ? ` · ${titleCaseDecisionValue(latestDecision.replacementStatus)}`
+                                    : ""}
+                                </div>
+                              </>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">No verifier decision yet</span>
+                            )}
                           </TableCell>
 
                           <TableCell>
@@ -598,17 +563,6 @@ export default function QRCodes() {
 
                           <TableCell className="text-muted-foreground">
                             {scanned ? format(scanned, "MMM d, yyyy") : "—"}
-                          </TableCell>
-
-                          <TableCell className="text-right">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => downloadSinglePng(qr.code)}
-                              disabled={loading || downloading}
-                            >
-                              Download
-                            </Button>
                           </TableCell>
                         </TableRow>
                       );

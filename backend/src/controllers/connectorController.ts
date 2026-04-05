@@ -10,7 +10,7 @@ import {
 const downloadParamsSchema = z.object({
   version: z.string().trim().min(3),
   platform: z.enum(["macos", "windows"]),
-});
+}).strict();
 
 const normalizeBaseUrl = (value?: string | null) => String(value || "").trim().replace(/\/+$/, "");
 

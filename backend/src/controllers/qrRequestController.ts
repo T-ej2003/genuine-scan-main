@@ -17,18 +17,24 @@ const ALLOCATION_TX_MAX_WAIT_MS = parsePositiveIntEnv("ALLOCATION_TX_MAX_WAIT_MS
 
 const createRequestSchema = z
   .object({
+    licenseeId: z.string().uuid().optional(),
     quantity: z.number().int().positive().max(5_000_000),
     batchName: z.string().trim().min(2).max(120),
     note: z.string().trim().max(500).optional(),
-  });
+  })
+  .strict();
 
 const approveSchema = z.object({
   decisionNote: z.string().trim().max(500).optional(),
-});
+}).strict();
 
 const rejectSchema = z.object({
   decisionNote: z.string().trim().max(500).optional(),
-});
+}).strict();
+
+const requestIdParamSchema = z.object({
+  id: z.string().uuid("Invalid request id"),
+}).strict();
 
 const ensureAuth = (req: AuthRequest) => {
   const role = req.user?.role;
@@ -58,7 +64,7 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
 
     const licenseeId =
       auth.role === UserRole.SUPER_ADMIN || auth.role === UserRole.PLATFORM_SUPER_ADMIN
-        ? (req.body?.licenseeId as string | undefined)
+        ? parsed.data.licenseeId
         : req.user?.licenseeId;
 
     if (!licenseeId) {
@@ -192,7 +198,11 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const id = req.params.id;
+    const paramsParsed = requestIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid request id" });
+    }
+    const id = paramsParsed.data.id;
     const requestRow = await prisma.qrAllocationRequest.findUnique({
       where: { id },
       include: { licensee: { select: { id: true, prefix: true } } },
@@ -344,7 +354,11 @@ export const rejectQrAllocationRequest = async (req: AuthRequest, res: Response)
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const id = req.params.id;
+    const paramsParsed = requestIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid request id" });
+    }
+    const id = paramsParsed.data.id;
     const requestRow = await prisma.qrAllocationRequest.findUnique({ where: { id } });
     if (!requestRow) return res.status(404).json({ success: false, error: "Request not found" });
     if (requestRow.status !== QrAllocationRequestStatus.PENDING) {

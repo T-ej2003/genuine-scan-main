@@ -1,16 +1,43 @@
+# syntax=docker/dockerfile:1.7
+
 FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 
 COPY package*.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci --prefer-offline --no-audit --no-fund
 
-COPY . .
+COPY components.json ./
+COPY eslint.config.js ./
+COPY index.html ./
+COPY postcss.config.js ./
+COPY tailwind.config.ts ./
+COPY tsconfig.app.json ./
+COPY tsconfig.incremental-strict.json ./
+COPY tsconfig.json ./
+COPY tsconfig.node.json ./
+COPY vite.config.ts ./
+COPY vitest.config.ts ./
+COPY public ./public
+COPY scripts ./scripts
+COPY shared ./shared
+COPY src ./src
 
 ARG VITE_API_URL=/api
+ARG GIT_SHA=unknown
+ARG VITE_APP_ENV=production
+ARG VITE_SENTRY_DSN=
+ARG RUN_VERIFY=false
 ENV VITE_API_URL=${VITE_API_URL}
+ENV GIT_SHA=${GIT_SHA}
+ENV VITE_APP_ENV=${VITE_APP_ENV}
+ENV VITE_SENTRY_DSN=${VITE_SENTRY_DSN}
 
-RUN npm run build
+RUN if [ "$RUN_VERIFY" = "true" ]; then npm run check:security-guardrails \
+  && npm run typecheck \
+  && npm test; fi \
+  && npm run build
 
 FROM nginx:1.27-alpine
 

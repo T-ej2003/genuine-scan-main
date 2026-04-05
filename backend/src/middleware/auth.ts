@@ -1,13 +1,18 @@
 import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
 import prisma from "../config/database";
-import { JWTPayload } from "../types";
+import { AuthenticatedSessionClaims, JWTPayload } from "../types";
 import { UserRole } from "@prisma/client";
-import { ACCESS_TOKEN_COOKIE } from "../services/auth/tokenService";
+import { ACCESS_TOKEN_COOKIE, verifyAccessToken, verifyMfaBootstrapToken } from "../services/auth/tokenService";
 import { isManufacturerRole, listManufacturerLinkedLicenseeIds } from "../services/manufacturerScopeService";
+import {
+  getAdminStepUpWindowMinutes,
+  getPasswordReauthWindowMinutes,
+  getSensitiveActionStepUpMethod,
+  isAdminMfaRequiredRole,
+} from "../services/auth/authService";
 
 export interface AuthRequest extends Request {
-  user?: JWTPayload;
+  user?: AuthenticatedSessionClaims;
   authMode?: "bearer" | "cookie";
 }
 
@@ -23,7 +28,7 @@ const getCookieAccessToken = (req: Request) => {
   return token ? String(token) : null;
 };
 
-async function hydrateTenantIfNeeded(payload: JWTPayload): Promise<JWTPayload> {
+async function hydrateTenantIfNeeded(payload: AuthenticatedSessionClaims): Promise<AuthenticatedSessionClaims> {
   if (!payload?.userId || !payload?.role) return payload;
 
   if (payload.role === UserRole.SUPER_ADMIN || payload.role === UserRole.PLATFORM_SUPER_ADMIN) return payload;
@@ -54,6 +59,32 @@ async function hydrateTenantIfNeeded(payload: JWTPayload): Promise<JWTPayload> {
   };
 }
 
+const parseAnySessionToken = async (token: string): Promise<AuthenticatedSessionClaims> => {
+  try {
+    const decoded = verifyAccessToken(token);
+    return hydrateTenantIfNeeded(decoded);
+  } catch {
+    const decoded = verifyMfaBootstrapToken(token);
+    return hydrateTenantIfNeeded({
+      userId: decoded.userId,
+      email: decoded.email,
+      role: decoded.role,
+      licenseeId: decoded.licenseeId ?? null,
+      orgId: decoded.orgId ?? null,
+      linkedLicenseeIds: decoded.linkedLicenseeIds ?? null,
+      sessionStage: "MFA_BOOTSTRAP",
+      authAssurance: "PASSWORD",
+      authenticatedAt: null,
+      mfaVerifiedAt: null,
+    });
+  }
+};
+
+const allowSseQueryToken = () => {
+  if (String(process.env.AUTH_SSE_QUERY_TOKEN_ENABLED || "").trim().toLowerCase() === "true") return true;
+  return process.env.NODE_ENV !== "production";
+};
+
 export const authenticate = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const bearer = getBearerToken(req);
   const cookieToken = bearer ? null : getCookieAccessToken(req);
@@ -61,8 +92,23 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
   if (!token) return res.status(401).json({ success: false, error: "No token provided" });
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
+    const decoded = verifyAccessToken(token);
     req.user = await hydrateTenantIfNeeded(decoded);
+    req.authMode = bearer ? "bearer" : "cookie";
+    return next();
+  } catch {
+    return res.status(401).json({ success: false, error: "Invalid or expired token" });
+  }
+};
+
+export const authenticateAnySession = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  const bearer = getBearerToken(req);
+  const cookieToken = bearer ? null : getCookieAccessToken(req);
+  const token = bearer || cookieToken;
+  if (!token) return res.status(401).json({ success: false, error: "No token provided" });
+
+  try {
+    req.user = await parseAnySessionToken(token);
     req.authMode = bearer ? "bearer" : "cookie";
     return next();
   } catch {
@@ -77,7 +123,7 @@ export const optionalAuth = async (req: AuthRequest, _res: Response, next: NextF
   if (!token) return next();
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
+    const decoded = verifyAccessToken(token);
     req.user = await hydrateTenantIfNeeded(decoded);
     req.authMode = bearer ? "bearer" : "cookie";
   } catch {
@@ -88,12 +134,12 @@ export const optionalAuth = async (req: AuthRequest, _res: Response, next: NextF
 
 /**
  * SSE auth supports:
- * - ?token= (for EventSource)
+ * - ?token= (temporary compatibility only when explicitly enabled or outside production)
  * - Authorization: Bearer (normal)
  * - Cookie access token (preferred; avoids putting tokens in URLs)
  */
 export const authenticateSSE = async (req: AuthRequest, res: Response, next: NextFunction) => {
-  const queryToken = (req.query.token as string | undefined) || "";
+  const queryToken = allowSseQueryToken() ? (req.query.token as string | undefined) || "" : "";
   const headerToken = getBearerToken(req) || "";
   const cookieToken = !queryToken && !headerToken ? getCookieAccessToken(req) || "" : "";
   const token = queryToken || headerToken || cookieToken;
@@ -101,11 +147,98 @@ export const authenticateSSE = async (req: AuthRequest, res: Response, next: Nex
   if (!token) return res.status(401).json({ success: false, error: "No token provided" });
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
+    const decoded = verifyAccessToken(token);
     req.user = await hydrateTenantIfNeeded(decoded);
     req.authMode = queryToken ? "bearer" : headerToken ? "bearer" : "cookie";
     return next();
   } catch {
     return res.status(401).json({ success: false, error: "Invalid or expired token" });
   }
+};
+
+const stepUpRequired = (
+  res: Response,
+  input: {
+    message: string;
+    method: "ADMIN_MFA" | "PASSWORD_REAUTH";
+  }
+) =>
+  res.status(428).json({
+    success: false,
+    error: input.message,
+    code: "STEP_UP_REQUIRED",
+    data: {
+      stepUpRequired: true,
+      stepUpMethod: input.method,
+    },
+  });
+
+export const requireRecentAdminMfa = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, error: "Authentication required" });
+  }
+
+  if (!isAdminMfaRequiredRole(req.user.role)) {
+    return next();
+  }
+
+  if (req.user.sessionStage !== "ACTIVE") {
+    return stepUpRequired(res, {
+      message: "Admin MFA verification is required before continuing.",
+      method: "ADMIN_MFA",
+    });
+  }
+
+  const verifiedAt = req.user.mfaVerifiedAt ? new Date(req.user.mfaVerifiedAt) : null;
+  if (!verifiedAt || Number.isNaN(verifiedAt.getTime())) {
+    return stepUpRequired(res, {
+      message: "Admin MFA verification is required before continuing.",
+      method: "ADMIN_MFA",
+    });
+  }
+
+  const maxAgeMs = getAdminStepUpWindowMinutes() * 60_000;
+  if (Date.now() - verifiedAt.getTime() > maxAgeMs) {
+    return stepUpRequired(res, {
+      message: "Your admin verification is no longer fresh enough for this action. Confirm your authenticator code to continue.",
+      method: "ADMIN_MFA",
+    });
+  }
+
+  return next();
+};
+
+export const requireRecentSensitiveAuth = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, error: "Authentication required" });
+  }
+
+  if (isAdminMfaRequiredRole(req.user.role)) {
+    return requireRecentAdminMfa(req, res, next);
+  }
+
+  if (req.user.sessionStage !== "ACTIVE") {
+    return stepUpRequired(res, {
+      message: "A fresh password confirmation is required before continuing.",
+      method: getSensitiveActionStepUpMethod(req.user.role),
+    });
+  }
+
+  const authenticatedAt = req.user.authenticatedAt ? new Date(req.user.authenticatedAt) : null;
+  if (!authenticatedAt || Number.isNaN(authenticatedAt.getTime())) {
+    return stepUpRequired(res, {
+      message: "A fresh password confirmation is required before continuing.",
+      method: getSensitiveActionStepUpMethod(req.user.role),
+    });
+  }
+
+  const maxAgeMs = getPasswordReauthWindowMinutes() * 60_000;
+  if (Date.now() - authenticatedAt.getTime() > maxAgeMs) {
+    return stepUpRequired(res, {
+      message: "Your password confirmation is no longer fresh enough for this action. Confirm your password to continue.",
+      method: getSensitiveActionStepUpMethod(req.user.role),
+    });
+  }
+
+  return next();
 };

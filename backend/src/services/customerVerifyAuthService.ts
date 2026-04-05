@@ -6,6 +6,8 @@ import { getJwtSecret, randomOpaqueToken } from "../utils/security";
 export type CustomerVerifyIdentity = {
   userId: string;
   email: string;
+  authStrength?: "EMAIL_OTP" | "PASSKEY";
+  webauthnVerifiedAt?: string | null;
 };
 
 type OtpChallengeJwtPayload = {
@@ -20,6 +22,8 @@ type CustomerAuthJwtPayload = {
   type: "customer_verify_access";
   userId: string;
   email: string;
+  authStrength?: "EMAIL_OTP" | "PASSKEY";
+  webauthnVerifiedAt?: string | null;
 };
 
 const parseIntEnv = (key: string, fallback: number) => {
@@ -41,9 +45,9 @@ const getCustomerTokenSecret = () => {
   return explicit || getJwtSecret();
 };
 
-const normalizeEmail = (input: string) => String(input || "").trim().toLowerCase();
+export const normalizeCustomerVerifyEmail = (input: string) => String(input || "").trim().toLowerCase();
 
-const deriveCustomerUserId = (email: string) => {
+export const deriveCustomerVerifyUserId = (email: string) => {
   const digest = createHmac("sha256", getCustomerTokenSecret()).update(email).digest("hex").slice(0, 32);
   return `cust_${digest}`;
 };
@@ -65,7 +69,7 @@ const sanitizeOtp = (otp: string) => String(otp || "").replace(/[^0-9]/g, "").sl
 const randomOtp = () => String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
 
 export const maskEmail = (email: string) => {
-  const normalized = normalizeEmail(email);
+  const normalized = normalizeCustomerVerifyEmail(email);
   const [name, domain] = normalized.split("@");
   if (!name || !domain) return "***";
   if (name.length <= 2) return `${name[0] || "*"}***@${domain}`;
@@ -73,7 +77,7 @@ export const maskEmail = (email: string) => {
 };
 
 export const createCustomerOtpChallenge = (emailInput: string) => {
-  const email = normalizeEmail(emailInput);
+  const email = normalizeCustomerVerifyEmail(emailInput);
   if (!email) {
     throw new Error("Email is required");
   }
@@ -126,7 +130,7 @@ export const verifyCustomerOtpChallenge = (input: { challengeToken: string; otp:
     throw new Error("Invalid OTP challenge payload");
   }
 
-  const email = normalizeEmail(decoded.email || "");
+  const email = normalizeCustomerVerifyEmail(decoded.email || "");
   const nonce = String(decoded.nonce || "").trim();
   const expAt = Number(decoded.expAt || 0);
   const otpMac = String(decoded.otpMac || "").trim();
@@ -141,16 +145,29 @@ export const verifyCustomerOtpChallenge = (input: { challengeToken: string; otp:
   }
 
   return {
-    userId: deriveCustomerUserId(email),
+    userId: deriveCustomerVerifyUserId(email),
     email,
   };
 };
 
-export const issueCustomerVerifyToken = (identity: CustomerVerifyIdentity) => {
+export const issueCustomerVerifyToken = (
+  identity: CustomerVerifyIdentity,
+  options?: {
+    authStrength?: "EMAIL_OTP" | "PASSKEY";
+    webauthnVerifiedAt?: string | Date | null;
+  }
+) => {
+  const authStrength = options?.authStrength || identity.authStrength || "EMAIL_OTP";
+  const webauthnVerifiedAt =
+    options?.webauthnVerifiedAt instanceof Date
+      ? options.webauthnVerifiedAt.toISOString()
+      : options?.webauthnVerifiedAt || identity.webauthnVerifiedAt || null;
   const payload: CustomerAuthJwtPayload = {
     type: "customer_verify_access",
     userId: identity.userId,
-    email: normalizeEmail(identity.email),
+    email: normalizeCustomerVerifyEmail(identity.email),
+    authStrength,
+    webauthnVerifiedAt,
   };
   return jwt.sign(payload, getCustomerTokenSecret(), {
     expiresIn: `${getCustomerTokenTtlHours()}h`,
@@ -172,18 +189,20 @@ export const verifyCustomerVerifyToken = (rawToken: string): CustomerVerifyIdent
     throw new Error("Invalid customer token payload");
   }
 
-  const email = normalizeEmail(decoded.email || "");
+  const email = normalizeCustomerVerifyEmail(decoded.email || "");
   const userId = String(decoded.userId || "").trim();
   if (!email || !userId) {
     throw new Error("Invalid customer token payload");
   }
 
-  if (deriveCustomerUserId(email) !== userId) {
+  if (deriveCustomerVerifyUserId(email) !== userId) {
     throw new Error("Customer token signature mismatch");
   }
 
   return {
     userId,
     email,
+    authStrength: decoded.authStrength === "PASSKEY" ? "PASSKEY" : "EMAIL_OTP",
+    webauthnVerifiedAt: decoded.webauthnVerifiedAt || null,
   };
 };

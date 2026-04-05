@@ -10,10 +10,17 @@ import { createHash, randomBytes } from "crypto";
 
 import prisma from "../config/database";
 import { inspectIppPrinter } from "../printing/ippClient";
+import {
+  ensurePrinterProfileForPrinter,
+  getPrinterProfileForPrinter,
+  serializePrinterCapabilityDiscoveryForClient,
+  serializePrinterProfileForClient,
+} from "../printing/registry/printerProfileService";
 import { testNetworkPrinterConnectivity } from "./networkPrinterSocketService";
 import { isGatewayFresh } from "./networkIppPrintService";
 import { getPrinterConnectionStatusForUser, type PrinterConnectionStatus } from "./printerConnectionService";
 import { supportsNetworkDirectCommandLanguage, supportsNetworkDirectPayload } from "./printPayloadService";
+import { resolvePrinterConfirmationMode } from "./printConfirmationService";
 
 const toCleanString = (value: unknown, max = 180) => String(value || "").trim().slice(0, max);
 const toNullableString = (value: unknown, max = 180) => {
@@ -52,6 +59,11 @@ const coerceCommandLanguage = (value: unknown): PrinterCommandLanguage => {
   if (normalized === "TSPL") return PrinterCommandLanguage.TSPL;
   if (normalized === "SBPL") return PrinterCommandLanguage.SBPL;
   if (normalized === "EPL") return PrinterCommandLanguage.EPL;
+  if (normalized === "DPL") return PrinterCommandLanguage.DPL;
+  if (normalized === "HONEYWELL_DP") return PrinterCommandLanguage.HONEYWELL_DP;
+  if (normalized === "HONEYWELL_FINGERPRINT") return PrinterCommandLanguage.HONEYWELL_FINGERPRINT;
+  if (normalized === "IPL") return PrinterCommandLanguage.IPL;
+  if (normalized === "ZSIM") return PrinterCommandLanguage.ZSIM;
   if (normalized === "CPCL") return PrinterCommandLanguage.CPCL;
   if (normalized === "ESC_POS") return PrinterCommandLanguage.ESC_POS;
   return PrinterCommandLanguage.AUTO;
@@ -63,6 +75,11 @@ const deriveCommandLanguageFromInventory = (row: any) => {
   if (languages.includes("TSPL")) return PrinterCommandLanguage.TSPL;
   if (languages.includes("SBPL")) return PrinterCommandLanguage.SBPL;
   if (languages.includes("EPL")) return PrinterCommandLanguage.EPL;
+  if (languages.includes("DPL")) return PrinterCommandLanguage.DPL;
+  if (languages.includes("HONEYWELL_DP")) return PrinterCommandLanguage.HONEYWELL_DP;
+  if (languages.includes("HONEYWELL_FINGERPRINT")) return PrinterCommandLanguage.HONEYWELL_FINGERPRINT;
+  if (languages.includes("IPL")) return PrinterCommandLanguage.IPL;
+  if (languages.includes("ZSIM")) return PrinterCommandLanguage.ZSIM;
   if (languages.includes("CPCL")) return PrinterCommandLanguage.CPCL;
   if (languages.includes("ESC_POS")) return PrinterCommandLanguage.ESC_POS;
   return PrinterCommandLanguage.AUTO;
@@ -169,7 +186,7 @@ const buildNetworkPrinterStatus = (printer: RegisteredPrinterRecord): PrinterReg
         printer.lastValidationMessage ||
         (printer.connectionType === PrinterConnectionType.NETWORK_IPP
           ? "Network IPP printing requires a valid printer URI and PDF-capable IPP endpoint."
-          : "Network-direct printing currently supports ZPL, TSPL, EPL, and CPCL. Use the local agent for other printer languages."),
+          : "Network-direct printing currently supports certified industrial language profiles such as ZPL, TSPL, EPL, DPL, Honeywell DP/Fingerprint, IPL, SBPL, ZSim, and CPCL."),
     };
   }
 
@@ -231,11 +248,31 @@ export const buildPrinterRegistryStatus = async (
   userContext?: { userId: string }
 ): Promise<PrinterRegistryStatus> => {
   if (printer.connectionType === PrinterConnectionType.NETWORK_DIRECT) {
+    if (printer.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY) {
+      if (resolvePrinterConfirmationMode(printer) === "DIRECT_NOT_ALLOWED") {
+        return {
+          state: "BLOCKED",
+          summary: "Direct industrial route not certified",
+          detail:
+            "This raw label printer does not yet expose a production-safe completion proof for strict direct printing. Use the workstation connector path or a certified Zebra profile.",
+        };
+      }
+      return buildGatewayPrinterStatus(printer);
+    }
     if (!supportsNetworkDirectPayload(printer as any)) {
       return {
         state: "BLOCKED",
         summary: "Language not available for network-direct dispatch",
-        detail: "Network-direct printing currently supports ZPL, TSPL, EPL, and CPCL. Use the local agent for other printer languages.",
+        detail:
+          "Network-direct printing currently supports certified industrial language profiles such as ZPL, TSPL, EPL, DPL, Honeywell DP/Fingerprint, IPL, SBPL, ZSim, and CPCL.",
+      };
+    }
+    if (resolvePrinterConfirmationMode(printer) === "DIRECT_NOT_ALLOWED") {
+      return {
+        state: "BLOCKED",
+        summary: "Direct confirmation not available",
+        detail:
+          "This raw printer can receive data, but MSCQR cannot prove label completion safely in direct mode yet. Use the workstation connector path or a certified Zebra profile.",
       };
     }
     if (!printer.ipAddress || !printer.port) {
@@ -388,6 +425,10 @@ export const syncLocalAgentPrintersFromHeartbeat = async (params: {
         metadata: toNullableJsonValue(metadata),
       },
     });
+    await ensurePrinterProfileForPrinter(
+      printer,
+      outputs.length === 0 ? "ONBOARDING" : "LIVE_DISCOVERY"
+    );
     outputs.push(printer);
   }
 
@@ -483,13 +524,35 @@ export const listRegisteredPrintersForManufacturer = async (params: {
     : null;
 
   const rows = await Promise.all(
-    printers.map(async (printer) => ({
-      ...printer,
-      registryStatus:
-        printer.connectionType === PrinterConnectionType.LOCAL_AGENT && localStatus
-          ? buildLocalPrinterStatus(printer, localStatus)
-          : await buildPrinterRegistryStatus(printer, { userId: params.userId }),
-    }))
+    printers.map(async (printer) => {
+      const profile = await getPrinterProfileForPrinter(printer.id);
+      const latestDiscoverySnapshot =
+        profile?.snapshots.find((snapshot) => snapshot.snapshotType === "LIVE_DISCOVERY") ||
+        profile?.onboardingSnapshot ||
+        profile?.snapshots[0] ||
+        null;
+
+      return {
+        ...printer,
+        registryStatus:
+          printer.connectionType === PrinterConnectionType.LOCAL_AGENT && localStatus
+            ? buildLocalPrinterStatus(printer, localStatus)
+            : await buildPrinterRegistryStatus(printer, { userId: params.userId }),
+        printerProfile: serializePrinterProfileForClient(profile),
+        latestDiscoverySnapshot: latestDiscoverySnapshot
+          ? {
+              id: latestDiscoverySnapshot.id,
+              printerProfileId: latestDiscoverySnapshot.printerProfileId,
+              snapshotType: latestDiscoverySnapshot.snapshotType,
+              summary: latestDiscoverySnapshot.summary || null,
+              warnings: Array.isArray(latestDiscoverySnapshot.warnings) ? (latestDiscoverySnapshot.warnings as string[]) : [],
+              capturedAt: latestDiscoverySnapshot.capturedAt.toISOString(),
+              data: (latestDiscoverySnapshot.data as Record<string, unknown>) || {},
+            }
+          : null,
+        capabilityDiscovery: serializePrinterCapabilityDiscoveryForClient(profile),
+      };
+    })
   );
 
   return rows;
@@ -552,22 +615,24 @@ export const upsertManagedNetworkPrinter = async (params: {
   if (params.connectionType === PrinterConnectionType.NETWORK_DIRECT) {
     if (!supportsNetworkDirectCommandLanguage(params.commandLanguage || null)) {
       throw new Error(
-        "Network-direct printing currently supports only ZPL, TSPL, EPL, and CPCL. Use the local agent for other printer languages."
+        "Network-direct printing currently supports only certified industrial printer languages such as ZPL, TSPL, EPL, DPL, Honeywell DP/Fingerprint, IPL, SBPL, ZSim, and CPCL."
       );
     }
   }
 
-  const deliveryMode = params.connectionType === PrinterConnectionType.NETWORK_IPP
-    ? params.deliveryMode || PrinterDeliveryMode.DIRECT
-    : PrinterDeliveryMode.DIRECT;
+  const deliveryMode =
+    params.connectionType === PrinterConnectionType.NETWORK_IPP || params.connectionType === PrinterConnectionType.NETWORK_DIRECT
+      ? params.deliveryMode || PrinterDeliveryMode.DIRECT
+      : PrinterDeliveryMode.DIRECT;
   const nextGatewaySecret =
-    params.connectionType === PrinterConnectionType.NETWORK_IPP &&
+    (params.connectionType === PrinterConnectionType.NETWORK_IPP || params.connectionType === PrinterConnectionType.NETWORK_DIRECT) &&
     deliveryMode === PrinterDeliveryMode.SITE_GATEWAY &&
     (!params.printerId || params.rotateGatewaySecret)
       ? randomBytes(24).toString("base64url")
       : null;
   const gatewayId =
-    params.connectionType === PrinterConnectionType.NETWORK_IPP && deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
+    (params.connectionType === PrinterConnectionType.NETWORK_IPP || params.connectionType === PrinterConnectionType.NETWORK_DIRECT) &&
+    deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
       ? toNullableString(current?.gatewayId, 64) || `gw-${randomBytes(9).toString("hex")}`
       : null;
   const data = {
@@ -609,21 +674,25 @@ export const upsertManagedNetworkPrinter = async (params: {
     deliveryMode,
     gatewayId,
     gatewaySecretHash:
-      params.connectionType === PrinterConnectionType.NETWORK_IPP && deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
+      (params.connectionType === PrinterConnectionType.NETWORK_IPP || params.connectionType === PrinterConnectionType.NETWORK_DIRECT) &&
+      deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
         ? nextGatewaySecret
           ? hashGatewaySecret(nextGatewaySecret)
           : current?.gatewaySecretHash || undefined
         : null,
     gatewayStatus:
-      params.connectionType === PrinterConnectionType.NETWORK_IPP && deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
+      (params.connectionType === PrinterConnectionType.NETWORK_IPP || params.connectionType === PrinterConnectionType.NETWORK_DIRECT) &&
+      deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
         ? "PENDING"
         : null,
     gatewayLastError:
-      params.connectionType === PrinterConnectionType.NETWORK_IPP && deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
+      (params.connectionType === PrinterConnectionType.NETWORK_IPP || params.connectionType === PrinterConnectionType.NETWORK_DIRECT) &&
+      deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
         ? "Gateway has not checked in yet."
         : null,
     gatewayLastSeenAt:
-      params.connectionType === PrinterConnectionType.NETWORK_IPP && deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
+      (params.connectionType === PrinterConnectionType.NETWORK_IPP || params.connectionType === PrinterConnectionType.NETWORK_DIRECT) &&
+      deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
         ? null
         : undefined,
     orgId: params.orgId || null,
@@ -640,6 +709,10 @@ export const upsertManagedNetworkPrinter = async (params: {
       where: { id: params.printerId },
       data,
     });
+    await ensurePrinterProfileForPrinter(
+      updated,
+      current ? "LIVE_DISCOVERY" : "ONBOARDING"
+    );
     return {
       printer: updated,
       gatewayProvisioningSecret: nextGatewaySecret,
@@ -647,6 +720,7 @@ export const upsertManagedNetworkPrinter = async (params: {
   }
 
   const created = await prisma.printer.create({ data });
+  await ensurePrinterProfileForPrinter(created, "ONBOARDING");
   return {
     printer: created,
     gatewayProvisioningSecret: nextGatewaySecret,
@@ -763,7 +837,7 @@ export const testRegisteredPrinterConnection = async (params: {
   if (params.printer.connectionType === PrinterConnectionType.NETWORK_DIRECT) {
     if (!supportsNetworkDirectCommandLanguage(params.printer.commandLanguage)) {
       const validationMessage =
-        "Network-direct printing currently supports only ZPL, TSPL, EPL, and CPCL. Use the local agent for other printer languages.";
+        "Network-direct printing currently supports only certified industrial printer languages such as ZPL, TSPL, EPL, DPL, Honeywell DP/Fingerprint, IPL, SBPL, ZSim, and CPCL.";
       await prisma.printer.update({
         where: { id: params.printer.id },
         data: {
@@ -779,6 +853,44 @@ export const testRegisteredPrinterConnection = async (params: {
           lastValidationStatus: "BLOCKED",
           lastValidationMessage: validationMessage,
         } as RegisteredPrinterRecord),
+      };
+    }
+
+    const confirmationMode = resolvePrinterConfirmationMode(params.printer);
+    if (confirmationMode === "DIRECT_NOT_ALLOWED") {
+      const validationMessage =
+        "This raw industrial printer does not yet expose a strict completion signal for safe direct printing. Use the workstation connector path or a certified Zebra profile.";
+      await prisma.printer.update({
+        where: { id: params.printer.id },
+        data: {
+          lastValidatedAt: new Date(),
+          lastValidationStatus: "BLOCKED",
+          lastValidationMessage: validationMessage,
+        },
+      });
+      return {
+        ok: false,
+        registryStatus: buildNetworkPrinterStatus({
+          ...params.printer,
+          lastValidationStatus: "BLOCKED",
+          lastValidationMessage: validationMessage,
+        } as RegisteredPrinterRecord),
+      };
+    }
+
+    if (params.printer.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY) {
+      const registryStatus = buildGatewayPrinterStatus(params.printer);
+      await prisma.printer.update({
+        where: { id: params.printer.id },
+        data: {
+          lastValidatedAt: new Date(),
+          lastValidationStatus: registryStatus.state,
+          lastValidationMessage: registryStatus.detail || registryStatus.summary,
+        },
+      });
+      return {
+        ok: registryStatus.state === "READY",
+        registryStatus,
       };
     }
 
@@ -806,7 +918,7 @@ export const testRegisteredPrinterConnection = async (params: {
     const validationStatus = networkDirectSupported ? "READY" : "BLOCKED";
     const validationMessage = networkDirectSupported
       ? `TCP connectivity validated in ${result.latencyMs}ms`
-      : `TCP connectivity validated in ${result.latencyMs}ms, but network-direct printing currently supports only ZPL, TSPL, EPL, and CPCL.`;
+      : `TCP connectivity validated in ${result.latencyMs}ms, but the current printer language/profile is not certified for direct dispatch.`;
 
     await prisma.printer.update({
       where: { id: params.printer.id },

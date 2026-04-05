@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { APP_PATHS } from "@/app/route-metadata";
 import { OperationProgressDialog } from "@/components/feedback/OperationProgressDialog";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { DataTablePagePattern, PageEmptyState, PageSection } from "@/components/page-patterns/PagePatterns";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOperationProgress } from "@/hooks/useOperationProgress";
 import apiClient from "@/lib/api-client";
@@ -52,6 +55,7 @@ type RequestRow = {
 };
 
 export default function QRRequests() {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const { user } = useAuth();
   const progress = useOperationProgress();
@@ -174,9 +178,9 @@ export default function QRRequests() {
     if (showApprovalProgress) {
       progress.start({
         title: "Approving allocation request",
-        description: "Validating request and allocating QR inventory for this licensee.",
+        description: "Validating request and allocating code inventory for this licensee.",
         phaseLabel: "Approval",
-        detail: `Allocating ${qty.toLocaleString()} QR codes.`,
+        detail: `Allocating ${qty.toLocaleString()} codes.`,
         mode: "simulated",
         initialValue: 14,
       });
@@ -200,9 +204,9 @@ export default function QRRequests() {
       }
 
       if (showApprovalProgress) {
-        await progress.complete(`Approved request and allocated ${qty.toLocaleString()} QR codes.`);
+        await progress.complete(`Approved request and allocated ${qty.toLocaleString()} codes.`);
       }
-      toast({ title: "Approved", description: "QR codes allocated to licensee pool." });
+      toast({ title: "Approved", description: "Codes allocated to the licensee pool." });
       setApproveOpen(false);
       setActiveReq(null);
       await loadRequests();
@@ -239,29 +243,68 @@ export default function QRRequests() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold">QR Requests</h1>
-            <p className="text-muted-foreground">
-              {isSuper
-                ? "Approve or reject licensee QR allocation requests."
-                : "Request new QR codes for your licensee pool."}
-            </p>
-          </div>
-
+      <DataTablePagePattern
+        eyebrow={isSuper ? "Approval queue" : "Inventory request"}
+        title="Code Requests"
+        description={
+          isSuper
+            ? "Review and approve code requests from licensee teams."
+            : "Request more codes for a new batch or upcoming production run."
+        }
+        actions={
           <Button variant="outline" onClick={loadRequests} disabled={loading}>
             <RefreshCw className="mr-2 h-4 w-4" />
             Refresh
           </Button>
-        </div>
+        }
+        filters={
+          <div className="flex flex-col gap-3 md:flex-row md:items-center">
+            <div className="flex items-center gap-2">
+              <Label className="text-xs">Status</Label>
+              <select
+                className="rounded-md border bg-background px-2 py-1 text-sm"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+              >
+                <option value="all">All</option>
+                <option value="PENDING">Pending</option>
+                <option value="APPROVED">Approved</option>
+                <option value="REJECTED">Rejected</option>
+              </select>
+            </div>
 
+            {isSuper && (
+              <div className="flex items-center gap-2">
+                <Label className="text-xs">Licensee</Label>
+                <select
+                  className="rounded-md border bg-background px-2 py-1 text-sm"
+                  value={licenseeFilter}
+                  onChange={(e) => setLicenseeFilter(e.target.value)}
+                >
+                  <option value="">All</option>
+                  {licensees.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.name} ({l.prefix})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        }
+      >
         {isLicensee && (
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="text-sm text-muted-foreground">Request new QR codes</div>
-            </CardHeader>
-            <CardContent>
+          <PageSection
+            title="Request codes"
+            description="Enter the quantity you need and the batch name your team will recognize later."
+            action={
+              <Button onClick={submitRequest} disabled={loading}>
+                Send request
+              </Button>
+            }
+          >
+            <Card className="border-0 shadow-none">
+              <CardContent className="px-0 pb-0">
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Quantity</Label>
@@ -272,7 +315,20 @@ export default function QRRequests() {
                   />
                 </div>
                 <div className="text-xs text-muted-foreground self-end pb-2">
-                  Allocation range is auto-picked from the next available codes after approval.
+                  The next available code range is assigned automatically after approval.
+                </div>
+              </div>
+
+              <div className="space-y-2 mt-3">
+                <Label>Batch name</Label>
+                <Input
+                  value={batchName}
+                  onChange={(e) => setBatchName(e.target.value)}
+                  maxLength={120}
+                  placeholder="Example: March Retail Rollout"
+                />
+                <div className="text-xs text-muted-foreground">
+                  This becomes the batch label shown across approval, batches, and print workflows.
                 </div>
               </div>
 
@@ -291,64 +347,31 @@ export default function QRRequests() {
 
               <div className="space-y-2 mt-3">
                 <Label>Note (optional)</Label>
-                <Input value={note} onChange={(e) => setNote(e.target.value)} />
+                <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional context for the approver" />
               </div>
-
-              <div className="flex justify-end mt-4">
-                <Button onClick={submitRequest} disabled={loading}>
-                  Submit Request
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </PageSection>
         )}
 
-        <Card>
-          <CardHeader className="pb-4">
-            <div className="flex flex-col md:flex-row md:items-center gap-3">
-              <div className="flex items-center gap-2">
-                <Label className="text-xs">Status</Label>
-                <select
-                  className="border rounded px-2 py-1 text-sm bg-background"
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                >
-                  <option value="all">All</option>
-                  <option value="PENDING">Pending</option>
-                  <option value="APPROVED">Approved</option>
-                  <option value="REJECTED">Rejected</option>
-                </select>
-              </div>
-
-              {isSuper && (
-                <div className="flex items-center gap-2">
-                  <Label className="text-xs">Licensee</Label>
-                  <select
-                    className="border rounded px-2 py-1 text-sm bg-background"
-                    value={licenseeFilter}
-                    onChange={(e) => setLicenseeFilter(e.target.value)}
-                  >
-                    <option value="">All</option>
-                    {licensees.map((l) => (
-                      <option key={l.id} value={l.id}>
-                        {l.name} ({l.prefix})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-          </CardHeader>
-
-          <CardContent>
+        <PageSection
+          title={isSuper ? "Request queue" : "Request history"}
+          description={
+            isSuper
+              ? "Approve or reject requests with clear outcomes for the requesting team."
+              : "Track the status of every code request for your company."
+          }
+        >
+          <Card className="border-0 shadow-none">
+            <CardContent className="px-0 pb-0">
             <div className="rounded-md border">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Request</TableHead>
-                    {isSuper && <TableHead>Licensee</TableHead>}
+                    {isSuper && <TableHead>Company</TableHead>}
                     <TableHead>Status</TableHead>
-                    <TableHead>Requested By</TableHead>
+                    <TableHead>Requested by</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead>Decision</TableHead>
                     {isSuper && <TableHead className="text-right">Actions</TableHead>}
@@ -363,8 +386,17 @@ export default function QRRequests() {
                     </TableRow>
                   ) : filtered.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={isSuper ? 7 : 6} className="text-muted-foreground">
-                        No requests found.
+                      <TableCell colSpan={isSuper ? 7 : 6} className="p-6">
+                        <PageEmptyState
+                          title={isSuper ? "No code requests to review" : "No code requests yet"}
+                          description={
+                            isSuper
+                              ? "New requests will appear here as licensee teams submit them."
+                              : "Create your first request when you need more codes for a batch."
+                          }
+                          actionLabel={!isSuper ? "Open batches" : undefined}
+                          onAction={!isSuper ? () => navigate(APP_PATHS.batches) : undefined}
+                        />
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -403,7 +435,7 @@ export default function QRRequests() {
                                 : "outline"
                             }
                           >
-                            {r.status}
+                            {r.status === "PENDING" ? "Pending" : r.status === "APPROVED" ? "Approved" : "Rejected"}
                           </Badge>
                         </TableCell>
 
@@ -462,16 +494,17 @@ export default function QRRequests() {
                 </TableBody>
               </Table>
             </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </PageSection>
 
         {/* Approve Dialog */}
         <Dialog open={approveOpen} onOpenChange={setApproveOpen}>
           <DialogContent className="sm:max-w-[520px]">
             <DialogHeader>
-              <DialogTitle>Approve Request</DialogTitle>
+              <DialogTitle>Approve code request</DialogTitle>
               <DialogDescription>
-                Approve this quantity request. Allocation uses the next available index sequence automatically.
+                Approve this request and assign the next available code range automatically.
               </DialogDescription>
             </DialogHeader>
 
@@ -512,8 +545,8 @@ export default function QRRequests() {
         <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
           <DialogContent className="sm:max-w-[520px]">
             <DialogHeader>
-              <DialogTitle>Reject Request</DialogTitle>
-              <DialogDescription>Provide an optional reason.</DialogDescription>
+              <DialogTitle>Reject code request</DialogTitle>
+              <DialogDescription>Add an optional note so the requesting team understands what to change.</DialogDescription>
             </DialogHeader>
 
             {!activeReq ? (
@@ -548,7 +581,7 @@ export default function QRRequests() {
           value={progress.state.value}
           indeterminate={progress.state.indeterminate}
         />
-      </div>
+      </DataTablePagePattern>
     </DashboardLayout>
   );
 }

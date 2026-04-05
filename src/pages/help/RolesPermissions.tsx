@@ -47,7 +47,7 @@ export default function RolesPermissions() {
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  Full platform access: licensees, QR inventory flows, audit logs, and the IR Center.
+                  Full platform access: licensees, code allocation flows, audit history, and Incident Response.
                 </p>
                 <p className="text-xs">
                   Login role: <span className="font-mono">SUPER_ADMIN</span> (legacy aliases map to this role).
@@ -57,7 +57,7 @@ export default function RolesPermissions() {
 
             <Card>
               <CardHeader className="space-y-1">
-                <CardTitle className="text-base">Licensee User (brand/company)</CardTitle>
+                <CardTitle className="text-base">Licensee Admin (brand/company)</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <p>
@@ -71,11 +71,11 @@ export default function RolesPermissions() {
 
             <Card>
               <CardHeader className="space-y-1">
-                <CardTitle className="text-base">Manufacturer User</CardTitle>
+                <CardTitle className="text-base">Manufacturer Admin</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  Operates production: create controlled print jobs, request one-time render tokens through the workstation connector when needed, and update print status for assigned batches only.
+                  Operates production: create controlled print jobs, let the MSCQR connector or certified printer route claim and complete them, and monitor status for assigned batches only.
                 </p>
                 <p className="text-xs">
                   Login role: <span className="font-mono">MANUFACTURER</span> (legacy aliases map to this role).

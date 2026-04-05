@@ -1,4 +1,5 @@
 import { Response } from "express";
+import { z } from "zod";
 
 import { AuthRequest } from "../middleware/auth";
 import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
@@ -22,6 +23,16 @@ const parseBool = (value: unknown) => {
   return false;
 };
 
+const notificationIdParamSchema = z.object({
+  id: z.string().uuid("Invalid notification id"),
+}).strict();
+
+const cursorSchema = z
+  .string()
+  .trim()
+  .max(512)
+  .optional();
+
 export const listNotifications = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
@@ -29,6 +40,7 @@ export const listNotifications = async (req: AuthRequest, res: Response) => {
     const limit = toInt(req.query.limit, 40, 1, 200);
     const offset = toInt(req.query.offset, 0, 0, 2000);
     const unreadOnly = parseBool(req.query.unreadOnly);
+    const cursor = cursorSchema.safeParse(req.query.cursor).success ? String(req.query.cursor || "").trim() || undefined : undefined;
     const licenseeIds = await resolveAccessibleLicenseeIdsForUser(req.user);
 
     const data = await listNotificationsForUser({
@@ -40,6 +52,7 @@ export const listNotifications = async (req: AuthRequest, res: Response) => {
       limit,
       offset,
       unreadOnly,
+      cursor,
     });
 
     return res.json({
@@ -48,6 +61,7 @@ export const listNotifications = async (req: AuthRequest, res: Response) => {
         ...data,
         limit,
         offset,
+        cursor: cursor || null,
       },
     });
   } catch (error) {
@@ -60,8 +74,11 @@ export const readNotification = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Notification ID is required" });
+    const paramsParsed = notificationIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Notification ID is required" });
+    }
+    const id = paramsParsed.data.id;
     const licenseeIds = await resolveAccessibleLicenseeIdsForUser(req.user);
 
     const updated = await markNotificationRead({

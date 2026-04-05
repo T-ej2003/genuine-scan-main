@@ -1,6 +1,8 @@
 import { createHash } from "crypto";
-import { PrintPayloadType, PrinterCommandLanguage, PrinterConnectionType } from "@prisma/client";
+import { PrintPayloadType, PrinterCommandLanguage, PrinterConnectionType, PrinterLanguageKind } from "@prisma/client";
 
+import { buildCanonicalQrLabel } from "../printing/canonicalLabel";
+import { resolvePrinterLanguageRenderer } from "../printing/renderers";
 import { buildScanUrl, hashToken, signQrPayload } from "./qrTokenService";
 
 export type PrinterPayloadProfile = {
@@ -8,6 +10,7 @@ export type PrinterPayloadProfile = {
   name: string;
   connectionType: PrinterConnectionType;
   commandLanguage: PrinterCommandLanguage;
+  activeLanguage?: PrinterLanguageKind | PrinterCommandLanguage | string | null;
   nativePrinterId?: string | null;
   ipAddress?: string | null;
   port?: number | null;
@@ -62,14 +65,25 @@ export type ApprovedPrintContext = {
 const NETWORK_DIRECT_PAYLOAD_TYPES = new Set<PrintPayloadType>([
   PrintPayloadType.ZPL,
   PrintPayloadType.TSPL,
+  PrintPayloadType.SBPL,
   PrintPayloadType.EPL,
+  PrintPayloadType.DPL,
+  PrintPayloadType.HONEYWELL_DP,
+  PrintPayloadType.HONEYWELL_FINGERPRINT,
+  PrintPayloadType.IPL,
   PrintPayloadType.CPCL,
 ]);
 
 export const NETWORK_DIRECT_COMMAND_LANGUAGES = [
   PrinterCommandLanguage.ZPL,
   PrinterCommandLanguage.TSPL,
+  PrinterCommandLanguage.SBPL,
   PrinterCommandLanguage.EPL,
+  PrinterCommandLanguage.DPL,
+  PrinterCommandLanguage.HONEYWELL_DP,
+  PrinterCommandLanguage.HONEYWELL_FINGERPRINT,
+  PrinterCommandLanguage.IPL,
+  PrinterCommandLanguage.ZSIM,
   PrinterCommandLanguage.CPCL,
 ] as const;
 
@@ -301,24 +315,54 @@ const buildAgentJsonPayload = (params: {
   );
 };
 
+const resolveLanguageKind = (printer: PrinterPayloadProfile): PrinterLanguageKind => {
+  const normalized = String(printer.activeLanguage || printer.commandLanguage || "AUTO").trim().toUpperCase();
+  if (normalized === "ZPL") return PrinterLanguageKind.ZPL;
+  if (normalized === "EPL") return PrinterLanguageKind.EPL;
+  if (normalized === "TSPL") return PrinterLanguageKind.TSPL;
+  if (normalized === "DPL") return PrinterLanguageKind.DPL;
+  if (normalized === "SBPL") return PrinterLanguageKind.SBPL;
+  if (normalized === "HONEYWELL_DP") return PrinterLanguageKind.HONEYWELL_DP;
+  if (normalized === "HONEYWELL_FINGERPRINT") return PrinterLanguageKind.HONEYWELL_FINGERPRINT;
+  if (normalized === "IPL") return PrinterLanguageKind.IPL;
+  if (normalized === "ZSIM") return PrinterLanguageKind.ZSIM;
+  if (normalized === "PDF") return PrinterLanguageKind.PDF;
+  return PrinterLanguageKind.AUTO;
+};
+
+const toPrinterCommandLanguage = (language: PrinterLanguageKind): PrinterCommandLanguage => {
+  if (language === PrinterLanguageKind.ZPL) return PrinterCommandLanguage.ZPL;
+  if (language === PrinterLanguageKind.EPL) return PrinterCommandLanguage.EPL;
+  if (language === PrinterLanguageKind.TSPL) return PrinterCommandLanguage.TSPL;
+  if (language === PrinterLanguageKind.SBPL) return PrinterCommandLanguage.SBPL;
+  if (language === PrinterLanguageKind.DPL) return PrinterCommandLanguage.DPL;
+  if (language === PrinterLanguageKind.HONEYWELL_DP) return PrinterCommandLanguage.HONEYWELL_DP;
+  if (language === PrinterLanguageKind.HONEYWELL_FINGERPRINT) return PrinterCommandLanguage.HONEYWELL_FINGERPRINT;
+  if (language === PrinterLanguageKind.IPL) return PrinterCommandLanguage.IPL;
+  if (language === PrinterLanguageKind.ZSIM) return PrinterCommandLanguage.ZSIM;
+  return PrinterCommandLanguage.AUTO;
+};
+
 export const resolvePayloadType = (printer: PrinterPayloadProfile): PrintPayloadType => {
   if (printer.connectionType === PrinterConnectionType.NETWORK_IPP) {
     return PrintPayloadType.PDF;
   }
-  if (
-    printer.connectionType === PrinterConnectionType.LOCAL_AGENT &&
-    (printer.commandLanguage === PrinterCommandLanguage.AUTO || !printer.commandLanguage)
-  ) {
-    return PrintPayloadType.JSON;
-  }
-  if (printer.commandLanguage === PrinterCommandLanguage.ZPL || printer.commandLanguage === PrinterCommandLanguage.AUTO) {
-    return PrintPayloadType.ZPL;
-  }
-  if (printer.commandLanguage === PrinterCommandLanguage.TSPL) return PrintPayloadType.TSPL;
-  if (printer.commandLanguage === PrinterCommandLanguage.SBPL) return PrintPayloadType.SBPL;
-  if (printer.commandLanguage === PrinterCommandLanguage.EPL) return PrintPayloadType.EPL;
   if (printer.commandLanguage === PrinterCommandLanguage.CPCL) return PrintPayloadType.CPCL;
   if (printer.commandLanguage === PrinterCommandLanguage.ESC_POS) return PrintPayloadType.ESC_POS;
+  const language = resolveLanguageKind(printer);
+  if (printer.connectionType === PrinterConnectionType.LOCAL_AGENT && language === PrinterLanguageKind.AUTO) {
+    return PrintPayloadType.JSON;
+  }
+  if (language === PrinterLanguageKind.ZPL || language === PrinterLanguageKind.ZSIM || language === PrinterLanguageKind.AUTO) {
+    return PrintPayloadType.ZPL;
+  }
+  if (language === PrinterLanguageKind.TSPL) return PrintPayloadType.TSPL;
+  if (language === PrinterLanguageKind.SBPL) return PrintPayloadType.SBPL;
+  if (language === PrinterLanguageKind.EPL) return PrintPayloadType.EPL;
+  if (language === PrinterLanguageKind.DPL) return PrintPayloadType.DPL;
+  if (language === PrinterLanguageKind.HONEYWELL_DP) return PrintPayloadType.HONEYWELL_DP;
+  if (language === PrinterLanguageKind.HONEYWELL_FINGERPRINT) return PrintPayloadType.HONEYWELL_FINGERPRINT;
+  if (language === PrinterLanguageKind.IPL) return PrintPayloadType.IPL;
   return PrintPayloadType.JSON;
 };
 
@@ -359,58 +403,48 @@ export const buildApprovedPrintPayload = (params: {
     reprintOfJobId: params.reprintOfJobId,
   });
   const preferredType = resolvePayloadType(params.printer);
+  const layout = getResolvedLayout(params.printer);
+  const canonicalDocument = buildCanonicalQrLabel({
+    qrId: params.qr.id,
+    code: params.qr.code,
+    scanUrl: context.scanUrl,
+    batchId: params.qr.batchId || "unscoped-batch",
+    printJobId: params.printJobId || "pending-job",
+    printItemId: params.printItemId || null,
+    reissueOfJobId: params.reprintOfJobId || null,
+    labelWidthMm: layout.labelWidthMm,
+    labelHeightMm: layout.labelHeightMm,
+    dpi: layout.dpi,
+  });
+  const resolvedLanguage = resolveLanguageKind(params.printer);
+  const rendered =
+    preferredType === PrintPayloadType.JSON || preferredType === PrintPayloadType.PDF
+      ? null
+      : resolvePrinterLanguageRenderer(resolvedLanguage).render(canonicalDocument, { dpi: layout.dpi });
 
   const payloadContent =
-    preferredType === PrintPayloadType.ZPL
-      ? buildZplPayload({
-          code: params.qr.code,
-          scanUrl: context.scanUrl,
-          printer: params.printer,
-          jobNumber: params.jobNumber,
-          reprintLabel: context.reprintLabel,
-        })
-      : preferredType === PrintPayloadType.TSPL
-      ? buildTsplPayload({
-          code: params.qr.code,
-          scanUrl: context.scanUrl,
-          printer: params.printer,
-          jobNumber: params.jobNumber,
-          reprintLabel: context.reprintLabel,
-        })
-      : preferredType === PrintPayloadType.EPL
-      ? buildEplPayload({
-          code: params.qr.code,
-          scanUrl: context.scanUrl,
-          printer: params.printer,
-          jobNumber: params.jobNumber,
-          reprintLabel: context.reprintLabel,
-        })
-      : preferredType === PrintPayloadType.CPCL
-      ? buildCpclPayload({
-          code: params.qr.code,
-          scanUrl: context.scanUrl,
-          printer: params.printer,
-          jobNumber: params.jobNumber,
-          reprintLabel: context.reprintLabel,
-        })
-      : buildAgentJsonPayload({
-          code: params.qr.code,
-          scanUrl: context.scanUrl,
-          scanToken: context.scanToken,
-          printer: params.printer,
-          jobNumber: params.jobNumber,
-          printJobId: params.printJobId,
-          printItemId: params.printItemId,
-          reprintLabel: context.reprintLabel,
-        });
+    rendered?.payloadContent ||
+    buildAgentJsonPayload({
+      code: params.qr.code,
+      scanUrl: context.scanUrl,
+      scanToken: context.scanToken,
+      printer: params.printer,
+      jobNumber: params.jobNumber,
+      printJobId: params.printJobId,
+      printItemId: params.printItemId,
+      reprintLabel: context.reprintLabel,
+    });
 
   return {
-    payloadType: preferredType,
+    payloadType: rendered?.payloadType || preferredType,
     payloadContent,
     payloadHash: createHash("sha256").update(payloadContent).digest("hex"),
     scanToken: context.scanToken,
     scanUrl: context.scanUrl,
-    commandLanguage: params.printer.commandLanguage,
+    commandLanguage:
+      params.printer.commandLanguage === PrinterCommandLanguage.AUTO
+        ? toPrinterCommandLanguage(resolvedLanguage)
+        : params.printer.commandLanguage,
     previewLabel: context.previewLabel,
   };
 };

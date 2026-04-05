@@ -1,12 +1,16 @@
 MSCQR Connector for Windows
 Version: __MSCQR_CONNECTOR_VERSION__
 
+This ZIP is an unsigned Windows test package for internal validation only.
+Customer-facing rollout should use the signed Windows installer once it is published.
+
 Setup steps:
 1. Extract this ZIP to a normal folder on the Windows computer that is connected to the printer.
 2. Do not run the installer from inside the ZIP preview in File Explorer.
 3. Double-click "Install Connector.cmd" from the extracted folder.
 4. The installer will verify that the connector started and check whether Windows is exposing a usable printer.
 5. If the printer is not ready yet, the connector stays installed and MSCQR Printer Setup opens so you can finish the OS-side checks.
+6. If Windows Smart App Control blocks "Install Connector.cmd", stop there and ask your admin for the signed Windows installer instead of retrying the blocked file.
 
 What this does:
 - installs the MSCQR Connector for the signed-in Windows user

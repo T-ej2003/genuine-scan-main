@@ -1,0 +1,28 @@
+[Setup]
+AppId={{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}
+AppName=MSCQR Connector
+AppVersion=__MSCQR_CONNECTOR_VERSION__
+AppPublisher=MSCQR
+DefaultDirName={localappdata}\Programs\MSCQR Connector
+DefaultGroupName=MSCQR Connector
+DisableProgramGroupPage=yes
+Compression=lzma
+SolidCompression=yes
+PrivilegesRequired=lowest
+WizardStyle=modern
+OutputDir=__WINDOWS_OUTPUT_DIR__
+OutputBaseFilename=MSCQR-Connector-Windows-__MSCQR_CONNECTOR_VERSION__-unsigned
+UninstallDisplayIcon={app}\bin\mscqr-local-print-agent.exe
+
+[Files]
+Source: "__WINDOWS_STAGE_DIR__\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+
+[Icons]
+Name: "{group}\MSCQR Connector"; Filename: "{app}\Install Connector.cmd"
+Name: "{group}\Uninstall MSCQR Connector"; Filename: "{app}\Uninstall Connector.cmd"
+
+[Run]
+Filename: "{cmd}"; Parameters: "/c ""{app}\Install Connector.cmd"""; Flags: runhidden waituntilterminated postinstall skipifsilent
+
+[UninstallRun]
+Filename: "{cmd}"; Parameters: "/c ""{app}\Uninstall Connector.cmd"""; Flags: runhidden waituntilterminated skipifsilent

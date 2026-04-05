@@ -26,7 +26,12 @@ import apiClient from "@/lib/api-client";
 type ConnectorPlatformRelease = {
   platform: "macos" | "windows";
   label: string;
-  installerKind: "pkg" | "zip" | "exe";
+  installerKind: "pkg" | "zip" | "exe" | "msi";
+  trustLevel: "trusted" | "unsigned";
+  signatureStatus?: "signed" | "unsigned" | "unknown";
+  publisherName?: string | null;
+  signedAt?: string | null;
+  windowsTrustMode?: "trusted" | "unsigned-test";
   filename: string;
   architecture: string;
   bytes: number;
@@ -152,51 +157,112 @@ const platformCopy: Record<
 > = {
   macos: {
     title: "Mac installer",
-    description: "One install. The connector starts automatically whenever that Mac user signs in.",
+    description: "One install. The printer helper starts automatically whenever that Mac user signs in.",
     action: "Download for Mac",
     icon: Apple,
-    helper: "Signed package target with LaunchAgent auto-start.",
+    helper: "Signed Mac package with automatic background startup.",
     iconSurfaceClass: "bg-emerald-100 text-emerald-700",
   },
   windows: {
     title: "Windows installer",
-    description: "Download the Windows ZIP, extract it to a normal folder, then run Install Connector once on the printing PC.",
-    action: "Download for Windows",
+    description: "Run the signed Windows installer once on the computer that is connected to the printer.",
+    action: "Download Windows installer",
     icon: MonitorSmartphone,
-    helper: "Extract first, then install. The connector uses a per-user Startup entry and verifies local printer readiness before claiming success.",
+    helper: "Signed Windows installer with automatic background startup and local printer readiness checks.",
     iconSurfaceClass: "bg-sky-100 text-sky-700",
   },
+};
+
+const formatTrustLabel = (item: ConnectorPlatformRelease) => {
+  if (item.platform !== "windows") {
+    return item.trustLevel === "trusted" ? "Signed release" : "Unsigned release";
+  }
+
+  if (item.trustLevel === "trusted") {
+    return "Trusted Windows installer";
+  }
+
+  return item.installerKind === "zip" ? "Unsigned test package" : "Unsigned test installer";
+};
+
+const formatSignatureLabel = (item: ConnectorPlatformRelease) => {
+  if (item.signatureStatus === "signed") return "Signed";
+  if (item.signatureStatus === "unknown") return "Signature not recorded";
+  if (item.signatureStatus === "unsigned") return "Unsigned";
+  return item.trustLevel === "trusted" ? "Signed" : "Unsigned";
+};
+
+const getWindowsUnsignedCopy = (
+  item: ConnectorPlatformRelease,
+): Pick<DownloadCard, "title" | "description" | "action" | "helper" | "icon" | "iconSurfaceClass"> => {
+  if (item.installerKind === "zip") {
+    return {
+      title: "Windows test package",
+      description:
+        "Download the Windows test package, extract it to a normal folder, then run Install Connector.cmd on the printing computer.",
+      action: "Download Windows test package",
+      icon: MonitorSmartphone,
+      helper:
+        "This unsigned ZIP is only for internal validation. Smart App Control can block it until a signed Windows installer is published.",
+      iconSurfaceClass: "bg-amber-100 text-amber-800",
+    };
+  }
+
+  return {
+    title: "Windows test installer",
+    description:
+      "Download the unsigned Windows test installer for internal validation on the printing computer.",
+    action: "Download Windows test installer",
+    icon: MonitorSmartphone,
+    helper:
+      "This unsigned installer is only for internal validation. Windows can still warn until the signed Windows installer is published.",
+    iconSurfaceClass: "bg-amber-100 text-amber-800",
+  };
+};
+
+const getDownloadCardCopy = (
+  item: ConnectorPlatformRelease,
+): Pick<DownloadCard, "title" | "description" | "action" | "helper" | "icon" | "iconSurfaceClass"> => {
+  if (item.platform === "macos") {
+    return platformCopy.macos;
+  }
+
+  if (item.trustLevel === "unsigned") {
+    return getWindowsUnsignedCopy(item);
+  }
+
+  return platformCopy.windows;
 };
 
 const workspaceHighlights = [
   {
     icon: ShieldCheck,
     title: "Approved printer access",
-    detail: "Keep printing on the workstation that already sees the device instead of forcing the browser to manage local printers.",
+    detail: "Keep printing on the computer that already sees the printer instead of asking the browser to manage local printers.",
   },
   {
     icon: Sparkles,
     title: "Single install",
-    detail: "Run the package once and the connector keeps starting automatically in the background after sign-in, then verifies whether Windows or macOS can actually use the printer.",
+    detail: "Run the package once and the printer helper keeps starting automatically in the background after sign-in, then checks whether Windows or macOS can actually use the printer.",
   },
   {
     icon: Printer,
     title: "Cleaner rollout",
-    detail: "Mac and Windows installers, setup help, and the live version number all stay on one page without the cramped split-screen shell.",
+    detail: "Published packages, setup help, and the live version number all stay on one page without the cramped split-screen shell.",
   },
 ];
 
 const setupSteps = [
   "Open this page on the same computer that is already connected to the printer.",
-  "Choose the Mac or Windows installer that matches that computer.",
-  "Run the installer once. The connector will start automatically at sign-in after that.",
+  "Choose the Mac or Windows package that matches that computer.",
+  "Run the installer once. The printer helper will start automatically at sign-in after that.",
   "The installer verifies local printer readiness before it tells you setup is complete.",
-  "If the printer still needs OS-side attention, MSCQR opens Printer Setup and keeps the connector installed.",
+  "If the printer still needs OS-side attention, MSCQR opens Printer Setup and keeps the helper installed.",
   "Return to Batches and create the print job.",
 ];
 
 const automaticBehaviors = [
-  "The connector starts automatically whenever that workstation user signs in.",
+  "The printer helper starts automatically whenever that computer user signs in.",
   "MSCQR keeps reading the operating-system printer list and surfaces business-safe readiness states.",
   "Manufacturers stay inside the normal batch workflow instead of launching scripts or extra local tools.",
 ];
@@ -234,7 +300,7 @@ export default function ConnectorDownload() {
       if (cancelled) return;
 
       if (!releaseRes?.success || !releaseRes.data) {
-        setError(releaseRes?.error || "Connector downloads are not available right now.");
+        setError(releaseRes?.error || "Printer helper downloads are not available right now.");
       } else {
         setRelease(releaseRes.data as LatestConnectorRelease);
       }
@@ -272,7 +338,7 @@ export default function ConnectorDownload() {
 
         return {
           ...item,
-          ...platformCopy[platformKey],
+          ...getDownloadCardCopy(item),
           recommended: detectedPlatform === platformKey,
           href: normalizeDownloadHref(item.downloadUrl, item.downloadPath),
         };
@@ -280,10 +346,19 @@ export default function ConnectorDownload() {
       .filter(Boolean) as DownloadCard[];
   }, [detectedPlatform, release]);
 
-  const recommendedCard = useMemo(
-    () => downloadCards.find((item) => item.recommended) || downloadCards[0] || null,
-    [downloadCards],
+  const detectedCard = useMemo(
+    () => (detectedPlatform === "unknown" ? null : downloadCards.find((item) => item.platform === detectedPlatform) || null),
+    [detectedPlatform, downloadCards],
   );
+
+  const recommendedCard = useMemo(
+    () => detectedCard || (detectedPlatform === "unknown" ? downloadCards[0] || null : null),
+    [detectedCard, detectedPlatform, downloadCards],
+  );
+
+  const missingDetectedPlatformRelease = detectedPlatform !== "unknown" && !detectedCard;
+  const recommendedCardIsUnsignedWindows = recommendedCard?.platform === "windows" && recommendedCard.trustLevel === "unsigned";
+  const recommendedCardIsUnsignedWindowsZip = recommendedCardIsUnsignedWindows && recommendedCard?.installerKind === "zip";
 
   const detectedPlatformLabel =
     detectedPlatform === "macos"
@@ -291,6 +366,14 @@ export default function ConnectorDownload() {
       : detectedPlatform === "windows"
         ? "This computer looks like Windows."
         : "Choose the installer that matches the computer connected to the printer.";
+
+  const recommendedBadgeLabel = missingDetectedPlatformRelease
+    ? detectedPlatform === "macos"
+      ? "Signed Mac installer not published yet"
+      : "Installer not published for this device yet"
+    : recommendedCard
+      ? `${recommendedCard.title} available`
+      : "Choose Mac or Windows";
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.16),transparent_26%),radial-gradient(circle_at_top_right,rgba(15,23,42,0.12),transparent_30%),linear-gradient(180deg,#eef8f4_0%,#f8fafc_46%,#ffffff_100%)] text-slate-950">
@@ -316,7 +399,7 @@ export default function ConnectorDownload() {
 
               <div className="flex flex-wrap gap-3">
                 <Button asChild size="sm" variant="outline">
-                  <Link to={release?.setupGuidePath || "/help/manufacturer"}>
+                  <Link to={release?.setupGuidePath || "/help/manufacturer"} data-testid="open-printer-helper-guide">
                     <Workflow className="h-4 w-4" />
                     Setup guide
                   </Link>
@@ -335,14 +418,14 @@ export default function ConnectorDownload() {
             {loading ? (
               <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Checking the latest connector release...
+                Checking the latest printer helper release...
               </div>
             ) : null}
 
             {error ? (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
-                <AlertTitle>Connector download unavailable</AlertTitle>
+                <AlertTitle>Printer helper download unavailable</AlertTitle>
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             ) : null}
@@ -353,14 +436,14 @@ export default function ConnectorDownload() {
                 <AlertTitle>Onboarding for {preview.licenseeName || "your factory team"}</AlertTitle>
                 <AlertDescription className="space-y-3">
                   <div>
-                    Your invite is ready for <strong>{preview.email}</strong>. Install the connector on the computer that
+                    Your invite is ready for <strong>{preview.email}</strong>. Install the printer helper on the computer that
                     will print, then return to the activation email to set the password.
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button asChild size="sm">
                       <Link to={`/accept-invite?token=${encodeURIComponent(inviteToken)}`}>Open activation link</Link>
                     </Button>
-                    <Button asChild size="sm" variant="outline">
+                    <Button asChild size="sm" variant="outline" data-testid="open-printer-helper-guide">
                       <Link to={release?.setupGuidePath || "/help/manufacturer"}>View setup guide</Link>
                     </Button>
                   </div>
@@ -381,22 +464,22 @@ export default function ConnectorDownload() {
                 <div className="relative space-y-8">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge className="border border-emerald-300/20 bg-emerald-400/15 text-emerald-100 hover:bg-emerald-400/15">
-                      Workstation printing
+                      Printing on this computer
                     </Badge>
                     {release ? (
                       <Badge className="border border-white/10 bg-white/10 text-slate-100 hover:bg-white/10">
-                        Latest connector {release.latestVersion}
+                        Latest printer helper {release.latestVersion}
                       </Badge>
                     ) : null}
                   </div>
 
                   <div className="space-y-4">
                     <h1 className="max-w-3xl text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl">
-                      Install the MSCQR Connector on the workstation that actually prints.
+                      Install the MSCQR printer helper on the computer that actually prints.
                     </h1>
                     <p className="max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
                       This page is now dedicated to installation only: more room, less congestion, and a direct download
-                      flow for the live Mac and Windows packages. Open it on the printer computer, install once, and keep
+                      flow for the latest published printer-helper packages. Open it on the printer computer, install once, and keep
                       the rest of the workflow inside MSCQR.
                     </p>
                   </div>
@@ -423,7 +506,7 @@ export default function ConnectorDownload() {
               <section className="rounded-[32px] border border-emerald-200/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(238,248,244,0.88))] p-6 shadow-[0_30px_80px_-60px_rgba(15,23,42,0.45)] sm:p-8">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
-                    {recommendedCard ? `${recommendedCard.title} available` : "Choose Mac or Windows"}
+                    {recommendedBadgeLabel}
                   </Badge>
                   {release ? <Badge variant="outline">Published {formatPublishedDate(release.release.publishedAt)}</Badge> : null}
                 </div>
@@ -434,10 +517,52 @@ export default function ConnectorDownload() {
                   </h2>
                   <p className="text-base leading-7 text-slate-600">
                     Open this page on the same Mac or Windows computer that is already connected to the printer. Choose
-                    the installer below, run it once, and the connector starts automatically every time that user signs
-                    in after that. Windows setup now verifies the local printer before it claims the workstation is ready.
+                    the package below, run it once, and the printer helper starts automatically every time that user signs
+                    in after that. Windows setup checks the local printer before it says the computer is ready.
                   </p>
                 </div>
+
+                {missingDetectedPlatformRelease ? (
+                  <Alert className="mt-5 border-amber-200 bg-amber-50 text-amber-950">
+                    <AlertCircle className="h-4 w-4 text-amber-700" />
+                    <AlertTitle>
+                      {detectedPlatform === "macos"
+                        ? "This Mac does not have a published signed installer yet"
+                        : "No installer is published for this device yet"}
+                    </AlertTitle>
+                    <AlertDescription>
+                      {detectedPlatform === "macos"
+                        ? "MSCQR should not send a Windows download to this Mac. If this Mac already has the printer helper and the printer is working, keep using the current helper until the signed Mac update is published."
+                        : "Use the setup guide for now and install the helper only when the matching device download is published."}
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+
+                {recommendedCardIsUnsignedWindows ? (
+                  <Alert className="mt-5 border-amber-200 bg-amber-50 text-amber-950">
+                    <AlertCircle className="h-4 w-4 text-amber-700" />
+                    <AlertTitle>
+                      {recommendedCardIsUnsignedWindowsZip
+                        ? "Windows can block this unsigned test package"
+                        : "Windows can still warn on this unsigned test installer"}
+                    </AlertTitle>
+                    <AlertDescription>
+                      {recommendedCardIsUnsignedWindowsZip ? (
+                        <>
+                          Smart App Control can block the current Windows download because it is a ZIP with a setup script, not a
+                          signed Windows installer yet. Extract it fully first. If Windows still blocks{" "}
+                          <strong>Install Connector.cmd</strong>, stop there and use a signed Windows rollout instead of retrying
+                          the blocked file.
+                        </>
+                      ) : (
+                        <>
+                          This Windows test installer is only for internal validation. Smart App Control can still warn because it
+                          is not signed yet. Use the signed Windows installer for normal customer rollout.
+                        </>
+                      )}
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
 
                 <div className="mt-6 grid gap-3 sm:grid-cols-2">
                   <div className="rounded-[24px] border border-slate-200 bg-white/80 p-4">
@@ -460,7 +585,7 @@ export default function ConnectorDownload() {
                       <div>
                         <div className="text-sm font-semibold text-slate-950">After install</div>
                         <div className="text-sm leading-6 text-slate-600">
-                          The connector keeps starting in the background automatically at sign-in.
+                          The printer helper keeps starting in the background automatically at sign-in.
                         </div>
                       </div>
                     </div>
@@ -470,10 +595,17 @@ export default function ConnectorDownload() {
                 <div className="mt-6 flex flex-wrap gap-3">
                   {recommendedCard ? (
                     <Button asChild size="lg" className="sm:min-w-[240px]">
-                      <a href={recommendedCard.href}>
+                      <a href={recommendedCard.href} data-testid={`download-printer-helper-${recommendedCard.platform}`}>
                         <Download className="h-4 w-4" />
-                        Get installer for this device
+                        {recommendedCard.action}
                       </a>
+                    </Button>
+                  ) : missingDetectedPlatformRelease ? (
+                    <Button asChild size="lg" variant="outline" className="sm:min-w-[240px]">
+                      <Link to="/printer-setup">
+                        Open printer setup
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
                     </Button>
                   ) : null}
                   <Button asChild size="lg" variant="outline">
@@ -490,9 +622,9 @@ export default function ConnectorDownload() {
               <section className="rounded-[32px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.92))] p-6 sm:p-8 lg:p-10">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                   <div className="space-y-3">
-                    <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">Install MSCQR Connector</Badge>
+                    <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">Install printer helper</Badge>
                     <h2 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-[2.2rem]">
-                      Choose the installer for the production workstation
+                      Choose the installer for the printing computer
                     </h2>
                     <p className="max-w-3xl text-base leading-7 text-slate-600">
                       {release.release.summary} Download the package that matches that computer and keep everything else
@@ -547,12 +679,27 @@ export default function ConnectorDownload() {
                             <div className="space-y-4">
                               <p className="text-sm leading-6 text-slate-600">{item.helper}</p>
 
-                              {item.platform === "windows" && item.installerKind === "zip" ? (
+                              {item.platform === "windows" && item.trustLevel === "unsigned" ? (
                                 <Alert className="border-amber-200 bg-amber-50 text-amber-950">
                                   <AlertCircle className="h-4 w-4 text-amber-700" />
-                                  <AlertTitle>Important for Windows</AlertTitle>
+                                  <AlertTitle>
+                                    {item.installerKind === "zip"
+                                      ? "Windows can block this unsigned test package"
+                                      : "Windows can still warn on this unsigned test installer"}
+                                  </AlertTitle>
                                   <AlertDescription>
-                                    Extract the ZIP fully before running <strong>Install Connector.cmd</strong>. Do not run it from the ZIP preview in File Explorer. The installer will tell you whether the connector is ready, needs printer attention, or failed.
+                                    {item.installerKind === "zip" ? (
+                                      <>
+                                        Extract the ZIP fully before running <strong>Install Connector.cmd</strong>. Do not run it from the
+                                        ZIP preview in File Explorer. If Smart App Control still blocks it, stop there and use a signed
+                                        Windows installer rollout instead of retrying the blocked file.
+                                      </>
+                                    ) : (
+                                      <>
+                                        This unsigned Windows test installer is only for internal validation. Windows can still show a
+                                        warning until a signed Windows installer is published.
+                                      </>
+                                    )}
                                   </AlertDescription>
                                 </Alert>
                               ) : null}
@@ -586,7 +733,29 @@ export default function ConnectorDownload() {
                                     <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Size</div>
                                     <div className="mt-1 font-medium text-slate-900">{formatBytes(item.bytes)}</div>
                                   </div>
+                                  <div className="rounded-2xl bg-white px-3 py-2">
+                                    <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Trust</div>
+                                    <div className="mt-1 font-medium text-slate-900">{formatTrustLabel(item)}</div>
+                                  </div>
+                                  <div className="rounded-2xl bg-white px-3 py-2">
+                                    <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Signature</div>
+                                    <div className="mt-1 font-medium text-slate-900">{formatSignatureLabel(item)}</div>
+                                  </div>
                                 </div>
+
+                                {item.publisherName ? (
+                                  <div>
+                                    <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Publisher</div>
+                                    <div className="mt-1 font-medium text-slate-900">{item.publisherName}</div>
+                                  </div>
+                                ) : null}
+
+                                {item.signedAt ? (
+                                  <div>
+                                    <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Signed</div>
+                                    <div className="mt-1 font-medium text-slate-900">{formatPublishedDate(item.signedAt)}</div>
+                                  </div>
+                                ) : null}
 
                                 <div>
                                   <div className="text-xs uppercase tracking-[0.16em] text-slate-400">SHA-256</div>
@@ -600,7 +769,7 @@ export default function ConnectorDownload() {
 
                           <div className="flex flex-col gap-3 sm:flex-row">
                             <Button asChild size="lg" className="sm:min-w-[230px]">
-                              <a href={item.href}>
+                              <a href={item.href} data-testid={`download-printer-helper-${item.platform}`}>
                                 <Download className="h-4 w-4" />
                                 {item.action}
                               </a>
@@ -630,7 +799,7 @@ export default function ConnectorDownload() {
                     <div>
                       <h3 className="text-2xl font-semibold tracking-tight text-slate-950">Simple setup steps for factory teams</h3>
                       <p className="mt-1 text-sm leading-6 text-slate-600">
-                        Share these steps with the workstation user who will print labels.
+                        Share these steps with the person who will print labels on that computer.
                       </p>
                     </div>
                   </div>
@@ -663,8 +832,8 @@ export default function ConnectorDownload() {
                   </div>
 
                   <div className="mt-6 rounded-[24px] border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300">
-                    If your printer is a shared office AirPrint or IPP printer, your admin can also save it as a managed
-                    network printer. Use the connector when printing depends on the workstation's local printer setup.
+                    If your printer is a shared office AirPrint or IPP printer, your admin can also save it as a shared
+                    network printer. Use the printer helper when printing depends on that computer&apos;s local printer setup.
                   </div>
                 </section>
               </div>

@@ -5,6 +5,7 @@ import { Prisma, UserRole } from "@prisma/client";
 import { compactDeviceLabel, reverseGeocode } from "../services/locationService";
 import { getQrTrackingAnalytics } from "../services/qrTrackingAnalyticsService";
 import { resolveScopedLicenseeAccess } from "../services/manufacturerScopeService";
+import { listScanLogsForReporting } from "../services/scanLogReportingService";
 
 export const getScanLogs = async (req: AuthRequest, res: Response) => {
   try {
@@ -60,19 +61,25 @@ export const getScanLogs = async (req: AuthRequest, res: Response) => {
       where.batch = { manufacturerId: req.user.userId };
     }
 
-    const [logs, total] = await Promise.all([
-      prisma.qrScanLog.findMany({
-        where,
-        orderBy: { scannedAt: "desc" },
-        take: limit,
-        skip: offset,
-        include: {
-          licensee: { select: { id: true, name: true, prefix: true } },
-          qrCode: { select: { id: true, code: true, status: true } },
-        },
-      }),
-      prisma.qrScanLog.count({ where }),
-    ]);
+    const reporting = await listScanLogsForReporting({
+      licenseeId,
+      manufacturerId:
+        req.user.role === UserRole.MANUFACTURER ||
+        req.user.role === UserRole.MANUFACTURER_ADMIN ||
+        req.user.role === UserRole.MANUFACTURER_USER
+          ? req.user.userId
+          : undefined,
+      batchId,
+      code,
+      status: status as any,
+      firstScan: onlyFirstScan,
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+      limit,
+      offset,
+    });
+
+    const { logs, total } = reporting;
 
     let geocodeBudget = 40;
     const enrichedLogs = await Promise.all(
@@ -131,6 +138,8 @@ export const getBatchSummary = async (req: AuthRequest, res: Response) => {
         ? (req.query.manufacturerId as string | undefined) || undefined
         : undefined;
     const whereBatch: any = {};
+    const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 500);
+    const offset = Math.max(0, parseInt(String(req.query.offset ?? "0"), 10) || 0);
     if (licenseeId) whereBatch.licenseeId = licenseeId;
     if (manufacturerId) whereBatch.manufacturerId = manufacturerId;
     if (
@@ -141,14 +150,19 @@ export const getBatchSummary = async (req: AuthRequest, res: Response) => {
       whereBatch.manufacturerId = req.user.userId;
     }
 
-    const batches = await prisma.batch.findMany({
-      where: whereBatch,
-      orderBy: { createdAt: "desc" },
-      select: { id: true, name: true, licenseeId: true, startCode: true, endCode: true, totalCodes: true, createdAt: true },
-    });
+    const [batches, total] = await Promise.all([
+      prisma.batch.findMany({
+        where: whereBatch,
+        orderBy: { createdAt: "desc" },
+        select: { id: true, name: true, licenseeId: true, startCode: true, endCode: true, totalCodes: true, createdAt: true },
+        take: limit,
+        skip: offset,
+      }),
+      prisma.batch.count({ where: whereBatch }),
+    ]);
 
     if (batches.length === 0) {
-      return res.json({ success: true, data: [] });
+      return res.json({ success: true, data: [], meta: { total, limit, offset } });
     }
 
     const batchIds = batches.map((b) => b.id);
@@ -172,7 +186,7 @@ export const getBatchSummary = async (req: AuthRequest, res: Response) => {
       counts: map.get(b.id) || {},
     }));
 
-    return res.json({ success: true, data });
+    return res.json({ success: true, data, meta: { total, limit, offset } });
   } catch (e) {
     console.error("getBatchSummary error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });

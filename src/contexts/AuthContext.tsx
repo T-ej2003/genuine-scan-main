@@ -1,14 +1,17 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
+
 import apiClient from "@/lib/api-client";
-import type { User } from "@/types";
+import type { AuthState, PendingAuthSession, User } from "@/types";
 
 interface AuthContextType {
   user: User | null;
+  pendingAuth: PendingAuthSession | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string; sessionStage?: "ACTIVE" | "MFA_BOOTSTRAP" }>;
   logout: () => void;
   refresh: () => Promise<void>;
+  completeMfaSession: (payload: { user?: any; auth?: AuthState | null }) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -18,7 +21,6 @@ const normalizeRole = (role: any): User["role"] => {
   if (r === "SUPER_ADMIN" || r === "PLATFORM_SUPER_ADMIN") return "super_admin";
   if (r === "LICENSEE_ADMIN" || r === "ORG_ADMIN") return "licensee_admin";
   if (r === "MANUFACTURER" || r === "MANUFACTURER_ADMIN" || r === "MANUFACTURER_USER") return "manufacturer";
-  // safest (least privilege)
   return "manufacturer";
 };
 
@@ -36,11 +38,16 @@ function normalizeUser(u: any): User {
           isPrimary: Boolean(entry.isPrimary),
         }))
     : undefined;
+
   return {
     id: String(u.id),
     email: String(u.email),
     name: String(u.name ?? ""),
     role: normalizeRole(u.role),
+    rawRole: String(u.role || "").trim().toUpperCase() || null,
+    emailVerifiedAt: u.emailVerifiedAt ?? null,
+    pendingEmail: u.pendingEmail ?? null,
+    pendingEmailRequestedAt: u.pendingEmailRequestedAt ?? null,
     licenseeId,
     orgId: u.orgId ?? null,
     licensee: u.licensee
@@ -55,35 +62,58 @@ function normalizeUser(u: any): User {
     createdAt: u.createdAt ?? new Date().toISOString(),
     isActive: typeof u.isActive === "boolean" ? u.isActive : true,
     deletedAt: u.deletedAt ?? null,
+    auth: u.auth ?? null,
   };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [pendingAuth, setPendingAuth] = useState<PendingAuthSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const clearSession = () => {
     setUser(null);
+    setPendingAuth(null);
     apiClient.logout();
   };
 
-  const setSessionUser = (u: any | null) => {
-    if (!u) {
+  const completeMfaSession = (payload: { user?: any; auth?: AuthState | null }) => {
+    if (!payload.user) {
       clearSession();
       return;
     }
-    const fixed = normalizeUser(u);
-    setUser(fixed);
+
+    setPendingAuth(null);
+    setUser(normalizeUser({ ...payload.user, auth: payload.auth || payload.user?.auth || null }));
+  };
+
+  const setAuthStateFromPayload = (payload: { user?: any; auth?: AuthState | null } | null) => {
+    if (!payload?.user) {
+      clearSession();
+      return;
+    }
+
+    const auth = payload.auth || payload.user?.auth || null;
+    const normalized = normalizeUser({ ...payload.user, auth });
+
+    if (auth?.sessionStage === "MFA_BOOTSTRAP") {
+      setUser(null);
+      setPendingAuth({ user: normalized, auth });
+      return;
+    }
+
+    setPendingAuth(null);
+    setUser(normalized);
   };
 
   const refresh = async () => {
-    const res = await apiClient.getCurrentUser(); // GET /auth/me
+    const res = await apiClient.getCurrentUser();
     if (!res.success || !res.data) {
       clearSession();
       return;
     }
 
-    setSessionUser(res.data);
+    setAuthStateFromPayload({ user: res.data, auth: (res.data as any)?.auth ?? null });
   };
 
   useEffect(() => {
@@ -107,8 +137,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const result = await apiClient.login(email, password);
       if (result.success && result.data?.user) {
-        setSessionUser(result.data.user);
-        return { success: true };
+        const auth = result.data.auth || null;
+        setAuthStateFromPayload({ user: result.data.user, auth });
+        return { success: true, sessionStage: auth?.sessionStage || "ACTIVE" };
       }
       return { success: false, error: result.error || "Invalid email or password" };
     } catch (e: any) {
@@ -123,13 +154,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthContextType>(
     () => ({
       user,
+      pendingAuth,
       isLoading,
-      isAuthenticated: !!user,
+      isAuthenticated: !!user && user.auth?.sessionStage !== "MFA_BOOTSTRAP",
       login,
       logout,
       refresh,
+      completeMfaSession,
     }),
-    [user, isLoading]
+    [user, pendingAuth, isLoading]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

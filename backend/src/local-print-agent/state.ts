@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "crypto";
+import { createHash, generateKeyPairSync, randomUUID } from "crypto";
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
@@ -17,6 +17,9 @@ export type AgentState = {
   agentId: string;
   deviceFingerprint: string;
   selectedPrinterId: string | null;
+  backendUrl: string | null;
+  publicKeyPem: string;
+  privateKeyPem: string;
   calibrationProfiles: Record<string, CalibrationProfile>;
 };
 
@@ -47,10 +50,14 @@ const sanitizeCalibrationProfile = (value: unknown): CalibrationProfile => {
 const buildDefaultState = (): AgentState => {
   const agentId = `agent-${randomUUID()}`;
   const deviceFingerprint = `device-${sha256Hex(`${os.hostname()}|${os.platform()}|${agentId}`).slice(0, 48)}`;
+  const keyPair = generateKeyPairSync("ed25519");
   return {
     agentId,
     deviceFingerprint,
     selectedPrinterId: null,
+    backendUrl: null,
+    publicKeyPem: keyPair.publicKey.export({ type: "spki", format: "pem" }).toString(),
+    privateKeyPem: keyPair.privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
     calibrationProfiles: {},
   };
 };
@@ -70,6 +77,9 @@ export const loadAgentState = async (): Promise<AgentState> => {
       agentId: String(parsed?.agentId || fallback.agentId),
       deviceFingerprint: String(parsed?.deviceFingerprint || fallback.deviceFingerprint),
       selectedPrinterId: parsed?.selectedPrinterId ? String(parsed.selectedPrinterId) : null,
+      backendUrl: parsed?.backendUrl ? String(parsed.backendUrl) : null,
+      publicKeyPem: String(parsed?.publicKeyPem || fallback.publicKeyPem),
+      privateKeyPem: String(parsed?.privateKeyPem || fallback.privateKeyPem),
       calibrationProfiles:
         parsed?.calibrationProfiles && typeof parsed.calibrationProfiles === "object"
           ? Object.fromEntries(
@@ -96,6 +106,9 @@ export const saveAgentState = async (state: AgentState) => {
         agentId: state.agentId,
         deviceFingerprint: state.deviceFingerprint,
         selectedPrinterId: state.selectedPrinterId,
+        backendUrl: state.backendUrl,
+        publicKeyPem: state.publicKeyPem,
+        privateKeyPem: state.privateKeyPem,
         calibrationProfiles: state.calibrationProfiles,
       },
       null,
@@ -122,3 +135,8 @@ export const mergeCalibrationProfile = (
     },
   };
 };
+
+export const setAgentBackendUrl = (state: AgentState, backendUrl: string | null): AgentState => ({
+  ...state,
+  backendUrl: backendUrl ? String(backendUrl).trim().replace(/\/+$/, "") : null,
+});

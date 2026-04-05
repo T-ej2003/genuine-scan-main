@@ -15,13 +15,14 @@ import {
 import { createAuditLog } from "../services/auditService";
 import prisma from "../config/database";
 import { listCompliancePackJobs, loadCompliancePackJobBuffer, runCompliancePackJob } from "../services/compliancePackService";
+import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
 
 const flagUpdateSchema = z.object({
   licenseeId: z.string().uuid().optional(),
   key: z.string().trim().min(3).max(120),
   enabled: z.boolean(),
-  config: z.any().optional(),
-});
+  config: z.unknown().optional(),
+}).strict();
 
 const retentionPatchSchema = z.object({
   licenseeId: z.string().uuid().optional(),
@@ -29,18 +30,42 @@ const retentionPatchSchema = z.object({
   purgeEnabled: z.boolean().optional(),
   exportBeforePurge: z.boolean().optional(),
   legalHoldTags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
-});
+}).strict();
 
 const retentionRunSchema = z.object({
   licenseeId: z.string().uuid().optional(),
   mode: z.enum(["PREVIEW", "APPLY"]).default("PREVIEW"),
-});
+}).strict();
 
 const compliancePackRunSchema = z.object({
   licenseeId: z.string().uuid().optional(),
   from: z.string().optional(),
   to: z.string().optional(),
-});
+}).strict();
+
+const incidentIdParamSchema = z.object({
+  id: z.string().uuid("Invalid incident id"),
+}).strict();
+
+const governanceQuerySchema = z.object({
+  licenseeId: z.string().uuid().optional(),
+}).strict();
+
+const complianceReportQuerySchema = z.object({
+  licenseeId: z.string().uuid().optional(),
+  from: z.string().trim().max(64).optional(),
+  to: z.string().trim().max(64).optional(),
+}).strict();
+
+const compliancePackJobsQuerySchema = z.object({
+  licenseeId: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  offset: z.coerce.number().int().min(0).max(20000).optional(),
+}).strict();
+
+const compliancePackJobParamSchema = z.object({
+  id: z.string().uuid("Invalid compliance pack job id"),
+}).strict();
 
 const resolveLicenseeScope = (req: AuthRequest, value?: string) => {
   if (!req.user) return null;
@@ -60,8 +85,12 @@ const toDate = (value: unknown) => {
 export const getFeatureFlags = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+    const parsed = governanceQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+    }
 
-    const licenseeId = resolveLicenseeScope(req);
+    const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
     if (!licenseeId) {
       return res.status(400).json({ success: false, error: "licenseeId is required" });
     }
@@ -88,28 +117,41 @@ export const upsertFeatureFlag = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: "licenseeId is required" });
     }
 
-    const row = await upsertTenantFeatureFlag({
+    const approval = await createSensitiveActionApproval({
+      actionKey: SENSITIVE_ACTION_KEYS.FEATURE_FLAG_UPSERT,
+      actor: {
+        userId: req.user.userId,
+        role: req.user.role,
+        orgId: req.user.orgId || null,
+        licenseeId: req.user.licenseeId || null,
+      },
+      orgId: req.user.orgId || null,
       licenseeId,
-      key: parsed.data.key,
-      enabled: parsed.data.enabled,
-      config: parsed.data.config,
-      updatedByUserId: req.user.userId,
+      entityType: "TenantFeatureFlag",
+      entityId: `${licenseeId}:${parsed.data.key}`,
+      summary: {
+        key: parsed.data.key,
+        enabled: parsed.data.enabled,
+      },
+      payload: {
+        licenseeId,
+        key: parsed.data.key,
+        enabled: parsed.data.enabled,
+        config: parsed.data.config,
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || null,
     });
 
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId,
-      action: "TENANT_FEATURE_FLAG_UPSERT",
-      entityType: "TenantFeatureFlag",
-      entityId: row.id,
-      ipAddress: req.ip,
-      details: {
-        key: row.key,
-        enabled: row.enabled,
+    return res.status(202).json({
+      success: true,
+      data: {
+        approvalRequired: true,
+        approvalId: approval.id,
+        status: approval.status,
+        expiresAt: approval.expiresAt,
       },
     });
-
-    return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("upsertFeatureFlag error:", error);
     return res.status(500).json({ success: false, error: "Failed to save feature flag" });
@@ -119,8 +161,12 @@ export const upsertFeatureFlag = async (req: AuthRequest, res: Response) => {
 export const getRetentionPolicyController = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+    const parsed = governanceQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+    }
 
-    const licenseeId = resolveLicenseeScope(req);
+    const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
     if (!licenseeId) {
       return res.status(400).json({ success: false, error: "licenseeId is required" });
     }
@@ -147,29 +193,43 @@ export const patchRetentionPolicyController = async (req: AuthRequest, res: Resp
       return res.status(400).json({ success: false, error: "licenseeId is required" });
     }
 
-    const policy = await updateRetentionPolicy({
+    const approval = await createSensitiveActionApproval({
+      actionKey: SENSITIVE_ACTION_KEYS.RETENTION_POLICY_PATCH,
+      actor: {
+        userId: req.user.userId,
+        role: req.user.role,
+        orgId: req.user.orgId || null,
+        licenseeId: req.user.licenseeId || null,
+      },
+      orgId: req.user.orgId || null,
       licenseeId,
-      retentionDays: parsed.data.retentionDays,
-      purgeEnabled: parsed.data.purgeEnabled,
-      exportBeforePurge: parsed.data.exportBeforePurge,
-      legalHoldTags: parsed.data.legalHoldTags,
-      updatedByUserId: req.user.userId,
+      entityType: "EvidenceRetentionPolicy",
+      entityId: licenseeId,
+      summary: {
+        retentionDays: parsed.data.retentionDays ?? null,
+        purgeEnabled: parsed.data.purgeEnabled ?? null,
+        exportBeforePurge: parsed.data.exportBeforePurge ?? null,
+      },
+      payload: {
+        licenseeId,
+        retentionDays: parsed.data.retentionDays,
+        purgeEnabled: parsed.data.purgeEnabled,
+        exportBeforePurge: parsed.data.exportBeforePurge,
+        legalHoldTags: parsed.data.legalHoldTags,
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || null,
     });
 
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId,
-      action: "EVIDENCE_RETENTION_POLICY_UPDATED",
-      entityType: "EvidenceRetentionPolicy",
-      entityId: policy.id,
-      ipAddress: req.ip,
-      details: {
-        retentionDays: policy.retentionDays,
-        purgeEnabled: policy.purgeEnabled,
+    return res.status(202).json({
+      success: true,
+      data: {
+        approvalRequired: true,
+        approvalId: approval.id,
+        status: approval.status,
+        expiresAt: approval.expiresAt,
       },
     });
-
-    return res.json({ success: true, data: policy });
   } catch (error) {
     console.error("patchRetentionPolicyController error:", error);
     return res.status(500).json({ success: false, error: "Failed to update retention policy" });
@@ -188,6 +248,40 @@ export const runRetentionJobController = async (req: AuthRequest, res: Response)
     const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
     if (!licenseeId) {
       return res.status(400).json({ success: false, error: "licenseeId is required" });
+    }
+
+    if (parsed.data.mode === "APPLY") {
+      const approval = await createSensitiveActionApproval({
+        actionKey: SENSITIVE_ACTION_KEYS.RETENTION_APPLY,
+        actor: {
+          userId: req.user.userId,
+          role: req.user.role,
+          orgId: req.user.orgId || null,
+          licenseeId: req.user.licenseeId || null,
+        },
+        orgId: req.user.orgId || null,
+        licenseeId,
+        entityType: "EvidenceRetentionJob",
+        entityId: licenseeId,
+        summary: {
+          mode: parsed.data.mode,
+        },
+        payload: {
+          licenseeId,
+        },
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") || null,
+      });
+
+      return res.status(202).json({
+        success: true,
+        data: {
+          approvalRequired: true,
+          approvalId: approval.id,
+          status: approval.status,
+          expiresAt: approval.expiresAt,
+        },
+      });
     }
 
     const result = await runRetentionLifecycle({
@@ -221,23 +315,21 @@ export const exportIncidentEvidenceBundleController = async (req: AuthRequest, r
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    const incidentId = String(req.params.id || "").trim();
-    if (!incidentId) return res.status(400).json({ success: false, error: "Incident ID is required" });
+    const paramsParsed = incidentIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Incident ID is required" });
+    }
+    const incidentId = paramsParsed.data.id;
 
-    const incident = await prisma.incident.findUnique({
-      where: { id: incidentId },
+    const incident = await prisma.incident.findFirst({
+      where:
+        req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
+          ? { id: incidentId }
+          : { id: incidentId, licenseeId: req.user.licenseeId || "__none__" },
       select: { id: true, licenseeId: true },
     });
 
     if (!incident) return res.status(404).json({ success: false, error: "Incident not found" });
-
-    if (
-      req.user.role !== UserRole.SUPER_ADMIN &&
-      req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
-      req.user.licenseeId !== incident.licenseeId
-    ) {
-      return res.status(403).json({ success: false, error: "Access denied" });
-    }
 
     const bundle = await buildIncidentEvidenceAuditBundle(incident.id);
 
@@ -263,10 +355,14 @@ export const exportIncidentEvidenceBundleController = async (req: AuthRequest, r
 export const generateComplianceReportController = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+    const parsed = complianceReportQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+    }
 
-    const licenseeId = resolveLicenseeScope(req);
-    const from = toDate(req.query.from);
-    const to = toDate(req.query.to);
+    const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
+    const from = toDate(parsed.data.from);
+    const to = toDate(parsed.data.to);
 
     const report = await generateComplianceReport({
       actor: {
@@ -321,10 +417,14 @@ export const runCompliancePackController = async (req: AuthRequest, res: Respons
 export const listCompliancePackJobsController = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+    const parsed = compliancePackJobsQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+    }
 
-    const limit = Math.min(Math.max(Number(req.query.limit || 20), 1), 200);
-    const offset = Math.max(Number(req.query.offset || 0), 0);
-    const licenseeId = resolveLicenseeScope(req);
+    const limit = parsed.data.limit ?? 20;
+    const offset = parsed.data.offset ?? 0;
+    const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
 
     const result = await listCompliancePackJobs({
       licenseeId,
@@ -350,12 +450,16 @@ export const listCompliancePackJobsController = async (req: AuthRequest, res: Re
 export const downloadCompliancePackJobController = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+    const paramsParsed = compliancePackJobParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Compliance pack job ID is required" });
+    }
 
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Compliance pack job ID is required" });
-
-    const row = await prisma.compliancePackJob.findUnique({
-      where: { id },
+    const row = await prisma.compliancePackJob.findFirst({
+      where:
+        req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
+          ? { id: paramsParsed.data.id }
+          : { id: paramsParsed.data.id, licenseeId: req.user.licenseeId || "__none__" },
       select: {
         id: true,
         licenseeId: true,
@@ -365,14 +469,6 @@ export const downloadCompliancePackJobController = async (req: AuthRequest, res:
       },
     });
     if (!row) return res.status(404).json({ success: false, error: "Compliance pack job not found" });
-
-    if (
-      req.user.role !== UserRole.SUPER_ADMIN &&
-      req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
-      req.user.licenseeId !== row.licenseeId
-    ) {
-      return res.status(403).json({ success: false, error: "Access denied" });
-    }
     if (row.status !== "COMPLETED" || !row.storageKey || !row.fileName) {
       return res.status(409).json({ success: false, error: "Compliance pack is not ready" });
     }

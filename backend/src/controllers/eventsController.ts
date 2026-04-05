@@ -1,94 +1,15 @@
 import { Response } from "express";
-import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { getEffectiveLicenseeId } from "../middleware/tenantIsolation";
 import { onAuditLog } from "../services/auditService";
 import { UserRole } from "@prisma/client";
 import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
-import { summarizeQrStatusCounts } from "../services/qrStatusMetrics";
-
-function writeSse(res: Response, event: string, data: any) {
-  res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
-}
-
-async function computeDashboard(req: AuthRequest) {
-  if (!req.user) throw new Error("Not authenticated");
-
-  const role = req.user.role;
-  const userId = req.user.userId;
-  const scopedLicenseeId = getEffectiveLicenseeId(req);
-
-  const qrWhere: any = {};
-  const batchWhere: any = {};
-
-  const manufacturersWhere: any = {
-    role: { in: [UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER] },
-    isActive: true,
-  };
-
-  if (
-    role === UserRole.MANUFACTURER ||
-    role === UserRole.MANUFACTURER_ADMIN ||
-    role === UserRole.MANUFACTURER_USER
-  ) {
-    batchWhere.manufacturerId = userId;
-    qrWhere.batch = { manufacturerId: userId };
-    manufacturersWhere.id = userId;
-  } else if (scopedLicenseeId) {
-    qrWhere.licenseeId = scopedLicenseeId;
-    batchWhere.licenseeId = scopedLicenseeId;
-    manufacturersWhere.OR = [
-      { licenseeId: scopedLicenseeId },
-      { manufacturerLicenseeLinks: { some: { licenseeId: scopedLicenseeId } } },
-    ];
-  }
-
-  const linkedLicenseeIds =
-    role === UserRole.MANUFACTURER || role === UserRole.MANUFACTURER_ADMIN || role === UserRole.MANUFACTURER_USER
-      ? await resolveAccessibleLicenseeIdsForUser(req.user)
-      : [];
-
-  const [totalQRCodes, totalBatches, manufacturers, activeLicensees, qrGrouped, qrTotal] =
-    await Promise.all([
-      prisma.qRCode.count({ where: qrWhere }),
-      prisma.batch.count({ where: batchWhere }),
-      prisma.user.count({ where: manufacturersWhere }),
-
-      role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN
-        ? prisma.licensee.count({ where: { isActive: true } })
-        : linkedLicenseeIds.length > 0
-          ? prisma.licensee.count({ where: { id: { in: linkedLicenseeIds }, isActive: true } })
-          : scopedLicenseeId
-          ? prisma.licensee.count({ where: { id: scopedLicenseeId, isActive: true } })
-          : 0,
-
-      prisma.qRCode.groupBy({
-        by: ["status"],
-        where: qrWhere,
-        _count: true,
-      }),
-      prisma.qRCode.count({ where: qrWhere }),
-    ]);
-
-  const byStatus = qrGrouped.reduce((acc, s) => {
-    acc[s.status] = s._count;
-    return acc;
-  }, {} as Record<string, number>);
-
-  return {
-    totalQRCodes,
-    activeLicensees,
-    manufacturers,
-    totalBatches,
-    qr: { total: qrTotal, byStatus, ...summarizeQrStatusCounts(byStatus) },
-  };
-}
+import { getDashboardSnapshot } from "../services/dashboardSnapshotService";
+import { writeSseRealtimeEnvelope } from "../utils/realtime";
 
 /**
  * SSE stream for dashboard updates.
- * Use EventSource in frontend:
- *   new EventSource(`${API}/api/events/dashboard?token=${token}`)
+ * Browser sessions use secure cookies, so EventSource connects without query tokens.
  */
 export const dashboardEvents = async (req: AuthRequest, res: Response) => {
   try {
@@ -103,8 +24,21 @@ export const dashboardEvents = async (req: AuthRequest, res: Response) => {
     res.flushHeaders?.();
 
     // Send initial payload
-    const initial = await computeDashboard(req);
-    writeSse(res, "stats", initial);
+    const initial = await getDashboardSnapshot(req);
+    writeSseRealtimeEnvelope(res, {
+      channel: "dashboard",
+      type: "snapshot",
+      payload: {
+        reason: "initial",
+        summary: {
+          totalQRCodes: initial.totalQRCodes,
+          activeLicensees: initial.activeLicensees,
+          manufacturers: initial.manufacturers,
+          totalBatches: initial.totalBatches,
+        },
+        qrStats: initial.qr,
+      },
+    });
 
     const scopedLicenseeId = getEffectiveLicenseeId(req);
     const role = req.user.role;
@@ -134,11 +68,20 @@ export const dashboardEvents = async (req: AuthRequest, res: Response) => {
           if (scopedLicenseeId && log.licenseeId !== scopedLicenseeId) return;
         }
 
-        writeSse(res, "audit", log);
-
-        // also send fresh stats
-        const fresh = await computeDashboard(req);
-        writeSse(res, "stats", fresh);
+        writeSseRealtimeEnvelope(res, {
+          channel: "dashboard",
+          type: "audit.delta",
+          payload: {
+            log,
+          },
+        });
+        writeSseRealtimeEnvelope(res, {
+          channel: "dashboard",
+          type: "summary.refresh",
+          payload: {
+            reason: "audit",
+          },
+        });
       } catch (e) {
         // ignore single event errors
       }

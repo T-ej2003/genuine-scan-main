@@ -151,11 +151,20 @@ const buildCountMaps = async (batchIds: string[]) => {
     };
   }
 
-  const [countGroups, unassignedRanges, printableRanges] = await Promise.all([
-    prisma.qRCode.groupBy({
-      by: ["batchId", "status"],
+  const [rollups, unassignedRanges, printableRanges] = await Promise.all([
+    prisma.inventoryStatusRollup.findMany({
       where: { batchId: { in: batchIds } },
-      _count: { _all: true },
+      select: {
+        batchId: true,
+        dormant: true,
+        active: true,
+        activated: true,
+        allocated: true,
+        printed: true,
+        redeemed: true,
+        blocked: true,
+        scanned: true,
+      },
     }),
     prisma.qRCode.groupBy({
       by: ["batchId"],
@@ -180,11 +189,33 @@ const buildCountMaps = async (batchIds: string[]) => {
   ]);
 
   const countsMap = new Map<string, BatchInventoryCounts>();
-  for (const group of countGroups) {
-    if (!group.batchId) continue;
-    const current = countsMap.get(group.batchId) || emptyCounts();
-    current[toCountKey(group.status)] = group._count?._all || 0;
-    countsMap.set(group.batchId, current);
+  for (const rollup of rollups) {
+    countsMap.set(rollup.batchId, {
+      dormant: Number(rollup.dormant || 0),
+      active: Number(rollup.active || 0),
+      activated: Number(rollup.activated || 0),
+      allocated: Number(rollup.allocated || 0),
+      printed: Number(rollup.printed || 0),
+      redeemed: Number(rollup.redeemed || 0),
+      blocked: Number(rollup.blocked || 0),
+      scanned: Number(rollup.scanned || 0),
+    });
+  }
+
+  const missingBatchIds = batchIds.filter((batchId) => !countsMap.has(batchId));
+  if (missingBatchIds.length > 0) {
+    const countGroups = await prisma.qRCode.groupBy({
+      by: ["batchId", "status"],
+      where: { batchId: { in: missingBatchIds } },
+      _count: { _all: true },
+    });
+
+    for (const group of countGroups) {
+      if (!group.batchId) continue;
+      const current = countsMap.get(group.batchId) || emptyCounts();
+      current[toCountKey(group.status)] = group._count?._all || 0;
+      countsMap.set(group.batchId, current);
+    }
   }
 
   const unassignedRangeMap = new Map<string, { start: string | null; end: string | null }>();

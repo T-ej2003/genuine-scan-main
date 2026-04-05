@@ -1,10 +1,11 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import Manufacturers from "@/pages/Manufacturers";
 import apiClient from "@/lib/api-client";
+import { renderWithQueryClient } from "@/test/render-with-query-client";
 
 const toast = vi.fn();
 const mockNavigate = vi.fn();
@@ -40,6 +41,7 @@ vi.mock("@/hooks/use-toast", () => ({
 }));
 
 vi.mock("@/lib/mutation-events", () => ({
+  emitMutationEvent: vi.fn(),
   onMutationEvent: () => () => undefined,
 }));
 
@@ -71,7 +73,7 @@ describe("Manufacturers licensee linking flow", () => {
   });
 
   it("links an existing manufacturer into the current licensee scope", async () => {
-    render(
+    renderWithQueryClient(
       <MemoryRouter>
         <Manufacturers />
       </MemoryRouter>
@@ -86,7 +88,7 @@ describe("Manufacturers licensee linking flow", () => {
       );
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Add Manufacturer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Invite manufacturer" }));
     fireEvent.change(screen.getByPlaceholderText("Factory A"), { target: { value: "Factory A" } });
     fireEvent.change(screen.getByPlaceholderText("factory@example.com"), { target: { value: "factory@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: "Send invite" }));

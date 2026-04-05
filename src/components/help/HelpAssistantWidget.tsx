@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { getAppRouteLabel } from "@/app/route-metadata";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +40,9 @@ type AssistantTurn =
 const mkTurnId = () => `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 
 const routeLabel = (route: string) => {
+  const appLabel = getAppRouteLabel(route);
+  if (appLabel) return appLabel;
+
   const labels: Record<string, string> = {
     "/help": "Help hub",
     "/help/getting-access": "Getting access",
@@ -53,15 +57,17 @@ const routeLabel = (route: string) => {
     "/help/incident-actions": "Incident actions docs",
     "/help/communications": "Communications docs",
     "/verify": "Verify page",
-    "/qr-requests": "QR Requests",
+    "/code-requests": "Code Requests",
     "/batches": "Batches",
     "/manufacturers": "Manufacturers",
-    "/qr-tracking": "QR Tracking",
-    "/incidents": "Incidents",
+    "/scan-activity": "Scan Activity",
+    "/incidents": "Incident Response",
     "/support": "Support tickets",
     "/governance": "Governance",
-    "/ir": "IR Center",
+    "/incident-response": "Incident Response",
     "/printer-diagnostics": "Printer Setup",
+    "/printer-setup": "Printer Setup",
+    "/settings": "Settings",
     "/account": "Account settings",
     "/login": "Sign in",
     "/accept-invite": "Accept invite",
@@ -104,7 +110,7 @@ const roleScopedIntro = (activeRole: HelpKbRole) => {
     return "Licensee/Admin mode: ask about inventory requests, the batch workspace, manufacturers, tracking, and account access.";
   }
   if (activeRole === "manufacturer") {
-    return "Manufacturer mode: ask about assigned batches, printer setup, workstation printing, saved factory printers, office printers, and status updates.";
+    return "Manufacturer mode: ask about assigned batches, printer setup, workstation printing, saved factory printers, shared printers, and status updates.";
   }
   return "Customer mode: ask about verification results, repeat scans, ownership claim, and counterfeit reporting.";
 };

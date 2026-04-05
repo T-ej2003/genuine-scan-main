@@ -1,77 +1,22 @@
 import { Response } from "express";
-import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
-import { UserRole } from "@prisma/client";
-import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
+import { getDashboardSnapshot } from "../services/dashboardSnapshotService";
 
 export const getDashboardStats = async (req: AuthRequest, res: Response) => {
   try {
-    const role = req.user?.role;
-    const userId = req.user?.userId;
-    const licenseeId = req.user?.licenseeId || null;
-
-    if (!role || !userId) {
+    if (!req.user?.role || !req.user?.userId) {
       return res.status(401).json({ success: false, error: "Not authenticated" });
     }
-
-    // SUPER_ADMIN can optionally scope by ?licenseeId=
-    const scopeLicenseeId =
-      role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN
-        ? ((req.query.licenseeId as string | undefined) || null)
-        : licenseeId;
-
-    const qrWhere: any = {};
-    const batchWhere: any = {};
-
-    // Manufacturers count:
-    // - SUPER_ADMIN (no scope): all manufacturers
-    // - SUPER_ADMIN (scoped): manufacturers inside that licensee
-    // - LICENSEE_ADMIN: manufacturers in own licensee
-    // - MANUFACTURER: only self (personal scope)
-    const mfgWhere: any = {
-      role: { in: [UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER] },
-      isActive: true,
-    };
-    if (
-      role === UserRole.MANUFACTURER ||
-      role === UserRole.MANUFACTURER_ADMIN ||
-      role === UserRole.MANUFACTURER_USER
-    ) {
-      batchWhere.manufacturerId = userId;
-      qrWhere.batch = { manufacturerId: userId };
-      mfgWhere.id = userId;
-    } else if (scopeLicenseeId) {
-      qrWhere.licenseeId = scopeLicenseeId;
-      batchWhere.licenseeId = scopeLicenseeId;
-      mfgWhere.OR = [{ licenseeId: scopeLicenseeId }, { manufacturerLicenseeLinks: { some: { licenseeId: scopeLicenseeId } } }];
-    }
-
-    const linkedLicenseeIds =
-      role === UserRole.MANUFACTURER || role === UserRole.MANUFACTURER_ADMIN || role === UserRole.MANUFACTURER_USER
-        ? await resolveAccessibleLicenseeIdsForUser(req.user!)
-        : [];
-
-    const [
-      totalQRCodes,
-      activeLicensees,
-      manufacturers,
-      totalBatches,
-    ] = await Promise.all([
-      prisma.qRCode.count({ where: qrWhere }),
-      role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN
-        ? prisma.licensee.count({ where: { ...(scopeLicenseeId ? { id: scopeLicenseeId } : {}), isActive: true } })
-        : linkedLicenseeIds.length > 0
-          ? prisma.licensee.count({ where: { id: { in: linkedLicenseeIds }, isActive: true } })
-          : scopeLicenseeId
-          ? prisma.licensee.count({ where: { id: scopeLicenseeId, isActive: true } })
-          : 0,
-      prisma.user.count({ where: mfgWhere }),
-      prisma.batch.count({ where: batchWhere }),
-    ]);
+    const snapshot = await getDashboardSnapshot(req);
 
     return res.json({
       success: true,
-      data: { totalQRCodes, activeLicensees, manufacturers, totalBatches },
+      data: {
+        totalQRCodes: snapshot.totalQRCodes,
+        activeLicensees: snapshot.activeLicensees,
+        manufacturers: snapshot.manufacturers,
+        totalBatches: snapshot.totalBatches,
+      },
     });
   } catch (err) {
     console.error("getDashboardStats error", err);

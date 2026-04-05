@@ -52,7 +52,7 @@ const createUserSchema = z.object({
   licenseeId: z.string().uuid().optional(),
   location: z.string().trim().max(200).optional(),
   website: z.string().trim().max(200).optional(),
-});
+}).strict();
 
 const updateUserSchema = z.object({
   name: z.string().min(2).optional(),
@@ -62,7 +62,23 @@ const updateUserSchema = z.object({
   licenseeId: z.string().uuid().optional(), // SUPER_ADMIN only
   location: z.string().trim().max(200).optional(),
   website: z.string().trim().max(200).optional(),
-});
+}).strict();
+
+const userIdParamSchema = z.object({
+  id: z.string().uuid("Invalid user id"),
+}).strict();
+
+const deleteUserQuerySchema = z.object({
+  hard: z.enum(["true", "false"]).optional(),
+}).strict();
+
+const parsePagination = (query: Record<string, unknown>, defaults?: { limit?: number; max?: number }) => {
+  const fallbackLimit = defaults?.limit ?? 100;
+  const maxLimit = defaults?.max ?? 500;
+  const limit = Math.min(parseInt(String(query.limit ?? fallbackLimit), 10) || fallbackLimit, maxLimit);
+  const offset = Math.max(0, parseInt(String(query.offset ?? "0"), 10) || 0);
+  return { limit, offset };
+};
 
 /* ===================== HELPERS ===================== */
 
@@ -260,6 +276,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
         data: {
           email,
           passwordHash,
+          emailVerifiedAt: new Date(),
           name,
           role,
           licenseeId,
@@ -335,6 +352,7 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
     const includeInactive = String(req.query.includeInactive || "false").toLowerCase() === "true";
     const roleFilter = (req.query.role as UserRole | undefined) || undefined;
     const effectiveLicenseeId = isPlatform(auth.role) ? queryLicenseeId : getTenantLicenseeId(req) || undefined;
+    const { limit, offset } = parsePagination(req.query as Record<string, unknown>);
 
     const where: any = {};
     if (roleFilter && isManufacturerRole(roleFilter)) {
@@ -351,33 +369,39 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
     }
     if (!includeInactive) where.isActive = true;
 
-    const users = await prisma.user.findMany({
-      where,
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        licenseeId: true,
-        isActive: true,
-        deletedAt: true,
-        createdAt: true,
-        location: true,
-        website: true,
-        licensee: { select: { id: true, name: true, prefix: true, brandName: true } },
-        manufacturerLicenseeLinks: {
-          include: {
-            licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
+    const [users, total] = await Promise.all([
+      prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          licenseeId: true,
+          isActive: true,
+          deletedAt: true,
+          createdAt: true,
+          location: true,
+          website: true,
+          licensee: { select: { id: true, name: true, prefix: true, brandName: true } },
+          manufacturerLicenseeLinks: {
+            include: {
+              licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
+            },
+            orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
           },
-          orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
         },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        skip: offset,
+      }),
+      prisma.user.count({ where }),
+    ]);
 
     return res.json({
       success: true,
       data: users.map((row) => serializeScopedUser(row, effectiveLicenseeId || null)),
+      meta: { total, limit, offset },
     });
   } catch (e) {
     console.error("getUsers error:", e);
@@ -396,6 +420,7 @@ export const getManufacturers = async (req: AuthRequest, res: Response) => {
     const licenseeId = isPlatform(auth.role)
       ? ((req.query.licenseeId as string | undefined) || undefined)
       : (getTenantLicenseeId(req) || undefined);
+    const { limit, offset } = parsePagination(req.query as Record<string, unknown>);
 
     const where: any = { role: { in: MANUFACTURER_ROLES } };
     if (licenseeId) {
@@ -406,33 +431,39 @@ export const getManufacturers = async (req: AuthRequest, res: Response) => {
     }
     if (!includeInactive) where.isActive = true;
 
-    const manufacturers = await prisma.user.findMany({
-      where,
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        licenseeId: true,
-        isActive: true,
-        deletedAt: true,
-        createdAt: true,
-        location: true,
-        website: true,
-        licensee: { select: { id: true, name: true, prefix: true, brandName: true } },
-        manufacturerLicenseeLinks: {
-          include: {
-            licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
+    const [manufacturers, total] = await Promise.all([
+      prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          licenseeId: true,
+          isActive: true,
+          deletedAt: true,
+          createdAt: true,
+          location: true,
+          website: true,
+          licensee: { select: { id: true, name: true, prefix: true, brandName: true } },
+          manufacturerLicenseeLinks: {
+            include: {
+              licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
+            },
+            orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
           },
-          orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
         },
-      },
-      orderBy: { name: "asc" },
-    });
+        orderBy: { name: "asc" },
+        take: limit,
+        skip: offset,
+      }),
+      prisma.user.count({ where }),
+    ]);
 
     return res.json({
       success: true,
       data: manufacturers.map((row) => serializeScopedUser(row, licenseeId || null)),
+      meta: { total, limit, offset },
     });
   } catch (e) {
     console.error("getManufacturers error:", e);
@@ -452,7 +483,11 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const targetId = req.params.id;
+    const paramsParsed = userIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid user id" });
+    }
+    const targetId = paramsParsed.data.id;
     const t = await assertManufacturerTarget(targetId);
     if (!t.ok) return res.status(t.status).json({ success: false, error: t.error });
 
@@ -558,8 +593,17 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
     const auth = ensureAuth(req);
     if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    const targetId = req.params.id;
-    const hard = String(req.query.hard || "false").toLowerCase() === "true";
+    const paramsParsed = userIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid user id" });
+    }
+    const queryParsed = deleteUserQuerySchema.safeParse(req.query || {});
+    if (!queryParsed.success) {
+      return res.status(400).json({ success: false, error: queryParsed.error.errors[0]?.message || "Invalid delete query" });
+    }
+
+    const targetId = paramsParsed.data.id;
+    const hard = queryParsed.data.hard === "true";
 
     const t = await assertManufacturerTarget(targetId);
     if (!t.ok) return res.status(t.status).json({ success: false, error: t.error });
@@ -692,7 +736,11 @@ export const restoreManufacturer = async (req: AuthRequest, res: Response) => {
     const auth = ensureAuth(req);
     if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
 
-    const targetId = req.params.id;
+    const paramsParsed = userIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid user id" });
+    }
+    const targetId = paramsParsed.data.id;
     const t = await assertManufacturerTarget(targetId);
     if (!t.ok) return res.status(t.status).json({ success: false, error: t.error });
 

@@ -1,9 +1,10 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 
 import Incidents from "@/pages/Incidents";
 import apiClient from "@/lib/api-client";
+import { renderWithQueryClient } from "@/test/render-with-query-client";
 
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
@@ -70,17 +71,17 @@ describe("Incidents filters", () => {
   });
 
   it("sends search filter to incidents API", async () => {
-    render(<Incidents />);
+    renderWithQueryClient(<Incidents />);
 
     await waitFor(() => {
       expect(vi.mocked(apiClient.getIncidents).mock.calls.length).toBeGreaterThan(0);
     });
 
     fireEvent.change(
-      screen.getByPlaceholderText("Search by code / description / contact"),
+      screen.getByPlaceholderText("Search by code, message, or contact"),
       { target: { value: "TT0000000068" } }
     );
-    fireEvent.click(screen.getByText("Apply"));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh results" }));
 
     await waitFor(() => {
       expect(vi.mocked(apiClient.getIncidents)).toHaveBeenLastCalledWith(
@@ -92,7 +93,7 @@ describe("Incidents filters", () => {
   });
 
   it("quick status buttons patch incident directly", async () => {
-    render(<Incidents />);
+    renderWithQueryClient(<Incidents />);
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Mark resolved" })).toBeInTheDocument();
@@ -106,7 +107,7 @@ describe("Incidents filters", () => {
       );
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Reject as spam" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark as spam" }));
     await waitFor(() => {
       expect(vi.mocked(apiClient.patchIncident)).toHaveBeenLastCalledWith(
         incidentRow.id,

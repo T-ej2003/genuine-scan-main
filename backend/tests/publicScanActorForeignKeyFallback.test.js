@@ -23,6 +23,14 @@ const qrScanCustomerFkError = new Prisma.PrismaClientKnownRequestError(
   }
 );
 
+const verifyUxPolicy = {
+  showTimelineCard: true,
+  showRiskCards: true,
+  allowOwnershipClaim: true,
+  allowFraudReport: true,
+  mobileCameraAssist: true,
+};
+
 const neutralPolicy = {
   policy: {
     autoBlockEnabled: true,
@@ -133,6 +141,10 @@ const fakePrisma = {
       claimedAt: new Date("2026-03-12T08:00:00.000Z"),
     }),
   },
+  ownershipTransfer: {
+    updateMany: async () => ({ count: 0 }),
+    findFirst: async () => null,
+  },
   $transaction: async (callback) =>
     callback({
       qRCode: {
@@ -145,6 +157,7 @@ const fakePrisma = {
         }),
       },
       qrScanLog: {
+        findFirst: async () => null,
         create: async ({ data }) => {
           scanLogCreateCalls += 1;
           lastScanLogPayload = data;
@@ -158,11 +171,15 @@ const fakePrisma = {
 };
 
 mockModule("config/database.js", { __esModule: true, default: fakePrisma });
-mockModule("services/auditService.js", { createAuditLog: async () => {} });
+mockModule("services/auditService.js", {
+  createAuditLog: async () => {},
+  createAuditLogSafely: async () => ({ log: { id: "audit-1" }, persisted: true, queued: false, outboxId: null }),
+});
 mockModule("services/locationService.js", { reverseGeocode: async () => null });
 mockModule("services/policyEngineService.js", { evaluateScanAndEnforcePolicy: async () => neutralPolicy });
 mockModule("services/scanInsightService.js", { getScanInsight: async () => emptyScanInsight });
 mockModule("services/governanceService.js", {
+  resolveVerifyUxPolicy: async () => verifyUxPolicy,
   resolveDuplicateRiskProfile: async () => ({
     tenantRiskLevel: "MEDIUM",
     productRiskLevel: "MEDIUM",

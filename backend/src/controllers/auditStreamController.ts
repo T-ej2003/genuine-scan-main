@@ -1,27 +1,10 @@
 import { Response } from "express";
-import { auditStream } from "../events/auditStream";
 import { AuthRequest } from "../middleware/auth";
 import { UserRole } from "@prisma/client";
-
-// SSE uses EventSource on browser which cannot send Authorization header.
-// We'll accept token via query (?token=...) safely for localhost.
-// If you want stricter security later, we can switch to cookie-based auth.
-
-import jwt from "jsonwebtoken";
-import { JWTPayload } from "../types";
-
-function authenticateSSE(req: AuthRequest): JWTPayload | null {
-  const token = (req.query.token as string | undefined) || "";
-  if (!token) return null;
-  try {
-    return jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
-  } catch {
-    return null;
-  }
-}
+import { onAuditLog } from "../services/auditService";
 
 export const streamAuditLogs = async (req: AuthRequest, res: Response) => {
-  const user = authenticateSSE(req);
+  const user = req.user;
   if (!user) return res.status(401).json({ success: false, error: "Unauthorized SSE" });
 
   // Visibility rule:
@@ -46,7 +29,7 @@ export const streamAuditLogs = async (req: AuthRequest, res: Response) => {
     res.write(`event: ping\ndata: {}\n\n`);
   }, 25000);
 
-  const off = auditStream.onLog((evt) => {
+  const off = onAuditLog((evt) => {
     // tenant filter (only works well if AuditLog has licenseeId)
     if (user.role === UserRole.LICENSEE_ADMIN || user.role === UserRole.ORG_ADMIN) {
       if (!user.licenseeId) return;

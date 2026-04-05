@@ -4,6 +4,10 @@ import { createTraceEventFromAuditLog } from "./traceEventService";
 import { hashIp, normalizeUserAgent } from "../utils/security";
 import { queueSecurityEvent } from "./siemOutboxService";
 import { appendForensicChainFromAuditLog } from "./forensicChainService";
+import { getRedisInstanceId, publishRedisJson, subscribeRedisJson } from "./redisService";
+import { bumpCacheNamespaceVersion } from "./versionedCacheService";
+import { buildDateCursorWhere, encodeDateCursor } from "../utils/cursorPagination";
+import { queueAuditLogOutbox } from "./auditLogOutboxService";
 
 export interface AuditLogInput {
   userId?: string;
@@ -21,8 +25,17 @@ export interface AuditLogInput {
 type Listener = (log: any) => void;
 
 const listeners = new Set<Listener>();
+const AUDIT_LOG_CHANNEL = "mscqr:realtime:audit-log";
+let auditChannelReady = false;
 
 export const onAuditLog = (cb: Listener) => {
+  if (!auditChannelReady) {
+    auditChannelReady = true;
+    void subscribeRedisJson(AUDIT_LOG_CHANNEL, (payload) => {
+      if (!payload || payload.origin === getRedisInstanceId()) return;
+      emitAuditLog(payload.log);
+    });
+  }
   listeners.add(cb);
   return () => listeners.delete(cb);
 };
@@ -46,20 +59,23 @@ const resolveOrgId = async (input: { orgId?: string; licenseeId?: string }) => {
   return derived || undefined;
 };
 
-export const createAuditLog = async (data: AuditLogInput) => {
+const resolveAuditPayload = async (data: AuditLogInput) => {
   const storeRawIp = ["1", "true", "yes", "on"].includes(String(process.env.AUDIT_LOG_STORE_RAW_IP || "").trim().toLowerCase());
   const resolvedOrgId = await resolveOrgId({ orgId: data.orgId, licenseeId: data.licenseeId });
   const resolvedIpHash = data.ipHash ?? hashIp(data.ipAddress);
   const resolvedUserAgent = normalizeUserAgent(data.userAgent);
 
-  const payload = {
+  return {
     ...data,
     orgId: resolvedOrgId,
     ipHash: resolvedIpHash || undefined,
     userAgent: resolvedUserAgent || undefined,
     ipAddress: storeRawIp ? data.ipAddress : undefined,
   } as any;
+};
 
+export const createAuditLog = async (data: AuditLogInput) => {
+  const payload = await resolveAuditPayload(data);
   let log;
   try {
     log = await prisma.auditLog.create({ data: payload });
@@ -108,6 +124,11 @@ export const createAuditLog = async (data: AuditLogInput) => {
     console.error("appendForensicChainFromAuditLog failed:", e);
   }
   emitAuditLog(log);
+  void publishRedisJson(AUDIT_LOG_CHANNEL, {
+    origin: getRedisInstanceId(),
+    log,
+  }).catch(() => undefined);
+  void bumpCacheNamespaceVersion("dashboard-snapshot").catch(() => undefined);
   await queueSecurityEvent("AUDIT_LOG", {
     id: log.id,
     action: log.action,
@@ -122,6 +143,29 @@ export const createAuditLog = async (data: AuditLogInput) => {
   return log;
 };
 
+export const createAuditLogSafely = async (data: AuditLogInput) => {
+  const payload = await resolveAuditPayload(data);
+
+  try {
+    const log = await createAuditLog(payload);
+    return {
+      log,
+      persisted: true,
+      queued: false,
+      outboxId: null as string | null,
+    };
+  } catch (error) {
+    const outboxId = await queueAuditLogOutbox(payload, error);
+    return {
+      log: null,
+      persisted: false,
+      queued: Boolean(outboxId),
+      outboxId,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    };
+  }
+};
+
 export const getAuditLogs = async (opts: {
   userId?: string;
   entityType?: string;
@@ -132,6 +176,7 @@ export const getAuditLogs = async (opts: {
   userIds?: string[];
   limit: number;
   offset: number;
+  cursor?: string | null;
 }) => {
   const where: any = {};
   if (opts.userId) where.userId = opts.userId;
@@ -153,15 +198,25 @@ export const getAuditLogs = async (opts: {
     where.licenseeId = opts.licenseeId;
   }
 
+  const cursorWhere = buildDateCursorWhere({
+    cursor: opts.cursor,
+    createdAtField: "createdAt",
+    idField: "id",
+  });
+  if (cursorWhere) {
+    where.AND = [...(Array.isArray(where.AND) ? where.AND : []), cursorWhere];
+  }
+
   const [logs, total] = await Promise.all([
     prisma.auditLog.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: opts.limit,
-      skip: opts.offset,
+      skip: opts.cursor ? 0 : opts.offset,
     }),
-    prisma.auditLog.count({ where }),
+    opts.cursor ? Promise.resolve<number | null>(null) : prisma.auditLog.count({ where }),
   ]);
 
-  return { logs, total };
+  const nextCursor = logs.length === opts.limit ? encodeDateCursor(logs[logs.length - 1]) : null;
+  return { logs, total, nextCursor };
 };

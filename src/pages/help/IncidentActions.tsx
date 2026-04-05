@@ -87,7 +87,7 @@ export default function IncidentActionsHelp() {
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-muted-foreground">
               <ol className="list-decimal pl-5">
-                <li>Open the incident in <Badge variant="outline">IR Center</Badge>.</li>
+                <li>Open the incident in <Badge variant="outline">Incident Response</Badge>.</li>
                 <li>Choose <strong>Actions</strong>.</li>
                 <li>Select the action type (QR, batch, org, manufacturer user).</li>
                 <li>Provide a reason and submit.</li>
@@ -143,7 +143,7 @@ export default function IncidentActionsHelp() {
                 <CardTitle className="text-base">Need to audit who did what</CardTitle>
               </CardHeader>
               <CardContent className="text-sm text-muted-foreground">
-                Check both the incident timeline and the Audit Logs for the action event, including IP hash and user agent.
+                Check both the incident timeline and Audit History for the action event, including IP hash and user agent.
               </CardContent>
             </Card>
           </div>
@@ -152,4 +152,3 @@ export default function IncidentActionsHelp() {
     </HelpShell>
   );
 }
-

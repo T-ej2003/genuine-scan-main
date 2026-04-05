@@ -1,3 +1,5 @@
+import { frontendRelease } from "@/lib/observability/release";
+
 export type SupportNetworkLog = {
   id: string;
   at: string;
@@ -99,6 +101,7 @@ export const getSupportEnvironmentSnapshot = () => {
 };
 
 export const buildSupportDiagnosticsPayload = () => ({
+  release: frontendRelease,
   environment: getSupportEnvironmentSnapshot(),
   networkLogs: getSupportNetworkLogs(),
   runtimeIssues: getSupportRuntimeIssues(),

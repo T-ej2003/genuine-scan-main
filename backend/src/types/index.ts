@@ -1,4 +1,8 @@
-import { UserRole } from '@prisma/client';
+import { UserRole } from "@prisma/client";
+
+export type AuthSessionStage = "ACTIVE" | "MFA_BOOTSTRAP";
+export type AuthAssuranceLevel = "PASSWORD" | "ADMIN_MFA";
+export type StepUpMethod = "ADMIN_MFA" | "PASSWORD_REAUTH";
 
 export interface JWTPayload {
   userId: string;
@@ -7,17 +11,37 @@ export interface JWTPayload {
   licenseeId: string | null;
   orgId: string | null;
   linkedLicenseeIds?: string[] | null;
+  sessionStage: "ACTIVE";
+  authAssurance: AuthAssuranceLevel;
+  authenticatedAt?: string | null;
+  mfaVerifiedAt?: string | null;
 }
 
 export interface MfaBootstrapPayload {
   userId: string;
   email: string;
   role: UserRole;
+  licenseeId: string | null;
+  orgId: string | null;
+  linkedLicenseeIds?: string[] | null;
   stage: "MFA_BOOTSTRAP";
 }
 
+export interface AuthenticatedSessionClaims {
+  userId: string;
+  email: string;
+  role: UserRole;
+  licenseeId: string | null;
+  orgId: string | null;
+  linkedLicenseeIds?: string[] | null;
+  sessionStage: AuthSessionStage;
+  authAssurance: AuthAssuranceLevel;
+  authenticatedAt?: string | null;
+  mfaVerifiedAt?: string | null;
+}
+
 export interface AuthenticatedRequest extends Express.Request {
-  user?: JWTPayload;
+  user?: AuthenticatedSessionClaims;
 }
 
 export interface CreateLicenseeDTO {

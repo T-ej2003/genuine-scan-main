@@ -2,7 +2,7 @@ import prisma from "../../config/database";
 import { UserRole, UserStatus } from "@prisma/client";
 import { hashPassword } from "./passwordService";
 import { newCsrfToken } from "./tokenService";
-import { hashToken, randomOpaqueToken } from "../../utils/security";
+import { buildTokenHashCandidates, hashToken, randomOpaqueToken } from "../../utils/security";
 import { sendAuthEmail } from "./authEmailService";
 import { createAuditLog } from "../auditService";
 import { normalizeEmailAddress } from "../../utils/email";
@@ -485,12 +485,12 @@ export const acceptInvite = async (input: {
   ipHash: string | null;
   userAgent: string | null;
 }) => {
-  const tokenHash = hashToken(input.rawToken);
   const now = new Date();
+  const tokenHashCandidates = buildTokenHashCandidates(input.rawToken);
 
   const result = await prisma.$transaction(async (tx) => {
-    const invite = await tx.invite.findUnique({
-      where: { tokenHash },
+    const invite = await tx.invite.findFirst({
+      where: { tokenHash: { in: tokenHashCandidates } },
       select: {
         id: true,
         orgId: true,
@@ -521,6 +521,7 @@ export const acceptInvite = async (input: {
       data: {
         passwordHash,
         status: UserStatus.ACTIVE,
+        emailVerifiedAt: now,
         name: userName ? userName : undefined,
         failedLoginAttempts: 0,
         lockedUntil: null,
@@ -552,11 +553,11 @@ export const acceptInvite = async (input: {
 };
 
 export const getInvitePreview = async (rawToken: string) => {
-  const tokenHash = hashToken(rawToken);
   const now = new Date();
+  const tokenHashCandidates = buildTokenHashCandidates(rawToken);
 
-  const invite = await prisma.invite.findUnique({
-    where: { tokenHash },
+  const invite = await prisma.invite.findFirst({
+    where: { tokenHash: { in: tokenHashCandidates } },
     select: {
       id: true,
       email: true,

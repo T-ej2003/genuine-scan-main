@@ -84,7 +84,7 @@ export default function PolicyAlertsHelp() {
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-muted-foreground">
               <ol className="list-decimal pl-5">
-                <li>Open <Badge variant="outline">IR Center</Badge>.</li>
+                <li>Open <Badge variant="outline">Incident Response</Badge>.</li>
                 <li>Switch to the <Badge variant="outline">Policies</Badge> tab.</li>
                 <li>Select <strong>Create policy</strong>.</li>
                 <li>Choose the rule type and set thresholds/time window.</li>
@@ -117,8 +117,8 @@ export default function PolicyAlertsHelp() {
             />
             <DocScreenshot
               filename="ir-dashboard.png"
-              alt="IR Center dashboard"
-              caption="IR Center tabs (Incidents, Alerts, Policies)."
+              alt="Incident Response dashboard"
+              caption="Incident Response tabs (Incidents, Alerts, Policies)."
             />
           </div>
           <ScreenshotChecklist
@@ -129,7 +129,7 @@ export default function PolicyAlertsHelp() {
               },
               {
                 filename: "ir-dashboard.png",
-                whereToCapture: "IR Center page (Incidents/Alerts/Policies) as Super Admin.",
+                whereToCapture: "Incident Response page (Incidents/Alerts/Policies) as Super Admin.",
               },
             ]}
           />
@@ -160,4 +160,3 @@ export default function PolicyAlertsHelp() {
     </HelpShell>
   );
 }
-

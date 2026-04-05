@@ -43,7 +43,7 @@ const run = async () => {
   // 2) Rate limiting
   let blocked = false;
   for (let i = 0; i < 15; i += 1) {
-    const res = enforceIncidentRateLimit({
+    const res = await enforceIncidentRateLimit({
       ip: "1.2.3.4",
       qrCode: "ABC0000000001",
       deviceFp: "device-x",

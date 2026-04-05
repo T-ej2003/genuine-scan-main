@@ -1,6 +1,7 @@
 import { SecurityPolicy } from "@prisma/client";
 import prisma from "../config/database";
 import { getOrCreateSecurityPolicy } from "./policyEngineService";
+import { getBatchScanHistoryFallback } from "./scanLogReportingService";
 
 const EARTH_RADIUS_KM = 6371;
 
@@ -136,19 +137,30 @@ export const getBatchSlaAnalytics = async (opts: {
 
   const batchIds = batches.map((b) => b.id);
 
-  const grouped = await prisma.qrScanLog.groupBy({
+  const grouped = await prisma.scanMetricsHourlyRollup.groupBy({
     by: ["batchId"],
     where: { batchId: { in: batchIds } },
-    _min: { scannedAt: true },
-    _count: { _all: true },
+    _min: { firstScannedAt: true },
+    _sum: { totalScanEvents: true },
   });
 
   const firstScanMap = new Map<string, Date>();
   const scanCountMap = new Map<string, number>();
   for (const g of grouped) {
     if (!g.batchId) continue;
-    if (g._min.scannedAt) firstScanMap.set(g.batchId, g._min.scannedAt);
-    scanCountMap.set(g.batchId, g._count._all || 0);
+    if (g._min.firstScannedAt) firstScanMap.set(g.batchId, g._min.firstScannedAt);
+    scanCountMap.set(g.batchId, g._sum.totalScanEvents || 0);
+  }
+
+  const missingBatchIds = batchIds.filter((batchId) => !scanCountMap.has(batchId));
+  if (missingBatchIds.length > 0) {
+    const fallbackGrouped = await getBatchScanHistoryFallback(missingBatchIds);
+
+    for (const group of fallbackGrouped) {
+      if (!group.batchId) continue;
+      if (group.firstScannedAt) firstScanMap.set(group.batchId, group.firstScannedAt);
+      scanCountMap.set(group.batchId, Number(group.totalScanEvents || 0));
+    }
   }
 
   const rows: BatchSlaRow[] = batches.map((b) => {

@@ -1,19 +1,24 @@
 import React, { Suspense, lazy } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { APP_PATHS } from "@/app/route-metadata";
 
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import StepUpRecoveryDialog from "@/components/auth/StepUpRecoveryDialog";
 import HelpAssistantWidget from "@/components/help/HelpAssistantWidget";
 import { getRoleHelpHome } from "@/help/contextual-help";
 import RouteMetricsTracker from "@/components/RouteMetricsTracker";
+import { MutationEventBridge, queryClient } from "@/lib/query-client";
 
 const Login = lazy(() => import("@/pages/Login"));
 const AcceptInvite = lazy(() => import("@/pages/AcceptInvite"));
+const VerifyEmail = lazy(() => import("@/pages/VerifyEmail"));
 const ConnectorDownload = lazy(() => import("@/pages/ConnectorDownload"));
+const PrinterSetup = lazy(() => import("@/pages/PrinterSetup"));
 const ForgotPassword = lazy(() => import("@/pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
@@ -32,7 +37,9 @@ const Governance = lazy(() => import("@/pages/Governance"));
 const Verify = lazy(() => import("@/pages/Verify"));
 const VerifyLanding = lazy(() => import("@/pages/VerifyLanding"));
 const Index = lazy(() => import("@/pages/Index"));
+const TrustCenter = lazy(() => import("@/pages/TrustCenter"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
+const SettingsPage = lazy(() => import("@/pages/Settings"));
 const AccountSettings = lazy(() => import("@/pages/AccountSettings"));
 const HelpHub = lazy(() => import("@/pages/help/HelpHub"));
 const HelpAuthOverview = lazy(() => import("@/pages/help/AuthOverview"));
@@ -51,18 +58,10 @@ const HelpSupport = lazy(() => import("@/pages/help/Support"));
 const HelpGovernance = lazy(() => import("@/pages/help/Governance"));
 const HelpIncidents = lazy(() => import("@/pages/help/Incidents"));
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      staleTime: 10_000,
-      refetchOnWindowFocus: false,
-    },
-    mutations: {
-      retry: 0,
-    },
-  },
-});
+function RedirectWithQuery({ to }: { to: string }) {
+  const location = useLocation();
+  return <Navigate to={`${to}${location.search}`} replace />;
+}
 
 /* =========================
    Route Guards
@@ -78,9 +77,11 @@ function LoadingScreen() {
 function ProtectedRoute({
   children,
   allowedRoles,
+  allowedRawRoles,
 }: {
   children: React.ReactNode;
   allowedRoles?: string[];
+  allowedRawRoles?: string[];
 }) {
   const { user, isAuthenticated, isLoading } = useAuth();
 
@@ -89,6 +90,13 @@ function ProtectedRoute({
 
   if (allowedRoles && user && !allowedRoles.includes(user.role)) {
     return <Navigate to="/dashboard" replace />;
+  }
+
+  if (allowedRawRoles && user) {
+    const rawRole = String(user.rawRole || "").trim().toUpperCase();
+    if (!allowedRawRoles.includes(rawRole)) {
+      return <Navigate to="/dashboard" replace />;
+    }
   }
 
   return <>{children}</>;
@@ -139,6 +147,7 @@ function AppRoutes() {
       <Routes>
         {/* Public */}
         <Route path="/" element={<Index />} />
+        <Route path="/trust" element={<TrustCenter />} />
         <Route path="/verify" element={<VerifyLanding />} />
         <Route path="/verify/:code" element={<Verify />} />
         <Route path="/scan" element={<Verify />} />
@@ -284,6 +293,7 @@ function AppRoutes() {
             </AuthRoute>
           }
         />
+        <Route path="/verify-email" element={<VerifyEmail />} />
         <Route
           path="/forgot-password"
           element={
@@ -324,7 +334,7 @@ function AppRoutes() {
           path="/qr-codes"
           element={
             <ProtectedRoute>
-              <Navigate to="/qr-tracking" replace />
+              <RedirectWithQuery to={APP_PATHS.scanActivity} />
             </ProtectedRoute>
           }
         />
@@ -339,19 +349,27 @@ function AppRoutes() {
         />
 
         <Route
-          path="/printer-diagnostics"
+          path={APP_PATHS.printerSetup}
           element={
             <ProtectedRoute allowedRoles={["manufacturer"]}>
-              <PrinterDiagnostics />
+              <PrinterSetup />
             </ProtectedRoute>
           }
         />
 
         <Route
-          path="/qr-requests"
+          path={APP_PATHS.codeRequests}
           element={
             <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
               <QRRequests />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/qr-requests"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin"]}>
+              <RedirectWithQuery to={APP_PATHS.codeRequests} />
             </ProtectedRoute>
           }
         />
@@ -359,10 +377,18 @@ function AppRoutes() {
         <Route path="/product-batches" element={<Navigate to="/batches" replace />} />
 
         <Route
-          path="/qr-tracking"
+          path={APP_PATHS.scanActivity}
           element={
             <ProtectedRoute allowedRoles={["super_admin", "licensee_admin", "manufacturer"]}>
               <QRTracking />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/qr-tracking"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin", "manufacturer"]}>
+              <RedirectWithQuery to={APP_PATHS.scanActivity} />
             </ProtectedRoute>
           }
         />
@@ -377,19 +403,43 @@ function AppRoutes() {
         />
 
         <Route
-          path="/audit-logs"
+          path={APP_PATHS.auditHistory}
           element={
             <ProtectedRoute allowedRoles={["super_admin", "licensee_admin", "manufacturer"]}>
               <AuditLogs />
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/audit-logs"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin", "manufacturer"]}>
+              <RedirectWithQuery to={APP_PATHS.auditHistory} />
+            </ProtectedRoute>
+          }
+        />
 
+        <Route
+          path={APP_PATHS.incidentResponse}
+          element={
+            <ProtectedRoute allowedRoles={["super_admin"]}>
+              <IR />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/ir"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin"]}>
+              <RedirectWithQuery to={APP_PATHS.incidentResponse} />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/incidents"
           element={
             <ProtectedRoute allowedRoles={["super_admin"]}>
-              <Incidents />
+              <RedirectWithQuery to={APP_PATHS.incidentResponse} />
             </ProtectedRoute>
           }
         />
@@ -413,19 +463,27 @@ function AppRoutes() {
         />
 
         <Route
-          path="/ir"
+          path={`${APP_PATHS.incidentDetailPrefix}/:id`}
           element={
             <ProtectedRoute allowedRoles={["super_admin"]}>
-              <IR />
+              <IRIncidentDetail />
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/ir/incidents/:id"
           element={
             <ProtectedRoute allowedRoles={["super_admin"]}>
               <IRIncidentDetail />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path={APP_PATHS.settings}
+          element={
+            <ProtectedRoute>
+              <SettingsPage />
             </ProtectedRoute>
           }
         />
@@ -449,10 +507,12 @@ function AppRoutes() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <MutationEventBridge />
       <AuthProvider>
         <TooltipProvider>
           <Toaster />
           <Sonner />
+          <StepUpRecoveryDialog />
           <BrowserRouter
             future={{
               v7_startTransition: true,

@@ -4,7 +4,8 @@ import { Response } from "express";
 import { AuthRequest } from "../middleware/auth";
 import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
 import { listNotificationsForUser, onNotificationEvent, type NotificationRealtimeEvent } from "../services/notificationService";
-
+import { canRoleViewNotificationType } from "../services/notificationVisibility";
+import { writeSseRealtimeEnvelope } from "../utils/realtime";
 const toInt = (value: unknown, fallback: number, min: number, max: number) => {
   const n = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(n)) return fallback;
@@ -19,16 +20,15 @@ const audienceForRole = (role: UserRole): NotificationAudience => {
   return NotificationAudience.MANUFACTURER;
 };
 
-const writeSse = (res: Response, event: string, data: any) => {
-  res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
-};
-
 const shouldDeliver = (
   event: NotificationRealtimeEvent,
   user: NonNullable<AuthRequest["user"]>,
   accessibleLicenseeIds: string[]
 ) => {
+  if (event.notificationType && !canRoleViewNotificationType(user.role, event.notificationType)) {
+    return false;
+  }
+
   if (event.userIds?.length && event.userIds.includes(user.userId)) return true;
 
   if (event.audience !== NotificationAudience.ALL) {
@@ -82,12 +82,16 @@ export const notificationEvents = async (req: AuthRequest, res: Response) => {
         offset: 0,
       });
 
-      writeSse(res, "notifications", {
-        reason,
-        ...payload,
-        limit,
-        offset: 0,
-        serverTime: new Date().toISOString(),
+      writeSseRealtimeEnvelope(res, {
+        channel: "notifications",
+        type: "snapshot",
+        payload: {
+          reason,
+          ...payload,
+          limit,
+          offset: 0,
+          serverTime: new Date().toISOString(),
+        },
       });
     };
 
@@ -100,7 +104,14 @@ export const notificationEvents = async (req: AuthRequest, res: Response) => {
     const off = onNotificationEvent(async (event) => {
       try {
         if (!shouldDeliver(event, req.user!, accessibleLicenseeIds)) return;
-        await sendSnapshot(event.type);
+        writeSseRealtimeEnvelope(res, {
+          channel: "notifications",
+          type: "version.bump",
+          payload: {
+            reason: event.type,
+            serverTime: new Date().toISOString(),
+          },
+        });
       } catch {
         // ignore per-event failures
       }

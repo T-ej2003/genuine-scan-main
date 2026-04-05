@@ -510,7 +510,7 @@ export default function PrinterDiagnostics() {
         vendor: source.vendor.trim() || undefined,
         model: source.model.trim() || undefined,
         licenseeId: effectiveLicenseeId,
-        connectionType: source.connectionType,
+        connectionType: isNetworkDirect ? ("NETWORK_DIRECT" as const) : ("NETWORK_IPP" as const),
         ipAddress: isNetworkDirect ? ipAddress : undefined,
         host: !isNetworkDirect ? host || undefined : undefined,
         port,
@@ -519,7 +519,8 @@ export default function PrinterDiagnostics() {
         printerUri: !isNetworkDirect ? printerUri || undefined : undefined,
         deliveryMode: !isNetworkDirect ? source.deliveryMode : undefined,
         rotateGatewaySecret: !isNetworkDirect ? Boolean(source.rotateGatewaySecret) : undefined,
-        commandLanguage: isNetworkDirect ? source.commandLanguage : undefined,
+        commandLanguage:
+          isNetworkDirect && isSupportedNetworkDirectLanguage(source.commandLanguage) ? source.commandLanguage : undefined,
         isDefault: params?.printerId ? undefined : !hasActiveDefault,
       };
 

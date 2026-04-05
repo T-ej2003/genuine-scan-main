@@ -3,7 +3,7 @@ import prisma from "../config/database";
 import { randomNonce } from "./qrTokenService";
 import { reverseGeocode } from "./locationService";
 import { summarizeQrStatusCounts } from "./qrStatusMetrics";
-import { warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
+import { guardPublicIntegrityFallback } from "../utils/publicIntegrityGuard";
 
 const parseScanRefreshGraceMs = () => {
   const raw = Number(String(process.env.SCAN_REFRESH_GRACE_SECONDS || "").trim());
@@ -194,6 +194,9 @@ export const recordScan = async (
     ownershipId?: string | null;
     ownershipMatchMethod?: string | null;
     isTrustedOwnerContext?: boolean;
+  },
+  options?: {
+    strictStorage?: boolean;
   }
 ) => {
   const existing = await prisma.qRCode.findUnique({
@@ -297,10 +300,14 @@ export const recordScan = async (
       });
     } catch (error) {
       if (isQrScanActorForeignKeyError(error)) {
-        warnStorageUnavailableOnce(
-          "verify-qr-log-actor-fk",
-          "[verify] QrScanLog customer/ownership foreign key is stale. Retrying verification log without actor linkage."
-        );
+        guardPublicIntegrityFallback({
+          strictStorage: options?.strictStorage,
+          warningKey: "verify-qr-log-actor-fk",
+          warningMessage:
+            "[verify] QrScanLog customer/ownership foreign key is stale. Retrying verification log without actor linkage.",
+          degradedMessage: "Verification is temporarily unavailable because scan-log integrity checks are stale.",
+          degradedCode: "PUBLIC_SCAN_LOG_INTEGRITY_STALE",
+        });
         await tx.qrScanLog.create({
           data: {
             ...baseScanLogData,
@@ -331,19 +338,72 @@ export const recordScan = async (
 
 export const getQRStats = async (licenseeId?: string) => {
   const where = licenseeId ? { licenseeId } : {};
-
-  const stats = await prisma.qRCode.groupBy({
-    by: ["status"],
+  const rollups = await prisma.inventoryStatusRollup.aggregate({
     where,
-    _count: true,
+    _sum: {
+      totalCodes: true,
+      dormant: true,
+      active: true,
+      activated: true,
+      allocated: true,
+      printed: true,
+      redeemed: true,
+      blocked: true,
+      scanned: true,
+    },
   });
 
-  const total = await prisma.qRCode.count({ where });
+  const hasRollupData = Object.values(rollups._sum || {}).some((value) => Number(value || 0) > 0);
 
-  const byStatus = stats.reduce((acc, s) => {
-    acc[s.status] = s._count;
-    return acc;
-  }, {} as Record<string, number>);
+  let total = 0;
+  let byStatus: Record<string, number> = {};
+
+  if (hasRollupData) {
+    const unbatchedStats = await prisma.qRCode.groupBy({
+      by: ["status"],
+      where: {
+        ...where,
+        batchId: null,
+      },
+      _count: true,
+    });
+
+    const unbatchedTotal = await prisma.qRCode.count({
+      where: {
+        ...where,
+        batchId: null,
+      },
+    });
+
+    byStatus = {
+      DORMANT: Number(rollups._sum?.dormant || 0),
+      ACTIVE: Number(rollups._sum?.active || 0),
+      ACTIVATED: Number(rollups._sum?.activated || 0),
+      ALLOCATED: Number(rollups._sum?.allocated || 0),
+      PRINTED: Number(rollups._sum?.printed || 0),
+      REDEEMED: Number(rollups._sum?.redeemed || 0),
+      BLOCKED: Number(rollups._sum?.blocked || 0),
+      SCANNED: Number(rollups._sum?.scanned || 0),
+    };
+
+    for (const stat of unbatchedStats) {
+      byStatus[stat.status] = Number(byStatus[stat.status] || 0) + Number(stat._count || 0);
+    }
+
+    total = Number(rollups._sum?.totalCodes || 0) + unbatchedTotal;
+  } else {
+    const stats = await prisma.qRCode.groupBy({
+      by: ["status"],
+      where,
+      _count: true,
+    });
+
+    total = await prisma.qRCode.count({ where });
+    byStatus = stats.reduce((acc, s) => {
+      acc[s.status] = s._count;
+      return acc;
+    }, {} as Record<string, number>);
+  }
 
   return {
     total,

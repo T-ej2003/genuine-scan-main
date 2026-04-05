@@ -1,3 +1,4 @@
+import { getAppHelpRoute } from "@/app/route-metadata";
 import type { UserRole } from "@/types";
 
 export type PageGuidance = {
@@ -18,29 +19,8 @@ export const getRoleHelpHome = (role?: UserRole | null) => {
 };
 
 export const getContextualHelpRoute = (pathname: string, role?: UserRole | null) => {
-  if (starts(pathname, "/ir/incidents/")) return "/help/incident-actions";
-  if (starts(pathname, "/ir")) return "/help/incident-response";
-  if (starts(pathname, "/incidents")) return role === "super_admin" ? "/help/incidents" : "/help/licensee-admin";
-  if (starts(pathname, "/licensees")) return "/help/super-admin";
-  if (starts(pathname, "/qr-codes")) return "/help/super-admin";
-  if (starts(pathname, "/printer-diagnostics")) return "/help/manufacturer";
-  if (starts(pathname, "/qr-requests")) return role === "super_admin" ? "/help/super-admin" : "/help/licensee-admin";
-  if (starts(pathname, "/batches")) {
-    if (role === "manufacturer") return "/help/manufacturer";
-    if (role === "super_admin") return "/help/super-admin";
-    return "/help/licensee-admin";
-  }
-  if (starts(pathname, "/manufacturers")) return role === "super_admin" ? "/help/super-admin" : "/help/licensee-admin";
-  if (starts(pathname, "/qr-tracking")) {
-    if (role === "super_admin") return "/help/super-admin";
-    if (role === "manufacturer") return "/help/manufacturer";
-    return "/help/licensee-admin";
-  }
-  if (starts(pathname, "/support")) return role === "super_admin" ? "/help/support" : "/help/communications";
-  if (starts(pathname, "/governance")) return role === "super_admin" ? "/help/governance" : "/help/licensee-admin";
-  if (starts(pathname, "/audit-logs")) return "/help/auth-overview";
-  if (starts(pathname, "/account")) return "/help/setting-password";
-  if (starts(pathname, "/verify") || starts(pathname, "/scan")) return "/help/customer";
+  const mapped = getAppHelpRoute(pathname, role);
+  if (mapped) return mapped;
   if (starts(pathname, "/help")) return getRoleHelpHome(role);
   return getRoleHelpHome(role);
 };
@@ -55,11 +35,11 @@ export const getPageGuidance = (pathname: string, role?: UserRole | null): PageG
     };
   }
 
-  if (starts(pathname, "/qr-requests")) {
+  if (starts(pathname, "/code-requests") || starts(pathname, "/qr-requests")) {
     return {
-      title: "Manage QR inventory requests",
-      summary: "Use this page to submit, review, and track QR quantity requests.",
-      firstAction: role === "super_admin" ? "Review pending requests first." : "Create a new request with required quantity.",
+      title: "Manage code requests",
+      summary: "Use this page to submit, review, and track code allocation requests.",
+      firstAction: role === "super_admin" ? "Review pending requests first." : "Create a new request with the quantity you need.",
       note: "Always add clear notes so approvals are easier.",
     };
   }
@@ -85,7 +65,7 @@ export const getPageGuidance = (pathname: string, role?: UserRole | null): PageG
     };
   }
 
-  if (starts(pathname, "/qr-tracking")) {
+  if (starts(pathname, "/scan-activity") || starts(pathname, "/qr-tracking")) {
     return {
       title: "Review scan activity",
       summary: "Track scan history, repeated scans, and blocked events to detect potential issues.",
@@ -94,7 +74,7 @@ export const getPageGuidance = (pathname: string, role?: UserRole | null): PageG
     };
   }
 
-  if (starts(pathname, "/ir") || starts(pathname, "/incidents")) {
+  if (starts(pathname, "/incident-response") || starts(pathname, "/ir") || starts(pathname, "/incidents")) {
     return {
       title: "Handle incidents step-by-step",
       summary: "Triage cases, apply containment, add evidence, and close with documented outcomes.",
@@ -121,7 +101,7 @@ export const getPageGuidance = (pathname: string, role?: UserRole | null): PageG
     };
   }
 
-  if (starts(pathname, "/audit-logs")) {
+  if (starts(pathname, "/audit-history") || starts(pathname, "/audit-logs")) {
     return {
       title: "Audit history",
       summary: "Use this page to verify who did what and when across key workflows.",
@@ -148,12 +128,21 @@ export const getPageGuidance = (pathname: string, role?: UserRole | null): PageG
     };
   }
 
-  if (starts(pathname, "/printer-diagnostics")) {
+  if (starts(pathname, "/printer-setup") || starts(pathname, "/printer-diagnostics")) {
     return {
-      title: "Diagnose printer issues",
-      summary: "Separate workstation connector problems, operating-system printer visibility, and saved printer readiness.",
-      firstAction: "Start with the top status card, then inspect workstation connector reachability and discovered printers.",
-      note: "Use workstation printing for printers installed on the computer, factory label printer profiles for controlled LAN devices, and office / AirPrint profiles for IPP printers.",
+      title: "Set up printing",
+      summary: "Check connector readiness, choose a printer, and confirm the workstation is ready to print.",
+      firstAction: "Start with the readiness card, then move through connector, printer choice, and test steps.",
+      note: "Advanced diagnostics stay available lower on the page when you need them.",
+    };
+  }
+
+  if (starts(pathname, "/settings")) {
+    return {
+      title: "Choose the right settings area",
+      summary: "Use this page as the home for account, printer, and system setup.",
+      firstAction: "Open the section that matches what you want to change: account, printer, or system controls.",
+      note: "Manufacturer users see printer tools here. Super Admin users also see system controls.",
     };
   }
 

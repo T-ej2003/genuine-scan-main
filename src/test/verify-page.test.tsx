@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { render, screen, waitFor } from "@testing-library/react";
 import Verify from "@/pages/Verify";
 import apiClient from "@/lib/api-client";
@@ -14,6 +14,12 @@ vi.mock("@/lib/api-client", () => ({
     submitProductFeedback: vi.fn(),
     requestVerifyEmailOtp: vi.fn(),
     verifyEmailOtp: vi.fn(),
+    beginCustomerPasskeyRegistration: vi.fn(),
+    finishCustomerPasskeyRegistration: vi.fn(),
+    beginCustomerPasskeyAssertion: vi.fn(),
+    finishCustomerPasskeyAssertion: vi.fn(),
+    getCustomerPasskeyCredentials: vi.fn(),
+    deleteCustomerPasskeyCredential: vi.fn(),
     claimVerifiedProduct: vi.fn(),
     linkDeviceClaimToUser: vi.fn(),
     createOwnershipTransfer: vi.fn(),
@@ -48,6 +54,7 @@ const renderVerifyPage = (path = `/verify/${CODE}`) =>
   render(
     <React.StrictMode>
       <MemoryRouter initialEntries={[path]}>
+        <LocationProbe />
         <Routes>
           <Route path="/verify/:code" element={<Verify />} />
           <Route path="/scan" element={<Verify />} />
@@ -55,6 +62,11 @@ const renderVerifyPage = (path = `/verify/${CODE}`) =>
       </MemoryRouter>
     </React.StrictMode>
   );
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location-probe">{`${location.pathname}${location.search}`}</div>;
+}
 
 const buildVerifyResponse = (overrides: Record<string, unknown> = {}) => ({
   success: true,
@@ -144,7 +156,7 @@ describe("Verify page", () => {
     expect(vi.mocked(apiClient.verifyQRCode)).toHaveBeenCalledTimes(1);
   });
 
-  it("explains that an owner must sign in before starting a resale transfer", async () => {
+  it("explains that an owner must sign in before starting a transfer", async () => {
     vi.mocked(apiClient.verifyQRCode).mockResolvedValue(
       buildVerifyResponse({
         ownershipStatus: {
@@ -160,7 +172,7 @@ describe("Verify page", () => {
 
     renderVerifyPage();
 
-    expect(await screen.findByText("Sign in below to start a secure resale transfer.")).toBeInTheDocument();
+    expect(await screen.findByText("Sign in below to start a secure ownership transfer.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign in to continue" })).toBeInTheDocument();
   });
 
@@ -244,7 +256,7 @@ describe("Verify page", () => {
       );
     });
 
-    expect(await screen.findByRole("button", { name: "Copy transfer link" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Copy handover link" })).toBeInTheDocument();
   });
 
   it("hydrates stored customer auth before the first scan request so refresh does not double-hit the public endpoint", async () => {
@@ -268,5 +280,52 @@ describe("Verify page", () => {
       })
     );
     expect(await screen.findByText("Verified Authentic")).toBeInTheDocument();
+  });
+
+  it("keeps the signed token on the canonical verify URL after a successful signed scan", async () => {
+    vi.mocked(apiClient.scanToken).mockResolvedValue(
+      buildVerifyResponse({
+        code: CODE,
+        proofSource: "SIGNED_LABEL",
+      }) as unknown as Awaited<ReturnType<typeof apiClient.scanToken>>
+    );
+
+    renderVerifyPage("/scan?t=signed-scan-token");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location-probe")).toHaveTextContent(`/verify/${CODE}?t=signed-scan-token`);
+    });
+  });
+
+  it("shows proof tier and requester trust from the unified verification decision contract", async () => {
+    vi.mocked(apiClient.verifyQRCode).mockResolvedValue(
+      buildVerifyResponse({
+        decisionId: "dec_123",
+        decisionVersion: 1,
+        proofSource: "SIGNED_LABEL",
+        proofTier: "SIGNED_LABEL",
+        customerTrustLevel: "ACCOUNT_TRUSTED",
+        printTrustState: "PRINT_CONFIRMED",
+        reasonCodes: ["FIRST_SCAN", "SIGNED_LABEL"],
+      }) as unknown as Awaited<ReturnType<typeof apiClient.verifyQRCode>>
+    );
+
+    renderVerifyPage();
+
+    expect(await screen.findByText("Proof tier: signed label")).toBeInTheDocument();
+    expect(screen.getByText("Requester trust: signed-in account")).toBeInTheDocument();
+    expect(screen.getByText("Decision Trace")).toBeInTheDocument();
+  });
+
+  it("shows passkey requester trust when the session was step-up verified", async () => {
+    vi.mocked(apiClient.verifyQRCode).mockResolvedValue(
+      buildVerifyResponse({
+        customerTrustLevel: "PASSKEY_VERIFIED",
+      }) as unknown as Awaited<ReturnType<typeof apiClient.verifyQRCode>>
+    );
+
+    renderVerifyPage();
+
+    expect(await screen.findByText("Requester trust: passkey verified")).toBeInTheDocument();
   });
 });

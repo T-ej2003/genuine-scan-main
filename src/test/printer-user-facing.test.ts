@@ -5,11 +5,15 @@ import { buildPrinterSupportSummary, sanitizePrinterUiError } from "@/lib/printe
 describe("printer user-facing helpers", () => {
   it("redacts localhost and trust details from printer errors", () => {
     expect(sanitizePrinterUiError("The browser could not reach localhost:17866")).toBe(
-      "The workstation connector is not available on this device right now."
+      "The printer helper is not available on this computer right now."
     );
 
     expect(sanitizePrinterUiError("Heartbeat signature verification failed")).toBe(
-      "The secure printer connection is not ready yet. Refresh and try again in a moment."
+      "MSCQR is still checking the secure printer connection. Refresh and try again in a moment."
+    );
+
+    expect(sanitizePrinterUiError("mTLS client certificate fingerprint header missing")).toBe(
+      "Advanced secure printer verification is not set up yet. Printing can stay available while setup finishes."
     );
   });
 
@@ -40,8 +44,8 @@ describe("printer user-facing helpers", () => {
         error: "Heartbeat signature verification failed",
       },
       selectedPrinterName: "Canon TS4100i series",
-      printerSummaryTitle: "Workstation connector is not available",
-      printerSummaryBody: "MSCQR could not reach the printing connector on this workstation.",
+      printerSummaryTitle: "Printer helper is not available",
+      printerSummaryBody: "MSCQR could not reach the printer helper on this computer.",
       managedPrinter: {
         name: "Canon TS4100i series",
         connectionType: "NETWORK_IPP",
@@ -50,8 +54,11 @@ describe("printer user-facing helpers", () => {
     });
 
     expect(summary).toContain("MSCQR printing support summary");
-    expect(summary).toContain("Managed printer type: Office / AirPrint printer");
+    expect(summary).toContain("Printer found on this computer: No");
+    expect(summary).toContain("Saved printer type: Saved shared printer");
+    expect(summary).toContain("Current status: Printer helper is not available");
     expect(summary).not.toContain("localhost");
     expect(summary).not.toContain("signature verification");
+    expect(summary).not.toContain("workstation connector");
   });
 });
