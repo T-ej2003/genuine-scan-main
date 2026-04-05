@@ -13,7 +13,7 @@
     "db:partitions:ensure": "tsx scripts/ensure-hot-event-partitions.ts",
     "db:scan-archive:run": "tsx scripts/archive-scan-logs.ts",
     "storage:migrate-local-uploads": "tsx scripts/migrate-local-uploads-to-object-storage.ts",
-    "build": "tsc",
+    "build": "npm run prisma:generate && tsc",
     "mock:printer": "node mock-printer/server.js",
     "print:agent": "node dist/local-print-agent/index.js",
     "print:agent:dev": "tsx src/local-print-agent/index.ts",
