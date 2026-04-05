@@ -95,8 +95,8 @@ describe("ConnectorDownload", () => {
 
     expect(await screen.findByText("Install printer helper")).toBeInTheDocument();
     expect(screen.getByText(/Acme Factory 1/i)).toBeInTheDocument();
-    expect(await screen.findByRole("link", { name: /download for mac/i })).toHaveAttribute(
-      "href",
+    expectAllLinksToMatch(
+      await screen.findAllByRole("link", { name: /download for mac/i }),
       "https://example.test/api/public/connector/download/2026.3.12/macos",
     );
     expectAllLinksToMatch(
@@ -170,8 +170,8 @@ describe("ConnectorDownload", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByRole("link", { name: /download for mac/i })).toHaveAttribute(
-      "href",
+    expectAllLinksToMatch(
+      await screen.findAllByRole("link", { name: /download for mac/i }),
       "https://example.test/api/public/connector/download/2026.3.12/macos",
     );
     expectAllLinksToMatch(
