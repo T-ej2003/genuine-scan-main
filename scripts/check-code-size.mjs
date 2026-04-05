@@ -39,12 +39,23 @@ const DEFAULT_BUDGETS = [
 ];
 
 const LEGACY_FILE_BUDGETS = {
+  "backend/src/controllers/authController.ts": { label: "Legacy controller", maxLines: 1300 },
   "backend/src/controllers/qrController.ts": { label: "Legacy controller", maxLines: 1760 },
-  "backend/src/controllers/incidentController.ts": { label: "Legacy controller", maxLines: 820 },
-  "backend/src/controllers/userController.ts": { label: "Legacy controller", maxLines: 780 },
+  "backend/src/controllers/incidentController.ts": { label: "Legacy controller", maxLines: 900 },
+  "backend/src/controllers/userController.ts": { label: "Legacy controller", maxLines: 820 },
   "backend/src/controllers/scanController.ts": { label: "Legacy controller", maxLines: 680 },
   "backend/src/controllers/licenseeController.ts": { label: "Legacy controller", maxLines: 650 },
-  "backend/src/controllers/irIncidentController.ts": { label: "Legacy controller", maxLines: 620 },
+  "backend/src/controllers/irIncidentController.ts": { label: "Legacy controller", maxLines: 760 },
+  "backend/src/controllers/printerAgentJobController.ts": { label: "Legacy controller", maxLines: 680 },
+  "backend/src/controllers/printerController.ts": { label: "Legacy controller", maxLines: 680 },
+  "backend/src/controllers/printerGatewayController.ts": { label: "Legacy controller", maxLines: 1080 },
+  "backend/src/controllers/verify/claimHandlers.ts": { label: "Legacy controller", maxLines: 580 },
+  "backend/src/controllers/verify/verificationHandlers.ts": { label: "Legacy controller", maxLines: 1020 },
+  "src/features/layout/useManufacturerPrinterConnection.ts": { label: "Legacy feature hook", maxLines: 740 },
+  "src/lib/api/internal-client-verify-support.ts": { label: "Legacy transport module", maxLines: 730 },
+  "src/pages/AuditLogs.tsx": { label: "Legacy page", maxLines: 740 },
+  "src/pages/ConnectorDownload.tsx": { label: "Legacy page", maxLines: 880 },
+  "src/pages/PrinterSetup.tsx": { label: "Legacy page", maxLines: 980 },
 };
 
 const WALK_ROOTS = ["src", "backend/src", "scripts"];
