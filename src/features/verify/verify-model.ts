@@ -29,6 +29,48 @@ export type CustomerTrustLevel =
   | "PASSKEY_VERIFIED"
   | "OPERATOR_REVIEWED";
 
+export type CustomerVerificationEntryMethod = "SIGNED_SCAN" | "MANUAL_CODE";
+export type CustomerVerificationAuthState = "PENDING" | "VERIFIED";
+
+export type CustomerTrustIntake = {
+  purchaseChannel: "online" | "offline" | "gifted" | "unknown";
+  sourceCategory?: "marketplace" | "direct_brand" | "retail_store" | "reseller" | "gift" | "unknown" | null;
+  platformName?: string | null;
+  sellerName?: string | null;
+  listingUrl?: string | null;
+  orderReference?: string | null;
+  storeName?: string | null;
+  purchaseCity?: string | null;
+  purchaseCountry?: string | null;
+  purchaseDate?: string | null;
+  packagingState?: "sealed" | "opened" | "damaged" | "unsure" | null;
+  packagingConcern?: "none" | "minor" | "major" | "unsure" | null;
+  scanReason: "routine_check" | "new_seller" | "pricing_concern" | "packaging_concern" | "authenticity_concern";
+  ownershipIntent: "verify_only" | "claim_ownership" | "report_concern" | "contact_support";
+  notes?: string | null;
+};
+
+export type VerificationSessionSummary = {
+  sessionId: string;
+  decisionId: string;
+  code?: string | null;
+  maskedCode?: string | null;
+  brandName?: string | null;
+  entryMethod: CustomerVerificationEntryMethod;
+  authState: CustomerVerificationAuthState;
+  intakeCompleted: boolean;
+  revealed: boolean;
+  startedAt: string;
+  revealAt?: string | null;
+  proofTier?: VerificationProofTier | string | null;
+  proofSource?: VerificationProofSource | string | null;
+  labelState?: string | null;
+  printTrustState?: string | null;
+  verificationLocked?: boolean;
+  intake?: CustomerTrustIntake | null;
+  verification?: VerifyPayload | null;
+};
+
 export type OwnershipTransferView = {
   state?:
     | "none"

@@ -27,6 +27,7 @@ import {
   verifyQrToken,
 } from "../../services/qrTokenService";
 import { persistVerificationDecision, type VerificationDecisionSummary } from "../../services/verificationDecisionService";
+import { attachVerificationPresentationSnapshot } from "../../services/verificationDecisionService";
 import {
   buildPublicIntegrityErrorBody,
   isPublicIntegrityDependencyError,
@@ -148,6 +149,12 @@ const withDecisionMetadata = <T extends Record<string, unknown>>(payload: T, dec
   latestDecisionOutcome: payload.scanOutcome || null,
 });
 
+const buildDecisionResponseBody = async <T extends Record<string, unknown>>(payload: T, decision: VerificationDecisionSummary) => {
+  const finalPayload = withDecisionMetadata(payload, decision);
+  await attachVerificationPresentationSnapshot(decision.decisionId, finalPayload);
+  return finalPayload;
+};
+
 const safeCreateAuditLog = async (
   payload: Parameters<typeof createAuditLogSafely>[0],
   context?: Record<string, unknown>
@@ -234,7 +241,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       const response = buildSignedTokenErrorResponse(message, scanOutcome);
       return res.status(statusCode).json({
         success: true,
-        data: withDecisionMetadata(response.data, decision),
+        data: await buildDecisionResponseBody(response.data, decision),
       });
     };
 
@@ -276,36 +283,39 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
         });
         return res.json({
           success: true,
-          data: withDecisionMetadata({
-            isAuthentic: true,
-            message:
-              "MSCQR printer setup test label verified. This QR is for printer setup only and does not represent a product.",
-            scanOutcome: "PRINTER_SETUP_TEST",
-            classification: "LEGIT_REPEAT",
-            code: "PRINTER_SETUP_TEST",
-            status: "TEST_ONLY",
-            proofSource,
-            warningMessage: "Use this label only to confirm printer setup and print quality.",
-            ownershipStatus: {
-              isClaimed: false,
-              claimedAt: null,
-              isOwnedByRequester: false,
-              isClaimedByAnother: false,
-              canClaim: false,
+          data: await buildDecisionResponseBody(
+            {
+              isAuthentic: true,
+              message:
+                "MSCQR printer setup test label verified. This QR is for printer setup only and does not represent a product.",
+              scanOutcome: "PRINTER_SETUP_TEST",
+              classification: "LEGIT_REPEAT",
+              code: "PRINTER_SETUP_TEST",
+              status: "TEST_ONLY",
+              proofSource,
+              warningMessage: "Use this label only to confirm printer setup and print quality.",
+              ownershipStatus: {
+                isClaimed: false,
+                claimedAt: null,
+                isOwnedByRequester: false,
+                isClaimedByAnother: false,
+                canClaim: false,
+              },
+              verifyUxPolicy: {
+                showTimelineCard: false,
+                showRiskCards: false,
+                allowOwnershipClaim: false,
+                allowFraudReport: false,
+                mobileCameraAssist: true,
+              },
+              scanSummary: {
+                totalScans: 0,
+                firstVerifiedAt: null,
+                latestVerifiedAt: null,
+              },
             },
-            verifyUxPolicy: {
-              showTimelineCard: false,
-              showRiskCards: false,
-              allowOwnershipClaim: false,
-              allowFraudReport: false,
-              mobileCameraAssist: true,
-            },
-            scanSummary: {
-              totalScans: 0,
-              firstVerifiedAt: null,
-              latestVerifiedAt: null,
-            },
-          }, decision),
+            decision
+          ),
         });
       }
 
@@ -335,7 +345,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
         });
         return res.status(404).json({
           success: true,
-          data: withDecisionMetadata(
+          data: await buildDecisionResponseBody(
             buildMissingQrVerificationPayload({
               normalizedCode: normalizedCode || null,
               reasons: ["Code not found in registry."],
@@ -434,7 +444,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
 
       return res.json({
         success: true,
-        data: withDecisionMetadata(
+        data: await buildDecisionResponseBody(
           buildMissingQrVerificationPayload({
             normalizedCode: normalizedCode || null,
             reasons,
@@ -570,7 +580,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       });
       return res.json({
         success: true,
-        data: withDecisionMetadata(
+        data: await buildDecisionResponseBody(
           {
             ...blockedPayload,
             replacementStatus: replacement.replacementStatus,
@@ -617,7 +627,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       });
       return res.json({
         success: true,
-        data: withDecisionMetadata(
+        data: await buildDecisionResponseBody(
           {
             ...buildNotReadyVerificationPayload({
               basePayload,
@@ -896,62 +906,65 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
 
     return res.json({
       success: true,
-      data: withDecisionMetadata({
-        isAuthentic: !isBlocked,
-        message: isBlocked
-          ? "Blocked code."
-          : isFirstScan
-            ? "This is a genuine product."
-            : "Already verified. Please review scan details below.",
-        proofSource,
-        code: updated.code,
-        status: finalStatus,
-        labelState: finalStatus,
-        printTrustState,
-        containment: runtimeContainment,
-        licensee: mapLicensee(updated.licensee),
-        batch: mapBatch(updated.batch),
-        batchName: updated.batch?.name || null,
-        printedAt: updated.batch?.printedAt || null,
-        firstScanned: firstScanTime ? firstScanTime.toISOString() : null,
-        scanCount: updated.scanCount ?? 0,
-        isFirstScan,
-        firstScanAt: postScanInsight.firstScanAt,
-        firstScanLocation: postScanInsight.firstScanLocation,
-        latestScanAt: postScanInsight.latestScanAt,
-        latestScanLocation: postScanInsight.latestScanLocation,
-        previousScanAt: postScanInsight.previousScanAt,
-        previousScanLocation: postScanInsight.previousScanLocation,
-        scanSignals: postScanInsight.signals,
-        classification,
-        reasons: decisionReasons,
-        activitySummary,
-        scanSummary: postScanSummary,
-        ownershipStatus,
-        ownershipTransfer,
-        customerTrustLevel,
-        replacementStatus: replacement.replacementStatus,
-        replacementChainId: replacement.replacementChainId,
-        verificationTimeline,
-        riskExplanation,
-        verifyUxPolicy,
-        isBlocked,
-        isReady,
-        totalScans: postScanSummary.totalScans,
-        firstVerifiedAt: postScanSummary.firstVerifiedAt,
-        latestVerifiedAt: postScanSummary.latestVerifiedAt,
-        riskScore,
-        riskThreshold: duplicateRisk.threshold,
-        riskSignals,
-        proof: describeVerificationProof(proofSource),
-        challenge: {
-          required: stepUpRequired,
-          methods: stepUpRequired ? ["EMAIL_OTP", "CAPTCHA"] : [],
+      data: await buildDecisionResponseBody(
+        {
+          isAuthentic: !isBlocked,
+          message: isBlocked
+            ? "Blocked code."
+            : isFirstScan
+              ? "This is a genuine product."
+              : "Already verified. Please review scan details below.",
+          proofSource,
+          code: updated.code,
+          status: finalStatus,
+          labelState: finalStatus,
+          printTrustState,
+          containment: runtimeContainment,
+          licensee: mapLicensee(updated.licensee),
+          batch: mapBatch(updated.batch),
+          batchName: updated.batch?.name || null,
+          printedAt: updated.batch?.printedAt || null,
+          firstScanned: firstScanTime ? firstScanTime.toISOString() : null,
+          scanCount: updated.scanCount ?? 0,
+          isFirstScan,
+          firstScanAt: postScanInsight.firstScanAt,
+          firstScanLocation: postScanInsight.firstScanLocation,
+          latestScanAt: postScanInsight.latestScanAt,
+          latestScanLocation: postScanInsight.latestScanLocation,
+          previousScanAt: postScanInsight.previousScanAt,
+          previousScanLocation: postScanInsight.previousScanLocation,
+          scanSignals: postScanInsight.signals,
+          classification,
+          reasons: decisionReasons,
+          activitySummary,
+          scanSummary: postScanSummary,
+          ownershipStatus,
+          ownershipTransfer,
+          customerTrustLevel,
+          replacementStatus: replacement.replacementStatus,
+          replacementChainId: replacement.replacementChainId,
+          verificationTimeline,
+          riskExplanation,
+          verifyUxPolicy,
+          isBlocked,
+          isReady,
+          totalScans: postScanSummary.totalScans,
+          firstVerifiedAt: postScanSummary.firstVerifiedAt,
+          latestVerifiedAt: postScanSummary.latestVerifiedAt,
+          riskScore,
+          riskThreshold: duplicateRisk.threshold,
+          riskSignals,
+          proof: describeVerificationProof(proofSource),
+          challenge: {
+            required: stepUpRequired,
+            methods: stepUpRequired ? ["EMAIL_OTP", "CAPTCHA"] : [],
+          },
+          warningMessage,
+          policy,
+          scanOutcome: isBlocked ? "BLOCKED" : isFirstScan ? "FIRST_SCAN" : "REPEAT_SCAN",
         },
-        warningMessage,
-        policy,
-        scanOutcome: isBlocked ? "BLOCKED" : isFirstScan ? "FIRST_SCAN" : "REPEAT_SCAN",
-      }, decision),
+        decision
+      ),
     });
   } catch (error) {
     if (isPublicIntegrityDependencyError(error)) {

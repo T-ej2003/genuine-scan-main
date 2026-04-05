@@ -125,13 +125,21 @@ import {
   verifyQRCode,
   reportFraud,
   submitProductFeedback,
+  completeCustomerOAuth,
   beginCustomerPasskeyAssertion,
   beginCustomerPasskeyRegistration,
   deleteCustomerPasskeyCredential,
+  exchangeCustomerOAuth,
   finishCustomerPasskeyAssertion,
   finishCustomerPasskeyRegistration,
+  listCustomerOAuthProviders,
   listCustomerPasskeyCredentials,
   requestCustomerEmailOtp,
+  getCustomerVerificationSessionState,
+  revealCustomerVerificationResult,
+  startCustomerOAuth,
+  startCustomerVerificationSession,
+  submitCustomerVerificationIntake,
   verifyCustomerEmailOtp,
   claimProductOwnership,
   linkDeviceClaimToCustomer,
@@ -595,6 +603,15 @@ router.get("/public/connector/releases", ...connectorManifestLimiters, listConne
 router.get("/public/connector/releases/latest", ...connectorManifestLimiters, getLatestConnectorReleaseController);
 router.get("/public/connector/download/:version/:platform", ...connectorDownloadLimiters, downloadConnectorReleaseController);
 router.get("/verify/:code", ...verifyCodeLimiters, optionalCustomerVerifyAuth, verifyQRCode);
+router.post("/verify/session/start", ...verifyCodeLimiters, optionalCustomerVerifyAuth, startCustomerVerificationSession);
+router.get("/verify/session/:id", ...verifyCodeLimiters, optionalCustomerVerifyAuth, getCustomerVerificationSessionState);
+router.post("/verify/session/:id/intake", ...verifyOtpVerifyLimiters, requireCustomerVerifyAuth, submitCustomerVerificationIntake);
+router.post("/verify/session/:id/reveal", ...verifyOtpVerifyLimiters, requireCustomerVerifyAuth, revealCustomerVerificationResult);
+router.get("/verify/auth/providers", ...verifyCodeLimiters, listCustomerOAuthProviders);
+router.get("/verify/auth/oauth/:provider/start", ...verifyCodeLimiters, startCustomerOAuth);
+router.get("/verify/auth/oauth/:provider/callback", ...verifyCodeLimiters, completeCustomerOAuth);
+router.post("/verify/auth/oauth/:provider/callback", ...verifyCodeLimiters, completeCustomerOAuth);
+router.post("/verify/auth/oauth/exchange", ...verifyOtpVerifyLimiters, exchangeCustomerOAuth);
 router.post("/verify/auth/email-otp/request", ...verifyOtpRequestLimiters, requestCustomerEmailOtp);
 router.post("/verify/auth/email-otp/verify", ...verifyOtpVerifyLimiters, verifyCustomerEmailOtp);
 router.post("/verify/auth/passkey/register/begin", ...verifyOtpVerifyLimiters, requireCustomerVerifyAuth, beginCustomerPasskeyRegistration);

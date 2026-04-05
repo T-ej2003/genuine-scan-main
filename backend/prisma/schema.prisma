@@ -434,6 +434,16 @@ enum CustomerTrustReviewState {
   REVOKED
 }
 
+enum CustomerVerificationEntryMethod {
+  SIGNED_SCAN
+  MANUAL_CODE
+}
+
+enum CustomerVerificationAuthState {
+  PENDING
+  VERIFIED
+}
+
 enum ReplacementChainStatus {
   ACTIVE
   SUPERSEDED
@@ -1335,6 +1345,7 @@ model VerificationDecision {
   metadata Json?
 
   evidenceSnapshots VerificationEvidenceSnapshot[]
+  customerVerificationSessions CustomerVerificationSession[]
 
   createdAt DateTime @default(now())
 
@@ -1473,6 +1484,67 @@ model CustomerWebAuthnChallenge {
   @@index([customerUserId, purpose, createdAt])
   @@index([expiresAt])
   @@index([consumedAt])
+}
+
+model CustomerVerificationSession {
+  id String @id @default(uuid())
+
+  verificationDecisionId String
+  verificationDecision VerificationDecision @relation(fields: [verificationDecisionId], references: [id], onDelete: Cascade)
+
+  qrCodeId String?
+  code String?
+  entryMethod CustomerVerificationEntryMethod
+  authState CustomerVerificationAuthState @default(PENDING)
+  customerUserId String?
+  customerEmail String?
+  intakeCompletedAt DateTime?
+  revealedAt DateTime?
+  expiresAt DateTime?
+  metadata Json?
+
+  trustIntake CustomerTrustIntake?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([verificationDecisionId, createdAt])
+  @@index([qrCodeId, createdAt])
+  @@index([customerUserId, createdAt])
+  @@index([authState, createdAt])
+  @@index([revealedAt])
+}
+
+model CustomerTrustIntake {
+  id String @id @default(uuid())
+
+  sessionId String @unique
+  session CustomerVerificationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  customerUserId String?
+  customerEmail String?
+  purchaseChannel String
+  sourceCategory String?
+  platformName String?
+  sellerName String?
+  listingUrl String?
+  orderReference String?
+  storeName String?
+  purchaseCity String?
+  purchaseCountry String?
+  purchaseDate DateTime?
+  packagingState String?
+  packagingConcern String?
+  scanReason String
+  ownershipIntent String
+  notes String?
+  answers Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerUserId, createdAt])
+  @@index([purchaseChannel, createdAt])
 }
 
 model AuditLogOutbox {

@@ -163,7 +163,7 @@ export default function VerifyLanding() {
           <CardTitle className="flex items-center gap-2 text-[#4f5b75]">
             <QrCode className="h-5 w-5" /> Verify a Product
           </CardTitle>
-          <CardDescription>Paste a code value (or scan to open the verify URL directly).</CardDescription>
+          <CardDescription>Paste a code value to start MSCQR’s secure verification journey.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <Input

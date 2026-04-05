@@ -200,3 +200,42 @@ export const persistVerificationDecision = async (input: {
     return baseSummary;
   }
 };
+
+export const attachVerificationPresentationSnapshot = async (
+  decisionId: string | null | undefined,
+  presentationSnapshot: Record<string, unknown> | null | undefined
+) => {
+  const evidenceStore = getEvidenceStore();
+  const normalizedDecisionId = String(decisionId || "").trim();
+  if (!normalizedDecisionId || !presentationSnapshot || !evidenceStore?.findFirst || !evidenceStore?.update) {
+    return false;
+  }
+
+  try {
+    const existing = await evidenceStore.findFirst({
+      where: { verificationDecisionId: normalizedDecisionId },
+      orderBy: [{ createdAt: "desc" }],
+    });
+
+    if (!existing?.id) return false;
+
+    const metadata =
+      existing.metadata && typeof existing.metadata === "object" && !Array.isArray(existing.metadata)
+        ? { ...(existing.metadata as Record<string, unknown>) }
+        : {};
+
+    metadata.presentationSnapshot = presentationSnapshot;
+
+    await evidenceStore.update({
+      where: { id: existing.id },
+      data: {
+        metadata,
+      },
+    });
+
+    return true;
+  } catch (error) {
+    console.warn("verification presentation snapshot skipped:", error);
+    return false;
+  }
+};

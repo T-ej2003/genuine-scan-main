@@ -23,10 +23,10 @@ export default function CustomerHelp() {
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
             <ul className="list-disc pl-5">
-              <li>Scan the code and verify authenticity.</li>
-              <li>See a clear result state: Product verified, Needs review, or Could not verify.</li>
-              <li>Review scan history summary (counts and coarse location hints).</li>
-              <li>Report suspected counterfeit with optional photos and contact details.</li>
+              <li>Scan the code and start a secure verification session.</li>
+              <li>Sign in, answer purchase-context questions, and then reveal the locked label decision.</li>
+              <li>See a clear separation between label authenticity, your purchase context, and next actions.</li>
+              <li>Report suspected counterfeit with contact details and purchase evidence.</li>
             </ul>
           </CardContent>
         </Card>
@@ -96,9 +96,9 @@ export default function CustomerHelp() {
             <CardContent className="space-y-2 text-sm text-muted-foreground">
               <ol className="list-decimal pl-5">
                 <li>Scan the code on the product label.</li>
-                <li>Wait for the verification result.</li>
-                <li>Review the brand/manufacturer and printed date.</li>
-                <li>If the banner says <strong>Under investigation</strong>, follow the support guidance shown.</li>
+                <li>Sign in with email OTP or an enabled identity provider.</li>
+                <li>Answer the purchase and packaging questions shown in the verify flow.</li>
+                <li>Reveal the locked label decision and review the proof tier, lifecycle state, and next actions.</li>
               </ol>
             </CardContent>
           </Card>

@@ -2,6 +2,33 @@ import { BASE_URL, type ApiClientCore, type ApiResponse } from "@/lib/api/intern
 import type { WebAuthnAuthenticationOptionsResponse, WebAuthnRegistrationOptionsResponse } from "@/lib/webauthn";
 
 export const createVerifySupportApi = (core: ApiClientCore) => ({
+  async getCustomerAuthProviders() {
+    return core.request<{
+      items: Array<{
+        id: "google" | "apple" | "x";
+        label: string;
+      }>;
+    }>(`/verify/auth/providers`, {
+      method: "GET",
+    });
+  },
+
+  async exchangeCustomerOAuth(ticket: string) {
+    return core.request<{
+      token: string;
+      customer: {
+        userId: string;
+        email: string;
+        maskedEmail?: string | null;
+        displayName?: string | null;
+        authProvider?: "GOOGLE" | "APPLE" | "X";
+      };
+    }>(`/verify/auth/oauth/exchange`, {
+      method: "POST",
+      body: JSON.stringify({ ticket }),
+    });
+  },
+
   async verifyQRCode(
     code: string,
     options?: { device?: string; lat?: number; lon?: number; acc?: number; customerToken?: string; transferToken?: string }
@@ -18,14 +45,111 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     return core.request(`/verify/${encodeURIComponent(normalizedCode)}${query}`, { method: "GET", headers });
   },
 
+  async startVerificationSession(
+    decisionId: string,
+    entryMethod: "SIGNED_SCAN" | "MANUAL_CODE",
+    customerToken?: string
+  ) {
+    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
+    return core.request<{
+      sessionId: string;
+      decisionId: string;
+      code?: string | null;
+      maskedCode?: string | null;
+      brandName?: string | null;
+      entryMethod: "SIGNED_SCAN" | "MANUAL_CODE";
+      authState: "PENDING" | "VERIFIED";
+      intakeCompleted: boolean;
+      revealed: boolean;
+      startedAt: string;
+      revealAt?: string | null;
+      proofTier?: string | null;
+      proofSource?: string | null;
+      labelState?: string | null;
+      printTrustState?: string | null;
+      verificationLocked: boolean;
+    }>(`/verify/session/start`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ decisionId, entryMethod }),
+    });
+  },
+
+  async getVerificationSession(sessionId: string, customerToken?: string) {
+    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
+    return core.request<{
+      sessionId: string;
+      decisionId: string;
+      code?: string | null;
+      maskedCode?: string | null;
+      brandName?: string | null;
+      entryMethod: "SIGNED_SCAN" | "MANUAL_CODE";
+      authState: "PENDING" | "VERIFIED";
+      intakeCompleted: boolean;
+      revealed: boolean;
+      startedAt: string;
+      revealAt?: string | null;
+      proofTier?: string | null;
+      proofSource?: string | null;
+      labelState?: string | null;
+      printTrustState?: string | null;
+      intake?: Record<string, unknown> | null;
+      verification?: Record<string, unknown> | null;
+    }>(`/verify/session/${encodeURIComponent(sessionId)}`, {
+      method: "GET",
+      headers,
+    });
+  },
+
+  async submitVerificationIntake(
+    sessionId: string,
+    payload: Record<string, unknown>,
+    customerToken: string
+  ) {
+    return core.request<{ intakeSaved: boolean }>(`/verify/session/${encodeURIComponent(sessionId)}/intake`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${customerToken}` },
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async revealVerificationSession(sessionId: string, customerToken: string) {
+    return core.request<{
+      sessionId: string;
+      decisionId: string;
+      code?: string | null;
+      maskedCode?: string | null;
+      brandName?: string | null;
+      entryMethod: "SIGNED_SCAN" | "MANUAL_CODE";
+      authState: "PENDING" | "VERIFIED";
+      intakeCompleted: boolean;
+      revealed: boolean;
+      startedAt: string;
+      revealAt?: string | null;
+      proofTier?: string | null;
+      proofSource?: string | null;
+      labelState?: string | null;
+      printTrustState?: string | null;
+      intake?: Record<string, unknown> | null;
+      verification?: Record<string, unknown> | null;
+    }>(`/verify/session/${encodeURIComponent(sessionId)}/reveal`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${customerToken}` },
+    });
+  },
+
   async reportFraud(payload: {
     code: string;
     reason: string;
+    incidentType?: string;
     notes?: string;
     contactEmail?: string;
     observedStatus?: string;
     observedOutcome?: string;
     pageUrl?: string;
+    sessionId?: string;
+    decisionId?: string;
+    description?: string;
   }) {
     return core.request(`/fraud-report`, { method: "POST", body: JSON.stringify(payload) });
   },

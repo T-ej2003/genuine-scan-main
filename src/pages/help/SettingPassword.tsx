@@ -75,12 +75,13 @@ export default function SettingPassword() {
           <h2 className="text-lg font-semibold text-foreground">Customers (public verify page)</h2>
           <Card>
             <CardHeader className="space-y-1">
-              <CardTitle className="text-base">No password required</CardTitle>
+              <CardTitle className="text-base">No platform password required</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-muted-foreground">
               <ul className="list-disc pl-5">
-                <li>Customers do not need an account to verify a product.</li>
-                <li>If a customer reports an issue, they can optionally leave contact details in the report form.</li>
+                <li>Customers now sign in during the public verify flow before the result is revealed.</li>
+                <li>Email OTP remains the fallback, and the flow can also surface enabled social identity providers.</li>
+                <li>The sign-in step creates customer trust context; it does not change the QR authenticity decision.</li>
               </ul>
             </CardContent>
           </Card>

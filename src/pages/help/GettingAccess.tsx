@@ -25,7 +25,7 @@ export default function GettingAccess() {
               <li>Who creates accounts for each role.</li>
               <li>What invite emails contain and how long invite links remain valid.</li>
               <li>What first-time sign-in looks like after password setup.</li>
-              <li>What customers need to do to verify a product (no account required).</li>
+              <li>What customers need to do to verify a product and complete the trust-intake journey.</li>
             </ul>
           </CardContent>
         </Card>
@@ -91,9 +91,9 @@ export default function GettingAccess() {
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ul className="list-disc pl-5">
-                  <li>No account is required.</li>
-                  <li>Scan the QR and the verify page shows authenticity status.</li>
-                  <li>You can report suspected counterfeit from the verify page if needed.</li>
+                  <li>Customers now verify through a staged public journey.</li>
+                  <li>They sign in with email OTP or an enabled social identity provider before the result is revealed.</li>
+                  <li>MSCQR then collects purchase context and reveals the locked label decision separately from customer trust.</li>
                 </ul>
               </CardContent>
             </Card>
@@ -126,7 +126,7 @@ export default function GettingAccess() {
             <DocScreenshot
               filename="customer-first-verification.png"
               alt="Customer first verification"
-              caption="Customer: verify page (no sign-in required)."
+              caption="Customer: staged verify flow with identity and trust intake."
             />
           </div>
 
