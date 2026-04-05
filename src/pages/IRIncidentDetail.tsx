@@ -7,6 +7,53 @@ import { IRIncidentDetailWorkspace } from "@/features/ir/components/IRIncidentDe
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/api-client";
 
+const humanKey = (key: string) =>
+  String(key || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+
+const humanValue = (rawValue: unknown): string => {
+  if (rawValue == null || rawValue === "") return "";
+  if (typeof rawValue === "boolean") return rawValue ? "Yes" : "No";
+  if (Array.isArray(rawValue)) {
+    return rawValue
+      .map((item) => humanValue(item))
+      .filter(Boolean)
+      .join(", ");
+  }
+  if (typeof rawValue === "object") {
+    const pairs = Object.entries(rawValue as Record<string, unknown>)
+      .map(([key, value]) => `${humanKey(key)}: ${humanValue(value)}`)
+      .filter((line) => !line.endsWith(": "));
+    return pairs.join(" • ");
+  }
+  return String(rawValue);
+};
+
+const readableDetailEntries = (details: unknown): Array<{ label: string; value: string }> => {
+  if (!details || typeof details !== "object" || Array.isArray(details)) return [];
+
+  const entries: Array<{ label: string; value: string }> = [];
+  for (const [key, value] of Object.entries(details as Record<string, unknown>)) {
+    const formatted = humanValue(value);
+    if (!formatted) continue;
+    entries.push({ label: humanKey(key), value: formatted });
+  }
+  return entries;
+};
+
+type EmailDeliverySummary = {
+  delivered: boolean;
+  providerMessageId?: string | null;
+  attemptedFrom?: string | null;
+  usedFrom?: string | null;
+  replyTo?: string | null;
+  error?: string | null;
+};
+
 export default function IRIncidentDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();

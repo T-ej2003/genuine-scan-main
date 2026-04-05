@@ -93,6 +93,10 @@ const generateQRCodesSchema = z.object({
   quantity: z.number().int().positive().max(200000),
 }).strict();
 
+const generateSignedLinksSchema = z.object({
+  codes: z.array(z.string().trim().min(2).max(128)).min(1).max(2000),
+});
+
 const blockQRSschema = z.object({
   reason: z.string().trim().max(500).optional(),
 }).strict();

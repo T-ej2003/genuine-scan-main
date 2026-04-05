@@ -25,6 +25,7 @@ const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Licensees = lazy(() => import("@/pages/Licensees"));
 const QRRequests = lazy(() => import("@/pages/QRRequests"));
 const Batches = lazy(() => import("@/pages/Batches"));
+const PrinterDiagnostics = lazy(() => import("@/pages/PrinterDiagnostics"));
 const QRTracking = lazy(() => import("@/pages/QRTracking"));
 const Manufacturers = lazy(() => import("@/pages/Manufacturers"));
 const AuditLogs = lazy(() => import("@/pages/AuditLogs"));

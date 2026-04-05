@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import path from "path";
 import { randomUUID } from "crypto";
 import cookieParser from "cookie-parser";
+import packageJson from "../package.json";
 import routes from "./routes";
 import prisma from "./config/database";
 import { logger } from "./utils/logger";

@@ -43,7 +43,7 @@ export default function RolesPermissions() {
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <CardHeader className="space-y-1">
-                <CardTitle className="text-base">Super Admin</CardTitle>
+                <CardTitle className="text-base">Super User</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <p>

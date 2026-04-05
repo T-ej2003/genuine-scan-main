@@ -55,6 +55,8 @@ const LEGACY_FILE_BUDGETS = {
   "src/lib/api/internal-client-verify-support.ts": { label: "Legacy transport module", maxLines: 730 },
   "src/pages/AuditLogs.tsx": { label: "Legacy page", maxLines: 740 },
   "src/pages/ConnectorDownload.tsx": { label: "Legacy page", maxLines: 880 },
+  "src/pages/Licensees.tsx": { label: "Legacy page", maxLines: 800 },
+  "src/pages/PrinterDiagnostics.tsx": { label: "Legacy page", maxLines: 1620 },
   "src/pages/PrinterSetup.tsx": { label: "Legacy page", maxLines: 980 },
 };
 

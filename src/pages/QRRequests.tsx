@@ -333,6 +333,19 @@ export default function QRRequests() {
               </div>
 
               <div className="space-y-2 mt-3">
+                <Label>Batch name</Label>
+                <Input
+                  value={batchName}
+                  onChange={(e) => setBatchName(e.target.value)}
+                  maxLength={120}
+                  placeholder="Example: March Retail Rollout"
+                />
+                <div className="text-xs text-muted-foreground">
+                  This becomes the received batch label after approval.
+                </div>
+              </div>
+
+              <div className="space-y-2 mt-3">
                 <Label>Note (optional)</Label>
                 <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional context for the approver" />
               </div>

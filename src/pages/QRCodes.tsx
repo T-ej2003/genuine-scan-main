@@ -114,6 +114,7 @@ export default function QRCodes() {
   const [stats, setStats] = useState<{ total: number; byStatus: Record<string, number> } | null>(null);
 
   const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [uiError, setUiError] = useState<string | null>(null);
 
   const filteredLicenseeId =
@@ -309,17 +310,17 @@ export default function QRCodes() {
               <Button
                 variant="destructive"
                 onClick={deleteSelectedQRCodes}
-                disabled={loading || selectedCount === 0}
+                disabled={loading || downloading || selectedCount === 0}
               >
                 Delete selected ({selectedCount})
               </Button>
             )}
 
-            <Button variant="outline" onClick={refreshAll} disabled={loading}>
+            <Button variant="outline" onClick={refreshAll} disabled={loading || downloading}>
               Refresh
             </Button>
 
-            <Button variant="outline" onClick={handleExportCsv} disabled={loading}>
+            <Button variant="outline" onClick={handleExportCsv} disabled={loading || downloading}>
               <Download className="mr-2 h-4 w-4" />
               Export CSV
             </Button>
