@@ -80,7 +80,7 @@ export default function SettingPassword() {
             <CardContent className="space-y-2 text-sm text-muted-foreground">
               <ul className="list-disc pl-5">
                 <li>Customers now sign in during the public verify flow before the result is revealed.</li>
-                <li>Email OTP remains the fallback, and the flow can also surface enabled social identity providers.</li>
+                <li>Email OTP remains the fallback, and the flow can also surface Google sign-in when it is enabled.</li>
                 <li>The sign-in step creates customer trust context; it does not change the QR authenticity decision.</li>
               </ul>
             </CardContent>

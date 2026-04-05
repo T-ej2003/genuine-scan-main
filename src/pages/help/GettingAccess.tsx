@@ -92,7 +92,7 @@ export default function GettingAccess() {
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ul className="list-disc pl-5">
                   <li>Customers now verify through a staged public journey.</li>
-                  <li>They sign in with email OTP or an enabled social identity provider before the result is revealed.</li>
+                  <li>They sign in with email OTP or Google sign-in before the result is revealed.</li>
                   <li>MSCQR then collects purchase context and reveals the locked label decision separately from customer trust.</li>
                 </ul>
               </CardContent>

@@ -5,7 +5,7 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
   async getCustomerAuthProviders() {
     return core.request<{
       items: Array<{
-        id: "google" | "apple" | "x";
+        id: "google";
         label: string;
       }>;
     }>(`/verify/auth/providers`, {
@@ -21,7 +21,7 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
         email: string;
         maskedEmail?: string | null;
         displayName?: string | null;
-        authProvider?: "GOOGLE" | "APPLE" | "X";
+        authProvider?: "GOOGLE";
       };
     }>(`/verify/auth/oauth/exchange`, {
       method: "POST",

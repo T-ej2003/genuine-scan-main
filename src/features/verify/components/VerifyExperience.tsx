@@ -57,7 +57,7 @@ import {
 type FlowStep = "identity" | "purchase" | "source" | "context" | "concern" | "intent" | "result";
 
 type ProviderOption = {
-  id: "google" | "apple" | "x";
+  id: "google";
   label: string;
 };
 
@@ -168,9 +168,6 @@ const buildProviderHref = (provider: ProviderOption["id"], returnTo: string) => 
   const params = new URLSearchParams({ returnTo });
   return `${BASE_URL}/verify/auth/oauth/${provider}/start?${params.toString()}`;
 };
-
-const isSyntheticCustomerEmail = (value?: string | null) =>
-  String(value || "").trim().toLowerCase().endsWith("@customer-verify.local");
 
 const validateStep = (step: FlowStep, intake: CustomerTrustIntake) => {
   switch (step) {
@@ -397,7 +394,7 @@ export default function VerifyExperience() {
       persistCustomerSession(tokenValue, emailValue);
       setCustomerToken(tokenValue);
       setCustomerEmail(emailValue);
-      setOtpEmail(isSyntheticCustomerEmail(emailValue) ? "" : emailValue);
+      setOtpEmail(emailValue);
       setFlowStep("purchase");
     },
     []
@@ -745,7 +742,7 @@ export default function VerifyExperience() {
         reason: reportReason,
         incidentType: reportReason,
         description: String(intake.notes || "").trim() || `Customer reported ${reportReason.replace(/_/g, " ")} during verification.`,
-        contactEmail: customerEmail && !isSyntheticCustomerEmail(customerEmail) ? customerEmail : undefined,
+        contactEmail: customerEmail || undefined,
         observedStatus: result?.status,
         observedOutcome: result?.latestDecisionOutcome || result?.scanOutcome,
         pageUrl: window.location.href,
@@ -959,7 +956,7 @@ export default function VerifyExperience() {
                   </div>
                 ) : (
                   <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-600">
-                    Google, Apple, and X sign-in slots are feature-flagged. Email verification is live now and stays the fallback for every customer journey.
+                    Google sign-in is enabled when configured. Email verification stays the fallback for every customer journey.
                   </div>
                 )}
 

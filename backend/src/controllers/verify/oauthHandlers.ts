@@ -10,7 +10,7 @@ import {
   type CustomerOAuthProvider,
 } from "../../services/customerVerifyOAuthService";
 
-const providerSchema = z.enum(["google", "apple", "x"]);
+const providerSchema = z.enum(["google"]);
 
 const startSchema = z.object({
   returnTo: z.string().trim().url(),

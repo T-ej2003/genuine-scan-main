@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import { getJwtSecret, randomOpaqueToken } from "../utils/security";
 
 export type CustomerVerifyAuthStrength = "EMAIL_OTP" | "PASSKEY" | "SOCIAL";
-export type CustomerVerifyAuthProvider = "EMAIL_OTP" | "GOOGLE" | "APPLE" | "X";
+export type CustomerVerifyAuthProvider = "EMAIL_OTP" | "GOOGLE";
 
 export type CustomerVerifyIdentity = {
   userId: string;
@@ -217,10 +217,7 @@ export const verifyCustomerVerifyToken = (rawToken: string): CustomerVerifyIdent
     authStrength:
       decoded.authStrength === "PASSKEY" ? "PASSKEY" : decoded.authStrength === "SOCIAL" ? "SOCIAL" : "EMAIL_OTP",
     webauthnVerifiedAt: decoded.webauthnVerifiedAt || null,
-    authProvider:
-      decoded.authProvider === "GOOGLE" || decoded.authProvider === "APPLE" || decoded.authProvider === "X"
-        ? decoded.authProvider
-        : "EMAIL_OTP",
+    authProvider: decoded.authProvider === "GOOGLE" ? "GOOGLE" : "EMAIL_OTP",
     displayName: String(decoded.displayName || "").trim() || null,
   };
 };
