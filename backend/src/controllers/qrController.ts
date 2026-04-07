@@ -18,6 +18,7 @@ import { resolveScopedLicenseeAccess } from "../services/manufacturerScopeServic
 import { summarizeQrStatusCounts } from "../services/qrStatusMetrics";
 import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
 import { listLatestDecisionByQrCodeIds } from "../services/verificationDecisionReadService";
+import { recordBreakGlassIssuanceMetric } from "../observability/verificationTrustMetrics";
 
 /* ===================== SCHEMAS ===================== */
 
@@ -141,8 +142,16 @@ const parsePositiveIntEnv = (name: string, fallback: number) => {
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
 };
 
+const parseBooleanEnv = (name: string, fallback = false) => {
+  const normalized = String(process.env[name] || "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+};
+
 const ALLOCATION_TX_TIMEOUT_MS = parsePositiveIntEnv("ALLOCATION_TX_TIMEOUT_MS", 120000);
 const ALLOCATION_TX_MAX_WAIT_MS = parsePositiveIntEnv("ALLOCATION_TX_MAX_WAIT_MS", 15000);
+const BREAK_GLASS_QR_GENERATE_ENABLED = parseBooleanEnv("ALLOW_BREAK_GLASS_QR_GENERATE", false);
 
 /* ===================== QR RANGE (SUPER ADMIN route) ===================== */
 
@@ -990,6 +999,14 @@ export const generateQRCodes = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
+    if (process.env.NODE_ENV === "production" && !BREAK_GLASS_QR_GENERATE_ENABLED) {
+      return res.status(403).json({
+        success: false,
+        error:
+          "Direct signed QR generation is disabled in production. Use the managed MSCQR print workflow so customer-verifiable labels remain tied to governed issuance and confirmed print state.",
+      });
+    }
+
     const parsed = generateQRCodesSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
@@ -1023,7 +1040,15 @@ export const generateQRCodes = async (req: AuthRequest, res: Response) => {
 
     const rows = await prisma.qRCode.findMany({
       where: { licenseeId, code: { gte: result.allocation.startCode, lte: result.allocation.endCode } },
-      select: { id: true, licenseeId: true, batchId: true, tokenNonce: true, tokenIssuedAt: true, tokenExpiresAt: true },
+      select: {
+        id: true,
+        licenseeId: true,
+        batchId: true,
+        replayEpoch: true,
+        tokenNonce: true,
+        tokenIssuedAt: true,
+        tokenExpiresAt: true,
+      },
       orderBy: { code: "asc" },
     });
 
@@ -1038,6 +1063,7 @@ export const generateQRCodes = async (req: AuthRequest, res: Response) => {
         batch_id: qr.batchId ?? null,
         licensee_id: qr.licenseeId,
         manufacturer_id: null,
+        epoch: Number(qr.replayEpoch || 1),
         iat: Math.floor(now.getTime() / 1000),
         exp: Math.floor(expAt.getTime() / 1000),
         nonce,
@@ -1053,6 +1079,8 @@ export const generateQRCodes = async (req: AuthRequest, res: Response) => {
           tokenIssuedAt: now,
           tokenExpiresAt: expAt,
           tokenHash,
+          issuanceMode: "BREAK_GLASS_DIRECT",
+          customerVerifiableAt: null,
         },
       });
     }
@@ -1064,6 +1092,11 @@ export const generateQRCodes = async (req: AuthRequest, res: Response) => {
       entityType: "QRCode",
       details: { startNumber: result.startNumber, endNumber: result.endNumber, quantity },
       ipAddress: req.ip,
+    });
+    recordBreakGlassIssuanceMetric({
+      licenseeId,
+      quantity,
+      actorUserId: req.user.userId,
     });
 
     return res.status(201).json({

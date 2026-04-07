@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ActionButton } from "@/components/ui/action-button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DialogEmptyState } from "@/components/ui/dialog-empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -48,7 +49,11 @@ export function RenameBatchDialog({
         </DialogHeader>
 
         {!batch ? (
-          <div className="text-sm text-muted-foreground">No batch selected.</div>
+          <DialogEmptyState
+            title="Choose a batch to rename"
+            description="Close this dialog, reopen Rename from the batch you want to update, and MSCQR will restore the current batch context."
+            onClose={() => onOpenChange(false)}
+          />
         ) : (
           <div className="mt-2 space-y-4">
             <div className="rounded-md border p-3 text-sm">
@@ -106,7 +111,11 @@ export function DeleteBatchDialog({
         </DialogHeader>
 
         {!batch ? (
-          <div className="text-sm text-muted-foreground">No batch selected.</div>
+          <DialogEmptyState
+            title="Choose a batch to delete"
+            description="This action only works from a specific batch row. Close this dialog, return to Batches, and reopen Delete from the batch you want to remove."
+            onClose={() => onOpenChange(false)}
+          />
         ) : (
           <div className="mt-2 space-y-4">
             <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
@@ -203,7 +212,11 @@ export function BatchPrintJobDialog({
         </DialogHeader>
 
         {!printBatch ? (
-          <div className="text-sm text-muted-foreground">No batch selected.</div>
+          <DialogEmptyState
+            title="Choose a batch before starting a print run"
+            description="Close this dialog, reopen Create Print Job from an assigned batch, and MSCQR will reload printer readiness for that batch."
+            onClose={onClose}
+          />
         ) : (
           <div className="mt-2 space-y-4">
             <div

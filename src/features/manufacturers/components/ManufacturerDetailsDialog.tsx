@@ -2,6 +2,7 @@ import { Copy, PackageCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DialogEmptyState } from "@/components/ui/dialog-empty-state";
 
 import {
   formatAssignmentTimestamp,
@@ -41,7 +42,11 @@ export function ManufacturerDetailsDialog({
         </DialogHeader>
 
         {!manufacturer ? (
-          <div className="text-sm text-muted-foreground">No manufacturer selected.</div>
+          <DialogEmptyState
+            title="Choose a manufacturer to review"
+            description="Close this dialog, reopen View details from the manufacturer row or card you want, and MSCQR will reload the latest assignment and printing summary."
+            onClose={() => onOpenChange(false)}
+          />
         ) : (
           <div className="space-y-5">
             <div className="grid gap-3 sm:grid-cols-2">

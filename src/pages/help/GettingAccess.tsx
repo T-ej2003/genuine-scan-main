@@ -146,7 +146,7 @@ export default function GettingAccess() {
               },
               {
                 filename: "customer-first-verification.png",
-                whereToCapture: "Public verify page showing Verified Authentic (first scan).",
+                whereToCapture: "Public verify page showing MSCQR confirmed this label.",
               },
             ]}
           />

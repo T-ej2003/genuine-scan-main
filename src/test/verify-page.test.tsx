@@ -77,9 +77,13 @@ const buildVerifyPayload = (overrides: Record<string, unknown> = {}) => ({
   status: "PRINTED",
   labelState: "PRINTED",
   printTrustState: "PRINT_CONFIRMED",
-  message: "This is a genuine product.",
+  message: "MSCQR confirmed this issued label is active.",
   proofSource: "SIGNED_LABEL",
   proofTier: "SIGNED_LABEL",
+  publicOutcome: "SIGNED_LABEL_ACTIVE",
+  riskDisposition: "CLEAR",
+  messageKey: "signed_label_active",
+  nextActionKey: "review_details",
   latestDecisionOutcome: "AUTHENTIC",
   classification: "FIRST_SCAN",
   reasonCodes: ["FIRST_SCAN", "SIGNED_LABEL"],
@@ -122,8 +126,12 @@ describe("Verify page", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
-    Object.defineProperty(globalThis.navigator, "geolocation", {
+    window.sessionStorage.clear();
     vi.mocked(apiClient.getCustomerAuthProviders).mockResolvedValue({
+      success: true,
+      data: { items: [] },
+    } as any);
+    vi.mocked(apiClient.getCustomerPasskeyCredentials).mockResolvedValue({
       success: true,
       data: { items: [] },
     } as any);
@@ -155,7 +163,7 @@ describe("Verify page", () => {
     } as any);
     vi.mocked(apiClient.startVerificationSession).mockResolvedValue({
       success: true,
-      data: buildSession(),
+      data: buildSession({ sessionProofToken: "session-proof-1", proofBindingRequired: true }),
     } as any);
     vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
       success: true,
@@ -176,6 +184,10 @@ describe("Verify page", () => {
     });
 
     await waitFor(() => {
+      expect(vi.mocked(apiClient.getVerificationSession)).toHaveBeenCalledWith(SESSION_ID, undefined, "session-proof-1");
+    });
+
+    await waitFor(() => {
       expect(screen.getByTestId("location-probe")).toHaveTextContent(`/verify/${CODE}?session=${SESSION_ID}&t=signed-token`);
     });
   });
@@ -189,7 +201,7 @@ describe("Verify page", () => {
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
     expect(await screen.findByText("Verify who is checking this product")).toBeInTheDocument();
-    expect(screen.queryByText("What MSCQR verified")).toBeNull();
+    expect(screen.queryByText("What MSCQR checked")).toBeNull();
   });
 
   it("renders configured customer social providers from the backend", async () => {
@@ -280,9 +292,9 @@ describe("Verify page", () => {
 
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
-    expect(await screen.findByText("What MSCQR verified")).toBeInTheDocument();
-    expect(screen.getByText("Signed label verification")).toBeInTheDocument();
-    expect(screen.getByText("Requester trust")).toBeInTheDocument();
+    expect(await screen.findByText("What MSCQR checked")).toBeInTheDocument();
+    expect(screen.getByText("Signed label check")).toBeInTheDocument();
+    expect(screen.getByText("Requester context")).toBeInTheDocument();
   });
 
   it("reports a concern with session and decision ids after reveal", async () => {
@@ -326,6 +338,84 @@ describe("Verify page", () => {
           decisionId: "decision-1",
         })
       );
+    });
+  });
+
+  it("lets a signed-in customer complete a replay review check and refresh the session", async () => {
+    vi.mocked(apiClient.getVerificationSession)
+      .mockResolvedValueOnce({
+        success: true,
+        data: buildSession({
+          authState: "VERIFIED",
+          challengeRequired: true,
+          revealed: false,
+          intakeCompleted: false,
+        }),
+      } as any)
+      .mockResolvedValueOnce({
+        success: true,
+        data: buildSession({
+          sessionId: "session-updated",
+          authState: "VERIFIED",
+          challengeCompleted: true,
+          challengeCompletedBy: "CUSTOMER_IDENTITY",
+          revealed: false,
+          intakeCompleted: false,
+        }),
+      } as any);
+    vi.mocked(apiClient.verifyQRCode).mockResolvedValue({
+      success: true,
+      data: buildVerifyPayload({
+        classification: "SUSPICIOUS_DUPLICATE",
+        publicOutcome: "REVIEW_REQUIRED",
+        riskDisposition: "REVIEW_REQUIRED",
+        challenge: {
+          required: false,
+          completed: true,
+          completedBy: "CUSTOMER_IDENTITY",
+        },
+      }),
+    } as any);
+    vi.mocked(apiClient.startVerificationSession).mockResolvedValue({
+      success: true,
+      data: buildSession({
+        sessionId: "session-updated",
+        authState: "VERIFIED",
+        challengeCompleted: true,
+        challengeCompletedBy: "CUSTOMER_IDENTITY",
+        sessionProofToken: "session-proof-updated",
+        proofBindingRequired: true,
+      }),
+    } as any);
+    window.localStorage.setItem("mscqr_verify_customer_token", "customer-token");
+    window.localStorage.setItem("mscqr_verify_customer_email", "abhi@example.com");
+
+    renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
+
+    expect(await screen.findByText("Additional review check required")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Re-check with verified identity" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(apiClient.verifyQRCode)).toHaveBeenCalledWith(
+        CODE,
+        expect.objectContaining({
+          customerToken: "customer-token",
+          device: expect.any(String),
+        })
+      );
+    });
+
+    await waitFor(() => {
+      expect(vi.mocked(apiClient.startVerificationSession)).toHaveBeenCalledWith("decision-1", "MANUAL_CODE", "customer-token");
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/completed the additional review check/i)).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location-probe")).toHaveTextContent(`/verify/${CODE}?session=session-updated`);
     });
   });
 });

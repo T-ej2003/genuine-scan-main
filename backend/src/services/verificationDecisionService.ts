@@ -8,6 +8,7 @@ import {
 } from "@prisma/client";
 
 import prisma from "../config/database";
+import { recordVerificationTrustMetric } from "../observability/verificationTrustMetrics";
 
 const DECISION_VERSION = 1;
 
@@ -80,6 +81,10 @@ export type VerificationDecisionSummary = {
   replacementStatus: VerificationReplacementStatus;
   degradationMode: VerificationDegradationMode;
   customerTrustLevel: CustomerTrustLevel;
+  publicOutcome?: string | null;
+  riskDisposition?: string | null;
+  messageKey?: string | null;
+  nextActionKey?: string | null;
   replacementChainId?: string | null;
 };
 
@@ -103,6 +108,10 @@ export const persistVerificationDecision = async (input: {
   actorIpHash?: string | null;
   actorDeviceHash?: string | null;
   replacementChainId?: string | null;
+  publicOutcome?: string | null;
+  riskDisposition?: string | null;
+  messageKey?: string | null;
+  nextActionKey?: string | null;
   scanSummary?: Record<string, unknown> | null;
   ownershipSnapshot?: Record<string, unknown> | null;
   riskSignals?: Record<string, unknown> | null;
@@ -136,6 +145,10 @@ export const persistVerificationDecision = async (input: {
     replacementStatus,
     degradationMode,
     customerTrustLevel,
+    publicOutcome: input.publicOutcome || null,
+    riskDisposition: input.riskDisposition || null,
+    messageKey: input.messageKey || null,
+    nextActionKey: input.nextActionKey || null,
     replacementChainId: input.replacementChainId || null,
   };
 
@@ -174,6 +187,10 @@ export const persistVerificationDecision = async (input: {
         actorDeviceHash: input.actorDeviceHash || undefined,
         metadata: {
           ...(input.metadata || {}),
+          publicOutcome: input.publicOutcome || null,
+          riskDisposition: input.riskDisposition || null,
+          messageKey: input.messageKey || null,
+          nextActionKey: input.nextActionKey || null,
           replacementChainId: input.replacementChainId || null,
         },
       },
@@ -187,7 +204,53 @@ export const persistVerificationDecision = async (input: {
         riskSignals: input.riskSignals || undefined,
         policySnapshot: input.policySnapshot || undefined,
         lifecycleSnapshot: input.lifecycleSnapshot || undefined,
-        metadata: input.metadata || undefined,
+        metadata: {
+          ...(input.metadata || {}),
+          publicOutcome: input.publicOutcome || null,
+          riskDisposition: input.riskDisposition || null,
+          messageKey: input.messageKey || null,
+          nextActionKey: input.nextActionKey || null,
+        },
+      },
+    });
+
+    const metadata = (input.metadata || {}) as Record<string, unknown>;
+    const lifecycleSnapshot = (input.lifecycleSnapshot || {}) as Record<string, unknown>;
+    const replayAssessment = (metadata.replayAssessment || {}) as Record<string, unknown>;
+    const signing = (metadata.signing || {}) as Record<string, unknown>;
+    recordVerificationTrustMetric({
+      decisionId: decision.id,
+      qrCodeId: input.qrCodeId || null,
+      licenseeId: input.licenseeId || null,
+      batchId: input.batchId || null,
+      proofSource: input.proofSource || null,
+      proofTier,
+      classification: input.classification || null,
+      publicOutcome: input.publicOutcome || null,
+      riskDisposition: input.riskDisposition || null,
+      riskBand,
+      printTrustState: String(lifecycleSnapshot.printTrustState || "").trim() || null,
+      issuanceMode: String(lifecycleSnapshot.issuanceMode || "").trim() || null,
+      replayState: String(lifecycleSnapshot.replayState || replayAssessment.replayState || "").trim() || null,
+      challengeRequired: Boolean(metadata.stepUpRequired),
+      challengeCompleted: Boolean(metadata.stepUpSatisfied),
+      challengeCompletedBy: String(metadata.stepUpCompletedBy || "").trim() || null,
+      signingMode: String(signing.mode || "").trim() || null,
+      signingKeyVersion: String(signing.keyVersion || "").trim() || null,
+      signingProvider: String(signing.provider || "").trim() || null,
+      replacementStatus,
+      breakGlassUsage:
+        String(lifecycleSnapshot.issuanceMode || "").trim().toUpperCase() === "BREAK_GLASS_DIRECT" ||
+        String(lifecycleSnapshot.printTrustState || "").trim().toUpperCase() === "RESTRICTED_DIRECT_ISSUANCE",
+      limitedProvenance:
+        String(input.publicOutcome || "").trim().toUpperCase() === "LIMITED_PROVENANCE" ||
+        String(lifecycleSnapshot.printTrustState || "").trim().toUpperCase() === "LIMITED_PROVENANCE",
+      metadata: {
+        sameContextRepeat:
+          String(lifecycleSnapshot.replayState || replayAssessment.replayState || "").trim().toUpperCase() === "SAME_CONTEXT_REPEAT",
+        changedContextRepeat: ["CHANGED_CONTEXT_REPEAT", "RAPID_CHANGED_CONTEXT_REPEAT"].includes(
+          String(lifecycleSnapshot.replayState || replayAssessment.replayState || "").trim().toUpperCase()
+        ),
       },
     });
 

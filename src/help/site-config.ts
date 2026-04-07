@@ -20,7 +20,8 @@ export const HELP_COMPLIANCE_COPY = {
   ukGdpr: `${HELP_SITE_CONFIG.appName} processes personal data in accordance with UK GDPR and the Data Protection Act 2018. Data protection queries should be directed to ${HELP_SITE_CONFIG.dpoEmail} or ${HELP_SITE_CONFIG.superAdminEmail}.`,
   security: "Access control is role-based (Super Admin, Licensee, Manufacturer). Communication is encrypted over HTTPS, passwords are handled using secure controls, and critical actions are captured in audit logs.",
   incidentResponse: "The controlled process is: report intake -> review -> containment -> documentation -> resolution.",
-  qrUsage: "All QR codes are unique, traceable, and single-use where applicable. QR codes must not be duplicated, altered, or reused.",
+  qrUsage:
+    "MSCQR codes are unique and traceable within the governed registry. Reuse, copying, or tampering is prohibited, but MSCQR should not be described as clone-proof or impossible to copy.",
   auditRetention: `Administrative actions, QR allocations, fraud reports, and login attempts are logged and retained for ${HELP_SITE_CONFIG.retentionDays} days.`,
   acceptableUse: "Unauthorized access, reverse engineering, misuse of fraud reporting, or interference with system security is prohibited.",
   hosting: `The platform is hosted via ${HELP_SITE_CONFIG.hostingProvider} with reasonable security controls and is provided on a best-effort basis.`,

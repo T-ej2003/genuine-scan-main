@@ -59,6 +59,15 @@ const requireCustomerIdentity = (req: CustomerVerifyRequest, res: Response) => {
   };
 };
 
+const resolveSessionErrorStatus = (error: any) => {
+  const message = String(error?.message || "").toLowerCase();
+  if (/not found/.test(message)) return 404;
+  if (/authentication required/.test(message)) return 401;
+  if (/belongs to a different signed-in customer/.test(message)) return 403;
+  if (/continuity check|required|expired|no longer current|failed/.test(message)) return 400;
+  return 500;
+};
+
 export const startCustomerVerificationSession = async (req: CustomerVerifyRequest, res: Response) => {
   try {
     const parsed = startSessionSchema.safeParse(req.body || {});
@@ -92,7 +101,7 @@ export const startCustomerVerificationSession = async (req: CustomerVerifyReques
       data: session,
     });
   } catch (error: any) {
-    return res.status(/not found/i.test(String(error?.message || "")) ? 404 : 500).json({
+    return res.status(resolveSessionErrorStatus(error)).json({
       success: false,
       error: error?.message || "Could not start verification session",
     });
@@ -112,6 +121,7 @@ export const getCustomerVerificationSessionState = async (req: CustomerVerifyReq
     const session = await getCustomerVerificationSession({
       sessionId: parsed.data.id,
       customer: req.customer || null,
+      proofToken: req.get("x-verification-session-proof") || null,
     });
 
     if (!session) {
@@ -126,7 +136,7 @@ export const getCustomerVerificationSessionState = async (req: CustomerVerifyReq
       data: session,
     });
   } catch (error: any) {
-    return res.status(500).json({
+    return res.status(resolveSessionErrorStatus(error)).json({
       success: false,
       error: error?.message || "Could not load verification session",
     });
@@ -156,6 +166,7 @@ export const submitCustomerVerificationIntake = async (req: CustomerVerifyReques
         answers: parsed.data as Record<string, unknown>,
       },
       customer,
+      proofToken: req.get("x-verification-session-proof") || null,
     });
 
     await createAuditLogSafely({
@@ -179,7 +190,7 @@ export const submitCustomerVerificationIntake = async (req: CustomerVerifyReques
       },
     });
   } catch (error: any) {
-    return res.status(/not found/i.test(String(error?.message || "")) ? 404 : 500).json({
+    return res.status(resolveSessionErrorStatus(error)).json({
       success: false,
       error: error?.message || "Could not save verification intake",
     });
@@ -202,6 +213,7 @@ export const revealCustomerVerificationResult = async (req: CustomerVerifyReques
     const reveal = await revealCustomerVerificationSession({
       sessionId: params.data.id,
       customer,
+      proofToken: req.get("x-verification-session-proof") || null,
     });
 
     await createAuditLogSafely({
@@ -221,7 +233,7 @@ export const revealCustomerVerificationResult = async (req: CustomerVerifyReques
       data: reveal,
     });
   } catch (error: any) {
-    return res.status(/not found/i.test(String(error?.message || "")) ? 404 : 400).json({
+    return res.status(resolveSessionErrorStatus(error)).json({
       success: false,
       error: error?.message || "Could not reveal verification result",
     });

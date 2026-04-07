@@ -74,6 +74,9 @@ jobs:
       - name: Backend build
         run: npm --prefix backend run build
 
+      - name: Backend trust-critical suite
+        run: npm --prefix backend run test:trust-critical:compiled
+
       - name: Backend test suite
         run: npm --prefix backend test
 

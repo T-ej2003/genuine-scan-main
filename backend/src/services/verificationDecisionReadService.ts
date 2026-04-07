@@ -15,6 +15,9 @@ export type InternalLatestDecision = {
   decisionVersion: number;
   outcome: VerificationDecisionOutcome;
   proofTier: VerificationProofTier;
+  publicOutcome: string | null;
+  riskDisposition: string | null;
+  messageKey: string | null;
   riskBand: VerificationRiskBand;
   replacementStatus: VerificationReplacementStatus;
   customerTrustLevel: CustomerTrustLevel;
@@ -52,6 +55,9 @@ const mapDecision = (params: {
     decisionVersion: Number(params.decision.decisionVersion || 1),
     outcome: params.decision.outcome,
     proofTier: params.decision.proofTier,
+    publicOutcome: String(metadata.publicOutcome || "").trim() || null,
+    riskDisposition: String(metadata.riskDisposition || "").trim() || null,
+    messageKey: String(metadata.messageKey || "").trim() || null,
     riskBand: params.decision.riskBand,
     replacementStatus: params.decision.replacementStatus,
     customerTrustLevel: trust?.trustLevel || params.decision.customerTrustLevel,

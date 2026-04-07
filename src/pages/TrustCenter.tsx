@@ -56,9 +56,9 @@ export default function TrustCenter() {
                 <ShieldCheck className="h-3.5 w-3.5 text-teal-200" />
                 MSCQR Trust Center
               </div>
-              <div className="mt-8 text-sm uppercase tracking-[0.28em] text-slate-400">Governed QR authentication</div>
+              <div className="mt-8 text-sm uppercase tracking-[0.28em] text-slate-400">Governed QR verification</div>
               <h1 className="mt-4 max-w-3xl text-balance text-5xl font-semibold leading-[1.02] text-white md:text-7xl">
-                Server-validated authenticity with clear proof tiers and controlled print trust.
+                Server-validated label verification with clear proof tiers and controlled print trust.
               </h1>
               <p className="mt-6 max-w-2xl text-base leading-7 text-slate-300 md:text-lg">
                 MSCQR is designed to make public verification, print lifecycle control, and operator evidence tell the
@@ -131,7 +131,7 @@ export default function TrustCenter() {
                 Lifecycle trust
               </div>
               <h2 className="mt-5 text-balance text-3xl font-semibold text-white md:text-4xl">
-                Authenticity only becomes customer-facing after the governed print path says the label is ready.
+                Customer-facing verification only becomes available after the governed print path says the label is ready.
               </h2>
             </div>
             <div className="space-y-5">

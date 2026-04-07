@@ -42,6 +42,7 @@ import {
   normalizeVerifyCode,
   readCachedGeo,
   readStoredValue,
+  toLabel,
   type CustomerTrustIntake,
   type VerificationClassification,
   type VerificationSessionSummary,
@@ -80,32 +81,38 @@ const STEP_META: Record<
   }
 > = {
   FIRST_SCAN: {
-    title: "Verified authentic",
-    badge: "Authentic",
+    title: "MSCQR confirmed this label",
+    badge: "Confirmed",
     tone: "border-emerald-200 bg-emerald-50 text-emerald-950",
     icon: <ShieldCheck className="h-5 w-5" />,
   },
   LEGIT_REPEAT: {
-    title: "Verified again",
-    badge: "Authentic",
+    title: "MSCQR confirmed this code again",
+    badge: "Recorded",
     tone: "border-emerald-200 bg-emerald-50 text-emerald-950",
     icon: <ShieldCheck className="h-5 w-5" />,
   },
   SUSPICIOUS_DUPLICATE: {
-    title: "Suspicious duplicate",
-    badge: "Needs review",
+    title: "Review required",
+    badge: "Review required",
     tone: "border-amber-200 bg-amber-50 text-amber-950",
     icon: <AlertTriangle className="h-5 w-5" />,
   },
   BLOCKED_BY_SECURITY: {
-    title: "Blocked by security",
+    title: "Do not rely on this code",
     badge: "Blocked",
     tone: "border-rose-200 bg-rose-50 text-rose-950",
     icon: <Ban className="h-5 w-5" />,
   },
   NOT_READY_FOR_CUSTOMER_USE: {
-    title: "Not ready for customer use",
+    title: "Not ready for customer verification",
     badge: "Not ready",
+    tone: "border-slate-200 bg-slate-100 text-slate-950",
+    icon: <CircleDashed className="h-5 w-5" />,
+  },
+  NOT_FOUND: {
+    title: "Code not found",
+    badge: "Not found",
     tone: "border-slate-200 bg-slate-100 text-slate-950",
     icon: <CircleDashed className="h-5 w-5" />,
   },
@@ -161,6 +168,30 @@ const clearStoredCustomerSession = () => {
     window.localStorage.removeItem(LEGACY_CUSTOMER_EMAIL_KEY);
   } catch {
     // Ignore storage issues.
+  }
+};
+
+const sessionProofStorageKey = (sessionId: string) => `mscqr_verify_session_proof:${sessionId}`;
+
+const persistSessionProofToken = (sessionId: string, token: string | null | undefined) => {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) return;
+  try {
+    const normalizedToken = String(token || "").trim();
+    if (normalizedToken) window.sessionStorage.setItem(sessionProofStorageKey(normalizedSessionId), normalizedToken);
+    else window.sessionStorage.removeItem(sessionProofStorageKey(normalizedSessionId));
+  } catch {
+    // Ignore storage issues.
+  }
+};
+
+const readSessionProofToken = (sessionId: string) => {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) return "";
+  try {
+    return String(window.sessionStorage.getItem(sessionProofStorageKey(normalizedSessionId)) || "").trim();
+  } catch {
+    return "";
   }
 };
 
@@ -321,6 +352,7 @@ export default function VerifyExperience() {
   const [intake, setIntake] = useState<CustomerTrustIntake>(DEFAULT_INTAKE);
   const [flowStep, setFlowStep] = useState<FlowStep>("identity");
   const [submittingReveal, setSubmittingReveal] = useState(false);
+  const [challengeRetrying, setChallengeRetrying] = useState(false);
 
   const [passkeyCredentials, setPasskeyCredentials] = useState<WebAuthnCredentialSummary[]>([]);
   const [loadingPasskeys, setLoadingPasskeys] = useState(false);
@@ -342,6 +374,10 @@ export default function VerifyExperience() {
   const currentCode = normalizeVerifyCode(result?.code || session?.code || codeParam);
   const authReady = Boolean(customerToken);
   const displaySessionSummary = session || null;
+  const challengeRequired = Boolean(result?.challenge?.required || lockedResult?.challenge?.required || session?.challengeRequired);
+  const challengeCompleted = Boolean(result?.challenge?.completed || lockedResult?.challenge?.completed || session?.challengeCompleted);
+  const challengeCompletedBy =
+    result?.challenge?.completedBy || lockedResult?.challenge?.completedBy || session?.challengeCompletedBy || null;
   const trustLevelLabel =
     result?.customerTrustLevel === "PASSKEY_VERIFIED"
       ? "Passkey-verified requester"
@@ -399,6 +435,24 @@ export default function VerifyExperience() {
     },
     []
   );
+
+  const loadGeoContext = useCallback(async () => {
+    return new Promise<{ lat?: number; lon?: number; acc?: number }>((resolve) => {
+      const cached = readCachedGeo();
+      if (!navigator.geolocation) return resolve(cached);
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            lat: position.coords.latitude,
+            lon: position.coords.longitude,
+            acc: position.coords.accuracy,
+          });
+        },
+        () => resolve(cached),
+        { enableHighAccuracy: false, timeout: 4_000, maximumAge: 300_000 }
+      );
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -479,12 +533,20 @@ export default function VerifyExperience() {
 
     try {
       if (sessionIdFromUrl) {
-        const sessionResponse = await apiClient.getVerificationSession(sessionIdFromUrl, customerToken || undefined);
+        const sessionProofToken = readSessionProofToken(sessionIdFromUrl);
+        const sessionResponse = await apiClient.getVerificationSession(
+          sessionIdFromUrl,
+          customerToken || undefined,
+          sessionProofToken || undefined
+        );
         if (!sessionResponse.success || !sessionResponse.data) {
           throw new Error(sessionResponse.error || "Could not load verification session.");
         }
 
         const nextSession = sessionResponse.data as unknown as VerificationSessionSummary;
+        if (nextSession.sessionProofToken) {
+          persistSessionProofToken(nextSession.sessionId, nextSession.sessionProofToken);
+        }
         setSession(nextSession);
         setLockedResult((nextSession.verification as VerifyPayload | null) || null);
         setResult((nextSession.verification as VerifyPayload | null) || null);
@@ -502,21 +564,7 @@ export default function VerifyExperience() {
         return;
       }
 
-      const geo = await new Promise<{ lat?: number; lon?: number; acc?: number }>((resolve) => {
-        const cached = readCachedGeo();
-        if (!navigator.geolocation) return resolve(cached);
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            resolve({
-              lat: position.coords.latitude,
-              lon: position.coords.longitude,
-              acc: position.coords.accuracy,
-            });
-          },
-          () => resolve(cached),
-          { enableHighAccuracy: false, timeout: 4_000, maximumAge: 300_000 }
-        );
-      });
+      const geo = await loadGeoContext();
 
       const verificationResponse = token
         ? await apiClient.scanToken(token, {
@@ -558,6 +606,9 @@ export default function VerifyExperience() {
       }
 
       const nextSession = sessionResponse.data as unknown as VerificationSessionSummary;
+      if (nextSession.sessionProofToken) {
+        persistSessionProofToken(nextSession.sessionId, nextSession.sessionProofToken);
+      }
       setSession(nextSession);
 
       const canonicalCode = normalizeVerifyCode(nextResult.code || nextSession.code || codeParam);
@@ -576,7 +627,7 @@ export default function VerifyExperience() {
     } finally {
       setBooting(false);
     }
-  }, [codeParam, customerToken, deviceId, navigate, sessionIdFromUrl, token]);
+  }, [codeParam, customerToken, deviceId, loadGeoContext, navigate, sessionIdFromUrl, token]);
 
   useEffect(() => {
     if (!oauthResolved) return;
@@ -643,6 +694,92 @@ export default function VerifyExperience() {
     }
   };
 
+  const handleCompleteChallenge = async () => {
+    if (!customerToken) {
+      toast({
+        title: "Sign in required",
+        description: "Sign in first so MSCQR can re-check this label with your verified identity.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setChallengeRetrying(true);
+    try {
+      const geo = await loadGeoContext();
+      const verificationResponse = token
+        ? await apiClient.scanToken(token, {
+            device: deviceId,
+            lat: geo.lat,
+            lon: geo.lon,
+            acc: geo.acc,
+            customerToken,
+          })
+        : await apiClient.verifyQRCode(codeParam, {
+            device: deviceId,
+            lat: geo.lat,
+            lon: geo.lon,
+            acc: geo.acc,
+            customerToken,
+          });
+
+      if (!verificationResponse.success || !verificationResponse.data) {
+        throw new Error(verificationResponse.error || "Could not re-check the label.");
+      }
+
+      const nextResult = verificationResponse.data as VerifyPayload;
+      setLockedResult(nextResult);
+      setResult(nextResult);
+
+      if (!nextResult.decisionId) {
+        setFlowStep("result");
+        toast({
+          title: "Review check updated",
+          description: "MSCQR re-checked this label with your verified identity.",
+        });
+        return;
+      }
+
+      const sessionResponse = await apiClient.startVerificationSession(
+        nextResult.decisionId,
+        token ? "SIGNED_SCAN" : "MANUAL_CODE",
+        customerToken
+      );
+
+      if (!sessionResponse.success || !sessionResponse.data) {
+        throw new Error(sessionResponse.error || "Could not prepare the updated verification session.");
+      }
+
+      const nextSession = sessionResponse.data as unknown as VerificationSessionSummary;
+      if (nextSession.sessionProofToken) {
+        persistSessionProofToken(nextSession.sessionId, nextSession.sessionProofToken);
+      }
+      setSession(nextSession);
+
+      const canonicalCode = normalizeVerifyCode(nextResult.code || nextSession.code || codeParam);
+      const params = new URLSearchParams();
+      params.set("session", nextSession.sessionId);
+      if (token) params.set("t", token);
+      navigate(`/verify/${encodeURIComponent(canonicalCode)}?${params.toString()}`, { replace: true });
+      setFlowStep("purchase");
+
+      toast({
+        title: nextResult.challenge?.completed ? "Review check completed" : "Label re-checked",
+        description: nextResult.challenge?.completed
+          ? "MSCQR re-checked this repeat scan with your verified identity."
+          : "MSCQR refreshed the label result using your verified identity.",
+      });
+    } catch (nextError: unknown) {
+      toast({
+        title: "Could not complete review check",
+        description: nextError instanceof Error ? nextError.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setChallengeRetrying(false);
+    }
+  };
+
   const handleSubmitIntakeAndReveal = async () => {
     if (!session?.sessionId || !customerToken) {
       toast({ title: "Sign in required", description: "Complete sign-in before revealing the result.", variant: "destructive" });
@@ -655,12 +792,22 @@ export default function VerifyExperience() {
 
     setSubmittingReveal(true);
     try {
-      const intakeResponse = await apiClient.submitVerificationIntake(session.sessionId, intake as Record<string, unknown>, customerToken);
+      const sessionProofToken = readSessionProofToken(session.sessionId);
+      const intakeResponse = await apiClient.submitVerificationIntake(
+        session.sessionId,
+        intake as Record<string, unknown>,
+        customerToken,
+        sessionProofToken || undefined
+      );
       if (!intakeResponse.success) {
         throw new Error(intakeResponse.error || "Could not save the verification intake.");
       }
 
-      const revealResponse = await apiClient.revealVerificationSession(session.sessionId, customerToken);
+      const revealResponse = await apiClient.revealVerificationSession(
+        session.sessionId,
+        customerToken,
+        sessionProofToken || undefined
+      );
       if (!revealResponse.success || !revealResponse.data) {
         throw new Error(revealResponse.error || "Could not reveal the verification result.");
       }
@@ -849,7 +996,7 @@ export default function VerifyExperience() {
                   Locking the label decision before we ask for your purchase context.
                 </h1>
                 <p className="max-w-2xl text-sm leading-7 text-slate-600 sm:text-base">
-                  MSCQR verifies the label in its governed issuance system first, then records your identity and purchase context separately so your answers never change the authenticity verdict.
+                  MSCQR verifies the label in its governed issuance system first, then records your identity and purchase context separately so your answers never change the locked label result.
                 </p>
               </div>
               <Badge className="border-slate-300 bg-slate-100 text-slate-700">{maskCode(codeParam)}</Badge>
@@ -887,18 +1034,58 @@ export default function VerifyExperience() {
   }
 
   const canReveal = Boolean(session?.sessionId && authReady);
+  const limitedProvenance = result?.publicOutcome === "LIMITED_PROVENANCE";
   const proofTitle =
     result?.proofTier === "SIGNED_LABEL"
-      ? "Signed label verification"
+      ? "Signed label check"
       : result?.proofTier === "MANUAL_REGISTRY_LOOKUP"
-        ? "Manual registry lookup"
-        : "Degraded verification";
+        ? "Manual code record check"
+        : "Fail-safe verification";
   const proofDetail =
     result?.proofTier === "SIGNED_LABEL"
       ? "MSCQR confirmed the issued label token and the current lifecycle state of this label."
       : result?.proofTier === "MANUAL_REGISTRY_LOOKUP"
         ? "MSCQR confirmed the registry record and lifecycle state, but not a label-bound signature."
         : "MSCQR returned a degraded decision because a dependency had to fail safely.";
+  const checkedItems =
+    result?.publicOutcome === "INTEGRITY_ERROR"
+      ? [
+          "MSCQR could not validate the signed-label proof presented for this result.",
+          "The platform did not accept this as a trusted signed-label check.",
+          "Use the brand support channel if this label should still be valid.",
+        ]
+      : result?.publicOutcome === "NOT_FOUND" || classification === "NOT_FOUND"
+      ? [
+          "MSCQR could not match this code to a live governed registry record.",
+          "No customer-ready lifecycle state could be confirmed for this code.",
+          "No signed-label proof could be completed for this result.",
+        ]
+      : limitedProvenance
+        ? [
+            "MSCQR confirmed the signed label token and found a live platform record for this label.",
+            "Governed print provenance is not available for this label, so this result is intentionally limited.",
+            "Treat this as a weaker signed-label result than a governed print confirmation.",
+          ]
+      : classification === "NOT_READY_FOR_CUSTOMER_USE"
+        ? [
+            "The label exists inside MSCQR’s governed issuance registry.",
+            "The lifecycle state is not yet released for customer verification.",
+            proofDetail,
+          ]
+        : classification === "BLOCKED_BY_SECURITY"
+          ? [
+              "The label exists inside MSCQR’s governed issuance registry.",
+              "MSCQR recorded a state or policy condition that currently blocks customer acceptance.",
+              proofDetail,
+            ]
+          : [
+              "The label exists inside MSCQR’s governed issuance registry.",
+              "The current lifecycle state is suitable for customer verification.",
+              proofDetail,
+          ];
+  const resultTone = limitedProvenance ? "border-amber-200 bg-amber-50 text-amber-950" : stepMeta.tone;
+  const resultBadge = limitedProvenance ? "Limited provenance" : stepMeta.badge;
+  const resultTitle = limitedProvenance ? "MSCQR found a weaker provenance path" : stepMeta.title;
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(15,23,42,0.08),transparent_36%),linear-gradient(180deg,#f8fafc_0%,#edf2f7_46%,#f8fafc_100%)] px-4 py-8 sm:px-6 sm:py-12">
@@ -906,16 +1093,16 @@ export default function VerifyExperience() {
         <header className="grid gap-6 rounded-[32px] border border-slate-200/80 bg-white/90 p-6 shadow-[0_30px_100px_rgba(15,23,42,0.08)] sm:p-10 lg:grid-cols-[1.6fr,0.8fr]">
           <div className="space-y-5">
             <div className="flex flex-wrap items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-500">
-              <span>MSCQR Customer Verification 2.0</span>
+              <span>MSCQR verification review</span>
               <span className="h-1 w-1 rounded-full bg-slate-300" />
-              <span>{displaySessionSummary?.brandName || "Governed label authentication"}</span>
+              <span>{displaySessionSummary?.brandName || "Governed label verification"}</span>
             </div>
             <div className="space-y-3">
               <h1 className="max-w-3xl text-3xl font-semibold tracking-tight text-slate-950 sm:text-5xl">
-                Verify the label first. Build customer trust second.
+                Review the MSCQR label result with clear proof boundaries.
               </h1>
               <p className="max-w-3xl text-sm leading-7 text-slate-600 sm:text-base">
-                MSCQR locks the label authenticity decision before revealing the result. Your identity and purchase answers add provenance trust and incident context, but they never rewrite the QR verdict.
+                MSCQR locks the label result before revealing it. Your identity and purchase answers add context for review and support, but they do not rewrite the original verification outcome.
               </p>
             </div>
             <div className="flex flex-wrap gap-3 text-sm">
@@ -927,10 +1114,10 @@ export default function VerifyExperience() {
             </div>
           </div>
           <div className="rounded-[28px] border border-slate-200 bg-slate-950 p-6 text-white shadow-[0_24px_64px_rgba(15,23,42,0.18)]">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-400">Locked authenticity basis</div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-400">What this result is based on</div>
             <div className="mt-4 space-y-3 text-sm leading-6 text-slate-200">
-              <p>MSCQR verifies whether the label exists in the governed issuance registry, whether its lifecycle state is customer-ready, and whether a signed label token still matches the issued record.</p>
-              <p className="text-slate-400">MSCQR does not prove the physical item is impossible to counterfeit or clone.</p>
+              <p>MSCQR checks whether the label exists in the governed issuance registry, whether its lifecycle state is customer-ready, and, when available, whether a signed label token still matches the issued record.</p>
+              <p className="text-slate-400">MSCQR does not prove the physical item is impossible to counterfeit, and a manual code lookup is weaker than a signed-label check.</p>
             </div>
             <div className="mt-6 border-t border-white/10 pt-4 text-sm text-slate-300">
               Session status: {session?.revealed ? "result revealed" : authReady ? "identity verified" : "identity required"}
@@ -946,6 +1133,11 @@ export default function VerifyExperience() {
             title="Verify who is checking this product"
             description="Sign in before MSCQR reveals the locked result. Your identity creates a customer trust context that stays separate from the label verdict."
           >
+            {challengeRequired && !challengeCompleted ? (
+              <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+                This repeat scan needs an additional review check before it should be trusted normally. Sign in first, then MSCQR can re-check it with your verified identity.
+              </div>
+            ) : null}
             <div className="grid gap-4 lg:grid-cols-[1.15fr,0.85fr]">
               <div className="space-y-4">
                 {socialProviders.length ? (
@@ -1010,7 +1202,7 @@ export default function VerifyExperience() {
                 </div>
                 <ul className="mt-4 space-y-3 text-sm leading-6 text-slate-600">
                   <li>It creates a portable customer trust record instead of treating every visit as anonymous scan count.</li>
-                  <li>It lets MSCQR separate label authenticity from purchase provenance and ownership intent.</li>
+                  <li>It lets MSCQR separate the locked label result from purchase provenance and ownership intent.</li>
                   <li>It makes later ownership, support, and fraud handling much more defensible.</li>
                 </ul>
               </div>
@@ -1022,8 +1214,28 @@ export default function VerifyExperience() {
           <SectionFrame
             eyebrow="Step 2"
             title="Tell MSCQR how you obtained the product"
-            description="This is provenance evidence, not authenticity proof. The label decision was already locked when your session started."
+            description="This is provenance evidence, not product proof. The label result was already locked when your session started."
           >
+            {challengeRequired && !challengeCompleted ? (
+              <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                <div className="font-semibold">Additional review check required</div>
+                <div className="mt-2 leading-6">
+                  MSCQR detected a risky repeat context for this label. Re-check it with your verified identity before you rely on the result.
+                </div>
+                <div className="mt-3">
+                  <Button variant="outline" onClick={handleCompleteChallenge} disabled={challengeRetrying}>
+                    {challengeRetrying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                    Re-check with verified identity
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+            {challengeCompleted ? (
+              <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
+                MSCQR completed the additional review check
+                {challengeCompletedBy === "CUSTOMER_IDENTITY" ? " using your verified identity." : "."}
+              </div>
+            ) : null}
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <QuestionOption
                 selected={intake.purchaseChannel === "online"}
@@ -1075,7 +1287,7 @@ export default function VerifyExperience() {
           <SectionFrame
             eyebrow="Step 3"
             title="Capture seller or source details"
-            description="MSCQR uses this as investigation context. It does not make the QR more or less authentic."
+            description="MSCQR uses this as investigation context. It does not change the locked label result."
           >
             <div className="grid gap-4 md:grid-cols-2">
               {intake.purchaseChannel === "online" ? (
@@ -1167,7 +1379,7 @@ export default function VerifyExperience() {
           <SectionFrame
             eyebrow="Step 4"
             title="Describe the product condition you saw"
-            description="These answers become customer trust and incident evidence. They do not change the authenticity decision already locked by MSCQR."
+            description="These answers become customer trust and incident evidence. They do not change the label result already locked by MSCQR."
           >
             <div className="grid gap-4 md:grid-cols-2">
               <div className="grid gap-2">
@@ -1270,7 +1482,7 @@ export default function VerifyExperience() {
           <SectionFrame
             eyebrow="Step 6"
             title="Choose the next action lane, then reveal the result"
-            description="MSCQR will keep your trust intake separate from the authenticity verdict. Once you submit this step, the locked result is revealed together with your provenance record."
+            description="MSCQR will keep your trust intake separate from the locked label result. Once you submit this step, the result is revealed together with your provenance record."
           >
             <div className="grid gap-6 lg:grid-cols-[0.95fr,1.05fr]">
               <div className="space-y-4">
@@ -1285,13 +1497,13 @@ export default function VerifyExperience() {
                       key={value}
                       selected={intake.ownershipIntent === value}
                       title={label}
-                      body="This changes the recommended next actions after reveal, not the authenticity verdict."
+                      body="This changes the recommended next actions after reveal, not the locked label result."
                       onClick={() => updateIntake("ownershipIntent", value as CustomerTrustIntake["ownershipIntent"])}
                     />
                   ))}
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
-                  Your answers create trust evidence and incident context only. They do not affect proof tier, replacement status, or the label decision already locked by MSCQR.
+                  Your answers create trust evidence and incident context only. They do not affect the verification basis, replacement status, or the label decision already locked by MSCQR.
                 </div>
               </div>
 
@@ -1344,34 +1556,79 @@ export default function VerifyExperience() {
         {flowStep === "result" && result ? (
           <div className="grid gap-6 xl:grid-cols-[1.15fr,0.85fr]">
             <SectionFrame
-              eyebrow="Locked label decision"
-              title={stepMeta.title}
-              description="This verdict was locked from the QR token/code and lifecycle state before MSCQR collected your trust answers."
+              eyebrow="Locked label result"
+              title={resultTitle}
+              description="This result was locked from the QR token or code and lifecycle state before MSCQR collected your trust answers."
             >
-              <div className={`rounded-[26px] border p-5 ${stepMeta.tone}`}>
+              <div className={`rounded-[26px] border p-5 ${resultTone}`}>
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
                     <div className="rounded-full bg-white/70 p-2">{stepMeta.icon}</div>
                     <div>
-                      <div className="text-lg font-semibold">{result.message || stepMeta.title}</div>
+                      <div className="text-lg font-semibold">{result.message || resultTitle}</div>
                       <div className="mt-1 text-sm">{reasonList[0]}</div>
                     </div>
                   </div>
-                  <Badge className="border-current/20 bg-white/60 text-current">{stepMeta.badge}</Badge>
+                  <Badge className="border-current/20 bg-white/60 text-current">{resultBadge}</Badge>
                 </div>
               </div>
 
+              {result.challenge?.required || result.challenge?.completed || result.warningMessage ? (
+                <div
+                  className={`rounded-2xl border p-5 ${
+                    result.challenge?.completed
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-950"
+                      : "border-amber-200 bg-amber-50 text-amber-950"
+                  }`}
+                >
+                  <div className="text-sm font-semibold">
+                    {result.challenge?.required
+                      ? "Additional review is required for this repeat scan"
+                      : result.challenge?.completed
+                        ? "Additional review check completed"
+                        : "Verification caution"}
+                  </div>
+                  <div className="mt-2 space-y-2 text-sm leading-6">
+                    {result.challenge?.required ? (
+                      <p>{result.challenge.reason || "MSCQR requires an additional challenge before this repeat scan should be trusted."}</p>
+                    ) : null}
+                    {result.challenge?.completed ? (
+                      <p>
+                        MSCQR re-checked this repeat scan
+                        {result.challenge.completedBy === "CUSTOMER_IDENTITY" ? " with a verified customer identity." : "."}
+                      </p>
+                    ) : null}
+                    {result.warningMessage ? <p>{result.warningMessage}</p> : null}
+                  </div>
+                  {result.challenge?.required ? (
+                    <div className="mt-4">
+                      {authReady ? (
+                        <Button variant="outline" onClick={handleCompleteChallenge} disabled={challengeRetrying}>
+                          {challengeRetrying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                          Re-check with verified identity
+                        </Button>
+                      ) : (
+                        <Button variant="outline" onClick={() => setFlowStep("identity")}>
+                          <ArrowLeft className="mr-2 h-4 w-4" />
+                          Return to sign-in
+                        </Button>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                  <div className="text-sm font-semibold text-slate-900">What MSCQR verified</div>
+                  <div className="text-sm font-semibold text-slate-900">What MSCQR checked</div>
                   <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-                    <li>The label exists inside MSCQR’s governed issuance registry.</li>
-                    <li>The current lifecycle state is suitable for customer verification.</li>
-                    <li>{proofDetail}</li>
+                    {checkedItems.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
                   </ul>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                  <div className="text-sm font-semibold text-slate-900">What MSCQR did not verify</div>
+                  <div className="text-sm font-semibold text-slate-900">What this result does not prove</div>
                   <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
                     <li>MSCQR does not prove the physical item is impossible to counterfeit.</li>
                     <li>MSCQR does not guarantee that a copied label was never reused elsewhere.</li>
@@ -1381,31 +1638,39 @@ export default function VerifyExperience() {
               </div>
 
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                <MetricCard title="Proof tier" value={proofTitle} icon={<Lock className="h-4 w-4" />} />
-                <MetricCard title="Requester trust" value={trustLevelLabel} icon={<ShieldCheck className="h-4 w-4" />} />
-                <MetricCard title="Print trust" value={result.printTrustState || "Unknown"} icon={<CheckCircle2 className="h-4 w-4" />} />
-                <MetricCard title="Label state" value={result.labelState || result.status || "Unknown"} icon={<CircleDashed className="h-4 w-4" />} />
+                <MetricCard title="Verification basis" value={proofTitle} icon={<Lock className="h-4 w-4" />} />
+                <MetricCard title="Requester context" value={trustLevelLabel} icon={<ShieldCheck className="h-4 w-4" />} />
+                <MetricCard
+                  title="Controlled-print status"
+                  value={toLabel(result.printTrustState || "Unknown")}
+                  icon={<CheckCircle2 className="h-4 w-4" />}
+                />
+                <MetricCard
+                  title="Label status"
+                  value={toLabel(result.labelState || result.status || "Unknown")}
+                  icon={<CircleDashed className="h-4 w-4" />}
+                />
                 <MetricCard
                   title="Replacement state"
                   value={result.replacementStatus ? result.replacementStatus.replace(/_/g, " ") : "None"}
                   icon={<ArrowRight className="h-4 w-4" />}
                 />
-                <MetricCard title="Decision id" value={result.decisionId || "Unavailable"} icon={<KeyRound className="h-4 w-4" />} mono />
+                <MetricCard
+                  title="Risk review state"
+                  value={result.riskDisposition ? result.riskDisposition.replace(/_/g, " ") : "Clear"}
+                  icon={<AlertTriangle className="h-4 w-4" />}
+                />
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                <div className="text-sm font-semibold text-slate-900">Reason codes</div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {(result.reasonCodes || []).length ? (
-                    result.reasonCodes?.map((reasonCode) => (
-                      <Badge key={reasonCode} className="border-slate-300 bg-slate-100 text-slate-700">
-                        {reasonCode}
-                      </Badge>
-                    ))
+                <div className="text-sm font-semibold text-slate-900">Verification notes</div>
+                <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+                  {reasonList.length ? (
+                    reasonList.map((reason) => <li key={reason}>{reason}</li>)
                   ) : (
-                    <div className="text-sm text-slate-500">No additional reason codes were recorded for this decision.</div>
+                    <li>No additional verification notes were recorded for this result.</li>
                   )}
-                </div>
+                </ul>
               </div>
             </SectionFrame>
 

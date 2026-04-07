@@ -4,6 +4,8 @@ import {
 } from "@prisma/client";
 
 import prisma from "../config/database";
+import { createAuditLogSafely } from "./auditService";
+import { hashToken, randomOpaqueToken } from "../utils/security";
 
 type CustomerIdentity = {
   userId?: string | null;
@@ -35,6 +37,22 @@ const getSessionStore = () => (prisma as any).customerVerificationSession;
 const getIntakeStore = () => (prisma as any).customerTrustIntake;
 const getQrStore = () => (prisma as any).qRCode;
 
+const parseBoolEnv = (value: unknown, fallback: boolean) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+};
+
+const parseIntEnv = (key: string, fallback: number, min = 1, max = 24 * 365) => {
+  const raw = Number(String(process.env[key] || "").trim());
+  if (!Number.isFinite(raw)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(raw)));
+};
+
+const VERIFY_SESSION_PROOF_BINDING_REQUIRED = parseBoolEnv(process.env.VERIFY_SESSION_PROOF_BINDING_REQUIRED, true);
+const VERIFY_SESSION_PROOF_TTL_MINUTES = parseIntEnv("VERIFY_SESSION_PROOF_TTL_MINUTES", 30, 5, 24 * 60);
+
 const toRecord = (value: unknown) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {} as Record<string, unknown>;
   return value as Record<string, unknown>;
@@ -45,13 +63,22 @@ const normalizeText = (value: unknown) => {
   return text || null;
 };
 
+const mergeSessionMetadata = (session: any, patch: Record<string, unknown>) => ({
+  ...toRecord(session?.metadata),
+  ...patch,
+});
+
 const toDate = (value: unknown) => {
   if (!value) return null;
   const parsed = value instanceof Date ? value : new Date(String(value));
   return Number.isFinite(parsed.getTime()) ? parsed : null;
 };
 
-const buildSessionSummary = (params: { session: any; presentationSnapshot: Record<string, unknown> | null }) => {
+const buildSessionSummary = (params: {
+  session: any;
+  presentationSnapshot: Record<string, unknown> | null;
+  sessionProofToken?: string | null;
+}) => {
   const presentation = params.presentationSnapshot || {};
   const code = normalizeText(params.session?.code) || normalizeText(presentation.code) || null;
   const maskedCode = code ? `${code.slice(0, Math.min(4, code.length))}${code.length > 4 ? `-${code.slice(-4)}` : ""}` : null;
@@ -80,6 +107,17 @@ const buildSessionSummary = (params: { session: any; presentationSnapshot: Recor
     proofSource: normalizeText(presentation.proofSource),
     labelState: normalizeText(presentation.labelState),
     printTrustState: normalizeText(presentation.printTrustState),
+    challengeRequired: Boolean((presentation.challenge as Record<string, unknown> | undefined)?.required),
+    challengeCompleted: Boolean((presentation.challenge as Record<string, unknown> | undefined)?.completed),
+    challengeCompletedBy: normalizeText((presentation.challenge as Record<string, unknown> | undefined)?.completedBy),
+    proofBindingRequired: Boolean(params.session.proofBindingTokenHash),
+    proofBindingExpiresAt:
+      params.session.proofBindingExpiresAt instanceof Date
+        ? params.session.proofBindingExpiresAt.toISOString()
+        : params.session.proofBindingExpiresAt
+          ? new Date(params.session.proofBindingExpiresAt).toISOString()
+          : null,
+    sessionProofToken: normalizeText(params.sessionProofToken),
   };
 };
 
@@ -165,8 +203,160 @@ const loadDecisionPresentation = async (decisionId: string) => {
               manufacturer: qrCode.batch.manufacturer || null,
             }
           : null),
+      replayEpoch:
+        Number((presentationSnapshot as any).replayEpoch || 0) > 0
+          ? Number((presentationSnapshot as any).replayEpoch)
+          : Number(qrCode?.replayEpoch || 1),
+      issuanceMode:
+        normalizeText((presentationSnapshot as any).issuanceMode) ||
+        normalizeText(qrCode?.issuanceMode) ||
+        "LEGACY_UNSPECIFIED",
+      customerVerifiableAt:
+        normalizeText((presentationSnapshot as any).customerVerifiableAt) ||
+        (qrCode?.customerVerifiableAt instanceof Date ? qrCode.customerVerifiableAt.toISOString() : null),
     },
   };
+};
+
+const createSessionProofBinding = (presentationSnapshot: Record<string, unknown>) => {
+  const proofSource = normalizeText(presentationSnapshot.proofSource);
+  if (!VERIFY_SESSION_PROOF_BINDING_REQUIRED || proofSource !== "SIGNED_LABEL") {
+    return null;
+  }
+
+  const rawToken = randomOpaqueToken(24);
+  const issuedAt = new Date();
+  const expiresAt = new Date(issuedAt.getTime() + VERIFY_SESSION_PROOF_TTL_MINUTES * 60_000);
+
+  return {
+    rawToken,
+    tokenHash: hashToken(rawToken),
+    issuedAt,
+    expiresAt,
+    replayEpoch:
+      Number.isFinite(Number((presentationSnapshot as any).replayEpoch))
+        ? Number((presentationSnapshot as any).replayEpoch)
+        : 1,
+  };
+};
+
+const resolveBoundSessionCustomerUserId = (session: any) =>
+  normalizeText(session?.customerUserId) || normalizeText(toRecord(session?.metadata).boundCustomerUserId);
+
+const recordSessionBoundarySignal = async (params: {
+  session: any;
+  customer?: CustomerIdentity | null;
+  reason: string;
+  phase: "LOAD" | "INTAKE" | "REVEAL" | "PROOF_BINDING";
+}) => {
+  await createAuditLogSafely({
+    action: "CUSTOMER_VERIFICATION_SESSION_BOUNDARY_REJECTED",
+    entityType: "CustomerVerificationSession",
+    entityId: params.session?.id || undefined,
+    details: {
+      phase: params.phase,
+      reason: params.reason,
+      boundCustomerUserId: resolveBoundSessionCustomerUserId(params.session),
+      requestedCustomerUserId: normalizeText(params.customer?.userId),
+      sessionAuthState: normalizeText(params.session?.authState),
+      revealed: Boolean(params.session?.revealedAt),
+      intakeCompleted: Boolean(params.session?.intakeCompletedAt),
+    },
+  });
+};
+
+const assertSessionCustomerBinding = async (params: {
+  session: any;
+  customer?: CustomerIdentity | null;
+  phase: "LOAD" | "INTAKE" | "REVEAL" | "PROOF_BINDING";
+}) => {
+  const boundCustomerUserId = resolveBoundSessionCustomerUserId(params.session);
+  const requestedCustomerUserId = normalizeText(params.customer?.userId);
+  const sessionRequiresBoundIdentity =
+    Boolean(boundCustomerUserId) ||
+    String(params.session?.authState || "").trim().toUpperCase() === CustomerVerificationAuthState.VERIFIED ||
+    Boolean(params.session?.intakeCompletedAt) ||
+    Boolean(params.session?.revealedAt);
+
+  if (boundCustomerUserId && requestedCustomerUserId && boundCustomerUserId !== requestedCustomerUserId) {
+    await recordSessionBoundarySignal({
+      session: params.session,
+      customer: params.customer,
+      reason: "SESSION_CUSTOMER_MISMATCH",
+      phase: params.phase,
+    });
+    throw new Error("Verification session belongs to a different signed-in customer.");
+  }
+
+  if (sessionRequiresBoundIdentity && !requestedCustomerUserId) {
+    await recordSessionBoundarySignal({
+      session: params.session,
+      customer: params.customer,
+      reason: "SESSION_CUSTOMER_AUTH_REQUIRED",
+      phase: params.phase,
+    });
+    throw new Error("Customer authentication required to continue this verification session.");
+  }
+};
+
+const assertSessionProofBinding = async (params: {
+  session: any;
+  customer?: CustomerIdentity | null;
+  proofToken?: string | null;
+}) => {
+  await assertSessionCustomerBinding({
+    session: params.session,
+    customer: params.customer,
+    phase: "PROOF_BINDING",
+  });
+
+  if (!params.session?.proofBindingTokenHash) return;
+  if (params.session.proofBindingExpiresAt && new Date(params.session.proofBindingExpiresAt).getTime() <= Date.now()) {
+    await recordSessionBoundarySignal({
+      session: params.session,
+      customer: params.customer,
+      reason: "SESSION_PROOF_BINDING_EXPIRED",
+      phase: "PROOF_BINDING",
+    });
+    throw new Error("Verification session expired. Re-scan the label to continue.");
+  }
+
+  const presented = normalizeText(params.proofToken);
+  if (!presented) {
+    await recordSessionBoundarySignal({
+      session: params.session,
+      customer: params.customer,
+      reason: "SESSION_PROOF_BINDING_MISSING",
+      phase: "PROOF_BINDING",
+    });
+    throw new Error("Verification session continuity check required. Re-scan the label to continue.");
+  }
+
+  if (hashToken(presented) !== params.session.proofBindingTokenHash) {
+    await recordSessionBoundarySignal({
+      session: params.session,
+      customer: params.customer,
+      reason: "SESSION_PROOF_BINDING_MISMATCH",
+      phase: "PROOF_BINDING",
+    });
+    throw new Error("Verification session continuity check failed. Re-scan the label to continue.");
+  }
+
+  if (params.session.proofBindingReplayEpoch != null && params.session.qrCodeId && getQrStore()?.findUnique) {
+    const qr = await getQrStore().findUnique({
+      where: { id: params.session.qrCodeId },
+      select: { replayEpoch: true },
+    });
+    if (qr && Number(qr.replayEpoch || 1) !== Number(params.session.proofBindingReplayEpoch)) {
+      await recordSessionBoundarySignal({
+        session: params.session,
+        customer: params.customer,
+        reason: "SESSION_REPLAY_EPOCH_MISMATCH",
+        phase: "PROOF_BINDING",
+      });
+      throw new Error("Verification session is no longer current. Re-scan the label to continue.");
+    }
+  }
 };
 
 export const createCustomerVerificationSession = async (input: {
@@ -184,6 +374,8 @@ export const createCustomerVerificationSession = async (input: {
     throw new Error("Verification decision not found");
   }
 
+  const proofBinding = createSessionProofBinding(detail.presentationSnapshot);
+
   const session = await sessionStore.create({
     data: {
       verificationDecisionId: detail.decision.id,
@@ -194,14 +386,26 @@ export const createCustomerVerificationSession = async (input: {
       customerUserId: normalizeText(input.customer?.userId) || undefined,
       customerEmail: normalizeText(input.customer?.email) || undefined,
       expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+      proofBindingTokenHash: proofBinding?.tokenHash,
+      proofBindingIssuedAt: proofBinding?.issuedAt,
+      proofBindingExpiresAt: proofBinding?.expiresAt,
+      proofBindingReplayEpoch: proofBinding?.replayEpoch,
       metadata: {
         createdFromDecision: detail.decision.id,
+        proofBindingRequired: Boolean(proofBinding),
+        boundCustomerUserId: normalizeText(input.customer?.userId),
+        boundCustomerEmail: normalizeText(input.customer?.email),
+        identityBoundAt: input.customer?.userId ? new Date().toISOString() : null,
       },
     },
   });
 
   return {
-    ...buildSessionSummary({ session, presentationSnapshot: detail.presentationSnapshot }),
+    ...buildSessionSummary({
+      session,
+      presentationSnapshot: detail.presentationSnapshot,
+      sessionProofToken: proofBinding?.rawToken || null,
+    }),
     verificationLocked: true,
   };
 };
@@ -209,6 +413,7 @@ export const createCustomerVerificationSession = async (input: {
 export const getCustomerVerificationSession = async (input: {
   sessionId: string;
   customer?: CustomerIdentity | null;
+  proofToken?: string | null;
 }) => {
   const sessionStore = getSessionStore();
   if (!sessionStore?.findUnique) return null;
@@ -221,8 +426,24 @@ export const getCustomerVerificationSession = async (input: {
   });
   if (!session) return null;
 
+  await assertSessionCustomerBinding({
+    session,
+    customer: input.customer || null,
+    phase: "LOAD",
+  });
+
   const detail = await loadDecisionPresentation(session.verificationDecisionId);
   if (!detail?.decision) return null;
+
+  const canRevealVerification =
+    Boolean(session.revealedAt) && (!session.customerUserId || session.customerUserId === normalizeText(input.customer?.userId));
+  if (canRevealVerification) {
+    await assertSessionProofBinding({
+      session,
+      customer: input.customer || null,
+      proofToken: input.proofToken || null,
+    });
+  }
 
   return {
     ...buildSessionSummary({ session, presentationSnapshot: detail.presentationSnapshot }),
@@ -246,10 +467,7 @@ export const getCustomerVerificationSession = async (input: {
           answers: session.trustIntake.answers || null,
         }
       : null,
-    verification:
-      session.revealedAt && (!session.customerUserId || session.customerUserId === normalizeText(input.customer?.userId))
-        ? detail.presentationSnapshot
-        : null,
+    verification: canRevealVerification ? detail.presentationSnapshot : null,
   };
 };
 
@@ -257,6 +475,7 @@ export const saveCustomerTrustIntake = async (input: {
   sessionId: string;
   intake: TrustIntakeInput;
   customer: CustomerIdentity;
+  proofToken?: string | null;
 }) => {
   const sessionStore = getSessionStore();
   const intakeStore = getIntakeStore();
@@ -270,6 +489,18 @@ export const saveCustomerTrustIntake = async (input: {
   if (!session) {
     throw new Error("Verification session not found");
   }
+
+  await assertSessionCustomerBinding({
+    session,
+    customer: input.customer,
+    phase: "INTAKE",
+  });
+
+  await assertSessionProofBinding({
+    session,
+    customer: input.customer,
+    proofToken: input.proofToken || null,
+  });
 
   const nextPurchaseDate = toDate(input.intake.purchaseDate);
 
@@ -325,6 +556,13 @@ export const saveCustomerTrustIntake = async (input: {
       customerUserId: normalizeText(input.customer.userId) || undefined,
       customerEmail: normalizeText(input.customer.email) || undefined,
       intakeCompletedAt: new Date(),
+      metadata: mergeSessionMetadata(session, {
+        boundCustomerUserId: normalizeText(input.customer.userId),
+        boundCustomerEmail: normalizeText(input.customer.email),
+        identityBoundAt: normalizeText(toRecord(session.metadata).identityBoundAt) || new Date().toISOString(),
+        trustIntakeCompletedByUserId: normalizeText(input.customer.userId),
+        trustIntakeCompletedAt: new Date().toISOString(),
+      }),
     },
   });
 
@@ -334,6 +572,7 @@ export const saveCustomerTrustIntake = async (input: {
 export const revealCustomerVerificationSession = async (input: {
   sessionId: string;
   customer: CustomerIdentity;
+  proofToken?: string | null;
 }) => {
   const sessionStore = getSessionStore();
   if (!sessionStore?.findUnique || !sessionStore?.update) {
@@ -353,6 +592,18 @@ export const revealCustomerVerificationSession = async (input: {
     throw new Error("Verification intake must be completed before reveal");
   }
 
+  await assertSessionCustomerBinding({
+    session,
+    customer: input.customer,
+    phase: "REVEAL",
+  });
+
+  await assertSessionProofBinding({
+    session,
+    customer: input.customer,
+    proofToken: input.proofToken || null,
+  });
+
   const updated = await sessionStore.update({
     where: { id: session.id },
     data: {
@@ -360,6 +611,13 @@ export const revealCustomerVerificationSession = async (input: {
       customerUserId: normalizeText(input.customer.userId) || undefined,
       customerEmail: normalizeText(input.customer.email) || undefined,
       revealedAt: session.revealedAt || new Date(),
+      metadata: mergeSessionMetadata(session, {
+        boundCustomerUserId: normalizeText(input.customer.userId),
+        boundCustomerEmail: normalizeText(input.customer.email),
+        identityBoundAt: normalizeText(toRecord(session.metadata).identityBoundAt) || new Date().toISOString(),
+        revealCompletedByUserId: normalizeText(input.customer.userId),
+        revealCompletedAt: new Date().toISOString(),
+      }),
     },
     include: {
       trustIntake: true,

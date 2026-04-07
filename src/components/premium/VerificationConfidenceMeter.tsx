@@ -7,7 +7,8 @@ type VerificationClassification =
   | "LEGIT_REPEAT"
   | "SUSPICIOUS_DUPLICATE"
   | "BLOCKED_BY_SECURITY"
-  | "NOT_READY_FOR_CUSTOMER_USE";
+  | "NOT_READY_FOR_CUSTOMER_USE"
+  | "NOT_FOUND";
 
 type ConfidenceSignalInput = {
   classification: VerificationClassification;
@@ -30,6 +31,7 @@ export const deriveVerificationConfidence = (input: ConfidenceSignalInput) => {
     SUSPICIOUS_DUPLICATE: 42,
     BLOCKED_BY_SECURITY: 8,
     NOT_READY_FOR_CUSTOMER_USE: 26,
+    NOT_FOUND: 18,
   };
 
   let score = byClass[input.classification];

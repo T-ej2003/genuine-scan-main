@@ -9,9 +9,47 @@ export type VerifyClassification =
   | "LEGIT_REPEAT"
   | "SUSPICIOUS_DUPLICATE"
   | "BLOCKED_BY_SECURITY"
-  | "NOT_READY_FOR_CUSTOMER_USE";
+  | "NOT_READY_FOR_CUSTOMER_USE"
+  | "NOT_FOUND";
 
 export type VerificationProofSource = "SIGNED_LABEL" | "MANUAL_CODE_LOOKUP";
+
+export type VerificationPublicOutcome =
+  | "SIGNED_LABEL_ACTIVE"
+  | "MANUAL_RECORD_FOUND"
+  | "LIMITED_PROVENANCE"
+  | "REVIEW_REQUIRED"
+  | "BLOCKED"
+  | "NOT_READY"
+  | "NOT_FOUND"
+  | "INTEGRITY_ERROR"
+  | "PRINTER_SETUP_ONLY";
+
+export type VerificationRiskDisposition = "CLEAR" | "MONITOR" | "REVIEW_REQUIRED" | "BLOCKED";
+
+export type VerificationMessageKey =
+  | "signed_label_active"
+  | "signed_label_repeat"
+  | "manual_record_found"
+  | "manual_record_repeat"
+  | "manual_record_signed_history"
+  | "limited_provenance"
+  | "review_required"
+  | "blocked"
+  | "replacement_required"
+  | "not_ready"
+  | "not_found"
+  | "integrity_error"
+  | "printer_setup_only";
+
+export type VerificationNextActionKey =
+  | "none"
+  | "review_details"
+  | "rescan_label"
+  | "contact_support"
+  | "report_concern"
+  | "scan_active_replacement"
+  | "try_again_later";
 
 export type ScanSummary = {
   totalScans: number;
@@ -111,7 +149,7 @@ export const verifyStepUpChallenge = async (req: Request) => {
   if (!captchaToken) {
     return {
       ok: false,
-      reason: "Suspicious activity challenge required. Complete captcha and retry.",
+      reason: "Suspicious activity challenge required. Sign in with verified identity or complete captcha and retry.",
     };
   }
   return verifyCaptchaToken(captchaToken, req.ip);

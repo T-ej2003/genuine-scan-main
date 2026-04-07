@@ -1,0 +1,71 @@
+[
+  {
+    "schemaVersion": 2,
+    "metric": "verification_trust_state",
+    "decisionRef": "decision_683448d2b8e9",
+    "qrRef": "qr_7b10f24ad1aa",
+    "licenseeRef": "lic_dca85b2d4b50",
+    "batchRef": "batch_54b289269f41",
+    "proofSource": "SIGNED_LABEL",
+    "proofTier": "GOVERNED",
+    "classification": "LEGIT_REPEAT",
+    "publicOutcome": "SIGNED_LABEL_ACTIVE",
+    "riskDisposition": "ALLOW",
+    "riskBand": "LOW",
+    "printTrustState": "PRINT_CONFIRMED",
+    "issuanceMode": "GOVERNED_PRINT",
+    "replayState": "SAME_CONTEXT_REPEAT",
+    "challengeRequired": false,
+    "challengeCompleted": false,
+    "challengeCompletedBy": null,
+    "signingMode": "ed25519",
+    "signingKeyVersion": "qr-key-v4",
+    "signingProvider": "env",
+    "replacementStatus": "NONE",
+    "breakGlassUsage": false,
+    "limitedProvenance": false,
+    "metadata": {
+      "sameContextRepeat": true,
+      "changedContextRepeat": false
+    }
+  },
+  {
+    "schemaVersion": 2,
+    "metric": "verification_trust_state",
+    "decisionRef": "decision_d2fef5a8f726",
+    "qrRef": "qr_3f7ff19575df",
+    "licenseeRef": "lic_dca85b2d4b50",
+    "batchRef": "batch_54b289269f41",
+    "proofSource": "SIGNED_LABEL",
+    "proofTier": "GOVERNED",
+    "classification": "SUSPICIOUS_DUPLICATE",
+    "publicOutcome": "REVIEW_REQUIRED",
+    "riskDisposition": "REVIEW_REQUIRED",
+    "riskBand": "HIGH",
+    "printTrustState": "PRINT_CONFIRMED",
+    "issuanceMode": "GOVERNED_PRINT",
+    "replayState": "CHANGED_CONTEXT_REPEAT",
+    "challengeRequired": true,
+    "challengeCompleted": false,
+    "challengeCompletedBy": null,
+    "signingMode": "ed25519",
+    "signingKeyVersion": "qr-key-v4",
+    "signingProvider": "env",
+    "replacementStatus": "NONE",
+    "breakGlassUsage": false,
+    "limitedProvenance": false,
+    "metadata": {
+      "sameContextRepeat": false,
+      "changedContextRepeat": true
+    }
+  },
+  {
+    "schemaVersion": 2,
+    "metric": "verification_break_glass_generate",
+    "breakGlassUsage": true,
+    "licenseeRef": "lic_82db56d11a2e",
+    "actorRef": "actor_69b2cc463f52",
+    "quantity": 40,
+    "quantityBucket": "21_100"
+  }
+]

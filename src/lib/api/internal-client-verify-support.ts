@@ -31,7 +31,15 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
 
   async verifyQRCode(
     code: string,
-    options?: { device?: string; lat?: number; lon?: number; acc?: number; customerToken?: string; transferToken?: string }
+    options?: {
+      device?: string;
+      lat?: number;
+      lon?: number;
+      acc?: number;
+      customerToken?: string;
+      transferToken?: string;
+      captchaToken?: string;
+    }
   ) {
     const normalizedCode = String(code || "").trim();
     const params = new URLSearchParams();
@@ -41,7 +49,9 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     if (options?.acc != null) params.append("acc", String(options.acc));
     if (options?.transferToken) params.append("transfer", options.transferToken);
     const query = params.toString() ? `?${params.toString()}` : "";
-    const headers = options?.customerToken ? { Authorization: `Bearer ${options.customerToken}` } : undefined;
+    const headers: Record<string, string> = {};
+    if (options?.customerToken) headers.Authorization = `Bearer ${options.customerToken}`;
+    if (options?.captchaToken) headers["x-captcha-token"] = options.captchaToken;
     return core.request(`/verify/${encodeURIComponent(normalizedCode)}${query}`, { method: "GET", headers });
   },
 
@@ -67,7 +77,13 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
       proofSource?: string | null;
       labelState?: string | null;
       printTrustState?: string | null;
+      challengeRequired?: boolean;
+      challengeCompleted?: boolean;
+      challengeCompletedBy?: string | null;
       verificationLocked: boolean;
+      proofBindingRequired?: boolean;
+      proofBindingExpiresAt?: string | null;
+      sessionProofToken?: string | null;
     }>(`/verify/session/start`, {
       method: "POST",
       headers,
@@ -75,8 +91,10 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     });
   },
 
-  async getVerificationSession(sessionId: string, customerToken?: string) {
-    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
+  async getVerificationSession(sessionId: string, customerToken?: string, sessionProofToken?: string) {
+    const headers: Record<string, string> = {};
+    if (customerToken) headers.Authorization = `Bearer ${customerToken}`;
+    if (sessionProofToken) headers["x-verification-session-proof"] = sessionProofToken;
     return core.request<{
       sessionId: string;
       decisionId: string;
@@ -93,27 +111,37 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
       proofSource?: string | null;
       labelState?: string | null;
       printTrustState?: string | null;
+      challengeRequired?: boolean;
+      challengeCompleted?: boolean;
+      challengeCompletedBy?: string | null;
+      proofBindingRequired?: boolean;
+      proofBindingExpiresAt?: string | null;
       intake?: Record<string, unknown> | null;
       verification?: Record<string, unknown> | null;
     }>(`/verify/session/${encodeURIComponent(sessionId)}`, {
       method: "GET",
-      headers,
+      headers: Object.keys(headers).length ? headers : undefined,
     });
   },
 
   async submitVerificationIntake(
     sessionId: string,
     payload: Record<string, unknown>,
-    customerToken: string
+    customerToken: string,
+    sessionProofToken?: string
   ) {
+    const headers: Record<string, string> = { Authorization: `Bearer ${customerToken}` };
+    if (sessionProofToken) headers["x-verification-session-proof"] = sessionProofToken;
     return core.request<{ intakeSaved: boolean }>(`/verify/session/${encodeURIComponent(sessionId)}/intake`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${customerToken}` },
+      headers,
       body: JSON.stringify(payload),
     });
   },
 
-  async revealVerificationSession(sessionId: string, customerToken: string) {
+  async revealVerificationSession(sessionId: string, customerToken: string, sessionProofToken?: string) {
+    const headers: Record<string, string> = { Authorization: `Bearer ${customerToken}` };
+    if (sessionProofToken) headers["x-verification-session-proof"] = sessionProofToken;
     return core.request<{
       sessionId: string;
       decisionId: string;
@@ -130,11 +158,16 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
       proofSource?: string | null;
       labelState?: string | null;
       printTrustState?: string | null;
+      challengeRequired?: boolean;
+      challengeCompleted?: boolean;
+      challengeCompletedBy?: string | null;
+      proofBindingRequired?: boolean;
+      proofBindingExpiresAt?: string | null;
       intake?: Record<string, unknown> | null;
       verification?: Record<string, unknown> | null;
     }>(`/verify/session/${encodeURIComponent(sessionId)}/reveal`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${customerToken}` },
+      headers,
     });
   },
 
@@ -166,7 +199,10 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     return core.request(`/verify/feedback`, { method: "POST", body: JSON.stringify(payload) });
   },
 
-  async scanToken(token: string, options?: { device?: string; lat?: number; lon?: number; acc?: number; customerToken?: string }) {
+  async scanToken(
+    token: string,
+    options?: { device?: string; lat?: number; lon?: number; acc?: number; customerToken?: string; captchaToken?: string }
+  ) {
     const params = new URLSearchParams();
     params.append("t", token);
     if (options?.device) params.append("device", options.device);
@@ -174,7 +210,9 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     if (options?.lon != null) params.append("lon", String(options.lon));
     if (options?.acc != null) params.append("acc", String(options.acc));
     const query = params.toString() ? `?${params.toString()}` : "";
-    const headers = options?.customerToken ? { Authorization: `Bearer ${options.customerToken}` } : undefined;
+    const headers: Record<string, string> = {};
+    if (options?.customerToken) headers.Authorization = `Bearer ${options.customerToken}`;
+    if (options?.captchaToken) headers["x-captcha-token"] = options.captchaToken;
     return core.request(`/scan${query}`, { method: "GET", headers });
   },
 

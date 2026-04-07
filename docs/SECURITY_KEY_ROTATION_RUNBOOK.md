@@ -129,6 +129,17 @@ Redeploy again. At that point only the new `CURRENT` secrets remain.
 - With dual-slot support, existing HMAC-signed QR tokens continue to verify during the cutover.
 - Long term, Ed25519 keys are still the preferred posture.
 
+### QR Ed25519 / managed bridge posture
+
+- The repo supports local Ed25519 signing today and exposes a managed signer bridge boundary for a future KMS/HSM integration.
+- Setting `QR_SIGN_KMS_KEY_REF` / `QR_SIGN_KMS_VERIFY_KEY_REF` alone does not enable managed signing.
+- Managed mode is only active when:
+  - `QR_SIGN_PROVIDER=managed`
+  - the deployed backend registers a managed signer bridge
+  - the bridge reports the active key version and key reference
+- If managed mode is selected without a registered bridge, MSCQR now fails closed at startup.
+- Rotation and revocation for managed signing remain operational responsibilities outside this repo until the runtime bridge is implemented.
+
 ### Printer SSE signing
 
 - Existing SSE clients may reconnect during deploy, which is acceptable.

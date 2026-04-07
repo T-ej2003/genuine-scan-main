@@ -1,6 +1,6 @@
 # Genuine Scan (MSCQR)
 
-Production-grade, multi-tenant QR authenticity platform for secure code issuance, controlled print operations, consumer verification, anomaly detection, and auditability.
+Production-grade, multi-tenant QR issuance, controlled-print, verification, anomaly-detection, and auditability platform.
 
 ## Delivery Standards
 
@@ -19,7 +19,7 @@ MSCQR is designed for anti-counterfeit operations across four user types:
 - Super Admin: platform owner across all licensees.
 - Licensee Admin: tenant operator for one licensee/brand.
 - Manufacturer: scoped production user who prints assigned batches.
-- Customer: public verifier who checks product authenticity and can report suspicious products.
+- Customer: public verifier who checks the MSCQR record for a product label and can report suspicious products.
 
 Core outcome:
 
@@ -245,14 +245,14 @@ Typical status progression:
 
 ## 7. Security Model
 
-Code-level assessment: highly secure,  enterprise-strong t (strongly high).
+Code-level assessment: strong server-governed QR controls with important limits called out explicitly below.
 
 Implemented protections:
 
 - Signed QR tokens (Ed25519 preferred; HMAC fallback).
 - Token hash + nonce binding in DB (`tokenHash`, `tokenNonce`).
 - Licensee/batch/manufacturer binding checks at scan time.
-- One-time redemption semantics.
+- Customer-ready lifecycle gating plus replay-aware downgrade semantics.
 - IP-based scan rate limiting (`SCAN_RATE_LIMIT_PER_MIN`).
 - Audit logs for sensitive transitions.
 - Policy engine for anomaly-triggered auto-block.
@@ -260,6 +260,9 @@ Implemented protections:
 Token signing behavior (`backend/src/services/qrTokenService.ts`):
 
 - Preferred mode: `QR_SIGN_PRIVATE_KEY` + `QR_SIGN_PUBLIC_KEY`.
+- Production hardening can require Ed25519 with `QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION=true`.
+- `QR_SIGN_ACTIVE_KEY_VERSION` pins the signing key version that MSCQR records in verification evidence and trust metrics.
+- `QR_SIGN_PROVIDER=managed` plus `QR_SIGN_KMS_KEY_REF` / `QR_SIGN_KMS_VERIFY_KEY_REF` select a future managed signer bridge, but the bridge must actually be registered by the deployed backend build. MSCQR does not pretend managed signing exists when only the refs are present.
 - Fallback mode: `QR_SIGN_HMAC_SECRET`.
 - If neither is set, signing/verification cannot run.
 
@@ -490,6 +493,8 @@ Recommended:
 
 - `QR_SIGN_PRIVATE_KEY`: Ed25519 private key PEM (`\\n` escaped newlines supported).
 - `QR_SIGN_PUBLIC_KEY`: Ed25519 public key PEM.
+- `QR_SIGN_ACTIVE_KEY_VERSION`: explicit signing key version for evidence, observability, and future rotation hygiene.
+- `QR_SIGN_PROVIDER`: `env` (default) or `managed`; `managed` fails closed unless the runtime registers a managed signer bridge.
 
 Fallback signing option:
 
@@ -499,6 +504,17 @@ Optional:
 
 - `PORT` (default `4000`)
 - `NODE_ENV` (`development`/`production`)
+- `ALLOW_BREAK_GLASS_QR_GENERATE` (default `false`; keep disabled in production so customer-verifiable labels stay on the managed print path)
+- `QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION` (default `true`; refuse production startup if QR signing falls back to HMAC)
+- `QR_SIGN_KMS_KEY_REF` / `QR_SIGN_KMS_VERIFY_KEY_REF` (managed signer integration points; inert unless `QR_SIGN_PROVIDER=managed` and a bridge is registered)
+- `VERIFY_REPLAY_HARDENING_ENABLED` (default `true`; downgrade changed-context signed-label reuse to review-required semantics)
+- `VERIFY_REPLAY_RAPID_REUSE_THRESHOLD_10M` (default `3`; repeat threshold for rapid changed-context signed-label reuse)
+- `VERIFY_REPLAY_IP_VELOCITY_THRESHOLD_10M` (default `2`; IP velocity threshold for replay review escalation)
+- `VERIFY_REPLAY_CHANGED_CONTEXT_LOOKBACK_MINUTES` (default `15`; recent-window check for changed-context signed-label reuse)
+- `VERIFY_SESSION_PROOF_BINDING_REQUIRED` (default `true`; require a short-lived proof-bound session token before revealing signed-scan results)
+- `VERIFY_SESSION_PROOF_TTL_MINUTES` (default `30`; lifespan of the proof-bound verification session token)
+- `VERIFY_REQUIRE_GOVERNED_PRINT_PROVENANCE` (default `true`; restrict strongest customer-verifiable semantics to governed print + confirmed readiness)
+- `VERIFY_OBSERVABILITY_LOGGING_ENABLED` (default `true`; emit privacy-minimized structured `verification_trust_metric` events for replay, provenance, challenge, and signing monitoring)
 - `JWT_EXPIRES_IN` (default `7d`)
 - `CORS_ORIGIN` (comma-separated origins)
 - `PUBLIC_SCAN_WEB_BASE_URL`
@@ -515,6 +531,17 @@ Optional:
 - `QR_ZIP_ULTRA_VOLUME_THRESHOLD` (default `1000000`)
 - `QR_ZIP_STANDARD_LEVEL` (default `6`)
 - `QR_ZIP_HIGH_LEVEL` (default `8`)
+
+Operational monitoring before premium rollout:
+
+- Proof-tier mix: signed-label vs manual record-check traffic.
+- Replay review-required rate: how often changed-context signed reuse is downgraded.
+- Same-context vs changed-context signed repeats: expected customer reuse versus replay-like spread.
+- Limited-provenance rate: governed-print-confirmed labels versus legacy or restricted provenance decisions.
+- Break-glass issuance usage: any direct generation event should be rare, explained, and auditable.
+- Challenge-required frequency and completion rate: identity-based review completion versus abandoned suspicious checks.
+- Signing profile health: active key version, provider mode, and any legacy HMAC fallback warnings.
+- Observability catalog, metrics mapping, and alert templates live under [docs/observability/](docs/observability/).
 - `QR_ZIP_ULTRA_LEVEL` (default `9`)
 - `QR_ZIP_STANDARD_PNG_WIDTH` (default `768`)
 - `QR_ZIP_HIGH_PNG_WIDTH` (default `640`)
@@ -609,7 +636,7 @@ Manufacturer:
 Consumer/public:
 
 1. Scan tokenized URL (`/scan?t=...`) or verify plain code (`/verify/:code`).
-2. Receive authenticity result + warning context where applicable.
+2. Receive the MSCQR verification result with warning context where applicable.
 
 ## 13. Scripts and Commands
 
@@ -739,11 +766,19 @@ Recommended smoke checks after changes:
 3. `npm run build`
 4. `npm run test`
 5. Login + dashboard load + scan flow sanity check in UI.
+6. `npm run verify:release`
+
+Historical provenance maintenance:
+
+- Dry-run legacy provenance review: `npm --prefix backend run data:backfill-qr-provenance -- --limit 500 --json`
+- Execute only after review: `npm --prefix backend run data:backfill-qr-provenance -- --execute --limit 500`
+- Unknown historical labels stay unknown unless direct governed-print evidence exists.
 
 ## 17. Operational and Security Checklist (Production)
 
 - Rotate all secrets (DB, JWT, signing keys).
 - Use Ed25519 keys; keep private key in secret manager.
+- If `QR_SIGN_PROVIDER=managed`, verify the managed signer bridge is present before rollout; refs alone are not enough.
 - Restrict CORS to real frontend domains only.
 - Enforce TLS end-to-end.
 - Lock down DB network exposure.
@@ -752,6 +787,7 @@ Recommended smoke checks after changes:
 - Centralize logs and alerting.
 - Validate backup/restore process.
 - Review RBAC and tenant isolation in staging before release.
+- Review [docs/observability/VERIFICATION_TRUST_EVENT_CATALOG.md](docs/observability/VERIFICATION_TRUST_EVENT_CATALOG.md) and [docs/PREMIUM_LAUNCH_INCIDENT_RUNBOOK.md](docs/PREMIUM_LAUNCH_INCIDENT_RUNBOOK.md) before premium launch.
 
 ## 18. Key Files to Understand First
 
@@ -836,8 +872,8 @@ Search/scoring logic lives in `src/help/kb-search.ts`.
 
 ### Rule-based scan explanation (customer verify page)
 
-- `Verified Again`: friendly repeat-verification messaging with “Show details”.
-- `Possible Duplicate`: reasons generated from scan signals (multi-device, burst scans, location/country drift) with clear action CTAs.
+- `MSCQR confirmed this code again`: repeat-verification messaging that keeps proof and scan-history details visible.
+- `Review required`: unusual scan signals (multi-device, burst scans, location/country drift) with clear action CTAs.
 - Fraud report form auto-attaches scan metadata and stores incident report in DB.
 
 ### Screenshots for docs/help pages

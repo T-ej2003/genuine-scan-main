@@ -890,7 +890,7 @@ export default function PrinterDiagnostics() {
               <SelectContent>
                 {!networkPrinterLanguageSupported && networkPrinterForm.commandLanguage ? (
                   <SelectItem value={networkPrinterForm.commandLanguage} disabled>
-                    {networkPrinterForm.commandLanguage} (legacy unsupported)
+                    {networkPrinterForm.commandLanguage} (not supported for managed direct printing)
                   </SelectItem>
                 ) : null}
                 {NETWORK_DIRECT_SUPPORTED_LANGUAGES.map((language) => (
@@ -972,9 +972,9 @@ export default function PrinterDiagnostics() {
               )}
               {gatewayProvisioningSecret && (
                 <div className="space-y-2 rounded-lg border border-amber-300 bg-white/70 p-3 text-[11px]">
-                  <div className="font-medium text-foreground">One-time connector bootstrap secret</div>
+                  <div className="font-medium text-foreground">One-time printer helper enrollment secret</div>
                   <div className="break-all font-mono text-foreground">{gatewayProvisioningSecret}</div>
-                  <div>Provision this secret into the workstation connector once. It will not be shown again.</div>
+                  <div>Provision this secret into the printer helper once. It will not be shown again.</div>
                 </div>
               )}
             </div>
@@ -1391,7 +1391,7 @@ export default function PrinterDiagnostics() {
                     <div>
                       <div className="text-sm font-semibold text-foreground">Auto-detected connected printers</div>
                       <div className="text-xs text-muted-foreground">
-                        The workstation connector can prefill managed routes when a connected printer exposes usable IPP/IPPS or raw TCP details.
+                        The printer helper can prefill managed routes when a connected printer exposes usable IPP/IPPS or raw TCP details.
                       </div>
                     </div>
                     <Badge variant="secondary">

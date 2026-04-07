@@ -40,6 +40,24 @@ export const acceptOwnershipTransfer = async (req: CustomerVerifyRequest, res: R
     if (transfer.initiatedByCustomerId === customer.userId) {
       return res.status(409).json({ success: false, error: "The current owner cannot accept their own transfer." });
     }
+    if (transfer.recipientEmail && customer.email && transfer.recipientEmail.trim().toLowerCase() !== customer.email.trim().toLowerCase()) {
+      await createAuditLogSafely({
+        action: "VERIFY_TRANSFER_ACCEPT_REJECTED",
+        entityType: "OwnershipTransfer",
+        entityId: transfer.id,
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") || undefined,
+        details: {
+          reason: "RECIPIENT_EMAIL_MISMATCH",
+          expectedRecipientEmail: transfer.recipientEmail,
+          attemptedCustomerId: customer.userId,
+        },
+      });
+      return res.status(403).json({
+        success: false,
+        error: "This transfer invitation is bound to a different signed-in customer.",
+      });
+    }
 
     const qrCode = await prisma.qRCode.findUnique({
       where: { id: transfer.qrCodeId },

@@ -44,29 +44,34 @@ const VERIFICATION_COPY: Record<
   }
 > = {
   FIRST_SCAN: {
-    title: "Verified Authentic",
-    subtitle: "This is the first successful customer check for this code.",
-    badge: "Authentic",
+    title: "MSCQR confirmed this label",
+    subtitle: "This is the first recorded customer-facing check for this code.",
+    badge: "Confirmed",
   },
   LEGIT_REPEAT: {
-    title: "Verified Again",
-    subtitle: "This item still looks genuine and the repeat check matches normal use.",
-    badge: "Authentic",
+    title: "MSCQR confirmed this code again",
+    subtitle: "This code has been checked before. Review the scan history and proof details.",
+    badge: "Recorded",
   },
   SUSPICIOUS_DUPLICATE: {
-    title: "Needs a Closer Look",
-    subtitle: "This check does not match the usual pattern for this item.",
+    title: "Review required",
+    subtitle: "This check does not match the usual pattern for this code.",
     badge: "Review",
   },
   BLOCKED_BY_SECURITY: {
-    title: "Blocked by Security",
-    subtitle: "Security checks stopped this code from being accepted.",
+    title: "Do not rely on this code",
+    subtitle: "MSCQR security controls stopped this code from being accepted.",
     badge: "Blocked",
   },
   NOT_READY_FOR_CUSTOMER_USE: {
-    title: "Not Ready Yet",
-    subtitle: "This code is not ready for customer verification yet.",
+    title: "Not ready for customer verification",
+    subtitle: "MSCQR has not released this code for customer-facing verification yet.",
     badge: "Not ready",
+  },
+  NOT_FOUND: {
+    title: "Code not found",
+    subtitle: "MSCQR could not find a live record for this code.",
+    badge: "Not found",
   },
 };
 

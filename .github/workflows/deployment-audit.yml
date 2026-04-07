@@ -31,20 +31,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Run frontend regression tests
-        run: npm run test
-
-      - name: Build frontend
-        run: npm run build
-
       - name: Install backend dependencies
         run: cd backend && npm ci
 
-      - name: Generate Prisma client
-        run: cd backend && npm run prisma:generate
-
-      - name: Run backend regression tests
-        run: cd backend && npm test
+      - name: Run full release validation
+        run: npm run verify:release
 
   audit:
     needs: quality-gates
