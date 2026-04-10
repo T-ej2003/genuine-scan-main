@@ -262,6 +262,70 @@ describe("Verify page", () => {
     expect(await screen.findByText("Tell MSCQR how you obtained the product")).toBeInTheDocument();
   });
 
+  it("lets customers skip optional intake questions and still reveal the locked result", async () => {
+    vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
+      success: true,
+      data: buildSession({
+        authState: "VERIFIED",
+        intakeCompleted: false,
+        revealed: false,
+      }),
+    } as any);
+    vi.mocked(apiClient.submitVerificationIntake).mockResolvedValue({
+      success: true,
+      data: { sessionId: SESSION_ID },
+    } as any);
+    vi.mocked(apiClient.revealVerificationSession).mockResolvedValue({
+      success: true,
+      data: buildSession({
+        authState: "VERIFIED",
+        intakeCompleted: true,
+        revealed: true,
+        verification: buildVerifyPayload({
+          publicOutcome: "SIGNED_LABEL_ACTIVE",
+          riskDisposition: "CLEAR",
+        }),
+      }),
+    } as any);
+    window.localStorage.setItem("mscqr_verify_customer_token", "customer-token");
+    window.localStorage.setItem("mscqr_verify_customer_email", "abhi@example.com");
+
+    renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
+
+    expect(await screen.findByText("Tell MSCQR how you obtained the product")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+
+    expect(await screen.findByText("Capture seller or source details")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+
+    expect(await screen.findByText("Describe the product condition you saw")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+
+    expect(await screen.findByText("Why did you choose to scan this item?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+
+    expect(await screen.findByText("Choose the next action lane, then reveal the result")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Skip questions and reveal" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(apiClient.submitVerificationIntake)).toHaveBeenCalledWith(
+        SESSION_ID,
+        expect.objectContaining({
+          purchaseChannel: "unknown",
+          sourceCategory: "unknown",
+          packagingState: "unsure",
+          packagingConcern: "unsure",
+          scanReason: "routine_check",
+          ownershipIntent: "verify_only",
+        }),
+        "customer-token",
+        undefined
+      );
+    });
+
+    expect(await screen.findByText("What MSCQR checked")).toBeInTheDocument();
+  });
+
   it("reveals the locked result from the server-side session payload", async () => {
     vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
       success: true,

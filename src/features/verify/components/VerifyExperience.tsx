@@ -228,14 +228,14 @@ function StepRail({ activeStep, authenticated }: { activeStep: FlowStep; authent
   const activeIndex = visibleSteps.findIndex((step) => step.id === activeStep);
 
   return (
-    <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-6">
+    <div className="flex gap-3 overflow-x-auto px-1 pb-1 sm:grid sm:grid-cols-3 sm:overflow-visible sm:px-0 xl:grid-cols-6">
       {visibleSteps.map((step, index) => {
         const done = index < activeIndex;
         const active = step.id === activeStep;
         return (
           <div
             key={step.id}
-            className={`rounded-2xl border px-4 py-3 transition-all ${
+            className={`min-w-[132px] shrink-0 rounded-2xl border px-4 py-3 transition-all sm:min-w-0 ${
               active
                 ? "border-slate-900 bg-slate-950 text-white shadow-[0_18px_40px_rgba(15,23,42,0.22)]"
                 : done
@@ -265,14 +265,14 @@ function SectionFrame({
 }) {
   return (
     <Card className="border-slate-200/80 bg-white/92 shadow-[0_24px_64px_rgba(15,23,42,0.08)]">
-      <CardHeader className="space-y-3 border-b border-slate-100 pb-6">
+      <CardHeader className="space-y-3 border-b border-slate-100 px-4 pb-5 pt-5 sm:px-6 sm:pb-6 sm:pt-6">
         <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-500">{eyebrow}</div>
         <div className="space-y-2">
-          <CardTitle className="text-2xl text-slate-950 sm:text-3xl">{title}</CardTitle>
+          <CardTitle className="text-xl text-slate-950 sm:text-3xl">{title}</CardTitle>
           <CardDescription className="max-w-2xl text-sm leading-6 text-slate-600">{description}</CardDescription>
         </div>
       </CardHeader>
-      <CardContent className="space-y-6 p-6 sm:p-8">{children}</CardContent>
+      <CardContent className="space-y-6 p-4 sm:p-8">{children}</CardContent>
     </Card>
   );
 }
@@ -780,14 +780,22 @@ export default function VerifyExperience() {
     }
   };
 
-  const handleSubmitIntakeAndReveal = async () => {
+  const handleSubmitIntakeAndReveal = async (intakeOverride?: Partial<CustomerTrustIntake>) => {
     if (!session?.sessionId || !customerToken) {
       toast({ title: "Sign in required", description: "Complete sign-in before revealing the result.", variant: "destructive" });
       return;
     }
-    if (!validateStep("intent", intake)) {
+    const intakePayload: CustomerTrustIntake = {
+      ...intake,
+      ...(intakeOverride || {}),
+    };
+    if (!validateStep("intent", intakePayload)) {
       toast({ title: "Complete this step", description: "Tell MSCQR what you want to do next.", variant: "destructive" });
       return;
+    }
+
+    if (intakeOverride) {
+      setIntake((prev) => ({ ...prev, ...intakeOverride }));
     }
 
     setSubmittingReveal(true);
@@ -795,7 +803,7 @@ export default function VerifyExperience() {
       const sessionProofToken = readSessionProofToken(session.sessionId);
       const intakeResponse = await apiClient.submitVerificationIntake(
         session.sessionId,
-        intake as Record<string, unknown>,
+        intakePayload as Record<string, unknown>,
         customerToken,
         sessionProofToken || undefined
       );
@@ -827,6 +835,65 @@ export default function VerifyExperience() {
       setSubmittingReveal(false);
     }
   };
+
+  const handleSkipCurrentStep = useCallback(() => {
+    if (flowStep === "purchase") {
+      setIntake((prev) => ({
+        ...prev,
+        purchaseChannel: "unknown",
+        sourceCategory: "unknown",
+        platformName: "",
+        sellerName: "",
+        listingUrl: "",
+        orderReference: "",
+        storeName: "",
+        purchaseCity: "",
+        purchaseCountry: "",
+        purchaseDate: "",
+      }));
+      toast({ title: "Step skipped", description: "You can continue without purchase answers." });
+      moveToNextStep();
+      return;
+    }
+    if (flowStep === "source") {
+      setIntake((prev) => ({
+        ...prev,
+        platformName: "",
+        sellerName: prev.purchaseChannel === "gifted" || prev.purchaseChannel === "unknown" ? prev.sellerName : "",
+        listingUrl: "",
+        orderReference: "",
+        storeName: "",
+        purchaseCity: "",
+        purchaseCountry: "",
+        purchaseDate: "",
+      }));
+      toast({ title: "Step skipped", description: "You can continue without source details." });
+      moveToNextStep();
+      return;
+    }
+    if (flowStep === "context") {
+      setIntake((prev) => ({
+        ...prev,
+        packagingState: "unsure",
+        packagingConcern: "unsure",
+      }));
+      toast({ title: "Step skipped", description: "MSCQR marked context as unsure." });
+      moveToNextStep();
+      return;
+    }
+    if (flowStep === "concern") {
+      setIntake((prev) => ({
+        ...prev,
+        scanReason: "routine_check",
+      }));
+      toast({ title: "Step skipped", description: "Reason defaulted to routine check." });
+      moveToNextStep();
+      return;
+    }
+    if (flowStep === "intent") {
+      void handleSubmitIntakeAndReveal({ ownershipIntent: "verify_only" });
+    }
+  }, [flowStep, handleSubmitIntakeAndReveal, moveToNextStep, toast]);
 
   const handleClaimOwnership = async () => {
     if (!currentCode) return;
@@ -1088,9 +1155,9 @@ export default function VerifyExperience() {
   const resultTitle = limitedProvenance ? "MSCQR found a weaker provenance path" : stepMeta.title;
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(15,23,42,0.08),transparent_36%),linear-gradient(180deg,#f8fafc_0%,#edf2f7_46%,#f8fafc_100%)] px-4 py-8 sm:px-6 sm:py-12">
-      <div className="mx-auto max-w-6xl space-y-8">
-        <header className="grid gap-6 rounded-[32px] border border-slate-200/80 bg-white/90 p-6 shadow-[0_30px_100px_rgba(15,23,42,0.08)] sm:p-10 lg:grid-cols-[1.6fr,0.8fr]">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(15,23,42,0.08),transparent_36%),linear-gradient(180deg,#f8fafc_0%,#edf2f7_46%,#f8fafc_100%)] px-3 py-4 sm:px-6 sm:py-12">
+      <div className="mx-auto max-w-6xl space-y-5 sm:space-y-8">
+        <header className="grid gap-5 rounded-[24px] border border-slate-200/80 bg-white/90 p-4 shadow-[0_30px_100px_rgba(15,23,42,0.08)] sm:rounded-[32px] sm:p-10 lg:grid-cols-[1.6fr,0.8fr]">
           <div className="space-y-5">
             <div className="flex flex-wrap items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-500">
               <span>MSCQR verification review</span>
@@ -1098,7 +1165,7 @@ export default function VerifyExperience() {
               <span>{displaySessionSummary?.brandName || "Governed label verification"}</span>
             </div>
             <div className="space-y-3">
-              <h1 className="max-w-3xl text-3xl font-semibold tracking-tight text-slate-950 sm:text-5xl">
+              <h1 className="max-w-3xl text-2xl font-semibold tracking-tight text-slate-950 sm:text-5xl">
                 Review the MSCQR label result with clear proof boundaries.
               </h1>
               <p className="max-w-3xl text-sm leading-7 text-slate-600 sm:text-base">
@@ -1113,7 +1180,7 @@ export default function VerifyExperience() {
               </Badge>
             </div>
           </div>
-          <div className="rounded-[28px] border border-slate-200 bg-slate-950 p-6 text-white shadow-[0_24px_64px_rgba(15,23,42,0.18)]">
+          <div className="rounded-[22px] border border-slate-200 bg-slate-950 p-5 text-white shadow-[0_24px_64px_rgba(15,23,42,0.18)] sm:rounded-[28px] sm:p-6">
             <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-400">What this result is based on</div>
             <div className="mt-4 space-y-3 text-sm leading-6 text-slate-200">
               <p>MSCQR checks whether the label exists in the governed issuance registry, whether its lifecycle state is customer-ready, and, when available, whether a signed label token still matches the issued record.</p>
@@ -1262,23 +1329,29 @@ export default function VerifyExperience() {
                 onClick={() => updateIntake("purchaseChannel", "unknown")}
               />
             </div>
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={() => setFlowStep("identity")}>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Button variant="outline" onClick={() => setFlowStep("identity")} className="w-full sm:w-auto">
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back
               </Button>
-              <Button
-                onClick={() => {
-                  if (!validateStep("purchase", intake)) {
-                    toast({ title: "Choose a purchase channel", description: "Pick how you obtained the product.", variant: "destructive" });
-                    return;
-                  }
-                  moveToNextStep();
-                }}
-              >
-                Continue
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                <Button variant="ghost" onClick={handleSkipCurrentStep} className="w-full sm:w-auto">
+                  Skip for now
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (!validateStep("purchase", intake)) {
+                      toast({ title: "Choose a purchase channel", description: "Pick how you obtained the product.", variant: "destructive" });
+                      return;
+                    }
+                    moveToNextStep();
+                  }}
+                  className="w-full sm:w-auto"
+                >
+                  Continue
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </SectionFrame>
         ) : null}
@@ -1354,23 +1427,29 @@ export default function VerifyExperience() {
                 </>
               )}
             </div>
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={moveToPreviousStep}>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Button variant="outline" onClick={moveToPreviousStep} className="w-full sm:w-auto">
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back
               </Button>
-              <Button
-                onClick={() => {
-                  if (!validateStep("source", intake)) {
-                    toast({ title: "Add source details", description: "MSCQR needs enough purchase-source context to continue.", variant: "destructive" });
-                    return;
-                  }
-                  moveToNextStep();
-                }}
-              >
-                Continue
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                <Button variant="ghost" onClick={handleSkipCurrentStep} className="w-full sm:w-auto">
+                  Skip for now
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (!validateStep("source", intake)) {
+                      toast({ title: "Add source details", description: "MSCQR needs enough purchase-source context to continue.", variant: "destructive" });
+                      return;
+                    }
+                    moveToNextStep();
+                  }}
+                  className="w-full sm:w-auto"
+                >
+                  Continue
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </SectionFrame>
         ) : null}
@@ -1421,23 +1500,29 @@ export default function VerifyExperience() {
                 />
               </div>
             </div>
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={moveToPreviousStep}>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Button variant="outline" onClick={moveToPreviousStep} className="w-full sm:w-auto">
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back
               </Button>
-              <Button
-                onClick={() => {
-                  if (!validateStep("context", intake)) {
-                    toast({ title: "Add product context", description: "Select the packaging state and concern level.", variant: "destructive" });
-                    return;
-                  }
-                  moveToNextStep();
-                }}
-              >
-                Continue
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                <Button variant="ghost" onClick={handleSkipCurrentStep} className="w-full sm:w-auto">
+                  Skip for now
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (!validateStep("context", intake)) {
+                      toast({ title: "Add product context", description: "Select the packaging state and concern level.", variant: "destructive" });
+                      return;
+                    }
+                    moveToNextStep();
+                  }}
+                  className="w-full sm:w-auto"
+                >
+                  Continue
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </SectionFrame>
         ) : null}
@@ -1465,15 +1550,20 @@ export default function VerifyExperience() {
                 />
               ))}
             </div>
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={moveToPreviousStep}>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Button variant="outline" onClick={moveToPreviousStep} className="w-full sm:w-auto">
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back
               </Button>
-              <Button onClick={moveToNextStep}>
-                Continue
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                <Button variant="ghost" onClick={handleSkipCurrentStep} className="w-full sm:w-auto">
+                  Skip for now
+                </Button>
+                <Button onClick={moveToNextStep} className="w-full sm:w-auto">
+                  Continue
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </SectionFrame>
         ) : null}
@@ -1540,15 +1630,20 @@ export default function VerifyExperience() {
               </div>
             </div>
 
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={moveToPreviousStep}>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Button variant="outline" onClick={moveToPreviousStep} className="w-full sm:w-auto">
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back
               </Button>
-              <Button onClick={handleSubmitIntakeAndReveal} disabled={!canReveal || submittingReveal}>
-                {submittingReveal ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                Submit and reveal result
-              </Button>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                <Button variant="ghost" onClick={handleSkipCurrentStep} className="w-full sm:w-auto" disabled={!canReveal || submittingReveal}>
+                  Skip questions and reveal
+                </Button>
+                <Button onClick={() => void handleSubmitIntakeAndReveal()} disabled={!canReveal || submittingReveal} className="w-full sm:w-auto">
+                  {submittingReveal ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                  Submit and reveal result
+                </Button>
+              </div>
             </div>
           </SectionFrame>
         ) : null}
@@ -1806,7 +1901,7 @@ export default function VerifyExperience() {
           </div>
         ) : null}
 
-        <div className="flex items-center justify-between text-sm text-slate-500">
+        <div className="flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
           <Link to="/verify" className="inline-flex items-center gap-2 hover:text-slate-900">
             <ArrowLeft className="h-4 w-4" />
             Verify another code
