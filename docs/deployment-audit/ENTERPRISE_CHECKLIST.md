@@ -7,6 +7,9 @@ Use this checklist for production releases. It aligns with the Deployment Audit 
 - [ ] Release notes capture user-facing changes and breaking risks.
 - [ ] Environment-specific configuration updated (no credential changes in code).
 - [ ] `.github/workflows` deployment controls are committed and enabled in remote repository.
+- [ ] `Release Candidate Gate / rc-trust-critical` passed on the release candidate branch.
+- [ ] `Release Candidate Gate / rc-staging-smoke` passed against staging.
+- [ ] `main` branch protection requires both Release Candidate Gate checks before merge.
 
 ## Security and compliance
 - [ ] CodeQL SAST completed in `deployment-audit` workflow.
