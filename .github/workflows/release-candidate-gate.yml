@@ -115,4 +115,4 @@ jobs:
         with:
           name: staging-smoke-log
           path: smoke-release.log
-          if-no-files-found: warn
+          if-no-files-found: ignore
