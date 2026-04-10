@@ -1009,6 +1009,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
     const stepUp: { ok: boolean; reason?: string } = replayAssessment.stepUpRecommended
       ? await verifyStepUpChallenge(req)
       : { ok: true };
+    const stepUpEligible = Boolean(replayAssessment.reviewRequired);
     const stepUpRequired =
       classification === "SUSPICIOUS_DUPLICATE" &&
       !customerUserId &&
@@ -1031,7 +1032,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       postReadiness
     );
 
-    if (proofSource === "SIGNED_LABEL") {
+    if (proofSource === "SIGNED_LABEL" && (prisma as any)?.qRCode?.update) {
       const shouldAdvanceSignedBaseline = !isBlocked && classification !== "SUSPICIOUS_DUPLICATE";
       const signedVerificationTimestamp = new Date();
       const signedVerificationUpdate = await prisma.qRCode.update({
@@ -1057,6 +1058,12 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       updated = {
         ...updated,
         ...signedVerificationUpdate,
+      };
+    } else if (proofSource === "SIGNED_LABEL") {
+      const signedVerificationTimestamp = new Date();
+      updated = {
+        ...updated,
+        signedFirstSeenAt: updated.signedFirstSeenAt || qrCode.signedFirstSeenAt || signedVerificationTimestamp,
       };
     }
 
@@ -1153,9 +1160,9 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
         replayAssessment: replayAssessment.metadata,
         manualFallbackAssessment: manualFallbackAssessment.metadata,
         stepUpRequired,
-        stepUpSatisfied: replayAssessment.stepUpRecommended ? (customerUserId ? true : stepUp.ok) : null,
+        stepUpSatisfied: stepUpEligible ? (customerUserId ? true : stepUp.ok) : null,
         stepUpCompletedBy:
-          replayAssessment.stepUpRecommended && !stepUpRequired
+          stepUpEligible && !stepUpRequired
             ? (customerUserId ? "CUSTOMER_IDENTITY" : stepUp.ok ? "CAPTCHA" : null)
             : null,
       },
@@ -1216,9 +1223,9 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
             reason: stepUpRequired
               ? "Sign in with a verified identity so MSCQR can re-check this repeat scan before it should be trusted normally."
               : null,
-            completed: Boolean(replayAssessment.stepUpRecommended) && !stepUpRequired && (Boolean(customerUserId) || stepUp.ok),
+            completed: stepUpEligible && !stepUpRequired && (Boolean(customerUserId) || stepUp.ok),
             completedBy:
-              Boolean(replayAssessment.stepUpRecommended) && !stepUpRequired
+              stepUpEligible && !stepUpRequired
                 ? (customerUserId ? "CUSTOMER_IDENTITY" : stepUp.ok ? "CAPTCHA" : null)
                 : null,
           },

@@ -130,17 +130,20 @@ export const assessSignedReplay = (input: {
 
   const hasCurrentContext = Boolean(currentDeviceHash || currentIpHash);
   const hasPreviousContext = Boolean(previousDeviceHash || previousIpHash);
+  const missingPreviousContext = !hasPreviousContext;
   const weakContextSignals = !hasCurrentContext && !hasPreviousContext;
   const sameContext =
     !firstSignedVerificationInEpoch &&
     (matchedPreviousDevice ||
       seenByTrustedActorBefore ||
       (matchedPreviousIp && seenOnCurrentDeviceBefore) ||
+      missingPreviousContext ||
       weakContextSignals);
   const changedContext =
     !firstSignedVerificationInEpoch &&
     !sameContext &&
-    (hasCurrentContext || hasPreviousContext);
+    (hasCurrentContext || hasPreviousContext) &&
+    hasPreviousContext;
 
   const minutesSinceLastSigned = minutesBetween(input.lastSignedVerificationAt, now);
   const recentScanCount10m = Number(signals.recentScanCount10m || 0);
@@ -205,6 +208,7 @@ export const assessSignedReplay = (input: {
       matchedPreviousIp,
       seenOnCurrentDeviceBefore,
       seenByTrustedActorBefore,
+      missingPreviousContext,
       weakContextSignals,
       distinctDeviceCount24h: Number(signals.distinctDeviceCount24h || 0),
       distinctUntrustedDeviceCount24h: Number(signals.distinctUntrustedDeviceCount24h || 0),

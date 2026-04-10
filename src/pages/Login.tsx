@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { isWebAuthnSupported, startAdminWebAuthnAuthentication } from "@/lib/webauthn";
 
 type MfaMode = "setup" | "challenge";
+type MfaChallengeMethod = "authenticator" | "backup";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -22,7 +23,10 @@ export default function Login() {
   const [error, setError] = useState("");
 
   const [mfaMode, setMfaMode] = useState<MfaMode | null>(null);
-  const [mfaCode, setMfaCode] = useState("");
+  const [mfaSetupCode, setMfaSetupCode] = useState("");
+  const [mfaChallengeMethod, setMfaChallengeMethod] = useState<MfaChallengeMethod>("authenticator");
+  const [mfaChallengeCode, setMfaChallengeCode] = useState("");
+  const [mfaBackupCode, setMfaBackupCode] = useState("");
   const [mfaTicket, setMfaTicket] = useState<string | null>(null);
   const [mfaSetup, setMfaSetup] = useState<{ secret: string; otpauthUri: string; backupCodes: string[] } | null>(null);
   const [mfaQrDataUrl, setMfaQrDataUrl] = useState("");
@@ -62,12 +66,18 @@ export default function Login() {
       setMfaTicket(null);
       setMfaSetup(null);
       setMfaQrDataUrl("");
-      setMfaCode("");
+      setMfaSetupCode("");
+      setMfaChallengeMethod("authenticator");
+      setMfaChallengeCode("");
+      setMfaBackupCode("");
       return;
     }
 
     setError("");
     setMfaMode(pendingAuth.auth.mfaEnrolled ? "challenge" : "setup");
+    setMfaChallengeMethod("authenticator");
+    setMfaChallengeCode("");
+    setMfaBackupCode("");
   }, [pendingAuth]);
 
   useEffect(() => {
@@ -151,7 +161,7 @@ export default function Login() {
     setMfaLoading(true);
 
     try {
-      const response = await apiClient.confirmAdminMfaSetup(mfaCode.trim());
+      const response = await apiClient.confirmAdminMfaSetup(mfaSetupCode.trim());
       if (!response.success) {
         setError(humanizeAuthError(response.error || "Could not complete MFA setup."));
         return;
@@ -176,10 +186,17 @@ export default function Login() {
       setError("This security challenge expired. Start again.");
       return;
     }
+    const challengeCode = mfaChallengeMethod === "backup"
+      ? mfaBackupCode.trim().toUpperCase()
+      : mfaChallengeCode.trim();
+    if (!challengeCode) {
+      setError(mfaChallengeMethod === "backup" ? "Enter a backup code." : "Enter the authenticator code.");
+      return;
+    }
 
     setMfaLoading(true);
     try {
-      const response = await apiClient.completeAdminMfaChallenge(mfaTicket, mfaCode.trim());
+      const response = await apiClient.completeAdminMfaChallenge(mfaTicket, challengeCode);
       if (!response.success || !response.data?.user) {
         setError(humanizeAuthError(response.error || "Could not complete MFA challenge."));
         return;
@@ -220,7 +237,10 @@ export default function Login() {
 
   const resetMfaFlow = () => {
     setMfaMode(null);
-    setMfaCode("");
+    setMfaSetupCode("");
+    setMfaChallengeMethod("authenticator");
+    setMfaChallengeCode("");
+    setMfaBackupCode("");
     setMfaTicket(null);
     setMfaSetup(null);
     setMfaQrDataUrl("");
@@ -402,8 +422,8 @@ export default function Login() {
             <Label htmlFor="mfa-setup-code">6-digit authenticator code</Label>
             <Input
               id="mfa-setup-code"
-              value={mfaCode}
-              onChange={(e) => setMfaCode(e.target.value)}
+              value={mfaSetupCode}
+              onChange={(e) => setMfaSetupCode(e.target.value)}
               inputMode="numeric"
               autoComplete="one-time-code"
               placeholder="123456"
@@ -466,16 +486,54 @@ export default function Login() {
           ) : null}
 
           <div className="space-y-2">
-            <Label htmlFor="mfa-challenge-code">Authenticator or backup code</Label>
-            <Input
-              id="mfa-challenge-code"
-              value={mfaCode}
-              onChange={(e) => setMfaCode(e.target.value)}
-              autoComplete="one-time-code"
-              placeholder="123456 or ABCDE-12345"
-              disabled={mfaLoading}
-              className="h-11"
-            />
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant={mfaChallengeMethod === "authenticator" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setMfaChallengeMethod("authenticator")}
+                disabled={mfaLoading}
+              >
+                Authenticator code
+              </Button>
+              <Button
+                type="button"
+                variant={mfaChallengeMethod === "backup" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setMfaChallengeMethod("backup")}
+                disabled={mfaLoading}
+              >
+                Backup code
+              </Button>
+            </div>
+            {mfaChallengeMethod === "authenticator" ? (
+              <>
+                <Label htmlFor="mfa-challenge-code">Authenticator code</Label>
+                <Input
+                  id="mfa-challenge-code"
+                  value={mfaChallengeCode}
+                  onChange={(e) => setMfaChallengeCode(e.target.value)}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="123456"
+                  disabled={mfaLoading}
+                  className="h-11"
+                />
+              </>
+            ) : (
+              <>
+                <Label htmlFor="mfa-backup-code">Backup code</Label>
+                <Input
+                  id="mfa-backup-code"
+                  value={mfaBackupCode}
+                  onChange={(e) => setMfaBackupCode(e.target.value)}
+                  autoComplete="one-time-code"
+                  placeholder="ABCDE-12345"
+                  disabled={mfaLoading}
+                  className="h-11"
+                />
+              </>
+            )}
           </div>
 
           <div className="flex gap-3">

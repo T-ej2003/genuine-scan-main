@@ -26,8 +26,10 @@ const getMaxLoginAttempts = () => parseIntEnv("AUTH_MAX_LOGIN_ATTEMPTS", 10);
 const getLockoutMinutes = () => parseIntEnv("AUTH_LOCKOUT_MINUTES", 15);
 export const getAdminStepUpWindowMinutes = () => parseIntEnv("ADMIN_STEP_UP_WINDOW_MINUTES", 30);
 export const getPasswordReauthWindowMinutes = () => parseIntEnv("AUTH_PASSWORD_STEP_UP_WINDOW_MINUTES", 30);
+export const getAdminLoginMfaCycleDays = () => parseIntEnv("ADMIN_LOGIN_MFA_CYCLE_DAYS", 28);
 
 const addMinutes = (d: Date, minutes: number) => new Date(d.getTime() + minutes * 60 * 1000);
+const addDays = (d: Date, days: number) => new Date(d.getTime() + days * 24 * 60 * 60 * 1000);
 const DISABLED_STATUS = (UserStatus as unknown as { DISABLED?: string } | undefined)?.DISABLED || "DISABLED";
 
 const isDisabledUser = (u: {
@@ -419,11 +421,55 @@ export const loginWithPassword = async (input: {
     throw new Error("High-risk login blocked. Try from a trusted network or contact administrator.");
   }
 
-  const mfaStatus = isAdminMfaRequiredRole(user.role)
-    ? await getAdminMfaStatus(user.id)
-    : { enabled: false };
+  const mfaStatus: { enabled: boolean; lastUsedAt: Date | string | null } = isAdminMfaRequiredRole(user.role)
+    ? await getAdminMfaStatus(user.id).catch(() => ({ enabled: false, lastUsedAt: null }))
+    : { enabled: false, lastUsedAt: null };
 
   if (isAdminMfaRequiredRole(user.role)) {
+    const lastUsedAt = mfaStatus?.lastUsedAt ? new Date(mfaStatus.lastUsedAt) : null;
+    const hasValidLastUsedAt = Boolean(lastUsedAt && Number.isFinite(lastUsedAt.getTime()));
+    const loginCycleDays = Math.max(1, getAdminLoginMfaCycleDays());
+    const cycleThreshold = addDays(now, -loginCycleDays);
+    const mfaFreshForLogin = Boolean(
+      mfaStatus?.enabled &&
+        hasValidLastUsedAt &&
+        (lastUsedAt as Date).getTime() >= cycleThreshold.getTime()
+    );
+
+    if (mfaFreshForLogin) {
+      const verifiedAt = (lastUsedAt as Date).getTime() > now.getTime() ? now : (lastUsedAt as Date);
+      const session = await issueSessionForUser({
+        userId: user.id,
+        ipHash: input.ipHash,
+        userAgent: input.userAgent,
+        authAssurance: "ADMIN_MFA",
+        authenticatedAt: now,
+        mfaVerifiedAt: verifiedAt,
+        now,
+      });
+
+      await createAuditLog({
+        userId: user.id,
+        licenseeId: user.licenseeId || undefined,
+        orgId: user.orgId || undefined,
+        action: "AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA",
+        entityType: "User",
+        entityId: user.id,
+        details: {
+          role: user.role,
+          riskScore: risk.score,
+          riskLevel: risk.riskLevel,
+          mfaEnabled: Boolean(mfaStatus.enabled),
+          mfaVerifiedAt: verifiedAt.toISOString(),
+          loginMfaCycleDays: loginCycleDays,
+        },
+        ipHash: input.ipHash || undefined,
+        userAgent: input.userAgent || undefined,
+      } as any);
+
+      return session;
+    }
+
     const bootstrapSession = await buildBootstrapSessionForUser({
       user,
       ipHash: input.ipHash,

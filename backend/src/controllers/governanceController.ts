@@ -14,7 +14,12 @@ import {
 } from "../services/governanceService";
 import { createAuditLog } from "../services/auditService";
 import prisma from "../config/database";
-import { listCompliancePackJobs, loadCompliancePackJobBuffer, runCompliancePackJob } from "../services/compliancePackService";
+import {
+  listCompliancePackJobs,
+  loadCompliancePackJobBuffer,
+  rebuildCompliancePackArtifactForJob,
+  runCompliancePackJob,
+} from "../services/compliancePackService";
 import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
 
 const flagUpdateSchema = z.object({
@@ -329,7 +334,22 @@ export const exportIncidentEvidenceBundleController = async (req: AuthRequest, r
       select: { id: true, licenseeId: true },
     });
 
-    if (!incident) return res.status(404).json({ success: false, error: "Incident not found" });
+    if (!incident) {
+      const matchingComplianceJob = await prisma.compliancePackJob.findFirst({
+        where:
+          req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
+            ? { id: incidentId }
+            : { id: incidentId, licenseeId: req.user.licenseeId || "__none__" },
+        select: { id: true },
+      });
+      if (matchingComplianceJob) {
+        return res.status(400).json({
+          success: false,
+          error: "That ID belongs to a compliance pack job. Enter an incident ID to export an incident evidence bundle.",
+        });
+      }
+      return res.status(404).json({ success: false, error: "Incident not found" });
+    }
 
     const bundle = await buildIncidentEvidenceAuditBundle(incident.id);
 
@@ -410,7 +430,12 @@ export const runCompliancePackController = async (req: AuthRequest, res: Respons
     return res.status(201).json({ success: true, data: out.job });
   } catch (error) {
     console.error("runCompliancePackController error:", error);
-    return res.status(500).json({ success: false, error: "Failed to generate compliance pack" });
+    const rawMessage = error instanceof Error ? String(error.message || "").trim() : "";
+    const safeMessage =
+      rawMessage && /missing|invalid|not configured|failed|error|denied|unavailable|timeout|encryption|signature/i.test(rawMessage)
+        ? rawMessage
+        : "Failed to generate compliance pack";
+    return res.status(500).json({ success: false, error: safeMessage });
   }
 };
 
@@ -473,9 +498,27 @@ export const downloadCompliancePackJobController = async (req: AuthRequest, res:
       return res.status(409).json({ success: false, error: "Compliance pack is not ready" });
     }
 
-    const buffer = loadCompliancePackJobBuffer(row.storageKey);
+    let buffer = loadCompliancePackJobBuffer(row.storageKey);
     if (!buffer) {
-      return res.status(404).json({ success: false, error: "Compliance pack file not found" });
+      try {
+        const rebuilt = await rebuildCompliancePackArtifactForJob({
+          jobId: row.id,
+          actor: {
+            userId: req.user.userId,
+            role: req.user.role,
+            licenseeId: req.user.licenseeId || null,
+          },
+        });
+        buffer = loadCompliancePackJobBuffer(rebuilt.job.storageKey || "");
+      } catch (rebuildError) {
+        console.error("downloadCompliancePackJobController rebuild error:", rebuildError);
+      }
+    }
+    if (!buffer) {
+      return res.status(404).json({
+        success: false,
+        error: "Compliance pack artifact is unavailable. Regenerate the pack and try download again.",
+      });
     }
 
     await createAuditLog({

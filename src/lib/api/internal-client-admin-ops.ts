@@ -443,7 +443,11 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
       headers,
       credentials: "include",
     });
-    if (!response.ok) throw new Error(`Download failed: HTTP ${response.status}`);
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      const message = String(payload?.error || payload?.message || "").trim();
+      throw new Error(message || `Download failed: HTTP ${response.status}`);
+    }
     return response.blob();
   },
 
@@ -454,7 +458,11 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
       headers,
       credentials: "include",
     });
-    if (!response.ok) throw new Error(`Export failed: HTTP ${response.status}`);
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      const message = String(payload?.error || payload?.message || "").trim();
+      throw new Error(message || `Export failed: HTTP ${response.status}`);
+    }
     return response.blob();
   },
 

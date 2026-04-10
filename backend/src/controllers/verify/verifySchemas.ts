@@ -145,7 +145,8 @@ export const OWNERSHIP_TRANSFER_TTL_HOURS = parseIntEnv("OWNERSHIP_TRANSFER_TTL_
 
 export const verifyStepUpChallenge = async (req: Request) => {
   if (!VERIFY_STEP_UP_REQUIRED_ON_SUSPICIOUS) return { ok: true };
-  const captchaToken = String(req.headers["x-captcha-token"] || (req.body as any)?.captchaToken || "").trim();
+  const headers = (req as any)?.headers || {};
+  const captchaToken = String(headers["x-captcha-token"] || (req.body as any)?.captchaToken || "").trim();
   if (!captchaToken) {
     return {
       ok: false,

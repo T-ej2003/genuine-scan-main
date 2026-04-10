@@ -74,6 +74,11 @@ const toDate = (value: unknown) => {
   return Number.isFinite(parsed.getTime()) ? parsed : null;
 };
 
+const toIsoOrNull = (value: unknown) => {
+  const dt = toDate(value);
+  return dt ? dt.toISOString() : null;
+};
+
 const buildSessionSummary = (params: {
   session: any;
   presentationSnapshot: Record<string, unknown> | null;
@@ -458,7 +463,7 @@ export const getCustomerVerificationSession = async (input: {
           storeName: session.trustIntake.storeName,
           purchaseCity: session.trustIntake.purchaseCity,
           purchaseCountry: session.trustIntake.purchaseCountry,
-          purchaseDate: session.trustIntake.purchaseDate ? session.trustIntake.purchaseDate.toISOString() : null,
+          purchaseDate: toIsoOrNull(session.trustIntake.purchaseDate),
           packagingState: session.trustIntake.packagingState,
           packagingConcern: session.trustIntake.packagingConcern,
           scanReason: session.trustIntake.scanReason,
@@ -643,7 +648,7 @@ export const revealCustomerVerificationSession = async (input: {
           storeName: updated.trustIntake.storeName,
           purchaseCity: updated.trustIntake.purchaseCity,
           purchaseCountry: updated.trustIntake.purchaseCountry,
-          purchaseDate: updated.trustIntake.purchaseDate ? updated.trustIntake.purchaseDate.toISOString() : null,
+          purchaseDate: toIsoOrNull(updated.trustIntake.purchaseDate),
           packagingState: updated.trustIntake.packagingState,
           packagingConcern: updated.trustIntake.packagingConcern,
           scanReason: updated.trustIntake.scanReason,

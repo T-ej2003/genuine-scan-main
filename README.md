@@ -590,6 +590,18 @@ Vite dev proxy (`vite.config.ts`):
 - Frontend runs on `8080`.
 - `/api` proxies to `http://localhost:4000` unless `VITE_API_PROXY_TARGET` is set in shell environment.
 
+### Admin MFA cadence controls
+
+- `ADMIN_LOGIN_MFA_CYCLE_DAYS` (default `28`): max age of previous admin MFA success allowed for new password sign-ins before a fresh MFA challenge is required.
+- `ADMIN_STEP_UP_WINDOW_MINUTES` (default `30`): freshness window for sensitive admin actions after login.
+- `AUTH_PASSWORD_STEP_UP_WINDOW_MINUTES` (default `30`): freshness window for sensitive password step-up on non-admin roles.
+- `AUTH_MFA_TOTP_WINDOW` (default `1`): accepted TOTP drift window in 30-second steps (`1` = +/-30 seconds).
+
+Recommended production posture:
+
+- Keep `ADMIN_LOGIN_MFA_CYCLE_DAYS=28` for predictable sign-in UX.
+- Keep `ADMIN_STEP_UP_WINDOW_MINUTES` short (for example `30`) to preserve high-risk action protection.
+
 ## 11. Seed Data and Demo Credentials
 
 Seed command:
@@ -741,6 +753,13 @@ Access:
 
 - Frontend at `http://localhost:${FRONTEND_PORT:-80}`
 - API via frontend reverse proxy at `/api/*`
+
+HTTPS for production (`mscqr.com` / `www.mscqr.com`):
+
+- The frontend container already supports HTTP-first boot and automatic HTTPS cutover when Let's Encrypt certs exist in `deploy/certbot/conf`.
+- Issue a certificate with `sh deploy/certbot/issue-letsencrypt.sh`
+- Dry-run renewal with `MSCQR_CERTBOT_DRY_RUN=true sh deploy/certbot/renew-letsencrypt.sh`
+- Full EC2/DNS instructions live in `docs/AWS_EC2_DEPLOY_MSCQR.md`
 
 Important compose note:
 

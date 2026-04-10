@@ -7,9 +7,9 @@ import { AuthRequest } from "../middleware/auth";
 import { createAuditLog } from "../services/auditService";
 
 const paginationSchema = z.object({
-  limit: z.coerce.number().int().min(1).max(200).default(50),
-  offset: z.coerce.number().int().min(0).default(0),
-}).strict();
+  limit: z.coerce.number().int().min(1).max(200).catch(50),
+  offset: z.coerce.number().int().min(0).catch(0),
+});
 
 const createPolicyRuleSchema = z.object({
   name: z.string().trim().min(3).max(120),

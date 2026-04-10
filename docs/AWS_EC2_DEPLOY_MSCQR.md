@@ -87,7 +87,7 @@ The compose file mounts:
 - `./deploy/certbot/www` -> ACME webroot
 - `./deploy/certbot/conf` -> certificates
 
-Run Certbot:
+Run Certbot directly:
 
 ```bash
 docker run --rm \
@@ -98,6 +98,19 @@ docker run --rm \
   -d mscqr.com -d www.mscqr.com \
   --email administration@mscqr.com \
   --agree-tos --no-eff-email
+```
+
+Or use the repo helper, which wraps the same command and restarts the frontend after the cert lands:
+
+```bash
+sh deploy/certbot/issue-letsencrypt.sh
+```
+
+Optional helper flags:
+
+```bash
+MSCQR_BOOTSTRAP_HTTP=true sh deploy/certbot/issue-letsencrypt.sh
+MSCQR_LE_EMAIL=ops@example.com sh deploy/certbot/issue-letsencrypt.sh
 ```
 
 ## 7. Switch frontend container to HTTPS mode
@@ -129,10 +142,16 @@ Add a cron job (or systemd timer wrapper) to renew and then restart frontend:
 crontab -e
 ```
 
-Example (runs daily at 3:15 AM):
+Example (runs daily at 3:15 AM) using the repo helper:
 
 ```cron
-15 3 * * * cd /home/ubuntu/genuine-scan-main && docker run --rm -v /home/ubuntu/genuine-scan-main/deploy/certbot/www:/var/www/certbot -v /home/ubuntu/genuine-scan-main/deploy/certbot/conf:/etc/letsencrypt certbot/certbot renew --webroot -w /var/www/certbot --quiet && docker compose restart frontend
+15 3 * * * cd /home/ubuntu/genuine-scan-main && /bin/sh deploy/certbot/renew-letsencrypt.sh
+```
+
+Dry-run the renewal helper before you install cron:
+
+```bash
+MSCQR_CERTBOT_DRY_RUN=true sh deploy/certbot/renew-letsencrypt.sh
 ```
 
 ## 9. Deploy updates later
