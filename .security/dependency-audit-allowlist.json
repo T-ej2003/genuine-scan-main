@@ -1,0 +1,33 @@
+{
+  "updatedAt": "2026-04-12",
+  "entries": [
+    {
+      "scope": "root",
+      "package": "flatted",
+      "owner": "security@mscqr",
+      "expiresOn": "2026-06-30",
+      "justification": "Dev-only eslint transitive vulnerability; runtime gate is clean and this is tracked for toolchain upgrade."
+    },
+    {
+      "scope": "root",
+      "package": "minimatch",
+      "owner": "security@mscqr",
+      "expiresOn": "2026-06-30",
+      "justification": "Dev-only lint/test transitive vulnerability pending upstream release alignment."
+    },
+    {
+      "scope": "root",
+      "package": "picomatch",
+      "owner": "security@mscqr",
+      "expiresOn": "2026-06-30",
+      "justification": "Dev-only test/build transitive vulnerability pending upstream patch propagation."
+    },
+    {
+      "scope": "backend",
+      "package": "picomatch",
+      "owner": "security@mscqr",
+      "expiresOn": "2026-06-30",
+      "justification": "Dev-only packaging-tool transitive vulnerability; production audit is clean."
+    }
+  ]
+}

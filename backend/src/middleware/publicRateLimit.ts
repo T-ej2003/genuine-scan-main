@@ -4,6 +4,7 @@ import rateLimit from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
 
 import { getRedisClient, isRedisConfigured } from "../services/redisService";
+import { normalizeClientIp } from "../utils/ipAddress";
 
 type RequestResolver = (req: Request) => string | null | undefined;
 
@@ -42,7 +43,7 @@ const buildResourceKey = (req: Request, resolver?: RequestResolver) => {
 };
 
 export const buildPublicIpRateLimitKey = (req: Request, scope: string, resourceResolver?: RequestResolver) => {
-  const ip = normalizeValue(req.ip || req.socket?.remoteAddress || "unknown", 256).toLowerCase();
+  const ip = normalizeClientIp(req.ip || req.socket?.remoteAddress || "", { fallback: "unknown" }).toLowerCase();
   return `public:${scope}:ip:${shortHash(ip)}:${buildResourceKey(req, resourceResolver)}`;
 };
 
@@ -53,7 +54,7 @@ export const buildPublicActorRateLimitKey = (
   resourceResolver?: RequestResolver
 ) => {
   const actorValue = normalizeValue(actorResolver?.(req), 512).toLowerCase();
-  const fallbackIp = normalizeValue(req.ip || req.socket?.remoteAddress || "unknown", 256).toLowerCase();
+  const fallbackIp = normalizeClientIp(req.ip || req.socket?.remoteAddress || "", { fallback: "unknown" }).toLowerCase();
   const actor = actorValue || `ip:${fallbackIp}`;
   return `public:${scope}:actor:${shortHash(actor)}:${buildResourceKey(req, resourceResolver)}`;
 };

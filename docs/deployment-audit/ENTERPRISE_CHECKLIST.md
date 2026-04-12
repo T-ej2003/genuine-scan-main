@@ -25,7 +25,8 @@ Use this checklist for production releases. It aligns with the Deployment Audit 
 
 ## Runtime readiness
 - [ ] `/healthz` returns `status: ok`.
-- [ ] `/version` returns `name`, `version`, and `gitSha`.
+- [ ] Public version endpoint is disabled (`PUBLIC_VERSION_ENDPOINT_ENABLED=false`).
+- [ ] Authenticated `/api/internal/release` returns release metadata for platform admins.
 - [ ] Required env vars set: `DATABASE_URL`, `JWT_SECRET`.
 - [ ] SMTP configured (or accepted as a known limitation).
 - [ ] `npm --prefix backend run prisma:migrate status` passes in release environment.

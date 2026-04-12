@@ -11,7 +11,8 @@ npm run smoke:release
 This validates:
 
 - `/api/health/ready`
-- `/api/version`
+- `/api/health/live`
+- `/api/internal/release` (after authenticated admin session)
 
 ## Public Verify
 

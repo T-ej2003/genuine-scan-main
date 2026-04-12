@@ -73,7 +73,7 @@ npm run dev
 - `http://localhost:4000/health`
 - `http://localhost:4000/healthz`
 - `http://localhost:4000/health/db`
-- `http://localhost:4000/version`
+- `http://localhost:4000/health/live`
 - `http://localhost:8080` (frontend)
 
 ## Optional local audit scans

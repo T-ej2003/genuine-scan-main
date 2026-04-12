@@ -1,4 +1,4 @@
-export { requestCustomerEmailOtp, verifyCustomerEmailOtp } from "./authHandlers";
+export { logoutCustomerVerifySession, requestCustomerEmailOtp, verifyCustomerEmailOtp } from "./authHandlers";
 export {
   completeCustomerOAuth,
   exchangeCustomerOAuth,

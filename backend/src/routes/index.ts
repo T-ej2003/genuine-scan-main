@@ -134,6 +134,7 @@ import {
   finishCustomerPasskeyRegistration,
   listCustomerOAuthProviders,
   listCustomerPasskeyCredentials,
+  logoutCustomerVerifySession,
   requestCustomerEmailOtp,
   getCustomerVerificationSessionState,
   revealCustomerVerificationResult,
@@ -230,7 +231,7 @@ import { listIrAlerts, patchIrAlert } from "../controllers/irAlertController";
 
 import { getDashboardStats } from "../controllers/dashboardController";
 import { dashboardEvents } from "../controllers/eventsController";
-import { healthCheck, latencySummary, liveHealthCheck, readyHealthCheck, versionCheck } from "../controllers/healthController";
+import { healthCheck, internalReleaseMetadata, latencySummary, liveHealthCheck, readyHealthCheck } from "../controllers/healthController";
 import { captureCspViolationReport, captureRouteTransitionMetric, getRouteTransitionSummary } from "../controllers/telemetryController";
 import { listNotifications, readAllNotifications, readNotification } from "../controllers/notificationController";
 import { notificationEvents } from "../controllers/notificationEventsController";
@@ -614,6 +615,7 @@ router.post("/verify/auth/oauth/:provider/callback", ...verifyCodeLimiters, comp
 router.post("/verify/auth/oauth/exchange", ...verifyOtpVerifyLimiters, exchangeCustomerOAuth);
 router.post("/verify/auth/email-otp/request", ...verifyOtpRequestLimiters, requestCustomerEmailOtp);
 router.post("/verify/auth/email-otp/verify", ...verifyOtpVerifyLimiters, verifyCustomerEmailOtp);
+router.post("/verify/auth/logout", ...verifyOtpVerifyLimiters, logoutCustomerVerifySession);
 router.post("/verify/auth/passkey/register/begin", ...verifyOtpVerifyLimiters, requireCustomerVerifyAuth, beginCustomerPasskeyRegistration);
 router.post("/verify/auth/passkey/register/finish", ...verifyOtpVerifyLimiters, requireCustomerVerifyAuth, finishCustomerPasskeyRegistration);
 router.post("/verify/auth/passkey/assertion/begin", ...verifyOtpVerifyLimiters, optionalCustomerVerifyAuth, beginCustomerPasskeyAssertion);
@@ -662,7 +664,7 @@ router.get("/healthz", ...publicStatusLimiters, healthCheck);
 router.get("/health/live", ...publicStatusLimiters, liveHealthCheck);
 router.get("/health/ready", ...publicStatusLimiters, readyHealthCheck);
 router.get("/health/latency", ...publicStatusLimiters, latencySummary);
-router.get("/version", ...publicStatusLimiters, versionCheck);
+router.get("/internal/release", authenticate, requirePlatformAdmin, internalReleaseMetadata);
 
 // ==================== LICENSEES (SUPER ADMIN) ====================
 router.get("/licensees/export", authenticate, requirePlatformAdmin, ...exportLimiters, exportLicenseesCsv);

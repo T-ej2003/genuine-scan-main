@@ -25,6 +25,7 @@ vi.mock("@/lib/api-client", () => ({
     finishCustomerPasskeyAssertion: vi.fn(),
     getCustomerPasskeyCredentials: vi.fn(),
     deleteCustomerPasskeyCredential: vi.fn(),
+    logoutCustomerVerifySession: vi.fn().mockResolvedValue({ success: true, data: { cleared: true } }),
     claimVerifiedProduct: vi.fn(),
     acceptOwnershipTransfer: vi.fn(),
     captureRouteTransition: vi.fn(() => Promise.resolve({ success: true })),
@@ -287,7 +288,6 @@ describe("Verify page", () => {
         }),
       }),
     } as any);
-    window.localStorage.setItem("mscqr_verify_customer_token", "customer-token");
     window.localStorage.setItem("mscqr_verify_customer_email", "abhi@example.com");
 
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
@@ -318,7 +318,7 @@ describe("Verify page", () => {
           scanReason: "routine_check",
           ownershipIntent: "verify_only",
         }),
-        "customer-token",
+        undefined,
         undefined
       );
     });
@@ -387,7 +387,6 @@ describe("Verify page", () => {
       success: true,
       data: { supportTicketRef: "SUP-1001" },
     } as any);
-    window.localStorage.setItem("mscqr_verify_customer_token", "customer-token");
     window.localStorage.setItem("mscqr_verify_customer_email", "abhi@example.com");
 
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
@@ -464,14 +463,14 @@ describe("Verify page", () => {
       expect(vi.mocked(apiClient.verifyQRCode)).toHaveBeenCalledWith(
         CODE,
         expect.objectContaining({
-          customerToken: "customer-token",
+          customerToken: undefined,
           device: expect.any(String),
         })
       );
     });
 
     await waitFor(() => {
-      expect(vi.mocked(apiClient.startVerificationSession)).toHaveBeenCalledWith("decision-1", "MANUAL_CODE", "customer-token");
+      expect(vi.mocked(apiClient.startVerificationSession)).toHaveBeenCalledWith("decision-1", "MANUAL_CODE", undefined);
     });
 
     await waitFor(() => {

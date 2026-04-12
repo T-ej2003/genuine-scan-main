@@ -47,6 +47,11 @@ const parseBool = (value: unknown, fallback = false) => {
   if (["0", "false", "no", "off"].includes(normalized)) return false;
   return fallback;
 };
+const isKnownInsecureStorageCredential = (value: string) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return false;
+  return normalized === "mscqrminio" || normalized === "mscqrminiochange" || normalized === "minioadmin";
+};
 const managedQrSigningRequested = isManagedQrSignerRequested();
 const managedQrSigningRefsConfigured = hasManagedQrSignerRefs();
 const managedQrSigningBridgeRegistered = hasManagedQrSignerBridgeRegistered();
@@ -181,6 +186,19 @@ if (process.env.NODE_ENV === "production") {
     );
     process.exit(1);
   }
+
+  const objectStorageAccessKey = String(
+    process.env.OBJECT_STORAGE_ACCESS_KEY || process.env.S3_ACCESS_KEY || process.env.MINIO_ROOT_USER || ""
+  ).trim();
+  const objectStorageSecretKey = String(
+    process.env.OBJECT_STORAGE_SECRET_KEY || process.env.S3_SECRET_KEY || process.env.MINIO_ROOT_PASSWORD || ""
+  ).trim();
+  if (isKnownInsecureStorageCredential(objectStorageAccessKey) || isKnownInsecureStorageCredential(objectStorageSecretKey)) {
+    logger.error(
+      "Refusing to start: production object storage credentials are using known default/insecure values."
+    );
+    process.exit(1);
+  }
 }
 
 const usesLegacyFallback = (primaryKeys: string[], fallbackKeys: string[] = []) =>
@@ -228,6 +246,7 @@ app.disable("etag");
 app.set("trust proxy", 1);
 const PORT = process.env.PORT || 4000;
 const runBackgroundWorkers = parseBool(process.env.RUN_BACKGROUND_WORKERS, true);
+const publicVersionEndpointEnabled = parseBool(process.env.PUBLIC_VERSION_ENDPOINT_ENABLED, false);
 const sentryEnabled = initBackendMonitoring();
 
 if (sentryEnabled) {
@@ -299,7 +318,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const requestTelemetryDebugPaths = new Set(["/health", "/healthz", "/health/db", "/health/latency", "/version"]);
+const requestTelemetryDebugPaths = new Set(["/health", "/healthz", "/health/db", "/health/latency"]);
 
 app.use((req, res, next) => {
   const requestId = String(req.get("x-request-id") || randomUUID());
@@ -307,8 +326,6 @@ app.use((req, res, next) => {
 
   (req as express.Request & { requestId?: string }).requestId = requestId;
   res.setHeader("X-Request-Id", requestId);
-  res.setHeader("X-Release-Version", releaseMetadata.version);
-  res.setHeader("X-Release-Sha", releaseMetadata.shortGitSha);
 
   res.on("finish", () => {
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
@@ -399,15 +416,15 @@ app.get("/health/live", publicStatusIpLimiter, publicStatusActorLimiter, (_req, 
   });
 });
 
-app.get("/version", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
-  res.json({
-    name: releaseMetadata.name,
-    version: releaseMetadata.version,
-    gitSha: releaseMetadata.gitSha,
-    release: releaseMetadata.release,
-    environment: releaseMetadata.environment,
+if (publicVersionEndpointEnabled) {
+  app.get("/version", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
+    res.json({
+      name: releaseMetadata.name,
+      version: releaseMetadata.version,
+      environment: releaseMetadata.environment,
+    });
   });
-});
+}
 
 app.get("/health/latency", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
   res.json({

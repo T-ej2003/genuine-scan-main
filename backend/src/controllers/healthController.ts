@@ -6,12 +6,16 @@ import { releaseMetadata } from "../observability/release";
 import { getObjectStorageHealth } from "../services/objectStorageService";
 import { getRedisHealth } from "../services/redisService";
 
-const releasePayload = {
+const releasePayloadInternal = {
   name: releaseMetadata.name,
   version: releaseMetadata.version,
   gitSha: releaseMetadata.shortGitSha,
   environment: releaseMetadata.environment,
   release: releaseMetadata.release,
+};
+
+const releasePayloadPublic = {
+  environment: releaseMetadata.environment,
 };
 
 const getDatabaseHealth = async () => {
@@ -56,7 +60,7 @@ export const buildReadyPayload = async () => {
     uptimeSec: Math.round(process.uptime()),
     timestamp: new Date().toISOString(),
     ms: Date.now() - started,
-    release: releasePayload,
+    release: releasePayloadPublic,
     dependencies,
   };
 };
@@ -72,7 +76,7 @@ export const liveHealthCheck = (_req: Request, res: Response) => {
     status: "live",
     uptimeSec: Math.round(process.uptime()),
     timestamp: new Date().toISOString(),
-    release: releasePayload,
+    release: releasePayloadPublic,
   });
 };
 
@@ -81,10 +85,10 @@ export const readyHealthCheck = async (_req: Request, res: Response) => {
   return res.status(payload.success ? 200 : 503).json(payload);
 };
 
-export const versionCheck = (_req: Request, res: Response) => {
+export const internalReleaseMetadata = (_req: Request, res: Response) => {
   res.json({
     success: true,
-    ...releasePayload,
+    ...releasePayloadInternal,
     gitSha: releaseMetadata.gitSha,
   });
 };

@@ -17,6 +17,7 @@ import {
   maskEmail,
   normalizeCustomerVerifyEmail,
 } from "../../services/customerVerifyAuthService";
+import { setCustomerVerifySessionCookie } from "../../services/customerVerifyCookieService";
 import { hashIp } from "../../utils/security";
 
 const passkeyLabelSchema = z.string().trim().min(1).max(120).optional();
@@ -172,6 +173,7 @@ export const finishCustomerPasskeyRegistration = async (req: CustomerVerifyReque
         webauthnVerifiedAt: new Date(),
       }
     );
+    setCustomerVerifySessionCookie(res, token);
 
     await createAuditLogSafely({
       action: "VERIFY_CUSTOMER_PASSKEY_REGISTER_FINISH",
@@ -269,6 +271,7 @@ export const finishCustomerPasskeyAssertion = async (req: CustomerVerifyRequest,
         webauthnVerifiedAt: result.assertedAt,
       }
     );
+    setCustomerVerifySessionCookie(res, token);
 
     await createAuditLogSafely({
       action: "VERIFY_CUSTOMER_PASSKEY_ASSERT_FINISH",

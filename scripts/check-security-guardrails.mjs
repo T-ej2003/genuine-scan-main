@@ -42,6 +42,17 @@ const rules = [
     patterns: [/\bfrom\s+["']child_process["']/g, /\brequire\(["']child_process["']\)/g],
     message: "Server-side child_process usage is only allowed inside backend/src/local-print-agent.",
   },
+  {
+    name: "Persistent customer verify token in localStorage",
+    matcher: /\.(ts|tsx|js|mjs|cjs)$/,
+    allow: (filePath) => filePath.includes(`${path.sep}src${path.sep}test${path.sep}`),
+    patterns: [
+      /localStorage\.setItem\(\s*["'`](mscqr_verify_customer_token|authenticqr_verify_customer_token)["'`]/g,
+      /window\.localStorage\.setItem\(\s*CUSTOMER_TOKEN_KEY/g,
+      /window\.localStorage\.setItem\(\s*LEGACY_CUSTOMER_TOKEN_KEY/g,
+    ],
+    message: "Customer verify bearer tokens must not be persisted in localStorage. Use HttpOnly cookie sessions.",
+  },
 ];
 
 const findings = [];

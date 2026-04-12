@@ -143,16 +143,13 @@ const maskCode = (value?: string | null) => {
 };
 
 const persistCustomerSession = (token: string, email: string) => {
-  const nextToken = String(token || "").trim();
   const nextEmail = String(email || "").trim();
 
   try {
-    if (nextToken) window.localStorage.setItem(CUSTOMER_TOKEN_KEY, nextToken);
-    else window.localStorage.removeItem(CUSTOMER_TOKEN_KEY);
-
     if (nextEmail) window.localStorage.setItem(CUSTOMER_EMAIL_KEY, nextEmail);
     else window.localStorage.removeItem(CUSTOMER_EMAIL_KEY);
 
+    window.localStorage.removeItem(CUSTOMER_TOKEN_KEY);
     window.localStorage.removeItem(LEGACY_CUSTOMER_TOKEN_KEY);
     window.localStorage.removeItem(LEGACY_CUSTOMER_EMAIL_KEY);
   } catch {
@@ -163,12 +160,22 @@ const persistCustomerSession = (token: string, email: string) => {
 const clearStoredCustomerSession = () => {
   try {
     window.localStorage.removeItem(CUSTOMER_TOKEN_KEY);
-    window.localStorage.removeItem(CUSTOMER_EMAIL_KEY);
     window.localStorage.removeItem(LEGACY_CUSTOMER_TOKEN_KEY);
-    window.localStorage.removeItem(LEGACY_CUSTOMER_EMAIL_KEY);
   } catch {
     // Ignore storage issues.
   }
+};
+
+const readAndClearLegacyCustomerToken = () => {
+  const token = readStoredValue(CUSTOMER_TOKEN_KEY, LEGACY_CUSTOMER_TOKEN_KEY);
+  if (!token) return "";
+  try {
+    window.localStorage.removeItem(CUSTOMER_TOKEN_KEY);
+    window.localStorage.removeItem(LEGACY_CUSTOMER_TOKEN_KEY);
+  } catch {
+    // Ignore storage issues.
+  }
+  return token;
 };
 
 const sessionProofStorageKey = (sessionId: string) => `mscqr_verify_session_proof:${sessionId}`;
@@ -333,7 +340,7 @@ export default function VerifyExperience() {
     }
   }, [code]);
 
-  const [customerToken, setCustomerToken] = useState(() => readStoredValue(CUSTOMER_TOKEN_KEY, LEGACY_CUSTOMER_TOKEN_KEY));
+  const [customerToken, setCustomerToken] = useState(() => readAndClearLegacyCustomerToken());
   const [customerEmail, setCustomerEmail] = useState(() => readStoredValue(CUSTOMER_EMAIL_KEY, LEGACY_CUSTOMER_EMAIL_KEY));
   const [session, setSession] = useState<VerificationSessionSummary | null>(null);
   const [lockedResult, setLockedResult] = useState<VerifyPayload | null>(null);
@@ -372,7 +379,7 @@ export default function VerifyExperience() {
   const reasonList = useMemo(() => deriveReasons(result || lockedResult, classification), [classification, lockedResult, result]);
   const stepMeta = STEP_META[classification];
   const currentCode = normalizeVerifyCode(result?.code || session?.code || codeParam);
-  const authReady = Boolean(customerToken);
+  const authReady = Boolean(customerToken) || session?.authState === "VERIFIED";
   const displaySessionSummary = session || null;
   const challengeRequired = Boolean(result?.challenge?.required || lockedResult?.challenge?.required || session?.challengeRequired);
   const challengeCompleted = Boolean(result?.challenge?.completed || lockedResult?.challenge?.completed || session?.challengeCompleted);
@@ -410,7 +417,7 @@ export default function VerifyExperience() {
 
   const loadCustomerPasskeys = useCallback(async (sessionToken?: string) => {
     const activeToken = String(sessionToken || customerToken || "").trim();
-    if (!activeToken || !passkeySupported) {
+    if (!passkeySupported) {
       setPasskeyCredentials([]);
       setLoadingPasskeys(false);
       return;
@@ -418,7 +425,7 @@ export default function VerifyExperience() {
 
     setLoadingPasskeys(true);
     try {
-      const response = await apiClient.getCustomerPasskeyCredentials(activeToken);
+      const response = await apiClient.getCustomerPasskeyCredentials(activeToken || undefined);
       setPasskeyCredentials(response.success ? response.data?.items || [] : []);
     } finally {
       setLoadingPasskeys(false);
@@ -556,7 +563,7 @@ export default function VerifyExperience() {
 
         if (nextSession.revealed && nextSession.verification) {
           setFlowStep("result");
-        } else if (customerToken) {
+        } else if (nextSession.authState === "VERIFIED" || customerToken) {
           setFlowStep(nextSession.intakeCompleted ? "intent" : "purchase");
         } else {
           setFlowStep("identity");
@@ -617,7 +624,7 @@ export default function VerifyExperience() {
       if (token) params.set("t", token);
       navigate(`/verify/${encodeURIComponent(canonicalCode)}?${params.toString()}`, { replace: true });
 
-      if (customerToken) {
+      if (nextSession.authState === "VERIFIED" || customerToken) {
         setFlowStep("purchase");
       } else {
         setFlowStep("identity");
@@ -635,9 +642,9 @@ export default function VerifyExperience() {
   }, [bootstrapSession, oauthResolved]);
 
   useEffect(() => {
-    if (!customerToken) return;
+    if (!authReady) return;
     loadCustomerPasskeys();
-  }, [customerToken, loadCustomerPasskeys]);
+  }, [authReady, loadCustomerPasskeys]);
 
   const handleRequestOtp = async () => {
     const email = otpEmail.trim();
@@ -695,7 +702,7 @@ export default function VerifyExperience() {
   };
 
   const handleCompleteChallenge = async () => {
-    if (!customerToken) {
+    if (!authReady) {
       toast({
         title: "Sign in required",
         description: "Sign in first so MSCQR can re-check this label with your verified identity.",
@@ -713,14 +720,14 @@ export default function VerifyExperience() {
             lat: geo.lat,
             lon: geo.lon,
             acc: geo.acc,
-            customerToken,
+            customerToken: customerToken || undefined,
           })
         : await apiClient.verifyQRCode(codeParam, {
             device: deviceId,
             lat: geo.lat,
             lon: geo.lon,
             acc: geo.acc,
-            customerToken,
+            customerToken: customerToken || undefined,
           });
 
       if (!verificationResponse.success || !verificationResponse.data) {
@@ -743,7 +750,7 @@ export default function VerifyExperience() {
       const sessionResponse = await apiClient.startVerificationSession(
         nextResult.decisionId,
         token ? "SIGNED_SCAN" : "MANUAL_CODE",
-        customerToken
+        customerToken || undefined
       );
 
       if (!sessionResponse.success || !sessionResponse.data) {
@@ -781,7 +788,7 @@ export default function VerifyExperience() {
   };
 
   const handleSubmitIntakeAndReveal = async (intakeOverride?: Partial<CustomerTrustIntake>) => {
-    if (!session?.sessionId || !customerToken) {
+    if (!session?.sessionId || !authReady) {
       toast({ title: "Sign in required", description: "Complete sign-in before revealing the result.", variant: "destructive" });
       return;
     }
@@ -804,7 +811,7 @@ export default function VerifyExperience() {
       const intakeResponse = await apiClient.submitVerificationIntake(
         session.sessionId,
         intakePayload as Record<string, unknown>,
-        customerToken,
+        customerToken || undefined,
         sessionProofToken || undefined
       );
       if (!intakeResponse.success) {
@@ -813,7 +820,7 @@ export default function VerifyExperience() {
 
       const revealResponse = await apiClient.revealVerificationSession(
         session.sessionId,
-        customerToken,
+        customerToken || undefined,
         sessionProofToken || undefined
       );
       if (!revealResponse.success || !revealResponse.data) {
@@ -926,11 +933,11 @@ export default function VerifyExperience() {
 
   const handleAcceptTransfer = async () => {
     const transferToken = String(searchParams.get("transfer") || "").trim();
-    if (!transferToken || !customerToken) return;
+    if (!transferToken || !authReady) return;
 
     setAcceptingTransfer(true);
     try {
-      const response = await apiClient.acceptOwnershipTransfer({ token: transferToken }, customerToken);
+      const response = await apiClient.acceptOwnershipTransfer({ token: transferToken }, customerToken || undefined);
       if (!response.success) {
         throw new Error(response.error || "Could not accept the ownership transfer.");
       }
@@ -985,13 +992,13 @@ export default function VerifyExperience() {
   };
 
   const handleRegisterPasskey = async () => {
-    if (!customerToken) return;
+    if (!authReady) return;
     setRegisteringPasskey(true);
     try {
-      const begin = await apiClient.beginCustomerPasskeyRegistration(customerToken);
+      const begin = await apiClient.beginCustomerPasskeyRegistration(customerToken || undefined);
       if (!begin.success || !begin.data) throw new Error(begin.error || "Could not start passkey registration.");
       const credential = await startWebAuthnRegistration(begin.data, `${APP_NAME} customer protection`);
-      const finish = await apiClient.finishCustomerPasskeyRegistration(customerToken, credential);
+      const finish = await apiClient.finishCustomerPasskeyRegistration(customerToken || undefined, credential);
       if (!finish.success || !finish.data?.token) throw new Error(finish.error || "Could not finish passkey registration.");
       applySignedInCustomer(finish.data.token, finish.data.customer?.email || customerEmail || otpEmail);
       await loadCustomerPasskeys(finish.data.token);
@@ -1009,13 +1016,13 @@ export default function VerifyExperience() {
   };
 
   const handleAssertPasskey = async () => {
-    if (!customerToken) return;
+    if (!authReady) return;
     setAssertingPasskey(true);
     try {
-      const begin = await apiClient.beginCustomerPasskeyAssertion(undefined, customerToken);
+      const begin = await apiClient.beginCustomerPasskeyAssertion(undefined, customerToken || undefined);
       if (!begin.success || !begin.data) throw new Error(begin.error || "Could not start passkey verification.");
       const assertion = await startWebAuthnAuthentication(begin.data);
-      const finish = await apiClient.finishCustomerPasskeyAssertion(assertion, customerToken);
+      const finish = await apiClient.finishCustomerPasskeyAssertion(assertion, customerToken || undefined);
       if (!finish.success || !finish.data?.token) throw new Error(finish.error || "Could not verify the passkey.");
       applySignedInCustomer(finish.data.token, finish.data.customer?.email || customerEmail || otpEmail);
       await loadCustomerPasskeys(finish.data.token);
@@ -1033,12 +1040,12 @@ export default function VerifyExperience() {
   };
 
   const handleDeletePasskey = async (credentialId: string) => {
-    if (!customerToken) return;
+    if (!authReady) return;
     setDeletingPasskeyId(credentialId);
     try {
-      const response = await apiClient.deleteCustomerPasskeyCredential(customerToken, credentialId);
+      const response = await apiClient.deleteCustomerPasskeyCredential(customerToken || undefined, credentialId);
       if (!response.success) throw new Error(response.error || "Could not remove the passkey.");
-      await loadCustomerPasskeys(customerToken);
+      await loadCustomerPasskeys(customerToken || undefined);
       toast({ title: "Passkey removed", description: "That device can no longer step up ownership automatically." });
     } catch (nextError: unknown) {
       toast({
@@ -1815,7 +1822,7 @@ export default function VerifyExperience() {
                   ) : null}
 
                   {String(searchParams.get("transfer") || "").trim() ? (
-                    <Button variant="outline" onClick={handleAcceptTransfer} disabled={!customerToken || acceptingTransfer}>
+                    <Button variant="outline" onClick={handleAcceptTransfer} disabled={!authReady || acceptingTransfer}>
                       {acceptingTransfer ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
                       Accept ownership transfer
                     </Button>
@@ -1912,20 +1919,21 @@ export default function VerifyExperience() {
           </Link>
         </div>
 
-        {!customerToken && flowStep !== "identity" ? (
+        {!authReady && flowStep !== "identity" ? (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             Your verification session is still locked, but result reveal is waiting for sign-in. Return to the identity step if you need to finish authentication.
           </div>
         ) : null}
 
-        {customerToken ? (
+        {authReady ? (
           <div className="flex items-center justify-end">
             <Button
               variant="ghost"
-              onClick={() => {
+              onClick={async () => {
+                await apiClient.logoutCustomerVerifySession();
                 clearStoredCustomerSession();
                 setCustomerToken("");
-                setCustomerEmail("");
+                setSession((prev) => (prev ? { ...prev, authState: "PENDING" } : prev));
                 setPasskeyCredentials([]);
                 setFlowStep("identity");
               }}

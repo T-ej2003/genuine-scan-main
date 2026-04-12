@@ -12,6 +12,8 @@ on:
 
 permissions:
   contents: read
+  actions: read
+  administration: read
 
 concurrency:
   group: release-candidate-gate-${{ github.ref }}
@@ -42,6 +44,24 @@ jobs:
 
       - name: Security guardrails
         run: npm run check:security-guardrails
+
+      - name: Dependency audit gate
+        run: npm run check:dependency-audit
+
+      - name: Trust observability guardrails
+        run: npm run check:trust-observability
+
+      - name: Trust alert bindings
+        run: npm run check:trust-alert-bindings
+
+      - name: Rotation evidence gate
+        run: npm run check:rotation-evidence
+
+      - name: Nginx hardening invariants
+        run: npm run check:nginx-hardening
+
+      - name: Public metadata surface
+        run: npm run check:public-metadata-surface
 
       - name: Prisma client generation
         run: npm --prefix backend run prisma:generate
@@ -116,3 +136,53 @@ jobs:
           name: staging-smoke-log
           path: smoke-release.log
           if-no-files-found: ignore
+
+  rc-governance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Validate protected branch required checks
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_PROTECTED_BRANCH: main
+          REQUIRED_RELEASE_CHECKS: Release Candidate Gate / rc-trust-critical,Release Candidate Gate / rc-staging-smoke
+        run: node scripts/check-release-governance.mjs
+
+  rc-release-checklist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      - rc-trust-critical
+      - rc-staging-smoke
+      - rc-governance
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build release checklist artifact
+        env:
+          TRUST_CRITICAL_RESULT: ${{ needs.rc-trust-critical.result }}
+          STAGING_SMOKE_RESULT: ${{ needs.rc-staging-smoke.result }}
+          DEPENDENCY_AUDIT_RESULT: ${{ needs.rc-trust-critical.result }}
+          PROVENANCE_BACKFILL_EVIDENCE_REF: ${{ vars.RC_PROVENANCE_BACKFILL_EVIDENCE_REF }}
+          SECRET_ROTATION_EVIDENCE_REF: ${{ vars.RC_SECRET_ROTATION_EVIDENCE_REF }}
+        run: node scripts/create-release-checklist-artifact.mjs
+
+      - name: Upload release checklist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-checklist-artifact
+          path: audit-artifacts/release-checklist.json
+          if-no-files-found: error

@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { z } from "zod";
 
 import { createAuditLogSafely } from "../../services/auditService";
+import { setCustomerVerifySessionCookie } from "../../services/customerVerifyCookieService";
 import {
   buildCustomerOAuthAuthorizationUrl,
   exchangeCustomerOAuthTicketForSession,
@@ -116,6 +117,7 @@ export const exchangeCustomerOAuth = async (req: Request, res: Response) => {
 
   try {
     const session = exchangeCustomerOAuthTicketForSession(parsed.data.ticket);
+    setCustomerVerifySessionCookie(res, session.token);
 
     await createAuditLogSafely({
       action: "VERIFY_CUSTOMER_OAUTH_EXCHANGE",

@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "searches": [
+    {
+      "name": "Replay review-required",
+      "query": "event=\"verification_trust_metric\" metric=\"verification_trust_state\" publicOutcome=\"REVIEW_REQUIRED\""
+    },
+    {
+      "name": "Changed-context replay",
+      "query": "event=\"verification_trust_metric\" metric=\"verification_trust_state\" replayState IN (\"CHANGED_CONTEXT_REPEAT\",\"RAPID_CHANGED_CONTEXT_REPEAT\")"
+    },
+    {
+      "name": "Limited provenance",
+      "query": "event=\"verification_trust_metric\" metric=\"verification_trust_state\" limitedProvenance=true"
+    },
+    {
+      "name": "Break-glass direct issuance",
+      "query": "event=\"verification_trust_metric\" metric=\"verification_break_glass_generate\""
+    },
+    {
+      "name": "Challenge required",
+      "query": "event=\"verification_trust_metric\" metric=\"verification_trust_state\" challengeRequired=true"
+    },
+    {
+      "name": "Challenge completed",
+      "query": "event=\"verification_trust_metric\" metric=\"verification_trust_state\" challengeCompleted=true"
+    },
+    {
+      "name": "Signing fallback watch",
+      "query": "event=\"verification_trust_metric\" metric=\"verification_trust_state\" signingMode=\"hmac\""
+    }
+  ]
+}

@@ -86,9 +86,9 @@ const run = async () => {
   }
 
   {
-    const { response, payload } = await requestJson(`${apiBaseUrl}/version`);
-    ensureOk("version", response.status, payload);
-    logPass("release version");
+    const { response, payload } = await requestJson(`${apiBaseUrl}/health/live`);
+    ensureOk("health/live", response.status, payload);
+    logPass("live health");
   }
 
   if (process.env.SMOKE_VERIFY_CODE) {
@@ -143,6 +143,16 @@ const run = async () => {
     const { response, payload } = await requestJson(`${apiBaseUrl}/auth/me`);
     ensureOk("auth me", response.status, payload);
     logPass("current user");
+  }
+
+  {
+    const { response, payload } = await requestJson(`${apiBaseUrl}/internal/release`);
+    if (response.status === 401 || response.status === 403) {
+      logSkip("internal release metadata (admin role required)");
+    } else {
+      ensureOk("internal release metadata", response.status, payload);
+      logPass("internal release metadata");
+    }
   }
 
   if (process.env.SMOKE_STEP_UP_PASSWORD) {

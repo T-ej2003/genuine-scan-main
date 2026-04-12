@@ -13,6 +13,7 @@ export {
   linkDeviceClaimToCustomer,
   listCustomerOAuthProviders,
   listCustomerPasskeyCredentials,
+  logoutCustomerVerifySession,
   getCustomerVerificationSessionState,
   revealCustomerVerificationResult,
   reportFraud,

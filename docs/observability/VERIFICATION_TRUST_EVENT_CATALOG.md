@@ -81,8 +81,11 @@ MSCQR emits structured `verification_trust_metric` events for premium-launch tru
 - Signing fallback watch:
   - `event="verification_trust_metric" signingMode="hmac"`
 
+Machine-readable saved searches: [verification_trust_metric.saved-searches.json](verification_trust_metric.saved-searches.json)
+
 ## Release gate expectation
 - These events must be visible in the production log pipeline before premium-client launch.
 - Alert rules derived from this catalog must be configured and tested.
+- Alert destination bindings should be maintained from [verification_trust_metric.alert-bindings.template.json](verification_trust_metric.alert-bindings.template.json).
 - Metric extraction should follow [verification_trust_metric.metrics.yml](verification_trust_metric.metrics.yml) so replay, provenance, challenge, and signer posture are measured consistently.
 - Privacy review must confirm that no raw customer identifiers or proof/session tokens are emitted.

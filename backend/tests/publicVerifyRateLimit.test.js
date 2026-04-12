@@ -39,6 +39,30 @@ assert.notStrictEqual(
   "different devices on the same IP should not share the same public verify bucket"
 );
 
+const verifyIpv4Canonical = buildPublicVerifyRateLimitKey(
+  buildRequest({
+    code: "AADS00000020171",
+    device: "device-a",
+    ip: "203.0.113.9",
+  }),
+  "verify"
+);
+
+const verifyIpv4MappedCanonical = buildPublicVerifyRateLimitKey(
+  buildRequest({
+    code: "AADS00000020171",
+    device: "device-a",
+    ip: "::ffff:203.0.113.9",
+  }),
+  "verify"
+);
+
+assert.strictEqual(
+  verifyIpv4Canonical,
+  verifyIpv4MappedCanonical,
+  "IPv4 and IPv4-mapped IPv6 representations must map to the same public verify rate-limit bucket"
+);
+
 const customerKey = buildPublicVerifyRateLimitKey(
   buildRequest({
     token: "signed-scan-token",

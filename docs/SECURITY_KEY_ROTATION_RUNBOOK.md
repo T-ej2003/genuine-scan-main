@@ -72,7 +72,7 @@ Deploy backend and frontend with both slots present.
 
 Run:
 
-- health/version checks
+- health/internal-release checks
 - admin login
 - refresh session
 - password reset
@@ -179,7 +179,7 @@ Rollback is allowed only if the new deployment is broken and the previous secret
 
 - `curl -sS /healthz`
 - `curl -sS /api/healthz`
-- `curl -sS /api/version`
+- authenticated `GET /api/internal/release`
 - admin login works
 - refresh works
 - password reset works

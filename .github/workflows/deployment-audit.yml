@@ -34,6 +34,24 @@ jobs:
       - name: Install backend dependencies
         run: cd backend && npm ci
 
+      - name: Dependency audit gate
+        run: npm run check:dependency-audit
+
+      - name: Trust observability guardrails
+        run: npm run check:trust-observability
+
+      - name: Trust alert bindings
+        run: npm run check:trust-alert-bindings
+
+      - name: Rotation evidence gate
+        run: npm run check:rotation-evidence
+
+      - name: Nginx hardening invariants
+        run: npm run check:nginx-hardening
+
+      - name: Public metadata surface
+        run: npm run check:public-metadata-surface
+
       - name: Run full release validation
         run: npm run verify:release
 
