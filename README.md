@@ -89,7 +89,16 @@ Targeted verification:
 npm run typecheck:incremental
 npm --prefix backend run build
 npm run build
+npm run verify:rc-local
 ```
+
+Environment setup/doctor scripts:
+
+```bash
+bash scripts/dev/doctor.sh
+```
+
+See [docs/DEV_ENV_SETUP.md](docs/DEV_ENV_SETUP.md) for required toolchain installation.
 
 Optional live smoke run against a ready environment:
 

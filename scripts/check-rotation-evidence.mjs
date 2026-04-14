@@ -12,7 +12,19 @@ if (!existsSync(evidencePath)) {
 const evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
 const failures = [];
 
-const requiredTopLevel = ["recordedAt", "approvedBy", "approverRole", "reason", "ticket", "environment", "families"];
+const requiredTopLevel = [
+  "recordedAt",
+  "approvedBy",
+  "approverRole",
+  "reason",
+  "ticket",
+  "environment",
+  "cleanupWindowComplete",
+  "cleanupCompletedAt",
+  "cleanupVerifiedBy",
+  "linkedDeployShas",
+  "families",
+];
 for (const key of requiredTopLevel) {
   if (!(key in evidence)) {
     failures.push(`rotation evidence missing required field: ${key}`);
@@ -34,6 +46,21 @@ if (Number.isNaN(recordedAt.getTime())) {
 const families = Array.isArray(evidence.families) ? evidence.families : [];
 if (!families.length) {
   failures.push("rotation evidence must include at least one rotated family");
+}
+if (!Array.isArray(evidence.linkedDeployShas) || evidence.linkedDeployShas.length === 0) {
+  failures.push("rotation evidence must include at least one linked deploy SHA");
+}
+if (!String(evidence.cleanupVerifiedBy || "").trim()) {
+  failures.push("rotation evidence cleanupVerifiedBy must be set");
+}
+const cleanupCompletedAt = new Date(String(evidence.cleanupCompletedAt || ""));
+if (Number.isNaN(cleanupCompletedAt.getTime())) {
+  failures.push("rotation evidence cleanupCompletedAt must be a valid ISO date-time");
+}
+const cleanupWindowComplete = Boolean(evidence.cleanupWindowComplete);
+const requiresCleanupConfirmation = String(process.env.ROTATION_WINDOW_COMPLETE || "").trim().toLowerCase() === "true";
+if (requiresCleanupConfirmation && !cleanupWindowComplete) {
+  failures.push("rotation evidence cleanupWindowComplete must be true when ROTATION_WINDOW_COMPLETE=true");
 }
 
 const requiredFamilies = ["jwt_secrets", "qr_signing_keys"];
@@ -65,4 +92,3 @@ if (failures.length > 0) {
 }
 
 console.log("Rotation evidence check passed.");
-

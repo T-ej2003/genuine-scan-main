@@ -8,7 +8,7 @@ This repository now includes `.github/workflows/release-candidate-gate.yml` with
 ## What this gate enforces
 
 - Trust-critical test coverage before production merge.
-- A staging smoke check using `npm run smoke:release`.
+- A staging smoke check using `npm run verify:staging-smoke`.
 - Fail-fast behavior when staging credentials/config are missing.
 
 ## Required staging configuration
@@ -18,22 +18,22 @@ Set these in the repository before expecting `rc-staging-smoke` to pass:
 ### Repository Variables
 
 - `STAGING_SMOKE_BASE_URL` (required)
-- `STAGING_SMOKE_API_BASE_URL` (optional)
-- `STAGING_SMOKE_VERIFY_CODE` (optional)
-- `STAGING_SMOKE_BATCH_PRINT_ENDPOINT` (optional)
-- `STAGING_SMOKE_BATCH_PRINT_PAYLOAD_JSON` (optional)
-- `STAGING_SMOKE_INCIDENT_ENDPOINT` (optional)
-- `STAGING_SMOKE_INCIDENT_PAYLOAD_JSON` (optional)
-- `STAGING_SMOKE_EVIDENCE_URL` (optional)
-- `STAGING_SMOKE_EVIDENCE_PATH` (optional)
+- `STAGING_SMOKE_API_BASE_URL` (optional override; derived from base URL when missing)
+- `STAGING_SMOKE_VERIFY_CODE` (required)
+- `STAGING_SMOKE_BATCH_PRINT_ENDPOINT` (required)
+- `STAGING_SMOKE_BATCH_PRINT_PAYLOAD_JSON` (required)
+- `STAGING_SMOKE_INCIDENT_ENDPOINT` (required)
+- `STAGING_SMOKE_INCIDENT_PAYLOAD_JSON` (required)
+- `STAGING_SMOKE_EVIDENCE_URL` or `STAGING_SMOKE_EVIDENCE_PATH` (at least one required)
+- `RC_PROVENANCE_BACKFILL_EVIDENCE_REF` (required for release evidence)
+- `RC_SECRET_ROTATION_EVIDENCE_REF` (required for release evidence)
+- `RC_INCIDENT_DRILL_EVIDENCE_REF` (required for release evidence)
 
 ### Repository Secrets
 
 - `STAGING_SMOKE_LOGIN_EMAIL` (required)
 - `STAGING_SMOKE_LOGIN_PASSWORD` (required)
-- `STAGING_SMOKE_ADMIN_MFA_CODE` (optional when MFA challenge is expected)
-- `STAGING_SMOKE_ADMIN_STEP_UP_CODE` (optional)
-- `STAGING_SMOKE_STEP_UP_PASSWORD` (optional)
+- `STAGING_SMOKE_ADMIN_MFA_CODE` or `STAGING_SMOKE_ADMIN_STEP_UP_CODE` or `STAGING_SMOKE_STEP_UP_PASSWORD` (at least one required)
 
 ## GitHub branch enforcement requirement
 

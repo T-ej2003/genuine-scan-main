@@ -40,6 +40,13 @@ for (const alertName of requiredNames) {
   }
   if (!String(entry.runbook || "").trim()) {
     failures.push(`Trust alert binding ${alertName} is missing runbook`);
+  } else {
+    const runbookRef = String(entry.runbook).trim();
+    const runbookPath = runbookRef.split("#")[0];
+    const resolvedRunbookPath = path.resolve(repoRoot, runbookPath);
+    if (!existsSync(resolvedRunbookPath)) {
+      failures.push(`Trust alert binding ${alertName} points to missing runbook file: ${runbookPath}`);
+    }
   }
 }
 
@@ -50,4 +57,3 @@ if (failures.length > 0) {
 }
 
 console.log(`Trust alert binding check passed (${path.relative(repoRoot, bindingsPath)}).`);
-

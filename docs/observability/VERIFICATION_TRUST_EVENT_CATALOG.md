@@ -82,6 +82,7 @@ MSCQR emits structured `verification_trust_metric` events for premium-launch tru
   - `event="verification_trust_metric" signingMode="hmac"`
 
 Machine-readable saved searches: [verification_trust_metric.saved-searches.json](verification_trust_metric.saved-searches.json)
+CloudWatch deployment guide: [CLOUDWATCH_DEPLOY.md](CLOUDWATCH_DEPLOY.md)
 
 ## Release gate expectation
 - These events must be visible in the production log pipeline before premium-client launch.

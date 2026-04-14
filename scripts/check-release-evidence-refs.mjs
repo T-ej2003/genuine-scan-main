@@ -1,0 +1,66 @@
+const normalize = (value) => String(value || "").trim();
+
+const isPlaceholder = (value) => {
+  const normalized = normalize(value).toLowerCase();
+  if (!normalized) return true;
+  return [
+    "pending",
+    "tbd",
+    "todo",
+    "unknown",
+    "n/a",
+    "none",
+    "example",
+    "placeholder",
+    "deploy-log://rotation/jwt",
+    "deploy-log://rotation/qr-signing",
+  ].some((token) => normalized === token || normalized.includes(token));
+};
+
+const repository = normalize(process.env.GITHUB_REPOSITORY);
+const ref = normalize(process.env.GITHUB_REF);
+const enforceExplicit = normalize(process.env.REQUIRE_RELEASE_EVIDENCE_REFS).toLowerCase() === "true";
+const isReleaseTag = ref.startsWith("refs/tags/release-") || ref.startsWith("refs/tags/v");
+const enforce = enforceExplicit || isReleaseTag;
+
+const requiredRefs = [
+  { key: "PROVENANCE_BACKFILL_EVIDENCE_REF", value: process.env.PROVENANCE_BACKFILL_EVIDENCE_REF },
+  { key: "SECRET_ROTATION_EVIDENCE_REF", value: process.env.SECRET_ROTATION_EVIDENCE_REF },
+  { key: "INCIDENT_DRILL_EVIDENCE_REF", value: process.env.INCIDENT_DRILL_EVIDENCE_REF },
+];
+
+const failures = [];
+const warnings = [];
+
+for (const item of requiredRefs) {
+  const value = normalize(item.value);
+  if (isPlaceholder(value)) {
+    const message = `${item.key} is missing or placeholder (${value || "<empty>"})`;
+    if (enforce) failures.push(message);
+    else warnings.push(message);
+  }
+}
+
+const summary = {
+  repository: repository || null,
+  ref: ref || null,
+  enforce,
+  checkedAt: new Date().toISOString(),
+  refs: Object.fromEntries(requiredRefs.map((item) => [item.key, normalize(item.value) || null])),
+};
+
+console.log(JSON.stringify(summary, null, 2));
+for (const warning of warnings) {
+  console.warn(`warning: ${warning}`);
+}
+
+if (failures.length > 0) {
+  console.error("Release evidence reference check failed:");
+  for (const failure of failures) {
+    console.error(`- ${failure}`);
+  }
+  process.exit(1);
+}
+
+console.log("Release evidence reference check passed.");
+

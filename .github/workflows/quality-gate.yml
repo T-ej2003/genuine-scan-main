@@ -35,14 +35,26 @@ jobs:
       - name: Trust alert bindings
         run: npm run check:trust-alert-bindings
 
+      - name: CloudWatch config guardrails
+        run: npm run check:cloudwatch-config
+
       - name: Rotation evidence gate
         run: npm run check:rotation-evidence
+
+      - name: Rotation cleanup gate
+        run: npm run check:rotation-cleanup
+
+      - name: Customer auth cutover gate
+        run: npm run check:customer-auth-cutover
 
       - name: Nginx hardening invariants
         run: npm run check:nginx-hardening
 
       - name: Public metadata surface
         run: npm run check:public-metadata-surface
+
+      - name: Release evidence refs
+        run: npm run check:release-evidence-refs
 
   frontend:
     runs-on: ubuntu-latest
@@ -59,6 +71,11 @@ jobs:
 
       - name: Strict typecheck
         run: npm run typecheck
+
+      - name: Lint changed files
+        env:
+          ENFORCE_LINT_CHANGED: ${{ vars.ENFORCE_LINT_CHANGED }}
+        run: npm run lint:changed
 
       - name: Code-size budgets
         run: npm run check:budgets

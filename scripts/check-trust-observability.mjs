@@ -8,6 +8,15 @@ const files = {
   metricsMap: path.join(repoRoot, "docs", "observability", "verification_trust_metric.metrics.yml"),
   examples: path.join(repoRoot, "docs", "observability", "verification_trust_metric.examples.json"),
   savedSearches: path.join(repoRoot, "docs", "observability", "verification_trust_metric.saved-searches.json"),
+  cloudwatchDeployGuide: path.join(repoRoot, "docs", "observability", "CLOUDWATCH_DEPLOY.md"),
+  cloudwatchFilters: path.join(
+    repoRoot,
+    "docs",
+    "observability",
+    "cloudwatch",
+    "verification-trust-metric-filters.json"
+  ),
+  cloudwatchAlarms: path.join(repoRoot, "docs", "observability", "cloudwatch", "verification-trust-alarms.json"),
 };
 
 const failures = [];
@@ -83,4 +92,3 @@ if (failures.length > 0) {
 }
 
 console.log("Trust observability check passed.");
-

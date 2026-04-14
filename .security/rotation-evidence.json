@@ -5,6 +5,12 @@
   "reason": "Premium launch hardening rotation window",
   "ticket": "SEC-ROT-2026-04",
   "environment": "shared",
+  "cleanupWindowComplete": false,
+  "cleanupCompletedAt": "2026-04-12T20:00:00.000Z",
+  "cleanupVerifiedBy": "security-owner@example.com",
+  "linkedDeployShas": [
+    "a26e73a"
+  ],
   "families": [
     {
       "name": "jwt_secrets",

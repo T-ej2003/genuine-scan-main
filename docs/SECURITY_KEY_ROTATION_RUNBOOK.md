@@ -67,6 +67,7 @@ export IP_HASH_SALT_CURRENT="<new-ip-salt>"
 ```
 
 Deploy backend and frontend with both slots present.
+Record this in `.security/rotation-evidence.json` with linked deploy SHA(s).
 
 ### 3. Verify During the Cutover
 
@@ -114,6 +115,13 @@ unset IP_HASH_SALT_PREVIOUS
 ```
 
 Redeploy again. At that point only the new `CURRENT` secrets remain.
+
+Mark cleanup in `.security/rotation-evidence.json`:
+
+- `cleanupWindowComplete=true`
+- `cleanupCompletedAt=<timestamp>`
+- `cleanupVerifiedBy=<operator>`
+- `linkedDeployShas` includes both deploy SHAs
 
 ## Secret-Specific Notes
 
@@ -188,6 +196,18 @@ Rollback is allowed only if the new deployment is broken and the previous secret
 - public verify works
 - incident submit works
 - printer SSE stream reconnects cleanly
+
+## CI policy checks
+
+- `npm run check:rotation-evidence`
+- `npm run check:rotation-cleanup`
+
+When the rotation window is closed, run with:
+
+```bash
+ROTATION_WINDOW_COMPLETE=true npm run check:rotation-evidence
+ROTATION_WINDOW_COMPLETE=true npm run check:rotation-cleanup
+```
 
 ## Operational Notes
 

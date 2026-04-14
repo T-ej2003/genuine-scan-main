@@ -93,13 +93,13 @@ This runbook is for trust-critical launch incidents that affect public verificat
 
 ### Immediate actions
 1. Run the provenance backfill in dry-run mode first:
-   - `npm --prefix backend run data:backfill-qr-provenance -- --limit 500 --json`
+   - `npm run backfill:provenance:dry-run`
 2. Review the output:
    - `UPGRADE_GOVERNED_PRINT`
    - `REPAIR_GOVERNED_READY_AT`
    - `LEAVE_UNKNOWN_HISTORICAL`
 3. Execute only after review and approval:
-   - `npm --prefix backend run data:backfill-qr-provenance -- --execute --limit 500`
+   - `npm run backfill:provenance:execute`
 4. Never manually upgrade `LEGACY_UNSPECIFIED` rows without direct governed-print evidence.
 
 ### Evidence to collect

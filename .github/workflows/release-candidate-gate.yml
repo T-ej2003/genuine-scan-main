@@ -42,6 +42,11 @@ jobs:
       - name: Install backend dependencies
         run: npm --prefix backend ci
 
+      - name: Lint changed files
+        env:
+          ENFORCE_LINT_CHANGED: ${{ vars.ENFORCE_LINT_CHANGED }}
+        run: npm run lint:changed
+
       - name: Security guardrails
         run: npm run check:security-guardrails
 
@@ -54,8 +59,17 @@ jobs:
       - name: Trust alert bindings
         run: npm run check:trust-alert-bindings
 
+      - name: CloudWatch config guardrails
+        run: npm run check:cloudwatch-config
+
       - name: Rotation evidence gate
         run: npm run check:rotation-evidence
+
+      - name: Rotation cleanup gate
+        run: npm run check:rotation-cleanup
+
+      - name: Customer auth cutover gate
+        run: npm run check:customer-auth-cutover
 
       - name: Nginx hardening invariants
         run: npm run check:nginx-hardening
@@ -106,28 +120,12 @@ jobs:
         run: npm ci
 
       - name: Validate staging smoke configuration
-        run: |
-          missing=0
-          if [ -z "${SMOKE_BASE_URL}" ]; then
-            echo "::error::Missing required var STAGING_SMOKE_BASE_URL"
-            missing=1
-          fi
-          if [ -z "${SMOKE_LOGIN_EMAIL}" ]; then
-            echo "::error::Missing required secret STAGING_SMOKE_LOGIN_EMAIL"
-            missing=1
-          fi
-          if [ -z "${SMOKE_LOGIN_PASSWORD}" ]; then
-            echo "::error::Missing required secret STAGING_SMOKE_LOGIN_PASSWORD"
-            missing=1
-          fi
-          if [ "$missing" -ne 0 ]; then
-            exit 1
-          fi
+        run: node scripts/check-staging-smoke-config.mjs
 
       - name: Run staging smoke gate
         run: |
           set -o pipefail
-          npm run smoke:release | tee smoke-release.log
+          npm run verify:staging-smoke | tee smoke-release.log
 
       - name: Upload staging smoke log
         if: always()
@@ -171,14 +169,40 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
       - name: Build release checklist artifact
         env:
           TRUST_CRITICAL_RESULT: ${{ needs.rc-trust-critical.result }}
           STAGING_SMOKE_RESULT: ${{ needs.rc-staging-smoke.result }}
+          GOVERNANCE_RESULT: ${{ needs.rc-governance.result }}
           DEPENDENCY_AUDIT_RESULT: ${{ needs.rc-trust-critical.result }}
           PROVENANCE_BACKFILL_EVIDENCE_REF: ${{ vars.RC_PROVENANCE_BACKFILL_EVIDENCE_REF }}
           SECRET_ROTATION_EVIDENCE_REF: ${{ vars.RC_SECRET_ROTATION_EVIDENCE_REF }}
-        run: node scripts/create-release-checklist-artifact.mjs
+          INCIDENT_DRILL_EVIDENCE_REF: ${{ vars.RC_INCIDENT_DRILL_EVIDENCE_REF }}
+          REQUIRE_RELEASE_EVIDENCE_REFS: ${{ startsWith(github.ref, 'refs/tags/release-') || startsWith(github.ref, 'refs/tags/v') }}
+        run: node scripts/check-release-evidence-refs.mjs && node scripts/create-release-checklist-artifact.mjs
+
+      - name: Lint debt report
+        run: npm run lint:debt:report
+
+      - name: Upload lint debt report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-debt-report
+          path: |
+            audit-artifacts/lint-debt-report.json
+            audit-artifacts/lint-debt-issue-template.md
+          if-no-files-found: ignore
 
       - name: Upload release checklist artifact
         uses: actions/upload-artifact@v4
