@@ -28,6 +28,7 @@
 | Phase 1 | Tighten connector trust surface | In progress | Connector UI still needs final browser QA against live manifest/signing evidence. | `src/pages/ConnectorDownload.tsx` | Bring back signing/account evidence. | Codex / User |
 | Phase 2 | Remove launch-visible dev residue | Done | Deleted unused mock-data file and replaced dev-like 404 experience. | `src/lib/mock-data.ts` removed, `src/pages/NotFound.tsx` updated | Run UI regression tests. | Codex |
 | Phase 2 | Clean support and trust wording | Done | Strengthened trust/legal/support guidance in live UI. | public pages, support launcher, footers | Browser QA. | Codex / User |
+| Phase 2 | Fix worker archive bootstrap SQL | Done | Split trigger drop/create into separate raw SQL executions so Prisma/Postgres no longer reject the archive bootstrap with a multi-command prepared statement error. Added runtime regression coverage. | `backend/src/services/hotEventPartitionService.ts`, `backend/tests/hotEventPartitionRuntimeSql.test.js` | Redeploy backend and worker, then confirm logs stay clean. | Codex / User |
 | Phase 2 | Permission-sensitive route verification | Not started | No new permission test matrix has been automated yet. | Audit artifacts | Convert role checks into executable validation next. | Codex |
 | Phase 3 | Align legal/privacy UI with implementation | Done | Legal pages reflect actual cookies, sessions, support diagnostics, Sentry, and AWS-hosting posture. | new public legal pages | Lawyer review. | Codex / User |
 | Phase 3 | Add retention and DPA handoff artifacts | Done | Added engineering retention notes and DPA handoff brief. | `retention_deletion_implementation_notes.md`, `dpa_handoff_brief.md` | Counsel completes final text. | Codex / User |
@@ -53,6 +54,8 @@
   - `customerVerifyAuthCookieMode.test.js`
   - `securityHardening.test.js`
   - `authAdminLoginMfaCycle.test.js`
+  - `hotEventPartitionPlan.test.js`
+  - `hotEventPartitionRuntimeSql.test.js`
 
 ## What Abhiram must do next
 

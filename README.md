@@ -760,6 +760,7 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 
 Production note:
 - `docker-compose.yml` is now fail-closed for object storage credentials. Set `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `OBJECT_STORAGE_ACCESS_KEY`, and `OBJECT_STORAGE_SECRET_KEY` explicitly in runtime env.
+- On production hosts, create a project-root `.env` beside `docker-compose.yml` so Docker Compose can interpolate these values before startup. `backend/.env` alone is not enough for the `minio` and `minio-init` services.
 
 Run migrations in container:
 

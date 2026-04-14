@@ -251,8 +251,8 @@ const ensureDuplicateGuardFunction = async () => {
 
 const ensureInsertGuardTrigger = async (tableName: string) => {
   const triggerName = `${normalizeBaseName(tableName)}_guard_uuid_insert`;
+  await executeRawStatement(`DROP TRIGGER IF EXISTS ${q(triggerName)} ON ${q(tableName)};`);
   await executeRawStatement(`
-    DROP TRIGGER IF EXISTS ${q(triggerName)} ON ${q(tableName)};
     CREATE TRIGGER ${q(triggerName)}
     BEFORE INSERT ON ${q(tableName)}
     FOR EACH ROW
