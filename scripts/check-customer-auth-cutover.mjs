@@ -7,7 +7,7 @@ const parseBool = (value, fallback = false) => {
 };
 
 const enforce = parseBool(process.env.ENFORCE_BEARER_COMPAT_DISABLE, false);
-const compatible = parseBool(process.env.VERIFY_CUSTOMER_BEARER_COMPAT_ENABLED, true);
+const compatible = parseBool(process.env.VERIFY_CUSTOMER_BEARER_COMPAT_ENABLED, false);
 
 if (!enforce) {
   console.log("Customer auth cutover check skipped (ENFORCE_BEARER_COMPAT_DISABLE is false).");
@@ -22,4 +22,3 @@ if (compatible) {
 }
 
 console.log("Customer auth cutover check passed.");
-

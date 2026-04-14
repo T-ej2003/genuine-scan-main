@@ -30,7 +30,7 @@ export const isCustomerVerifyCookieAuthEnabled = () =>
   parseBoolEnv(process.env.VERIFY_CUSTOMER_COOKIE_AUTH_ENABLED, true);
 
 export const isCustomerVerifyBearerCompatEnabled = () =>
-  parseBoolEnv(process.env.VERIFY_CUSTOMER_BEARER_COMPAT_ENABLED, true);
+  parseBoolEnv(process.env.VERIFY_CUSTOMER_BEARER_COMPAT_ENABLED, process.env.NODE_ENV !== "production");
 
 export const readCustomerVerifySessionCookie = (req: Request) => {
   if (!isCustomerVerifyCookieAuthEnabled()) return null;
@@ -51,4 +51,3 @@ export const clearCustomerVerifySessionCookie = (res: Response) => {
   if (!isCustomerVerifyCookieAuthEnabled()) return;
   res.clearCookie(CUSTOMER_VERIFY_SESSION_COOKIE_NAME, customerVerifyCookieOptions(0));
 };
-

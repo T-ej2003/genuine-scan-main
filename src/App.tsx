@@ -10,6 +10,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import StepUpRecoveryDialog from "@/components/auth/StepUpRecoveryDialog";
 import HelpAssistantWidget from "@/components/help/HelpAssistantWidget";
+import { CookieConsentBanner } from "@/components/trust/CookieConsentBanner";
 import { getRoleHelpHome } from "@/help/contextual-help";
 import RouteMetricsTracker from "@/components/RouteMetricsTracker";
 import { MutationEventBridge, queryClient } from "@/lib/query-client";
@@ -38,6 +39,9 @@ const Verify = lazy(() => import("@/pages/Verify"));
 const VerifyLanding = lazy(() => import("@/pages/VerifyLanding"));
 const Index = lazy(() => import("@/pages/Index"));
 const TrustCenter = lazy(() => import("@/pages/TrustCenter"));
+const PrivacyPolicy = lazy(() => import("@/pages/PrivacyPolicy"));
+const TermsOfUse = lazy(() => import("@/pages/TermsOfUse"));
+const CookieNotice = lazy(() => import("@/pages/CookieNotice"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 const SettingsPage = lazy(() => import("@/pages/Settings"));
 const AccountSettings = lazy(() => import("@/pages/AccountSettings"));
@@ -148,6 +152,9 @@ function AppRoutes() {
         {/* Public */}
         <Route path="/" element={<Index />} />
         <Route path="/trust" element={<TrustCenter />} />
+        <Route path="/privacy" element={<PrivacyPolicy />} />
+        <Route path="/terms" element={<TermsOfUse />} />
+        <Route path="/cookies" element={<CookieNotice />} />
         <Route path="/verify" element={<VerifyLanding />} />
         <Route path="/verify/:code" element={<Verify />} />
         <Route path="/scan" element={<Verify />} />
@@ -522,6 +529,7 @@ export default function App() {
             <AppRoutes />
             <RouteMetricsTracker />
             <HelpAssistantWidget />
+            <CookieConsentBanner />
           </BrowserRouter>
         </TooltipProvider>
       </AuthProvider>

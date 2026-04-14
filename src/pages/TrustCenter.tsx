@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { ArrowRight, LifeBuoy, LockKeyhole, ScanLine, ShieldCheck, ShieldAlert, Waypoints } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { LegalFooter } from "@/components/trust/LegalFooter";
 
 const CONTACT_EMAIL = "administration@mscqr.com";
 
@@ -195,6 +196,7 @@ export default function TrustCenter() {
           </div>
         </section>
       </main>
+      <LegalFooter tone="dark" />
     </div>
   );
 }

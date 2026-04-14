@@ -4,6 +4,7 @@ import { ChevronDown, CircleHelp, LogOut, Menu, Printer, Settings } from "lucide
 
 import { APP_PATHS, getAppBreadcrumbs, getNavItemsForRole, getRoleDisplayLabel, isAppRouteActive } from "@/app/route-metadata";
 import { SupportIssueLauncher } from "@/components/support/SupportIssueLauncher";
+import { LegalFooter } from "@/components/trust/LegalFooter";
 import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
@@ -330,12 +331,15 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         </main>
 
         <footer className="px-4 pb-6 lg:px-6">
-          <div className="text-center text-xs text-muted-foreground">
-            Need guidance on this page?{" "}
-            <Link to={contextualHelpRoute} className="text-foreground underline-offset-4 hover:underline">
-              Open the relevant help section
-            </Link>
-            .
+          <div className="space-y-4">
+            <div className="text-center text-xs text-muted-foreground">
+              Need guidance on this page?{" "}
+              <Link to={contextualHelpRoute} className="text-foreground underline-offset-4 hover:underline">
+                Open the relevant help section
+              </Link>
+              .
+            </div>
+            <LegalFooter className="rounded-2xl border border-border bg-card" />
           </div>
         </footer>
       </div>

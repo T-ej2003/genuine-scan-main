@@ -31,12 +31,93 @@ CREATE TYPE "IncidentCommChannel" AS ENUM ('EMAIL');
 -- CreateEnum
 CREATE TYPE "IncidentCommStatus" AS ENUM ('QUEUED', 'SENT', 'FAILED');
 
--- AlterTable
-ALTER TABLE "QrScanLog"
-ADD COLUMN "locationName" TEXT,
-ADD COLUMN "locationCountry" TEXT,
-ADD COLUMN "locationRegion" TEXT,
-ADD COLUMN "locationCity" TEXT;
+-- Historical migration bootstrap
+-- This migration originally assumed QrScanLog already existed from earlier history.
+-- Clean-environment validation showed that assumption was false, so this migration now
+-- bootstraps the missing table shape before incident-response columns reference it.
+CREATE TABLE IF NOT EXISTS "QrScanLog" (
+    "id" TEXT NOT NULL,
+    "code" TEXT NOT NULL,
+    "qrCodeId" TEXT NOT NULL,
+    "licenseeId" TEXT NOT NULL,
+    "batchId" TEXT,
+    "status" "QRStatus" NOT NULL,
+    "scannedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "isFirstScan" BOOLEAN NOT NULL DEFAULT false,
+    "scanCount" INTEGER,
+    "customerUserId" TEXT,
+    "ownershipId" TEXT,
+    "ownershipMatchMethod" TEXT,
+    "ipAddress" TEXT,
+    "userAgent" TEXT,
+    "device" TEXT,
+    "latitude" DOUBLE PRECISION,
+    "longitude" DOUBLE PRECISION,
+    "accuracy" DOUBLE PRECISION,
+
+    CONSTRAINT "QrScanLog_pkey" PRIMARY KEY ("id")
+);
+
+CREATE INDEX IF NOT EXISTS "QrScanLog_licenseeId_idx" ON "QrScanLog"("licenseeId");
+CREATE INDEX IF NOT EXISTS "QrScanLog_batchId_idx" ON "QrScanLog"("batchId");
+CREATE INDEX IF NOT EXISTS "QrScanLog_code_idx" ON "QrScanLog"("code");
+CREATE INDEX IF NOT EXISTS "QrScanLog_scannedAt_idx" ON "QrScanLog"("scannedAt");
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'QrScanLog_qrCodeId_fkey') THEN
+    ALTER TABLE "QrScanLog"
+      ADD CONSTRAINT "QrScanLog_qrCodeId_fkey"
+      FOREIGN KEY ("qrCodeId") REFERENCES "QRCode"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'QrScanLog_licenseeId_fkey') THEN
+    ALTER TABLE "QrScanLog"
+      ADD CONSTRAINT "QrScanLog_licenseeId_fkey"
+      FOREIGN KEY ("licenseeId") REFERENCES "Licensee"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'QrScanLog_batchId_fkey') THEN
+    ALTER TABLE "QrScanLog"
+      ADD CONSTRAINT "QrScanLog_batchId_fkey"
+      FOREIGN KEY ("batchId") REFERENCES "Batch"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'QrScanLog' AND column_name = 'locationName'
+  ) THEN
+    ALTER TABLE "QrScanLog" ADD COLUMN "locationName" TEXT;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'QrScanLog' AND column_name = 'locationCountry'
+  ) THEN
+    ALTER TABLE "QrScanLog" ADD COLUMN "locationCountry" TEXT;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'QrScanLog' AND column_name = 'locationRegion'
+  ) THEN
+    ALTER TABLE "QrScanLog" ADD COLUMN "locationRegion" TEXT;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'QrScanLog' AND column_name = 'locationCity'
+  ) THEN
+    ALTER TABLE "QrScanLog" ADD COLUMN "locationCity" TEXT;
+  END IF;
+END $$;
 
 -- CreateTable
 CREATE TABLE "Incident" (

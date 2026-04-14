@@ -108,6 +108,13 @@ if (process.env.NODE_ENV === "production") {
     process.exit(1);
   }
 
+  if (parseBool(process.env.AUTH_LEGACY_TOKEN_RESPONSE_ENABLED, false)) {
+    logger.error(
+      "Refusing to start: AUTH_LEGACY_TOKEN_RESPONSE_ENABLED must remain false in production. The launch posture is cookie-backed auth only."
+    );
+    process.exit(1);
+  }
+
   const insecurePublicUrls = [
     "PUBLIC_SCAN_WEB_BASE_URL",
     "PUBLIC_VERIFY_WEB_BASE_URL",
@@ -198,6 +205,12 @@ if (process.env.NODE_ENV === "production") {
       "Refusing to start: production object storage credentials are using known default/insecure values."
     );
     process.exit(1);
+  }
+
+  if (parseBool(process.env.VERIFY_CUSTOMER_BEARER_COMPAT_ENABLED, false)) {
+    logger.warn(
+      "Production customer verify bearer compatibility is enabled. This should only be used as a documented emergency rollback path."
+    );
   }
 }
 

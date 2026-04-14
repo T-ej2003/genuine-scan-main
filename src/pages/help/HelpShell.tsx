@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { ComplianceStatements } from "@/components/help/ComplianceStatements";
+import { LegalFooter } from "@/components/trust/LegalFooter";
 import { getRoleHelpHome } from "@/help/contextual-help";
 import { HELP_SITE_CONFIG } from "@/help/site-config";
 
@@ -91,6 +92,7 @@ export function HelpShell({
             </Link>
           </div>
         </div>
+        <LegalFooter className="border-t border-border bg-transparent" />
       </footer>
     </div>
   );
