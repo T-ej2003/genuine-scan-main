@@ -16,7 +16,9 @@ const uploadDirs = [
 
 const run = async () => {
   if (!isObjectStorageConfigured()) {
-    throw new Error("Object storage is not configured. Set OBJECT_STORAGE_* env vars first.");
+    throw new Error(
+      "Object storage is not configured. Set OBJECT_STORAGE_BUCKET and OBJECT_STORAGE_REGION/AWS_REGION, then either provide static OBJECT_STORAGE credentials or rely on AWS default credentials."
+    );
   }
 
   let uploaded = 0;

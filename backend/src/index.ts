@@ -27,7 +27,7 @@ import {
 } from "./middleware/publicRateLimit";
 import { hasConfiguredSecret } from "./utils/secretConfig";
 import { buildReadyPayload } from "./controllers/healthController";
-import { isObjectStorageConfigured } from "./services/objectStorageService";
+import { getObjectStorageConfiguration } from "./services/objectStorageService";
 import { isRedisConfigured } from "./services/redisService";
 import {
   getQrSigningProfile,
@@ -187,9 +187,10 @@ if (process.env.NODE_ENV === "production") {
     process.exit(1);
   }
 
-  if (!isObjectStorageConfigured()) {
+  const objectStorageConfiguration = getObjectStorageConfiguration();
+  if (!objectStorageConfiguration.configured) {
     logger.error(
-      "Refusing to start: production requires S3-compatible object storage (OBJECT_STORAGE_* / S3_* / MINIO_*)."
+      `Refusing to start: production requires object storage. ${objectStorageConfiguration.reason} Set OBJECT_STORAGE_BUCKET and OBJECT_STORAGE_REGION/AWS_REGION, then either provide OBJECT_STORAGE_ACCESS_KEY + OBJECT_STORAGE_SECRET_KEY (plus OBJECT_STORAGE_ENDPOINT for MinIO/custom S3) or rely on AWS default credentials/IAM task role with no static object storage credentials.`
     );
     process.exit(1);
   }
@@ -200,7 +201,10 @@ if (process.env.NODE_ENV === "production") {
   const objectStorageSecretKey = String(
     process.env.OBJECT_STORAGE_SECRET_KEY || process.env.S3_SECRET_KEY || process.env.MINIO_ROOT_PASSWORD || ""
   ).trim();
-  if (isKnownInsecureStorageCredential(objectStorageAccessKey) || isKnownInsecureStorageCredential(objectStorageSecretKey)) {
+  if (
+    objectStorageConfiguration.mode === "static-credentials" &&
+    (isKnownInsecureStorageCredential(objectStorageAccessKey) || isKnownInsecureStorageCredential(objectStorageSecretKey))
+  ) {
     logger.error(
       "Refusing to start: production object storage credentials are using known default/insecure values."
     );
