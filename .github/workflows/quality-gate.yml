@@ -120,10 +120,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Docker compose build
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Frontend Docker compose build
         env:
           MINIO_ROOT_USER: ci-minio-user
           MINIO_ROOT_PASSWORD: ci-minio-password
           OBJECT_STORAGE_ACCESS_KEY: ci-object-user
           OBJECT_STORAGE_SECRET_KEY: ci-object-password
-        run: docker compose build backend frontend
+        run: docker compose build frontend
+
+      - name: Backend linux/amd64 buildx validation
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            --file backend/Dockerfile \
+            --build-arg GIT_SHA=ci-${GITHUB_SHA} \
+            --tag mscqr-backend-ci:${GITHUB_SHA} \
+            .

@@ -1,0 +1,148 @@
+name: Publish ECS Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      services:
+        description: "Which production image set to publish"
+        required: true
+        type: choice
+        default: both
+        options:
+          - backend
+          - worker
+          - both
+      git_ref:
+        description: "Git ref, branch, or SHA to publish. Defaults to the branch the workflow runs from."
+        required: false
+        type: string
+      aws_region:
+        description: "AWS region that owns the ECR repositories"
+        required: true
+        type: string
+        default: eu-west-2
+      platforms:
+        description: "Comma-separated target platforms. Keep linux/amd64 for ECS/Fargate."
+        required: true
+        type: string
+        default: linux/amd64,linux/arm64
+      backend_ecr_repo:
+        description: "ECR repository for the backend service image"
+        required: true
+        type: string
+        default: mscqr-backend
+      worker_ecr_repo:
+        description: "ECR repository for the worker service image"
+        required: true
+        type: string
+        default: mscqr-worker
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ inputs.aws_region }}
+      PLATFORMS: ${{ inputs.platforms }}
+      BACKEND_ECR_REPO: ${{ inputs.backend_ecr_repo }}
+      WORKER_ECR_REPO: ${{ inputs.worker_ecr_repo }}
+      SERVICES: ${{ inputs.services }}
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref != '' && inputs.git_ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Validate AWS authentication inputs
+        id: auth-mode
+        env:
+          AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          if [ -n "$AWS_ROLE_TO_ASSUME" ]; then
+            echo "mode=oidc" >> "$GITHUB_OUTPUT"
+          elif [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+            echo "mode=keys" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Configure repository variable AWS_ROLE_TO_ASSUME for OIDC, or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY as fallback secrets."
+            exit 1
+          fi
+
+      - name: Configure AWS credentials via OIDC
+        if: steps.auth-mode.outputs.mode == 'oidc'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+
+      - name: Configure AWS credentials via access keys
+        if: steps.auth-mode.outputs.mode == 'keys'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve immutable image metadata
+        id: image-meta
+        run: |
+          echo "image_tag=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "account_id=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_OUTPUT"
+          echo "resolved_ref=${{ inputs.git_ref != '' && inputs.git_ref || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish ECS images
+        env:
+          IMAGE_TAG: ${{ steps.image-meta.outputs.image_tag }}
+          AWS_ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
+        run: ./scripts/aws/publish-ecs-images.sh "$SERVICES"
+
+      - name: Summarize published manifests
+        env:
+          IMAGE_TAG: ${{ steps.image-meta.outputs.image_tag }}
+          ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
+          RESOLVED_REF: ${{ steps.image-meta.outputs.resolved_ref }}
+        run: |
+          REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+          repos=()
+          case "$SERVICES" in
+            backend) repos+=("$BACKEND_ECR_REPO") ;;
+            worker) repos+=("$WORKER_ECR_REPO") ;;
+            both) repos+=("$BACKEND_ECR_REPO" "$WORKER_ECR_REPO") ;;
+          esac
+
+          {
+            echo "## ECS image publish summary"
+            echo
+            echo "- Ref: \`$RESOLVED_REF\`"
+            echo "- Immutable image tag: \`$IMAGE_TAG\`"
+            echo "- Platforms requested: \`$PLATFORMS\`"
+            echo "- ECS/Fargate requirement: \`linux/amd64\` must be present before task definition updates."
+            echo
+            for repo in "${repos[@]}"; do
+              image_uri="${REGISTRY}/${repo}:${IMAGE_TAG}"
+              echo "### ${repo}"
+              echo
+              echo "- Image URI: \`${image_uri}\`"
+              echo
+              echo '```text'
+              REQUIRED_PLATFORMS="$PLATFORMS" ./scripts/aws/verify-image-manifest.sh "$image_uri"
+              echo '```'
+              echo
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

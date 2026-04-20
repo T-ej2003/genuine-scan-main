@@ -763,6 +763,40 @@ Production note:
 - On production hosts, create a project-root `.env` beside `docker-compose.yml` so Docker Compose can interpolate these values before startup. `backend/.env` alone is not enough for the `minio` and `minio-init` services.
 - ECS/Fargate deployments do not need the MinIO env set. Use `OBJECT_STORAGE_BUCKET` plus `OBJECT_STORAGE_REGION` or `AWS_REGION`, leave `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_ACCESS_KEY`, and `OBJECT_STORAGE_SECRET_KEY` unset, leave `OBJECT_STORAGE_FORCE_PATH_STYLE` unset or set it to `false`, and grant the task role S3 access.
 
+ECS/Fargate image architecture note:
+- Local Docker Compose remains a developer-native workflow. On Apple Silicon, `docker compose build` will naturally create an `arm64` image unless you explicitly cross-build. That is correct for local development and must not be treated as the production publishing path.
+- Production ECS/Fargate currently runs on `LINUX/X86_64`. Every production backend and worker image pushed to ECR must therefore include `linux/amd64`.
+- The repo standard for production is a multi-arch manifest list built with `docker buildx` for `linux/amd64,linux/arm64`. ECS will pull the `linux/amd64` descriptor while Apple Silicon developers still get a safe, repeatable publishing path.
+- Use the repo-owned publish path documented in [docs/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md](/Users/abhiramteja/Downloads/genuine-scan-main/docs/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md:1) instead of ad hoc `docker build` or `docker push` commands.
+
+Exact production image commands:
+
+```bash
+export AWS_REGION=eu-west-2
+export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+export IMAGE_TAG="$(git rev-parse HEAD)"
+export ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+./scripts/aws/publish-ecs-images.sh backend
+./scripts/aws/publish-ecs-images.sh worker
+./scripts/aws/publish-ecs-images.sh both
+```
+
+Exact manifest verification commands before ECS task-definition updates:
+
+```bash
+REQUIRED_PLATFORMS=linux/amd64,linux/arm64 \
+  ./scripts/aws/verify-image-manifest.sh "${ECR_REGISTRY}/mscqr-backend:${IMAGE_TAG}"
+
+REQUIRED_PLATFORMS=linux/amd64,linux/arm64 \
+  ./scripts/aws/verify-image-manifest.sh "${ECR_REGISTRY}/mscqr-worker:${IMAGE_TAG}"
+```
+
+Operator guidance:
+- Do not update the backend or worker ECS task definition until the SHA-tagged image manifest has been verified.
+- Backend and worker intentionally use the same runtime image content from `backend/Dockerfile`, but they stay in separate ECR repositories for operational clarity.
+- Keep the object-storage task-role deployment guidance separate. See [docs/aws/object-storage-task-role.md](/Users/abhiramteja/Downloads/genuine-scan-main/docs/aws/object-storage-task-role.md:1) for the ECS S3 credential contract.
+
 Run migrations in container:
 
 ```bash
@@ -780,6 +814,7 @@ HTTPS for production (`mscqr.com` / `www.mscqr.com`):
 - Issue a certificate with `sh deploy/certbot/issue-letsencrypt.sh`
 - Dry-run renewal with `MSCQR_CERTBOT_DRY_RUN=true sh deploy/certbot/renew-letsencrypt.sh`
 - Full EC2/DNS instructions live in `docs/AWS_EC2_DEPLOY_MSCQR.md`
+- ECS/ECR image architecture instructions live in [docs/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md](/Users/abhiramteja/Downloads/genuine-scan-main/docs/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md:1)
 
 Important compose note:
 

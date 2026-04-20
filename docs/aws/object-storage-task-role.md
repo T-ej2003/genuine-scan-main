@@ -74,3 +74,11 @@ Scope these permissions to the bucket and the object prefix pattern used by the 
 ## Local Development
 
 No ECS changes are required for local Docker Compose + MinIO development. The local MinIO flow still uses the endpoint plus static credentials path.
+
+## Related ECS Deployment Notes
+
+Keep this object-storage contract separate from the production image-architecture workflow.
+
+For the standard ECR/buildx publish path and manifest verification steps, see:
+
+- [docs/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md](/Users/abhiramteja/Downloads/genuine-scan-main/docs/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md:1)

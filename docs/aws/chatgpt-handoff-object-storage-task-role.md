@@ -86,6 +86,7 @@ PY
 
 - Local Docker Compose still intentionally uses the MinIO endpoint plus static credentials flow.
 - `uploadObjectFromFile` currently buffers the file in memory before upload. This is acceptable for current behavior, but streaming or multipart upload would be the next scalability hardening step for larger evidence or compliance artifacts.
+- ECS image architecture and ECR publishing are handled separately. Use [docs/aws/chatgpt-handoff-ecs-image-architecture.md](/Users/abhiramteja/Downloads/genuine-scan-main/docs/aws/chatgpt-handoff-ecs-image-architecture.md:1) for buildx publishing, manifest verification, and task-definition image update steps.
 
 ## Exact Next Manual AWS Deployment Steps
 
