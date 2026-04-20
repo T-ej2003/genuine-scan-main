@@ -761,7 +761,7 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 Production note:
 - `docker-compose.yml` is now fail-closed for object storage credentials. Set `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `OBJECT_STORAGE_ACCESS_KEY`, and `OBJECT_STORAGE_SECRET_KEY` explicitly in runtime env.
 - On production hosts, create a project-root `.env` beside `docker-compose.yml` so Docker Compose can interpolate these values before startup. `backend/.env` alone is not enough for the `minio` and `minio-init` services.
-- ECS/Fargate deployments do not need the MinIO env set. Use `OBJECT_STORAGE_BUCKET` plus `OBJECT_STORAGE_REGION` or `AWS_REGION`, leave `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_ACCESS_KEY`, and `OBJECT_STORAGE_SECRET_KEY` unset, and grant the task role S3 access.
+- ECS/Fargate deployments do not need the MinIO env set. Use `OBJECT_STORAGE_BUCKET` plus `OBJECT_STORAGE_REGION` or `AWS_REGION`, leave `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_ACCESS_KEY`, and `OBJECT_STORAGE_SECRET_KEY` unset, leave `OBJECT_STORAGE_FORCE_PATH_STYLE` unset or set it to `false`, and grant the task role S3 access.
 
 Run migrations in container:
 
