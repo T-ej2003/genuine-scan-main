@@ -8,13 +8,12 @@ import {
 import { z } from "zod";
 
 import { CustomerVerifyRequest } from "../../middleware/customerVerifyAuth";
-import { createAuditLogSafely } from "../../services/auditService";
+import { recordDegradationEvent } from "../../services/degradationEventService";
 import {
   recordCustomerTrustCredential,
   resolveCustomerTrustLevel,
   resolveCustomerTrustSignal,
 } from "../../services/customerTrustService";
-import { recordDegradationEvent } from "../../services/degradationEventService";
 import { resolveVerifyUxPolicy } from "../../services/governanceService";
 import { recordScan } from "../../services/qrService";
 import { evaluateScanAndEnforcePolicy } from "../../services/policyEngineService";
@@ -28,7 +27,6 @@ import {
 } from "../../services/qrTokenService";
 import { assessManualVerificationFallback, assessSignedReplay } from "../../services/verificationReplayService";
 import { persistVerificationDecision, type VerificationDecisionSummary } from "../../services/verificationDecisionService";
-import { attachVerificationPresentationSnapshot } from "../../services/verificationDecisionService";
 import {
   buildPublicIntegrityErrorBody,
   isPublicIntegrityDependencyError,
@@ -68,6 +66,14 @@ import {
   buildMissingQrVerificationPayload,
   buildNotReadyVerificationPayload,
 } from "./verificationResponseBuilders";
+import {
+  applyPublicSemantics,
+  buildDecisionResponseBody,
+  resolvePrintTrustState,
+  safeCreateAuditLog,
+  toNum,
+} from "./verificationDecisionHelpers";
+import { resolveSignedVerificationTarget } from "./verificationSignedTokenResolver";
 
 const verifyParamsSchema = z.object({
   code: z.string().trim().min(2).max(128).optional(),
@@ -123,94 +129,6 @@ const qrVerificationInclude = {
   },
 } as const;
 
-const toNum = (v: unknown) => {
-  const n = parseFloat(String(v));
-  return Number.isFinite(n) ? n : null;
-};
-
-const buildSignedTokenErrorResponse = (message: string, scanOutcome: string) => ({
-  success: true,
-  data: {
-    isAuthentic: false,
-    message,
-    reasons: [message],
-    scanOutcome,
-    proofSource: "SIGNED_LABEL" as VerificationProofSource,
-  },
-});
-
-const applyPublicSemantics = <T extends Record<string, unknown>>(
-  payload: T,
-  semantics: ReturnType<typeof buildPublicVerificationSemantics>
-) => ({
-  ...payload,
-  message: semantics.headline,
-  publicOutcome: semantics.publicOutcome,
-  riskDisposition: semantics.riskDisposition,
-  messageKey: semantics.messageKey,
-  nextActionKey: semantics.nextActionKey,
-});
-
-const withDecisionMetadata = <T extends Record<string, unknown>>(payload: T, decision: VerificationDecisionSummary) => ({
-  ...payload,
-  decisionId: decision.decisionId,
-  decisionVersion: decision.decisionVersion,
-  proofTier: decision.proofTier,
-  reasonCodes: decision.reasonCodes,
-  riskBand: decision.riskBand,
-  replacementStatus: decision.replacementStatus,
-  degradationMode: decision.degradationMode,
-  customerTrustLevel: decision.customerTrustLevel,
-  replacementChainId: decision.replacementChainId || null,
-  publicOutcome: decision.publicOutcome || (payload as any).publicOutcome || null,
-  riskDisposition: decision.riskDisposition || (payload as any).riskDisposition || null,
-  messageKey: decision.messageKey || (payload as any).messageKey || null,
-  nextActionKey: decision.nextActionKey || (payload as any).nextActionKey || null,
-  latestDecisionOutcome: payload.scanOutcome || decision.publicOutcome || null,
-});
-
-const buildDecisionResponseBody = async <T extends Record<string, unknown>>(payload: T, decision: VerificationDecisionSummary) => {
-  const finalPayload = withDecisionMetadata(payload, decision);
-  await attachVerificationPresentationSnapshot(decision.decisionId, finalPayload);
-  return finalPayload;
-};
-
-const safeCreateAuditLog = async (
-  payload: Parameters<typeof createAuditLogSafely>[0],
-  context?: Record<string, unknown>
-) => {
-  const result = await createAuditLogSafely(payload);
-  if (result.queued) {
-    await recordDegradationEvent({
-      dependencyKey: "audit_log",
-      mode: VerificationDegradationMode.QUEUE_AND_RETRY,
-      code: "AUDIT_LOG_QUEUED",
-      message: "Audit log write failed on request path and was queued for retry.",
-      context: {
-        ...context,
-        outboxId: result.outboxId || null,
-        errorMessage: result.errorMessage || null,
-      },
-    });
-    return VerificationDegradationMode.QUEUE_AND_RETRY;
-  }
-  return VerificationDegradationMode.NORMAL;
-};
-
-const resolvePrintTrustState = (qrCode: any, readiness: { isReady?: boolean; governedProofEligible?: boolean } | boolean) => {
-  const readinessState = typeof readiness === "boolean" ? { isReady: readiness, governedProofEligible: false } : readiness;
-  const status = String(qrCode?.status || "").trim().toUpperCase();
-  const issuanceMode = String(qrCode?.issuanceMode || "LEGACY_UNSPECIFIED").trim().toUpperCase();
-  if (issuanceMode === "BREAK_GLASS_DIRECT") return "RESTRICTED_DIRECT_ISSUANCE";
-  if (!readinessState.isReady && (status === "ALLOCATED" || status === "ACTIVATED")) {
-    return "AWAITING_PRINT_CONFIRMATION";
-  }
-  if (readinessState.governedProofEligible) return "PRINT_CONFIRMED";
-  if (!qrCode?.printJobId && !qrCode?.printJob) return "LEGACY_NO_CONTROLLED_PRINT";
-  if (readinessState.isReady) return "LIMITED_PROVENANCE";
-  return "AWAITING_PRINT_CONFIRMATION";
-};
-
 export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) => {
   try {
     const paramsParsed = verifyParamsSchema.safeParse(req.params || {});
@@ -236,246 +154,31 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
     const requesterIpHash = hashIp(req.ip);
     let qrCode;
     let signedPayload: ReturnType<typeof verifyQrToken>["payload"] | null = null;
-
-    const respondSignedTokenFailure = async (
-      statusCode: number,
-      message: string,
-      scanOutcome: string,
-      errorOutcome: VerificationDecisionOutcome
-    ) => {
-      const semantics = buildPublicVerificationSemantics({
-        classification: "BLOCKED_BY_SECURITY",
-        proofSource: "SIGNED_LABEL",
-        integrityError: true,
-      });
-      const decision = await persistVerificationDecision({
-        code: normalizedCode || null,
-        proofSource: "SIGNED_LABEL",
-        isAuthentic: false,
-        degradationMode: VerificationDegradationMode.NORMAL,
-        customerTrustLevel: resolveCustomerTrustLevel({
-          customerUserId,
-          deviceTokenHash,
-          customerAuthStrength: req.customer?.authStrength || null,
-        }),
-        errorOutcome,
-        reasons: [message, scanOutcome],
-        actorIpHash: requesterIpHash,
-        actorDeviceHash,
-        publicOutcome: semantics.publicOutcome,
-        riskDisposition: semantics.riskDisposition,
-        messageKey: semantics.messageKey,
-        nextActionKey: semantics.nextActionKey,
-        metadata: {
-          route: req.originalUrl || req.url,
-          signedToken: true,
-          invalidOutcome: scanOutcome,
-        },
-      });
-      const response = buildSignedTokenErrorResponse(message, scanOutcome);
-      return res.status(statusCode).json({
-        success: true,
-        data: await buildDecisionResponseBody(applyPublicSemantics(response.data, semantics), decision),
-      });
-    };
-
     let verifiedSigningMetadata: Record<string, unknown> | null = null;
 
     if (signedToken) {
-      let payload;
-      try {
-        const verifiedToken = verifyQrToken(signedToken);
-        payload = verifiedToken.payload;
-        verifiedSigningMetadata = verifiedToken.signing;
-        signedPayload = payload;
-      } catch {
-        return respondSignedTokenFailure(400, "Invalid or tampered QR token.", "INVALID_SIGNATURE", VerificationDecisionOutcome.INVALID_SIGNATURE);
-      }
-
-      if (!payload.qr_id || !payload.licensee_id || !payload.nonce) {
-        return respondSignedTokenFailure(400, "Invalid QR token payload.", "INVALID_PAYLOAD", VerificationDecisionOutcome.INVALID_PAYLOAD);
-      }
-
-      if (payload.exp && payload.exp * 1000 < Date.now()) {
-        return respondSignedTokenFailure(400, "QR token expired.", "EXPIRED", VerificationDecisionOutcome.EXPIRED);
-      }
-
-      if (isPrinterTestQrId(payload.qr_id)) {
-        const semantics = buildPublicVerificationSemantics({
-          classification: "LEGIT_REPEAT",
-          proofSource,
-          printerSetupOnly: true,
-        });
-        const decision = await persistVerificationDecision({
-          code: "PRINTER_SETUP_TEST",
-          proofSource,
-          classification: "LEGIT_REPEAT",
-          reasons: ["Printer setup test label verified."],
-          isAuthentic: true,
-          customerTrustLevel: resolveCustomerTrustLevel({
-            customerUserId,
-            deviceTokenHash,
-            customerAuthStrength: req.customer?.authStrength || null,
-          }),
-          actorIpHash: requesterIpHash,
-          actorDeviceHash,
-          publicOutcome: semantics.publicOutcome,
-          riskDisposition: semantics.riskDisposition,
-          messageKey: semantics.messageKey,
-          nextActionKey: semantics.nextActionKey,
-          metadata: {
-            route: req.originalUrl || req.url,
-            signedToken: true,
-            scanOutcome: "PRINTER_SETUP_TEST",
-          },
-        });
-        return res.json({
-          success: true,
-          data: await buildDecisionResponseBody(
-            applyPublicSemantics({
-              isAuthentic: true,
-              message:
-                "MSCQR printer setup test label verified. This QR is for printer setup only and does not represent a product.",
-              scanOutcome: "PRINTER_SETUP_TEST",
-              classification: "LEGIT_REPEAT",
-              code: "PRINTER_SETUP_TEST",
-              status: "TEST_ONLY",
-              proofSource,
-              warningMessage: "Use this label only to confirm printer setup and print quality.",
-              ownershipStatus: {
-                isClaimed: false,
-                claimedAt: null,
-                isOwnedByRequester: false,
-                isClaimedByAnother: false,
-                canClaim: false,
-              },
-              verifyUxPolicy: {
-                showTimelineCard: false,
-                showRiskCards: false,
-                allowOwnershipClaim: false,
-                allowFraudReport: false,
-                mobileCameraAssist: true,
-              },
-              scanSummary: {
-                totalScans: 0,
-                firstVerifiedAt: null,
-                latestVerifiedAt: null,
-              },
-            }, semantics),
-            decision
-          ),
-        });
-      }
-
-      qrCode = await prisma.qRCode.findUnique({
-        where: { id: payload.qr_id },
-        include: qrVerificationInclude,
+      const signedResolution = await resolveSignedVerificationTarget({
+        actorDeviceHash,
+        customerAuthStrength: req.customer?.authStrength || null,
+        customerUserId,
+        defaultVerifyUxPolicy,
+        deviceTokenHash,
+        normalizedCode: normalizedCode || null,
+        originalUrl: req.originalUrl || req.url,
+        proofSource,
+        qrVerificationInclude,
+        queryToken: signedToken,
+        requestUrl: req.url,
+        requesterIpHash,
       });
 
-      if (!qrCode) {
-        const semantics = buildPublicVerificationSemantics({
-          classification: "NOT_FOUND",
-          proofSource,
-          notFound: true,
-        });
-        const decision = await persistVerificationDecision({
-          code: normalizedCode || null,
-          proofSource,
-          classification: "NOT_FOUND",
-          notFound: true,
-          isAuthentic: false,
-          reasons: ["Code not found in registry."],
-          customerTrustLevel: resolveCustomerTrustLevel({
-            customerUserId,
-            deviceTokenHash,
-            customerAuthStrength: req.customer?.authStrength || null,
-          }),
-          actorIpHash: requesterIpHash,
-          actorDeviceHash,
-          publicOutcome: semantics.publicOutcome,
-          riskDisposition: semantics.riskDisposition,
-          messageKey: semantics.messageKey,
-          nextActionKey: semantics.nextActionKey,
-          metadata: {
-            route: req.originalUrl || req.url,
-            signedToken: true,
-          },
-        });
-        return res.status(404).json({
-          success: true,
-          data: await buildDecisionResponseBody(
-            applyPublicSemantics(
-              buildMissingQrVerificationPayload({
-                normalizedCode: normalizedCode || null,
-                reasons: ["Code not found in registry."],
-                verifyUxPolicy: defaultVerifyUxPolicy,
-                proofSource,
-              }),
-              semantics
-            ),
-            decision
-          ),
-        });
+      if (signedResolution.kind === "response") {
+        return res.status(signedResolution.statusCode).json(signedResolution.body);
       }
 
-      if (normalizedCode && normalizedCode !== qrCode.code) {
-        return respondSignedTokenFailure(
-          400,
-          "QR token does not match this verification URL.",
-          "TOKEN_MISMATCH",
-          VerificationDecisionOutcome.TOKEN_MISMATCH
-        );
-      }
-
-      const tokenHash = hashQrToken(signedToken);
-      if (!qrCode.tokenHash) {
-        return respondSignedTokenFailure(400, "QR token has not been issued.", "NOT_ISSUED", VerificationDecisionOutcome.INVALID_PAYLOAD);
-      }
-      if (qrCode.tokenHash !== tokenHash) {
-        return respondSignedTokenFailure(400, "QR token revoked or mismatched.", "TOKEN_MISMATCH", VerificationDecisionOutcome.TOKEN_MISMATCH);
-      }
-      if (qrCode.tokenNonce && payload.nonce !== qrCode.tokenNonce) {
-        return respondSignedTokenFailure(400, "QR token mismatch.", "TOKEN_MISMATCH", VerificationDecisionOutcome.TOKEN_MISMATCH);
-      }
-      if (
-        payload.epoch !== undefined &&
-        Number.isFinite(Number(payload.epoch)) &&
-        Number(payload.epoch) !== Number(qrCode.replayEpoch || 1)
-      ) {
-        return respondSignedTokenFailure(
-          400,
-          "QR token replay epoch mismatch.",
-          "TOKEN_MISMATCH",
-          VerificationDecisionOutcome.TOKEN_MISMATCH
-        );
-      }
-      if (payload.epoch === undefined && Number(qrCode.replayEpoch || 1) > 1) {
-        return respondSignedTokenFailure(
-          400,
-          "QR token replay epoch missing.",
-          "TOKEN_MISMATCH",
-          VerificationDecisionOutcome.TOKEN_MISMATCH
-        );
-      }
-      if (payload.licensee_id !== qrCode.licenseeId) {
-        return respondSignedTokenFailure(
-          400,
-          "QR token invalid for this licensee.",
-          "TOKEN_MISMATCH",
-          VerificationDecisionOutcome.TOKEN_MISMATCH
-        );
-      }
-      if (payload.batch_id !== (qrCode.batchId ?? null)) {
-        return respondSignedTokenFailure(400, "QR token invalid for this batch.", "TOKEN_MISMATCH", VerificationDecisionOutcome.TOKEN_MISMATCH);
-      }
-      if (payload.manufacturer_id !== undefined && payload.manufacturer_id !== (qrCode.batch?.manufacturer?.id ?? null)) {
-        return respondSignedTokenFailure(
-          400,
-          "QR token invalid for this manufacturer.",
-          "TOKEN_MISMATCH",
-          VerificationDecisionOutcome.TOKEN_MISMATCH
-        );
-      }
+      qrCode = signedResolution.value.qrCode;
+      signedPayload = signedResolution.value.signedPayload;
+      verifiedSigningMetadata = signedResolution.value.verifiedSigningMetadata;
     } else {
       if (!normalizedCode) {
         return res.status(400).json({

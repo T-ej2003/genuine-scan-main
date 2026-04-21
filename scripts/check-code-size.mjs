@@ -39,11 +39,6 @@ const DEFAULT_BUDGETS = [
 ];
 
 const LEGACY_FILE_BUDGETS = {
-  "backend/src/controllers/authController.ts": {
-    label: "Legacy controller",
-    maxLines: 1325,
-    reason: "Auth controller still combines login, session, and recovery flows pending security-domain extraction.",
-  },
   "backend/src/controllers/qrController.ts": { label: "Legacy controller", maxLines: 1760 },
   "backend/src/controllers/incidentController.ts": { label: "Legacy controller", maxLines: 900 },
   "backend/src/controllers/userController.ts": { label: "Legacy controller", maxLines: 820 },
@@ -61,8 +56,8 @@ const LEGACY_FILE_BUDGETS = {
   },
   "backend/src/controllers/verify/verificationHandlers.ts": {
     label: "Legacy controller",
-    maxLines: 1300,
-    reason: "Public verification flow remains monolithic until the handler and policy orchestration split lands.",
+    maxLines: 1000,
+    reason: "Public verification flow still coordinates signed-token, policy, and trust evaluation while deeper orchestration is being extracted.",
   },
   "backend/src/controllers/verify/verifyPresentation.ts": {
     label: "Legacy controller",
@@ -76,11 +71,6 @@ const LEGACY_FILE_BUDGETS = {
     reason: "Verify support transport still consolidates customer auth, session, and ownership endpoints pending module split.",
   },
   "src/pages/AuditLogs.tsx": { label: "Legacy page", maxLines: 740 },
-  "src/pages/AccountSettings.tsx": {
-    label: "Legacy page",
-    maxLines: 1080,
-    reason: "Account settings still bundles profile, security, and device-management sections in one route component.",
-  },
   "src/pages/ConnectorDownload.tsx": { label: "Legacy page", maxLines: 880 },
   "src/pages/Licensees.tsx": { label: "Legacy page", maxLines: 800 },
   "src/pages/PrinterDiagnostics.tsx": { label: "Legacy page", maxLines: 1620 },

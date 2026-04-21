@@ -1,0 +1,11 @@
+services:
+  frontend:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api
+        GIT_SHA: ${GIT_SHA:-unknown}
+        RUN_VERIFY: ${DOCKER_BUILD_VERIFY:-false}
+        VITE_APP_ENV: ${VITE_APP_ENV:-production}
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}

@@ -18,15 +18,16 @@
      - `backend/src/controllers/verify/verificationHandlers.ts`
      - `backend/src/controllers/verify/verifyPresentation.ts`
    - Each entry has a tight file-specific ceiling and a reason string.
+   - `backend/src/controllers/authController.ts` and `src/pages/AccountSettings.tsx` were refactored enough to fall back to the default controller/page budgets, so their legacy exceptions were removed.
    - No global controller or transport-module budget was relaxed.
-3. Deterministic Docker CI env
+3. Dedicated frontend Docker CI compose file
    - `Quality Gate / docker` now runs:
-     - `docker compose --env-file .github/ci/docker-compose.frontend.env build frontend`
-   - `.github/ci/docker-compose.frontend.env` provides safe placeholder values only for Compose interpolation so the frontend build can be validated independently from backend MinIO secrets.
+     - `docker compose -f .github/ci/docker-compose.frontend-build.yml build frontend`
+   - `.github/ci/docker-compose.frontend-build.yml` contains only the frontend image build definition, so CI does not parse unrelated backend, Redis, or MinIO services at all.
 
 ## Operator guidance
 
 - If the budget gate fails again, prefer refactoring repeated types/helpers out of the flagged file first.
 - Only add a new legacy budget entry when the file is still intentionally monolithic and the ceiling can stay tight and justified.
-- Do not replace the CI env-file with production secrets. It exists only to satisfy Compose interpolation for a frontend-only build check.
-- If Docker CI starts depending on more unrelated services, prefer a dedicated Compose overlay or env-file over weakening the base `docker-compose.yml` requirements.
+- Keep the CI compose file build-only. It is intentionally separate from local and production orchestration.
+- If Docker CI starts needing shared build defaults, prefer extending the dedicated frontend compose file over weakening the base `docker-compose.yml` requirements.
