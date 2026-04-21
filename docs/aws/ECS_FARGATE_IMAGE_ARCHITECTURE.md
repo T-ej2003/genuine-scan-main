@@ -135,6 +135,22 @@ Workflow behavior:
 
 Use `Publish ECS Images` for publish-only runs. Use `Deploy ECS Release` when you want one audited flow that publishes, verifies, deploys, waits for ECS stability, and confirms `/version` is serving the expected `GIT_SHA`.
 
+## Deployment Environment Protections
+
+The deploy workflow is staged deliberately:
+
+1. release/image approval
+2. backend canary approval
+3. worker rollout approval
+
+Map those to protected GitHub environments such as:
+
+- `production-release`
+- `production-canary`
+- `production-worker`
+
+If your repo configures required reviewers on those environments, GitHub will block promotion until each stage is explicitly approved.
+
 ## ECR Control Enforcement
 
 Apply production ECR controls with:
@@ -200,6 +216,28 @@ export EXPECTED_GIT_SHA="$IMAGE_TAG"
 ./scripts/aws/deploy-ecs-service.sh
 ./scripts/aws/verify-version-endpoint.sh "$VERSION_URL" "$EXPECTED_GIT_SHA"
 ```
+
+For automatic rollback support during backend canary:
+
+```bash
+./scripts/aws/rollback-ecs-service.sh
+./scripts/aws/verify-ready-endpoint.sh https://api.example.com/health/ready
+```
+
+The `Deploy ECS Release` workflow uses those helpers automatically when backend canary verification fails.
+
+## Terraform Baseline
+
+To bring ECS/ECR under infrastructure-as-code review, use:
+
+- [infra/aws/terraform/README.md](/Users/abhiramteja/Downloads/genuine-scan-main/infra/aws/terraform/README.md:1)
+
+That baseline manages:
+
+- immutable/scanned ECR repositories with lifecycle rules
+- ECS cluster settings
+- backend and worker task definitions pinned to `X86_64`
+- ECS services with deployment circuit breaker and rollback enabled
 
 ## What Not To Do
 

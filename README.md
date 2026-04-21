@@ -800,6 +800,8 @@ Operator guidance:
 - The publish workflow now signs release images with cosign and attaches SBOM plus provenance attestations. The deploy workflow verifies those artifacts before touching ECS.
 - The audited ECS rollout path is the `Deploy ECS Release` workflow or the repo-owned [`scripts/aws/deploy-ecs-service.sh`](/Users/abhiramteja/Downloads/genuine-scan-main/scripts/aws/deploy-ecs-service.sh:1) helper.
 - Post-deploy runtime verification is now explicit: `./scripts/aws/verify-version-endpoint.sh https://your-backend.example.com/version "$IMAGE_TAG"`.
+- Infrastructure drift control now has a repo-owned Terraform baseline in [infra/aws/terraform/README.md](/Users/abhiramteja/Downloads/genuine-scan-main/infra/aws/terraform/README.md:1) for ECR and ECS service settings.
+- Production approvals are staged through protected GitHub environments in the deploy workflow: release approval, backend canary approval, then worker rollout approval.
 
 Run migrations in container:
 

@@ -22,14 +22,20 @@ This is a production publishing problem, not an ECS CPU-architecture problem.
   - `scripts/aws/apply-ecr-repository-controls.sh`
 - Added repo-owned ECS rollout helper:
   - `scripts/aws/deploy-ecs-service.sh`
+- Added repo-owned ECS rollback helper:
+  - `scripts/aws/rollback-ecs-service.sh`
 - Added repo-owned runtime SHA smoke-check helper:
   - `scripts/aws/verify-version-endpoint.sh`
+- Added repo-owned readiness smoke-check helper:
+  - `scripts/aws/verify-ready-endpoint.sh`
 - Added repo-owned signed release verification helper:
   - `scripts/aws/verify-release-artifacts.sh`
 - Added a manual GitHub Actions workflow as the canonical production path:
   - `.github/workflows/publish-ecs-images.yml`
 - Added a manual audited deploy workflow:
   - `.github/workflows/deploy-ecs-release.yml`
+- Added a Terraform baseline for ECR and ECS drift control:
+  - `infra/aws/terraform/`
 - Updated CI so backend container buildability is validated explicitly for `linux/amd64` with `docker buildx`
 - Updated deployment docs to explain:
   - local Apple Silicon Docker behavior
@@ -134,6 +140,8 @@ Current standard:
 - ECS/Fargate runtime stays on `LINUX/X86_64`
 - production image tags are immutable Git SHAs
 - production publishes use repo-owned buildx automation
+- deployment approvals are staged across protected environments
+- backend canary must pass `/version` and `/health/ready` checks before worker rollout
 
 ## Important Separation Of Concerns
 
@@ -152,4 +160,4 @@ The new standard path prevents the original failure in three ways:
 2. The default publish output is a multi-arch manifest list that includes `linux/amd64`.
 3. ECR repos are hardened with immutable tags and lifecycle cleanup, so stale images do not accumulate and mutable-tag drift is blocked.
 4. The release flow now signs images and attaches SBOM plus provenance attestations, then verifies them before deployment.
-5. The deploy flow fails fast if post-rollout `/version` does not report the expected `GIT_SHA`.
+5. The deploy flow fails fast if post-rollout `/version` or `/health/ready` does not match the expected healthy release, and rolls the backend back before worker promotion.

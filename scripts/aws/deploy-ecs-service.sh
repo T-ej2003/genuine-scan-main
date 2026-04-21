@@ -20,6 +20,7 @@ Required environment:
 Optional environment:
   WAIT_FOR_STABLE   Default: true
   DRY_RUN           Default: false. When true, prints the register payload only.
+  METADATA_FILE     Optional path to write deployment metadata JSON.
   VERSION_URL       Backend /version URL for post-deploy verification.
   EXPECTED_GIT_SHA  Full expected git SHA for VERSION_URL verification.
 
@@ -141,6 +142,10 @@ for (const optionalField of [
 fs.writeFileSync(payloadPath, JSON.stringify(payload, null, 2));
 NODE
 
+PREVIOUS_TASK_DEFINITION_ARN="$(
+  node --input-type=module -e 'import fs from "node:fs"; const raw = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(raw.taskDefinition.taskDefinitionArn || "");' "$RAW_FILE"
+)"
+
 if [[ "$DRY_RUN" == "true" ]]; then
   cat "$PAYLOAD_FILE"
   exit 0
@@ -160,6 +165,24 @@ aws ecs update-service \
   --service "$SERVICE_NAME" \
   --task-definition "$NEW_TASK_DEFINITION_ARN" \
   >/dev/null
+
+if [[ -n "${METADATA_FILE:-}" ]]; then
+  node --input-type=module - "$METADATA_FILE" "$CLUSTER_NAME" "$SERVICE_NAME" "$CONTAINER_NAME" "$IMAGE_URI" "$PREVIOUS_TASK_DEFINITION_ARN" "$NEW_TASK_DEFINITION_ARN" <<'NODE'
+import fs from "node:fs";
+
+const [outPath, clusterName, serviceName, containerName, imageUri, previousTaskDefinitionArn, newTaskDefinitionArn] =
+  process.argv.slice(2);
+const payload = {
+  clusterName,
+  serviceName,
+  containerName,
+  imageUri,
+  previousTaskDefinitionArn,
+  newTaskDefinitionArn,
+};
+fs.writeFileSync(outPath, JSON.stringify(payload, null, 2));
+NODE
+fi
 
 if [[ "$WAIT_FOR_STABLE" == "true" ]]; then
   aws ecs wait services-stable \

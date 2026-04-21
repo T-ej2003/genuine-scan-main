@@ -22,6 +22,21 @@ on:
         required: true
         type: string
         default: linux/amd64,linux/arm64
+      release_environment:
+        description: "Protected GitHub environment for release/image promotion approval"
+        required: true
+        type: string
+        default: production-release
+      canary_environment:
+        description: "Protected GitHub environment for backend canary approval"
+        required: true
+        type: string
+        default: production-canary
+      worker_environment:
+        description: "Protected GitHub environment for worker rollout approval"
+        required: true
+        type: string
+        default: production-worker
       backend_ecr_repo:
         description: "Backend ECR repository"
         required: true
@@ -53,6 +68,20 @@ on:
         description: "Public backend /version URL for post-deploy SHA verification"
         required: true
         type: string
+      backend_ready_url:
+        description: "Public backend /health/ready URL for canary verification"
+        required: true
+        type: string
+      backend_canary_attempts:
+        description: "How many backend canary verification rounds to run before promoting worker"
+        required: true
+        type: number
+        default: 5
+      backend_canary_delay_seconds:
+        description: "Seconds to wait between backend canary verification rounds"
+        required: true
+        type: number
+        default: 30
       worker_cluster:
         description: "Worker ECS cluster"
         required: true
@@ -76,8 +105,12 @@ permissions:
   id-token: write
 
 jobs:
-  deploy:
+  prepare_release:
     runs-on: ubuntu-latest
+    environment: ${{ inputs.release_environment }}
+    outputs:
+      image_tag: ${{ steps.image-meta.outputs.image_tag }}
+      account_id: ${{ steps.image-meta.outputs.account_id }}
     env:
       AWS_REGION: ${{ inputs.aws_region }}
       PLATFORMS: ${{ inputs.platforms }}
@@ -131,7 +164,6 @@ jobs:
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        if: inputs.publish_images
         uses: docker/setup-buildx-action@v3
 
       - name: Install cosign
@@ -144,13 +176,11 @@ jobs:
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b "$RUNNER_TEMP/bin"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
-      - name: Resolve deployment metadata
+      - name: Resolve release metadata
         id: image-meta
         run: |
           echo "image_tag=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "account_id=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_OUTPUT"
-          echo "images_file=$RUNNER_TEMP/deploy-images.jsonl" >> "$GITHUB_OUTPUT"
-          : > "$RUNNER_TEMP/deploy-images.jsonl"
 
       - name: Enforce ECR repository controls
         run: ./scripts/aws/apply-ecr-repository-controls.sh both
@@ -160,41 +190,16 @@ jobs:
         env:
           IMAGE_TAG: ${{ steps.image-meta.outputs.image_tag }}
           AWS_ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
-          OUTPUT_FILE: ${{ steps.image-meta.outputs.images_file }}
         run: ./scripts/aws/publish-ecs-images.sh both
 
       - name: Generate SBOMs, provenance, and signatures
         if: inputs.publish_images
         env:
           IMAGE_TAG: ${{ steps.image-meta.outputs.image_tag }}
-          IMAGES_FILE: ${{ steps.image-meta.outputs.images_file }}
+          AWS_ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
         run: |
+          REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
           mkdir -p "$RUNNER_TEMP/release-artifacts"
-          while IFS= read -r record; do
-            [ -n "$record" ] || continue
-            repository="$(node --input-type=module -e 'const record = JSON.parse(process.argv[1]); process.stdout.write(record.repository);' "$record")"
-            image_ref="$(node --input-type=module -e 'const record = JSON.parse(process.argv[1]); process.stdout.write(record.image_ref);' "$record")"
-            image_digest="$(node --input-type=module -e 'const record = JSON.parse(process.argv[1]); process.stdout.write(record.image_digest);' "$record")"
-            sbom_file="$RUNNER_TEMP/release-artifacts/${repository}-sbom.spdx.json"
-            provenance_file="$RUNNER_TEMP/release-artifacts/${repository}-provenance.json"
-
-            syft "$image_ref" -o "spdx-json=$sbom_file"
-
-            node --input-type=module -e 'import fs from "node:fs"; const [outPath, repository, imageRef, imageDigest, imageTag, repoName, workflowName, runId, runAttempt, runUrl, platforms] = process.argv.slice(1); const predicate = { buildType: "mscqr-release-provenance", builder: { id: `${repoName}/${workflowName}`, runId, runAttempt, runUrl }, invocation: { repository: repoName, ref: process.env.GITHUB_REF || "", sha: imageTag, workflow: workflowName, actor: process.env.GITHUB_ACTOR || "" }, metadata: { builtAt: new Date().toISOString(), platforms: platforms.split(",").map((value) => value.trim()).filter(Boolean) }, subject: { repository, imageRef, imageDigest } }; fs.writeFileSync(outPath, JSON.stringify(predicate, null, 2));' "$provenance_file" "$repository" "$image_ref" "$image_digest" "$IMAGE_TAG" "${{ github.repository }}" "${{ github.workflow }}" "${{ github.run_id }}" "${{ github.run_attempt }}" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" "$PLATFORMS"
-
-            cosign sign --yes "$image_ref"
-            cosign attest --yes --type spdxjson --predicate "$sbom_file" "$image_ref"
-            cosign attest --yes --type mscqr-release-provenance --predicate "$provenance_file" "$image_ref"
-          done < "$IMAGES_FILE"
-
-      - name: Resolve existing image refs when publish is skipped
-        if: ${{ !inputs.publish_images }}
-        env:
-          IMAGE_TAG: ${{ steps.image-meta.outputs.image_tag }}
-          ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
-          IMAGES_FILE: ${{ steps.image-meta.outputs.images_file }}
-        run: |
-          REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
           for repo in "$BACKEND_ECR_REPO" "$WORKER_ECR_REPO"; do
             image_digest="$(
               aws ecr describe-images \
@@ -204,80 +209,290 @@ jobs:
                 --query 'imageDetails[0].imageDigest' \
                 --output text
             )"
-            image_uri="${REGISTRY}/${repo}:${IMAGE_TAG}"
             image_ref="${REGISTRY}/${repo}@${image_digest}"
-            node --input-type=module -e 'import fs from "node:fs"; const [outputPath, repository, imageUri, imageTag, imageDigest, imageRef] = process.argv.slice(1); fs.appendFileSync(outputPath, `${JSON.stringify({ repository, image_uri: imageUri, image_tag: imageTag, image_digest: imageDigest, image_ref: imageRef })}\n`);' "$IMAGES_FILE" "$repo" "$image_uri" "$IMAGE_TAG" "$image_digest" "$image_ref"
+            sbom_file="$RUNNER_TEMP/release-artifacts/${repo}-sbom.spdx.json"
+            provenance_file="$RUNNER_TEMP/release-artifacts/${repo}-provenance.json"
+
+            syft "$image_ref" -o "spdx-json=$sbom_file"
+            node --input-type=module -e 'import fs from "node:fs"; const [outPath, repository, imageRef, imageDigest, imageTag, repoName, workflowName, runId, runAttempt, runUrl, platforms] = process.argv.slice(1); const predicate = { buildType: "mscqr-release-provenance", builder: { id: `${repoName}/${workflowName}`, runId, runAttempt, runUrl }, invocation: { repository: repoName, ref: process.env.GITHUB_REF || "", sha: imageTag, workflow: workflowName, actor: process.env.GITHUB_ACTOR || "" }, metadata: { builtAt: new Date().toISOString(), platforms: platforms.split(",").map((value) => value.trim()).filter(Boolean) }, subject: { repository, imageRef, imageDigest } }; fs.writeFileSync(outPath, JSON.stringify(predicate, null, 2));' "$provenance_file" "$repo" "$image_ref" "$image_digest" "$IMAGE_TAG" "${{ github.repository }}" "${{ github.workflow }}" "${{ github.run_id }}" "${{ github.run_attempt }}" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" "$PLATFORMS"
+            cosign sign --yes "$image_ref"
+            cosign attest --yes --type spdxjson --predicate "$sbom_file" "$image_ref"
+            cosign attest --yes --type mscqr-release-provenance --predicate "$provenance_file" "$image_ref"
           done
 
-      - name: Verify release artifacts before deploy
+      - name: Verify release artifacts
         env:
-          IMAGES_FILE: ${{ steps.image-meta.outputs.images_file }}
+          IMAGE_TAG: ${{ steps.image-meta.outputs.image_tag }}
+          AWS_ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
           COSIGN_CERT_IDENTITY_REGEXP: "^https://github.com/${{ github.repository }}/.github/workflows/(publish-ecs-images|deploy-ecs-release).yml@.*$"
         run: |
-          while IFS= read -r record; do
-            [ -n "$record" ] || continue
-            image_ref="$(node --input-type=module -e 'const record = JSON.parse(process.argv[1]); process.stdout.write(record.image_ref);' "$record")"
-            REQUIRED_PLATFORMS="$PLATFORMS" \
-              ./scripts/aws/verify-release-artifacts.sh "$image_ref"
-          done < "$IMAGES_FILE"
+          REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          for repo in "$BACKEND_ECR_REPO" "$WORKER_ECR_REPO"; do
+            image_digest="$(
+              aws ecr describe-images \
+                --region "$AWS_REGION" \
+                --repository-name "$repo" \
+                --image-ids imageTag="$IMAGE_TAG" \
+                --query 'imageDetails[0].imageDigest' \
+                --output text
+            )"
+            image_ref="${REGISTRY}/${repo}@${image_digest}"
+            REQUIRED_PLATFORMS="$PLATFORMS" ./scripts/aws/verify-release-artifacts.sh "$image_ref"
+          done
 
-      - name: Deploy backend ECS service
+      - name: Summarize prepared release
         env:
-          ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
           IMAGE_TAG: ${{ steps.image-meta.outputs.image_tag }}
-          IMAGES_FILE: ${{ steps.image-meta.outputs.images_file }}
+          ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
+        run: |
+          REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          {
+            echo "## Release prepared"
+            echo
+            echo "- Immutable git SHA: \`$IMAGE_TAG\`"
+            echo "- Release approval environment: \`${{ inputs.release_environment }}\`"
+            echo
+            for repo in "$BACKEND_ECR_REPO" "$WORKER_ECR_REPO"; do
+              image_digest="$(
+                aws ecr describe-images \
+                  --region "$AWS_REGION" \
+                  --repository-name "$repo" \
+                  --image-ids imageTag="$IMAGE_TAG" \
+                  --query 'imageDetails[0].imageDigest' \
+                  --output text
+              )"
+              echo "- ${repo}: \`${REGISTRY}/${repo}@${image_digest}\`"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  backend_canary:
+    needs: prepare_release
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.canary_environment }}
+    env:
+      AWS_REGION: ${{ inputs.aws_region }}
+      BACKEND_ECR_REPO: ${{ inputs.backend_ecr_repo }}
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref != '' && inputs.git_ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Validate AWS authentication inputs
+        id: auth-mode
+        env:
+          AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          if [ -n "$AWS_ROLE_TO_ASSUME" ]; then
+            echo "mode=oidc" >> "$GITHUB_OUTPUT"
+          elif [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+            echo "mode=keys" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Configure repository variable AWS_ROLE_TO_ASSUME for OIDC, or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY as fallback secrets."
+            exit 1
+          fi
+
+      - name: Configure AWS credentials via OIDC
+        if: steps.auth-mode.outputs.mode == 'oidc'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+
+      - name: Configure AWS credentials via access keys
+        if: steps.auth-mode.outputs.mode == 'keys'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve backend image ref
+        id: backend-image
+        env:
+          IMAGE_TAG: ${{ needs.prepare_release.outputs.image_tag }}
+          ACCOUNT_ID: ${{ needs.prepare_release.outputs.account_id }}
+          COSIGN_CERT_IDENTITY_REGEXP: "^https://github.com/${{ github.repository }}/.github/workflows/(publish-ecs-images|deploy-ecs-release).yml@.*$"
+        run: |
+          image_digest="$(
+            aws ecr describe-images \
+              --region "$AWS_REGION" \
+              --repository-name "$BACKEND_ECR_REPO" \
+              --image-ids imageTag="$IMAGE_TAG" \
+              --query 'imageDetails[0].imageDigest' \
+              --output text
+          )"
+          image_ref="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${BACKEND_ECR_REPO}@${image_digest}"
+          echo "image_ref=${image_ref}" >> "$GITHUB_OUTPUT"
+          REQUIRED_PLATFORMS="${{ inputs.platforms }}" ./scripts/aws/verify-release-artifacts.sh "$image_ref"
+
+      - name: Deploy backend canary
+        id: backend-deploy
+        env:
           CLUSTER_NAME: ${{ inputs.backend_cluster }}
           SERVICE_NAME: ${{ inputs.backend_service }}
           TASK_DEFINITION: ${{ inputs.backend_task_definition }}
           CONTAINER_NAME: ${{ inputs.backend_container_name }}
+          IMAGE_URI: ${{ steps.backend-image.outputs.image_ref }}
           VERSION_URL: ${{ inputs.backend_version_url }}
-          EXPECTED_GIT_SHA: ${{ steps.image-meta.outputs.image_tag }}
-        run: |
-          IMAGE_URI="$(node --input-type=module -e '
-            import fs from "node:fs";
-            const records = fs.readFileSync(process.argv[1], "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
-            const record = records.find((candidate) => candidate.repository === process.argv[2]);
-            if (!record) throw new Error(`No image record for ${process.argv[2]}`);
-            process.stdout.write(record.image_ref);
-          ' "$IMAGES_FILE" "$BACKEND_ECR_REPO")"
-          export IMAGE_URI
-          ./scripts/aws/deploy-ecs-service.sh
+          EXPECTED_GIT_SHA: ${{ needs.prepare_release.outputs.image_tag }}
+          METADATA_FILE: ${{ runner.temp }}/backend-deployment.json
+        run: ./scripts/aws/deploy-ecs-service.sh
 
-      - name: Deploy worker ECS service
+      - name: Run backend canary verification window
         env:
-          ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
-          IMAGE_TAG: ${{ steps.image-meta.outputs.image_tag }}
-          IMAGES_FILE: ${{ steps.image-meta.outputs.images_file }}
+          VERSION_URL: ${{ inputs.backend_version_url }}
+          READY_URL: ${{ inputs.backend_ready_url }}
+          EXPECTED_GIT_SHA: ${{ needs.prepare_release.outputs.image_tag }}
+          CANARY_ATTEMPTS: ${{ inputs.backend_canary_attempts }}
+          CANARY_DELAY_SECONDS: ${{ inputs.backend_canary_delay_seconds }}
+        run: |
+          attempts="${CANARY_ATTEMPTS}"
+          delay_seconds="${CANARY_DELAY_SECONDS}"
+          for attempt in $(seq 1 "$attempts"); do
+            ./scripts/aws/verify-version-endpoint.sh "$VERSION_URL" "$EXPECTED_GIT_SHA"
+            ./scripts/aws/verify-ready-endpoint.sh "$READY_URL"
+            if [[ "$attempt" -lt "$attempts" ]]; then
+              sleep "$delay_seconds"
+            fi
+          done
+
+      - name: Roll back backend canary on failure
+        if: failure()
+        env:
+          CLUSTER_NAME: ${{ inputs.backend_cluster }}
+          SERVICE_NAME: ${{ inputs.backend_service }}
+        run: |
+          metadata_file="${{ runner.temp }}/backend-deployment.json"
+          if [[ ! -f "$metadata_file" ]]; then
+            echo "No backend deployment metadata file found; nothing to roll back."
+            exit 1
+          fi
+          previous_task_definition_arn="$(node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.previousTaskDefinitionArn || "");' "$metadata_file")"
+          if [[ -z "$previous_task_definition_arn" ]]; then
+            echo "Backend deployment metadata did not include previousTaskDefinitionArn."
+            exit 1
+          fi
+          export PREVIOUS_TASK_DEFINITION_ARN="$previous_task_definition_arn"
+          ./scripts/aws/rollback-ecs-service.sh
+
+      - name: Summarize backend canary
+        if: success()
+        env:
+          IMAGE_REF: ${{ steps.backend-image.outputs.image_ref }}
+        run: |
+          {
+            echo "## Backend canary passed"
+            echo
+            echo "- Canary approval environment: \`${{ inputs.canary_environment }}\`"
+            echo "- Backend image: \`${IMAGE_REF}\`"
+            echo "- Version URL: \`${{ inputs.backend_version_url }}\`"
+            echo "- Ready URL: \`${{ inputs.backend_ready_url }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  worker_rollout:
+    needs: [prepare_release, backend_canary]
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.worker_environment }}
+    env:
+      AWS_REGION: ${{ inputs.aws_region }}
+      WORKER_ECR_REPO: ${{ inputs.worker_ecr_repo }}
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref != '' && inputs.git_ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Validate AWS authentication inputs
+        id: auth-mode
+        env:
+          AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          if [ -n "$AWS_ROLE_TO_ASSUME" ]; then
+            echo "mode=oidc" >> "$GITHUB_OUTPUT"
+          elif [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+            echo "mode=keys" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Configure repository variable AWS_ROLE_TO_ASSUME for OIDC, or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY as fallback secrets."
+            exit 1
+          fi
+
+      - name: Configure AWS credentials via OIDC
+        if: steps.auth-mode.outputs.mode == 'oidc'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+
+      - name: Configure AWS credentials via access keys
+        if: steps.auth-mode.outputs.mode == 'keys'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve worker image ref
+        id: worker-image
+        env:
+          IMAGE_TAG: ${{ needs.prepare_release.outputs.image_tag }}
+          ACCOUNT_ID: ${{ needs.prepare_release.outputs.account_id }}
+          COSIGN_CERT_IDENTITY_REGEXP: "^https://github.com/${{ github.repository }}/.github/workflows/(publish-ecs-images|deploy-ecs-release).yml@.*$"
+        run: |
+          image_digest="$(
+            aws ecr describe-images \
+              --region "$AWS_REGION" \
+              --repository-name "$WORKER_ECR_REPO" \
+              --image-ids imageTag="$IMAGE_TAG" \
+              --query 'imageDetails[0].imageDigest' \
+              --output text
+          )"
+          image_ref="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${WORKER_ECR_REPO}@${image_digest}"
+          echo "image_ref=${image_ref}" >> "$GITHUB_OUTPUT"
+          REQUIRED_PLATFORMS="${{ inputs.platforms }}" ./scripts/aws/verify-release-artifacts.sh "$image_ref"
+
+      - name: Deploy worker service
+        env:
           CLUSTER_NAME: ${{ inputs.worker_cluster }}
           SERVICE_NAME: ${{ inputs.worker_service }}
           TASK_DEFINITION: ${{ inputs.worker_task_definition }}
           CONTAINER_NAME: ${{ inputs.worker_container_name }}
-        run: |
-          IMAGE_URI="$(node --input-type=module -e '
-            import fs from "node:fs";
-            const records = fs.readFileSync(process.argv[1], "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
-            const record = records.find((candidate) => candidate.repository === process.argv[2]);
-            if (!record) throw new Error(`No image record for ${process.argv[2]}`);
-            process.stdout.write(record.image_ref);
-          ' "$IMAGES_FILE" "$WORKER_ECR_REPO")"
-          export IMAGE_URI
-          ./scripts/aws/deploy-ecs-service.sh
+          IMAGE_URI: ${{ steps.worker-image.outputs.image_ref }}
+        run: ./scripts/aws/deploy-ecs-service.sh
 
-      - name: Summarize deployed release
+      - name: Summarize worker rollout
         env:
-          IMAGE_TAG: ${{ steps.image-meta.outputs.image_tag }}
-          IMAGES_FILE: ${{ steps.image-meta.outputs.images_file }}
+          IMAGE_REF: ${{ steps.worker-image.outputs.image_ref }}
         run: |
           {
-            echo "## ECS deploy summary"
+            echo "## Worker rollout passed"
             echo
-            echo "- Immutable git SHA: \`$IMAGE_TAG\`"
-            echo "- Backend /version smoke check passed: \`${{ inputs.backend_version_url }}\`"
-            echo
-            while IFS= read -r record; do
-              [ -n "$record" ] || continue
-              repo="$(node --input-type=module -e 'const record = JSON.parse(process.argv[1]); process.stdout.write(record.repository);' "$record")"
-              image_ref="$(node --input-type=module -e 'const record = JSON.parse(process.argv[1]); process.stdout.write(record.image_ref);' "$record")"
-              echo "- ${repo}: \`${image_ref}\`"
-            done < "$IMAGES_FILE"
+            echo "- Worker approval environment: \`${{ inputs.worker_environment }}\`"
+            echo "- Worker image: \`${IMAGE_REF}\`"
           } >> "$GITHUB_STEP_SUMMARY"
