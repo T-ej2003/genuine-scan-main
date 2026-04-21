@@ -1,5 +1,21 @@
 import { BASE_URL, type ApiClientCore, type ApiResponse } from "@/lib/api/internal-client-core";
+import type {
+  CustomerPasskeyCredentialSummary,
+  CustomerVerifyTokenResponse,
+  VerificationSessionResponse,
+  VerifyEntryMethod,
+} from "@/lib/api/internal-client-verify-types";
 import type { WebAuthnAuthenticationOptionsResponse, WebAuthnRegistrationOptionsResponse } from "@/lib/webauthn";
+
+const withCustomerAuth = (customerToken?: string) =>
+  customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
+
+const withVerifySessionHeaders = (customerToken?: string, sessionProofToken?: string) => {
+  const headers: Record<string, string> = {};
+  if (customerToken) headers.Authorization = `Bearer ${customerToken}`;
+  if (sessionProofToken) headers["x-verification-session-proof"] = sessionProofToken;
+  return Object.keys(headers).length ? headers : undefined;
+};
 
 export const createVerifySupportApi = (core: ApiClientCore) => ({
   async getCustomerAuthProviders() {
@@ -14,16 +30,7 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
   },
 
   async exchangeCustomerOAuth(ticket: string) {
-    return core.request<{
-      token: string;
-      customer: {
-        userId: string;
-        email: string;
-        maskedEmail?: string | null;
-        displayName?: string | null;
-        authProvider?: "GOOGLE";
-      };
-    }>(`/verify/auth/oauth/exchange`, {
+    return core.request<CustomerVerifyTokenResponse>(`/verify/auth/oauth/exchange`, {
       method: "POST",
       body: JSON.stringify({ ticket }),
     });
@@ -57,70 +64,20 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
 
   async startVerificationSession(
     decisionId: string,
-    entryMethod: "SIGNED_SCAN" | "MANUAL_CODE",
+    entryMethod: VerifyEntryMethod,
     customerToken?: string
   ) {
-    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
-    return core.request<{
-      sessionId: string;
-      decisionId: string;
-      code?: string | null;
-      maskedCode?: string | null;
-      brandName?: string | null;
-      entryMethod: "SIGNED_SCAN" | "MANUAL_CODE";
-      authState: "PENDING" | "VERIFIED";
-      intakeCompleted: boolean;
-      revealed: boolean;
-      startedAt: string;
-      revealAt?: string | null;
-      proofTier?: string | null;
-      proofSource?: string | null;
-      labelState?: string | null;
-      printTrustState?: string | null;
-      challengeRequired?: boolean;
-      challengeCompleted?: boolean;
-      challengeCompletedBy?: string | null;
-      verificationLocked: boolean;
-      proofBindingRequired?: boolean;
-      proofBindingExpiresAt?: string | null;
-      sessionProofToken?: string | null;
-    }>(`/verify/session/start`, {
+    return core.request<VerificationSessionResponse>(`/verify/session/start`, {
       method: "POST",
-      headers,
+      headers: withCustomerAuth(customerToken),
       body: JSON.stringify({ decisionId, entryMethod }),
     });
   },
 
   async getVerificationSession(sessionId: string, customerToken?: string, sessionProofToken?: string) {
-    const headers: Record<string, string> = {};
-    if (customerToken) headers.Authorization = `Bearer ${customerToken}`;
-    if (sessionProofToken) headers["x-verification-session-proof"] = sessionProofToken;
-    return core.request<{
-      sessionId: string;
-      decisionId: string;
-      code?: string | null;
-      maskedCode?: string | null;
-      brandName?: string | null;
-      entryMethod: "SIGNED_SCAN" | "MANUAL_CODE";
-      authState: "PENDING" | "VERIFIED";
-      intakeCompleted: boolean;
-      revealed: boolean;
-      startedAt: string;
-      revealAt?: string | null;
-      proofTier?: string | null;
-      proofSource?: string | null;
-      labelState?: string | null;
-      printTrustState?: string | null;
-      challengeRequired?: boolean;
-      challengeCompleted?: boolean;
-      challengeCompletedBy?: string | null;
-      proofBindingRequired?: boolean;
-      proofBindingExpiresAt?: string | null;
-      intake?: Record<string, unknown> | null;
-      verification?: Record<string, unknown> | null;
-    }>(`/verify/session/${encodeURIComponent(sessionId)}`, {
+    return core.request<VerificationSessionResponse>(`/verify/session/${encodeURIComponent(sessionId)}`, {
       method: "GET",
-      headers: Object.keys(headers).length ? headers : undefined,
+      headers: withVerifySessionHeaders(customerToken, sessionProofToken),
     });
   },
 
@@ -130,46 +87,17 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     customerToken?: string,
     sessionProofToken?: string
   ) {
-    const headers: Record<string, string> = {};
-    if (customerToken) headers.Authorization = `Bearer ${customerToken}`;
-    if (sessionProofToken) headers["x-verification-session-proof"] = sessionProofToken;
     return core.request<{ intakeSaved: boolean }>(`/verify/session/${encodeURIComponent(sessionId)}/intake`, {
       method: "POST",
-      headers: Object.keys(headers).length ? headers : undefined,
+      headers: withVerifySessionHeaders(customerToken, sessionProofToken),
       body: JSON.stringify(payload),
     });
   },
 
   async revealVerificationSession(sessionId: string, customerToken?: string, sessionProofToken?: string) {
-    const headers: Record<string, string> = {};
-    if (customerToken) headers.Authorization = `Bearer ${customerToken}`;
-    if (sessionProofToken) headers["x-verification-session-proof"] = sessionProofToken;
-    return core.request<{
-      sessionId: string;
-      decisionId: string;
-      code?: string | null;
-      maskedCode?: string | null;
-      brandName?: string | null;
-      entryMethod: "SIGNED_SCAN" | "MANUAL_CODE";
-      authState: "PENDING" | "VERIFIED";
-      intakeCompleted: boolean;
-      revealed: boolean;
-      startedAt: string;
-      revealAt?: string | null;
-      proofTier?: string | null;
-      proofSource?: string | null;
-      labelState?: string | null;
-      printTrustState?: string | null;
-      challengeRequired?: boolean;
-      challengeCompleted?: boolean;
-      challengeCompletedBy?: string | null;
-      proofBindingRequired?: boolean;
-      proofBindingExpiresAt?: string | null;
-      intake?: Record<string, unknown> | null;
-      verification?: Record<string, unknown> | null;
-    }>(`/verify/session/${encodeURIComponent(sessionId)}/reveal`, {
+    return core.request<VerificationSessionResponse>(`/verify/session/${encodeURIComponent(sessionId)}/reveal`, {
       method: "POST",
-      headers: Object.keys(headers).length ? headers : undefined,
+      headers: withVerifySessionHeaders(customerToken, sessionProofToken),
     });
   },
 
@@ -230,24 +158,16 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
   },
 
   async verifyEmailOtp(challengeToken: string, otp: string) {
-    return core.request<{
-      token: string;
-      customer: {
-        userId: string;
-        email: string;
-        maskedEmail: string;
-      };
-    }>(`/verify/auth/email-otp/verify`, {
+    return core.request<CustomerVerifyTokenResponse>(`/verify/auth/email-otp/verify`, {
       method: "POST",
       body: JSON.stringify({ challengeToken, otp }),
     });
   },
 
   async beginCustomerPasskeyRegistration(customerToken?: string, label?: string) {
-    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
     return core.request<WebAuthnRegistrationOptionsResponse>(`/verify/auth/passkey/register/begin`, {
       method: "POST",
-      headers,
+      headers: withCustomerAuth(customerToken),
       body: JSON.stringify({ label }),
     });
   },
@@ -260,27 +180,17 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
       credential: Record<string, unknown>;
     }
   ) {
-    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
-    return core.request<{
-      enrolled: boolean;
-      token: string;
-      customer: {
-        userId: string;
-        email: string;
-        maskedEmail: string;
-      };
-    }>(`/verify/auth/passkey/register/finish`, {
+    return core.request<{ enrolled: boolean } & CustomerVerifyTokenResponse>(`/verify/auth/passkey/register/finish`, {
       method: "POST",
-      headers,
+      headers: withCustomerAuth(customerToken),
       body: JSON.stringify(payload),
     });
   },
 
   async beginCustomerPasskeyAssertion(payload?: { email?: string }, customerToken?: string) {
-    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
     return core.request<WebAuthnAuthenticationOptionsResponse>(`/verify/auth/passkey/assertion/begin`, {
       method: "POST",
-      headers,
+      headers: withCustomerAuth(customerToken),
       body: JSON.stringify(payload || {}),
     });
   },
@@ -292,49 +202,30 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     },
     customerToken?: string
   ) {
-    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
-    return core.request<{
-      token: string;
-      assertedAt?: string;
-      customer: {
-        userId: string;
-        email: string;
-        maskedEmail: string;
-      };
-    }>(`/verify/auth/passkey/assertion/finish`, {
+    return core.request<{ assertedAt?: string } & CustomerVerifyTokenResponse>(`/verify/auth/passkey/assertion/finish`, {
       method: "POST",
-      headers,
+      headers: withCustomerAuth(customerToken),
       body: JSON.stringify(payload),
     });
   },
 
   async getCustomerPasskeyCredentials(customerToken?: string) {
-    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
     return core.request<{
-      items: Array<{
-        id: string;
-        label: string;
-        transports?: string[];
-        lastUsedAt?: string | null;
-        createdAt?: string | null;
-        updatedAt?: string | null;
-      }>;
+      items: CustomerPasskeyCredentialSummary[];
     }>(`/verify/auth/passkey/credentials`, {
       method: "GET",
-      headers,
+      headers: withCustomerAuth(customerToken),
     });
   },
 
   async deleteCustomerPasskeyCredential(customerToken: string | undefined, credentialId: string) {
-    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
     return core.request<{ deleted: boolean }>(`/verify/auth/passkey/credentials/${encodeURIComponent(credentialId)}`, {
       method: "DELETE",
-      headers,
+      headers: withCustomerAuth(customerToken),
     });
   },
 
   async claimVerifiedProduct(code: string, customerToken?: string) {
-    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
     return core.request<{
       claimResult: string;
       message?: string;
@@ -352,12 +243,11 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
       };
     }>(`/verify/${encodeURIComponent(code)}/claim`, {
       method: "POST",
-      headers,
+      headers: withCustomerAuth(customerToken),
     });
   },
 
   async linkDeviceClaimToUser(code: string, customerToken?: string) {
-    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
     return core.request<{
       linkResult: string;
       message?: string;
@@ -370,12 +260,11 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
       };
     }>(`/verify/${encodeURIComponent(code)}/link-claim`, {
       method: "POST",
-      headers,
+      headers: withCustomerAuth(customerToken),
     });
   },
 
   async createOwnershipTransfer(code: string, payload: { recipientEmail?: string }, customerToken?: string) {
-    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
     return core.request<{
       message?: string;
       transferLink: string;
@@ -384,25 +273,23 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
       ownershipTransfer?: any;
     }>(`/verify/${encodeURIComponent(code)}/transfer`, {
       method: "POST",
-      headers,
+      headers: withCustomerAuth(customerToken),
       body: JSON.stringify(payload),
     });
   },
 
   async cancelOwnershipTransfer(code: string, payload: { transferId?: string }, customerToken?: string) {
-    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
     return core.request<{
       message?: string;
       ownershipTransfer?: any;
     }>(`/verify/${encodeURIComponent(code)}/transfer/cancel`, {
       method: "POST",
-      headers,
+      headers: withCustomerAuth(customerToken),
       body: JSON.stringify(payload),
     });
   },
 
   async acceptOwnershipTransfer(payload: { token: string }, customerToken?: string) {
-    const headers = customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
     return core.request<{
       message?: string;
       code?: string;
@@ -410,7 +297,7 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
       ownershipTransfer?: any;
     }>(`/verify/transfer/accept`, {
       method: "POST",
-      headers,
+      headers: withCustomerAuth(customerToken),
       body: JSON.stringify(payload),
     });
   },
