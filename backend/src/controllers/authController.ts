@@ -57,7 +57,6 @@ export const login = async (req: Request, res: Response) => {
     const session = await loginWithPassword({
       email,
       password,
-      sourceIp: req.ip,
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
     });
@@ -266,7 +265,6 @@ export const acceptInviteController = async (req: Request, res: Response) => {
     const session = await loginWithPassword({
       email: user.email,
       password: parsed.data.password,
-      sourceIp: req.ip,
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
     });

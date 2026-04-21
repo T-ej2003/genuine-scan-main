@@ -31,6 +31,7 @@ import {
   passwordStepUpController,
   refresh,
   resetPassword,
+  revokeAllSessionsController,
   revokeSessionController,
   rotateAdminMfaBackupCodesController,
   verifyEmailController,
@@ -58,6 +59,7 @@ export const createAuthRoutes = (limiters: AuthRouteLimiters) => {
   router.post("/auth/refresh", requireCsrf, refresh);
   router.post("/auth/logout", authenticateAnySession, requireCsrf, logout);
   router.get("/auth/sessions", authenticate, listSessions);
+  router.post("/auth/sessions/revoke-all", authenticate, requireCsrf, revokeAllSessionsController);
   router.post("/auth/sessions/:id/revoke", authenticate, requireCsrf, revokeSessionController);
   router.post("/auth/step-up/password", authenticate, requireCsrf, passwordStepUpController);
 
