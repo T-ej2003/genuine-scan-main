@@ -77,6 +77,9 @@ jobs:
           ENFORCE_LINT_CHANGED: ${{ vars.ENFORCE_LINT_CHANGED }}
         run: npm run lint:changed
 
+      - name: Architecture guardrails
+        run: node scripts/check-architecture-guardrails.mjs
+
       - name: Code-size budgets
         run: npm run check:budgets
 

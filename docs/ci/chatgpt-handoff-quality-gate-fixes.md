@@ -24,10 +24,20 @@
    - `Quality Gate / docker` now runs:
      - `docker compose -f .github/ci/docker-compose.frontend-build.yml build frontend`
    - `.github/ci/docker-compose.frontend-build.yml` contains only the frontend image build definition, so CI does not parse unrelated backend, Redis, or MinIO services at all.
+4. Architecture migration notes
+   - `node scripts/check-architecture-guardrails.mjs` now enforces a second guardrail for oversized controller/page files.
+   - Any controller over the default 500-line threshold, or page over the default 700-line threshold, must have an explicit entry in `docs/architecture/threshold-migration-notes.json`.
+   - Each note must state what is still consolidated, what the next extraction step is, and the target reduced line count.
+   - This keeps legacy exceptions visible as planned migration work instead of letting large files drift silently.
+5. Verify post-scan service extraction
+   - `backend/src/controllers/verify/verificationHandlers.ts` now delegates the post-scan policy, replay, trust, and decision orchestration to `backend/src/services/publicVerificationPostScanService.ts`.
+   - The controller still owns request parsing and pre-scan response paths, but the heaviest public verification flow is now in a dedicated service layer.
 
 ## Operator guidance
 
 - If the budget gate fails again, prefer refactoring repeated types/helpers out of the flagged file first.
 - Only add a new legacy budget entry when the file is still intentionally monolithic and the ceiling can stay tight and justified.
+- If an oversized controller/page is intentionally still above the default threshold, add a matching migration note in `docs/architecture/threshold-migration-notes.json` with a real next step before adjusting budgets.
+- Remove the migration note once the file is back under the default controller/page threshold so the debt log stays honest.
 - Keep the CI compose file build-only. It is intentionally separate from local and production orchestration.
 - If Docker CI starts needing shared build defaults, prefer extending the dedicated frontend compose file over weakening the base `docker-compose.yml` requirements.

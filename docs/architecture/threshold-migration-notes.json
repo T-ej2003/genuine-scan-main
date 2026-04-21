@@ -1,0 +1,82 @@
+{
+  "backend/src/controllers/governanceController.ts": {
+    "summary": "Governance approval, compliance-pack, and policy endpoints are still consolidated in one controller.",
+    "nextStep": "Move approval workflow orchestration and policy pack assembly into dedicated governance services and slimmer route handlers.",
+    "targetMaxLines": 500
+  },
+  "backend/src/controllers/incidentController.ts": {
+    "summary": "Incident intake, remediation, evidence, and workflow state transitions remain coupled in one controller.",
+    "nextStep": "Split incident lifecycle actions into service-backed handlers for intake, evidence, and remediation.",
+    "targetMaxLines": 500
+  },
+  "backend/src/controllers/irIncidentController.ts": {
+    "summary": "IR incident response endpoints still mix escalation, evidence, and operator workflow concerns.",
+    "nextStep": "Extract escalation and evidence orchestration into incident-response services with route-level composition only.",
+    "targetMaxLines": 500
+  },
+  "backend/src/controllers/licenseeController.ts": {
+    "summary": "Licensee enrollment, policy, and operational endpoints still share one controller surface.",
+    "nextStep": "Separate licensee administration from operational actions and move policy assembly into services.",
+    "targetMaxLines": 500
+  },
+  "backend/src/controllers/printerAgentJobController.ts": {
+    "summary": "Printer agent job scheduling, retries, and status reconciliation are still controller-led.",
+    "nextStep": "Move job orchestration and reconciliation into printer-agent services and keep controllers request-focused.",
+    "targetMaxLines": 500
+  },
+  "backend/src/controllers/printerController.ts": {
+    "summary": "Printer provisioning and operational state changes remain bundled into a single controller.",
+    "nextStep": "Split provisioning flows from operational actions and centralize validation/state transitions in services.",
+    "targetMaxLines": 500
+  },
+  "backend/src/controllers/printerGatewayController.ts": {
+    "summary": "Gateway registration, trust exchange, and delivery workflow logic are still heavily centralized.",
+    "nextStep": "Extract gateway trust negotiation and delivery orchestration into dedicated printer gateway services.",
+    "targetMaxLines": 500
+  },
+  "backend/src/controllers/qrController.ts": {
+    "summary": "QR issuance, lifecycle, operator actions, and reporting are still concentrated in one legacy controller.",
+    "nextStep": "Break QR issuance, lifecycle operations, and reporting endpoints into focused controller modules backed by shared services.",
+    "targetMaxLines": 500
+  },
+  "backend/src/controllers/userController.ts": {
+    "summary": "User administration, invitations, and account operations still share a large controller entrypoint.",
+    "nextStep": "Split user admin flows from self-service account operations and move identity workflow logic into services.",
+    "targetMaxLines": 500
+  },
+  "backend/src/controllers/verify/claimHandlers.ts": {
+    "summary": "Ownership claim handling still combines claim validation, persistence, and response shaping.",
+    "nextStep": "Extract claim decision and ownership update orchestration into verify-domain services.",
+    "targetMaxLines": 500
+  },
+  "backend/src/controllers/verify/verificationHandlers.ts": {
+    "summary": "The public verify controller now delegates post-scan orchestration to a service, but still coordinates multiple entry paths and response modes.",
+    "nextStep": "Split manual lookup, signed-label verification, and recovery/error response paths into focused verify handlers that share service-level orchestration.",
+    "targetMaxLines": 500
+  },
+  "backend/src/controllers/verify/verifyPresentation.ts": {
+    "summary": "Verify presentation logic still centralizes public-proof messaging and readiness mapping in one file.",
+    "nextStep": "Separate proof messaging, readiness mapping, and public response copy into smaller presentation modules.",
+    "targetMaxLines": 500
+  },
+  "src/pages/AuditLogs.tsx": {
+    "summary": "Audit log filtering, export controls, and table rendering remain tightly coupled in one page.",
+    "nextStep": "Move filter state, export actions, and table sections into dedicated audit-log feature components/hooks.",
+    "targetMaxLines": 700
+  },
+  "src/pages/ConnectorDownload.tsx": {
+    "summary": "Connector download guidance, platform branching, and operator actions still live in one large page.",
+    "nextStep": "Split platform-specific flows and operator guidance blocks into dedicated connector feature sections.",
+    "targetMaxLines": 700
+  },
+  "src/pages/PrinterDiagnostics.tsx": {
+    "summary": "Printer diagnostics combines status dashboards, troubleshooting workflows, and operational controls in one page.",
+    "nextStep": "Break diagnostics widgets, troubleshooting actions, and historical views into focused printer-diagnostics feature modules.",
+    "targetMaxLines": 700
+  },
+  "src/pages/PrinterSetup.tsx": {
+    "summary": "Printer setup still bundles onboarding, connection state, and troubleshooting logic in a single page.",
+    "nextStep": "Split setup wizard, connection health, and remediation flows into feature components and hooks.",
+    "targetMaxLines": 700
+  }
+}
