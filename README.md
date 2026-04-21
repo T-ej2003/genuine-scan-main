@@ -796,6 +796,10 @@ Operator guidance:
 - Do not update the backend or worker ECS task definition until the SHA-tagged image manifest has been verified.
 - Backend and worker intentionally use the same runtime image content from `backend/Dockerfile`, but they stay in separate ECR repositories for operational clarity.
 - Keep the object-storage task-role deployment guidance separate. See [docs/aws/object-storage-task-role.md](/Users/abhiramteja/Downloads/genuine-scan-main/docs/aws/object-storage-task-role.md:1) for the ECS S3 credential contract.
+- Before production publishing, enforce ECR immutability and lifecycle controls with `./scripts/aws/apply-ecr-repository-controls.sh both`.
+- The publish workflow now signs release images with cosign and attaches SBOM plus provenance attestations. The deploy workflow verifies those artifacts before touching ECS.
+- The audited ECS rollout path is the `Deploy ECS Release` workflow or the repo-owned [`scripts/aws/deploy-ecs-service.sh`](/Users/abhiramteja/Downloads/genuine-scan-main/scripts/aws/deploy-ecs-service.sh:1) helper.
+- Post-deploy runtime verification is now explicit: `./scripts/aws/verify-version-endpoint.sh https://your-backend.example.com/version "$IMAGE_TAG"`.
 
 Run migrations in container:
 

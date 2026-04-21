@@ -82,8 +82,16 @@ export WORKER_ECR_REPO=mscqr-worker
 This publishes the same runtime image content to both ECR repositories with one immutable Git SHA tag:
 
 ```bash
+./scripts/aws/apply-ecr-repository-controls.sh both
 ./scripts/aws/publish-ecs-images.sh both
 ```
+
+What that now enforces:
+
+- ECR image tags are immutable
+- stale images are lifecycle-managed
+- published images are signed with cosign in GitHub Actions
+- published images receive SBOM and release-provenance attestations
 
 ## Exact Manifest Verification Commands
 
@@ -110,6 +118,7 @@ If `linux/amd64` is missing, stop. Do not update the ECS task definition.
 The canonical production path is the manual GitHub Actions workflow:
 
 - `.github/workflows/publish-ecs-images.yml`
+- `.github/workflows/deploy-ecs-release.yml`
 
 Workflow behavior:
 
@@ -117,10 +126,47 @@ Workflow behavior:
 - uses immutable Git SHA tags
 - prefers AWS OIDC role auth through repository variable `AWS_ROLE_TO_ASSUME`
 - can fall back to `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` secrets if OIDC is not yet wired
+- enforces immutable-tag and lifecycle controls on the ECR repositories
+- signs the pushed digest refs with cosign
+- attaches SBOM (`spdxjson`) and release-provenance attestations
+- verifies manifest, signature, SBOM, and provenance before deploy
 - verifies manifest platforms after publish
 - prints exact image URIs and manifest results in the workflow summary
 
-Use the workflow for routine production publishing. Use the shell scripts when you need the same process locally or from an ops runner.
+Use `Publish ECS Images` for publish-only runs. Use `Deploy ECS Release` when you want one audited flow that publishes, verifies, deploys, waits for ECS stability, and confirms `/version` is serving the expected `GIT_SHA`.
+
+## ECR Control Enforcement
+
+Apply production ECR controls with:
+
+```bash
+export AWS_REGION=eu-west-2
+./scripts/aws/apply-ecr-repository-controls.sh both
+```
+
+Current defaults:
+
+- `imageTagMutability=IMMUTABLE`
+- keep newest `120` release images per repo
+- expire untagged images older than `7` days
+
+If you need different retention, override:
+
+```bash
+KEEP_TAGGED_COUNT=180 UNTAGGED_DAYS=14 ./scripts/aws/apply-ecr-repository-controls.sh both
+```
+
+## Release Artifact Verification
+
+To verify the full signed release surface for a digest ref:
+
+```bash
+export COSIGN_CERT_IDENTITY_REGEXP='^https://github.com/T-ej2003/genuine-scan-main/.github/workflows/(publish-ecs-images|deploy-ecs-release).yml@.*$'
+
+REQUIRED_PLATFORMS=linux/amd64,linux/arm64 \
+  ./scripts/aws/verify-release-artifacts.sh \
+  "${ECR_REGISTRY}/${BACKEND_ECR_REPO}@sha256:<digest>"
+```
 
 ## Exact ECS Follow-Up Steps
 
@@ -138,6 +184,22 @@ After the publish and manifest verification succeed:
 8. Deploy that revision to the worker ECS service.
 9. Verify service startup and readiness after rollout.
 10. Keep ECS task CPU architecture on `X86_64` unless you intentionally design and validate an infrastructure migration.
+
+Or use the repo-owned deploy helper directly:
+
+```bash
+export AWS_REGION=eu-west-2
+export IMAGE_URI="${ECR_REGISTRY}/${BACKEND_ECR_REPO}@sha256:<digest>"
+export CLUSTER_NAME=mscqr-prod
+export SERVICE_NAME=mscqr-backend
+export TASK_DEFINITION=mscqr-backend
+export CONTAINER_NAME=backend
+export VERSION_URL=https://api.example.com/version
+export EXPECTED_GIT_SHA="$IMAGE_TAG"
+
+./scripts/aws/deploy-ecs-service.sh
+./scripts/aws/verify-version-endpoint.sh "$VERSION_URL" "$EXPECTED_GIT_SHA"
+```
 
 ## What Not To Do
 

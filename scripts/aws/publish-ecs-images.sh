@@ -18,6 +18,7 @@ Environment:
   BACKEND_ECR_REPO   Optional. Defaults to mscqr-backend.
   WORKER_ECR_REPO    Optional. Defaults to mscqr-worker.
   BUILDER_NAME       Optional. Defaults to mscqr-multiarch.
+  OUTPUT_FILE        Optional JSON Lines output file with published image refs.
 
 Examples:
   AWS_REGION=eu-west-2 ./scripts/aws/publish-ecs-images.sh backend
@@ -130,6 +131,33 @@ docker buildx build \
 echo
 for image_uri in "${IMAGE_URIS[@]}"; do
   REQUIRED_PLATFORMS="$PLATFORMS" "$VERIFY_SCRIPT" "$image_uri"
+
+  repository_name="${image_uri#${ECR_REGISTRY}/}"
+  repository_name="${repository_name%%:*}"
+
+  if [[ -n "${OUTPUT_FILE:-}" ]]; then
+    image_digest="$(
+      aws ecr describe-images \
+        --region "$AWS_REGION" \
+        --repository-name "$repository_name" \
+        --image-ids imageTag="$IMAGE_TAG" \
+        --query 'imageDetails[0].imageDigest' \
+        --output text
+    )"
+    node --input-type=module - "$OUTPUT_FILE" "$repository_name" "$image_uri" "$IMAGE_TAG" "$image_digest" <<'NODE'
+import fs from "node:fs";
+
+const [outputPath, repositoryName, imageUri, imageTag, imageDigest] = process.argv.slice(2);
+const record = {
+  repository: repositoryName,
+  image_uri: imageUri,
+  image_tag: imageTag,
+  image_digest: imageDigest,
+  image_ref: imageUri.replace(/:[^:@]+$/, `@${imageDigest}`),
+};
+fs.appendFileSync(outputPath, `${JSON.stringify(record)}\n`);
+NODE
+  fi
   echo
 done
 

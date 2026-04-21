@@ -438,6 +438,9 @@ if (publicVersionEndpointEnabled) {
     res.json({
       name: releaseMetadata.name,
       version: releaseMetadata.version,
+      gitSha: releaseMetadata.gitSha,
+      shortGitSha: releaseMetadata.shortGitSha,
+      release: releaseMetadata.release,
       environment: releaseMetadata.environment,
     });
   });

@@ -18,13 +18,25 @@ This is a production publishing problem, not an ECS CPU-architecture problem.
   - `scripts/aws/publish-ecs-images.sh`
 - Added repo-owned manifest verification script:
   - `scripts/aws/verify-image-manifest.sh`
+- Added repo-owned ECR control enforcement script:
+  - `scripts/aws/apply-ecr-repository-controls.sh`
+- Added repo-owned ECS rollout helper:
+  - `scripts/aws/deploy-ecs-service.sh`
+- Added repo-owned runtime SHA smoke-check helper:
+  - `scripts/aws/verify-version-endpoint.sh`
+- Added repo-owned signed release verification helper:
+  - `scripts/aws/verify-release-artifacts.sh`
 - Added a manual GitHub Actions workflow as the canonical production path:
   - `.github/workflows/publish-ecs-images.yml`
+- Added a manual audited deploy workflow:
+  - `.github/workflows/deploy-ecs-release.yml`
 - Updated CI so backend container buildability is validated explicitly for `linux/amd64` with `docker buildx`
 - Updated deployment docs to explain:
   - local Apple Silicon Docker behavior
   - ECS/Fargate `X86_64` requirement
   - multi-arch manifest list vs single-arch image
+- Updated `/version` so post-deploy smoke checks can confirm the exact `GIT_SHA` serving in production.
+- ECR repositories now enforce immutable tags and lifecycle cleanup for stale release images.
 
 Backend and worker still use the same runtime image content from `backend/Dockerfile`, but stay in separate ECR repositories for operational clarity.
 
@@ -56,6 +68,7 @@ Publish worker only:
 Publish both with the same immutable Git SHA tag:
 
 ```bash
+./scripts/aws/apply-ecr-repository-controls.sh both
 ./scripts/aws/publish-ecs-images.sh both
 ```
 
@@ -71,6 +84,23 @@ REQUIRED_PLATFORMS=linux/amd64,linux/arm64 \
 
 If `linux/amd64` is missing, stop and do not update ECS.
 
+## Signed Release Verification
+
+```bash
+export COSIGN_CERT_IDENTITY_REGEXP='^https://github.com/T-ej2003/genuine-scan-main/.github/workflows/(publish-ecs-images|deploy-ecs-release).yml@.*$'
+
+REQUIRED_PLATFORMS=linux/amd64,linux/arm64 \
+  ./scripts/aws/verify-release-artifacts.sh \
+  "${ECR_REGISTRY}/${BACKEND_ECR_REPO}@sha256:<digest>"
+```
+
+That now verifies:
+
+- required manifest platforms
+- cosign signature
+- SBOM attestation
+- release-provenance attestation
+
 ## Exact ECS Deployment Follow-Up Steps
 
 1. Verify the backend image manifest includes `linux/amd64`.
@@ -82,6 +112,22 @@ If `linux/amd64` is missing, stop and do not update ECS.
 7. Register the worker task-definition revision.
 8. Deploy the worker ECS service.
 9. Confirm service health and startup logs.
+10. Confirm the backend `/version` endpoint reports the expected full `GIT_SHA`.
+
+Direct helper commands:
+
+```bash
+export IMAGE_URI="${ECR_REGISTRY}/${BACKEND_ECR_REPO}@sha256:<digest>"
+export CLUSTER_NAME=mscqr-prod
+export SERVICE_NAME=mscqr-backend
+export TASK_DEFINITION=mscqr-backend
+export CONTAINER_NAME=backend
+export VERSION_URL=https://api.example.com/version
+export EXPECTED_GIT_SHA="$IMAGE_TAG"
+
+./scripts/aws/deploy-ecs-service.sh
+./scripts/aws/verify-version-endpoint.sh "$VERSION_URL" "$EXPECTED_GIT_SHA"
+```
 
 Current standard:
 
@@ -104,4 +150,6 @@ The new standard path prevents the original failure in three ways:
 
 1. Production publishing is explicit and no longer depends on whatever architecture a local laptop happens to use.
 2. The default publish output is a multi-arch manifest list that includes `linux/amd64`.
-3. The publish flow fails fast if manifest verification does not show the required platform before an operator updates ECS.
+3. ECR repos are hardened with immutable tags and lifecycle cleanup, so stale images do not accumulate and mutable-tag drift is blocked.
+4. The release flow now signs images and attaches SBOM plus provenance attestations, then verifies them before deployment.
+5. The deploy flow fails fast if post-rollout `/version` does not report the expected `GIT_SHA`.
