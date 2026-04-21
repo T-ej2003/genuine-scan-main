@@ -91,7 +91,6 @@ jobs:
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
-
       - name: Playwright smoke suite
         run: npm run test:e2e
 
