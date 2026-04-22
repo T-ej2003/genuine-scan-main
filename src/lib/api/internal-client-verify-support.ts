@@ -1,18 +1,15 @@
 import { BASE_URL, type ApiClientCore, type ApiResponse } from "@/lib/api/internal-client-core";
 import type {
   CustomerPasskeyCredentialSummary,
+  CustomerVerifySessionStateResponse,
   CustomerVerifyTokenResponse,
   VerificationSessionResponse,
   VerifyEntryMethod,
 } from "@/lib/api/internal-client-verify-types";
 import type { WebAuthnAuthenticationOptionsResponse, WebAuthnRegistrationOptionsResponse } from "@/lib/webauthn";
 
-const withCustomerAuth = (customerToken?: string) =>
-  customerToken ? { Authorization: `Bearer ${customerToken}` } : undefined;
-
-const withVerifySessionHeaders = (customerToken?: string, sessionProofToken?: string) => {
+const withVerifySessionHeaders = (sessionProofToken?: string) => {
   const headers: Record<string, string> = {};
-  if (customerToken) headers.Authorization = `Bearer ${customerToken}`;
   if (sessionProofToken) headers["x-verification-session-proof"] = sessionProofToken;
   return Object.keys(headers).length ? headers : undefined;
 };
@@ -25,6 +22,12 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
         label: string;
       }>;
     }>(`/verify/auth/providers`, {
+      method: "GET",
+    });
+  },
+
+  async getCustomerAuthSession() {
+    return core.request<CustomerVerifySessionStateResponse>(`/verify/auth/session`, {
       method: "GET",
     });
   },
@@ -43,7 +46,6 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
       lat?: number;
       lon?: number;
       acc?: number;
-      customerToken?: string;
       transferToken?: string;
       captchaToken?: string;
     }
@@ -57,47 +59,40 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     if (options?.transferToken) params.append("transfer", options.transferToken);
     const query = params.toString() ? `?${params.toString()}` : "";
     const headers: Record<string, string> = {};
-    if (options?.customerToken) headers.Authorization = `Bearer ${options.customerToken}`;
     if (options?.captchaToken) headers["x-captcha-token"] = options.captchaToken;
     return core.request(`/verify/${encodeURIComponent(normalizedCode)}${query}`, { method: "GET", headers });
   },
 
-  async startVerificationSession(
-    decisionId: string,
-    entryMethod: VerifyEntryMethod,
-    customerToken?: string
-  ) {
+  async startVerificationSession(decisionId: string, entryMethod: VerifyEntryMethod) {
     return core.request<VerificationSessionResponse>(`/verify/session/start`, {
       method: "POST",
-      headers: withCustomerAuth(customerToken),
       body: JSON.stringify({ decisionId, entryMethod }),
     });
   },
 
-  async getVerificationSession(sessionId: string, customerToken?: string, sessionProofToken?: string) {
+  async getVerificationSession(sessionId: string, sessionProofToken?: string) {
     return core.request<VerificationSessionResponse>(`/verify/session/${encodeURIComponent(sessionId)}`, {
       method: "GET",
-      headers: withVerifySessionHeaders(customerToken, sessionProofToken),
+      headers: withVerifySessionHeaders(sessionProofToken),
     });
   },
 
   async submitVerificationIntake(
     sessionId: string,
     payload: Record<string, unknown>,
-    customerToken?: string,
     sessionProofToken?: string
   ) {
     return core.request<{ intakeSaved: boolean }>(`/verify/session/${encodeURIComponent(sessionId)}/intake`, {
       method: "POST",
-      headers: withVerifySessionHeaders(customerToken, sessionProofToken),
+      headers: withVerifySessionHeaders(sessionProofToken),
       body: JSON.stringify(payload),
     });
   },
 
-  async revealVerificationSession(sessionId: string, customerToken?: string, sessionProofToken?: string) {
+  async revealVerificationSession(sessionId: string, sessionProofToken?: string) {
     return core.request<VerificationSessionResponse>(`/verify/session/${encodeURIComponent(sessionId)}/reveal`, {
       method: "POST",
-      headers: withVerifySessionHeaders(customerToken, sessionProofToken),
+      headers: withVerifySessionHeaders(sessionProofToken),
     });
   },
 
@@ -131,7 +126,7 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
 
   async scanToken(
     token: string,
-    options?: { device?: string; lat?: number; lon?: number; acc?: number; customerToken?: string; captchaToken?: string }
+    options?: { device?: string; lat?: number; lon?: number; acc?: number; captchaToken?: string }
   ) {
     const params = new URLSearchParams();
     params.append("t", token);
@@ -141,7 +136,6 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     if (options?.acc != null) params.append("acc", String(options.acc));
     const query = params.toString() ? `?${params.toString()}` : "";
     const headers: Record<string, string> = {};
-    if (options?.customerToken) headers.Authorization = `Bearer ${options.customerToken}`;
     if (options?.captchaToken) headers["x-captcha-token"] = options.captchaToken;
     return core.request(`/scan${query}`, { method: "GET", headers });
   },
@@ -164,68 +158,49 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     });
   },
 
-  async beginCustomerPasskeyRegistration(customerToken?: string, label?: string) {
+  async beginCustomerPasskeyRegistration(label?: string) {
     return core.request<WebAuthnRegistrationOptionsResponse>(`/verify/auth/passkey/register/begin`, {
       method: "POST",
-      headers: withCustomerAuth(customerToken),
       body: JSON.stringify({ label }),
     });
   },
 
-  async finishCustomerPasskeyRegistration(
-    customerToken: string | undefined,
-    payload: {
-      ticket: string;
-      label?: string;
-      credential: Record<string, unknown>;
-    }
-  ) {
+  async finishCustomerPasskeyRegistration(payload: { ticket: string; label?: string; credential: Record<string, unknown> }) {
     return core.request<{ enrolled: boolean } & CustomerVerifyTokenResponse>(`/verify/auth/passkey/register/finish`, {
       method: "POST",
-      headers: withCustomerAuth(customerToken),
       body: JSON.stringify(payload),
     });
   },
 
-  async beginCustomerPasskeyAssertion(payload?: { email?: string }, customerToken?: string) {
+  async beginCustomerPasskeyAssertion(payload?: { email?: string }) {
     return core.request<WebAuthnAuthenticationOptionsResponse>(`/verify/auth/passkey/assertion/begin`, {
       method: "POST",
-      headers: withCustomerAuth(customerToken),
       body: JSON.stringify(payload || {}),
     });
   },
 
-  async finishCustomerPasskeyAssertion(
-    payload: {
-      ticket: string;
-      credential: Record<string, unknown>;
-    },
-    customerToken?: string
-  ) {
+  async finishCustomerPasskeyAssertion(payload: { ticket: string; credential: Record<string, unknown> }) {
     return core.request<{ assertedAt?: string } & CustomerVerifyTokenResponse>(`/verify/auth/passkey/assertion/finish`, {
       method: "POST",
-      headers: withCustomerAuth(customerToken),
       body: JSON.stringify(payload),
     });
   },
 
-  async getCustomerPasskeyCredentials(customerToken?: string) {
+  async getCustomerPasskeyCredentials() {
     return core.request<{
       items: CustomerPasskeyCredentialSummary[];
     }>(`/verify/auth/passkey/credentials`, {
       method: "GET",
-      headers: withCustomerAuth(customerToken),
     });
   },
 
-  async deleteCustomerPasskeyCredential(customerToken: string | undefined, credentialId: string) {
+  async deleteCustomerPasskeyCredential(credentialId: string) {
     return core.request<{ deleted: boolean }>(`/verify/auth/passkey/credentials/${encodeURIComponent(credentialId)}`, {
       method: "DELETE",
-      headers: withCustomerAuth(customerToken),
     });
   },
 
-  async claimVerifiedProduct(code: string, customerToken?: string) {
+  async claimVerifiedProduct(code: string) {
     return core.request<{
       claimResult: string;
       message?: string;
@@ -243,11 +218,10 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
       };
     }>(`/verify/${encodeURIComponent(code)}/claim`, {
       method: "POST",
-      headers: withCustomerAuth(customerToken),
     });
   },
 
-  async linkDeviceClaimToUser(code: string, customerToken?: string) {
+  async linkDeviceClaimToUser(code: string) {
     return core.request<{
       linkResult: string;
       message?: string;
@@ -260,11 +234,10 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
       };
     }>(`/verify/${encodeURIComponent(code)}/link-claim`, {
       method: "POST",
-      headers: withCustomerAuth(customerToken),
     });
   },
 
-  async createOwnershipTransfer(code: string, payload: { recipientEmail?: string }, customerToken?: string) {
+  async createOwnershipTransfer(code: string, payload: { recipientEmail?: string }) {
     return core.request<{
       message?: string;
       transferLink: string;
@@ -273,23 +246,21 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
       ownershipTransfer?: any;
     }>(`/verify/${encodeURIComponent(code)}/transfer`, {
       method: "POST",
-      headers: withCustomerAuth(customerToken),
       body: JSON.stringify(payload),
     });
   },
 
-  async cancelOwnershipTransfer(code: string, payload: { transferId?: string }, customerToken?: string) {
+  async cancelOwnershipTransfer(code: string, payload: { transferId?: string }) {
     return core.request<{
       message?: string;
       ownershipTransfer?: any;
     }>(`/verify/${encodeURIComponent(code)}/transfer/cancel`, {
       method: "POST",
-      headers: withCustomerAuth(customerToken),
       body: JSON.stringify(payload),
     });
   },
 
-  async acceptOwnershipTransfer(payload: { token: string }, customerToken?: string) {
+  async acceptOwnershipTransfer(payload: { token: string }) {
     return core.request<{
       message?: string;
       code?: string;
@@ -297,7 +268,6 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
       ownershipTransfer?: any;
     }>(`/verify/transfer/accept`, {
       method: "POST",
-      headers: withCustomerAuth(customerToken),
       body: JSON.stringify(payload),
     });
   },
@@ -308,13 +278,10 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     });
   },
 
-  async submitFraudReport(formData: FormData, customerToken?: string) {
-    const headers: Record<string, string> = {};
-    if (customerToken) headers["Authorization"] = `Bearer ${customerToken}`;
+  async submitFraudReport(formData: FormData) {
     return core.request(`/fraud-report`, {
       method: "POST",
       body: formData,
-      headers,
       skipJson: true,
       timeoutMs: 45_000,
     });

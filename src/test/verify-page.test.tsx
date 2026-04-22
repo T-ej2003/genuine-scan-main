@@ -13,6 +13,7 @@ vi.mock("@/lib/api-client", () => ({
     startVerificationSession: vi.fn(),
     getVerificationSession: vi.fn(),
     getCustomerAuthProviders: vi.fn(),
+    getCustomerAuthSession: vi.fn(),
     exchangeCustomerOAuth: vi.fn(),
     submitVerificationIntake: vi.fn(),
     revealVerificationSession: vi.fn(),
@@ -132,6 +133,10 @@ describe("Verify page", () => {
       success: true,
       data: { items: [] },
     } as any);
+    vi.mocked(apiClient.getCustomerAuthSession).mockResolvedValue({
+      success: true,
+      data: { customer: null, auth: { cookieBacked: true, authenticated: false } },
+    } as any);
     vi.mocked(apiClient.getCustomerPasskeyCredentials).mockResolvedValue({
       success: true,
       data: { items: [] },
@@ -181,11 +186,11 @@ describe("Verify page", () => {
     });
 
     await waitFor(() => {
-      expect(vi.mocked(apiClient.startVerificationSession)).toHaveBeenCalledWith("decision-1", "SIGNED_SCAN", undefined);
+      expect(vi.mocked(apiClient.startVerificationSession)).toHaveBeenCalledWith("decision-1", "SIGNED_SCAN");
     });
 
     await waitFor(() => {
-      expect(vi.mocked(apiClient.getVerificationSession)).toHaveBeenCalledWith(SESSION_ID, undefined, "session-proof-1");
+      expect(vi.mocked(apiClient.getVerificationSession)).toHaveBeenCalledWith(SESSION_ID, "session-proof-1");
     });
 
     await waitFor(() => {
@@ -237,11 +242,15 @@ describe("Verify page", () => {
     vi.mocked(apiClient.verifyEmailOtp).mockResolvedValue({
       success: true,
       data: {
-        token: "customer-token",
         customer: {
           userId: "cust-1",
           email: "abhi@example.com",
           maskedEmail: "ab***@example.com",
+        },
+        auth: {
+          cookieBacked: true,
+          authenticated: true,
+          authStrength: "EMAIL_OTP",
         },
       },
     } as any);
@@ -318,7 +327,6 @@ describe("Verify page", () => {
           scanReason: "routine_check",
           ownershipIntent: "verify_only",
         }),
-        undefined,
         undefined
       );
     });
@@ -352,8 +360,6 @@ describe("Verify page", () => {
         },
       }),
     } as any);
-    window.localStorage.setItem("mscqr_verify_customer_token", "customer-token");
-
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
     expect(await screen.findByText("What MSCQR checked")).toBeInTheDocument();
@@ -450,7 +456,6 @@ describe("Verify page", () => {
         proofBindingRequired: true,
       }),
     } as any);
-    window.localStorage.setItem("mscqr_verify_customer_token", "customer-token");
     window.localStorage.setItem("mscqr_verify_customer_email", "abhi@example.com");
 
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
@@ -462,15 +467,12 @@ describe("Verify page", () => {
     await waitFor(() => {
       expect(vi.mocked(apiClient.verifyQRCode)).toHaveBeenCalledWith(
         CODE,
-        expect.objectContaining({
-          customerToken: undefined,
-          device: expect.any(String),
-        })
+        expect.objectContaining({ device: expect.any(String) })
       );
     });
 
     await waitFor(() => {
-      expect(vi.mocked(apiClient.startVerificationSession)).toHaveBeenCalledWith("decision-1", "MANUAL_CODE", undefined);
+      expect(vi.mocked(apiClient.startVerificationSession)).toHaveBeenCalledWith("decision-1", "MANUAL_CODE");
     });
 
     await waitFor(() => {

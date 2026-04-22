@@ -94,6 +94,21 @@ export function createApiClientCore(): ApiClientCore {
     }
   };
 
+  const readCsrfCookieForEndpoint = (endpoint: string) => {
+    const preferVerifyCookie = endpoint.startsWith("/verify/");
+    const candidates = preferVerifyCookie
+      ? ["mscqr_verify_csrf", "aq_csrf"]
+      : ["aq_csrf", "mscqr_verify_csrf"];
+
+    for (const candidate of candidates) {
+      const value = readCookie(candidate);
+      if (value) return value;
+    }
+    return "";
+  };
+
+  const hasCookieBackedSession = () => Boolean(readCookie("aq_access") || readCookie("aq_refresh") || readCookie("mscqr_verify_session"));
+
   const isAuthRefreshEndpoint = (endpoint: string) =>
     endpoint === "/auth/login" ||
     endpoint === "/auth/refresh" ||
@@ -129,7 +144,7 @@ export function createApiClientCore(): ApiClientCore {
         headers["x-idempotency-key"] = generatedKey;
       }
 
-      const csrf = readCookie("aq_csrf");
+      const csrf = readCsrfCookieForEndpoint(endpoint);
       if (csrf && !headers["x-csrf-token"] && !headers["X-CSRF-Token"]) {
         headers["x-csrf-token"] = csrf;
       }
@@ -196,7 +211,7 @@ export function createApiClientCore(): ApiClientCore {
           (typeof payload === "string" && payload) ||
           "Not authenticated";
 
-        if (!getToken() && !readCookie("aq_csrf")) {
+        if (!getToken() && !hasCookieBackedSession()) {
           pushNetworkLog({ status: response.status, ok: false, error: message });
           return { success: false, error: message };
         }

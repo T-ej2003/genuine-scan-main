@@ -33,9 +33,7 @@ import { BASE_URL } from "@/lib/api/internal-client-core";
 import {
   APP_NAME,
   CUSTOMER_EMAIL_KEY,
-  CUSTOMER_TOKEN_KEY,
   LEGACY_CUSTOMER_EMAIL_KEY,
-  LEGACY_CUSTOMER_TOKEN_KEY,
   deriveReasons,
   formatDateTime,
   inferClassification,
@@ -142,15 +140,12 @@ const maskCode = (value?: string | null) => {
   return `${normalized.slice(0, Math.min(4, normalized.length))}${normalized.length > 4 ? `-${normalized.slice(-4)}` : ""}`;
 };
 
-const persistCustomerSession = (token: string, email: string) => {
+const persistCustomerSession = (email: string) => {
   const nextEmail = String(email || "").trim();
 
   try {
     if (nextEmail) window.localStorage.setItem(CUSTOMER_EMAIL_KEY, nextEmail);
     else window.localStorage.removeItem(CUSTOMER_EMAIL_KEY);
-
-    window.localStorage.removeItem(CUSTOMER_TOKEN_KEY);
-    window.localStorage.removeItem(LEGACY_CUSTOMER_TOKEN_KEY);
     window.localStorage.removeItem(LEGACY_CUSTOMER_EMAIL_KEY);
   } catch {
     // Ignore storage issues.
@@ -159,23 +154,11 @@ const persistCustomerSession = (token: string, email: string) => {
 
 const clearStoredCustomerSession = () => {
   try {
-    window.localStorage.removeItem(CUSTOMER_TOKEN_KEY);
-    window.localStorage.removeItem(LEGACY_CUSTOMER_TOKEN_KEY);
+    window.localStorage.removeItem(CUSTOMER_EMAIL_KEY);
+    window.localStorage.removeItem(LEGACY_CUSTOMER_EMAIL_KEY);
   } catch {
     // Ignore storage issues.
   }
-};
-
-const readAndClearLegacyCustomerToken = () => {
-  const token = readStoredValue(CUSTOMER_TOKEN_KEY, LEGACY_CUSTOMER_TOKEN_KEY);
-  if (!token) return "";
-  try {
-    window.localStorage.removeItem(CUSTOMER_TOKEN_KEY);
-    window.localStorage.removeItem(LEGACY_CUSTOMER_TOKEN_KEY);
-  } catch {
-    // Ignore storage issues.
-  }
-  return token;
 };
 
 const sessionProofStorageKey = (sessionId: string) => `mscqr_verify_session_proof:${sessionId}`;
@@ -340,7 +323,7 @@ export default function VerifyExperience() {
     }
   }, [code]);
 
-  const [customerToken, setCustomerToken] = useState(() => readAndClearLegacyCustomerToken());
+  const [customerAuthenticated, setCustomerAuthenticated] = useState(false);
   const [customerEmail, setCustomerEmail] = useState(() => readStoredValue(CUSTOMER_EMAIL_KEY, LEGACY_CUSTOMER_EMAIL_KEY));
   const [session, setSession] = useState<VerificationSessionSummary | null>(null);
   const [lockedResult, setLockedResult] = useState<VerifyPayload | null>(null);
@@ -379,7 +362,7 @@ export default function VerifyExperience() {
   const reasonList = useMemo(() => deriveReasons(result || lockedResult, classification), [classification, lockedResult, result]);
   const stepMeta = STEP_META[classification];
   const currentCode = normalizeVerifyCode(result?.code || session?.code || codeParam);
-  const authReady = Boolean(customerToken) || session?.authState === "VERIFIED";
+  const authReady = customerAuthenticated || session?.authState === "VERIFIED";
   const displaySessionSummary = session || null;
   const challengeRequired = Boolean(result?.challenge?.required || lockedResult?.challenge?.required || session?.challengeRequired);
   const challengeCompleted = Boolean(result?.challenge?.completed || lockedResult?.challenge?.completed || session?.challengeCompleted);
@@ -415,9 +398,8 @@ export default function VerifyExperience() {
     setIntake((prev) => ({ ...prev, [key]: value }));
   }, []);
 
-  const loadCustomerPasskeys = useCallback(async (sessionToken?: string) => {
-    const activeToken = String(sessionToken || customerToken || "").trim();
-    if (!passkeySupported) {
+  const loadCustomerPasskeys = useCallback(async () => {
+    if (!passkeySupported || !customerAuthenticated) {
       setPasskeyCredentials([]);
       setLoadingPasskeys(false);
       return;
@@ -425,22 +407,41 @@ export default function VerifyExperience() {
 
     setLoadingPasskeys(true);
     try {
-      const response = await apiClient.getCustomerPasskeyCredentials(activeToken || undefined);
+      const response = await apiClient.getCustomerPasskeyCredentials();
       setPasskeyCredentials(response.success ? response.data?.items || [] : []);
     } finally {
       setLoadingPasskeys(false);
     }
-  }, [customerToken, passkeySupported]);
+  }, [customerAuthenticated, passkeySupported]);
 
   const applySignedInCustomer = useCallback(
-    (tokenValue: string, emailValue: string) => {
-      persistCustomerSession(tokenValue, emailValue);
-      setCustomerToken(tokenValue);
+    (emailValue: string) => {
+      persistCustomerSession(emailValue);
+      setCustomerAuthenticated(true);
       setCustomerEmail(emailValue);
       setOtpEmail(emailValue);
       setFlowStep("purchase");
     },
     []
+  );
+
+  const hydrateCustomerAuthSession = useCallback(
+    (nextState?: { customer?: { email?: string | null } | null; auth?: { authenticated?: boolean } | null } | null) => {
+      const authenticated = Boolean(nextState?.auth?.authenticated && nextState?.customer?.email);
+      if (!authenticated) {
+        setCustomerAuthenticated(false);
+        return;
+      }
+
+      const nextEmail = String(nextState?.customer?.email || "").trim();
+      if (!nextEmail) {
+        setCustomerAuthenticated(false);
+        return;
+      }
+
+      applySignedInCustomer(nextEmail);
+    },
+    [applySignedInCustomer]
   );
 
   const loadGeoContext = useCallback(async () => {
@@ -491,10 +492,10 @@ export default function VerifyExperience() {
       setBooting(true);
       try {
         const response = await apiClient.exchangeCustomerOAuth(ticket);
-        if (!response.success || !response.data?.token) {
+        if (!response.success || !response.data?.customer?.email) {
           throw new Error(response.error || "Could not complete social sign-in.");
         }
-        persistCustomerSession(response.data.token, response.data.customer?.email || "");
+        persistCustomerSession(response.data.customer.email);
         clearHash();
         window.location.replace(`${window.location.pathname}${window.location.search}`);
       } catch (nextError: unknown) {
@@ -534,6 +535,22 @@ export default function VerifyExperience() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCustomerAuthSession = async () => {
+      const response = await apiClient.getCustomerAuthSession();
+      if (cancelled || !response.success) return;
+      hydrateCustomerAuthSession(response.data || null);
+    };
+
+    void loadCustomerAuthSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrateCustomerAuthSession]);
+
   const bootstrapSession = useCallback(async () => {
     setBooting(true);
     setError(null);
@@ -541,11 +558,7 @@ export default function VerifyExperience() {
     try {
       if (sessionIdFromUrl) {
         const sessionProofToken = readSessionProofToken(sessionIdFromUrl);
-        const sessionResponse = await apiClient.getVerificationSession(
-          sessionIdFromUrl,
-          customerToken || undefined,
-          sessionProofToken || undefined
-        );
+        const sessionResponse = await apiClient.getVerificationSession(sessionIdFromUrl, sessionProofToken || undefined);
         if (!sessionResponse.success || !sessionResponse.data) {
           throw new Error(sessionResponse.error || "Could not load verification session.");
         }
@@ -563,7 +576,7 @@ export default function VerifyExperience() {
 
         if (nextSession.revealed && nextSession.verification) {
           setFlowStep("result");
-        } else if (nextSession.authState === "VERIFIED" || customerToken) {
+        } else if (nextSession.authState === "VERIFIED" || customerAuthenticated) {
           setFlowStep(nextSession.intakeCompleted ? "intent" : "purchase");
         } else {
           setFlowStep("identity");
@@ -579,14 +592,12 @@ export default function VerifyExperience() {
             lat: geo.lat,
             lon: geo.lon,
             acc: geo.acc,
-            customerToken: customerToken || undefined,
           })
         : await apiClient.verifyQRCode(codeParam, {
             device: deviceId,
             lat: geo.lat,
             lon: geo.lon,
             acc: geo.acc,
-            customerToken: customerToken || undefined,
           });
 
       if (!verificationResponse.success || !verificationResponse.data) {
@@ -604,8 +615,7 @@ export default function VerifyExperience() {
 
       const sessionResponse = await apiClient.startVerificationSession(
         nextResult.decisionId,
-        token ? "SIGNED_SCAN" : "MANUAL_CODE",
-        customerToken || undefined
+        token ? "SIGNED_SCAN" : "MANUAL_CODE"
       );
 
       if (!sessionResponse.success || !sessionResponse.data) {
@@ -624,7 +634,7 @@ export default function VerifyExperience() {
       if (token) params.set("t", token);
       navigate(`/verify/${encodeURIComponent(canonicalCode)}?${params.toString()}`, { replace: true });
 
-      if (nextSession.authState === "VERIFIED" || customerToken) {
+      if (nextSession.authState === "VERIFIED" || customerAuthenticated) {
         setFlowStep("purchase");
       } else {
         setFlowStep("identity");
@@ -634,7 +644,7 @@ export default function VerifyExperience() {
     } finally {
       setBooting(false);
     }
-  }, [codeParam, customerToken, deviceId, loadGeoContext, navigate, sessionIdFromUrl, token]);
+  }, [codeParam, customerAuthenticated, deviceId, loadGeoContext, navigate, sessionIdFromUrl, token]);
 
   useEffect(() => {
     if (!oauthResolved) return;
@@ -682,11 +692,11 @@ export default function VerifyExperience() {
     setOtpVerifying(true);
     try {
       const response = await apiClient.verifyEmailOtp(otpChallengeToken, otpCode.trim());
-      if (!response.success || !response.data?.token) {
+      if (!response.success || !response.data?.customer?.email) {
         throw new Error(response.error || "Could not verify the email code.");
       }
 
-      applySignedInCustomer(response.data.token, response.data.customer?.email || otpEmail.trim());
+      applySignedInCustomer(response.data.customer.email || otpEmail.trim());
       setOtpChallengeToken("");
       setOtpCode("");
       toast({ title: "Signed in", description: "Your verification session is now tied to your identity." });
@@ -720,14 +730,12 @@ export default function VerifyExperience() {
             lat: geo.lat,
             lon: geo.lon,
             acc: geo.acc,
-            customerToken: customerToken || undefined,
           })
         : await apiClient.verifyQRCode(codeParam, {
             device: deviceId,
             lat: geo.lat,
             lon: geo.lon,
             acc: geo.acc,
-            customerToken: customerToken || undefined,
           });
 
       if (!verificationResponse.success || !verificationResponse.data) {
@@ -749,8 +757,7 @@ export default function VerifyExperience() {
 
       const sessionResponse = await apiClient.startVerificationSession(
         nextResult.decisionId,
-        token ? "SIGNED_SCAN" : "MANUAL_CODE",
-        customerToken || undefined
+        token ? "SIGNED_SCAN" : "MANUAL_CODE"
       );
 
       if (!sessionResponse.success || !sessionResponse.data) {
@@ -811,7 +818,6 @@ export default function VerifyExperience() {
       const intakeResponse = await apiClient.submitVerificationIntake(
         session.sessionId,
         intakePayload as Record<string, unknown>,
-        customerToken || undefined,
         sessionProofToken || undefined
       );
       if (!intakeResponse.success) {
@@ -820,7 +826,6 @@ export default function VerifyExperience() {
 
       const revealResponse = await apiClient.revealVerificationSession(
         session.sessionId,
-        customerToken || undefined,
         sessionProofToken || undefined
       );
       if (!revealResponse.success || !revealResponse.data) {
@@ -906,7 +911,7 @@ export default function VerifyExperience() {
     if (!currentCode) return;
     setClaiming(true);
     try {
-      const response = await apiClient.claimVerifiedProduct(currentCode, customerToken || undefined);
+      const response = await apiClient.claimVerifiedProduct(currentCode);
       if (!response.success || !response.data) {
         throw new Error(response.error || "Could not claim this product.");
       }
@@ -937,7 +942,7 @@ export default function VerifyExperience() {
 
     setAcceptingTransfer(true);
     try {
-      const response = await apiClient.acceptOwnershipTransfer({ token: transferToken }, customerToken || undefined);
+      const response = await apiClient.acceptOwnershipTransfer({ token: transferToken });
       if (!response.success) {
         throw new Error(response.error || "Could not accept the ownership transfer.");
       }
@@ -995,13 +1000,13 @@ export default function VerifyExperience() {
     if (!authReady) return;
     setRegisteringPasskey(true);
     try {
-      const begin = await apiClient.beginCustomerPasskeyRegistration(customerToken || undefined);
+      const begin = await apiClient.beginCustomerPasskeyRegistration();
       if (!begin.success || !begin.data) throw new Error(begin.error || "Could not start passkey registration.");
       const credential = await startWebAuthnRegistration(begin.data, `${APP_NAME} customer protection`);
-      const finish = await apiClient.finishCustomerPasskeyRegistration(customerToken || undefined, credential);
-      if (!finish.success || !finish.data?.token) throw new Error(finish.error || "Could not finish passkey registration.");
-      applySignedInCustomer(finish.data.token, finish.data.customer?.email || customerEmail || otpEmail);
-      await loadCustomerPasskeys(finish.data.token);
+      const finish = await apiClient.finishCustomerPasskeyRegistration(credential);
+      if (!finish.success || !finish.data?.customer?.email) throw new Error(finish.error || "Could not finish passkey registration.");
+      applySignedInCustomer(finish.data.customer.email || customerEmail || otpEmail);
+      await loadCustomerPasskeys();
       await bootstrapSession();
       toast({ title: "Passkey added", description: "Future ownership actions can use stronger proof on this device." });
     } catch (nextError: unknown) {
@@ -1019,13 +1024,13 @@ export default function VerifyExperience() {
     if (!authReady) return;
     setAssertingPasskey(true);
     try {
-      const begin = await apiClient.beginCustomerPasskeyAssertion(undefined, customerToken || undefined);
+      const begin = await apiClient.beginCustomerPasskeyAssertion();
       if (!begin.success || !begin.data) throw new Error(begin.error || "Could not start passkey verification.");
       const assertion = await startWebAuthnAuthentication(begin.data);
-      const finish = await apiClient.finishCustomerPasskeyAssertion(assertion, customerToken || undefined);
-      if (!finish.success || !finish.data?.token) throw new Error(finish.error || "Could not verify the passkey.");
-      applySignedInCustomer(finish.data.token, finish.data.customer?.email || customerEmail || otpEmail);
-      await loadCustomerPasskeys(finish.data.token);
+      const finish = await apiClient.finishCustomerPasskeyAssertion(assertion);
+      if (!finish.success || !finish.data?.customer?.email) throw new Error(finish.error || "Could not verify the passkey.");
+      applySignedInCustomer(finish.data.customer.email || customerEmail || otpEmail);
+      await loadCustomerPasskeys();
       await bootstrapSession();
       toast({ title: "Passkey verified", description: "This session now carries stronger ownership proof." });
     } catch (nextError: unknown) {
@@ -1043,9 +1048,9 @@ export default function VerifyExperience() {
     if (!authReady) return;
     setDeletingPasskeyId(credentialId);
     try {
-      const response = await apiClient.deleteCustomerPasskeyCredential(customerToken || undefined, credentialId);
+      const response = await apiClient.deleteCustomerPasskeyCredential(credentialId);
       if (!response.success) throw new Error(response.error || "Could not remove the passkey.");
-      await loadCustomerPasskeys(customerToken || undefined);
+      await loadCustomerPasskeys();
       toast({ title: "Passkey removed", description: "That device can no longer step up ownership automatically." });
     } catch (nextError: unknown) {
       toast({
@@ -1932,7 +1937,7 @@ export default function VerifyExperience() {
               onClick={async () => {
                 await apiClient.logoutCustomerVerifySession();
                 clearStoredCustomerSession();
-                setCustomerToken("");
+                setCustomerAuthenticated(false);
                 setSession((prev) => (prev ? { ...prev, authState: "PENDING" } : prev));
                 setPasskeyCredentials([]);
                 setFlowStep("identity");

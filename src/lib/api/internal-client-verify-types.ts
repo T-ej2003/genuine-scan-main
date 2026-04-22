@@ -10,8 +10,25 @@ export type CustomerVerifyIdentity = {
 };
 
 export type CustomerVerifyTokenResponse = {
-  token?: string;
   customer: CustomerVerifyIdentity;
+  auth?: {
+    cookieBacked: true;
+    authenticated: boolean;
+    authStrength?: "EMAIL_OTP" | "PASSKEY" | "SOCIAL" | null;
+    webauthnVerifiedAt?: string | null;
+    authProvider?: "EMAIL_OTP" | "GOOGLE" | null;
+  };
+};
+
+export type CustomerVerifySessionStateResponse = {
+  customer: CustomerVerifyIdentity | null;
+  auth: {
+    cookieBacked: true;
+    authenticated: boolean;
+    authStrength?: "EMAIL_OTP" | "PASSKEY" | "SOCIAL" | null;
+    webauthnVerifiedAt?: string | null;
+    authProvider?: "EMAIL_OTP" | "GOOGLE" | null;
+  };
 };
 
 export type VerificationSessionResponse = {
