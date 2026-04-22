@@ -42,9 +42,14 @@ jobs:
       - name: Install backend dependencies
         run: npm --prefix backend ci
 
-      - name: Release-candidate validation contract
+      # TODO(ci-lint): make changed-file lint hard-blocking here once ENFORCE_LINT_CHANGED=true
+      # and the existing repository lint debt no longer requires report-only mode.
+      - name: Lint changed files report
         env:
           ENFORCE_LINT_CHANGED: ${{ vars.ENFORCE_LINT_CHANGED }}
+        run: npm run report:lint:changed
+
+      - name: Release-candidate validation contract
         run: npm run verify:ci:release-candidate
 
   rc-staging-smoke:

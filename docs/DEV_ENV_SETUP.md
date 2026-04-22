@@ -61,6 +61,8 @@ npx playwright install --with-deps chromium
 npm run verify:ci:frontend:e2e
 ```
 
+Changed-file lint remains a report, not a hard gate, until the existing repository lint debt is burned down and `ENFORCE_LINT_CHANGED=true` can be enabled without relying on report-only mode.
+
 ## 5) Local smoke (dev only)
 
 ```bash
