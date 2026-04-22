@@ -19,9 +19,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
 
-      - name: Backend security guardrails
-        run: npm run check:security-guardrails
+      - name: Install frontend dependencies
+        run: npm ci
 
       - name: Baseline secret-pattern guard
         run: node scripts/check-baseline-secret-patterns.mjs
@@ -29,32 +33,16 @@ jobs:
       - name: Dependency audit gate
         run: npm run check:dependency-audit
 
-      - name: Trust observability guardrails
-        run: npm run check:trust-observability
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
 
-      - name: Trust alert bindings
-        run: npm run check:trust-alert-bindings
-
-      - name: CloudWatch config guardrails
-        run: npm run check:cloudwatch-config
-
-      - name: Rotation evidence gate
-        run: npm run check:rotation-evidence
-
-      - name: Rotation cleanup gate
-        run: npm run check:rotation-cleanup
-
-      - name: Customer auth cutover gate
-        run: npm run check:customer-auth-cutover
-
-      - name: Nginx hardening invariants
-        run: npm run check:nginx-hardening
-
-      - name: Public metadata surface
-        run: npm run check:public-metadata-surface
-
-      - name: Release evidence refs
-        run: npm run check:release-evidence-refs
+      - name: Security and release guardrails
+        env:
+          REQUIRE_RELEASE_EVIDENCE_REFS: ${{ github.ref == 'refs/heads/main' }}
+          PROVENANCE_BACKFILL_EVIDENCE_REF: ${{ vars.RC_PROVENANCE_BACKFILL_EVIDENCE_REF }}
+          SECRET_ROTATION_EVIDENCE_REF: ${{ vars.RC_SECRET_ROTATION_EVIDENCE_REF }}
+          INCIDENT_DRILL_EVIDENCE_REF: ${{ vars.RC_INCIDENT_DRILL_EVIDENCE_REF }}
+        run: npm run verify:ci:security
 
   frontend:
     runs-on: ubuntu-latest
@@ -69,30 +57,14 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Strict typecheck
-        run: npm run typecheck
-
-      - name: Lint changed files
+      - name: Frontend quality contract
         env:
           ENFORCE_LINT_CHANGED: ${{ vars.ENFORCE_LINT_CHANGED }}
-        run: npm run lint:changed
-
-      - name: Architecture guardrails
-        run: node scripts/check-architecture-guardrails.mjs
-
-      - name: Code-size budgets
-        run: npm run check:budgets
-
-      - name: Unit tests
-        run: npm test
-
-      - name: Production build
-        run: npm run build
-
+        run: npm run verify:ci:frontend
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
       - name: Playwright smoke suite
-        run: npm run test:e2e
+        run: npm run verify:ci:frontend:e2e
 
   backend:
     runs-on: ubuntu-latest
@@ -108,14 +80,8 @@ jobs:
       - name: Install backend dependencies
         run: npm --prefix backend ci
 
-      - name: Backend build
-        run: npm --prefix backend run build
-
-      - name: Backend trust-critical suite
-        run: npm --prefix backend run test:trust-critical:compiled
-
-      - name: Backend test suite
-        run: npm --prefix backend test
+      - name: Backend quality contract
+        run: npm run verify:ci:backend
 
   docker:
     runs-on: ubuntu-latest

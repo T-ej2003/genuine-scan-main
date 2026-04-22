@@ -51,6 +51,14 @@ npm --prefix backend ci
 
 ```bash
 npm run verify:rc-local
+npm run verify:release
+```
+
+`verify:release` is the deterministic repo-local release contract. Browser-heavy Playwright coverage stays in CI and should be run explicitly when needed:
+
+```bash
+npx playwright install --with-deps chromium
+npm run verify:ci:frontend:e2e
 ```
 
 ## 5) Local smoke (dev only)
@@ -64,4 +72,3 @@ For staging/release smoke, always set `SMOKE_BASE_URL` and run:
 ```bash
 SMOKE_BASE_URL=https://<staging-host> npm run verify:staging-smoke
 ```
-

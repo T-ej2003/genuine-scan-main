@@ -42,46 +42,10 @@ jobs:
       - name: Install backend dependencies
         run: npm --prefix backend ci
 
-      - name: Lint changed files
+      - name: Release-candidate validation contract
         env:
           ENFORCE_LINT_CHANGED: ${{ vars.ENFORCE_LINT_CHANGED }}
-        run: npm run lint:changed
-
-      - name: Security guardrails
-        run: npm run check:security-guardrails
-
-      - name: Dependency audit gate
-        run: npm run check:dependency-audit
-
-      - name: Trust observability guardrails
-        run: npm run check:trust-observability
-
-      - name: Trust alert bindings
-        run: npm run check:trust-alert-bindings
-
-      - name: CloudWatch config guardrails
-        run: npm run check:cloudwatch-config
-
-      - name: Rotation evidence gate
-        run: npm run check:rotation-evidence
-
-      - name: Rotation cleanup gate
-        run: npm run check:rotation-cleanup
-
-      - name: Customer auth cutover gate
-        run: npm run check:customer-auth-cutover
-
-      - name: Nginx hardening invariants
-        run: npm run check:nginx-hardening
-
-      - name: Public metadata surface
-        run: npm run check:public-metadata-surface
-
-      - name: Prisma client generation
-        run: npm --prefix backend run prisma:generate
-
-      - name: Trust-critical suite
-        run: npm run test:trust-critical
+        run: npm run verify:ci:release-candidate
 
   rc-staging-smoke:
     runs-on: ubuntu-latest

@@ -42,11 +42,17 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "typecheck:incremental": "npm run typecheck",
-    "verify:rc-local": "npm run check:security-guardrails && npm run check:dependency-audit && npm run check:trust-observability && npm run check:trust-alert-bindings && npm run check:cloudwatch-config && npm run check:rotation-evidence && npm run check:rotation-cleanup && npm run check:customer-auth-cutover && npm run check:nginx-hardening && npm run check:public-metadata-surface && npm run typecheck && npm run build && npm run test:trust-critical",
+    "verify:guardrails": "npm run check:security-guardrails && npm run check:dependency-audit && npm run check:trust-observability && npm run check:trust-alert-bindings && npm run check:cloudwatch-config && npm run check:rotation-evidence && npm run check:rotation-cleanup && npm run check:customer-auth-cutover && npm run check:nginx-hardening && npm run check:public-metadata-surface",
+    "verify:ci:security": "npm run verify:guardrails && npm run check:release-evidence-refs",
+    "verify:ci:frontend": "npm run typecheck && npm run lint:changed && node scripts/check-architecture-guardrails.mjs && npm run check:budgets && npm test && npm run build",
+    "verify:ci:frontend:e2e": "npm run test:e2e",
+    "verify:ci:backend": "npm --prefix backend run build && npm --prefix backend run test:trust-critical:compiled && npm --prefix backend test",
+    "verify:ci:release-candidate": "npm run lint:changed && npm run verify:rc-local && npm --prefix backend run prisma:generate",
+    "verify:rc-local": "npm run verify:guardrails && npm run typecheck && npm run build && npm run test:trust-critical",
     "verify:staging-smoke": "node scripts/verify-staging-smoke.mjs",
     "backfill:provenance:dry-run": "node scripts/backfill-provenance-artifact.mjs",
     "backfill:provenance:execute": "node scripts/backfill-provenance-artifact.mjs --execute",
-    "verify:release": "npm run check:security-guardrails && npm run check:dependency-audit && npm run check:trust-observability && npm run check:trust-alert-bindings && npm run check:cloudwatch-config && npm run check:rotation-evidence && npm run check:rotation-cleanup && npm run check:customer-auth-cutover && npm run check:nginx-hardening && npm run check:public-metadata-surface && npm run check:release-evidence-refs && npm run typecheck && npm run build && npm run test:trust-critical && npm test && npm --prefix backend run prisma:generate && (cd backend && npm test)"
+    "verify:release": "npm run verify:guardrails && npm run check:release-evidence-refs && npm run typecheck && npm run build && npm run test:trust-critical && npm test && npm --prefix backend run prisma:generate && (cd backend && npm test)"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

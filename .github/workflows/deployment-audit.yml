@@ -32,44 +32,14 @@ jobs:
         run: npm ci
 
       - name: Install backend dependencies
-        run: cd backend && npm ci
+        run: npm --prefix backend ci
 
-      - name: Dependency audit gate
-        run: npm run check:dependency-audit
-
-      - name: Trust observability guardrails
-        run: npm run check:trust-observability
-
-      - name: Trust alert bindings
-        run: npm run check:trust-alert-bindings
-
-      - name: CloudWatch config guardrails
-        run: npm run check:cloudwatch-config
-
-      - name: Rotation evidence gate
-        run: npm run check:rotation-evidence
-
-      - name: Rotation cleanup gate
-        run: npm run check:rotation-cleanup
-
-      - name: Customer auth cutover gate
-        run: npm run check:customer-auth-cutover
-
-      - name: Nginx hardening invariants
-        run: npm run check:nginx-hardening
-
-      - name: Public metadata surface
-        run: npm run check:public-metadata-surface
-
-      - name: Release evidence refs
+      - name: Run full release validation
         env:
           REQUIRE_RELEASE_EVIDENCE_REFS: ${{ github.ref == 'refs/heads/main' }}
           PROVENANCE_BACKFILL_EVIDENCE_REF: ${{ vars.RC_PROVENANCE_BACKFILL_EVIDENCE_REF }}
           SECRET_ROTATION_EVIDENCE_REF: ${{ vars.RC_SECRET_ROTATION_EVIDENCE_REF }}
           INCIDENT_DRILL_EVIDENCE_REF: ${{ vars.RC_INCIDENT_DRILL_EVIDENCE_REF }}
-        run: npm run check:release-evidence-refs
-
-      - name: Run full release validation
         run: npm run verify:release
 
   audit:
