@@ -2,12 +2,7 @@ import { createHmac } from "crypto";
 import { Request } from "express";
 import { getJwtSecret, normalizeUserAgent } from "./security";
 import { normalizeClientIp } from "./ipAddress";
-
-const readCookie = (req: Request, name: string) => {
-  const cookies = (req as any).cookies as Record<string, string> | undefined;
-  const value = String(cookies?.[name] || "").trim();
-  return value || "";
-};
+import { readCookie } from "./cookies";
 
 const getFingerprintSecret = () =>
   String(process.env.SCAN_FINGERPRINT_SECRET || "").trim() ||

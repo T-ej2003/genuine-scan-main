@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { verifyCaptchaToken } from "../../services/captchaService";
 import { randomOpaqueToken } from "../../utils/security";
+import { getRequestCookies } from "../../utils/cookies";
 
 export type VerifyClassification =
   | "FIRST_SCAN"
@@ -165,7 +166,7 @@ const deviceClaimCookieOptions = () => ({
 });
 
 export const getDeviceClaimTokenFromRequest = (req: Request) => {
-  const cookies = (req as any).cookies as Record<string, string> | undefined;
+  const cookies = getRequestCookies(req);
   const raw = String(cookies?.[DEVICE_CLAIM_COOKIE] || "").trim();
   return raw || null;
 };

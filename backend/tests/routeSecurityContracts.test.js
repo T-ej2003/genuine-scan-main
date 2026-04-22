@@ -15,63 +15,79 @@ const authRoutesSource = readNormalized("src/routes/modules/authRoutes.ts");
 const routesSource = readNormalized("src/routes/index.ts");
 
 assert(!indexSource.includes("app.use(cookieParser())"), "app root should not mount cookie parsing globally");
-assert(authRoutesSource.includes("router.use(cookieParser());"), "auth router should own its cookie parsing lane");
-assert(routesSource.includes("const cookiePublicRouter = Router();"), "cookie-aware public router should be explicit");
-assert(routesSource.includes("const protectedRouter = Router();"), "protected router should be explicit");
-assert(routesSource.includes("cookiePublicRouter.use(cookieParser());"), "cookie-aware public router should parse cookies locally");
-assert(routesSource.includes("protectedRouter.use(cookieParser());"), "protected router should parse cookies locally");
+assert(!authRoutesSource.includes("router.use(cookieParser());"), "auth routes should not hide cookie parsing behind router.use");
+assert(!routesSource.includes("cookiePublicRouter.use(cookieParser());"), "cookie-aware verify routes should not hide cookie parsing behind router.use");
+assert(!routesSource.includes("protectedRouter.use(cookieParser());"), "protected routes should not hide cookie parsing behind router.use");
+assert(routesSource.includes("const publicReadRouter = Router();"), "public read router should be explicit");
+assert(routesSource.includes("const publicMutationRouter = Router();"), "public mutation router should be explicit");
+assert(routesSource.includes("const cookieReadRouter = Router();"), "cookie read router should be explicit");
+assert(routesSource.includes("const cookieMutationRouter = Router();"), "cookie mutation router should be explicit");
+assert(routesSource.includes("const protectedReadRouter = Router();"), "protected read router should be explicit");
+assert(routesSource.includes("const protectedMutationRouter = Router();"), "protected mutation router should be explicit");
 
 assert(
   authRoutesSource.includes(
-    'router.post("/auth/sessions/revoke-all", authenticate, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, revokeAllSessionsController);'
+    'router.post("/auth/sessions/revoke-all", authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, revokeAllSessionsController);'
   ),
   "revoke-all should declare auth, rate limits, and CSRF inline"
 );
 assert(
   authRoutesSource.includes(
-    'router.post("/auth/mfa/webauthn/setup/begin", authenticate, requireRecentAdminMfa, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminWebAuthnSetupController);'
+    'router.post("/auth/mfa/webauthn/setup/begin", authenticate, requireRecentAdminMfa, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminWebAuthnSetupController);'
   ),
   "admin webauthn setup should declare MFA limiter and CSRF inline"
 );
 assert(
   authRoutesSource.includes(
-    'router.post("/auth/invite", authenticate, requireAnyAdmin, requireRecentAdminMfa, adminInviteIpLimiter, adminInviteActorLimiter, requireCsrf, invite);'
+    'router.post("/auth/invite", authenticate, requireAnyAdmin, requireRecentAdminMfa, adminInviteRouteLimiter, adminInviteIpLimiter, adminInviteActorLimiter, requireCsrf, invite);'
   ),
   "admin invite should declare its limiter and CSRF inline"
 );
 
 assert(
   routesSource.includes(
-    'cookiePublicRouter.post( "/verify/session/:id/intake", requireCustomerVerifyAuth, verifyCustomerCookieMutationIpLimiter, verifyCustomerCookieMutationActorLimiter, requireCustomerVerifyCsrf, submitCustomerVerificationIntake );'
+    'cookieMutationRouter.post( "/verify/session/:id/intake", requireCustomerVerifyAuth, verifyCustomerCookieRouteLimiter, verifyCustomerCookieMutationIpLimiter, verifyCustomerCookieMutationActorLimiter, requireCustomerVerifyCsrf, submitCustomerVerificationIntake );'
   ),
   "verify intake should declare auth, rate limits, and CSRF inline"
 );
 assert(
   routesSource.includes(
-    'cookiePublicRouter.get( "/verify/auth/session", optionalCustomerVerifyAuth, verifyCustomerSessionReadIpLimiter, verifyCustomerSessionReadActorLimiter, getCustomerVerifyAuthSession );'
+    'cookieReadRouter.get( "/verify/auth/session", optionalCustomerVerifyAuth, verifySessionRouteLimiter, verifyCustomerSessionReadIpLimiter, verifyCustomerSessionReadActorLimiter, getCustomerVerifyAuthSession );'
   ),
   "verify auth session should declare its read limiters inline"
 );
 assert(
   routesSource.includes(
-    'cookiePublicRouter.post( "/verify/auth/passkey/register/begin", requireCustomerVerifyAuth, verifyCustomerCookieMutationIpLimiter, verifyCustomerCookieMutationActorLimiter, requireCustomerVerifyCsrf, beginCustomerPasskeyRegistration );'
+    'cookieMutationRouter.post( "/verify/auth/passkey/register/begin", requireCustomerVerifyAuth, verifyCustomerCookieRouteLimiter, verifyCustomerCookieMutationIpLimiter, verifyCustomerCookieMutationActorLimiter, requireCustomerVerifyCsrf, beginCustomerPasskeyRegistration );'
   ),
   "verify passkey registration should declare auth, rate limits, and CSRF inline"
 );
 assert(
   routesSource.includes(
-    'cookiePublicRouter.post( "/verify/:code/claim", optionalCustomerVerifyAuth, verifyClaimIpLimiter, verifyClaimActorLimiter, requireCustomerVerifyCsrf, claimProductOwnership );'
+    'cookieMutationRouter.post( "/verify/:code/claim", optionalCustomerVerifyAuth, verifyClaimRouteLimiter, verifyClaimIpLimiter, verifyClaimActorLimiter, requireCustomerVerifyCsrf, claimProductOwnership );'
   ),
   "claim flow should declare its limiter and CSRF inline"
 );
 assert(
   routesSource.includes(
-    'protectedRouter.get("/internal/release", authenticate, requirePlatformAdmin, internalReleaseIpLimiter, internalReleaseActorLimiter, internalReleaseMetadata);'
+    'protectedReadRouter.get("/internal/release", authenticate, requirePlatformAdmin, internalReleaseRouteLimiter, internalReleaseIpLimiter, internalReleaseActorLimiter, internalReleaseMetadata);'
   ),
   "internal release route should declare authentication and rate limiting inline"
 );
 assert(
-  routesSource.includes('router.get("/health", ...publicStatusLimiters, healthCheck);'),
+  routesSource.includes(
+    'protectedMutationRouter.patch("/account/profile", authenticate, protectedMutationRouteLimiter, requireRecentSensitiveAuth, requireCsrf, updateMyProfile);'
+  ),
+  "account profile mutation should declare a direct limiter and CSRF inline"
+);
+assert(
+  routesSource.includes(
+    'protectedReadRouter.get("/ir/policies", authenticate, requirePlatformAdmin, protectedReadRouteLimiter, listIrPolicies);'
+  ),
+  "protected reads should declare a direct route limiter inline"
+);
+assert(
+  routesSource.includes('publicReadRouter.get("/health", ...publicStatusLimiters, healthCheck);'),
   "public health route should remain outside the cookie-auth mutation lane"
 );
 

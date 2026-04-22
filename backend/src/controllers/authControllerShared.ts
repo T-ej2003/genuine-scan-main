@@ -10,6 +10,7 @@ import {
   getRefreshTokenTtlDays,
   newCsrfToken,
 } from "../services/auth/tokenService";
+import { readCookie } from "../utils/cookies";
 import { openCookieToken, sealCookieToken } from "../services/auth/cookieTokenProtectionService";
 import {
   getAdminStepUpWindowMinutes,
@@ -220,7 +221,7 @@ export const authResponseData = (session: CookieBackedAuthResponse) => ({
 });
 
 export const getRefreshTokenFromRequest = (req: Request) => {
-  const raw = (req as any).cookies?.[REFRESH_TOKEN_COOKIE];
+  const raw = readCookie(req, REFRESH_TOKEN_COOKIE);
   return typeof raw === "string" && raw.trim() ? openCookieToken(raw, "auth.refresh") : null;
 };
 
@@ -301,7 +302,7 @@ export const getCurrentRefreshSession = async (req: Request) => {
 };
 
 export const ensureCsrfCookie = (req: Request, res: Response) => {
-  const hasCsrfCookie = Boolean((req as any).cookies?.[CSRF_TOKEN_COOKIE]);
+  const hasCsrfCookie = Boolean(readCookie(req, CSRF_TOKEN_COOKIE));
   if (!hasCsrfCookie) {
     res.cookie(CSRF_TOKEN_COOKIE, newCsrfToken(), {
       ...csrfCookieOptions(),

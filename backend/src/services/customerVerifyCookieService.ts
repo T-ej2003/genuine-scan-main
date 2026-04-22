@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { openCookieToken, sealCookieToken } from "./auth/cookieTokenProtectionService";
 import { randomOpaqueToken } from "../utils/security";
+import { readCookie } from "../utils/cookies";
 
 export const CUSTOMER_VERIFY_SESSION_COOKIE_NAME =
   String(process.env.CUSTOMER_VERIFY_SESSION_COOKIE_NAME || "").trim() || "mscqr_verify_session";
@@ -46,14 +47,12 @@ export const isCustomerVerifyBearerCompatEnabled = () =>
 
 export const readCustomerVerifySessionCookie = (req: Request) => {
   if (!isCustomerVerifyCookieAuthEnabled()) return null;
-  const cookies = (req as any).cookies as Record<string, string> | undefined;
-  const raw = String(cookies?.[CUSTOMER_VERIFY_SESSION_COOKIE_NAME] || "").trim();
+  const raw = String(readCookie(req, CUSTOMER_VERIFY_SESSION_COOKIE_NAME) || "").trim();
   return raw ? openCookieToken(raw, "customer-verify.session") : null;
 };
 
 export const readCustomerVerifyCsrfCookie = (req: Request) => {
-  const cookies = (req as any).cookies as Record<string, string> | undefined;
-  const raw = String(cookies?.[CUSTOMER_VERIFY_CSRF_COOKIE_NAME] || "").trim();
+  const raw = String(readCookie(req, CUSTOMER_VERIFY_CSRF_COOKIE_NAME) || "").trim();
   return raw || null;
 };
 
