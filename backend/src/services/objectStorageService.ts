@@ -36,10 +36,10 @@ const configuredRegion = () =>
   String(process.env.OBJECT_STORAGE_REGION || process.env.S3_REGION || process.env.AWS_REGION || "").trim();
 
 const configuredAccessKey = () =>
-  String(process.env.OBJECT_STORAGE_ACCESS_KEY || process.env.S3_ACCESS_KEY || process.env.MINIO_ROOT_USER || "").trim();
+  String(process.env.OBJECT_STORAGE_ACCESS_KEY || process.env.S3_ACCESS_KEY || "").trim();
 
 const configuredSecretKey = () =>
-  String(process.env.OBJECT_STORAGE_SECRET_KEY || process.env.S3_SECRET_KEY || process.env.MINIO_ROOT_PASSWORD || "").trim();
+  String(process.env.OBJECT_STORAGE_SECRET_KEY || process.env.S3_SECRET_KEY || "").trim();
 
 const forcePathStyle = () =>
   parseBool(process.env.OBJECT_STORAGE_FORCE_PATH_STYLE, Boolean(configuredEndpoint()));

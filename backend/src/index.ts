@@ -196,10 +196,10 @@ if (process.env.NODE_ENV === "production") {
   }
 
   const objectStorageAccessKey = String(
-    process.env.OBJECT_STORAGE_ACCESS_KEY || process.env.S3_ACCESS_KEY || process.env.MINIO_ROOT_USER || ""
+    process.env.OBJECT_STORAGE_ACCESS_KEY || process.env.S3_ACCESS_KEY || ""
   ).trim();
   const objectStorageSecretKey = String(
-    process.env.OBJECT_STORAGE_SECRET_KEY || process.env.S3_SECRET_KEY || process.env.MINIO_ROOT_PASSWORD || ""
+    process.env.OBJECT_STORAGE_SECRET_KEY || process.env.S3_SECRET_KEY || ""
   ).trim();
   if (
     objectStorageConfiguration.mode === "static-credentials" &&
