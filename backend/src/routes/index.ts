@@ -1,4 +1,4 @@
-import { Request, Router } from "express";
+import { Request, type RequestHandler, Router } from "express";
 import {
   authenticate,
   authenticateAnySession,
@@ -339,42 +339,6 @@ const connectorDownloadResourceResolver = (req: any) =>
   [String(req.params?.version || "").trim(), String(req.params?.platform || "").trim()].filter(Boolean).join(":") || null;
 const supportTicketTrackResourceResolver = (req: any) => String(req.params?.reference || "").trim().toUpperCase() || null;
 
-const loginLimiters = buildPublicRateLimitPair({
-  scope: "auth.login",
-  windowMs: 15 * 60 * 1000,
-  ipMax: 25,
-  actorMax: 10,
-  message: "Too many sign-in attempts. Please wait before trying again.",
-  actorResolver: composeRequestResolvers(fromBodyFields("email"), fromUserAgent),
-});
-
-const inviteAcceptanceLimiters = buildPublicRateLimitPair({
-  scope: "auth.invite",
-  windowMs: 15 * 60 * 1000,
-  ipMax: 25,
-  actorMax: 10,
-  message: "Too many invite attempts. Please wait before retrying.",
-  actorResolver: tokenActor,
-});
-
-const verifyEmailLimiters = buildPublicRateLimitPair({
-  scope: "auth.verify-email",
-  windowMs: 15 * 60 * 1000,
-  ipMax: 25,
-  actorMax: 10,
-  message: "Too many verification attempts. Please wait before retrying.",
-  actorResolver: tokenActor,
-});
-
-const forgotPasswordLimiters = buildPublicRateLimitPair({
-  scope: "auth.password-reset",
-  windowMs: 15 * 60 * 1000,
-  ipMax: 10,
-  actorMax: 5,
-  message: "Too many password reset requests. Please wait before trying again.",
-  actorResolver: emailActor,
-});
-
 const verifyOtpRequestLimiters = buildPublicRateLimitPair({
   scope: "verify.otp-request",
   windowMs: 15 * 60 * 1000,
@@ -391,16 +355,6 @@ const verifyOtpVerifyLimiters = buildPublicRateLimitPair({
   actorMax: 12,
   message: "Too many verification attempts. Please wait before retrying.",
   actorResolver: composeRequestResolvers(fromBodyFields("challengeToken"), publicClientActor),
-});
-
-const verifyClaimLimiters = buildPublicRateLimitPair({
-  scope: "verify.claim",
-  windowMs: 10 * 60 * 1000,
-  ipMax: 25,
-  actorMax: 12,
-  message: "Too many ownership actions. Please wait before retrying.",
-  actorResolver: composeRequestResolvers(fromAuthorizationBearer, fromBodyFields("token", "transferId"), publicClientActor),
-  resourceResolver: verifyResourceResolver,
 });
 
 const verifyCodeLimiters = buildPublicRateLimitPair({
@@ -573,39 +527,87 @@ const secureAccountMutationLimiters = buildAuthenticatedRateLimitPair({
   message: "Too many account security actions. Please wait before retrying.",
 });
 
-const adminMfaMutationLimiters = buildAuthenticatedRateLimitPair({
-  scope: "admin.mfa",
-  windowMs: 10 * 60 * 1000,
-  ipMax: 30,
-  actorMax: 12,
-  message: "Too many MFA security actions. Please wait before retrying.",
-});
+const verifyCustomerSessionReadLimiters: RequestHandler[] = [
+  createPublicIpRateLimiter({
+    scope: "verify.customer-session:ip",
+    windowMs: 10 * 60 * 1000,
+    max: 30,
+    message: "Too many customer session checks. Please wait before retrying.",
+  }),
+  createPublicActorRateLimiter({
+    scope: "verify.customer-session:actor",
+    windowMs: 10 * 60 * 1000,
+    max: 12,
+    message: "Too many customer session checks. Please wait before retrying.",
+    actorResolver: publicClientActor,
+  }),
+];
 
-const verifyCustomerMutationLimiters = buildPublicRateLimitPair({
-  scope: "verify.customer-auth",
-  windowMs: 10 * 60 * 1000,
-  ipMax: 30,
-  actorMax: 12,
-  message: "Too many customer authentication actions. Please wait before retrying.",
-  actorResolver: publicClientActor,
-});
+const verifyCustomerMutationLimiters: RequestHandler[] = [
+  createPublicIpRateLimiter({
+    scope: "verify.customer-auth:ip",
+    windowMs: 10 * 60 * 1000,
+    max: 30,
+    message: "Too many customer authentication actions. Please wait before retrying.",
+  }),
+  createPublicActorRateLimiter({
+    scope: "verify.customer-auth:actor",
+    windowMs: 10 * 60 * 1000,
+    max: 12,
+    message: "Too many customer authentication actions. Please wait before retrying.",
+    actorResolver: publicClientActor,
+  }),
+];
 
-const verifyCustomerCookieMutationLimiters = buildPublicRateLimitPair({
-  scope: "verify.customer-cookie",
-  windowMs: 10 * 60 * 1000,
-  ipMax: 30,
-  actorMax: 12,
-  message: "Too many customer account actions. Please wait before retrying.",
-  actorResolver: composeRequestResolvers(fromAuthorizationBearer, fromUserAgent),
-});
+const verifyCustomerCookieMutationLimiters: RequestHandler[] = [
+  createPublicIpRateLimiter({
+    scope: "verify.customer-cookie:ip",
+    windowMs: 10 * 60 * 1000,
+    max: 30,
+    message: "Too many customer account actions. Please wait before retrying.",
+  }),
+  createPublicActorRateLimiter({
+    scope: "verify.customer-cookie:actor",
+    windowMs: 10 * 60 * 1000,
+    max: 12,
+    message: "Too many customer account actions. Please wait before retrying.",
+    actorResolver: composeRequestResolvers(fromHeaderFields("x-device-fp"), fromUserAgent),
+  }),
+];
 
-const internalReleaseLimiters = buildAuthenticatedRateLimitPair({
-  scope: "internal.release",
-  windowMs: 10 * 60 * 1000,
-  ipMax: 20,
-  actorMax: 10,
-  message: "Too many release metadata lookups. Please wait before retrying.",
-});
+const verifyClaimLimiters: RequestHandler[] = [
+  createPublicIpRateLimiter({
+    scope: "verify.claim:ip",
+    windowMs: 10 * 60 * 1000,
+    max: 25,
+    message: "Too many ownership actions. Please wait before retrying.",
+    resourceResolver: verifyResourceResolver,
+  }),
+  createPublicActorRateLimiter({
+    scope: "verify.claim:actor",
+    windowMs: 10 * 60 * 1000,
+    max: 12,
+    message: "Too many ownership actions. Please wait before retrying.",
+    actorResolver: composeRequestResolvers(fromAuthorizationBearer, fromBodyFields("token", "transferId"), publicClientActor),
+    resourceResolver: verifyResourceResolver,
+  }),
+];
+
+const internalReleaseLimiters: RequestHandler[] = [
+  createPublicIpRateLimiter({
+    scope: "internal.release:ip",
+    windowMs: 10 * 60 * 1000,
+    max: 20,
+    message: "Too many release metadata lookups. Please wait before retrying.",
+  }),
+  createPublicActorRateLimiter({
+    scope: "internal.release:actor",
+    windowMs: 10 * 60 * 1000,
+    max: 10,
+    message: "Too many release metadata lookups. Please wait before retrying.",
+    actorResolver: (req: any) => req.user?.userId || null,
+  }),
+];
 
 const exportLimiters = buildAuthenticatedRateLimitPair({
   scope: "exports.downloads",
@@ -616,17 +618,7 @@ const exportLimiters = buildAuthenticatedRateLimitPair({
   resourceResolver: composeRequestResolvers(fromParamFields("id", "fileName")),
 });
 
-router.use(
-  createAuthRoutes({
-    loginLimiters,
-    inviteAcceptanceLimiters,
-    verifyEmailLimiters,
-    forgotPasswordLimiters,
-    adminInviteLimiters,
-    secureSessionLimiters: secureAccountMutationLimiters,
-    mfaMutationLimiters: adminMfaMutationLimiters,
-  })
-);
+router.use(createAuthRoutes());
 
 router.use(createRealtimeRoutes());
 router.use(
@@ -646,7 +638,7 @@ router.get("/verify/session/:id", ...verifyCodeLimiters, optionalCustomerVerifyA
 router.post("/verify/session/:id/intake", requireCustomerVerifyAuth, ...verifyCustomerCookieMutationLimiters, requireCustomerVerifyCsrf, submitCustomerVerificationIntake);
 router.post("/verify/session/:id/reveal", requireCustomerVerifyAuth, ...verifyCustomerCookieMutationLimiters, requireCustomerVerifyCsrf, revealCustomerVerificationResult);
 router.get("/verify/auth/providers", ...verifyCodeLimiters, listCustomerOAuthProviders);
-router.get("/verify/auth/session", optionalCustomerVerifyAuth, getCustomerVerifyAuthSession);
+router.get("/verify/auth/session", optionalCustomerVerifyAuth, ...verifyCustomerSessionReadLimiters, getCustomerVerifyAuthSession);
 router.get("/verify/auth/oauth/:provider/start", ...verifyCodeLimiters, startCustomerOAuth);
 router.get("/verify/auth/oauth/:provider/callback", ...verifyCodeLimiters, completeCustomerOAuth);
 router.post("/verify/auth/oauth/:provider/callback", ...verifyCodeLimiters, completeCustomerOAuth);

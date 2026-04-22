@@ -19,7 +19,6 @@ import { releaseMetadata } from "./observability/release";
 import { captureBackendException, flushBackendMonitoring, initBackendMonitoring } from "./observability/sentry";
 import { getLatencySummary, recordRequestMetric } from "./observability/requestMetrics";
 import { sanitizeRequestInput } from "./middleware/requestSanitizer";
-import { enforceCookieMutationSecurity } from "./middleware/cookieMutationSecurity";
 import {
   createPublicActorRateLimiter,
   createPublicIpRateLimiter,
@@ -322,7 +321,6 @@ app.use(
 app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
-app.use(enforceCookieMutationSecurity);
 app.use(sanitizeRequestInput);
 
 app.use((req, res, next) => {
