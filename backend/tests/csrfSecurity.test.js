@@ -36,6 +36,17 @@ const runCustomerCsrf = (req) => {
 };
 
 {
+  const { res, nextCalled } = runAdminCsrf({
+    method: "GET",
+    headers: {},
+    cookies: {},
+    authMode: "cookie",
+  });
+  assert.strictEqual(res.statusCode, 200);
+  assert.strictEqual(nextCalled, true, "safe admin reads should not require CSRF");
+}
+
+{
   const { res } = runAdminCsrf({
     method: "POST",
     headers: {},
@@ -57,6 +68,17 @@ const runCustomerCsrf = (req) => {
 }
 
 {
+  const { res, nextCalled } = runAdminCsrf({
+    method: "POST",
+    headers: { authorization: "Bearer admin-token" },
+    cookies: {},
+    authMode: "bearer",
+  });
+  assert.strictEqual(res.statusCode, 200);
+  assert.strictEqual(nextCalled, true, "bearer-backed admin mutations should not require CSRF");
+}
+
+{
   const { res } = runCustomerCsrf({
     method: "POST",
     headers: {},
@@ -68,6 +90,17 @@ const runCustomerCsrf = (req) => {
 
 {
   const { res, nextCalled } = runCustomerCsrf({
+    method: "GET",
+    headers: {},
+    cookies: {},
+    customerAuthSource: "cookie",
+  });
+  assert.strictEqual(res.statusCode, 200);
+  assert.strictEqual(nextCalled, true, "safe customer verify reads should not require CSRF");
+}
+
+{
+  const { res, nextCalled } = runCustomerCsrf({
     method: "POST",
     headers: { "x-csrf-token": "verify-token" },
     cookies: { [CUSTOMER_VERIFY_CSRF_COOKIE_NAME]: "verify-token" },
@@ -75,6 +108,17 @@ const runCustomerCsrf = (req) => {
   });
   assert.strictEqual(res.statusCode, 200);
   assert.strictEqual(nextCalled, true, "cookie-backed customer mutations should accept matching CSRF");
+}
+
+{
+  const { res, nextCalled } = runCustomerCsrf({
+    method: "POST",
+    headers: { authorization: "Bearer verify-token" },
+    cookies: {},
+    customerAuthSource: "bearer",
+  });
+  assert.strictEqual(res.statusCode, 200);
+  assert.strictEqual(nextCalled, true, "bearer-backed customer verify mutations should not require CSRF");
 }
 
 console.log("csrf security tests passed");

@@ -1,3 +1,4 @@
+import cookieParser from "cookie-parser";
 import { Request, type RequestHandler, Router } from "express";
 import {
   authenticate,
@@ -265,6 +266,11 @@ import {
 } from "../controllers/governanceController";
 
 const router = Router();
+const cookiePublicRouter = Router();
+const protectedRouter = Router();
+
+cookiePublicRouter.use(cookieParser());
+protectedRouter.use(cookieParser());
 
 const buildPublicRateLimitPair = (params: {
   scope: string;
@@ -527,87 +533,82 @@ const secureAccountMutationLimiters = buildAuthenticatedRateLimitPair({
   message: "Too many account security actions. Please wait before retrying.",
 });
 
-const verifyCustomerSessionReadLimiters: RequestHandler[] = [
-  createPublicIpRateLimiter({
-    scope: "verify.customer-session:ip",
-    windowMs: 10 * 60 * 1000,
-    max: 30,
-    message: "Too many customer session checks. Please wait before retrying.",
-  }),
-  createPublicActorRateLimiter({
-    scope: "verify.customer-session:actor",
-    windowMs: 10 * 60 * 1000,
-    max: 12,
-    message: "Too many customer session checks. Please wait before retrying.",
-    actorResolver: publicClientActor,
-  }),
-];
+const verifyCustomerSessionReadIpLimiter = createPublicIpRateLimiter({
+  scope: "verify.customer-session:ip",
+  windowMs: 10 * 60 * 1000,
+  max: 30,
+  message: "Too many customer session checks. Please wait before retrying.",
+});
 
-const verifyCustomerMutationLimiters: RequestHandler[] = [
-  createPublicIpRateLimiter({
-    scope: "verify.customer-auth:ip",
-    windowMs: 10 * 60 * 1000,
-    max: 30,
-    message: "Too many customer authentication actions. Please wait before retrying.",
-  }),
-  createPublicActorRateLimiter({
-    scope: "verify.customer-auth:actor",
-    windowMs: 10 * 60 * 1000,
-    max: 12,
-    message: "Too many customer authentication actions. Please wait before retrying.",
-    actorResolver: publicClientActor,
-  }),
-];
+const verifyCustomerSessionReadActorLimiter = createPublicActorRateLimiter({
+  scope: "verify.customer-session:actor",
+  windowMs: 10 * 60 * 1000,
+  max: 12,
+  message: "Too many customer session checks. Please wait before retrying.",
+  actorResolver: publicClientActor,
+});
 
-const verifyCustomerCookieMutationLimiters: RequestHandler[] = [
-  createPublicIpRateLimiter({
-    scope: "verify.customer-cookie:ip",
-    windowMs: 10 * 60 * 1000,
-    max: 30,
-    message: "Too many customer account actions. Please wait before retrying.",
-  }),
-  createPublicActorRateLimiter({
-    scope: "verify.customer-cookie:actor",
-    windowMs: 10 * 60 * 1000,
-    max: 12,
-    message: "Too many customer account actions. Please wait before retrying.",
-    actorResolver: composeRequestResolvers(fromHeaderFields("x-device-fp"), fromUserAgent),
-  }),
-];
+const verifyCustomerMutationIpLimiter = createPublicIpRateLimiter({
+  scope: "verify.customer-auth:ip",
+  windowMs: 10 * 60 * 1000,
+  max: 30,
+  message: "Too many customer authentication actions. Please wait before retrying.",
+});
 
-const verifyClaimLimiters: RequestHandler[] = [
-  createPublicIpRateLimiter({
-    scope: "verify.claim:ip",
-    windowMs: 10 * 60 * 1000,
-    max: 25,
-    message: "Too many ownership actions. Please wait before retrying.",
-    resourceResolver: verifyResourceResolver,
-  }),
-  createPublicActorRateLimiter({
-    scope: "verify.claim:actor",
-    windowMs: 10 * 60 * 1000,
-    max: 12,
-    message: "Too many ownership actions. Please wait before retrying.",
-    actorResolver: composeRequestResolvers(fromAuthorizationBearer, fromBodyFields("token", "transferId"), publicClientActor),
-    resourceResolver: verifyResourceResolver,
-  }),
-];
+const verifyCustomerMutationActorLimiter = createPublicActorRateLimiter({
+  scope: "verify.customer-auth:actor",
+  windowMs: 10 * 60 * 1000,
+  max: 12,
+  message: "Too many customer authentication actions. Please wait before retrying.",
+  actorResolver: publicClientActor,
+});
 
-const internalReleaseLimiters: RequestHandler[] = [
-  createPublicIpRateLimiter({
-    scope: "internal.release:ip",
-    windowMs: 10 * 60 * 1000,
-    max: 20,
-    message: "Too many release metadata lookups. Please wait before retrying.",
-  }),
-  createPublicActorRateLimiter({
-    scope: "internal.release:actor",
-    windowMs: 10 * 60 * 1000,
-    max: 10,
-    message: "Too many release metadata lookups. Please wait before retrying.",
-    actorResolver: (req: any) => req.user?.userId || null,
-  }),
-];
+const verifyCustomerCookieMutationIpLimiter = createPublicIpRateLimiter({
+  scope: "verify.customer-cookie:ip",
+  windowMs: 10 * 60 * 1000,
+  max: 30,
+  message: "Too many customer account actions. Please wait before retrying.",
+});
+
+const verifyCustomerCookieMutationActorLimiter = createPublicActorRateLimiter({
+  scope: "verify.customer-cookie:actor",
+  windowMs: 10 * 60 * 1000,
+  max: 12,
+  message: "Too many customer account actions. Please wait before retrying.",
+  actorResolver: composeRequestResolvers(fromHeaderFields("x-device-fp"), fromUserAgent),
+});
+
+const verifyClaimIpLimiter = createPublicIpRateLimiter({
+  scope: "verify.claim:ip",
+  windowMs: 10 * 60 * 1000,
+  max: 25,
+  message: "Too many ownership actions. Please wait before retrying.",
+  resourceResolver: verifyResourceResolver,
+});
+
+const verifyClaimActorLimiter = createPublicActorRateLimiter({
+  scope: "verify.claim:actor",
+  windowMs: 10 * 60 * 1000,
+  max: 12,
+  message: "Too many ownership actions. Please wait before retrying.",
+  actorResolver: composeRequestResolvers(fromAuthorizationBearer, fromBodyFields("token", "transferId"), publicClientActor),
+  resourceResolver: verifyResourceResolver,
+});
+
+const internalReleaseIpLimiter = createPublicIpRateLimiter({
+  scope: "internal.release:ip",
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  message: "Too many release metadata lookups. Please wait before retrying.",
+});
+
+const internalReleaseActorLimiter = createPublicActorRateLimiter({
+  scope: "internal.release:actor",
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  message: "Too many release metadata lookups. Please wait before retrying.",
+  actorResolver: (req: any) => req.user?.userId || null,
+});
 
 const exportLimiters = buildAuthenticatedRateLimitPair({
   scope: "exports.downloads",
@@ -620,8 +621,8 @@ const exportLimiters = buildAuthenticatedRateLimitPair({
 
 router.use(createAuthRoutes());
 
-router.use(createRealtimeRoutes());
-router.use(
+protectedRouter.use(createRealtimeRoutes());
+protectedRouter.use(
   createGovernanceRoutes({
     exportLimiters,
     incidentSupportMutationLimiters,
@@ -632,31 +633,125 @@ router.use(
 router.get("/public/connector/releases", ...connectorManifestLimiters, listConnectorReleasesController);
 router.get("/public/connector/releases/latest", ...connectorManifestLimiters, getLatestConnectorReleaseController);
 router.get("/public/connector/download/:version/:platform", ...connectorDownloadLimiters, downloadConnectorReleaseController);
-router.get("/verify/:code", ...verifyCodeLimiters, optionalCustomerVerifyAuth, verifyQRCode);
-router.post("/verify/session/start", ...verifyCodeLimiters, optionalCustomerVerifyAuth, startCustomerVerificationSession);
-router.get("/verify/session/:id", ...verifyCodeLimiters, optionalCustomerVerifyAuth, getCustomerVerificationSessionState);
-router.post("/verify/session/:id/intake", requireCustomerVerifyAuth, ...verifyCustomerCookieMutationLimiters, requireCustomerVerifyCsrf, submitCustomerVerificationIntake);
-router.post("/verify/session/:id/reveal", requireCustomerVerifyAuth, ...verifyCustomerCookieMutationLimiters, requireCustomerVerifyCsrf, revealCustomerVerificationResult);
+cookiePublicRouter.get("/verify/:code", ...verifyCodeLimiters, optionalCustomerVerifyAuth, verifyQRCode);
+cookiePublicRouter.post("/verify/session/start", ...verifyCodeLimiters, optionalCustomerVerifyAuth, startCustomerVerificationSession);
+cookiePublicRouter.get("/verify/session/:id", ...verifyCodeLimiters, optionalCustomerVerifyAuth, getCustomerVerificationSessionState);
+cookiePublicRouter.post(
+  "/verify/session/:id/intake",
+  requireCustomerVerifyAuth,
+  verifyCustomerCookieMutationIpLimiter,
+  verifyCustomerCookieMutationActorLimiter,
+  requireCustomerVerifyCsrf,
+  submitCustomerVerificationIntake
+);
+cookiePublicRouter.post(
+  "/verify/session/:id/reveal",
+  requireCustomerVerifyAuth,
+  verifyCustomerCookieMutationIpLimiter,
+  verifyCustomerCookieMutationActorLimiter,
+  requireCustomerVerifyCsrf,
+  revealCustomerVerificationResult
+);
 router.get("/verify/auth/providers", ...verifyCodeLimiters, listCustomerOAuthProviders);
-router.get("/verify/auth/session", optionalCustomerVerifyAuth, ...verifyCustomerSessionReadLimiters, getCustomerVerifyAuthSession);
+cookiePublicRouter.get(
+  "/verify/auth/session",
+  optionalCustomerVerifyAuth,
+  verifyCustomerSessionReadIpLimiter,
+  verifyCustomerSessionReadActorLimiter,
+  getCustomerVerifyAuthSession
+);
 router.get("/verify/auth/oauth/:provider/start", ...verifyCodeLimiters, startCustomerOAuth);
 router.get("/verify/auth/oauth/:provider/callback", ...verifyCodeLimiters, completeCustomerOAuth);
 router.post("/verify/auth/oauth/:provider/callback", ...verifyCodeLimiters, completeCustomerOAuth);
-router.post("/verify/auth/oauth/exchange", ...verifyCustomerMutationLimiters, exchangeCustomerOAuth);
+router.post("/verify/auth/oauth/exchange", verifyCustomerMutationIpLimiter, verifyCustomerMutationActorLimiter, exchangeCustomerOAuth);
 router.post("/verify/auth/email-otp/request", ...verifyOtpRequestLimiters, requestCustomerEmailOtp);
-router.post("/verify/auth/email-otp/verify", ...verifyCustomerMutationLimiters, verifyCustomerEmailOtp);
-router.post("/verify/auth/logout", ...verifyCustomerCookieMutationLimiters, requireCustomerVerifyCsrf, logoutCustomerVerifySession);
-router.post("/verify/auth/passkey/register/begin", requireCustomerVerifyAuth, ...verifyCustomerCookieMutationLimiters, requireCustomerVerifyCsrf, beginCustomerPasskeyRegistration);
-router.post("/verify/auth/passkey/register/finish", requireCustomerVerifyAuth, ...verifyCustomerCookieMutationLimiters, requireCustomerVerifyCsrf, finishCustomerPasskeyRegistration);
-router.post("/verify/auth/passkey/assertion/begin", optionalCustomerVerifyAuth, ...verifyCustomerMutationLimiters, beginCustomerPasskeyAssertion);
-router.post("/verify/auth/passkey/assertion/finish", optionalCustomerVerifyAuth, ...verifyCustomerMutationLimiters, finishCustomerPasskeyAssertion);
-router.get("/verify/auth/passkey/credentials", ...verifyOtpVerifyLimiters, requireCustomerVerifyAuth, listCustomerPasskeyCredentials);
-router.delete("/verify/auth/passkey/credentials/:id", requireCustomerVerifyAuth, ...verifyCustomerCookieMutationLimiters, requireCustomerVerifyCsrf, deleteCustomerPasskeyCredential);
-router.post("/verify/:code/claim", optionalCustomerVerifyAuth, ...verifyClaimLimiters, requireCustomerVerifyCsrf, claimProductOwnership);
-router.post("/verify/:code/link-claim", requireCustomerVerifyAuth, ...verifyClaimLimiters, requireCustomerVerifyCsrf, linkDeviceClaimToCustomer);
-router.post("/verify/:code/transfer", requireCustomerVerifyAuth, ...verifyClaimLimiters, requireCustomerVerifyCsrf, createOwnershipTransfer);
-router.post("/verify/:code/transfer/cancel", requireCustomerVerifyAuth, ...verifyClaimLimiters, requireCustomerVerifyCsrf, cancelOwnershipTransfer);
-router.post("/verify/transfer/accept", requireCustomerVerifyAuth, ...verifyClaimLimiters, requireCustomerVerifyCsrf, acceptOwnershipTransfer);
+router.post("/verify/auth/email-otp/verify", verifyCustomerMutationIpLimiter, verifyCustomerMutationActorLimiter, verifyCustomerEmailOtp);
+cookiePublicRouter.post(
+  "/verify/auth/logout",
+  verifyCustomerCookieMutationIpLimiter,
+  verifyCustomerCookieMutationActorLimiter,
+  requireCustomerVerifyCsrf,
+  logoutCustomerVerifySession
+);
+cookiePublicRouter.post(
+  "/verify/auth/passkey/register/begin",
+  requireCustomerVerifyAuth,
+  verifyCustomerCookieMutationIpLimiter,
+  verifyCustomerCookieMutationActorLimiter,
+  requireCustomerVerifyCsrf,
+  beginCustomerPasskeyRegistration
+);
+cookiePublicRouter.post(
+  "/verify/auth/passkey/register/finish",
+  requireCustomerVerifyAuth,
+  verifyCustomerCookieMutationIpLimiter,
+  verifyCustomerCookieMutationActorLimiter,
+  requireCustomerVerifyCsrf,
+  finishCustomerPasskeyRegistration
+);
+cookiePublicRouter.post(
+  "/verify/auth/passkey/assertion/begin",
+  optionalCustomerVerifyAuth,
+  verifyCustomerMutationIpLimiter,
+  verifyCustomerMutationActorLimiter,
+  beginCustomerPasskeyAssertion
+);
+cookiePublicRouter.post(
+  "/verify/auth/passkey/assertion/finish",
+  optionalCustomerVerifyAuth,
+  verifyCustomerMutationIpLimiter,
+  verifyCustomerMutationActorLimiter,
+  finishCustomerPasskeyAssertion
+);
+cookiePublicRouter.get("/verify/auth/passkey/credentials", ...verifyOtpVerifyLimiters, requireCustomerVerifyAuth, listCustomerPasskeyCredentials);
+cookiePublicRouter.delete(
+  "/verify/auth/passkey/credentials/:id",
+  requireCustomerVerifyAuth,
+  verifyCustomerCookieMutationIpLimiter,
+  verifyCustomerCookieMutationActorLimiter,
+  requireCustomerVerifyCsrf,
+  deleteCustomerPasskeyCredential
+);
+cookiePublicRouter.post(
+  "/verify/:code/claim",
+  optionalCustomerVerifyAuth,
+  verifyClaimIpLimiter,
+  verifyClaimActorLimiter,
+  requireCustomerVerifyCsrf,
+  claimProductOwnership
+);
+cookiePublicRouter.post(
+  "/verify/:code/link-claim",
+  requireCustomerVerifyAuth,
+  verifyClaimIpLimiter,
+  verifyClaimActorLimiter,
+  requireCustomerVerifyCsrf,
+  linkDeviceClaimToCustomer
+);
+cookiePublicRouter.post(
+  "/verify/:code/transfer",
+  requireCustomerVerifyAuth,
+  verifyClaimIpLimiter,
+  verifyClaimActorLimiter,
+  requireCustomerVerifyCsrf,
+  createOwnershipTransfer
+);
+cookiePublicRouter.post(
+  "/verify/:code/transfer/cancel",
+  requireCustomerVerifyAuth,
+  verifyClaimIpLimiter,
+  verifyClaimActorLimiter,
+  requireCustomerVerifyCsrf,
+  cancelOwnershipTransfer
+);
+cookiePublicRouter.post(
+  "/verify/transfer/accept",
+  requireCustomerVerifyAuth,
+  verifyClaimIpLimiter,
+  verifyClaimActorLimiter,
+  requireCustomerVerifyCsrf,
+  acceptOwnershipTransfer
+);
 router.post(
   "/verify/report-fraud",
   verifyReportIpLimiter,
@@ -686,25 +781,25 @@ router.post(
   reportIncident
 );
 router.get("/support/tickets/track/:reference", ...supportTicketTrackLimiters, trackSupportTicketPublic);
-router.get("/scan", ...scanLimiters, optionalCustomerVerifyAuth, scanToken);
-router.post("/telemetry/route-transition", optionalAuth, ...telemetryLimiters, captureRouteTransitionMetric);
-router.post("/telemetry/csp-report", optionalAuth, ...cspReportLimiters, captureCspViolationReport);
+cookiePublicRouter.get("/scan", ...scanLimiters, optionalCustomerVerifyAuth, scanToken);
+cookiePublicRouter.post("/telemetry/route-transition", optionalAuth, ...telemetryLimiters, captureRouteTransitionMetric);
+cookiePublicRouter.post("/telemetry/csp-report", optionalAuth, ...cspReportLimiters, captureCspViolationReport);
 router.get("/health", ...publicStatusLimiters, healthCheck);
 router.get("/healthz", ...publicStatusLimiters, healthCheck);
 router.get("/health/live", ...publicStatusLimiters, liveHealthCheck);
 router.get("/health/ready", ...publicStatusLimiters, readyHealthCheck);
 router.get("/health/latency", ...publicStatusLimiters, latencySummary);
-router.get("/internal/release", authenticate, requirePlatformAdmin, ...internalReleaseLimiters, internalReleaseMetadata);
+protectedRouter.get("/internal/release", authenticate, requirePlatformAdmin, internalReleaseIpLimiter, internalReleaseActorLimiter, internalReleaseMetadata);
 
 // ==================== LICENSEES (SUPER ADMIN) ====================
-router.get("/licensees/export", authenticate, requirePlatformAdmin, ...exportLimiters, exportLicenseesCsv);
+protectedRouter.get("/licensees/export", authenticate, requirePlatformAdmin, ...exportLimiters, exportLicenseesCsv);
 
-router.post("/licensees", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, createLicensee);
-router.get("/licensees", authenticate, requirePlatformAdmin, getLicensees);
-router.get("/licensees/:id", authenticate, requirePlatformAdmin, getLicensee);
-router.patch("/licensees/:id", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, updateLicensee);
-router.delete("/licensees/:id", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, deleteLicensee);
-router.post(
+protectedRouter.post("/licensees", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, createLicensee);
+protectedRouter.get("/licensees", authenticate, requirePlatformAdmin, getLicensees);
+protectedRouter.get("/licensees/:id", authenticate, requirePlatformAdmin, getLicensee);
+protectedRouter.patch("/licensees/:id", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, updateLicensee);
+protectedRouter.delete("/licensees/:id", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, deleteLicensee);
+protectedRouter.post(
   "/licensees/:id/admin-invite/resend",
   authenticate,
   requirePlatformAdmin,
@@ -716,16 +811,16 @@ router.post(
 
 // ==================== USERS ====================
 // ✅ recommended: allow LICENSEE_ADMIN to create MANUFACTURER (controller already enforces)
-router.post("/users", authenticate, requireAnyAdmin, requireRecentAdminMfa, enforceTenantIsolation, ...adminUserMutationLimiters, requireCsrf, createUser);
+protectedRouter.post("/users", authenticate, requireAnyAdmin, requireRecentAdminMfa, enforceTenantIsolation, ...adminUserMutationLimiters, requireCsrf, createUser);
 
-router.get("/users", authenticate, requireAnyAdmin, enforceTenantIsolation, getUsers);
-router.patch("/users/:id", authenticate, requireAnyAdmin, requireRecentAdminMfa, enforceTenantIsolation, ...adminUserMutationLimiters, requireCsrf, updateUser);
-router.delete("/users/:id", authenticate, requireAnyAdmin, requireRecentAdminMfa, enforceTenantIsolation, ...adminUserMutationLimiters, requireCsrf, deleteUser);
+protectedRouter.get("/users", authenticate, requireAnyAdmin, enforceTenantIsolation, getUsers);
+protectedRouter.patch("/users/:id", authenticate, requireAnyAdmin, requireRecentAdminMfa, enforceTenantIsolation, ...adminUserMutationLimiters, requireCsrf, updateUser);
+protectedRouter.delete("/users/:id", authenticate, requireAnyAdmin, requireRecentAdminMfa, enforceTenantIsolation, ...adminUserMutationLimiters, requireCsrf, deleteUser);
 
 // ==================== MANUFACTURERS ====================
-router.get("/manufacturers", authenticate, requireAnyAdmin, enforceTenantIsolation, getManufacturers);
+protectedRouter.get("/manufacturers", authenticate, requireAnyAdmin, enforceTenantIsolation, getManufacturers);
 
-router.patch(
+protectedRouter.patch(
   "/manufacturers/:id/deactivate",
   authenticate,
   requireAnyAdmin,
@@ -735,7 +830,7 @@ router.patch(
   deactivateManufacturer
 );
 
-router.patch(
+protectedRouter.patch(
   "/manufacturers/:id/restore",
   authenticate,
   requireAnyAdmin,
@@ -745,7 +840,7 @@ router.patch(
   restoreManufacturer
 );
 
-router.delete(
+protectedRouter.delete(
   "/manufacturers/:id",
   authenticate,
   requireAnyAdmin,
@@ -756,11 +851,11 @@ router.delete(
 );
 
 // ==================== QR (SUPER ADMIN for ranges) ====================
-router.post("/qr/ranges/allocate", authenticate, requirePlatformAdmin, requireRecentAdminMfa, ...qrMutationLimiters, requireCsrf, allocateQRRange);
-router.post("/qr/generate", authenticate, requirePlatformAdmin, requireRecentAdminMfa, ...qrMutationLimiters, requireCsrf, generateQRCodes);
+protectedRouter.post("/qr/ranges/allocate", authenticate, requirePlatformAdmin, requireRecentAdminMfa, ...qrMutationLimiters, requireCsrf, allocateQRRange);
+protectedRouter.post("/qr/generate", authenticate, requirePlatformAdmin, requireRecentAdminMfa, ...qrMutationLimiters, requireCsrf, generateQRCodes);
 
 // Super admin allocate range to existing licensee
-router.post(
+protectedRouter.post(
   "/admin/licensees/:licenseeId/qr-allocate-range",
   authenticate,
   requirePlatformAdmin,
@@ -771,11 +866,11 @@ router.post(
 );
 
 // ==================== BATCHES ====================
-router.post("/qr/batches", authenticate, requireLicenseeAdmin, requireRecentAdminMfa, enforceTenantIsolation, ...qrMutationLimiters, requireCsrf, createBatch);
-router.get("/qr/batches", authenticate, enforceTenantIsolation, getBatches);
-router.get("/qr/batches/:id/allocation-map", authenticate, enforceTenantIsolation, getBatchAllocationMap);
+protectedRouter.post("/qr/batches", authenticate, requireLicenseeAdmin, requireRecentAdminMfa, enforceTenantIsolation, ...qrMutationLimiters, requireCsrf, createBatch);
+protectedRouter.get("/qr/batches", authenticate, enforceTenantIsolation, getBatches);
+protectedRouter.get("/qr/batches/:id/allocation-map", authenticate, enforceTenantIsolation, getBatchAllocationMap);
 
-router.post(
+protectedRouter.post(
   "/qr/batches/:id/assign-manufacturer",
   authenticate,
   requireLicenseeAdmin,
@@ -785,7 +880,7 @@ router.post(
   requireCsrf,
   assignManufacturer
 );
-router.patch(
+protectedRouter.patch(
   "/qr/batches/:id/rename",
   authenticate,
   requireAnyAdmin,
@@ -796,21 +891,21 @@ router.patch(
 );
 
 // Super admin bulk allocation helper
-router.post("/qr/batches/admin-allocate", authenticate, requirePlatformAdmin, requireRecentAdminMfa, ...qrMutationLimiters, requireCsrf, adminAllocateBatch);
+protectedRouter.post("/qr/batches/admin-allocate", authenticate, requirePlatformAdmin, requireRecentAdminMfa, ...qrMutationLimiters, requireCsrf, adminAllocateBatch);
 
 // ✅ IMPORTANT: remove QR Codes page for LICENSEE_ADMIN
 // raw QR list/export should be SUPER_ADMIN only
-router.get("/qr/codes/export", authenticate, requirePlatformAdmin, ...exportLimiters, exportQRCodesCsv);
-router.get("/qr/codes", authenticate, requirePlatformAdmin, getQRCodes);
-router.post("/qr/codes/signed-links", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, generateSignedScanLinks);
+protectedRouter.get("/qr/codes/export", authenticate, requirePlatformAdmin, ...exportLimiters, exportQRCodesCsv);
+protectedRouter.get("/qr/codes", authenticate, requirePlatformAdmin, getQRCodes);
+protectedRouter.post("/qr/codes/signed-links", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, generateSignedScanLinks);
 
 // Stats is still allowed (needed for dashboard chart)
-router.get("/qr/stats", authenticate, enforceTenantIsolation, getStats);
+protectedRouter.get("/qr/stats", authenticate, enforceTenantIsolation, getStats);
 
 // delete endpoints (admins)
-router.delete("/qr/batches/:id", authenticate, requireAnyAdmin, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, deleteBatch);
-router.post("/qr/batches/bulk-delete", authenticate, requireAnyAdmin, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, bulkDeleteBatches);
-router.delete("/qr/codes", authenticate, requireAnyAdmin, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, bulkDeleteQRCodes);
+protectedRouter.delete("/qr/batches/:id", authenticate, requireAnyAdmin, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, deleteBatch);
+protectedRouter.post("/qr/batches/bulk-delete", authenticate, requireAnyAdmin, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, bulkDeleteBatches);
+protectedRouter.delete("/qr/codes", authenticate, requireAnyAdmin, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, bulkDeleteQRCodes);
 
 // ==================== MANUFACTURER PRINT JOBS ====================
 router.post("/print-gateway/heartbeat", ...gatewayHeartbeatLimiters, gatewayHeartbeat);
@@ -831,7 +926,7 @@ router.post("/printer-agent/local/fail", ...gatewayJobLimiters, failLocalAgentPr
 router.post("/print-gateway/ipp/confirm", ...gatewayJobLimiters, confirmGatewayIppJob);
 router.post("/print-gateway/ipp/fail", ...gatewayJobLimiters, failGatewayIppJob);
 
-router.post(
+protectedRouter.post(
   "/manufacturer/print-jobs",
   authenticate,
   requireManufacturer,
@@ -841,14 +936,14 @@ router.post(
   requireCsrf,
   createPrintJob
 );
-router.get(
+protectedRouter.get(
   "/manufacturer/printers",
   authenticate,
   requireOpsUser,
   enforceTenantIsolation,
   listPrinters
 );
-router.post(
+protectedRouter.post(
   "/manufacturer/printers",
   authenticate,
   requireOpsUser,
@@ -858,7 +953,7 @@ router.post(
   requireCsrf,
   createNetworkPrinter
 );
-router.patch(
+protectedRouter.patch(
   "/manufacturer/printers/:id",
   authenticate,
   requireOpsUser,
@@ -868,7 +963,7 @@ router.patch(
   requireCsrf,
   updateNetworkPrinter
 );
-router.delete(
+protectedRouter.delete(
   "/manufacturer/printers/:id",
   authenticate,
   requireOpsUser,
@@ -878,7 +973,7 @@ router.delete(
   requireCsrf,
   deleteNetworkPrinter
 );
-router.post(
+protectedRouter.post(
   "/manufacturer/printers/:id/test",
   authenticate,
   requireOpsUser,
@@ -888,7 +983,7 @@ router.post(
   requireCsrf,
   testPrinter
 );
-router.post(
+protectedRouter.post(
   "/manufacturer/printers/:id/test-label",
   authenticate,
   requireOpsUser,
@@ -898,7 +993,7 @@ router.post(
   requireCsrf,
   testPrinterLabel
 );
-router.post(
+protectedRouter.post(
   "/manufacturer/printers/:id/discover",
   authenticate,
   requireOpsUser,
@@ -908,21 +1003,21 @@ router.post(
   requireCsrf,
   discoverPrinter
 );
-router.get(
+protectedRouter.get(
   "/manufacturer/print-jobs",
   authenticate,
   requireOpsUser,
   enforceTenantIsolation,
   listManufacturerPrintJobs
 );
-router.get(
+protectedRouter.get(
   "/manufacturer/print-jobs/:id",
   authenticate,
   requireOpsUser,
   enforceTenantIsolation,
   getManufacturerPrintJobStatus
 );
-router.post(
+protectedRouter.post(
   "/manufacturer/print-jobs/:id/reissue",
   authenticate,
   requireOpsUser,
@@ -932,7 +1027,7 @@ router.post(
   requireCsrf,
   reissueManufacturerPrintJob
 );
-router.get(
+protectedRouter.get(
   "/manufacturer/print-jobs/:id/pack",
   authenticate,
   requireManufacturer,
@@ -940,7 +1035,7 @@ router.get(
   ...exportLimiters,
   downloadPrintJobPack
 );
-router.post(
+protectedRouter.post(
   "/manufacturer/print-jobs/:id/direct-print/tokens",
   authenticate,
   requireManufacturer,
@@ -950,7 +1045,7 @@ router.post(
   requireCsrf,
   issueDirectPrintTokens
 );
-router.post(
+protectedRouter.post(
   "/manufacturer/print-jobs/:id/direct-print/resolve",
   authenticate,
   requireManufacturer,
@@ -959,7 +1054,7 @@ router.post(
   requireCsrf,
   resolveDirectPrintToken
 );
-router.post(
+protectedRouter.post(
   "/manufacturer/print-jobs/:id/direct-print/confirm-item",
   authenticate,
   requireManufacturer,
@@ -968,7 +1063,7 @@ router.post(
   requireCsrf,
   confirmDirectPrintItem
 );
-router.post(
+protectedRouter.post(
   "/manufacturer/print-jobs/:id/direct-print/fail",
   authenticate,
   requireManufacturer,
@@ -977,7 +1072,7 @@ router.post(
   requireCsrf,
   reportDirectPrintFailure
 );
-router.post(
+protectedRouter.post(
   "/manufacturer/print-jobs/:id/confirm",
   authenticate,
   requireManufacturer,
@@ -989,7 +1084,7 @@ router.post(
 );
 
 // ==================== QR REQUESTS ====================
-router.post(
+protectedRouter.post(
   "/qr/requests",
   authenticate,
   requireAnyAdmin,
@@ -999,21 +1094,21 @@ router.post(
   requireCsrf,
   createQrAllocationRequest
 );
-router.get("/qr/requests", authenticate, requireAnyAdmin, enforceTenantIsolation, getQrAllocationRequests);
-router.post("/qr/requests/:id/approve", authenticate, requirePlatformAdmin, requireRecentAdminMfa, ...qrMutationLimiters, requireCsrf, approveQrAllocationRequest);
-router.post("/qr/requests/:id/reject", authenticate, requirePlatformAdmin, requireRecentAdminMfa, ...qrMutationLimiters, requireCsrf, rejectQrAllocationRequest);
+protectedRouter.get("/qr/requests", authenticate, requireAnyAdmin, enforceTenantIsolation, getQrAllocationRequests);
+protectedRouter.post("/qr/requests/:id/approve", authenticate, requirePlatformAdmin, requireRecentAdminMfa, ...qrMutationLimiters, requireCsrf, approveQrAllocationRequest);
+protectedRouter.post("/qr/requests/:id/reject", authenticate, requirePlatformAdmin, requireRecentAdminMfa, ...qrMutationLimiters, requireCsrf, rejectQrAllocationRequest);
 
 // ==================== AUDIT ====================
-router.use("/audit", auditRoutes);
+protectedRouter.use("/audit", auditRoutes);
 
 // ==================== TRACE / ANALYTICS / POLICY ====================
-router.get("/trace/timeline", authenticate, enforceTenantIsolation, getTraceTimelineController);
-router.get("/analytics/batch-sla", authenticate, requireAnyAdmin, enforceTenantIsolation, getBatchSlaAnalyticsController);
-router.get("/analytics/risk-scores", authenticate, requireAnyAdmin, enforceTenantIsolation, getRiskAnalyticsController);
-router.get("/policy/config", authenticate, requireAnyAdmin, enforceTenantIsolation, getPolicyConfigController);
-router.patch("/policy/config", authenticate, requireAnyAdmin, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, updatePolicyConfigController);
-router.get("/policy/alerts", authenticate, requireAnyAdmin, enforceTenantIsolation, getPolicyAlertsController);
-router.post(
+protectedRouter.get("/trace/timeline", authenticate, enforceTenantIsolation, getTraceTimelineController);
+protectedRouter.get("/analytics/batch-sla", authenticate, requireAnyAdmin, enforceTenantIsolation, getBatchSlaAnalyticsController);
+protectedRouter.get("/analytics/risk-scores", authenticate, requireAnyAdmin, enforceTenantIsolation, getRiskAnalyticsController);
+protectedRouter.get("/policy/config", authenticate, requireAnyAdmin, enforceTenantIsolation, getPolicyConfigController);
+protectedRouter.patch("/policy/config", authenticate, requireAnyAdmin, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, updatePolicyConfigController);
+protectedRouter.get("/policy/alerts", authenticate, requireAnyAdmin, enforceTenantIsolation, getPolicyAlertsController);
+protectedRouter.post(
   "/policy/alerts/:id/ack",
   authenticate,
   requireAnyAdmin,
@@ -1022,7 +1117,7 @@ router.post(
   requireCsrf,
   acknowledgePolicyAlertController
 );
-router.get(
+protectedRouter.get(
   "/audit/export/batches/:id/package",
   authenticate,
   requireAnyAdmin,
@@ -1030,7 +1125,7 @@ router.get(
   ...exportLimiters,
   exportBatchAuditPackageController
 );
-router.get(
+protectedRouter.get(
   "/telemetry/route-transition/summary",
   authenticate,
   requireAnyAdmin,
@@ -1039,9 +1134,9 @@ router.get(
 );
 
 // ==================== SUPPORT TICKETS ====================
-router.get("/support/tickets", authenticate, requirePlatformAdmin, listSupportTickets);
-router.get("/support/tickets/:id", authenticate, requirePlatformAdmin, getSupportTicket);
-router.patch(
+protectedRouter.get("/support/tickets", authenticate, requirePlatformAdmin, listSupportTickets);
+protectedRouter.get("/support/tickets/:id", authenticate, requirePlatformAdmin, getSupportTicket);
+protectedRouter.patch(
   "/support/tickets/:id",
   authenticate,
   requirePlatformAdmin,
@@ -1050,7 +1145,7 @@ router.patch(
   requireCsrf,
   patchSupportTicket
 );
-router.post(
+protectedRouter.post(
   "/support/tickets/:id/messages",
   authenticate,
   requirePlatformAdmin,
@@ -1059,8 +1154,8 @@ router.post(
   requireCsrf,
   addSupportMessage
 );
-router.get("/support/reports", authenticate, requireOpsUser, enforceTenantIsolation, listSupportIssueReports);
-router.post(
+protectedRouter.get("/support/reports", authenticate, requireOpsUser, enforceTenantIsolation, listSupportIssueReports);
+protectedRouter.post(
   "/support/reports",
   authenticate,
   requireOpsUser,
@@ -1072,7 +1167,7 @@ router.post(
   sanitizeRequestInput,
   createSupportIssueReport
 );
-router.post(
+protectedRouter.post(
   "/support/reports/:id/respond",
   authenticate,
   requirePlatformAdmin,
@@ -1081,7 +1176,7 @@ router.post(
   requireCsrf,
   respondToSupportIssueReport
 );
-router.get(
+protectedRouter.get(
   "/support/reports/files/:fileName",
   authenticate,
   requireOpsUser,
@@ -1090,23 +1185,23 @@ router.get(
 );
 
 // ==================== QR LOGS (ADMINS) ====================
-router.get("/admin/qr/scan-logs", authenticate, requireOpsUser, enforceTenantIsolation, getScanLogs);
-router.get("/admin/qr/batch-summary", authenticate, requireOpsUser, enforceTenantIsolation, getBatchSummary);
-router.get("/admin/qr/analytics", authenticate, requireOpsUser, enforceTenantIsolation, getQrTrackingAnalyticsController);
+protectedRouter.get("/admin/qr/scan-logs", authenticate, requireOpsUser, enforceTenantIsolation, getScanLogs);
+protectedRouter.get("/admin/qr/batch-summary", authenticate, requireOpsUser, enforceTenantIsolation, getBatchSummary);
+protectedRouter.get("/admin/qr/analytics", authenticate, requireOpsUser, enforceTenantIsolation, getQrTrackingAnalyticsController);
 
 // ==================== INCIDENT RESPONSE ====================
-router.get("/incidents", authenticate, requireAnyAdmin, enforceTenantIsolation, listIncidents);
-router.get(
+protectedRouter.get("/incidents", authenticate, requireAnyAdmin, enforceTenantIsolation, listIncidents);
+protectedRouter.get(
   "/incidents/evidence-files/:fileName",
   authenticate,
   requireAnyAdmin,
   enforceTenantIsolation,
   serveIncidentEvidenceFile
 );
-router.get("/incidents/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, getIncident);
-router.patch("/incidents/:id", authenticate, requireAnyAdmin, requireRecentAdminMfa, enforceTenantIsolation, ...incidentSupportMutationLimiters, requireCsrf, patchIncident);
-router.post("/incidents/:id/events", authenticate, requireAnyAdmin, requireRecentAdminMfa, enforceTenantIsolation, ...incidentSupportMutationLimiters, requireCsrf, addIncidentEventNote);
-router.post(
+protectedRouter.get("/incidents/:id", authenticate, requireAnyAdmin, enforceTenantIsolation, getIncident);
+protectedRouter.patch("/incidents/:id", authenticate, requireAnyAdmin, requireRecentAdminMfa, enforceTenantIsolation, ...incidentSupportMutationLimiters, requireCsrf, patchIncident);
+protectedRouter.post("/incidents/:id/events", authenticate, requireAnyAdmin, requireRecentAdminMfa, enforceTenantIsolation, ...incidentSupportMutationLimiters, requireCsrf, addIncidentEventNote);
+protectedRouter.post(
   "/incidents/:id/evidence",
   authenticate,
   requireAnyAdmin,
@@ -1118,7 +1213,7 @@ router.post(
   enforceUploadedFileSignatures(["image/png", "image/jpeg", "image/webp", "application/pdf"]),
   addIncidentEvidence
 );
-router.post(
+protectedRouter.post(
   "/incidents/:id/email",
   authenticate,
   requireAnyAdmin,
@@ -1128,7 +1223,7 @@ router.post(
   requireCsrf,
   notifyIncidentCustomer
 );
-router.post(
+protectedRouter.post(
   "/incidents/:id/notify-customer",
   authenticate,
   requireAnyAdmin,
@@ -1138,7 +1233,7 @@ router.post(
   requireCsrf,
   notifyIncidentCustomer
 );
-router.get(
+protectedRouter.get(
   "/incidents/:id/export-pdf",
   authenticate,
   requireAnyAdmin,
@@ -1148,14 +1243,14 @@ router.get(
 );
 
 // ==================== IR (PLATFORM SUPERADMIN) ====================
-router.get("/ir/incidents", authenticate, requirePlatformAdmin, listIrIncidents);
-router.post("/ir/incidents", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, createIrIncident);
-router.get("/ir/incidents/:id", authenticate, requirePlatformAdmin, getIrIncident);
-router.patch("/ir/incidents/:id", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, patchIrIncident);
-router.post("/ir/incidents/:id/events", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, addIrIncidentEvent);
-router.post("/ir/incidents/:id/customer-trust/review", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, reviewIrIncidentCustomerTrust);
-router.post("/ir/incidents/:id/actions", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, applyIrIncidentAction);
-router.post(
+protectedRouter.get("/ir/incidents", authenticate, requirePlatformAdmin, listIrIncidents);
+protectedRouter.post("/ir/incidents", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, createIrIncident);
+protectedRouter.get("/ir/incidents/:id", authenticate, requirePlatformAdmin, getIrIncident);
+protectedRouter.patch("/ir/incidents/:id", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, patchIrIncident);
+protectedRouter.post("/ir/incidents/:id/events", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, addIrIncidentEvent);
+protectedRouter.post("/ir/incidents/:id/customer-trust/review", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, reviewIrIncidentCustomerTrust);
+protectedRouter.post("/ir/incidents/:id/actions", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, applyIrIncidentAction);
+protectedRouter.post(
   "/ir/incidents/:id/communications",
   authenticate,
   requirePlatformAdmin,
@@ -1163,7 +1258,7 @@ router.post(
   requireCsrf,
   sendIrIncidentCommunication
 );
-router.post(
+protectedRouter.post(
   "/ir/incidents/:id/attachments",
   authenticate,
   requirePlatformAdmin,
@@ -1174,19 +1269,22 @@ router.post(
   addIncidentEvidence
 );
 
-router.get("/ir/policies", authenticate, requirePlatformAdmin, listIrPolicies);
-router.post("/ir/policies", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, createIrPolicy);
-router.patch("/ir/policies/:id", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, patchIrPolicy);
+protectedRouter.get("/ir/policies", authenticate, requirePlatformAdmin, listIrPolicies);
+protectedRouter.post("/ir/policies", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, createIrPolicy);
+protectedRouter.patch("/ir/policies/:id", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, patchIrPolicy);
 
-router.get("/ir/alerts", authenticate, requirePlatformAdmin, listIrAlerts);
-router.patch("/ir/alerts/:id", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, patchIrAlert);
+protectedRouter.get("/ir/alerts", authenticate, requirePlatformAdmin, listIrAlerts);
+protectedRouter.patch("/ir/alerts/:id", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, patchIrAlert);
 
 // ==================== ADMIN BLOCK ====================
-router.post("/admin/qrs/:id/block", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, blockQRCode);
-router.post("/admin/batches/:id/block", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, blockBatch);
+protectedRouter.post("/admin/qrs/:id/block", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, blockQRCode);
+protectedRouter.post("/admin/batches/:id/block", authenticate, requirePlatformAdmin, requireRecentAdminMfa, requireCsrf, blockBatch);
 
 // ==================== ACCOUNT ====================
-router.patch("/account/profile", authenticate, requireRecentSensitiveAuth, ...secureAccountMutationLimiters, requireCsrf, updateMyProfile);
-router.patch("/account/password", authenticate, requireRecentSensitiveAuth, ...secureAccountMutationLimiters, requireCsrf, changeMyPassword);
+protectedRouter.patch("/account/profile", authenticate, requireRecentSensitiveAuth, ...secureAccountMutationLimiters, requireCsrf, updateMyProfile);
+protectedRouter.patch("/account/password", authenticate, requireRecentSensitiveAuth, ...secureAccountMutationLimiters, requireCsrf, changeMyPassword);
+
+router.use(cookiePublicRouter);
+router.use(protectedRouter);
 
 export default router;

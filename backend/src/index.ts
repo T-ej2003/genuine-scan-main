@@ -3,7 +3,6 @@ import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import { createHash, randomUUID } from "crypto";
-import cookieParser from "cookie-parser";
 import packageJson from "../package.json";
 import routes from "./routes";
 import prisma from "./config/database";
@@ -320,7 +319,6 @@ app.use(
 
 app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 app.use(express.json({ limit: "1mb" }));
-app.use(cookieParser());
 app.use(sanitizeRequestInput);
 
 app.use((req, res, next) => {
