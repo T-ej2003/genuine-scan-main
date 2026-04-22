@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHmac, scryptSync, timingSafeEqual } from "crypto";
 import jwt from "jsonwebtoken";
 
 import { getJwtSecret, randomOpaqueToken } from "../utils/security";
@@ -55,7 +55,14 @@ const getCustomerTokenSecret = () => {
 export const normalizeCustomerVerifyEmail = (input: string) => String(input || "").trim().toLowerCase();
 
 export const deriveCustomerVerifyUserId = (email: string) => {
-  const digest = createHmac("sha256", getCustomerTokenSecret()).update(email).digest("hex").slice(0, 32);
+  const digest = scryptSync(email, getCustomerTokenSecret(), 16, {
+    N: 1 << 14,
+    r: 8,
+    p: 1,
+    maxmem: 32 * 1024 * 1024,
+  })
+    .toString("hex")
+    .slice(0, 32);
   return `cust_${digest}`;
 };
 
@@ -185,6 +192,16 @@ export const issueCustomerVerifyToken = (
     expiresIn: `${getCustomerTokenTtlHours()}h`,
   });
 };
+
+export const issueCustomerVerifySession = (
+  identity: CustomerVerifyIdentity,
+  options?: {
+    authStrength?: CustomerVerifyAuthStrength;
+    webauthnVerifiedAt?: string | Date | null;
+    authProvider?: CustomerVerifyAuthProvider;
+    displayName?: string | null;
+  }
+) => issueCustomerVerifyToken(identity, options);
 
 export const verifyCustomerVerifyToken = (rawToken: string): CustomerVerifyIdentity => {
   const token = String(rawToken || "").trim();

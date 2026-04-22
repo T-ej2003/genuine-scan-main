@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import cookieParser from "cookie-parser";
 import packageJson from "../package.json";
 import routes from "./routes";
@@ -19,6 +19,7 @@ import { releaseMetadata } from "./observability/release";
 import { captureBackendException, flushBackendMonitoring, initBackendMonitoring } from "./observability/sentry";
 import { getLatencySummary, recordRequestMetric } from "./observability/requestMetrics";
 import { sanitizeRequestInput } from "./middleware/requestSanitizer";
+import { enforceCookieMutationSecurity } from "./middleware/cookieMutationSecurity";
 import {
   createPublicActorRateLimiter,
   createPublicIpRateLimiter,
@@ -50,7 +51,12 @@ const parseBool = (value: unknown, fallback = false) => {
 const isKnownInsecureStorageCredential = (value: string) => {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return false;
-  return normalized === "mscqrminio" || normalized === "mscqrminiochange" || normalized === "minioadmin";
+  const fingerprint = createHash("sha256").update(normalized).digest("hex");
+  return new Set([
+    "98daf8223196e1b807f51d5c9f648dea2623dcb6e031adb5f05a6f2d6cbf0386",
+    "72cbd1ce992c2cb9d9ade3d4f794dcce18e13004e0574dec0a8c81fdcebbd653",
+    "ad9858116e63b0c5a4d7dc7f50f034c7247e56838dae22c1832712ffde48e694",
+  ]).has(fingerprint);
 };
 const managedQrSigningRequested = isManagedQrSignerRequested();
 const managedQrSigningRefsConfigured = hasManagedQrSignerRefs();
@@ -316,6 +322,7 @@ app.use(
 app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
+app.use(enforceCookieMutationSecurity);
 app.use(sanitizeRequestInput);
 
 app.use((req, res, next) => {

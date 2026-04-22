@@ -6,7 +6,6 @@ import {
   CustomerVerifyAuthProvider,
   CustomerVerifyIdentity,
   deriveCustomerVerifyUserId,
-  issueCustomerVerifyToken,
   maskEmail,
   normalizeCustomerVerifyEmail,
 } from "./customerVerifyAuthService";
@@ -45,7 +44,13 @@ type CustomerOAuthProfile = {
 const OAUTH_STATE_TTL_MINUTES = 15;
 const OAUTH_EXCHANGE_TTL_MINUTES = 10;
 
-const normalizeBaseUrl = (value?: string | null) => String(value || "").trim().replace(/\/+$/, "");
+const normalizeBaseUrl = (value?: string | null) => {
+  let normalized = String(value || "").trim();
+  while (normalized.endsWith("/")) {
+    normalized = normalized.slice(0, -1);
+  }
+  return normalized;
+};
 
 const getOauthStateSecret = () => String(process.env.CUSTOMER_VERIFY_OAUTH_STATE_SECRET || process.env.CUSTOMER_VERIFY_TOKEN_SECRET || getJwtSecret()).trim();
 const getOauthExchangeSecret = () => String(process.env.CUSTOMER_VERIFY_OAUTH_EXCHANGE_SECRET || process.env.CUSTOMER_VERIFY_TOKEN_SECRET || getJwtSecret()).trim();
@@ -338,14 +343,8 @@ export const exchangeCustomerOAuthTicketForSession = (ticket: string) => {
     authProvider,
   });
 
-  const token = issueCustomerVerifyToken(identity, {
-    authStrength: "SOCIAL",
-    authProvider,
-    displayName: identity.displayName || null,
-  });
-
   return {
-    token,
+    identity,
     customer: {
       userId: identity.userId,
       email: identity.email,

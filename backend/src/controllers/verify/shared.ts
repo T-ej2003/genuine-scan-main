@@ -3,6 +3,7 @@ import { IncidentActorType, OwnershipTransferStatus, Prisma, QRStatus } from "@p
 import prisma from "../../config/database";
 import {
   createCustomerOtpChallenge,
+  issueCustomerVerifySession,
   issueCustomerVerifyToken,
   maskEmail,
   verifyCustomerOtpChallenge,
@@ -33,6 +34,7 @@ export {
   getSuperadminAlertEmails,
   hashIp,
   hashToken,
+  issueCustomerVerifySession,
   issueCustomerVerifyToken,
   maskEmail,
   prisma,

@@ -6,6 +6,7 @@ process.env.VERIFY_CUSTOMER_COOKIE_AUTH_ENABLED = "true";
 process.env.VERIFY_CUSTOMER_BEARER_COMPAT_ENABLED = "true";
 
 const { deriveCustomerVerifyUserId, issueCustomerVerifyToken } = require("../dist/services/customerVerifyAuthService");
+const { sealCookieToken } = require("../dist/services/auth/cookieTokenProtectionService");
 const { optionalCustomerVerifyAuth, requireCustomerVerifyAuth } = require("../dist/middleware/customerVerifyAuth");
 
 const buildReq = (overrides = {}) => ({
@@ -46,7 +47,7 @@ const token = issueCustomerVerifyToken({
 
 // Cookie token should authenticate first.
 {
-  const req = buildReq({ cookies: { mscqr_verify_session: token } });
+  const req = buildReq({ cookies: { mscqr_verify_session: sealCookieToken(token, "customer-verify.session") } });
   const res = buildRes();
   optionalCustomerVerifyAuth(req, res, () => {});
   assert(req.customer, "cookie session should authenticate");
@@ -78,7 +79,7 @@ const token = issueCustomerVerifyToken({
 // Required auth should pass with cookie session even when bearer compatibility is disabled.
 {
   process.env.VERIFY_CUSTOMER_BEARER_COMPAT_ENABLED = "false";
-  const req = buildReq({ cookies: { mscqr_verify_session: token } });
+  const req = buildReq({ cookies: { mscqr_verify_session: sealCookieToken(token, "customer-verify.session") } });
   const res = buildRes();
   let nextCalled = false;
   requireCustomerVerifyAuth(req, res, () => {

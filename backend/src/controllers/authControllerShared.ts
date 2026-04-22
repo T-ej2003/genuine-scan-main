@@ -10,6 +10,7 @@ import {
   getRefreshTokenTtlDays,
   newCsrfToken,
 } from "../services/auth/tokenService";
+import { openCookieToken, sealCookieToken } from "../services/auth/cookieTokenProtectionService";
 import {
   getAdminStepUpWindowMinutes,
   getPasswordReauthWindowMinutes,
@@ -204,31 +205,23 @@ export const csrfCookieOptions = () => ({
   domain: cookieDomain(),
 });
 
-const allowLegacyTokenResponse = () => {
-  const explicit = String(process.env.AUTH_LEGACY_TOKEN_RESPONSE_ENABLED || "").trim().toLowerCase();
-  if (explicit === "true") return true;
-  return process.env.NODE_ENV !== "production";
-};
-
 export type CookieBackedAuthResponse = {
   sessionStage: "ACTIVE" | "MFA_BOOTSTRAP";
   accessToken: string;
   refreshToken: string | null;
   refreshTokenExpiresAt: Date | null;
-  csrfToken: string;
   user: any;
   auth: any;
 };
 
 export const authResponseData = (session: CookieBackedAuthResponse) => ({
-  ...(allowLegacyTokenResponse() && session.sessionStage === "ACTIVE" ? { token: session.accessToken } : {}),
   user: session.user,
   auth: session.auth,
 });
 
 export const getRefreshTokenFromRequest = (req: Request) => {
   const raw = (req as any).cookies?.[REFRESH_TOKEN_COOKIE];
-  return typeof raw === "string" && raw.trim() ? raw.trim() : null;
+  return typeof raw === "string" && raw.trim() ? openCookieToken(raw, "auth.refresh") : null;
 };
 
 export const clearAuthCookies = (res: Response) => {
@@ -240,16 +233,23 @@ export const clearAuthCookies = (res: Response) => {
 export const setAuthCookies = (res: Response, session: CookieBackedAuthResponse) => {
   const accessTtlMs = getAccessTokenTtlMinutes() * 60 * 1000;
   const refreshTtlMs = getRefreshTokenTtlDays() * 24 * 60 * 60 * 1000;
+  const csrfToken = newCsrfToken();
 
-  res.cookie(ACCESS_TOKEN_COOKIE, session.accessToken, { ...authCookieOptions(), maxAge: accessTtlMs });
+  res.cookie(ACCESS_TOKEN_COOKIE, sealCookieToken(session.accessToken, "auth.access"), {
+    ...authCookieOptions(),
+    maxAge: accessTtlMs,
+  });
 
   if (session.refreshToken) {
-    res.cookie(REFRESH_TOKEN_COOKIE, session.refreshToken, { ...authCookieOptions(), maxAge: refreshTtlMs });
+    res.cookie(REFRESH_TOKEN_COOKIE, sealCookieToken(session.refreshToken, "auth.refresh"), {
+      ...authCookieOptions(),
+      maxAge: refreshTtlMs,
+    });
   } else {
     res.clearCookie(REFRESH_TOKEN_COOKIE, authCookieOptions());
   }
 
-  res.cookie(CSRF_TOKEN_COOKIE, session.csrfToken, {
+  res.cookie(CSRF_TOKEN_COOKIE, csrfToken, {
     ...csrfCookieOptions(),
     maxAge: session.refreshToken ? refreshTtlMs : accessTtlMs,
   });

@@ -8,12 +8,13 @@ import {
 } from "../../services/customerVerifyCookieService";
 import {
   createCustomerOtpChallenge,
-  issueCustomerVerifyToken,
+  issueCustomerVerifySession,
   maskEmail,
   requestOtpSchema,
   verifyCustomerOtpChallenge,
   verifyOtpSchema,
 } from "./shared";
+import { buildAnonymousCustomerVerifyAuthResponse, buildCustomerVerifyAuthResponse } from "./customerAuthResponsePolicy";
 
 export const requestCustomerEmailOtp = async (req: Request, res: Response) => {
   try {
@@ -93,8 +94,8 @@ export const verifyCustomerEmailOtp = async (req: Request, res: Response) => {
       otp: parsed.data.otp,
     });
 
-    const token = issueCustomerVerifyToken(identity);
-    setCustomerVerifySessionCookie(res, token);
+    const sessionToken = issueCustomerVerifySession(identity);
+    setCustomerVerifySessionCookie(res, sessionToken);
 
     await createAuditLog({
       action: "VERIFY_CUSTOMER_OTP_VERIFIED",
@@ -110,12 +111,7 @@ export const verifyCustomerEmailOtp = async (req: Request, res: Response) => {
     return res.json({
       success: true,
       data: {
-        token,
-        customer: {
-          userId: identity.userId,
-          email: identity.email,
-          maskedEmail: maskEmail(identity.email),
-        },
+        ...buildCustomerVerifyAuthResponse(identity),
       },
     });
   } catch (error: any) {
@@ -124,6 +120,20 @@ export const verifyCustomerEmailOtp = async (req: Request, res: Response) => {
       error: error?.message || "Invalid OTP code",
     });
   }
+};
+
+export const getCustomerVerifyAuthSession = async (req: any, res: Response) => {
+  if (!req.customer) {
+    return res.json({
+      success: true,
+      data: buildAnonymousCustomerVerifyAuthResponse(),
+    });
+  }
+
+  return res.json({
+    success: true,
+    data: buildCustomerVerifyAuthResponse(req.customer),
+  });
 };
 
 export const logoutCustomerVerifySession = async (req: Request, res: Response) => {

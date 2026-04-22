@@ -146,7 +146,6 @@ export const refresh = async (req: Request, res: Response) => {
       accessToken: rotated.accessToken,
       refreshToken: rotated.refreshToken,
       refreshTokenExpiresAt: rotated.refreshTokenExpiresAt,
-      csrfToken: rotated.csrfToken,
       user: rotated.user,
       auth: rotated.auth,
     };

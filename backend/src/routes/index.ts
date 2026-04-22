@@ -17,7 +17,7 @@ import {
   requireAnyAdmin,
   requireOpsUser,
 } from "../middleware/rbac";
-import { requireCsrf } from "../middleware/csrf";
+import { requireCsrf, requireCustomerVerifyCsrf } from "../middleware/csrf";
 import {
   composeRequestResolvers,
   createPublicActorRateLimiter,
@@ -132,6 +132,7 @@ import {
   exchangeCustomerOAuth,
   finishCustomerPasskeyAssertion,
   finishCustomerPasskeyRegistration,
+  getCustomerVerifyAuthSession,
   listCustomerOAuthProviders,
   listCustomerPasskeyCredentials,
   logoutCustomerVerifySession,
@@ -572,6 +573,40 @@ const secureAccountMutationLimiters = buildAuthenticatedRateLimitPair({
   message: "Too many account security actions. Please wait before retrying.",
 });
 
+const adminMfaMutationLimiters = buildAuthenticatedRateLimitPair({
+  scope: "admin.mfa",
+  windowMs: 10 * 60 * 1000,
+  ipMax: 30,
+  actorMax: 12,
+  message: "Too many MFA security actions. Please wait before retrying.",
+});
+
+const verifyCustomerMutationLimiters = buildPublicRateLimitPair({
+  scope: "verify.customer-auth",
+  windowMs: 10 * 60 * 1000,
+  ipMax: 30,
+  actorMax: 12,
+  message: "Too many customer authentication actions. Please wait before retrying.",
+  actorResolver: publicClientActor,
+});
+
+const verifyCustomerCookieMutationLimiters = buildPublicRateLimitPair({
+  scope: "verify.customer-cookie",
+  windowMs: 10 * 60 * 1000,
+  ipMax: 30,
+  actorMax: 12,
+  message: "Too many customer account actions. Please wait before retrying.",
+  actorResolver: composeRequestResolvers(fromAuthorizationBearer, fromUserAgent),
+});
+
+const internalReleaseLimiters = buildAuthenticatedRateLimitPair({
+  scope: "internal.release",
+  windowMs: 10 * 60 * 1000,
+  ipMax: 20,
+  actorMax: 10,
+  message: "Too many release metadata lookups. Please wait before retrying.",
+});
+
 const exportLimiters = buildAuthenticatedRateLimitPair({
   scope: "exports.downloads",
   windowMs: 10 * 60 * 1000,
@@ -588,6 +623,8 @@ router.use(
     verifyEmailLimiters,
     forgotPasswordLimiters,
     adminInviteLimiters,
+    secureSessionLimiters: secureAccountMutationLimiters,
+    mfaMutationLimiters: adminMfaMutationLimiters,
   })
 );
 
@@ -606,27 +643,28 @@ router.get("/public/connector/download/:version/:platform", ...connectorDownload
 router.get("/verify/:code", ...verifyCodeLimiters, optionalCustomerVerifyAuth, verifyQRCode);
 router.post("/verify/session/start", ...verifyCodeLimiters, optionalCustomerVerifyAuth, startCustomerVerificationSession);
 router.get("/verify/session/:id", ...verifyCodeLimiters, optionalCustomerVerifyAuth, getCustomerVerificationSessionState);
-router.post("/verify/session/:id/intake", ...verifyOtpVerifyLimiters, requireCustomerVerifyAuth, submitCustomerVerificationIntake);
-router.post("/verify/session/:id/reveal", ...verifyOtpVerifyLimiters, requireCustomerVerifyAuth, revealCustomerVerificationResult);
+router.post("/verify/session/:id/intake", requireCustomerVerifyAuth, ...verifyCustomerCookieMutationLimiters, requireCustomerVerifyCsrf, submitCustomerVerificationIntake);
+router.post("/verify/session/:id/reveal", requireCustomerVerifyAuth, ...verifyCustomerCookieMutationLimiters, requireCustomerVerifyCsrf, revealCustomerVerificationResult);
 router.get("/verify/auth/providers", ...verifyCodeLimiters, listCustomerOAuthProviders);
+router.get("/verify/auth/session", optionalCustomerVerifyAuth, getCustomerVerifyAuthSession);
 router.get("/verify/auth/oauth/:provider/start", ...verifyCodeLimiters, startCustomerOAuth);
 router.get("/verify/auth/oauth/:provider/callback", ...verifyCodeLimiters, completeCustomerOAuth);
 router.post("/verify/auth/oauth/:provider/callback", ...verifyCodeLimiters, completeCustomerOAuth);
-router.post("/verify/auth/oauth/exchange", ...verifyOtpVerifyLimiters, exchangeCustomerOAuth);
+router.post("/verify/auth/oauth/exchange", ...verifyCustomerMutationLimiters, exchangeCustomerOAuth);
 router.post("/verify/auth/email-otp/request", ...verifyOtpRequestLimiters, requestCustomerEmailOtp);
-router.post("/verify/auth/email-otp/verify", ...verifyOtpVerifyLimiters, verifyCustomerEmailOtp);
-router.post("/verify/auth/logout", ...verifyOtpVerifyLimiters, logoutCustomerVerifySession);
-router.post("/verify/auth/passkey/register/begin", ...verifyOtpVerifyLimiters, requireCustomerVerifyAuth, beginCustomerPasskeyRegistration);
-router.post("/verify/auth/passkey/register/finish", ...verifyOtpVerifyLimiters, requireCustomerVerifyAuth, finishCustomerPasskeyRegistration);
-router.post("/verify/auth/passkey/assertion/begin", ...verifyOtpVerifyLimiters, optionalCustomerVerifyAuth, beginCustomerPasskeyAssertion);
-router.post("/verify/auth/passkey/assertion/finish", ...verifyOtpVerifyLimiters, optionalCustomerVerifyAuth, finishCustomerPasskeyAssertion);
+router.post("/verify/auth/email-otp/verify", ...verifyCustomerMutationLimiters, verifyCustomerEmailOtp);
+router.post("/verify/auth/logout", ...verifyCustomerCookieMutationLimiters, requireCustomerVerifyCsrf, logoutCustomerVerifySession);
+router.post("/verify/auth/passkey/register/begin", requireCustomerVerifyAuth, ...verifyCustomerCookieMutationLimiters, requireCustomerVerifyCsrf, beginCustomerPasskeyRegistration);
+router.post("/verify/auth/passkey/register/finish", requireCustomerVerifyAuth, ...verifyCustomerCookieMutationLimiters, requireCustomerVerifyCsrf, finishCustomerPasskeyRegistration);
+router.post("/verify/auth/passkey/assertion/begin", optionalCustomerVerifyAuth, ...verifyCustomerMutationLimiters, beginCustomerPasskeyAssertion);
+router.post("/verify/auth/passkey/assertion/finish", optionalCustomerVerifyAuth, ...verifyCustomerMutationLimiters, finishCustomerPasskeyAssertion);
 router.get("/verify/auth/passkey/credentials", ...verifyOtpVerifyLimiters, requireCustomerVerifyAuth, listCustomerPasskeyCredentials);
-router.delete("/verify/auth/passkey/credentials/:id", ...verifyOtpVerifyLimiters, requireCustomerVerifyAuth, deleteCustomerPasskeyCredential);
-router.post("/verify/:code/claim", ...verifyClaimLimiters, optionalCustomerVerifyAuth, claimProductOwnership);
-router.post("/verify/:code/link-claim", ...verifyClaimLimiters, requireCustomerVerifyAuth, linkDeviceClaimToCustomer);
-router.post("/verify/:code/transfer", ...verifyClaimLimiters, requireCustomerVerifyAuth, createOwnershipTransfer);
-router.post("/verify/:code/transfer/cancel", ...verifyClaimLimiters, requireCustomerVerifyAuth, cancelOwnershipTransfer);
-router.post("/verify/transfer/accept", ...verifyClaimLimiters, requireCustomerVerifyAuth, acceptOwnershipTransfer);
+router.delete("/verify/auth/passkey/credentials/:id", requireCustomerVerifyAuth, ...verifyCustomerCookieMutationLimiters, requireCustomerVerifyCsrf, deleteCustomerPasskeyCredential);
+router.post("/verify/:code/claim", optionalCustomerVerifyAuth, ...verifyClaimLimiters, requireCustomerVerifyCsrf, claimProductOwnership);
+router.post("/verify/:code/link-claim", requireCustomerVerifyAuth, ...verifyClaimLimiters, requireCustomerVerifyCsrf, linkDeviceClaimToCustomer);
+router.post("/verify/:code/transfer", requireCustomerVerifyAuth, ...verifyClaimLimiters, requireCustomerVerifyCsrf, createOwnershipTransfer);
+router.post("/verify/:code/transfer/cancel", requireCustomerVerifyAuth, ...verifyClaimLimiters, requireCustomerVerifyCsrf, cancelOwnershipTransfer);
+router.post("/verify/transfer/accept", requireCustomerVerifyAuth, ...verifyClaimLimiters, requireCustomerVerifyCsrf, acceptOwnershipTransfer);
 router.post(
   "/verify/report-fraud",
   verifyReportIpLimiter,
@@ -664,7 +702,7 @@ router.get("/healthz", ...publicStatusLimiters, healthCheck);
 router.get("/health/live", ...publicStatusLimiters, liveHealthCheck);
 router.get("/health/ready", ...publicStatusLimiters, readyHealthCheck);
 router.get("/health/latency", ...publicStatusLimiters, latencySummary);
-router.get("/internal/release", authenticate, requirePlatformAdmin, internalReleaseMetadata);
+router.get("/internal/release", authenticate, requirePlatformAdmin, ...internalReleaseLimiters, internalReleaseMetadata);
 
 // ==================== LICENSEES (SUPER ADMIN) ====================
 router.get("/licensees/export", authenticate, requirePlatformAdmin, ...exportLimiters, exportLicenseesCsv);

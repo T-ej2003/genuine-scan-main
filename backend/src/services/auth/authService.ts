@@ -3,7 +3,6 @@ import { UserRole, UserStatus } from "@prisma/client";
 import { verifyPassword, hashPassword, shouldRehashPassword } from "./passwordService";
 import {
   signAccessToken,
-  newCsrfToken,
   newRefreshToken,
   signMfaBootstrapToken,
   getMfaBootstrapTtlMinutes,
@@ -136,8 +135,6 @@ export const issueSessionForUser = async (input: {
 
   const accessToken = signAccessToken(payload);
   const refreshToken = newRefreshToken();
-  const csrfToken = newCsrfToken();
-
   const created = await createRefreshToken({
     userId: user.id,
     orgId: user.orgId,
@@ -155,7 +152,6 @@ export const issueSessionForUser = async (input: {
     refreshToken,
     refreshTokenExpiresAt: created.expiresAt,
     sessionId: created.row.id,
-    csrfToken,
     user: {
       id: user.id,
       email: user.email,
@@ -200,7 +196,6 @@ type BootstrapSessionResult = {
   accessToken: string;
   refreshToken: null;
   refreshTokenExpiresAt: null;
-  csrfToken: string;
   user: SessionIssueResult["user"];
   auth: {
     sessionStage: "MFA_BOOTSTRAP";
@@ -258,7 +253,6 @@ const buildBootstrapSessionForUser = async (input: {
     accessToken,
     refreshToken: null,
     refreshTokenExpiresAt: null,
-    csrfToken: newCsrfToken(),
     user: {
       id: input.user.id,
       email: input.user.email,
@@ -569,7 +563,6 @@ export const refreshSession = async (input: {
     accessToken: session.accessToken,
     refreshToken: rotated.newRawToken,
     refreshTokenExpiresAt: rotated.newExpiresAt,
-    csrfToken: session.csrfToken,
     user: session.user,
     auth: session.auth,
   };

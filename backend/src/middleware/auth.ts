@@ -3,6 +3,7 @@ import prisma from "../config/database";
 import { AuthenticatedSessionClaims, JWTPayload } from "../types";
 import { UserRole } from "@prisma/client";
 import { ACCESS_TOKEN_COOKIE, verifyAccessToken, verifyMfaBootstrapToken } from "../services/auth/tokenService";
+import { openCookieToken } from "../services/auth/cookieTokenProtectionService";
 import { isManufacturerRole, listManufacturerLinkedLicenseeIds } from "../services/manufacturerScopeService";
 import {
   getAdminStepUpWindowMinutes,
@@ -24,8 +25,8 @@ const getBearerToken = (req: Request) => {
 
 const getCookieAccessToken = (req: Request) => {
   const cookies = (req as any).cookies as Record<string, string> | undefined;
-  const token = cookies?.[ACCESS_TOKEN_COOKIE];
-  return token ? String(token) : null;
+  const token = String(cookies?.[ACCESS_TOKEN_COOKIE] || "").trim();
+  return token ? openCookieToken(token, "auth.access") : null;
 };
 
 async function hydrateTenantIfNeeded(payload: AuthenticatedSessionClaims): Promise<AuthenticatedSessionClaims> {

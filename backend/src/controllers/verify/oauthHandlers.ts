@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { createAuditLogSafely } from "../../services/auditService";
 import { setCustomerVerifySessionCookie } from "../../services/customerVerifyCookieService";
+import { issueCustomerVerifySession } from "../../services/customerVerifyAuthService";
 import {
   buildCustomerOAuthAuthorizationUrl,
   exchangeCustomerOAuthTicketForSession,
@@ -10,6 +11,7 @@ import {
   listConfiguredCustomerOAuthProviders,
   type CustomerOAuthProvider,
 } from "../../services/customerVerifyOAuthService";
+import { buildCustomerVerifyAuthResponse } from "./customerAuthResponsePolicy";
 
 const providerSchema = z.enum(["google"]);
 
@@ -117,7 +119,12 @@ export const exchangeCustomerOAuth = async (req: Request, res: Response) => {
 
   try {
     const session = exchangeCustomerOAuthTicketForSession(parsed.data.ticket);
-    setCustomerVerifySessionCookie(res, session.token);
+    const sessionToken = issueCustomerVerifySession(session.identity, {
+      authStrength: "SOCIAL",
+      authProvider: session.identity.authProvider,
+      displayName: session.identity.displayName || null,
+    });
+    setCustomerVerifySessionCookie(res, sessionToken);
 
     await createAuditLogSafely({
       action: "VERIFY_CUSTOMER_OAUTH_EXCHANGE",
@@ -132,7 +139,7 @@ export const exchangeCustomerOAuth = async (req: Request, res: Response) => {
 
     return res.json({
       success: true,
-      data: session,
+      data: buildCustomerVerifyAuthResponse(session.identity),
     });
   } catch (error: any) {
     return res.status(400).json({

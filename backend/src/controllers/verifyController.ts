@@ -10,6 +10,7 @@ export {
   exchangeCustomerOAuth,
   finishCustomerPasskeyAssertion,
   finishCustomerPasskeyRegistration,
+  getCustomerVerifyAuthSession,
   linkDeviceClaimToCustomer,
   listCustomerOAuthProviders,
   listCustomerPasskeyCredentials,
