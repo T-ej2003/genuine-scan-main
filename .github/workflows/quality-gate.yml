@@ -23,6 +23,9 @@ jobs:
       - name: Backend security guardrails
         run: npm run check:security-guardrails
 
+      - name: Baseline secret-pattern guard
+        run: node scripts/check-baseline-secret-patterns.mjs
+
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -77,4 +80,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Docker compose build
+        env:
+          MINIO_ROOT_USER: ci-minio-user
+          MINIO_ROOT_PASSWORD: ci-minio-password
+          OBJECT_STORAGE_ACCESS_KEY: ci-object-user
+          OBJECT_STORAGE_SECRET_KEY: ci-object-password
         run: docker compose build backend frontend

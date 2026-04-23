@@ -110,7 +110,7 @@ describe("Verify page", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
-    Object.defineProperty(global.navigator, "geolocation", {
+    Object.defineProperty(globalThis.navigator, "geolocation", {
       configurable: true,
       value: {
         getCurrentPosition: (success: (pos: GeolocationPosition) => void) => {
