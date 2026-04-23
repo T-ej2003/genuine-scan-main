@@ -47,7 +47,6 @@
     "archiver": "^7.0.1",
     "argon2": "^0.44.0",
     "bcryptjs": "^2.4.3",
-    "bullmq": "^5.71.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -64,6 +63,9 @@
     "qrcode": "^1.5.4",
     "rate-limit-redis": "^4.3.1",
     "zod": "^3.22.4"
+  },
+  "overrides": {
+    "fast-xml-parser": "5.7.1"
   },
   "devDependencies": {
     "@types/archiver": "^7.0.0",

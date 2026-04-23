@@ -63,6 +63,13 @@ assert(routesSource.includes("const protectedMutationRouter = Router();"), "prot
 });
 
 assert(!auditRoutesSource.includes("...auditExportLimiters"), "audit routes should not use spread-applied audit export limiters");
+assert(auditRoutesSource.includes("const auditReadRouteLimiter: RequestHandler = rateLimit("), "audit routes should define a direct audit read route limiter");
+assert(auditRoutesSource.includes("const auditExportRouteLimiter: RequestHandler = rateLimit("), "audit routes should define a direct audit export route limiter");
+assert(governanceRoutesSource.includes("const governanceReadRouteLimiter: RequestHandler = rateLimit("), "governance routes should define a direct governance read route limiter");
+assert(governanceRoutesSource.includes("const governanceExportRouteLimiter: RequestHandler = rateLimit("), "governance routes should define a direct governance export route limiter");
+assert(routesSource.includes("const licenseeReadRouteLimiter = rateLimit("), "main routes should define a direct licensee read route limiter");
+assert(routesSource.includes("const auditPackageExportRouteLimiter = rateLimit("), "main routes should define a direct audit package export limiter");
+assert(realtimeRoutesSource.includes("const printerAgentHeartbeatRouteLimiter: RequestHandler = rateLimit("), "realtime routes should define a direct printer-agent heartbeat route limiter");
 
 assert(
   authRoutesSource.includes('router.post("/auth/login", loginIpLimiter, loginActorLimiter, login);'),
@@ -95,7 +102,7 @@ assert(
 
 assert(
   routesSource.includes(
-    'cookieReadRouter.get("/verify/:code", verifyCodeIpLimiter, verifyCodeActorLimiter, optionalCustomerVerifyAuth, verifyQRCode);'
+    'cookieReadRouter.get("/verify/:code", verifyLookupRouteLimiter, verifyCodeIpLimiter, verifyCodeActorLimiter, optionalCustomerVerifyAuth, verifyQRCode);'
   ),
   "verify code lookup should declare explicit public verify limiters inline"
 );
@@ -143,21 +150,39 @@ assert(
 );
 assert(
   routesSource.includes(
-    'protectedReadRouter.get( "/audit/export/batches/:id/package", authenticate, requireAnyAdmin, protectedReadRouteLimiter, exportReadRouteLimiter, exportReadIpLimiter, exportReadActorLimiter,'
+    'protectedReadRouter.get( "/audit/export/batches/:id/package", authenticate, requireAnyAdmin, auditPackageExportRouteLimiter, protectedReadRouteLimiter, exportReadRouteLimiter, exportReadIpLimiter, exportReadActorLimiter,'
   ),
   "audit export package route should declare explicit export limiters inline"
 );
 assert(
   routesSource.includes(
-    'protectedMutationRouter.patch("/account/profile", authenticate, protectedMutationRouteLimiter, requireRecentSensitiveAuth, requireCsrf, updateMyProfile);'
+    'protectedMutationRouter.patch("/account/profile", authenticate, accountMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentSensitiveAuth, requireCsrf, updateMyProfile);'
   ),
   "account profile mutation should declare a direct limiter and CSRF inline"
 );
 assert(
   routesSource.includes(
-    'protectedReadRouter.get("/ir/policies", authenticate, requirePlatformAdmin, protectedReadRouteLimiter, listIrPolicies);'
+    'protectedReadRouter.get("/ir/policies", authenticate, requirePlatformAdmin, irReadRouteLimiter, protectedReadRouteLimiter, listIrPolicies);'
   ),
   "protected reads should declare a direct route limiter inline"
+);
+assert(
+  routesSource.includes(
+    'protectedReadRouter.get("/licensees", authenticate, requirePlatformAdmin, licenseeReadRouteLimiter, protectedReadRouteLimiter, getLicensees);'
+  ),
+  "licensee reads should declare a dedicated route-family limiter inline"
+);
+assert(
+  routesSource.includes(
+    'publicMutationRouter.post("/verify/auth/email-otp/request", verifyOtpRequestRouteLimiter, verifyOtpRequestIpLimiter, verifyOtpRequestActorLimiter, requestCustomerEmailOtp);'
+  ),
+  "verify OTP request should declare a dedicated route-family limiter inline"
+);
+assert(
+  governanceRoutesSource.includes(
+    'router.get( "/governance/compliance/report", authenticate, requirePlatformAdmin, governanceExportRouteLimiter, governanceExportIpLimiter, governanceExportActorLimiter, generateComplianceReportController );'
+  ),
+  "governance report export should declare a direct governance export limiter inline"
 );
 assert(
   routesSource.includes('publicReadRouter.get("/health", publicStatusIpLimiter, publicStatusActorLimiter, healthCheck);'),
@@ -165,20 +190,14 @@ assert(
 );
 
 assert(
-  governanceRoutesSource.includes(
-    'router.get( "/governance/compliance/report", authenticate, requirePlatformAdmin, governanceExportIpLimiter, governanceExportActorLimiter, generateComplianceReportController );'
-  ),
-  "governance report export should declare explicit export limiters inline"
-);
-assert(
   realtimeRoutesSource.includes(
-    'router.post( "/manufacturer/printer-agent/heartbeat", authenticate, requireManufacturer, requireRecentSensitiveAuth, enforceTenantIsolation, printerAgentHeartbeatIpLimiter, printerAgentHeartbeatActorLimiter, requireCsrf, reportPrinterHeartbeat );'
+    'router.post( "/manufacturer/printer-agent/heartbeat", authenticate, requireManufacturer, requireRecentSensitiveAuth, enforceTenantIsolation, printerAgentHeartbeatRouteLimiter, printerAgentHeartbeatIpLimiter, printerAgentHeartbeatActorLimiter, requireCsrf, reportPrinterHeartbeat );'
   ),
   "printer-agent heartbeat should declare explicit mutation limiters inline"
 );
 assert(
   auditRoutesSource.includes(
-    'router.get( "/logs/export", authenticate, requireAuditViewer, enforceTenantIsolation, auditExportIpLimiter, auditExportActorLimiter, exportLogsCsv );'
+    'router.get( "/logs/export", authenticate, requireAuditViewer, enforceTenantIsolation, auditExportRouteLimiter, auditExportIpLimiter, auditExportActorLimiter, exportLogsCsv );'
   ),
   "audit export should declare explicit export limiters inline"
 );

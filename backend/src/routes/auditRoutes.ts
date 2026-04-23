@@ -1,10 +1,61 @@
 import { Request, Router, type RequestHandler } from "express";
+import rateLimit from "express-rate-limit";
 import { authenticate, authenticateSSE, requireRecentAdminMfa } from "../middleware/auth";
 import { requireAuditViewer, requirePlatformAdmin } from "../middleware/rbac";
 import { enforceTenantIsolation } from "../middleware/tenantIsolation";
 import { getLogs, streamLogs, exportLogsCsv, getFraudReports, respondToFraudReport } from "../controllers/auditController";
 import { requireCsrf } from "../middleware/csrf";
-import { createPublicActorRateLimiter, createPublicIpRateLimiter } from "../middleware/publicRateLimit";
+import {
+  buildPublicActorRateLimitKey,
+  createPublicActorRateLimiter,
+  createPublicIpRateLimiter,
+} from "../middleware/publicRateLimit";
+
+const createJsonRateLimitHandler =
+  (scope: string, message: string) =>
+  (_req: Request, res: any) =>
+    res.status(429).json({
+      success: false,
+      code: "RATE_LIMITED",
+      error: message,
+      scope,
+    });
+
+const auditReadRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "audit.read", (currentReq: any) => currentReq.user?.userId || null),
+  handler: createJsonRateLimitHandler("audit.read", "Too many audit read requests. Please wait before retrying."),
+});
+
+const auditExportRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "audit.export", (currentReq: any) => currentReq.user?.userId || null),
+  handler: createJsonRateLimitHandler("audit.export", "Too many audit export requests. Please wait before retrying."),
+});
+
+const auditFraudReadRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "audit.fraud-read", (currentReq: any) => currentReq.user?.userId || null),
+  handler: createJsonRateLimitHandler("audit.fraud-read", "Too many fraud review reads. Please wait before retrying."),
+});
+
+const auditFraudMutationRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "audit.fraud-mutation", (currentReq: any) => currentReq.user?.userId || null),
+  handler: createJsonRateLimitHandler("audit.fraud-mutation", "Too many fraud review actions. Please wait before retrying."),
+});
 
 const auditReadIpLimiter: RequestHandler = createPublicIpRateLimiter({
   scope: "audit.read:ip",
@@ -69,12 +120,13 @@ const auditMutationActorLimiter: RequestHandler = createPublicActorRateLimiter({
 export const createAuditReadRoutes = () => {
   const router = Router();
 
-  router.get("/logs", authenticate, requireAuditViewer, enforceTenantIsolation, auditReadIpLimiter, auditReadActorLimiter, getLogs);
+  router.get("/logs", authenticate, requireAuditViewer, enforceTenantIsolation, auditReadRouteLimiter, auditReadIpLimiter, auditReadActorLimiter, getLogs);
   router.get(
     "/logs/export",
     authenticate,
     requireAuditViewer,
     enforceTenantIsolation,
+    auditExportRouteLimiter,
     auditExportIpLimiter,
     auditExportActorLimiter,
     exportLogsCsv
@@ -84,6 +136,7 @@ export const createAuditReadRoutes = () => {
     authenticateSSE,
     requireAuditViewer,
     enforceTenantIsolation,
+    auditReadRouteLimiter,
     auditStreamIpLimiter,
     auditStreamActorLimiter,
     streamLogs
@@ -93,6 +146,7 @@ export const createAuditReadRoutes = () => {
     authenticate,
     requirePlatformAdmin,
     enforceTenantIsolation,
+    auditFraudReadRouteLimiter,
     auditReadIpLimiter,
     auditReadActorLimiter,
     getFraudReports
@@ -110,6 +164,7 @@ export const createAuditMutationRoutes = () => {
     requirePlatformAdmin,
     requireRecentAdminMfa,
     enforceTenantIsolation,
+    auditFraudMutationRouteLimiter,
     auditMutationIpLimiter,
     auditMutationActorLimiter,
     requireCsrf,
@@ -118,3 +173,5 @@ export const createAuditMutationRoutes = () => {
 
   return router;
 };
+
+export { auditReadRouteLimiter, auditExportRouteLimiter, auditFraudReadRouteLimiter, auditFraudMutationRouteLimiter };
