@@ -94,6 +94,16 @@ const requirements = [
   },
   {
     file: "indexRoutes",
+    description: "security abuse summary must keep a pre-auth limiter before authenticate",
+    pattern: '"/security/abuse/rate-limits", securityOpsReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
+  },
+  {
+    file: "indexRoutes",
+    description: "security abuse alerts must keep a pre-auth limiter before authenticate",
+    pattern: '"/security/abuse/rate-limits/alerts", securityOpsReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
+  },
+  {
+    file: "indexRoutes",
     description: "licensee reads must keep a pre-auth limiter before authenticate",
     pattern: 'protectedReadRouter.get("/licensees", licenseeReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
   },

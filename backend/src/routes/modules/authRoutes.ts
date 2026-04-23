@@ -19,6 +19,7 @@ import {
   fromParamFields,
   fromUserAgent,
 } from "../../middleware/publicRateLimit";
+import { createRateLimitJsonHandler } from "../../observability/rateLimitMetrics";
 import {
   acceptInviteController,
   adminMfaStepUpController,
@@ -155,16 +156,6 @@ const adminInviteActorLimiter = createPublicActorRateLimiter({
   resourceResolver: composeRequestResolvers(fromBodyFields("email"), fromParamFields("id")),
 });
 
-const createJsonRateLimitHandler =
-  (scope: string, message: string) =>
-  (_req: any, res: any) =>
-    res.status(429).json({
-      success: false,
-      code: "RATE_LIMITED",
-      error: message,
-      scope,
-    });
-
 const sessionReadRouteLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 60,
@@ -172,7 +163,7 @@ const sessionReadRouteLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "auth.session-read", (currentReq: any) => currentReq.user?.userId || fromUserAgent(currentReq)),
-  handler: createJsonRateLimitHandler(
+  handler: createRateLimitJsonHandler(
     "auth.session-read",
     "Too many account session reads. Please wait before retrying."
   ),
@@ -185,7 +176,7 @@ const sessionReadPreAuthRouteLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "auth.session-read:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
-  handler: createJsonRateLimitHandler("auth.session-read:pre-auth", "Too many account session reads. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("auth.session-read:pre-auth", "Too many account session reads. Please wait before retrying."),
 });
 
 const secureSessionRouteLimiter = rateLimit({
@@ -194,7 +185,7 @@ const secureSessionRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicIpRateLimitKey(req, "account.security"),
-  handler: createJsonRateLimitHandler(
+  handler: createRateLimitJsonHandler(
     "account.security",
     "Too many account security actions. Please wait before retrying."
   ),
@@ -207,7 +198,7 @@ const mfaRouteLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "admin.mfa", (currentReq: any) => currentReq.user?.userId || fromUserAgent(currentReq)),
-  handler: createJsonRateLimitHandler("admin.mfa", "Too many MFA security actions. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("admin.mfa", "Too many MFA security actions. Please wait before retrying."),
 });
 
 const adminInviteRouteLimiter = rateLimit({
@@ -222,7 +213,7 @@ const adminInviteRouteLimiter = rateLimit({
       composeRequestResolvers((currentReq: any) => currentReq.user?.userId || null, fromBodyFields("email"), fromUserAgent),
       composeRequestResolvers(fromBodyFields("email"), fromParamFields("id"))
     ),
-  handler: createJsonRateLimitHandler("admin.invite", "Too many invite actions. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("admin.invite", "Too many invite actions. Please wait before retrying."),
 });
 
 const adminInvitePreAuthRouteLimiter = rateLimit({
@@ -237,7 +228,7 @@ const adminInvitePreAuthRouteLimiter = rateLimit({
       composeRequestResolvers(fromAuthorizationBearer, fromBodyFields("email"), fromUserAgent),
       composeRequestResolvers(fromBodyFields("email"), fromParamFields("id"))
     ),
-  handler: createJsonRateLimitHandler("admin.invite:pre-auth", "Too many invite actions. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("admin.invite:pre-auth", "Too many invite actions. Please wait before retrying."),
 });
 
 export const createAuthRoutes = () => {

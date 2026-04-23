@@ -33,6 +33,7 @@ import {
   fromUserAgent,
   parsePositiveIntEnv,
 } from "../middleware/publicRateLimit";
+import { createRateLimitJsonHandler } from "../observability/rateLimitMetrics";
 
 import {
   login,
@@ -238,6 +239,7 @@ import { dashboardEvents } from "../controllers/eventsController";
 import { healthCheck, internalReleaseMetadata, latencySummary, liveHealthCheck, readyHealthCheck } from "../controllers/healthController";
 import { captureCspViolationReport, captureRouteTransitionMetric, getRouteTransitionSummary } from "../controllers/telemetryController";
 import { listNotifications, readAllNotifications, readNotification } from "../controllers/notificationController";
+import { getRateLimitAlertsController, getRateLimitAnalyticsController } from "../controllers/securityOperationsController";
 import { notificationEvents } from "../controllers/notificationEventsController";
 import {
   addSupportMessage,
@@ -325,23 +327,13 @@ const publicClientActor = composeRequestResolvers(
 );
 const protectedPreAuthActor = composeRequestResolvers(fromAuthorizationBearer, fromUserAgent);
 
-const createJsonRateLimitHandler =
-  (scope: string, message: string) =>
-  (_req: any, res: any) =>
-    res.status(429).json({
-      success: false,
-      code: "RATE_LIMITED",
-      error: message,
-      scope,
-    });
-
 const protectedReadRouteLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "protected.read", (currentReq: any) => currentReq.user?.userId || fromUserAgent(currentReq)),
-  handler: createJsonRateLimitHandler("protected.read", "Too many authenticated read requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("protected.read", "Too many authenticated read requests. Please wait before retrying."),
 });
 
 const protectedMutationRouteLimiter = rateLimit({
@@ -350,7 +342,7 @@ const protectedMutationRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "protected.mutation", (currentReq: any) => currentReq.user?.userId || fromUserAgent(currentReq)),
-  handler: createJsonRateLimitHandler("protected.mutation", "Too many authenticated write requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("protected.mutation", "Too many authenticated write requests. Please wait before retrying."),
 });
 
 const verifySessionRouteLimiter = rateLimit({
@@ -359,7 +351,7 @@ const verifySessionRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "verify.customer-session", publicClientActor),
-  handler: createJsonRateLimitHandler("verify.customer-session", "Too many customer session checks. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("verify.customer-session", "Too many customer session checks. Please wait before retrying."),
 });
 
 const verifyCustomerMutationRouteLimiter = rateLimit({
@@ -368,7 +360,7 @@ const verifyCustomerMutationRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "verify.customer-auth", publicClientActor),
-  handler: createJsonRateLimitHandler("verify.customer-auth", "Too many customer authentication actions. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("verify.customer-auth", "Too many customer authentication actions. Please wait before retrying."),
 });
 
 const verifyCustomerCookieRouteLimiter = rateLimit({
@@ -378,7 +370,7 @@ const verifyCustomerCookieRouteLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "verify.customer-cookie", composeRequestResolvers(fromHeaderFields("x-device-fp"), fromUserAgent)),
-  handler: createJsonRateLimitHandler("verify.customer-cookie", "Too many customer account actions. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("verify.customer-cookie", "Too many customer account actions. Please wait before retrying."),
 });
 
 const verifyClaimRouteLimiter = rateLimit({
@@ -393,7 +385,7 @@ const verifyClaimRouteLimiter = rateLimit({
       composeRequestResolvers(fromAuthorizationBearer, fromBodyFields("token", "transferId"), publicClientActor),
       verifyResourceResolver
     ),
-  handler: createJsonRateLimitHandler("verify.claim", "Too many ownership actions. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("verify.claim", "Too many ownership actions. Please wait before retrying."),
 });
 
 const telemetryRouteLimiter = rateLimit({
@@ -402,7 +394,7 @@ const telemetryRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicIpRateLimitKey(req, "telemetry"),
-  handler: createJsonRateLimitHandler("telemetry", "Too many telemetry submissions. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("telemetry", "Too many telemetry submissions. Please wait before retrying."),
 });
 
 const internalReleaseRouteLimiter = rateLimit({
@@ -411,7 +403,16 @@ const internalReleaseRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "internal.release", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("internal.release", "Too many release metadata lookups. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("internal.release", "Too many release metadata lookups. Please wait before retrying."),
+});
+
+const securityOpsReadRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 18,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "security-ops.read", (currentReq: any) => currentReq.user?.userId || null),
+  handler: createRateLimitJsonHandler("security-ops.read", "Too many security analytics requests. Please wait before retrying."),
 });
 
 const gatewayHeartbeatRouteLimiter = rateLimit({
@@ -420,7 +421,7 @@ const gatewayHeartbeatRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "gateway.heartbeat", gatewayActor),
-  handler: createJsonRateLimitHandler("gateway.heartbeat", "Too many gateway heartbeat requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("gateway.heartbeat", "Too many gateway heartbeat requests. Please wait before retrying."),
 });
 
 const gatewayJobRouteLimiter = rateLimit({
@@ -429,7 +430,7 @@ const gatewayJobRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "gateway.jobs", gatewayActor),
-  handler: createJsonRateLimitHandler("gateway.jobs", "Too many gateway job requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("gateway.jobs", "Too many gateway job requests. Please wait before retrying."),
 });
 
 const printMutationRouteLimiter = rateLimit({
@@ -438,7 +439,7 @@ const printMutationRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "print.mutation", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("print.mutation", "Too many printing actions. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("print.mutation", "Too many printing actions. Please wait before retrying."),
 });
 
 const exportReadRouteLimiter = rateLimit({
@@ -447,7 +448,7 @@ const exportReadRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "exports.downloads", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("exports.downloads", "Too many export or download requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("exports.downloads", "Too many export or download requests. Please wait before retrying."),
 });
 
 const auditPackageExportRouteLimiter = rateLimit({
@@ -456,7 +457,7 @@ const auditPackageExportRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "audit.package-export", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("audit.package-export", "Too many audit package export requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("audit.package-export", "Too many audit package export requests. Please wait before retrying."),
 });
 
 const printReadRouteLimiter = rateLimit({
@@ -465,7 +466,7 @@ const printReadRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "print.read", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("print.read", "Too many print status reads. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("print.read", "Too many print status reads. Please wait before retrying."),
 });
 
 const printExportRouteLimiter = rateLimit({
@@ -474,7 +475,7 @@ const printExportRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "print.export", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("print.export", "Too many print export requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("print.export", "Too many print export requests. Please wait before retrying."),
 });
 
 const telemetryMutationRouteLimiter = rateLimit({
@@ -483,7 +484,7 @@ const telemetryMutationRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "telemetry.mutation", publicClientActor),
-  handler: createJsonRateLimitHandler("telemetry.mutation", "Too many telemetry submissions. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("telemetry.mutation", "Too many telemetry submissions. Please wait before retrying."),
 });
 
 const cspTelemetryRouteLimiter = rateLimit({
@@ -492,7 +493,7 @@ const cspTelemetryRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "telemetry.csp", publicClientActor),
-  handler: createJsonRateLimitHandler("telemetry.csp", "Too many CSP reports. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("telemetry.csp", "Too many CSP reports. Please wait before retrying."),
 });
 
 const licenseeReadRouteLimiter = rateLimit({
@@ -501,7 +502,7 @@ const licenseeReadRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "licensees.read", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("licensees.read", "Too many licensee reads. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("licensees.read", "Too many licensee reads. Please wait before retrying."),
 });
 
 const licenseeExportRouteLimiter = rateLimit({
@@ -510,7 +511,7 @@ const licenseeExportRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "licensees.export", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("licensees.export", "Too many licensee export requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("licensees.export", "Too many licensee export requests. Please wait before retrying."),
 });
 
 const licenseeMutationRouteLimiter = rateLimit({
@@ -519,7 +520,7 @@ const licenseeMutationRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "licensees.mutation", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("licensees.mutation", "Too many licensee changes. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("licensees.mutation", "Too many licensee changes. Please wait before retrying."),
 });
 
 const adminDirectoryReadRouteLimiter = rateLimit({
@@ -528,7 +529,7 @@ const adminDirectoryReadRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "admin.directory.read", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("admin.directory.read", "Too many admin directory reads. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("admin.directory.read", "Too many admin directory reads. Please wait before retrying."),
 });
 
 const adminDirectoryMutationRouteLimiter = rateLimit({
@@ -537,7 +538,7 @@ const adminDirectoryMutationRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "admin.directory.mutation", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("admin.directory.mutation", "Too many admin directory changes. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("admin.directory.mutation", "Too many admin directory changes. Please wait before retrying."),
 });
 
 const qrReadRouteLimiter = rateLimit({
@@ -546,7 +547,7 @@ const qrReadRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "qr.read", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("qr.read", "Too many QR read requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("qr.read", "Too many QR read requests. Please wait before retrying."),
 });
 
 const qrExportRouteLimiter = rateLimit({
@@ -555,7 +556,7 @@ const qrExportRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "qr.export", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("qr.export", "Too many QR export requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("qr.export", "Too many QR export requests. Please wait before retrying."),
 });
 
 const qrMutationRouteLimiter = rateLimit({
@@ -564,7 +565,7 @@ const qrMutationRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "qr.mutation", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("qr.mutation", "Too many QR changes. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("qr.mutation", "Too many QR changes. Please wait before retrying."),
 });
 
 const qrRequestReadRouteLimiter = rateLimit({
@@ -573,7 +574,7 @@ const qrRequestReadRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "qr.requests.read", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("qr.requests.read", "Too many QR request reads. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("qr.requests.read", "Too many QR request reads. Please wait before retrying."),
 });
 
 const qrRequestMutationRouteLimiter = rateLimit({
@@ -582,7 +583,7 @@ const qrRequestMutationRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "qr.requests.mutation", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("qr.requests.mutation", "Too many QR request actions. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("qr.requests.mutation", "Too many QR request actions. Please wait before retrying."),
 });
 
 const policyReadRouteLimiter = rateLimit({
@@ -591,7 +592,7 @@ const policyReadRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "policy.read", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("policy.read", "Too many policy and analytics reads. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("policy.read", "Too many policy and analytics reads. Please wait before retrying."),
 });
 
 const policyMutationRouteLimiter = rateLimit({
@@ -600,7 +601,7 @@ const policyMutationRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "policy.mutation", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("policy.mutation", "Too many policy and analytics changes. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("policy.mutation", "Too many policy and analytics changes. Please wait before retrying."),
 });
 
 const supportReadRouteLimiter = rateLimit({
@@ -609,7 +610,7 @@ const supportReadRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "support.read", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("support.read", "Too many support reads. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("support.read", "Too many support reads. Please wait before retrying."),
 });
 
 const supportMutationRouteLimiter = rateLimit({
@@ -618,7 +619,7 @@ const supportMutationRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "support.mutation", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("support.mutation", "Too many support changes. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("support.mutation", "Too many support changes. Please wait before retrying."),
 });
 
 const incidentReadRouteLimiter = rateLimit({
@@ -627,7 +628,7 @@ const incidentReadRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "incidents.read", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("incidents.read", "Too many incident reads. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("incidents.read", "Too many incident reads. Please wait before retrying."),
 });
 
 const incidentMutationRouteLimiter = rateLimit({
@@ -636,7 +637,7 @@ const incidentMutationRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "incidents.mutation", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("incidents.mutation", "Too many incident changes. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("incidents.mutation", "Too many incident changes. Please wait before retrying."),
 });
 
 const incidentExportRouteLimiter = rateLimit({
@@ -645,7 +646,7 @@ const incidentExportRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "incidents.export", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("incidents.export", "Too many incident export requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("incidents.export", "Too many incident export requests. Please wait before retrying."),
 });
 
 const irReadRouteLimiter = rateLimit({
@@ -654,7 +655,7 @@ const irReadRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "ir.read", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("ir.read", "Too many incident response reads. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("ir.read", "Too many incident response reads. Please wait before retrying."),
 });
 
 const irMutationRouteLimiter = rateLimit({
@@ -663,7 +664,7 @@ const irMutationRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "ir.mutation", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("ir.mutation", "Too many incident response changes. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("ir.mutation", "Too many incident response changes. Please wait before retrying."),
 });
 
 const accountMutationRouteLimiter = rateLimit({
@@ -672,7 +673,7 @@ const accountMutationRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "account.mutation", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("account.mutation", "Too many account security changes. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("account.mutation", "Too many account security changes. Please wait before retrying."),
 });
 
 const verifySessionPreAuthRouteLimiter = rateLimit({
@@ -681,7 +682,7 @@ const verifySessionPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "verify.customer-session:pre-auth", publicClientActor),
-  handler: createJsonRateLimitHandler("verify.customer-session:pre-auth", "Too many customer session checks. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("verify.customer-session:pre-auth", "Too many customer session checks. Please wait before retrying."),
 });
 
 const verifyCustomerCookiePreAuthRouteLimiter = rateLimit({
@@ -691,7 +692,7 @@ const verifyCustomerCookiePreAuthRouteLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "verify.customer-cookie:pre-auth", composeRequestResolvers(fromHeaderFields("x-device-fp"), fromAuthorizationBearer, fromUserAgent)),
-  handler: createJsonRateLimitHandler("verify.customer-cookie:pre-auth", "Too many customer account actions. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("verify.customer-cookie:pre-auth", "Too many customer account actions. Please wait before retrying."),
 });
 
 const verifyCustomerMutationPreAuthRouteLimiter = rateLimit({
@@ -700,7 +701,7 @@ const verifyCustomerMutationPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "verify.customer-auth:pre-auth", publicClientActor),
-  handler: createJsonRateLimitHandler("verify.customer-auth:pre-auth", "Too many customer authentication actions. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("verify.customer-auth:pre-auth", "Too many customer authentication actions. Please wait before retrying."),
 });
 
 const verifyClaimPreAuthRouteLimiter = rateLimit({
@@ -715,7 +716,7 @@ const verifyClaimPreAuthRouteLimiter = rateLimit({
       composeRequestResolvers(fromAuthorizationBearer, fromBodyFields("token", "transferId"), publicClientActor),
       verifyResourceResolver
     ),
-  handler: createJsonRateLimitHandler("verify.claim:pre-auth", "Too many ownership actions. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("verify.claim:pre-auth", "Too many ownership actions. Please wait before retrying."),
 });
 
 const telemetryMutationPreAuthRouteLimiter = rateLimit({
@@ -724,7 +725,7 @@ const telemetryMutationPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "telemetry.mutation:pre-auth", publicClientActor),
-  handler: createJsonRateLimitHandler("telemetry.mutation:pre-auth", "Too many telemetry submissions. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("telemetry.mutation:pre-auth", "Too many telemetry submissions. Please wait before retrying."),
 });
 
 const cspTelemetryPreAuthRouteLimiter = rateLimit({
@@ -733,7 +734,7 @@ const cspTelemetryPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "telemetry.csp:pre-auth", publicClientActor),
-  handler: createJsonRateLimitHandler("telemetry.csp:pre-auth", "Too many CSP reports. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("telemetry.csp:pre-auth", "Too many CSP reports. Please wait before retrying."),
 });
 
 const internalReleasePreAuthRouteLimiter = rateLimit({
@@ -742,7 +743,17 @@ const internalReleasePreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "internal.release:pre-auth", protectedPreAuthActor),
-  handler: createJsonRateLimitHandler("internal.release:pre-auth", "Too many release metadata lookups. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("internal.release:pre-auth", "Too many release metadata lookups. Please wait before retrying."),
+});
+
+const securityOpsReadPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 26,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "security-ops.read:pre-auth", protectedPreAuthActor),
+  handler: createRateLimitJsonHandler("security-ops.read:pre-auth", "Too many security analytics requests. Please wait before retrying."),
 });
 
 const licenseeReadPreAuthRouteLimiter = rateLimit({
@@ -752,7 +763,7 @@ const licenseeReadPreAuthRouteLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "licensees.read:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id", "licenseeId"))),
-  handler: createJsonRateLimitHandler("licensees.read:pre-auth", "Too many licensee reads. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("licensees.read:pre-auth", "Too many licensee reads. Please wait before retrying."),
 });
 
 const licenseeExportPreAuthRouteLimiter = rateLimit({
@@ -761,7 +772,7 @@ const licenseeExportPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "licensees.export:pre-auth", protectedPreAuthActor),
-  handler: createJsonRateLimitHandler("licensees.export:pre-auth", "Too many licensee export requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("licensees.export:pre-auth", "Too many licensee export requests. Please wait before retrying."),
 });
 
 const licenseeMutationPreAuthRouteLimiter = rateLimit({
@@ -771,7 +782,7 @@ const licenseeMutationPreAuthRouteLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "licensees.mutation:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id", "licenseeId"))),
-  handler: createJsonRateLimitHandler("licensees.mutation:pre-auth", "Too many licensee changes. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("licensees.mutation:pre-auth", "Too many licensee changes. Please wait before retrying."),
 });
 
 const adminDirectoryReadPreAuthRouteLimiter = rateLimit({
@@ -781,7 +792,7 @@ const adminDirectoryReadPreAuthRouteLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "admin.directory.read:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id"))),
-  handler: createJsonRateLimitHandler("admin.directory.read:pre-auth", "Too many admin directory reads. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("admin.directory.read:pre-auth", "Too many admin directory reads. Please wait before retrying."),
 });
 
 const adminDirectoryMutationPreAuthRouteLimiter = rateLimit({
@@ -791,7 +802,7 @@ const adminDirectoryMutationPreAuthRouteLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "admin.directory.mutation:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id"))),
-  handler: createJsonRateLimitHandler("admin.directory.mutation:pre-auth", "Too many admin directory changes. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("admin.directory.mutation:pre-auth", "Too many admin directory changes. Please wait before retrying."),
 });
 
 const qrReadPreAuthRouteLimiter = rateLimit({
@@ -801,7 +812,7 @@ const qrReadPreAuthRouteLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "qr.read:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id", "licenseeId"))),
-  handler: createJsonRateLimitHandler("qr.read:pre-auth", "Too many QR read requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("qr.read:pre-auth", "Too many QR read requests. Please wait before retrying."),
 });
 
 const qrExportPreAuthRouteLimiter = rateLimit({
@@ -810,7 +821,7 @@ const qrExportPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "qr.export:pre-auth", protectedPreAuthActor),
-  handler: createJsonRateLimitHandler("qr.export:pre-auth", "Too many QR export requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("qr.export:pre-auth", "Too many QR export requests. Please wait before retrying."),
 });
 
 const qrMutationPreAuthRouteLimiter = rateLimit({
@@ -820,7 +831,7 @@ const qrMutationPreAuthRouteLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "qr.mutation:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id", "licenseeId"))),
-  handler: createJsonRateLimitHandler("qr.mutation:pre-auth", "Too many QR changes. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("qr.mutation:pre-auth", "Too many QR changes. Please wait before retrying."),
 });
 
 const qrRequestReadPreAuthRouteLimiter = rateLimit({
@@ -829,7 +840,7 @@ const qrRequestReadPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "qr.requests.read:pre-auth", protectedPreAuthActor, fromParamFields("id")),
-  handler: createJsonRateLimitHandler("qr.requests.read:pre-auth", "Too many QR request reads. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("qr.requests.read:pre-auth", "Too many QR request reads. Please wait before retrying."),
 });
 
 const qrRequestMutationPreAuthRouteLimiter = rateLimit({
@@ -838,7 +849,7 @@ const qrRequestMutationPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "qr.requests.mutation:pre-auth", protectedPreAuthActor, fromParamFields("id")),
-  handler: createJsonRateLimitHandler("qr.requests.mutation:pre-auth", "Too many QR request actions. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("qr.requests.mutation:pre-auth", "Too many QR request actions. Please wait before retrying."),
 });
 
 const policyReadPreAuthRouteLimiter = rateLimit({
@@ -847,7 +858,7 @@ const policyReadPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "policy.read:pre-auth", protectedPreAuthActor, fromParamFields("id")),
-  handler: createJsonRateLimitHandler("policy.read:pre-auth", "Too many policy and analytics reads. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("policy.read:pre-auth", "Too many policy and analytics reads. Please wait before retrying."),
 });
 
 const policyMutationPreAuthRouteLimiter = rateLimit({
@@ -856,7 +867,7 @@ const policyMutationPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "policy.mutation:pre-auth", protectedPreAuthActor, fromParamFields("id")),
-  handler: createJsonRateLimitHandler("policy.mutation:pre-auth", "Too many policy and analytics changes. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("policy.mutation:pre-auth", "Too many policy and analytics changes. Please wait before retrying."),
 });
 
 const supportReadPreAuthRouteLimiter = rateLimit({
@@ -865,7 +876,7 @@ const supportReadPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "support.read:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id", "fileName"))),
-  handler: createJsonRateLimitHandler("support.read:pre-auth", "Too many support reads. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("support.read:pre-auth", "Too many support reads. Please wait before retrying."),
 });
 
 const supportMutationPreAuthRouteLimiter = rateLimit({
@@ -874,7 +885,7 @@ const supportMutationPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "support.mutation:pre-auth", protectedPreAuthActor, fromParamFields("id")),
-  handler: createJsonRateLimitHandler("support.mutation:pre-auth", "Too many support changes. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("support.mutation:pre-auth", "Too many support changes. Please wait before retrying."),
 });
 
 const incidentReadPreAuthRouteLimiter = rateLimit({
@@ -883,7 +894,7 @@ const incidentReadPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "incidents.read:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id", "fileName"))),
-  handler: createJsonRateLimitHandler("incidents.read:pre-auth", "Too many incident reads. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("incidents.read:pre-auth", "Too many incident reads. Please wait before retrying."),
 });
 
 const incidentMutationPreAuthRouteLimiter = rateLimit({
@@ -892,7 +903,7 @@ const incidentMutationPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "incidents.mutation:pre-auth", protectedPreAuthActor, fromParamFields("id")),
-  handler: createJsonRateLimitHandler("incidents.mutation:pre-auth", "Too many incident changes. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("incidents.mutation:pre-auth", "Too many incident changes. Please wait before retrying."),
 });
 
 const incidentExportPreAuthRouteLimiter = rateLimit({
@@ -901,7 +912,7 @@ const incidentExportPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "incidents.export:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id", "fileName"))),
-  handler: createJsonRateLimitHandler("incidents.export:pre-auth", "Too many incident export requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("incidents.export:pre-auth", "Too many incident export requests. Please wait before retrying."),
 });
 
 const irReadPreAuthRouteLimiter = rateLimit({
@@ -910,7 +921,7 @@ const irReadPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "ir.read:pre-auth", protectedPreAuthActor, fromParamFields("id")),
-  handler: createJsonRateLimitHandler("ir.read:pre-auth", "Too many incident response reads. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("ir.read:pre-auth", "Too many incident response reads. Please wait before retrying."),
 });
 
 const irMutationPreAuthRouteLimiter = rateLimit({
@@ -919,7 +930,7 @@ const irMutationPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "ir.mutation:pre-auth", protectedPreAuthActor, fromParamFields("id")),
-  handler: createJsonRateLimitHandler("ir.mutation:pre-auth", "Too many incident response changes. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("ir.mutation:pre-auth", "Too many incident response changes. Please wait before retrying."),
 });
 
 const accountMutationPreAuthRouteLimiter = rateLimit({
@@ -928,7 +939,7 @@ const accountMutationPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "account.mutation:pre-auth", protectedPreAuthActor),
-  handler: createJsonRateLimitHandler("account.mutation:pre-auth", "Too many account security changes. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("account.mutation:pre-auth", "Too many account security changes. Please wait before retrying."),
 });
 
 const auditPackageExportPreAuthRouteLimiter = rateLimit({
@@ -937,7 +948,7 @@ const auditPackageExportPreAuthRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "audit.package-export:pre-auth", protectedPreAuthActor, fromParamFields("id")),
-  handler: createJsonRateLimitHandler("audit.package-export:pre-auth", "Too many audit package export requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("audit.package-export:pre-auth", "Too many audit package export requests. Please wait before retrying."),
 });
 
 const verifyLookupRouteLimiter = rateLimit({
@@ -952,7 +963,7 @@ const verifyLookupRouteLimiter = rateLimit({
       publicClientActor,
       (currentReq: any) => String(currentReq.params?.code || "").trim().toUpperCase() || null
     ),
-  handler: createJsonRateLimitHandler("verify.lookup", "Too many verification lookups. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("verify.lookup", "Too many verification lookups. Please wait before retrying."),
 });
 
 const verifyProviderRouteLimiter = rateLimit({
@@ -961,7 +972,7 @@ const verifyProviderRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "verify.providers", publicClientActor),
-  handler: createJsonRateLimitHandler("verify.providers", "Too many verification auth provider requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("verify.providers", "Too many verification auth provider requests. Please wait before retrying."),
 });
 
 const verifyOtpRequestRouteLimiter = rateLimit({
@@ -970,7 +981,7 @@ const verifyOtpRequestRouteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "verify.otp-request", publicClientActor),
-  handler: createJsonRateLimitHandler("verify.otp-request", "Too many OTP requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("verify.otp-request", "Too many OTP requests. Please wait before retrying."),
 });
 const emailActor = composeRequestResolvers(
   fromBodyFields("email", "contactEmail", "customerEmail", "recipientEmail"),
@@ -1218,6 +1229,21 @@ const internalReleaseActorLimiter = createPublicActorRateLimiter({
   actorResolver: (req: any) => req.user?.userId || null,
 });
 
+const securityOpsReadIpLimiter = createPublicIpRateLimiter({
+  scope: "security-ops.read:ip",
+  windowMs: 10 * 60 * 1000,
+  max: 36,
+  message: "Too many security analytics requests. Please wait before retrying.",
+});
+
+const securityOpsReadActorLimiter = createPublicActorRateLimiter({
+  scope: "security-ops.read:actor",
+  windowMs: 10 * 60 * 1000,
+  max: 18,
+  message: "Too many security analytics requests. Please wait before retrying.",
+  actorResolver: (req: any) => req.user?.userId || null,
+});
+
 const [exportReadIpLimiter, exportReadActorLimiter]: [RequestHandler, RequestHandler] = buildAuthenticatedRateLimitPair({
   scope: "exports.downloads",
   windowMs: 10 * 60 * 1000,
@@ -1438,6 +1464,26 @@ publicReadRouter.get("/health/live", publicStatusIpLimiter, publicStatusActorLim
 publicReadRouter.get("/health/ready", publicStatusIpLimiter, publicStatusActorLimiter, readyHealthCheck);
 publicReadRouter.get("/health/latency", publicStatusIpLimiter, publicStatusActorLimiter, latencySummary);
 protectedReadRouter.get("/internal/release", internalReleasePreAuthRouteLimiter, authenticate, requirePlatformAdmin, internalReleaseRouteLimiter, internalReleaseIpLimiter, internalReleaseActorLimiter, internalReleaseMetadata);
+protectedReadRouter.get(
+  "/security/abuse/rate-limits",
+  securityOpsReadPreAuthRouteLimiter,
+  authenticate,
+  requirePlatformAdmin,
+  securityOpsReadRouteLimiter,
+  securityOpsReadIpLimiter,
+  securityOpsReadActorLimiter,
+  getRateLimitAnalyticsController
+);
+protectedReadRouter.get(
+  "/security/abuse/rate-limits/alerts",
+  securityOpsReadPreAuthRouteLimiter,
+  authenticate,
+  requirePlatformAdmin,
+  securityOpsReadRouteLimiter,
+  securityOpsReadIpLimiter,
+  securityOpsReadActorLimiter,
+  getRateLimitAlertsController
+);
 
 // ==================== LICENSEES (SUPER ADMIN) ====================
 protectedReadRouter.get(

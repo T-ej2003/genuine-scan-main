@@ -1,0 +1,24 @@
+metric: rate_limit_metric
+description: Structured limiter-hit event for abuse analytics and security operations.
+dimensions:
+  - family
+  - stage
+  - route
+  - method
+  - authModel
+  - offenderKind
+  - tenantRef
+measures:
+  - name: count
+    type: counter
+  - name: retryAfterSec
+    type: gauge
+families:
+  - licensees.read
+  - governance.read
+  - governance.export
+  - audit.read
+  - audit.export
+  - verify.claim
+  - printer-agent.heartbeat
+  - support.read

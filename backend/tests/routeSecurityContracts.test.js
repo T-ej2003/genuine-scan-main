@@ -21,6 +21,11 @@ assert(!indexSource.includes("app.use(cookieParser())"), "app root should not mo
 assert(!authRoutesSource.includes("router.use(cookieParser());"), "auth routes should not hide cookie parsing behind router.use");
 assert(!routesSource.includes("cookiePublicRouter.use(cookieParser());"), "cookie-aware verify routes should not hide cookie parsing behind router.use");
 assert(!routesSource.includes("protectedRouter.use(cookieParser());"), "protected routes should not hide cookie parsing behind router.use");
+assert(!authRoutesSource.includes("const createJsonRateLimitHandler"), "auth routes should use shared rate-limit telemetry handlers");
+assert(!realtimeRoutesSource.includes("const createJsonRateLimitHandler"), "realtime routes should use shared rate-limit telemetry handlers");
+assert(!governanceRoutesSource.includes("const createJsonRateLimitHandler"), "governance routes should use shared rate-limit telemetry handlers");
+assert(!auditRoutesSource.includes("const createJsonRateLimitHandler"), "audit routes should use shared rate-limit telemetry handlers");
+assert(!routesSource.includes("const createJsonRateLimitHandler"), "main routes should use shared rate-limit telemetry handlers");
 
 [
   "...loginLimiters",
@@ -109,6 +114,8 @@ assert(auditRoutesSource.includes("const auditFraudReportsRespondPreAuthRouteLim
   '"/telemetry/route-transition", telemetryMutationPreAuthRouteLimiter, optionalAuth,',
   '"/telemetry/csp-report", cspTelemetryPreAuthRouteLimiter, optionalAuth,',
   '"/internal/release", internalReleasePreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
+  '"/security/abuse/rate-limits", securityOpsReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
+  '"/security/abuse/rate-limits/alerts", securityOpsReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
   '"/licensees/export", licenseeExportPreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
   '"/licensees", licenseeReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
   '"/licensees", licenseeMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin,',

@@ -14,16 +14,7 @@ import {
   fromParamFields,
   fromUserAgent,
 } from "../middleware/publicRateLimit";
-
-const createJsonRateLimitHandler =
-  (scope: string, message: string) =>
-  (_req: Request, res: any) =>
-    res.status(429).json({
-      success: false,
-      code: "RATE_LIMITED",
-      error: message,
-      scope,
-    });
+import { createRateLimitJsonHandler } from "../observability/rateLimitMetrics";
 
 const auditReadRouteLimiter: RequestHandler = rateLimit({
   windowMs: 10 * 60 * 1000,
@@ -31,7 +22,7 @@ const auditReadRouteLimiter: RequestHandler = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "audit.read", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("audit.read", "Too many audit read requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("audit.read", "Too many audit read requests. Please wait before retrying."),
 });
 
 const auditLogsReadPreAuthRouteLimiter: RequestHandler = rateLimit({
@@ -41,7 +32,7 @@ const auditLogsReadPreAuthRouteLimiter: RequestHandler = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "audit.logs-read:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
-  handler: createJsonRateLimitHandler("audit.logs-read:pre-auth", "Too many audit read requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("audit.logs-read:pre-auth", "Too many audit read requests. Please wait before retrying."),
 });
 
 const auditExportRouteLimiter: RequestHandler = rateLimit({
@@ -50,7 +41,7 @@ const auditExportRouteLimiter: RequestHandler = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "audit.export", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("audit.export", "Too many audit export requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("audit.export", "Too many audit export requests. Please wait before retrying."),
 });
 
 const auditLogsExportPreAuthRouteLimiter: RequestHandler = rateLimit({
@@ -60,7 +51,7 @@ const auditLogsExportPreAuthRouteLimiter: RequestHandler = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "audit.logs-export:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
-  handler: createJsonRateLimitHandler("audit.logs-export:pre-auth", "Too many audit export requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("audit.logs-export:pre-auth", "Too many audit export requests. Please wait before retrying."),
 });
 
 const auditFraudReadRouteLimiter: RequestHandler = rateLimit({
@@ -69,7 +60,7 @@ const auditFraudReadRouteLimiter: RequestHandler = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "audit.fraud-read", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("audit.fraud-read", "Too many fraud review reads. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("audit.fraud-read", "Too many fraud review reads. Please wait before retrying."),
 });
 
 const auditFraudReportsReadPreAuthRouteLimiter: RequestHandler = rateLimit({
@@ -79,7 +70,7 @@ const auditFraudReportsReadPreAuthRouteLimiter: RequestHandler = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "audit.fraud-read:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
-  handler: createJsonRateLimitHandler("audit.fraud-read:pre-auth", "Too many fraud review reads. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("audit.fraud-read:pre-auth", "Too many fraud review reads. Please wait before retrying."),
 });
 
 const auditFraudMutationRouteLimiter: RequestHandler = rateLimit({
@@ -88,7 +79,7 @@ const auditFraudMutationRouteLimiter: RequestHandler = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "audit.fraud-mutation", (currentReq: any) => currentReq.user?.userId || null),
-  handler: createJsonRateLimitHandler("audit.fraud-mutation", "Too many fraud review actions. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("audit.fraud-mutation", "Too many fraud review actions. Please wait before retrying."),
 });
 
 const auditFraudReportsRespondPreAuthRouteLimiter: RequestHandler = rateLimit({
@@ -103,7 +94,7 @@ const auditFraudReportsRespondPreAuthRouteLimiter: RequestHandler = rateLimit({
       composeRequestResolvers(fromAuthorizationBearer, fromUserAgent),
       fromParamFields("id")
     ),
-  handler: createJsonRateLimitHandler("audit.fraud-mutation:pre-auth", "Too many fraud review actions. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("audit.fraud-mutation:pre-auth", "Too many fraud review actions. Please wait before retrying."),
 });
 
 const auditStreamPreAuthRouteLimiter: RequestHandler = rateLimit({
@@ -113,7 +104,7 @@ const auditStreamPreAuthRouteLimiter: RequestHandler = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "audit.stream:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
-  handler: createJsonRateLimitHandler("audit.stream:pre-auth", "Too many audit stream requests. Please wait before retrying."),
+  handler: createRateLimitJsonHandler("audit.stream:pre-auth", "Too many audit stream requests. Please wait before retrying."),
 });
 
 const auditReadIpLimiter: RequestHandler = createPublicIpRateLimiter({
