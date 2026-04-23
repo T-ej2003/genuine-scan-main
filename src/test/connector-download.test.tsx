@@ -20,6 +20,9 @@ const expectAllLinksToMatch = (links: HTMLElement[], href: string) => {
   }
 };
 
+const hasTextContent = (snippet: RegExp) => (_: string, element: Element | null) =>
+  snippet.test(element?.textContent || "");
+
 describe("ConnectorDownload", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -106,7 +109,7 @@ describe("ConnectorDownload", () => {
     expect(screen.getAllByText(/Windows can block this unsigned test package/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Extract the ZIP fully before running/i)).toBeInTheDocument();
     expect(screen.getByText(/Run the installer once/i)).toBeInTheDocument();
-    expect(screen.getByText(/Smart App Control can block the current Windows download/i)).toBeInTheDocument();
+    expect(screen.getAllByText(hasTextContent(/Smart App Control can block the current Windows download/i)).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Unsigned test package/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/verifies local printer readiness before it tells you setup is complete/i).length).toBeGreaterThan(0);
   });
