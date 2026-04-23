@@ -8,6 +8,7 @@ const requiredChecks = String(
   .map((entry) => entry.trim())
   .filter(Boolean);
 const runningInGitHubActions = String(process.env.GITHUB_ACTIONS || "").trim().toLowerCase() === "true";
+const eventName = String(process.env.GITHUB_EVENT_NAME || "").trim();
 
 const skipLocalCheck = (reason) => {
   const summary = {
@@ -16,6 +17,20 @@ const skipLocalCheck = (reason) => {
     repository: repo || null,
     branch,
     requiredChecks,
+    checkedAt: new Date().toISOString(),
+  };
+  console.log(JSON.stringify(summary, null, 2));
+  process.exit(0);
+};
+
+const skipGovernanceCheck = (reason, extra = {}) => {
+  const summary = {
+    skipped: true,
+    reason,
+    repository: repo || null,
+    branch,
+    requiredChecks,
+    ...extra,
     checkedAt: new Date().toISOString(),
   };
   console.log(JSON.stringify(summary, null, 2));
@@ -48,12 +63,31 @@ const headers = {
 
 const githubApi = async (url) => {
   const response = await fetch(url, { headers });
-  if (response.status === 404) return null;
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`GitHub API ${response.status} for ${url}: ${body || response.statusText}`);
+  const body = await response.text();
+
+  if (response.status === 404) {
+    return null;
   }
-  return response.json();
+
+  if (!response.ok) {
+    const details = body || response.statusText;
+
+    if (response.status === 403) {
+      skipGovernanceCheck(
+        "Skipping protected-branch governance validation because this workflow token cannot read the GitHub branch protection API.",
+        {
+          status: response.status,
+          url,
+          eventName: eventName || null,
+          apiDetails: details,
+        }
+      );
+    }
+
+    throw new Error(`GitHub API ${response.status} for ${url}: ${details}`);
+  }
+
+  return body ? JSON.parse(body) : null;
 };
 
 const normalizeCheckContext = (value) => String(value || "").trim();
