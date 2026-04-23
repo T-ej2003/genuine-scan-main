@@ -16,7 +16,6 @@ requireSecret("SMOKE_LOGIN_EMAIL");
 requireSecret("SMOKE_LOGIN_PASSWORD");
 
 // Optional verify flow
-// If set, the smoke runner will use it. If not, it should skip.
 const verifyCode = read("SMOKE_VERIFY_CODE");
 
 // Optional batch print flow
@@ -43,7 +42,6 @@ if (evidenceUrl && evidencePath) {
 }
 
 // Optional step-up / MFA
-// These should not be hard-required because some staging accounts may not need them.
 const stepUpPassword = read("SMOKE_STEP_UP_PASSWORD");
 const stepUpCode = read("SMOKE_ADMIN_STEP_UP_CODE");
 const mfaCode = read("SMOKE_ADMIN_MFA_CODE");
@@ -56,29 +54,19 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
+const configuredOptionalCount = [
+  verifyCode,
+  batchPrintEndpoint,
+  batchPrintPayload,
+  incidentEndpoint,
+  incidentPayload,
+  evidenceUrl,
+  evidencePath,
+  stepUpPassword,
+  stepUpCode,
+  mfaCode,
+].filter(Boolean).length;
+
 console.log("Staging smoke configuration check passed.");
-console.log(
-  JSON.stringify(
-    {
-      required: {
-        SMOKE_BASE_URL: Boolean(read("SMOKE_BASE_URL")),
-        SMOKE_LOGIN_EMAIL: Boolean(read("SMOKE_LOGIN_EMAIL")),
-        SMOKE_LOGIN_PASSWORD: Boolean(read("SMOKE_LOGIN_PASSWORD")),
-      },
-      optional: {
-        SMOKE_VERIFY_CODE: Boolean(verifyCode),
-        SMOKE_BATCH_PRINT_ENDPOINT: Boolean(batchPrintEndpoint),
-        SMOKE_BATCH_PRINT_PAYLOAD_JSON: Boolean(batchPrintPayload),
-        SMOKE_INCIDENT_ENDPOINT: Boolean(incidentEndpoint),
-        SMOKE_INCIDENT_PAYLOAD_JSON: Boolean(incidentPayload),
-        SMOKE_EVIDENCE_URL: Boolean(evidenceUrl),
-        SMOKE_EVIDENCE_PATH: Boolean(evidencePath),
-        SMOKE_STEP_UP_PASSWORD: Boolean(stepUpPassword),
-        SMOKE_ADMIN_STEP_UP_CODE: Boolean(stepUpCode),
-        SMOKE_ADMIN_MFA_CODE: Boolean(mfaCode),
-      },
-    },
-    null,
-    2
-  )
-);
+console.log(`Validated required keys: SMOKE_BASE_URL, SMOKE_LOGIN_EMAIL, SMOKE_LOGIN_PASSWORD`);
+console.log(`Configured optional inputs: ${configuredOptionalCount}`);
