@@ -22,7 +22,7 @@ vi.mock("@/lib/api-client", () => ({
 describe("Incident report form", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.defineProperty(global.navigator, "geolocation", {
+    Object.defineProperty(globalThis.navigator, "geolocation", {
       configurable: true,
       value: {
         getCurrentPosition: (success: (pos: any) => void) =>
