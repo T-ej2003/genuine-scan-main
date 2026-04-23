@@ -21,8 +21,8 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-mscqrminio}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-mscqrminiochange}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in environment or .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in environment or .env}
     volumes:
       - minio_data:/data
     expose:
@@ -46,7 +46,7 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c
-      "mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-mscqrminio} ${MINIO_ROOT_PASSWORD:-mscqrminiochange} &&
+      "mc alias set local http://minio:9000 ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in environment or .env} ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in environment or .env} &&
       mc mb --ignore-existing local/${OBJECT_STORAGE_BUCKET:-mscqr-artifacts}"
     networks:
       - app
@@ -74,8 +74,8 @@ services:
       OBJECT_STORAGE_ENDPOINT: ${OBJECT_STORAGE_ENDPOINT:-http://minio:9000}
       OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION:-us-east-1}
       OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:-mscqr-artifacts}
-      OBJECT_STORAGE_ACCESS_KEY: ${OBJECT_STORAGE_ACCESS_KEY:-mscqrminio}
-      OBJECT_STORAGE_SECRET_KEY: ${OBJECT_STORAGE_SECRET_KEY:-mscqrminiochange}
+      OBJECT_STORAGE_ACCESS_KEY: ${OBJECT_STORAGE_ACCESS_KEY:?Set OBJECT_STORAGE_ACCESS_KEY in environment or .env}
+      OBJECT_STORAGE_SECRET_KEY: ${OBJECT_STORAGE_SECRET_KEY:?Set OBJECT_STORAGE_SECRET_KEY in environment or .env}
       OBJECT_STORAGE_FORCE_PATH_STYLE: ${OBJECT_STORAGE_FORCE_PATH_STYLE:-true}
     expose:
       - "4000"
@@ -122,8 +122,8 @@ services:
       OBJECT_STORAGE_ENDPOINT: ${OBJECT_STORAGE_ENDPOINT:-http://minio:9000}
       OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION:-us-east-1}
       OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:-mscqr-artifacts}
-      OBJECT_STORAGE_ACCESS_KEY: ${OBJECT_STORAGE_ACCESS_KEY:-mscqrminio}
-      OBJECT_STORAGE_SECRET_KEY: ${OBJECT_STORAGE_SECRET_KEY:-mscqrminiochange}
+      OBJECT_STORAGE_ACCESS_KEY: ${OBJECT_STORAGE_ACCESS_KEY:?Set OBJECT_STORAGE_ACCESS_KEY in environment or .env}
+      OBJECT_STORAGE_SECRET_KEY: ${OBJECT_STORAGE_SECRET_KEY:?Set OBJECT_STORAGE_SECRET_KEY in environment or .env}
       OBJECT_STORAGE_FORCE_PATH_STYLE: ${OBJECT_STORAGE_FORCE_PATH_STYLE:-true}
     depends_on:
       redis:
