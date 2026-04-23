@@ -1,0 +1,180 @@
+name: Release Candidate Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - codex/merge-main-ours-test2
+      - release-candidate/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-candidate-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rc-trust-critical:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      # TODO(ci-lint): make changed-file lint hard-blocking here once ENFORCE_LINT_CHANGED=true
+      # and the existing repository lint debt no longer requires report-only mode.
+      - name: Lint changed files report
+        env:
+          ENFORCE_LINT_CHANGED: ${{ vars.ENFORCE_LINT_CHANGED }}
+        run: npm run report:lint:changed
+
+      - name: Release-candidate validation contract
+        run: npm run verify:ci:release-candidate
+
+  rc-staging-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs:
+      - rc-trust-critical
+    environment: staging
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
+    env:
+      SMOKE_BASE_URL: ${{ vars.STAGING_SMOKE_BASE_URL }}
+      SMOKE_API_BASE_URL: ${{ vars.STAGING_SMOKE_API_BASE_URL }}
+      SMOKE_LOGIN_EMAIL: ${{ secrets.STAGING_SMOKE_LOGIN_EMAIL }}
+      SMOKE_LOGIN_PASSWORD: ${{ secrets.STAGING_SMOKE_LOGIN_PASSWORD }}
+      SMOKE_ADMIN_MFA_CODE: ${{ secrets.STAGING_SMOKE_ADMIN_MFA_CODE }}
+      SMOKE_ADMIN_STEP_UP_CODE: ${{ secrets.STAGING_SMOKE_ADMIN_STEP_UP_CODE }}
+      SMOKE_STEP_UP_PASSWORD: ${{ secrets.STAGING_SMOKE_STEP_UP_PASSWORD }}
+      SMOKE_VERIFY_CODE: ${{ vars.STAGING_SMOKE_VERIFY_CODE }}
+      SMOKE_BATCH_PRINT_ENDPOINT: ${{ vars.STAGING_SMOKE_BATCH_PRINT_ENDPOINT }}
+      SMOKE_BATCH_PRINT_PAYLOAD_JSON: ${{ vars.STAGING_SMOKE_BATCH_PRINT_PAYLOAD_JSON }}
+      SMOKE_INCIDENT_ENDPOINT: ${{ vars.STAGING_SMOKE_INCIDENT_ENDPOINT }}
+      SMOKE_INCIDENT_PAYLOAD_JSON: ${{ vars.STAGING_SMOKE_INCIDENT_PAYLOAD_JSON }}
+      SMOKE_EVIDENCE_URL: ${{ vars.STAGING_SMOKE_EVIDENCE_URL }}
+      SMOKE_EVIDENCE_PATH: ${{ vars.STAGING_SMOKE_EVIDENCE_PATH }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Validate staging smoke configuration
+        run: node scripts/check-staging-smoke-config.mjs
+
+      - name: Run staging smoke gate
+        run: |
+          set -o pipefail
+          npm run verify:staging-smoke | tee smoke-release.log
+
+      - name: Upload staging smoke log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-smoke-log
+          path: smoke-release.log
+          if-no-files-found: ignore
+
+  rc-governance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Validate protected branch required checks
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_PROTECTED_BRANCH: main
+          REQUIRED_RELEASE_CHECKS: Release Candidate Gate / rc-trust-critical,Release Candidate Gate / rc-staging-smoke
+        run: node scripts/check-release-governance.mjs
+
+  rc-release-checklist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      - rc-trust-critical
+      - rc-staging-smoke
+      - rc-governance
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build release checklist artifact
+        env:
+          TRUST_CRITICAL_RESULT: ${{ needs.rc-trust-critical.result }}
+          STAGING_SMOKE_RESULT: ${{ needs.rc-staging-smoke.result }}
+          GOVERNANCE_RESULT: ${{ needs.rc-governance.result }}
+          DEPENDENCY_AUDIT_RESULT: ${{ needs.rc-trust-critical.result }}
+          PROVENANCE_BACKFILL_EVIDENCE_REF: ${{ vars.RC_PROVENANCE_BACKFILL_EVIDENCE_REF }}
+          SECRET_ROTATION_EVIDENCE_REF: ${{ vars.RC_SECRET_ROTATION_EVIDENCE_REF }}
+          INCIDENT_DRILL_EVIDENCE_REF: ${{ vars.RC_INCIDENT_DRILL_EVIDENCE_REF }}
+          REQUIRE_RELEASE_EVIDENCE_REFS: ${{ startsWith(github.ref, 'refs/tags/release-') || startsWith(github.ref, 'refs/tags/v') }}
+        run: node scripts/check-release-evidence-refs.mjs && node scripts/create-release-checklist-artifact.mjs
+
+      - name: Lint debt report
+        run: npm run lint:debt:report
+
+      - name: Upload lint debt report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-debt-report
+          path: |
+            audit-artifacts/lint-debt-report.json
+            audit-artifacts/lint-debt-issue-template.md
+          if-no-files-found: ignore
+
+      - name: Upload release checklist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-checklist-artifact
+          path: audit-artifacts/release-checklist.json
+          if-no-files-found: error

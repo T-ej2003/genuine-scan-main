@@ -1,13 +1,18 @@
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHmac, scryptSync, timingSafeEqual } from "crypto";
 import jwt from "jsonwebtoken";
 
 import { getJwtSecret, randomOpaqueToken } from "../utils/security";
 
+export type CustomerVerifyAuthStrength = "EMAIL_OTP" | "PASSKEY" | "SOCIAL";
+export type CustomerVerifyAuthProvider = "EMAIL_OTP" | "GOOGLE";
+
 export type CustomerVerifyIdentity = {
   userId: string;
   email: string;
-  authStrength?: "EMAIL_OTP" | "PASSKEY";
+  authStrength?: CustomerVerifyAuthStrength;
   webauthnVerifiedAt?: string | null;
+  authProvider?: CustomerVerifyAuthProvider;
+  displayName?: string | null;
 };
 
 type OtpChallengeJwtPayload = {
@@ -22,8 +27,10 @@ type CustomerAuthJwtPayload = {
   type: "customer_verify_access";
   userId: string;
   email: string;
-  authStrength?: "EMAIL_OTP" | "PASSKEY";
+  authStrength?: CustomerVerifyAuthStrength;
   webauthnVerifiedAt?: string | null;
+  authProvider?: CustomerVerifyAuthProvider;
+  displayName?: string | null;
 };
 
 const parseIntEnv = (key: string, fallback: number) => {
@@ -48,7 +55,14 @@ const getCustomerTokenSecret = () => {
 export const normalizeCustomerVerifyEmail = (input: string) => String(input || "").trim().toLowerCase();
 
 export const deriveCustomerVerifyUserId = (email: string) => {
-  const digest = createHmac("sha256", getCustomerTokenSecret()).update(email).digest("hex").slice(0, 32);
+  const digest = scryptSync(email, getCustomerTokenSecret(), 16, {
+    N: 1 << 14,
+    r: 8,
+    p: 1,
+    maxmem: 32 * 1024 * 1024,
+  })
+    .toString("hex")
+    .slice(0, 32);
   return `cust_${digest}`;
 };
 
@@ -153,11 +167,14 @@ export const verifyCustomerOtpChallenge = (input: { challengeToken: string; otp:
 export const issueCustomerVerifyToken = (
   identity: CustomerVerifyIdentity,
   options?: {
-    authStrength?: "EMAIL_OTP" | "PASSKEY";
+    authStrength?: CustomerVerifyAuthStrength;
     webauthnVerifiedAt?: string | Date | null;
+    authProvider?: CustomerVerifyAuthProvider;
+    displayName?: string | null;
   }
 ) => {
   const authStrength = options?.authStrength || identity.authStrength || "EMAIL_OTP";
+  const authProvider = options?.authProvider || identity.authProvider || "EMAIL_OTP";
   const webauthnVerifiedAt =
     options?.webauthnVerifiedAt instanceof Date
       ? options.webauthnVerifiedAt.toISOString()
@@ -168,11 +185,23 @@ export const issueCustomerVerifyToken = (
     email: normalizeCustomerVerifyEmail(identity.email),
     authStrength,
     webauthnVerifiedAt,
+    authProvider,
+    displayName: String(options?.displayName || identity.displayName || "").trim() || null,
   };
   return jwt.sign(payload, getCustomerTokenSecret(), {
     expiresIn: `${getCustomerTokenTtlHours()}h`,
   });
 };
+
+export const issueCustomerVerifySession = (
+  identity: CustomerVerifyIdentity,
+  options?: {
+    authStrength?: CustomerVerifyAuthStrength;
+    webauthnVerifiedAt?: string | Date | null;
+    authProvider?: CustomerVerifyAuthProvider;
+    displayName?: string | null;
+  }
+) => issueCustomerVerifyToken(identity, options);
 
 export const verifyCustomerVerifyToken = (rawToken: string): CustomerVerifyIdentity => {
   const token = String(rawToken || "").trim();
@@ -202,7 +231,10 @@ export const verifyCustomerVerifyToken = (rawToken: string): CustomerVerifyIdent
   return {
     userId,
     email,
-    authStrength: decoded.authStrength === "PASSKEY" ? "PASSKEY" : "EMAIL_OTP",
+    authStrength:
+      decoded.authStrength === "PASSKEY" ? "PASSKEY" : decoded.authStrength === "SOCIAL" ? "SOCIAL" : "EMAIL_OTP",
     webauthnVerifiedAt: decoded.webauthnVerifiedAt || null,
+    authProvider: decoded.authProvider === "GOOGLE" ? "GOOGLE" : "EMAIL_OTP",
+    displayName: String(decoded.displayName || "").trim() || null,
   };
 };

@@ -7,7 +7,7 @@ type OwnershipLike = {
   matchMethod?: "user" | "device_token" | null;
 };
 
-type CustomerAuthStrength = "EMAIL_OTP" | "PASSKEY";
+type CustomerAuthStrength = "EMAIL_OTP" | "PASSKEY" | "SOCIAL";
 
 const getStore = () => (prisma as any).customerTrustCredential;
 

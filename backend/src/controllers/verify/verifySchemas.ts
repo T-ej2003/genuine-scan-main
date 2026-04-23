@@ -3,15 +3,54 @@ import { z } from "zod";
 
 import { verifyCaptchaToken } from "../../services/captchaService";
 import { randomOpaqueToken } from "../../utils/security";
+import { getRequestCookies } from "../../utils/cookies";
 
 export type VerifyClassification =
   | "FIRST_SCAN"
   | "LEGIT_REPEAT"
   | "SUSPICIOUS_DUPLICATE"
   | "BLOCKED_BY_SECURITY"
-  | "NOT_READY_FOR_CUSTOMER_USE";
+  | "NOT_READY_FOR_CUSTOMER_USE"
+  | "NOT_FOUND";
 
 export type VerificationProofSource = "SIGNED_LABEL" | "MANUAL_CODE_LOOKUP";
+
+export type VerificationPublicOutcome =
+  | "SIGNED_LABEL_ACTIVE"
+  | "MANUAL_RECORD_FOUND"
+  | "LIMITED_PROVENANCE"
+  | "REVIEW_REQUIRED"
+  | "BLOCKED"
+  | "NOT_READY"
+  | "NOT_FOUND"
+  | "INTEGRITY_ERROR"
+  | "PRINTER_SETUP_ONLY";
+
+export type VerificationRiskDisposition = "CLEAR" | "MONITOR" | "REVIEW_REQUIRED" | "BLOCKED";
+
+export type VerificationMessageKey =
+  | "signed_label_active"
+  | "signed_label_repeat"
+  | "manual_record_found"
+  | "manual_record_repeat"
+  | "manual_record_signed_history"
+  | "limited_provenance"
+  | "review_required"
+  | "blocked"
+  | "replacement_required"
+  | "not_ready"
+  | "not_found"
+  | "integrity_error"
+  | "printer_setup_only";
+
+export type VerificationNextActionKey =
+  | "none"
+  | "review_details"
+  | "rescan_label"
+  | "contact_support"
+  | "report_concern"
+  | "scan_active_replacement"
+  | "try_again_later";
 
 export type ScanSummary = {
   totalScans: number;
@@ -40,6 +79,8 @@ export const reportFraudSchema = z
     observedStatus: z.string().trim().max(64).optional(),
     observedOutcome: z.string().trim().max(64).optional(),
     pageUrl: z.string().trim().max(1000).optional(),
+    sessionId: z.string().trim().max(128).optional(),
+    decisionId: z.string().trim().max(128).optional(),
     tags: z.union([z.string(), z.array(z.string())]).optional(),
     captchaToken: z.string().trim().max(4000).optional(),
   })
@@ -105,11 +146,12 @@ export const OWNERSHIP_TRANSFER_TTL_HOURS = parseIntEnv("OWNERSHIP_TRANSFER_TTL_
 
 export const verifyStepUpChallenge = async (req: Request) => {
   if (!VERIFY_STEP_UP_REQUIRED_ON_SUSPICIOUS) return { ok: true };
-  const captchaToken = String(req.headers["x-captcha-token"] || (req.body as any)?.captchaToken || "").trim();
+  const headers = (req as any)?.headers || {};
+  const captchaToken = String(headers["x-captcha-token"] || (req.body as any)?.captchaToken || "").trim();
   if (!captchaToken) {
     return {
       ok: false,
-      reason: "Suspicious activity challenge required. Complete captcha and retry.",
+      reason: "Suspicious activity challenge required. Sign in with verified identity or complete captcha and retry.",
     };
   }
   return verifyCaptchaToken(captchaToken, req.ip);
@@ -124,7 +166,7 @@ const deviceClaimCookieOptions = () => ({
 });
 
 export const getDeviceClaimTokenFromRequest = (req: Request) => {
-  const cookies = (req as any).cookies as Record<string, string> | undefined;
+  const cookies = getRequestCookies(req);
   const raw = String(cookies?.[DEVICE_CLAIM_COOKIE] || "").trim();
   return raw || null;
 };

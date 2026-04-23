@@ -1,13 +1,34 @@
-import { PrintJobStatus, PrintPipelineState, PrintSessionStatus, QRStatus } from "@prisma/client";
+import { PrintJobStatus, PrintPipelineState, PrintSessionStatus, QRStatus, VerificationReplacementStatus } from "@prisma/client";
 
 import { type VerificationActivitySummary } from "../../services/duplicateRiskService";
 import type { OwnershipStatus } from "./verifyOwnership";
 import type {
   ReportIncidentType,
   ScanSummary,
+  VerificationMessageKey,
+  VerificationNextActionKey,
   VerificationProofSource,
+  VerificationPublicOutcome,
+  VerificationRiskDisposition,
   VerifyClassification,
 } from "./verifySchemas";
+
+const parseBoolEnv = (value: unknown, fallback: boolean) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+};
+
+const VERIFY_REQUIRE_GOVERNED_PRINT_PROVENANCE = parseBoolEnv(
+  process.env.VERIFY_REQUIRE_GOVERNED_PRINT_PROVENANCE,
+  true
+);
+
+const normalizeIssuanceMode = (value: unknown) => {
+  const normalized = String(value || "LEGACY_UNSPECIFIED").trim().toUpperCase();
+  return normalized || "LEGACY_UNSPECIFIED";
+};
 
 export const mapLicensee = (licensee: any) =>
   licensee
@@ -92,11 +113,44 @@ const isPrintLifecycleConfirmed = (qrCode: any) => {
 };
 
 export const resolvePublicVerificationReadiness = (qrCode: any) => {
+  const issuanceMode = normalizeIssuanceMode(qrCode?.issuanceMode);
+  const customerVerifiableAt = toIso(qrCode?.customerVerifiableAt);
+  const hasGovernedPrintProvenance = issuanceMode === "GOVERNED_PRINT";
+  const limitedProvenance = issuanceMode !== "GOVERNED_PRINT";
+
   if (!isQrReadyForCustomerUse(qrCode?.status)) {
     return {
       isReady: false,
       message: statusNotReadyMessage(qrCode?.status),
       reason: statusNotReadyReason(qrCode?.status),
+      issuanceMode,
+      customerVerifiableAt,
+      governedProofEligible: false,
+      limitedProvenance,
+    };
+  }
+
+  if (VERIFY_REQUIRE_GOVERNED_PRINT_PROVENANCE && issuanceMode === "BREAK_GLASS_DIRECT") {
+    return {
+      isReady: false,
+      message: "This label was issued through a restricted emergency path and is not approved for normal customer verification.",
+      reason: "Restricted direct issuance bypassed the governed print workflow and cannot receive normal customer-verifiable proof.",
+      issuanceMode,
+      customerVerifiableAt,
+      governedProofEligible: false,
+      limitedProvenance: false,
+    };
+  }
+
+  if (hasGovernedPrintProvenance && !customerVerifiableAt) {
+    return {
+      isReady: false,
+      message: "This QR code is awaiting confirmed print completion.",
+      reason: "Governed issuance exists, but customer-verifiable readiness has not been established yet.",
+      issuanceMode,
+      customerVerifiableAt,
+      governedProofEligible: false,
+      limitedProvenance: false,
     };
   }
 
@@ -105,6 +159,10 @@ export const resolvePublicVerificationReadiness = (qrCode: any) => {
       isReady: false,
       message: "This QR code is awaiting confirmed print completion.",
       reason: "Code is assigned to a controlled print run, but print confirmation is not complete.",
+      issuanceMode,
+      customerVerifiableAt,
+      governedProofEligible: false,
+      limitedProvenance,
     };
   }
 
@@ -112,6 +170,14 @@ export const resolvePublicVerificationReadiness = (qrCode: any) => {
     isReady: true,
     message: null,
     reason: null,
+    issuanceMode,
+    customerVerifiableAt,
+    governedProofEligible: hasGovernedPrintProvenance && Boolean(customerVerifiableAt),
+    limitedProvenance,
+    provenanceReason:
+      limitedProvenance && issuanceMode !== "BREAK_GLASS_DIRECT"
+        ? "Governed print provenance is not available for this label."
+        : null,
   };
 };
 
@@ -203,7 +269,7 @@ export const buildRiskExplanation = (params: {
           ? "External scan activity needs review"
           : "Duplicate risk signals detected",
       details: params.reasons,
-      recommendedAction: "Review seller source and report suspected counterfeit if this is unexpected.",
+      recommendedAction: "Review where the product came from and contact brand support if this result is unexpected.",
     };
   }
 
@@ -213,6 +279,15 @@ export const buildRiskExplanation = (params: {
       title: "Blocked by security controls",
       details: params.reasons,
       recommendedAction: "Do not use this product until support confirms resolution.",
+    };
+  }
+
+  if (params.classification === "NOT_FOUND") {
+    return {
+      level: "medium",
+      title: "MSCQR could not find this code",
+      details: params.reasons,
+      recommendedAction: "Check the code carefully and contact brand support if the product should carry an MSCQR label.",
     };
   }
 
@@ -247,13 +322,13 @@ export const describeVerificationProof = (proofSource?: VerificationProofSource 
   if (proofSource === "SIGNED_LABEL") {
     return {
       title: "Signed label verification",
-      detail: "This result is tied to an issued MSCQR label signature.",
+      detail: "This result is tied to an issued MSCQR label signature and live platform record.",
     };
   }
 
   return {
     title: "Manual registry lookup",
-    detail: "This result confirms registry state and lifecycle, but not the physical label binding.",
+    detail: "This result confirms the MSCQR registry record and lifecycle state only. It does not confirm physical label binding.",
   };
 };
 
@@ -262,6 +337,7 @@ export const buildRepeatWarningMessage = (params: {
   hasContainment: boolean;
   isFirstScan: boolean;
   firstVerifiedAt: string | null;
+  classification?: VerifyClassification;
   activitySummary?: VerificationActivitySummary | null;
 }) => {
   if (params.blockedByPolicy) {
@@ -270,18 +346,145 @@ export const buildRepeatWarningMessage = (params: {
   if (params.hasContainment) {
     return "This product is currently under investigation. Please review details and contact support if needed.";
   }
+  if (params.classification === "SUSPICIOUS_DUPLICATE") {
+    return "MSCQR recorded unusual repeat activity for this code. Review the details before relying on it.";
+  }
   if (params.isFirstScan || !params.firstVerifiedAt) {
     return null;
   }
 
   if (params.activitySummary?.state === "trusted_repeat") {
-    return "Already verified before. Recent checks match the same owner or trusted device.";
+    return "This code has been checked before, and recent activity matches the same owner or trusted device.";
   }
   if (params.activitySummary?.state === "mixed_repeat") {
-    return "Already verified before. Some recent checks match the owner context, but additional external activity was also recorded.";
+    return "This code has been checked before. Some recent activity matches the owner context, but additional external activity was also recorded.";
   }
 
-  return `Already verified before. First verification was on ${params.firstVerifiedAt}.`;
+  return `This code has been checked before. The first customer-facing verification was recorded on ${params.firstVerifiedAt}.`;
+};
+
+export const buildPublicVerificationSemantics = (params: {
+  classification: VerifyClassification;
+  proofSource: VerificationProofSource;
+  replacementStatus?: VerificationReplacementStatus | null;
+  isFirstScan?: boolean;
+  notFound?: boolean;
+  integrityError?: boolean;
+  printerSetupOnly?: boolean;
+  limitedProvenance?: boolean;
+  manualSignedHistory?: boolean;
+}) => {
+  if (params.printerSetupOnly) {
+    return {
+      publicOutcome: "PRINTER_SETUP_ONLY" as VerificationPublicOutcome,
+      riskDisposition: "MONITOR" as VerificationRiskDisposition,
+      messageKey: "printer_setup_only" as VerificationMessageKey,
+      nextActionKey: "none" as VerificationNextActionKey,
+      headline: "MSCQR confirmed this printer setup label.",
+    };
+  }
+
+  if (params.notFound) {
+    return {
+      publicOutcome: "NOT_FOUND" as VerificationPublicOutcome,
+      riskDisposition: "BLOCKED" as VerificationRiskDisposition,
+      messageKey: "not_found" as VerificationMessageKey,
+      nextActionKey: "report_concern" as VerificationNextActionKey,
+      headline: "MSCQR could not find a live record for this code.",
+    };
+  }
+
+  if (params.integrityError) {
+    return {
+      publicOutcome: "INTEGRITY_ERROR" as VerificationPublicOutcome,
+      riskDisposition: "BLOCKED" as VerificationRiskDisposition,
+      messageKey: "integrity_error" as VerificationMessageKey,
+      nextActionKey: "report_concern" as VerificationNextActionKey,
+      headline: "MSCQR could not trust this label proof.",
+    };
+  }
+
+  if (params.classification === "BLOCKED_BY_SECURITY") {
+    if (params.replacementStatus === VerificationReplacementStatus.REPLACED_LABEL) {
+      return {
+        publicOutcome: "BLOCKED" as VerificationPublicOutcome,
+        riskDisposition: "BLOCKED" as VerificationRiskDisposition,
+        messageKey: "replacement_required" as VerificationMessageKey,
+        nextActionKey: "scan_active_replacement" as VerificationNextActionKey,
+        headline: "This label has been replaced by a newer controlled issuance.",
+      };
+    }
+
+    return {
+      publicOutcome: "BLOCKED" as VerificationPublicOutcome,
+      riskDisposition: "BLOCKED" as VerificationRiskDisposition,
+      messageKey: "blocked" as VerificationMessageKey,
+      nextActionKey: "contact_support" as VerificationNextActionKey,
+      headline: "MSCQR blocked this code for safety review.",
+    };
+  }
+
+  if (params.classification === "NOT_READY_FOR_CUSTOMER_USE") {
+    return {
+      publicOutcome: "NOT_READY" as VerificationPublicOutcome,
+      riskDisposition: "MONITOR" as VerificationRiskDisposition,
+      messageKey: "not_ready" as VerificationMessageKey,
+      nextActionKey: "try_again_later" as VerificationNextActionKey,
+      headline: "This code is not ready for customer verification yet.",
+    };
+  }
+
+  if (params.classification === "SUSPICIOUS_DUPLICATE") {
+    return {
+      publicOutcome: "REVIEW_REQUIRED" as VerificationPublicOutcome,
+      riskDisposition: "REVIEW_REQUIRED" as VerificationRiskDisposition,
+      messageKey: "review_required" as VerificationMessageKey,
+      nextActionKey: "report_concern" as VerificationNextActionKey,
+      headline: "This code needs review before it should be trusted.",
+    };
+  }
+
+  if (params.limitedProvenance && params.proofSource === "SIGNED_LABEL") {
+    return {
+      publicOutcome: "LIMITED_PROVENANCE" as VerificationPublicOutcome,
+      riskDisposition: "MONITOR" as VerificationRiskDisposition,
+      messageKey: "limited_provenance" as VerificationMessageKey,
+      nextActionKey: "review_details" as VerificationNextActionKey,
+      headline: "MSCQR found this label active, but governed print provenance is limited.",
+    };
+  }
+
+  if (params.proofSource === "MANUAL_CODE_LOOKUP") {
+    if (params.manualSignedHistory) {
+      return {
+        publicOutcome: "MANUAL_RECORD_FOUND" as VerificationPublicOutcome,
+        riskDisposition: "MONITOR" as VerificationRiskDisposition,
+        messageKey: "manual_record_signed_history" as VerificationMessageKey,
+        nextActionKey: "rescan_label" as VerificationNextActionKey,
+        headline: "MSCQR found the record for this code, but prior signed-label history exists.",
+      };
+    }
+
+    return {
+      publicOutcome: "MANUAL_RECORD_FOUND" as VerificationPublicOutcome,
+      riskDisposition: params.isFirstScan ? ("CLEAR" as VerificationRiskDisposition) : ("MONITOR" as VerificationRiskDisposition),
+      messageKey: params.isFirstScan ? ("manual_record_found" as VerificationMessageKey) : ("manual_record_repeat" as VerificationMessageKey),
+      nextActionKey: "review_details" as VerificationNextActionKey,
+      headline: params.isFirstScan
+        ? "MSCQR found a live record for this code."
+        : "MSCQR found the same live record for this code again.",
+    };
+  }
+
+  return {
+    publicOutcome: "SIGNED_LABEL_ACTIVE" as VerificationPublicOutcome,
+    riskDisposition: params.isFirstScan ? ("CLEAR" as VerificationRiskDisposition) : ("MONITOR" as VerificationRiskDisposition),
+    messageKey: params.isFirstScan ? ("signed_label_active" as VerificationMessageKey) : ("signed_label_repeat" as VerificationMessageKey),
+    nextActionKey: "review_details" as VerificationNextActionKey,
+    headline: params.isFirstScan
+      ? "MSCQR confirmed this issued label is active."
+      : "MSCQR confirmed this issued label again.",
+  };
 };
 
 export const buildSecurityContainmentReasons = (containment: ReturnType<typeof buildContainment>) => {

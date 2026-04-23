@@ -28,9 +28,9 @@ import { runIncidentAutoContainment } from "../services/soarService";
 import { listLatestDecisionByQrCodeIds } from "../services/verificationDecisionReadService";
 
 const paginationSchema = z.object({
-  limit: z.coerce.number().int().min(1).max(200).default(50),
-  offset: z.coerce.number().int().min(0).default(0),
-}).strict();
+  limit: z.coerce.number().int().min(1).max(200).catch(50),
+  offset: z.coerce.number().int().min(0).catch(0),
+});
 
 const listIncidentsQuerySchema = z.object({
   limit: z.union([z.string(), z.number()]).optional(),

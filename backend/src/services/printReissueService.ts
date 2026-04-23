@@ -86,9 +86,9 @@ export const createAuthorizedPrintReissue = async (params: {
   const created = await prisma.$transaction(
     async (tx) => {
       const reservedRows = await tx.$queryRaw<
-        Array<{ id: string; code: string; licenseeId: string; batchId: string | null }>
+        Array<{ id: string; code: string; licenseeId: string; batchId: string | null; replayEpoch: number | null }>
       >(Prisma.sql`
-        SELECT q."id", q."code", q."licenseeId", q."batchId"
+        SELECT q."id", q."code", q."licenseeId", q."batchId", q."replayEpoch"
         FROM "QRCode" q
         WHERE q."batchId" = ${originalJob.batch.id}
           AND q."status" = CAST(${QRStatus.ALLOCATED} AS "QRStatus")
@@ -109,6 +109,7 @@ export const createAuthorizedPrintReissue = async (params: {
           batch_id: qr.batchId,
           licensee_id: qr.licenseeId,
           manufacturer_id: originalJob.manufacturerId,
+          epoch: Number(qr.replayEpoch || 1),
           iat: Math.floor(now.getTime() / 1000),
           exp: Math.floor(expAt.getTime() / 1000),
           nonce,
@@ -154,7 +155,8 @@ export const createAuthorizedPrintReissue = async (params: {
           "tokenIssuedAt" = v."tokenIssuedAt",
           "tokenExpiresAt" = v."tokenExpiresAt",
           "tokenHash" = v."tokenHash",
-          "printJobId" = ${replacementJob.id}
+          "printJobId" = ${replacementJob.id},
+          "issuanceMode" = 'GOVERNED_PRINT'
         FROM (
           VALUES ${Prisma.join(values)}
         ) AS v("id", "tokenNonce", "tokenHash", "tokenIssuedAt", "tokenExpiresAt")

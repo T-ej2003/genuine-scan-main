@@ -5,6 +5,7 @@ import {
   getTokenHashSecretSet,
   type SecretVersion,
 } from "./secretConfig";
+import { normalizeClientIp } from "./ipAddress";
 
 const must = (key: string) => {
   const v = String(process.env[key] || "").trim();
@@ -61,7 +62,7 @@ export const hmacSha256Hex = (value: string, secret: string) =>
   createHmac("sha256", secret).update(value).digest("hex");
 
 export const hashIp = (ip: string | null | undefined) => {
-  const v = String(ip || "").trim();
+  const v = normalizeClientIp(ip);
   if (!v) return null;
   return hashWithVersion(v, getIpHashSecretSet().current);
 };
@@ -88,7 +89,7 @@ export const matchesHashedToken = (token: string, storedHash: string | null | un
   matchesVersionedHmacHash(token, storedHash, getTokenHashSecretSet, ["TOKEN_HASH_SECRET", "IP_HASH_SALT", "JWT_SECRET"]);
 
 export const buildIpHashCandidates = (ip: string) =>
-  buildHmacHashCandidates(ip, getIpHashSecretSet, ["IP_HASH_SALT", "JWT_SECRET"]);
+  buildHmacHashCandidates(normalizeClientIp(ip), getIpHashSecretSet, ["IP_HASH_SALT", "JWT_SECRET"]);
 
 export const verifyJwtWithCurrentOrPrevious = <T>(token: string, verify: (secret: string) => T) => {
   const versions = getJwtSecretVersions();

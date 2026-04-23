@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "region": "eu-west-2",
+  "snsTopicArn": "arn:aws:sns:eu-west-2:123456789012:mscqr-oncall-security",
+  "alarms": [
+    {
+      "alarmName": "mscqr-trust-replay-review-spike",
+      "metricName": "ReplayReviewRequiredCount",
+      "namespace": "MSCQR/Trust",
+      "statistic": "Sum",
+      "period": 300,
+      "evaluationPeriods": 2,
+      "threshold": 20,
+      "comparisonOperator": "GreaterThanOrEqualToThreshold",
+      "treatMissingData": "notBreaching"
+    },
+    {
+      "alarmName": "mscqr-trust-changed-context-repeat-spike",
+      "metricName": "ChangedContextRepeatCount",
+      "namespace": "MSCQR/Trust",
+      "statistic": "Sum",
+      "period": 300,
+      "evaluationPeriods": 2,
+      "threshold": 10,
+      "comparisonOperator": "GreaterThanOrEqualToThreshold",
+      "treatMissingData": "notBreaching"
+    },
+    {
+      "alarmName": "mscqr-trust-limited-provenance-spike",
+      "metricName": "LimitedProvenanceCount",
+      "namespace": "MSCQR/Trust",
+      "statistic": "Sum",
+      "period": 900,
+      "evaluationPeriods": 2,
+      "threshold": 30,
+      "comparisonOperator": "GreaterThanOrEqualToThreshold",
+      "treatMissingData": "notBreaching"
+    },
+    {
+      "alarmName": "mscqr-trust-break-glass-usage",
+      "metricName": "BreakGlassGenerateCount",
+      "namespace": "MSCQR/Trust",
+      "statistic": "Sum",
+      "period": 60,
+      "evaluationPeriods": 1,
+      "threshold": 1,
+      "comparisonOperator": "GreaterThanOrEqualToThreshold",
+      "treatMissingData": "notBreaching"
+    },
+    {
+      "alarmName": "mscqr-trust-signing-fallback",
+      "metricName": "SigningFallbackCount",
+      "namespace": "MSCQR/Trust",
+      "statistic": "Sum",
+      "period": 300,
+      "evaluationPeriods": 1,
+      "threshold": 1,
+      "comparisonOperator": "GreaterThanOrEqualToThreshold",
+      "treatMissingData": "notBreaching"
+    },
+    {
+      "alarmName": "mscqr-trust-challenge-completion-drop",
+      "expression": "IF(challenge_required > 0, challenge_completed / challenge_required, 1)",
+      "threshold": 0.4,
+      "comparisonOperator": "LessThanThreshold",
+      "evaluationPeriods": 2,
+      "period": 300,
+      "metrics": [
+        {
+          "id": "challenge_required",
+          "namespace": "MSCQR/Trust",
+          "metricName": "ChallengeRequiredCount",
+          "statistic": "Sum"
+        },
+        {
+          "id": "challenge_completed",
+          "namespace": "MSCQR/Trust",
+          "metricName": "ChallengeCompletedCount",
+          "statistic": "Sum"
+        }
+      ],
+      "treatMissingData": "notBreaching"
+    }
+  ]
+}
+

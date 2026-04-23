@@ -52,6 +52,7 @@ If `prisma:migrate status` fails with `P3006`, migration history is not clean fo
 ```bash
 npm --prefix backend test
 npm test
+npm run verify:rc-local
 ```
 
 ## Step 5: Start services locally
@@ -73,8 +74,20 @@ npm run dev
 - `http://localhost:4000/health`
 - `http://localhost:4000/healthz`
 - `http://localhost:4000/health/db`
-- `http://localhost:4000/version`
+- `http://localhost:4000/health/live`
 - `http://localhost:8080` (frontend)
+
+Local-only smoke:
+
+```bash
+npm run smoke:dev-local
+```
+
+Release/staging smoke:
+
+```bash
+SMOKE_BASE_URL=https://staging.example.com npm run verify:staging-smoke
+```
 
 ## Optional local audit scans
 

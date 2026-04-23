@@ -26,6 +26,7 @@ import {
   decisionOutcomeTone,
   decisionRiskTone,
   decisionTrustTone,
+  presentPrintTrustState,
   titleCaseDecisionValue,
 } from "@/lib/verification-decision";
 
@@ -396,9 +397,9 @@ export function IRIncidentDetailWorkspace({
                         <Badge className={decisionTrustTone(incident.latestDecision.customerTrustReviewState)}>
                           {titleCaseDecisionValue(incident.latestDecision.customerTrustReviewState)}
                         </Badge>
-                        {incident.latestDecision.printTrustState ? (
-                          <Badge variant="outline">{titleCaseDecisionValue(incident.latestDecision.printTrustState)}</Badge>
-                        ) : null}
+                        <Badge className={presentPrintTrustState(incident.latestDecision).tone}>
+                          {presentPrintTrustState(incident.latestDecision).label}
+                        </Badge>
                       </div>
                       <div className="mt-2 text-sm text-slate-700">
                         Proof tier: {titleCaseDecisionValue(incident.latestDecision.proofTier)}.
@@ -406,6 +407,7 @@ export function IRIncidentDetailWorkspace({
                           ? ` Replacement: ${titleCaseDecisionValue(incident.latestDecision.replacementStatus)}.`
                           : ""}
                       </div>
+                      <div className="mt-2 text-sm text-slate-600">{presentPrintTrustState(incident.latestDecision).guidance}</div>
                     </div>
                   ) : (
                     <div className="rounded-lg border p-4 text-sm text-muted-foreground">No verification decision has been recorded for this QR yet.</div>

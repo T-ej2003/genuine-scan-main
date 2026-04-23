@@ -1,9 +1,11 @@
 import { createHash } from "crypto";
-import type { Request, Response } from "express";
+import type { Request } from "express";
 import rateLimit from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
 
 import { getRedisClient, isRedisConfigured } from "../services/redisService";
+import { normalizeClientIp } from "../utils/ipAddress";
+import { createRateLimitJsonHandler } from "../observability/rateLimitMetrics";
 
 type RequestResolver = (req: Request) => string | null | undefined;
 
@@ -30,19 +32,13 @@ const readFirstValue = (container: unknown, fieldNames: string[], max = 256) => 
   return "";
 };
 
-const retryAfterSeconds = (req: Request) => {
-  const limitedReq = req as Request & { rateLimit?: { resetTime?: Date } };
-  const resetAt = limitedReq.rateLimit?.resetTime?.getTime?.() || Date.now() + 1000;
-  return Math.max(1, Math.ceil((resetAt - Date.now()) / 1000));
-};
-
 const buildResourceKey = (req: Request, resolver?: RequestResolver) => {
   const resource = normalizeValue(resolver?.(req), 512);
   return resource ? `resource:${shortHash(resource.toLowerCase())}` : "resource:global";
 };
 
 export const buildPublicIpRateLimitKey = (req: Request, scope: string, resourceResolver?: RequestResolver) => {
-  const ip = normalizeValue(req.ip || req.socket?.remoteAddress || "unknown", 256).toLowerCase();
+  const ip = normalizeClientIp(req.ip || req.socket?.remoteAddress || "", { fallback: "unknown" }).toLowerCase();
   return `public:${scope}:ip:${shortHash(ip)}:${buildResourceKey(req, resourceResolver)}`;
 };
 
@@ -53,22 +49,9 @@ export const buildPublicActorRateLimitKey = (
   resourceResolver?: RequestResolver
 ) => {
   const actorValue = normalizeValue(actorResolver?.(req), 512).toLowerCase();
-  const fallbackIp = normalizeValue(req.ip || req.socket?.remoteAddress || "unknown", 256).toLowerCase();
+  const fallbackIp = normalizeClientIp(req.ip || req.socket?.remoteAddress || "", { fallback: "unknown" }).toLowerCase();
   const actor = actorValue || `ip:${fallbackIp}`;
   return `public:${scope}:actor:${shortHash(actor)}:${buildResourceKey(req, resourceResolver)}`;
-};
-
-// Return a stable JSON error contract for public callers and surface a retry hint.
-const createJson429Handler = (scope: string, message: string) => (req: Request, res: Response) => {
-  const retryAfterSec = retryAfterSeconds(req);
-  res.setHeader("Retry-After", String(retryAfterSec));
-  return res.status(429).json({
-    success: false,
-    code: "RATE_LIMITED",
-    error: message,
-    scope,
-    retryAfterSec,
-  });
 };
 
 export const createPublicIpRateLimiter = ({ scope, windowMs, max, message, resourceResolver }: PublicLimiterOptions) =>
@@ -88,7 +71,7 @@ export const createPublicIpRateLimiter = ({ scope, windowMs, max, message, resou
         })
       : undefined,
     keyGenerator: (req) => buildPublicIpRateLimitKey(req, scope, resourceResolver),
-    handler: createJson429Handler(scope, message),
+    handler: createRateLimitJsonHandler(scope, message, { includeRetryAfter: true }),
   });
 
 export const createPublicActorRateLimiter = ({
@@ -115,7 +98,7 @@ export const createPublicActorRateLimiter = ({
         })
       : undefined,
     keyGenerator: (req) => buildPublicActorRateLimitKey(req, scope, actorResolver, resourceResolver),
-    handler: createJson429Handler(scope, message),
+    handler: createRateLimitJsonHandler(scope, message, { includeRetryAfter: true }),
   });
 
 export const composeRequestResolvers =

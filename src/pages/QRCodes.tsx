@@ -34,6 +34,7 @@ import {
   decisionOutcomeTone,
   decisionRiskTone,
   decisionTrustTone,
+  presentPrintTrustState,
   titleCaseDecisionValue,
   type LatestDecision,
 } from "@/lib/verification-decision";
@@ -504,36 +505,40 @@ export default function QRCodes() {
 
                           <TableCell className="space-y-1">
                             {latestDecision ? (
-                              <>
-                                <div className="flex flex-wrap gap-1">
-                                  <Badge className={decisionOutcomeTone(latestDecision.outcome)}>
-                                    {titleCaseDecisionValue(latestDecision.outcome)}
-                                  </Badge>
-                                  <Badge className={decisionRiskTone(latestDecision.riskBand)}>
-                                    {titleCaseDecisionValue(latestDecision.riskBand)}
-                                  </Badge>
-                                </div>
-                                <div className="flex flex-wrap gap-1">
-                                  <Badge className={decisionTrustTone(latestDecision.customerTrustReviewState)}>
-                                    {titleCaseDecisionValue(latestDecision.customerTrustReviewState)}
-                                  </Badge>
-                                  <Badge variant="outline">
-                                    {latestDecision.proofTier === "SIGNED_LABEL"
-                                      ? "Signed label"
-                                      : latestDecision.proofTier === "DEGRADED"
-                                        ? "Degraded"
-                                        : "Manual lookup"}
-                                  </Badge>
-                                </div>
-                                <div className="text-[11px] text-muted-foreground">
-                                  {latestDecision.printTrustState
-                                    ? titleCaseDecisionValue(latestDecision.printTrustState)
-                                    : "No print trust state"}
-                                  {latestDecision.replacementStatus && latestDecision.replacementStatus !== "NONE"
-                                    ? ` · ${titleCaseDecisionValue(latestDecision.replacementStatus)}`
-                                    : ""}
-                                </div>
-                              </>
+                              (() => {
+                                const printTrust = presentPrintTrustState(latestDecision);
+                                return (
+                                  <>
+                                    <div className="flex flex-wrap gap-1">
+                                      <Badge className={decisionOutcomeTone(latestDecision.outcome)}>
+                                        {titleCaseDecisionValue(latestDecision.outcome)}
+                                      </Badge>
+                                      <Badge className={decisionRiskTone(latestDecision.riskBand)}>
+                                        {titleCaseDecisionValue(latestDecision.riskBand)}
+                                      </Badge>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1">
+                                      <Badge className={decisionTrustTone(latestDecision.customerTrustReviewState)}>
+                                        {titleCaseDecisionValue(latestDecision.customerTrustReviewState)}
+                                      </Badge>
+                                      <Badge variant="outline">
+                                        {latestDecision.proofTier === "SIGNED_LABEL"
+                                          ? "Signed label"
+                                          : latestDecision.proofTier === "DEGRADED"
+                                            ? "Degraded"
+                                            : "Manual lookup"}
+                                      </Badge>
+                                      <Badge className={printTrust.tone}>{printTrust.label}</Badge>
+                                    </div>
+                                    <div className="text-[11px] text-muted-foreground">
+                                      {printTrust.guidance}
+                                      {latestDecision.replacementStatus && latestDecision.replacementStatus !== "NONE"
+                                        ? ` · ${titleCaseDecisionValue(latestDecision.replacementStatus)}`
+                                        : ""}
+                                    </div>
+                                  </>
+                                );
+                              })()
                             ) : (
                               <span className="text-sm text-muted-foreground">No verifier decision yet</span>
                             )}

@@ -1,12 +1,8 @@
 import { createHmac } from "crypto";
 import { Request } from "express";
 import { getJwtSecret, normalizeUserAgent } from "./security";
-
-const readCookie = (req: Request, name: string) => {
-  const cookies = (req as any).cookies as Record<string, string> | undefined;
-  const value = String(cookies?.[name] || "").trim();
-  return value || "";
-};
+import { normalizeClientIp } from "./ipAddress";
+import { readCookie } from "./cookies";
 
 const getFingerprintSecret = () =>
   String(process.env.SCAN_FINGERPRINT_SECRET || "").trim() ||
@@ -24,7 +20,7 @@ export const deriveRequestDeviceFingerprint = (
   const deviceClaimCookie = readCookie(req, "gs_device_claim");
   const anonDeviceCookie = readCookie(req, "aq_vid");
   const userAgent = normalizeUserAgent(req.get("user-agent") || null) || "";
-  const ip = String(req.ip || "").trim();
+  const ip = normalizeClientIp(req.ip || req.socket?.remoteAddress || "");
   const input = [ip, userAgent, deviceClaimCookie, anonDeviceCookie, clientHint].join("|");
   return createHmac("sha256", getFingerprintSecret()).update(input).digest("hex");
 };

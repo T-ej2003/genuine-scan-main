@@ -10,6 +10,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { DialogEmptyState } from "@/components/ui/dialog-empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -532,7 +533,11 @@ export function LicenseeDialogs({
           </DialogHeader>
 
           {!rangeForm ? (
-            <div className="text-sm text-muted-foreground">No licensee selected.</div>
+            <DialogEmptyState
+              title="Select a licensee before allocating codes"
+              description="Close this dialog, reopen Allocate Code Range from the correct licensee row, and MSCQR will load the latest range history for that tenant."
+              onClose={() => onRangeDialogOpenChange(false)}
+            />
           ) : (
             <form className="mt-2 space-y-4" onSubmit={onRangeSubmit}>
               <div className="space-y-1 rounded-md border p-3 text-sm">

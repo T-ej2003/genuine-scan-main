@@ -23,10 +23,10 @@ export default function CustomerHelp() {
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
             <ul className="list-disc pl-5">
-              <li>Scan the code and verify authenticity.</li>
-              <li>See a clear result state: Product verified, Needs review, or Could not verify.</li>
-              <li>Review scan history summary (counts and coarse location hints).</li>
-              <li>Report suspected counterfeit with optional photos and contact details.</li>
+              <li>Scan the code and start a secure verification session.</li>
+              <li>Sign in, answer purchase-context questions, and then reveal the locked label decision.</li>
+              <li>See a clear separation between the label verification result, your purchase context, and next actions.</li>
+              <li>Report suspected counterfeit with contact details and purchase evidence.</li>
             </ul>
           </CardContent>
         </Card>
@@ -35,7 +35,7 @@ export default function CustomerHelp() {
           <ShieldCheck className="h-4 w-4" />
           <AlertTitle>Privacy</AlertTitle>
           <AlertDescription>
-            The verify page stores scan events to detect duplicates. Location is stored as <strong>coarse city/country</strong> only, and IP is hashed server-side.
+            The verify page stores scan events to detect duplicates and support investigations. Depending on the verification flow, MSCQR may store IP address, device details, and location fields such as city, region, country, and submitted coordinates.
           </AlertDescription>
         </Alert>
 
@@ -46,12 +46,12 @@ export default function CustomerHelp() {
               <CardHeader className="space-y-1">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                  Verified Authentic
+                  MSCQR confirmed this label
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
-                <p>First-time verification completed successfully.</p>
-                <p className="text-xs">Tip: keep this screen as proof if asked.</p>
+                <p>A signed MSCQR label check or a governed record check completed successfully.</p>
+                <p className="text-xs">Review the proof section carefully, especially if the result came from a manual code entry.</p>
               </CardContent>
             </Card>
 
@@ -59,12 +59,12 @@ export default function CustomerHelp() {
               <CardHeader className="space-y-1">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                  Verified Again
+                  MSCQR confirmed this code again
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
-                <p>Repeat scans by the same buyer are normal.</p>
-                <p className="text-xs">You can safely show this screen again if someone asks for proof.</p>
+                <p>Repeat scans can be normal, but they should still be reviewed in context.</p>
+                <p className="text-xs">A repeat result does not prove a copied label was never reused elsewhere.</p>
               </CardContent>
             </Card>
 
@@ -72,14 +72,14 @@ export default function CustomerHelp() {
               <CardHeader className="space-y-1">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <ShieldAlert className="h-4 w-4 text-amber-600" />
-                  Possible Duplicate
+                  Review required
                   <Badge variant="outline">Review</Badge>
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
-                <p>This code shows unusual scan patterns that may indicate label copying.</p>
+                <p>This code shows unusual scan patterns that need review before the result should be trusted.</p>
                 <ul className="list-disc pl-5">
-                  <li>Check the scan history summary and the “Why this was flagged” reasons.</li>
+                  <li>Check the scan history summary and the verification notes.</li>
                   <li>If anything looks wrong, report it so the brand can investigate.</li>
                 </ul>
               </CardContent>
@@ -96,9 +96,9 @@ export default function CustomerHelp() {
             <CardContent className="space-y-2 text-sm text-muted-foreground">
               <ol className="list-decimal pl-5">
                 <li>Scan the code on the product label.</li>
-                <li>Wait for the verification result.</li>
-                <li>Review the brand/manufacturer and printed date.</li>
-                <li>If the banner says <strong>Under investigation</strong>, follow the support guidance shown.</li>
+                <li>Sign in with email OTP or an enabled identity provider.</li>
+                <li>Answer the purchase and packaging questions shown in the verify flow.</li>
+                <li>Reveal the locked label decision and review the verification basis, lifecycle state, and next actions.</li>
               </ol>
             </CardContent>
           </Card>
@@ -125,19 +125,19 @@ export default function CustomerHelp() {
           <div className="grid gap-4 md:grid-cols-2">
             <DocScreenshot
               filename="customer-first-verification.png"
-              alt="Verified Authentic (first scan)"
-              caption="First-time verification."
+              alt="MSCQR confirmed this label"
+              caption="First customer-facing verification."
               eager
             />
             <DocScreenshot
               filename="customer-verified-again.png"
-              alt="Verified Again (repeat scan)"
-              caption="Repeat verification by the same buyer."
+              alt="MSCQR confirmed this code again"
+              caption="Repeat verification with context preserved."
             />
             <DocScreenshot
               filename="customer-possible-duplicate.png"
-              alt="Possible Duplicate"
-              caption="Possible duplicate label warning and reasons."
+              alt="Review required"
+              caption="Review-required result with investigation guidance."
             />
             <DocScreenshot
               filename="customer-report-dialog.png"
@@ -149,15 +149,15 @@ export default function CustomerHelp() {
             items={[
               {
                 filename: "customer-first-verification.png",
-                whereToCapture: "Public verify page showing Verified Authentic (first scan).",
+                whereToCapture: "Public verify page showing MSCQR confirmed this label.",
               },
               {
                 filename: "customer-verified-again.png",
-                whereToCapture: "Public verify page showing Verified Again (repeat scan).",
+                whereToCapture: "Public verify page showing MSCQR confirmed this code again.",
               },
               {
                 filename: "customer-possible-duplicate.png",
-                whereToCapture: "Public verify page showing Possible Duplicate with reasons.",
+                whereToCapture: "Public verify page showing Review required with verification notes.",
               },
               {
                 filename: "customer-report-dialog.png",

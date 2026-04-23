@@ -69,6 +69,8 @@ export const reportFraud = async (req: Request, res: Response) => {
       `Reasons: ${snapshot.reasons.join(" | ") || "n/a"}`,
       `Scan summary: total=${snapshot.scanSummary.totalScans}, first=${snapshot.scanSummary.firstVerifiedAt || "n/a"}, latest=${snapshot.scanSummary.latestVerifiedAt || "n/a"}`,
       `Ownership: claimed=${String(snapshot.ownershipStatus.isClaimed)}, ownedByRequester=${String(snapshot.ownershipStatus.isOwnedByRequester)}`,
+      `Verification session: ${String(payload.sessionId || "n/a")}`,
+      `Verification decision: ${String(payload.decisionId || "n/a")}`,
     ];
 
     const userDescription =
@@ -87,6 +89,7 @@ export const reportFraud = async (req: Request, res: Response) => {
       "verify_fraud_report",
       `classification_${snapshot.classification.toLowerCase()}`,
       snapshot.ownershipStatus.isClaimed ? "ownership_claimed" : "ownership_unclaimed",
+      String(payload.sessionId || "").trim() ? "verification_session_present" : "verification_session_missing",
     ].slice(0, 10);
 
     const customerEmail = String(payload.contactEmail || payload.customerEmail || "").trim() || undefined;

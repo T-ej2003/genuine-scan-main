@@ -245,6 +245,71 @@ export const loadCompliancePackJobBuffer = (storageKey: string) => {
   return fs.readFileSync(fullPath);
 };
 
+export const rebuildCompliancePackArtifactForJob = async (params: {
+  jobId: string;
+  actor: { userId: string; role: UserRole; licenseeId?: string | null };
+}) => {
+  const job = await prisma.compliancePackJob.findUnique({
+    where: { id: params.jobId },
+    select: {
+      id: true,
+      licenseeId: true,
+      periodFrom: true,
+      periodTo: true,
+    },
+  });
+  if (!job) {
+    throw new Error("COMPLIANCE_PACK_JOB_NOT_FOUND");
+  }
+
+  const pack = await buildSignedComplianceEvidencePack({
+    actor: params.actor,
+    licenseeId: job.licenseeId || null,
+    from: job.periodFrom || null,
+    to: job.periodTo || null,
+  });
+
+  ensureDir(compliancePackDir());
+  const storageKey = `${job.id}-rebuild-${Date.now()}-${pack.fileName}`;
+  const fullPath = path.join(compliancePackDir(), storageKey);
+  fs.writeFileSync(fullPath, pack.buffer);
+
+  const updated = await prisma.compliancePackJob.update({
+    where: { id: job.id },
+    data: {
+      status: "COMPLETED",
+      fileName: pack.fileName,
+      storageKey,
+      integrityHash: pack.metadata.integrityHash,
+      signatureAlgorithm: pack.metadata.signatureAlgorithm,
+      summary: {
+        controls: pack.metadata.controls,
+        generatedAt: pack.metadata.generatedAt,
+        rebuiltFromMissingArtifact: true,
+      },
+      errorMessage: null,
+      finishedAt: new Date(),
+    },
+  });
+
+  await createAuditLog({
+    userId: params.actor.userId,
+    licenseeId: job.licenseeId || undefined,
+    action: "COMPLIANCE_PACK_ARTIFACT_REBUILT",
+    entityType: "CompliancePackJob",
+    entityId: updated.id,
+    details: {
+      fileName: updated.fileName,
+      integrityHash: updated.integrityHash,
+    },
+  });
+
+  return {
+    job: updated,
+    filePath: fullPath,
+  };
+};
+
 let schedulerStarted = false;
 let schedulerTimer: NodeJS.Timeout | null = null;
 let lastRunStamp = "";

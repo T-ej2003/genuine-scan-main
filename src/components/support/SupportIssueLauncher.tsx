@@ -14,6 +14,7 @@ import {
   reportSupportRuntimeIssue,
   type SupportRuntimeIssue,
 } from "@/lib/support-diagnostics";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -204,6 +205,18 @@ export function SupportIssueLauncher() {
           </DialogHeader>
 
           <div className="space-y-4">
+            <Alert className="border-slate-200 bg-slate-50">
+              <AlertTitle>Privacy notice for support evidence</AlertTitle>
+              <AlertDescription>
+                MSCQR attaches recent diagnostics automatically and can capture a screenshot to help super admin
+                investigate faster. Review the current handling summary in the{" "}
+                <a href="/privacy" className="font-medium underline underline-offset-4">
+                  Privacy Notice
+                </a>
+                .
+              </AlertDescription>
+            </Alert>
+
             {!manualMode && activeIssue ? (
               <div className="rounded-md border border-amber-300/50 bg-amber-50 p-3 text-sm text-amber-900">
                 <div className="flex items-center gap-2 font-medium">
@@ -246,7 +259,7 @@ export function SupportIssueLauncher() {
 
               <div className="flex items-center justify-between gap-3">
                 <div className="text-xs text-muted-foreground">
-                  Screenshot is captured automatically for faster debugging.
+                  Screenshot capture, runtime diagnostics, and recent network logs are included to speed up debugging.
                 </div>
                 <Button
                   type="button"

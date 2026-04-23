@@ -2,8 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
-import { randomUUID } from "crypto";
-import cookieParser from "cookie-parser";
+import { createHash, randomUUID } from "crypto";
 import packageJson from "../package.json";
 import routes from "./routes";
 import prisma from "./config/database";
@@ -27,8 +26,15 @@ import {
 } from "./middleware/publicRateLimit";
 import { hasConfiguredSecret } from "./utils/secretConfig";
 import { buildReadyPayload } from "./controllers/healthController";
-import { isObjectStorageConfigured } from "./services/objectStorageService";
+import { getObjectStorageConfiguration } from "./services/objectStorageService";
 import { isRedisConfigured } from "./services/redisService";
+import {
+  getQrSigningProfile,
+  hasEd25519QrSigningKeys,
+  hasManagedQrSignerBridgeRegistered,
+  hasManagedQrSignerRefs,
+  isManagedQrSignerRequested,
+} from "./services/qrTokenService";
 
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -40,6 +46,19 @@ const parseBool = (value: unknown, fallback = false) => {
   if (["0", "false", "no", "off"].includes(normalized)) return false;
   return fallback;
 };
+const isKnownInsecureStorageCredential = (value: string) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return false;
+  const fingerprint = createHash("sha256").update(normalized).digest("hex");
+  return new Set([
+    "98daf8223196e1b807f51d5c9f648dea2623dcb6e031adb5f05a6f2d6cbf0386",
+    "72cbd1ce992c2cb9d9ade3d4f794dcce18e13004e0574dec0a8c81fdcebbd653",
+    "ad9858116e63b0c5a4d7dc7f50f034c7247e56838dae22c1832712ffde48e694",
+  ]).has(fingerprint);
+};
+const managedQrSigningRequested = isManagedQrSignerRequested();
+const managedQrSigningRefsConfigured = hasManagedQrSignerRefs();
+const managedQrSigningBridgeRegistered = hasManagedQrSignerBridgeRegistered();
 
 const missingRequiredEnv = ["DATABASE_URL"].filter((k) => !process.env[k]);
 if (!hasAnyConfiguredSecret("JWT_SECRET_CURRENT", "JWT_SECRET")) {
@@ -93,6 +112,13 @@ if (process.env.NODE_ENV === "production") {
     process.exit(1);
   }
 
+  if (parseBool(process.env.AUTH_LEGACY_TOKEN_RESPONSE_ENABLED, false)) {
+    logger.error(
+      "Refusing to start: AUTH_LEGACY_TOKEN_RESPONSE_ENABLED must remain false in production. The launch posture is cookie-backed auth only."
+    );
+    process.exit(1);
+  }
+
   const insecurePublicUrls = [
     "PUBLIC_SCAN_WEB_BASE_URL",
     "PUBLIC_VERIFY_WEB_BASE_URL",
@@ -110,9 +136,26 @@ if (process.env.NODE_ENV === "production") {
 
   const hasQrEd25519 = hasAnyConfiguredSecret("QR_SIGN_PRIVATE_KEY") && hasAnyConfiguredSecret("QR_SIGN_PUBLIC_KEY");
   const hasQrHmac = hasAnyConfiguredSecret("QR_SIGN_HMAC_SECRET_CURRENT", "QR_SIGN_HMAC_SECRET");
+  const enforceEd25519InProduction = parseBool(process.env.QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION, true);
+
+  if (managedQrSigningRequested && !managedQrSigningRefsConfigured) {
+    logger.error(
+      "Refusing to start: QR_SIGN_PROVIDER requests managed signing, but QR_SIGN_KMS_KEY_REF / QR_SIGN_KMS_VERIFY_KEY_REF are not configured."
+    );
+    process.exit(1);
+  }
+
+  if (managedQrSigningRequested && !managedQrSigningBridgeRegistered) {
+    logger.error("Refusing to start: QR_SIGN_PROVIDER requests managed signing, but no managed signer bridge is registered.");
+    process.exit(1);
+  }
+
+  const qrSigningConfigured = managedQrSigningRequested ? managedQrSigningRefsConfigured : hasQrEd25519 || hasQrHmac;
 
   const missingStrongSecurityEnv = [
-    !hasQrEd25519 && !hasQrHmac ? "QR signing keys (QR_SIGN_PRIVATE_KEY + QR_SIGN_PUBLIC_KEY or QR_SIGN_HMAC_SECRET_CURRENT/QR_SIGN_HMAC_SECRET)" : "",
+    !qrSigningConfigured
+      ? "QR signing configuration (managed bridge with QR_SIGN_KMS_* refs, or QR_SIGN_PRIVATE_KEY + QR_SIGN_PUBLIC_KEY, or QR_SIGN_HMAC_SECRET_CURRENT/QR_SIGN_HMAC_SECRET)"
+      : "",
     !hasAnyConfiguredSecret("TOKEN_HASH_SECRET_CURRENT", "TOKEN_HASH_SECRET") ? "TOKEN_HASH_SECRET_CURRENT or TOKEN_HASH_SECRET" : "",
     !hasAnyConfiguredSecret("IP_HASH_SALT_CURRENT", "IP_HASH_SALT") ? "IP_HASH_SALT_CURRENT or IP_HASH_SALT" : "",
     !String(process.env.CUSTOMER_VERIFY_OTP_SECRET || "").trim() ? "CUSTOMER_VERIFY_OTP_SECRET" : "",
@@ -130,16 +173,52 @@ if (process.env.NODE_ENV === "production") {
     process.exit(1);
   }
 
+  if (enforceEd25519InProduction && !hasQrEd25519 && !managedQrSigningRequested) {
+    logger.error(
+      "Refusing to start: production QR signing must use Ed25519 when QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION is enabled."
+    );
+    process.exit(1);
+  }
+
+  if (hasQrEd25519 && !String(process.env.QR_SIGN_ACTIVE_KEY_VERSION || "").trim()) {
+    logger.warn(
+      "QR_SIGN_ACTIVE_KEY_VERSION is not set. MSCQR will derive a version from the public key, but explicit production key-version tracking is strongly recommended."
+    );
+  }
+
   if (!isRedisConfigured()) {
     logger.error("Refusing to start: production requires Redis coordination (REDIS_URL or REDIS_HOST/REDIS_PORT).");
     process.exit(1);
   }
 
-  if (!isObjectStorageConfigured()) {
+  const objectStorageConfiguration = getObjectStorageConfiguration();
+  if (!objectStorageConfiguration.configured) {
     logger.error(
-      "Refusing to start: production requires S3-compatible object storage (OBJECT_STORAGE_* / S3_* / MINIO_*)."
+      `Refusing to start: production requires object storage. ${objectStorageConfiguration.reason} Set OBJECT_STORAGE_BUCKET and OBJECT_STORAGE_REGION/AWS_REGION, then either provide OBJECT_STORAGE_ACCESS_KEY + OBJECT_STORAGE_SECRET_KEY (plus OBJECT_STORAGE_ENDPOINT for MinIO/custom S3) or rely on AWS default credentials/IAM task role with no static object storage credentials.`
     );
     process.exit(1);
+  }
+
+  const objectStorageAccessKey = String(
+    process.env.OBJECT_STORAGE_ACCESS_KEY || ""
+  ).trim();
+  const objectStorageSecretKey = String(
+    process.env.OBJECT_STORAGE_SECRET_KEY || ""
+  ).trim();
+  if (
+    objectStorageConfiguration.mode === "static-credentials" &&
+    (isKnownInsecureStorageCredential(objectStorageAccessKey) || isKnownInsecureStorageCredential(objectStorageSecretKey))
+  ) {
+    logger.error(
+      "Refusing to start: production object storage credentials are using known default/insecure values."
+    );
+    process.exit(1);
+  }
+
+  if (parseBool(process.env.VERIFY_CUSTOMER_BEARER_COMPAT_ENABLED, false)) {
+    logger.warn(
+      "Production customer verify bearer compatibility is enabled. This should only be used as a documented emergency rollback path."
+    );
   }
 }
 
@@ -168,6 +247,13 @@ const legacyFallbackWarnings = [
     message:
       "Incident hashing is falling back to JWT_SECRET. Configure INCIDENT_HASH_SALT_CURRENT for independent rotation.",
   },
+  {
+    primaryKeys: ["QR_SIGN_ACTIVE_KEY_VERSION"],
+    fallbackKeys: [],
+    enabled: hasEd25519QrSigningKeys(),
+    message:
+      "QR signing is using Ed25519 without an explicit QR_SIGN_ACTIVE_KEY_VERSION. Configure it so verification evidence and rotations stay operationally traceable.",
+  },
 ];
 
 for (const warning of legacyFallbackWarnings) {
@@ -181,6 +267,7 @@ app.disable("etag");
 app.set("trust proxy", 1);
 const PORT = process.env.PORT || 4000;
 const runBackgroundWorkers = parseBool(process.env.RUN_BACKGROUND_WORKERS, true);
+const publicVersionEndpointEnabled = parseBool(process.env.PUBLIC_VERSION_ENDPOINT_ENABLED, false);
 const sentryEnabled = initBackendMonitoring();
 
 if (sentryEnabled) {
@@ -230,8 +317,8 @@ app.use(
   })
 );
 
+app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 app.use(express.json({ limit: "1mb" }));
-app.use(cookieParser());
 app.use(sanitizeRequestInput);
 
 app.use((req, res, next) => {
@@ -251,7 +338,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const requestTelemetryDebugPaths = new Set(["/health", "/healthz", "/health/db", "/health/latency", "/version"]);
+const requestTelemetryDebugPaths = new Set(["/health", "/healthz", "/health/db", "/health/latency"]);
 
 app.use((req, res, next) => {
   const requestId = String(req.get("x-request-id") || randomUUID());
@@ -259,8 +346,6 @@ app.use((req, res, next) => {
 
   (req as express.Request & { requestId?: string }).requestId = requestId;
   res.setHeader("X-Request-Id", requestId);
-  res.setHeader("X-Release-Version", releaseMetadata.version);
-  res.setHeader("X-Release-Sha", releaseMetadata.shortGitSha);
 
   res.on("finish", () => {
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
@@ -351,15 +436,18 @@ app.get("/health/live", publicStatusIpLimiter, publicStatusActorLimiter, (_req, 
   });
 });
 
-app.get("/version", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
-  res.json({
-    name: releaseMetadata.name,
-    version: releaseMetadata.version,
-    gitSha: releaseMetadata.gitSha,
-    release: releaseMetadata.release,
-    environment: releaseMetadata.environment,
+if (publicVersionEndpointEnabled) {
+  app.get("/version", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
+    res.json({
+      name: releaseMetadata.name,
+      version: releaseMetadata.version,
+      gitSha: releaseMetadata.gitSha,
+      shortGitSha: releaseMetadata.shortGitSha,
+      release: releaseMetadata.release,
+      environment: releaseMetadata.environment,
+    });
   });
-});
+}
 
 app.get("/health/latency", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
   res.json({
@@ -432,11 +520,29 @@ app.use((_req, res) => {
 });
 
 const server = app.listen(PORT, () => {
+  let qrSigningProfile: ReturnType<typeof getQrSigningProfile> | null = null;
+  try {
+    qrSigningProfile = getQrSigningProfile();
+  } catch (error) {
+    logger.warn("QR signing profile unavailable at startup", { error: (error as Error)?.message || error });
+  }
   logger.info("Release metadata loaded", {
     environment: releaseMetadata.environment,
     release: releaseMetadata.release,
     gitSha: releaseMetadata.shortGitSha,
   });
+  if (qrSigningProfile) {
+    logger.info("QR signing profile ready", {
+      mode: qrSigningProfile.mode,
+      provider: qrSigningProfile.provider,
+      keyVersion: qrSigningProfile.keyVersion,
+      keyRef: qrSigningProfile.keyRef,
+      legacyHmacFallback: Boolean(qrSigningProfile.legacyHmacFallback),
+      managedSigningRequested: managedQrSigningRequested,
+      managedSigningBridgeRegistered: managedQrSigningBridgeRegistered,
+      kmsKeyRefConfigured: managedQrSigningRefsConfigured,
+    });
+  }
   logger.info(`🚀 Server running on http://localhost:${PORT}`);
   logger.info(`📚 API available at http://localhost:${PORT}/api`);
   logger.info(`🔍 Health check at http://localhost:${PORT}/health`);

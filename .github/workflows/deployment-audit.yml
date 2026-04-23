@@ -6,6 +6,10 @@ on:
       - main
   pull_request:
 
+concurrency:
+  group: deployment-audit-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   security-events: write
@@ -15,6 +19,7 @@ permissions:
 jobs:
   quality-gates:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,24 +36,21 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Run frontend regression tests
-        run: npm run test
-
-      - name: Build frontend
-        run: npm run build
-
       - name: Install backend dependencies
-        run: cd backend && npm ci
+        run: npm --prefix backend ci
 
-      - name: Generate Prisma client
-        run: cd backend && npm run prisma:generate
-
-      - name: Run backend regression tests
-        run: cd backend && npm test
+      - name: Run full release validation
+        env:
+          REQUIRE_RELEASE_EVIDENCE_REFS: ${{ github.ref == 'refs/heads/main' }}
+          PROVENANCE_BACKFILL_EVIDENCE_REF: ${{ vars.RC_PROVENANCE_BACKFILL_EVIDENCE_REF }}
+          SECRET_ROTATION_EVIDENCE_REF: ${{ vars.RC_SECRET_ROTATION_EVIDENCE_REF }}
+          INCIDENT_DRILL_EVIDENCE_REF: ${{ vars.RC_INCIDENT_DRILL_EVIDENCE_REF }}
+        run: npm run verify:release
 
   audit:
     needs: quality-gates
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       security-events: write

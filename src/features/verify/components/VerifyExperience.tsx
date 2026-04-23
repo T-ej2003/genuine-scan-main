@@ -1,118 +1,298 @@
-import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { AlertTriangle, Ban, Clock3, Loader2, Lock, SearchX, Shield, ShieldCheck, WifiOff } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  Ban,
+  CheckCircle2,
+  CircleDashed,
+  ExternalLink,
+  KeyRound,
+  Loader2,
+  Lock,
+  Mail,
+  MapPin,
+  ShieldCheck,
+  ShoppingBag,
+  Sparkles,
+  Store,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/api-client";
 import { getOrCreateAnonDeviceId } from "@/lib/anon-device";
-import { friendlyReferenceLabel } from "@/lib/friendly-reference";
-import { getSupportStatusLabel, getVerificationCopy } from "@/lib/ui-copy";
-import { cn } from "@/lib/utils";
-import { PremiumScanLoader } from "@/components/premium/PremiumScanLoader";
-import { PREMIUM_PALETTE } from "@/components/premium/palette";
+import { BASE_URL } from "@/lib/api/internal-client-core";
 import {
-  VerificationConfidenceMeter,
-  deriveVerificationConfidence,
-} from "@/components/premium/VerificationConfidenceMeter";
-import { VerifiedAuthenticStamp } from "@/components/premium/VerifiedAuthenticStamp";
-import { PremiumSectionAccordion } from "@/components/premium/PremiumSectionAccordion";
+  APP_NAME,
+  deriveReasons,
+  formatDateTime,
+  inferClassification,
+  normalizeVerifyCode,
+  readCachedGeo,
+  toLabel,
+  type CustomerTrustIntake,
+  type VerificationClassification,
+  type VerificationSessionSummary,
+  type VerifyPayload,
+} from "@/features/verify/verify-model";
 import {
   isWebAuthnSupported,
   startWebAuthnAuthentication,
   startWebAuthnRegistration,
   type WebAuthnCredentialSummary,
 } from "@/lib/webauthn";
-import {
-  APP_NAME,
-  CUSTOMER_EMAIL_KEY,
-  CUSTOMER_TOKEN_KEY,
-  DEFAULT_OWNERSHIP_STATUS,
-  DEFAULT_VERIFY_POLICY,
-  INCIDENT_TYPE_OPTIONS,
-  LEGACY_CUSTOMER_EMAIL_KEY,
-  LEGACY_CUSTOMER_TOKEN_KEY,
-  LEGACY_TRANSFER_TOKEN_KEY_PREFIX,
-  deriveReasons,
-  deriveScanSummary,
-  formatDateTime,
-  getTransferTokenStorageKey,
-  inferClassification,
-  normalizeVerifyCode,
-  readCachedGeo,
-  readStoredValue,
-  toLabel,
-  writeCachedGeo,
-  type VerificationClassification,
-  type VerificationProofSource,
-  type VerifyPayload,
-  type VerifyRequestResponse,
-} from "@/features/verify/verify-model";
 
-const CLASS_META: Record<
+type FlowStep = "identity" | "purchase" | "source" | "context" | "concern" | "intent" | "result";
+
+type ProviderOption = {
+  id: "google";
+  label: string;
+};
+
+const FLOW_STEPS: Array<{ id: FlowStep; label: string }> = [
+  { id: "identity", label: "Identity" },
+  { id: "purchase", label: "Purchase" },
+  { id: "source", label: "Source" },
+  { id: "context", label: "Context" },
+  { id: "concern", label: "Concern" },
+  { id: "intent", label: "Reveal" },
+];
+
+const STEP_META: Record<
   VerificationClassification,
   {
     title: string;
-    subtitle: string;
     badge: string;
-    bannerClass: string;
-    badgeClass: string;
+    tone: string;
     icon: React.ReactNode;
   }
 > = {
   FIRST_SCAN: {
-    title: "Verified Authentic",
-    subtitle: "First customer verification completed successfully.",
-    badge: "Authentic",
-    bannerClass: "border border-emerald-600 bg-emerald-800 text-emerald-50 shadow-[0_12px_28px_rgba(6,78,59,0.25)]",
-    badgeClass: "border-emerald-200/30 bg-emerald-50/15 text-emerald-50",
-    icon: <ShieldCheck className="h-6 w-6" />,
+    title: "MSCQR confirmed this label",
+    badge: "Confirmed",
+    tone: "border-emerald-200 bg-emerald-50 text-emerald-950",
+    icon: <ShieldCheck className="h-5 w-5" />,
   },
   LEGIT_REPEAT: {
-    title: "Verified Again",
-    subtitle: "Product is authentic and repeat verification signals are consistent.",
-    badge: "Authentic",
-    bannerClass: "border border-emerald-500/70 bg-emerald-700 text-emerald-50 shadow-[0_12px_28px_rgba(6,95,70,0.24)]",
-    badgeClass: "border-emerald-200/30 bg-emerald-50/15 text-emerald-50",
-    icon: <ShieldCheck className="h-6 w-6" />,
+    title: "MSCQR confirmed this code again",
+    badge: "Recorded",
+    tone: "border-emerald-200 bg-emerald-50 text-emerald-950",
+    icon: <ShieldCheck className="h-5 w-5" />,
   },
   SUSPICIOUS_DUPLICATE: {
-    title: "Suspicious Duplicate",
-    subtitle: "Scan pattern requires additional authenticity checks.",
-    badge: "Fraud Risk",
-    bannerClass: "border border-amber-500/60 bg-amber-700 text-amber-50 shadow-[0_10px_24px_rgba(146,95,22,0.24)]",
-    badgeClass: "border-amber-200/30 bg-amber-50/20 text-amber-50",
-    icon: <AlertTriangle className="h-6 w-6" />,
+    title: "Review required",
+    badge: "Review required",
+    tone: "border-amber-200 bg-amber-50 text-amber-950",
+    icon: <AlertTriangle className="h-5 w-5" />,
   },
   BLOCKED_BY_SECURITY: {
-    title: "Blocked by Security",
-    subtitle: "Security controls currently block this code.",
+    title: "Do not rely on this code",
     badge: "Blocked",
-    bannerClass: "border border-rose-400/35 bg-rose-900 text-rose-50 shadow-[0_10px_24px_rgba(76,5,25,0.26)]",
-    badgeClass: "border-rose-200/30 bg-rose-50/15 text-rose-50",
-    icon: <Ban className="h-6 w-6" />,
+    tone: "border-rose-200 bg-rose-50 text-rose-950",
+    icon: <Ban className="h-5 w-5" />,
   },
   NOT_READY_FOR_CUSTOMER_USE: {
-    title: "Not Ready for Customer Use",
-    subtitle: "Code lifecycle is incomplete or unavailable for customer verification.",
-    badge: "Not Ready",
-    bannerClass: "border border-slate-500 bg-slate-800 text-slate-50 shadow-[0_10px_24px_rgba(15,23,42,0.24)]",
-    badgeClass: "border-slate-300/35 bg-slate-100/15 text-slate-50",
-    icon: <SearchX className="h-6 w-6" />,
+    title: "Not ready for customer verification",
+    badge: "Not ready",
+    tone: "border-slate-200 bg-slate-100 text-slate-950",
+    icon: <CircleDashed className="h-5 w-5" />,
+  },
+  NOT_FOUND: {
+    title: "Code not found",
+    badge: "Not found",
+    tone: "border-slate-200 bg-slate-100 text-slate-950",
+    icon: <CircleDashed className="h-5 w-5" />,
   },
 };
 
-const SkeletonBlock = ({ className }: { className?: string }) => (
-  <div aria-hidden className={cn("premium-shimmer rounded-md bg-[#bccad6]/45", className)} />
-);
+const LEGACY_VERIFY_EMAIL_STORAGE_KEYS = ["mscqr_verify_customer_email", "authenticqr_verify_customer_email"] as const;
+
+const DEFAULT_INTAKE: CustomerTrustIntake = {
+  purchaseChannel: "online",
+  sourceCategory: "marketplace",
+  platformName: "",
+  sellerName: "",
+  listingUrl: "",
+  orderReference: "",
+  storeName: "",
+  purchaseCity: "",
+  purchaseCountry: "",
+  purchaseDate: "",
+  packagingState: "sealed",
+  packagingConcern: "none",
+  scanReason: "routine_check",
+  ownershipIntent: "verify_only",
+  notes: "",
+};
+
+const maskCode = (value?: string | null) => {
+  const normalized = normalizeVerifyCode(value);
+  if (!normalized) return "MSCQR";
+  return `${normalized.slice(0, Math.min(4, normalized.length))}${normalized.length > 4 ? `-${normalized.slice(-4)}` : ""}`;
+};
+
+const clearLegacyStoredCustomerSession = () => {
+  try {
+    for (const key of LEGACY_VERIFY_EMAIL_STORAGE_KEYS) {
+      window.localStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore storage issues.
+  }
+};
+
+const sessionProofStorageKey = (sessionId: string) => `mscqr_verify_session_proof:${sessionId}`;
+
+const persistSessionProofToken = (sessionId: string, token: string | null | undefined) => {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) return;
+  try {
+    const normalizedToken = String(token || "").trim();
+    if (normalizedToken) window.sessionStorage.setItem(sessionProofStorageKey(normalizedSessionId), normalizedToken);
+    else window.sessionStorage.removeItem(sessionProofStorageKey(normalizedSessionId));
+  } catch {
+    // Ignore storage issues.
+  }
+};
+
+const readSessionProofToken = (sessionId: string) => {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) return "";
+  try {
+    return String(window.sessionStorage.getItem(sessionProofStorageKey(normalizedSessionId)) || "").trim();
+  } catch {
+    return "";
+  }
+};
+
+const buildProviderHref = (provider: ProviderOption["id"], returnTo: string) => {
+  const params = new URLSearchParams({ returnTo });
+  return `${BASE_URL}/verify/auth/oauth/${provider}/start?${params.toString()}`;
+};
+
+const validateStep = (step: FlowStep, intake: CustomerTrustIntake) => {
+  switch (step) {
+    case "purchase":
+      return Boolean(intake.purchaseChannel);
+    case "source":
+      if (intake.purchaseChannel === "online") {
+        return Boolean(String(intake.platformName || "").trim());
+      }
+      if (intake.purchaseChannel === "offline") {
+        return Boolean(String(intake.storeName || "").trim() && String(intake.purchaseCountry || "").trim());
+      }
+      return true;
+    case "context":
+      return Boolean(intake.packagingState && intake.packagingConcern);
+    case "concern":
+      return Boolean(intake.scanReason);
+    case "intent":
+      return Boolean(intake.ownershipIntent);
+    default:
+      return true;
+  }
+};
+
+function StepRail({ activeStep, authenticated }: { activeStep: FlowStep; authenticated: boolean }) {
+  const visibleSteps = authenticated ? FLOW_STEPS : FLOW_STEPS.filter((step) => step.id === "identity");
+  const activeIndex = visibleSteps.findIndex((step) => step.id === activeStep);
+
+  return (
+    <div className="flex gap-3 overflow-x-auto px-1 pb-1 sm:grid sm:grid-cols-3 sm:overflow-visible sm:px-0 xl:grid-cols-6">
+      {visibleSteps.map((step, index) => {
+        const done = index < activeIndex;
+        const active = step.id === activeStep;
+        return (
+          <div
+            key={step.id}
+            className={`min-w-[132px] shrink-0 rounded-2xl border px-4 py-3 transition-all sm:min-w-0 ${
+              active
+                ? "border-slate-900 bg-slate-950 text-white shadow-[0_18px_40px_rgba(15,23,42,0.22)]"
+                : done
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-950"
+                  : "border-slate-200 bg-white/80 text-slate-600"
+            }`}
+          >
+            <div className="text-[11px] uppercase tracking-[0.18em]">{index + 1}</div>
+            <div className="mt-1 text-sm font-semibold">{step.label}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function SectionFrame({
+  eyebrow,
+  title,
+  description,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Card className="border-slate-200/80 bg-white/92 shadow-[0_24px_64px_rgba(15,23,42,0.08)]">
+      <CardHeader className="space-y-3 border-b border-slate-100 px-4 pb-5 pt-5 sm:px-6 sm:pb-6 sm:pt-6">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-500">{eyebrow}</div>
+        <div className="space-y-2">
+          <CardTitle className="text-xl text-slate-950 sm:text-3xl">{title}</CardTitle>
+          <CardDescription className="max-w-2xl text-sm leading-6 text-slate-600">{description}</CardDescription>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-6 p-4 sm:p-8">{children}</CardContent>
+    </Card>
+  );
+}
+
+function ProviderButton({ provider }: { provider: ProviderOption }) {
+  return (
+    <a
+      href={buildProviderHref(provider.id, `${window.location.origin}${window.location.pathname}${window.location.search}`)}
+      className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-medium text-slate-900 transition hover:-translate-y-0.5 hover:border-slate-900 hover:shadow-[0_16px_32px_rgba(15,23,42,0.12)]"
+    >
+      <span>Continue with {provider.label}</span>
+      <ExternalLink className="h-4 w-4 text-slate-500" />
+    </a>
+  );
+}
+
+function QuestionOption({
+  selected,
+  title,
+  body,
+  onClick,
+}: {
+  selected: boolean;
+  title: string;
+  body: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-2xl border p-4 text-left transition ${
+        selected
+          ? "border-slate-900 bg-slate-950 text-white shadow-[0_16px_32px_rgba(15,23,42,0.18)]"
+          : "border-slate-200 bg-white text-slate-900 hover:border-slate-400"
+      }`}
+    >
+      <div className="text-sm font-semibold">{title}</div>
+      <div className={`mt-1 text-sm ${selected ? "text-slate-200" : "text-slate-600"}`}>{body}</div>
+    </button>
+  );
+}
 
 export default function VerifyExperience() {
   const { code } = useParams<{ code: string }>();
@@ -120,41 +300,38 @@ export default function VerifyExperience() {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const token = searchParams.get("t")?.trim() || "";
-  const transferToken = searchParams.get("transfer")?.trim() || "";
-  const codeParam = (() => {
+  const token = String(searchParams.get("t") || "").trim();
+  const sessionIdFromUrl = String(searchParams.get("session") || "").trim();
+  const codeParam = useMemo(() => {
     const raw = String(code || "");
     try {
       return decodeURIComponent(raw).trim();
     } catch {
       return raw.trim();
     }
-  })();
-  const initialCustomerToken = readStoredValue(CUSTOMER_TOKEN_KEY, LEGACY_CUSTOMER_TOKEN_KEY);
-  const initialCustomerEmail = readStoredValue(CUSTOMER_EMAIL_KEY, LEGACY_CUSTOMER_EMAIL_KEY);
-  const initialPersistedTransferToken = transferToken
-    ? ""
-    : readStoredValue(
-        getTransferTokenStorageKey(codeParam),
-        normalizeVerifyCode(codeParam) ? `${LEGACY_TRANSFER_TOKEN_KEY_PREFIX}${normalizeVerifyCode(codeParam)}` : ""
-      );
+  }, [code]);
 
+  const [customerAuthenticated, setCustomerAuthenticated] = useState(false);
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [session, setSession] = useState<VerificationSessionSummary | null>(null);
+  const [lockedResult, setLockedResult] = useState<VerifyPayload | null>(null);
   const [result, setResult] = useState<VerifyPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [isOffline, setIsOffline] = useState<boolean>(() => !navigator.onLine);
-  const [retryAttempt, setRetryAttempt] = useState(0);
-  const [retryNotice, setRetryNotice] = useState<string>("");
+  const [booting, setBooting] = useState(true);
+  const [oauthResolved, setOauthResolved] = useState(false);
 
-  const [customerToken, setCustomerToken] = useState<string>(initialCustomerToken);
-  const [customerEmail, setCustomerEmail] = useState<string>(initialCustomerEmail);
-
-  const [otpEmail, setOtpEmail] = useState(initialCustomerEmail);
+  const [otpEmail, setOtpEmail] = useState("");
   const [otpChallengeToken, setOtpChallengeToken] = useState("");
   const [otpMaskedEmail, setOtpMaskedEmail] = useState("");
   const [otpCode, setOtpCode] = useState("");
   const [otpSending, setOtpSending] = useState(false);
   const [otpVerifying, setOtpVerifying] = useState(false);
+
+  const [intake, setIntake] = useState<CustomerTrustIntake>(DEFAULT_INTAKE);
+  const [flowStep, setFlowStep] = useState<FlowStep>("identity");
+  const [submittingReveal, setSubmittingReveal] = useState(false);
+  const [challengeRetrying, setChallengeRetrying] = useState(false);
+
   const [passkeyCredentials, setPasskeyCredentials] = useState<WebAuthnCredentialSummary[]>([]);
   const [loadingPasskeys, setLoadingPasskeys] = useState(false);
   const [registeringPasskey, setRegisteringPasskey] = useState(false);
@@ -162,575 +339,322 @@ export default function VerifyExperience() {
   const [deletingPasskeyId, setDeletingPasskeyId] = useState("");
 
   const [claiming, setClaiming] = useState(false);
-  const [linkingClaim, setLinkingClaim] = useState(false);
-  const [claimConfirmOpen, setClaimConfirmOpen] = useState(false);
-  const [transferOpen, setTransferOpen] = useState(false);
-  const [transferRecipientEmail, setTransferRecipientEmail] = useState("");
-  const [transferSubmitting, setTransferSubmitting] = useState(false);
-  const [transferAccepting, setTransferAccepting] = useState(false);
-  const [transferCancelling, setTransferCancelling] = useState(false);
-  const [issuedTransferLink, setIssuedTransferLink] = useState<string | null>(null);
-  const [persistedTransferToken, setPersistedTransferToken] = useState(initialPersistedTransferToken);
-  const [queueTransferDialogAfterSignIn, setQueueTransferDialogAfterSignIn] = useState(false);
-
-  const [reportOpen, setReportOpen] = useState(false);
+  const [acceptingTransfer, setAcceptingTransfer] = useState(false);
   const [reporting, setReporting] = useState(false);
-  const [reportReference, setReportReference] = useState<string | null>(null);
-  const [reportSupportRef, setReportSupportRef] = useState<string | null>(null);
-  const [reportSupportStatus, setReportSupportStatus] = useState<string | null>(null);
-  const [reportSupportSla, setReportSupportSla] = useState<string | null>(null);
-  const [reportTamperSummary, setReportTamperSummary] = useState<string | null>(null);
-  const [trackReference, setTrackReference] = useState("");
-  const [trackEmail, setTrackEmail] = useState("");
-  const [trackingTicket, setTrackingTicket] = useState(false);
-  const [trackedTicket, setTrackedTicket] = useState<{
-    referenceCode?: string;
-    status?: string;
-    handoffStage?: string;
-    sla?: { dueAt?: string; isBreached?: boolean; remainingMinutes?: number } | null;
-  } | null>(null);
-  const [reportType, setReportType] = useState<string>(INCIDENT_TYPE_OPTIONS[0].value);
-  const [reportDescription, setReportDescription] = useState("");
-  const [reportEmail, setReportEmail] = useState("");
-  const [reportPhotos, setReportPhotos] = useState<File[]>([]);
-  const [loadingStage, setLoadingStage] = useState<0 | 1>(0);
-
-  const transferStorageKey = useMemo(() => getTransferTokenStorageKey(result?.code || codeParam), [codeParam, result?.code]);
-  const legacyTransferStorageKey = useMemo(() => {
-    const normalized = normalizeVerifyCode(result?.code || codeParam);
-    return normalized ? `${LEGACY_TRANSFER_TOKEN_KEY_PREFIX}${normalized}` : "";
-  }, [codeParam, result?.code]);
-  const activeTransferToken = useMemo(
-    () => transferToken || (customerToken ? persistedTransferToken : ""),
-    [customerToken, persistedTransferToken, transferToken]
-  );
-  const requestKey = useMemo(() => {
-    if (token) return `token:${token}|cust:${customerToken.slice(-10)}`;
-    if (codeParam) return `code:${codeParam.toUpperCase()}|transfer:${activeTransferToken.slice(-10)}|cust:${customerToken.slice(-10)}`;
-    return "";
-  }, [activeTransferToken, codeParam, customerToken, token]);
+  const [reportReason, setReportReason] = useState("counterfeit_suspected");
+  const [socialProviders, setSocialProviders] = useState<ProviderOption[]>([]);
 
   const deviceId = useMemo(() => getOrCreateAnonDeviceId(), []);
-  const inFlightRef = useRef(new Map<string, Promise<VerifyRequestResponse>>());
-  const verifyStartedAtRef = useRef<number>(0);
-  const sentDroppedMetricRef = useRef(false);
-  const protectionSignInRef = useRef<HTMLDivElement | null>(null);
-
-  const displayedCode = result?.code || codeParam || "—";
-  const classification = useMemo(() => inferClassification(result), [result]);
-  const classMeta = CLASS_META[classification];
-  const verificationCopy = useMemo(() => getVerificationCopy(classification), [classification]);
-  const reasons = useMemo(() => deriveReasons(result, classification), [classification, result]);
-  const scanSummary = useMemo(() => deriveScanSummary(result), [result]);
-  const activitySummary = result?.activitySummary || null;
-  const ownershipStatus = result?.ownershipStatus || DEFAULT_OWNERSHIP_STATUS;
-  const ownershipTransfer = result?.ownershipTransfer || null;
-  const verifyUxPolicy = { ...DEFAULT_VERIFY_POLICY, ...(result?.verifyUxPolicy || {}) };
-  const shareableTransferLink = issuedTransferLink || ownershipTransfer?.acceptUrl || "";
-  const showLinkClaim =
-    Boolean(customerToken) && ownershipStatus.isOwnedByRequester && ownershipStatus.matchMethod && ownershipStatus.matchMethod !== "user";
-  const transferLinkIsInvalid = ownershipTransfer?.state === "invalid";
-  const showOwnerTransferSignInPrompt = ownershipStatus.isOwnedByRequester && !customerToken;
-  const showRecipientTransferSignInPrompt = Boolean(transferToken) && !customerToken && !transferLinkIsInvalid;
-  const signInCardTitle = showRecipientTransferSignInPrompt
-      ? "Sign in to accept transfer"
-    : queueTransferDialogAfterSignIn
-      ? "Sign in to start transfer"
-      : "Sign in for better protection (optional)";
-  const signInCardDescription = showRecipientTransferSignInPrompt
-    ? "Accepting a transfer links this product to your signed-in customer account."
-    : queueTransferDialogAfterSignIn
-      ? "Complete sign-in below. The transfer form will open automatically."
-      : "Sign-in makes ownership portable across devices. Device-only claims stay on this browser and device until you sign in.";
-  const showAuthenticStamp = classification === "FIRST_SCAN" || classification === "LEGIT_REPEAT";
-  const confidenceScore = useMemo(
-    () =>
-      deriveVerificationConfidence({
-        classification,
-        totalScans: scanSummary.totalScans,
-        distinctDeviceCount24h: result?.scanSignals?.distinctDeviceCount24h,
-        recentScanCount10m: result?.scanSignals?.recentScanCount10m,
-        distinctCountryCount24h: result?.scanSignals?.distinctCountryCount24h,
-        distinctUntrustedDeviceCount24h: result?.scanSignals?.distinctUntrustedDeviceCount24h,
-        untrustedScanCount10m: result?.scanSignals?.untrustedScanCount10m,
-        trustedOwnerScanCount24h: result?.scanSignals?.trustedOwnerScanCount24h,
-        warningMessage: result?.warningMessage || null,
-      }),
-    [
-      classification,
-      scanSummary.totalScans,
-      result?.scanSignals?.distinctDeviceCount24h,
-      result?.scanSignals?.recentScanCount10m,
-      result?.scanSignals?.distinctCountryCount24h,
-      result?.scanSignals?.distinctUntrustedDeviceCount24h,
-      result?.scanSignals?.untrustedScanCount10m,
-      result?.scanSignals?.trustedOwnerScanCount24h,
-      result?.warningMessage,
-    ]
-  );
-  const claimUnavailableReason =
-    !verifyUxPolicy.allowOwnershipClaim
-      ? "Ownership claim is currently disabled by brand policy."
-      : classification === "BLOCKED_BY_SECURITY"
-        ? "Claiming is unavailable while this code is blocked by security."
-        : classification === "NOT_READY_FOR_CUSTOMER_USE"
-          ? "Claiming starts once the product is ready for customer use."
-          : "Claiming is currently unavailable.";
-  const verificationTimeline = result?.verificationTimeline || {
-    firstSeen: scanSummary.firstVerifiedAt,
-    latestSeen: scanSummary.latestVerifiedAt,
-    anomalyReason:
-      classification === "SUSPICIOUS_DUPLICATE" || classification === "BLOCKED_BY_SECURITY" ? reasons[0] || null : null,
-    visualSignal:
-      classification === "FIRST_SCAN" || classification === "LEGIT_REPEAT"
-        ? "stable"
-        : classification === "SUSPICIOUS_DUPLICATE"
-          ? "warning"
-          : "critical",
-  };
-  const riskExplanation = result?.riskExplanation || {
-    level: classification === "SUSPICIOUS_DUPLICATE" ? "elevated" : classification === "BLOCKED_BY_SECURITY" ? "high" : "low",
-    title:
-      classification === "SUSPICIOUS_DUPLICATE"
-        ? activitySummary?.currentActorTrustedOwnerContext && Number(activitySummary?.untrustedScanCount24h ?? 0) > 0
-          ? "External scan activity needs review"
-          : "Duplicate risk indicators detected"
-        : classification === "BLOCKED_BY_SECURITY"
-          ? "Security controls blocked this code"
-          : activitySummary?.state === "trusted_repeat"
-            ? "Repeat checks match the same owner context"
-          : "No high-risk anomaly detected",
-    details: reasons,
-    recommendedAction:
-      classification === "SUSPICIOUS_DUPLICATE" || classification === "BLOCKED_BY_SECURITY"
-        ? "Review purchase source and report suspicious activity."
-        : activitySummary?.state === "trusted_repeat"
-          ? "Normal re-checks are fine. Keep proof of purchase for future verification."
-          : "Keep proof of purchase for future verification.",
-  };
-  const proofSource = (result?.proofSource || (token ? "SIGNED_LABEL" : "MANUAL_CODE_LOOKUP")) as VerificationProofSource;
-  const proofDescriptor = result?.proof || (
-    proofSource === "SIGNED_LABEL"
-      ? {
-          title: "Signed label verification",
-          detail: "This result is tied to an issued MSCQR label signature.",
-        }
-      : {
-          title: "Manual registry lookup",
-          detail: "This result confirms registry state and lifecycle, but not the physical label binding.",
-        }
-  );
-  const proofTierLabel =
-    result?.proofTier === "SIGNED_LABEL"
-      ? "Proof tier: signed label"
-      : result?.proofTier === "MANUAL_REGISTRY_LOOKUP"
-        ? "Proof tier: manual registry lookup"
-        : result?.proofTier === "DEGRADED"
-          ? "Proof tier: degraded"
-          : null;
-  const trustLevelLabel =
-    result?.customerTrustLevel === "ACCOUNT_TRUSTED"
-      ? "Requester trust: signed-in account"
-      : result?.customerTrustLevel === "PASSKEY_VERIFIED"
-        ? "Requester trust: passkey verified"
-      : result?.customerTrustLevel === "DEVICE_TRUSTED"
-        ? "Requester trust: trusted device"
-        : result?.customerTrustLevel === "OPERATOR_REVIEWED"
-          ? "Requester trust: operator reviewed"
-          : "Requester trust: anonymous";
-  const replacementStatusLabel =
-    result?.replacementStatus === "ACTIVE_REPLACEMENT"
-      ? "Replacement state: active replacement label"
-      : result?.replacementStatus === "REPLACED_LABEL"
-        ? "Replacement state: superseded label"
-        : null;
-  const degradationLabel =
-    result?.degradationMode === "QUEUE_AND_RETRY"
-      ? "Audit mode: queue and retry"
-      : result?.degradationMode === "FAIL_CLOSED"
-        ? "Audit mode: fail closed"
-        : result?.degradationMode === "NORMAL"
-          ? "Audit mode: normal"
-          : null;
-  const trustedRepeatCount = Number(activitySummary?.trustedOwnerScanCount24h ?? result?.scanSignals?.trustedOwnerScanCount24h ?? 0);
-  const externalScanCount = Number(activitySummary?.untrustedScanCount24h ?? result?.scanSignals?.untrustedScanCount24h ?? 0);
-  const externalDeviceCount = Number(
-    activitySummary?.distinctUntrustedDeviceCount24h ?? result?.scanSignals?.distinctUntrustedDeviceCount24h ?? 0
-  );
-
-  const googleOauthUrl = String(import.meta.env.VITE_GOOGLE_OAUTH_URL || "").trim();
   const passkeySupported = isWebAuthnSupported();
-  const hasPasskeyTrust = result?.customerTrustLevel === "PASSKEY_VERIFIED";
-  const showSkeleton = loading && !result && !error;
-  const motionButtonClass = "transition-transform duration-200 hover:scale-[1.02] active:scale-[0.99]";
+  const classification = useMemo(() => inferClassification(result || lockedResult), [lockedResult, result]);
+  const reasonList = useMemo(() => deriveReasons(result || lockedResult, classification), [classification, lockedResult, result]);
+  const stepMeta = STEP_META[classification];
+  const currentCode = normalizeVerifyCode(result?.code || session?.code || codeParam);
+  const authReady = customerAuthenticated || session?.authState === "VERIFIED";
+  const displaySessionSummary = session || null;
+  const challengeRequired = Boolean(result?.challenge?.required || lockedResult?.challenge?.required || session?.challengeRequired);
+  const challengeCompleted = Boolean(result?.challenge?.completed || lockedResult?.challenge?.completed || session?.challengeCompleted);
+  const challengeCompletedBy =
+    result?.challenge?.completedBy || lockedResult?.challenge?.completedBy || session?.challengeCompletedBy || null;
+  const trustLevelLabel =
+    result?.customerTrustLevel === "PASSKEY_VERIFIED"
+      ? "Passkey-verified requester"
+      : result?.customerTrustLevel === "ACCOUNT_TRUSTED"
+        ? "Signed-in requester"
+        : result?.customerTrustLevel === "DEVICE_TRUSTED"
+          ? "Device-trusted requester"
+          : result?.customerTrustLevel === "OPERATOR_REVIEWED"
+            ? "Operator-reviewed requester"
+            : "Anonymous requester";
 
-  const syncPersistedTransferToken = useCallback(
-    (nextToken: string | null) => {
-      const normalized = String(nextToken || "").trim();
-      setPersistedTransferToken(normalized);
+  const moveToNextStep = useCallback(() => {
+    const stepOrder: FlowStep[] = authReady ? FLOW_STEPS.map((step) => step.id) : ["identity"];
+    const currentIndex = stepOrder.indexOf(flowStep);
+    if (currentIndex === -1) return;
+    const nextStep = stepOrder[currentIndex + 1];
+    if (nextStep) setFlowStep(nextStep);
+  }, [authReady, flowStep]);
 
-      if ((!transferStorageKey && !legacyTransferStorageKey) || transferToken) return;
+  const moveToPreviousStep = useCallback(() => {
+    const stepOrder: FlowStep[] = authReady ? FLOW_STEPS.map((step) => step.id) : ["identity"];
+    const currentIndex = stepOrder.indexOf(flowStep);
+    if (currentIndex <= 0) return;
+    setFlowStep(stepOrder[currentIndex - 1]);
+  }, [authReady, flowStep]);
 
-      try {
-        if (normalized) {
-          if (transferStorageKey) window.localStorage.setItem(transferStorageKey, normalized);
-          if (legacyTransferStorageKey) window.localStorage.removeItem(legacyTransferStorageKey);
-        } else {
-          if (transferStorageKey) window.localStorage.removeItem(transferStorageKey);
-          if (legacyTransferStorageKey) window.localStorage.removeItem(legacyTransferStorageKey);
-        }
-      } catch {
-        // ignore storage issues
-      }
-    },
-    [legacyTransferStorageKey, transferStorageKey, transferToken]
-  );
-
-  const persistCustomerSession = useCallback((nextToken: string, nextEmail: string) => {
-    const tokenValue = String(nextToken || "").trim();
-    const emailValue = String(nextEmail || "").trim();
-
-    setCustomerToken(tokenValue);
-    setCustomerEmail(emailValue);
-    if (emailValue) setOtpEmail(emailValue);
-
-    try {
-      if (tokenValue) {
-        window.localStorage.setItem(CUSTOMER_TOKEN_KEY, tokenValue);
-      } else {
-        window.localStorage.removeItem(CUSTOMER_TOKEN_KEY);
-      }
-
-      if (emailValue) {
-        window.localStorage.setItem(CUSTOMER_EMAIL_KEY, emailValue);
-      } else {
-        window.localStorage.removeItem(CUSTOMER_EMAIL_KEY);
-      }
-
-      window.localStorage.removeItem(LEGACY_CUSTOMER_TOKEN_KEY);
-      window.localStorage.removeItem(LEGACY_CUSTOMER_EMAIL_KEY);
-    } catch {
-      // ignore storage issues
-    }
+  const updateIntake = useCallback(<K extends keyof CustomerTrustIntake>(key: K, value: CustomerTrustIntake[K]) => {
+    setIntake((prev) => ({ ...prev, [key]: value }));
   }, []);
 
-  const clearCustomerSession = useCallback(() => {
-    setCustomerToken("");
-    setCustomerEmail("");
-    setPasskeyCredentials([]);
-    setOtpChallengeToken("");
-    setOtpCode("");
-    setQueueTransferDialogAfterSignIn(false);
-
-    try {
-      window.localStorage.removeItem(CUSTOMER_TOKEN_KEY);
-      window.localStorage.removeItem(CUSTOMER_EMAIL_KEY);
-      window.localStorage.removeItem(LEGACY_CUSTOMER_TOKEN_KEY);
-      window.localStorage.removeItem(LEGACY_CUSTOMER_EMAIL_KEY);
-    } catch {
-      // ignore storage issues
-    }
-  }, []);
-
-  const loadCustomerPasskeys = useCallback(
-    async (sessionToken?: string) => {
-      const activeToken = String(sessionToken || customerToken || "").trim();
-      if (!activeToken || !passkeySupported) {
-        startTransition(() => {
-          setPasskeyCredentials([]);
-          setLoadingPasskeys(false);
-        });
-        return;
-      }
-
-      setLoadingPasskeys(true);
-      try {
-        const response = await apiClient.getCustomerPasskeyCredentials(activeToken);
-        startTransition(() => {
-          setPasskeyCredentials(response.success ? response.data?.items || [] : []);
-        });
-      } finally {
-        setLoadingPasskeys(false);
-      }
-    },
-    [customerToken, passkeySupported]
-  );
-
-  const fetchVerification = useCallback(async () => {
-    if (!requestKey) {
-      setLoading(false);
-      setResult({ isAuthentic: false, message: "Missing verification code" });
+  const loadCustomerPasskeys = useCallback(async () => {
+    if (!passkeySupported || !customerAuthenticated) {
+      setPasskeyCredentials([]);
+      setLoadingPasskeys(false);
       return;
     }
 
-    setLoading(true);
+    setLoadingPasskeys(true);
+    try {
+      const response = await apiClient.getCustomerPasskeyCredentials();
+      setPasskeyCredentials(response.success ? response.data?.items || [] : []);
+    } finally {
+      setLoadingPasskeys(false);
+    }
+  }, [customerAuthenticated, passkeySupported]);
+
+  const applySignedInCustomer = useCallback(
+    (emailValue: string) => {
+      const normalizedEmail = String(emailValue || "").trim();
+      setCustomerAuthenticated(Boolean(normalizedEmail));
+      setCustomerEmail(normalizedEmail);
+      setOtpEmail(normalizedEmail);
+      setFlowStep("purchase");
+    },
+    []
+  );
+
+  const hydrateCustomerAuthSession = useCallback(
+    (nextState?: { customer?: { email?: string | null } | null; auth?: { authenticated?: boolean } | null } | null) => {
+      const authenticated = Boolean(nextState?.auth?.authenticated && nextState?.customer?.email);
+      if (!authenticated) {
+        setCustomerAuthenticated(false);
+        return;
+      }
+
+      const nextEmail = String(nextState?.customer?.email || "").trim();
+      if (!nextEmail) {
+        setCustomerAuthenticated(false);
+        return;
+      }
+
+      applySignedInCustomer(nextEmail);
+    },
+    [applySignedInCustomer]
+  );
+
+  const loadGeoContext = useCallback(async () => {
+    return new Promise<{ lat?: number; lon?: number; acc?: number }>((resolve) => {
+      const cached = readCachedGeo();
+      if (!navigator.geolocation) return resolve(cached);
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            lat: position.coords.latitude,
+            lon: position.coords.longitude,
+            acc: position.coords.accuracy,
+          });
+        },
+        () => resolve(cached),
+        { enableHighAccuracy: false, timeout: 4_000, maximumAge: 300_000 }
+      );
+    });
+  }, []);
+
+  useEffect(() => {
+    clearLegacyStoredCustomerSession();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const handleProviderReturn = async () => {
+      const hashParams = new URLSearchParams(window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash);
+      const ticket = String(hashParams.get("customer_auth_exchange") || "").trim();
+      const authError = String(hashParams.get("customer_auth_error") || "").trim();
+      const clearHash = () => {
+        window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`);
+      };
+
+      if (authError) {
+        clearHash();
+        toast({
+          title: "Could not complete social sign-in",
+          description: authError.replace(/_/g, " "),
+          variant: "destructive",
+        });
+        if (!cancelled) setOauthResolved(true);
+        return;
+      }
+
+      if (!ticket) {
+        if (!cancelled) setOauthResolved(true);
+        return;
+      }
+
+      setBooting(true);
+      try {
+        const response = await apiClient.exchangeCustomerOAuth(ticket);
+        if (!response.success || !response.data?.customer?.email) {
+          throw new Error(response.error || "Could not complete social sign-in.");
+        }
+        clearHash();
+        hydrateCustomerAuthSession(response.data);
+        if (!cancelled) {
+          setBooting(false);
+          setOauthResolved(true);
+        }
+      } catch (nextError: unknown) {
+        clearHash();
+        toast({
+          title: "Could not complete social sign-in",
+          description: nextError instanceof Error ? nextError.message : "Please try again.",
+          variant: "destructive",
+        });
+        if (!cancelled) {
+          setBooting(false);
+          setOauthResolved(true);
+        }
+      }
+    };
+
+    void handleProviderReturn();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrateCustomerAuthSession, toast]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadProviders = async () => {
+      const response = await apiClient.getCustomerAuthProviders();
+      if (cancelled) return;
+      setSocialProviders(response.success ? response.data?.items || [] : []);
+    };
+
+    void loadProviders();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCustomerAuthSession = async () => {
+      const response = await apiClient.getCustomerAuthSession();
+      if (cancelled || !response.success) return;
+      hydrateCustomerAuthSession(response.data || null);
+    };
+
+    void loadCustomerAuthSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrateCustomerAuthSession]);
+
+  const bootstrapSession = useCallback(async () => {
+    setBooting(true);
     setError(null);
-    setRetryAttempt(0);
-    setRetryNotice("");
-    sentDroppedMetricRef.current = false;
-    verifyStartedAtRef.current = typeof performance !== "undefined" ? performance.now() : Date.now();
 
     try {
-      const runRequest = async () => {
-        let pending = inFlightRef.current.get(requestKey);
-        if (pending) return pending;
+      if (sessionIdFromUrl) {
+        const sessionProofToken = readSessionProofToken(sessionIdFromUrl);
+        const sessionResponse = await apiClient.getVerificationSession(sessionIdFromUrl, sessionProofToken || undefined);
+        if (!sessionResponse.success || !sessionResponse.data) {
+          throw new Error(sessionResponse.error || "Could not load verification session.");
+        }
 
-        pending = (async () => {
-          const getGeo = () =>
-            new Promise<{ lat?: number; lon?: number; acc?: number }>((resolve) => {
-              const cached = readCachedGeo();
-              if (!navigator?.geolocation) return resolve(cached);
-              navigator.geolocation.getCurrentPosition(
-                (pos) => {
-                  const nextGeo = {
-                    lat: pos.coords.latitude,
-                    lon: pos.coords.longitude,
-                    acc: pos.coords.accuracy,
-                  };
-                  writeCachedGeo(nextGeo);
-                  resolve(nextGeo);
-                },
-                () => resolve(cached),
-                { enableHighAccuracy: false, timeout: 4000, maximumAge: 300_000 }
-              );
-            });
+        const nextSession = sessionResponse.data as unknown as VerificationSessionSummary;
+        if (nextSession.sessionProofToken) {
+          persistSessionProofToken(nextSession.sessionId, nextSession.sessionProofToken);
+        }
+        setSession(nextSession);
+        setLockedResult((nextSession.verification as VerifyPayload | null) || null);
+        setResult((nextSession.verification as VerifyPayload | null) || null);
+        if (nextSession.intake) {
+          setIntake((prev) => ({ ...prev, ...(nextSession.intake as CustomerTrustIntake) }));
+        }
 
-          const geo = await getGeo();
-          if (token) {
-            return apiClient.scanToken(token, {
-              device: deviceId,
-              lat: geo.lat,
-              lon: geo.lon,
-              acc: geo.acc,
-              customerToken: customerToken || undefined,
-            });
-          }
+        if (nextSession.revealed && nextSession.verification) {
+          setFlowStep("result");
+        } else if (nextSession.authState === "VERIFIED" || customerAuthenticated) {
+          setFlowStep(nextSession.intakeCompleted ? "intent" : "purchase");
+        } else {
+          setFlowStep("identity");
+        }
+        return;
+      }
 
-          return apiClient.verifyQRCode(codeParam, {
+      const geo = await loadGeoContext();
+
+      const verificationResponse = token
+        ? await apiClient.scanToken(token, {
             device: deviceId,
             lat: geo.lat,
             lon: geo.lon,
             acc: geo.acc,
-            customerToken: customerToken || undefined,
-            transferToken: activeTransferToken || undefined,
+          })
+        : await apiClient.verifyQRCode(codeParam, {
+            device: deviceId,
+            lat: geo.lat,
+            lon: geo.lon,
+            acc: geo.acc,
           });
-        })();
 
-        inFlightRef.current.set(requestKey, pending);
-        return pending;
-      };
-
-      const maxAttempts = 4;
-      let response: VerifyRequestResponse | null = null;
-      let lastError = "";
-
-      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-        if (!navigator.onLine) {
-          setIsOffline(true);
-          lastError = "You appear to be offline. Please reconnect and retry.";
-          break;
-        }
-
-        setRetryAttempt(attempt - 1);
-        response = await runRequest();
-        inFlightRef.current.delete(requestKey);
-        if (response?.success) break;
-
-        lastError = String(response?.error || "Verification failed");
-        const retryable = /network|timed out|timeout|unavailable|internal server error/i.test(lastError);
-        if (!retryable || attempt >= maxAttempts) break;
-
-        const waitMs = Math.min(1200 * 2 ** (attempt - 1), 5000);
-        setRetryNotice(`Poor network detected. Retrying (${attempt}/${maxAttempts - 1})...`);
-        await new Promise((resolve) => window.setTimeout(resolve, waitMs));
+      if (!verificationResponse.success || !verificationResponse.data) {
+        throw new Error(verificationResponse.error || "Verification service unavailable.");
       }
 
-      if (!response?.success) {
-        setError(lastError || response?.error || "Verification failed");
-        setResult(null);
-        const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-        const elapsed = Math.max(0, Math.round(now - verifyStartedAtRef.current));
-        apiClient
-          .captureRouteTransition({
-            routeFrom: "/verify",
-            routeTo: window.location.pathname,
-            source: "verify_request",
-            transitionMs: elapsed,
-            verifyCodePresent: true,
-            verifyResult: "ERROR",
-            dropped: false,
-            online: navigator.onLine,
-          })
-          .catch(() => {
-            // best effort telemetry
-          });
+      const nextResult = verificationResponse.data as VerifyPayload;
+      setLockedResult(nextResult);
+
+      if (!nextResult.decisionId) {
+        setResult(nextResult);
+        setFlowStep("result");
         return;
       }
 
-      setResult((response.data as VerifyPayload) || null);
-      setRetryNotice("");
-      if (token && typeof (response.data as VerifyPayload | null)?.code === "string") {
-        navigate(
-          `/verify/${encodeURIComponent(String((response.data as VerifyPayload).code || "").trim())}?t=${encodeURIComponent(token)}`,
-          { replace: true }
-        );
+      const sessionResponse = await apiClient.startVerificationSession(
+        nextResult.decisionId,
+        token ? "SIGNED_SCAN" : "MANUAL_CODE"
+      );
+
+      if (!sessionResponse.success || !sessionResponse.data) {
+        throw new Error(sessionResponse.error || "Could not prepare secure verification.");
       }
-      const finalClassification = inferClassification((response.data as VerifyPayload) || null);
-      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-      const elapsed = Math.max(0, Math.round(now - verifyStartedAtRef.current));
-      apiClient
-        .captureRouteTransition({
-          routeFrom: "/verify",
-          routeTo: window.location.pathname,
-          source: "verify_request",
-          transitionMs: elapsed,
-          verifyCodePresent: true,
-          verifyResult: finalClassification,
-          dropped: false,
-          online: navigator.onLine,
-        })
-        .catch(() => {
-          // best effort telemetry
-        });
-    } catch (err: unknown) {
-      inFlightRef.current.delete(requestKey);
-      setError(err instanceof Error ? err.message : "Verification failed");
-      setResult(null);
+
+      const nextSession = sessionResponse.data as unknown as VerificationSessionSummary;
+      if (nextSession.sessionProofToken) {
+        persistSessionProofToken(nextSession.sessionId, nextSession.sessionProofToken);
+      }
+      setSession(nextSession);
+
+      const canonicalCode = normalizeVerifyCode(nextResult.code || nextSession.code || codeParam);
+      const params = new URLSearchParams();
+      params.set("session", nextSession.sessionId);
+      if (token) params.set("t", token);
+      navigate(`/verify/${encodeURIComponent(canonicalCode)}?${params.toString()}`, { replace: true });
+
+      if (nextSession.authState === "VERIFIED" || customerAuthenticated) {
+        setFlowStep("purchase");
+      } else {
+        setFlowStep("identity");
+      }
+    } catch (nextError: unknown) {
+      setError(nextError instanceof Error ? nextError.message : "Could not load verification flow.");
     } finally {
-      setLoading(false);
+      setBooting(false);
     }
-  }, [activeTransferToken, codeParam, customerToken, deviceId, navigate, requestKey, token]);
+  }, [codeParam, customerAuthenticated, deviceId, loadGeoContext, navigate, sessionIdFromUrl, token]);
 
   useEffect(() => {
-    setIssuedTransferLink(null);
-    setQueueTransferDialogAfterSignIn(false);
-    setTransferRecipientEmail("");
-  }, [transferStorageKey]);
+    if (!oauthResolved) return;
+    bootstrapSession();
+  }, [bootstrapSession, oauthResolved]);
 
   useEffect(() => {
-    if (!transferStorageKey || transferToken) {
-      setPersistedTransferToken("");
-      return;
-    }
-
-    try {
-      setPersistedTransferToken(window.localStorage.getItem(transferStorageKey) || "");
-    } catch {
-      setPersistedTransferToken("");
-    }
-  }, [transferStorageKey, transferToken]);
-
-  useEffect(() => {
-    if (!transferStorageKey || !legacyTransferStorageKey || transferToken) return;
-    try {
-      const nextValue = window.localStorage.getItem(transferStorageKey);
-      if (nextValue) return;
-      const legacyValue = window.localStorage.getItem(legacyTransferStorageKey);
-      if (!legacyValue) return;
-      window.localStorage.setItem(transferStorageKey, legacyValue);
-      window.localStorage.removeItem(legacyTransferStorageKey);
-      setPersistedTransferToken(legacyValue);
-    } catch {
-      // ignore storage issues
-    }
-  }, [legacyTransferStorageKey, transferStorageKey, transferToken]);
-
-  useEffect(() => {
-    fetchVerification();
-  }, [fetchVerification]);
-
-  useEffect(() => {
+    if (!authReady) return;
     loadCustomerPasskeys();
-  }, [loadCustomerPasskeys]);
-
-  useEffect(() => {
-    if (ownershipTransfer?.acceptUrl) {
-      setIssuedTransferLink(ownershipTransfer.acceptUrl);
-    }
-  }, [ownershipTransfer?.acceptUrl]);
-
-  useEffect(() => {
-    if (!customerToken || transferToken) return;
-    const state = String(ownershipTransfer?.state || "");
-    if (!["accepted", "cancelled", "expired", "invalid"].includes(state)) return;
-    if (!persistedTransferToken && !issuedTransferLink) return;
-
-    syncPersistedTransferToken(null);
-    setIssuedTransferLink(null);
-  }, [customerToken, issuedTransferLink, ownershipTransfer?.state, persistedTransferToken, syncPersistedTransferToken, transferToken]);
-
-  useEffect(() => {
-    if (!queueTransferDialogAfterSignIn) return;
-    if (!customerToken) return;
-    if (!ownershipTransfer?.canCreate) return;
-
-    setTransferOpen(true);
-    setQueueTransferDialogAfterSignIn(false);
-  }, [customerToken, ownershipTransfer?.canCreate, queueTransferDialogAfterSignIn]);
-
-  useEffect(() => {
-    const onOnline = () => {
-      setIsOffline(false);
-      setRetryNotice("");
-    };
-    const onOffline = () => {
-      setIsOffline(true);
-      setRetryNotice("You are offline. Verification will retry once connection is restored.");
-    };
-
-    window.addEventListener("online", onOnline);
-    window.addEventListener("offline", onOffline);
-    return () => {
-      window.removeEventListener("online", onOnline);
-      window.removeEventListener("offline", onOffline);
-    };
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (!loading || sentDroppedMetricRef.current) return;
-      sentDroppedMetricRef.current = true;
-      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-      const elapsed = Math.max(0, Math.round(now - verifyStartedAtRef.current));
-      apiClient
-        .captureRouteTransition({
-          routeFrom: "/verify",
-          routeTo: window.location.pathname,
-          source: "verify_request",
-          transitionMs: elapsed,
-          verifyCodePresent: true,
-          verifyResult: null,
-          dropped: true,
-          online: navigator.onLine,
-        })
-        .catch(() => {
-          // best effort telemetry
-        });
-    };
-  }, [loading]);
-
-  useEffect(() => {
-    if (!loading) {
-      setLoadingStage(0);
-      return;
-    }
-    setLoadingStage(0);
-    const timer = window.setTimeout(() => setLoadingStage(1), 1200);
-    return () => window.clearTimeout(timer);
-  }, [loading]);
-
-  useEffect(() => {
-    if (isOffline) return;
-    if (!error) return;
-    if (!/offline|network|timed out|timeout|unavailable/i.test(error)) return;
-    fetchVerification();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOffline]);
+  }, [authReady, loadCustomerPasskeys]);
 
   const handleRequestOtp = async () => {
     const email = otpEmail.trim();
     if (!email) {
-      toast({ title: "Email required", description: "Enter your email to receive OTP.", variant: "destructive" });
+      toast({ title: "Email required", description: "Enter your email to continue.", variant: "destructive" });
       return;
     }
 
@@ -738,107 +662,352 @@ export default function VerifyExperience() {
     try {
       const response = await apiClient.requestVerifyEmailOtp(email);
       if (!response.success || !response.data) {
-        toast({
-          title: "Could not send OTP",
-          description: response.error || "Please try again.",
-          variant: "destructive",
-        });
-        return;
+        throw new Error(response.error || "Could not send OTP.");
       }
-
       setOtpChallengeToken(response.data.challengeToken);
       setOtpMaskedEmail(response.data.maskedEmail);
-      toast({ title: "OTP sent", description: `Code sent to ${response.data.maskedEmail}` });
+      toast({ title: "Code sent", description: `Verification code sent to ${response.data.maskedEmail}.` });
+    } catch (nextError: unknown) {
+      toast({
+        title: "Could not send code",
+        description: nextError instanceof Error ? nextError.message : "Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setOtpSending(false);
     }
   };
 
   const handleVerifyOtp = async () => {
-    if (!otpChallengeToken) {
-      toast({ title: "OTP not requested", description: "Request an OTP first.", variant: "destructive" });
-      return;
-    }
-
-    if (otpCode.trim().length < 6) {
-      toast({ title: "Invalid OTP", description: "Enter the 6-digit code.", variant: "destructive" });
+    if (!otpChallengeToken || otpCode.trim().length < 6) {
+      toast({ title: "Invalid code", description: "Enter the 6-digit code from your email.", variant: "destructive" });
       return;
     }
 
     setOtpVerifying(true);
     try {
       const response = await apiClient.verifyEmailOtp(otpChallengeToken, otpCode.trim());
-      if (!response.success || !response.data?.token) {
-        toast({
-          title: "OTP verification failed",
-          description: response.error || "Please check the code and try again.",
-          variant: "destructive",
-        });
-        return;
+      if (!response.success || !response.data?.customer?.email) {
+        throw new Error(response.error || "Could not verify the email code.");
       }
 
-      const tokenValue = response.data.token;
-      const emailValue = response.data.customer?.email || otpEmail.trim();
-
-      persistCustomerSession(tokenValue, emailValue);
+      applySignedInCustomer(response.data.customer.email || otpEmail.trim());
       setOtpChallengeToken("");
       setOtpCode("");
-
-      toast({ title: "Signed in", description: "Protection sign-in is active for this device." });
+      toast({ title: "Signed in", description: "Your verification session is now tied to your identity." });
+    } catch (nextError: unknown) {
+      toast({
+        title: "Could not verify code",
+        description: nextError instanceof Error ? nextError.message : "Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setOtpVerifying(false);
     }
   };
 
-  const handleSignOut = async () => {
-    clearCustomerSession();
+  const handleCompleteChallenge = async () => {
+    if (!authReady) {
+      toast({
+        title: "Sign in required",
+        description: "Sign in first so MSCQR can re-check this label with your verified identity.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setChallengeRetrying(true);
+    try {
+      const geo = await loadGeoContext();
+      const verificationResponse = token
+        ? await apiClient.scanToken(token, {
+            device: deviceId,
+            lat: geo.lat,
+            lon: geo.lon,
+            acc: geo.acc,
+          })
+        : await apiClient.verifyQRCode(codeParam, {
+            device: deviceId,
+            lat: geo.lat,
+            lon: geo.lon,
+            acc: geo.acc,
+          });
+
+      if (!verificationResponse.success || !verificationResponse.data) {
+        throw new Error(verificationResponse.error || "Could not re-check the label.");
+      }
+
+      const nextResult = verificationResponse.data as VerifyPayload;
+      setLockedResult(nextResult);
+      setResult(nextResult);
+
+      if (!nextResult.decisionId) {
+        setFlowStep("result");
+        toast({
+          title: "Review check updated",
+          description: "MSCQR re-checked this label with your verified identity.",
+        });
+        return;
+      }
+
+      const sessionResponse = await apiClient.startVerificationSession(
+        nextResult.decisionId,
+        token ? "SIGNED_SCAN" : "MANUAL_CODE"
+      );
+
+      if (!sessionResponse.success || !sessionResponse.data) {
+        throw new Error(sessionResponse.error || "Could not prepare the updated verification session.");
+      }
+
+      const nextSession = sessionResponse.data as unknown as VerificationSessionSummary;
+      if (nextSession.sessionProofToken) {
+        persistSessionProofToken(nextSession.sessionId, nextSession.sessionProofToken);
+      }
+      setSession(nextSession);
+
+      const canonicalCode = normalizeVerifyCode(nextResult.code || nextSession.code || codeParam);
+      const params = new URLSearchParams();
+      params.set("session", nextSession.sessionId);
+      if (token) params.set("t", token);
+      navigate(`/verify/${encodeURIComponent(canonicalCode)}?${params.toString()}`, { replace: true });
+      setFlowStep("purchase");
+
+      toast({
+        title: nextResult.challenge?.completed ? "Review check completed" : "Label re-checked",
+        description: nextResult.challenge?.completed
+          ? "MSCQR re-checked this repeat scan with your verified identity."
+          : "MSCQR refreshed the label result using your verified identity.",
+      });
+    } catch (nextError: unknown) {
+      toast({
+        title: "Could not complete review check",
+        description: nextError instanceof Error ? nextError.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setChallengeRetrying(false);
+    }
+  };
+
+  const handleSubmitIntakeAndReveal = async (intakeOverride?: Partial<CustomerTrustIntake>) => {
+    if (!session?.sessionId || !authReady) {
+      toast({ title: "Sign in required", description: "Complete sign-in before revealing the result.", variant: "destructive" });
+      return;
+    }
+    const intakePayload: CustomerTrustIntake = {
+      ...intake,
+      ...(intakeOverride || {}),
+    };
+    if (!validateStep("intent", intakePayload)) {
+      toast({ title: "Complete this step", description: "Tell MSCQR what you want to do next.", variant: "destructive" });
+      return;
+    }
+
+    if (intakeOverride) {
+      setIntake((prev) => ({ ...prev, ...intakeOverride }));
+    }
+
+    setSubmittingReveal(true);
+    try {
+      const sessionProofToken = readSessionProofToken(session.sessionId);
+      const intakeResponse = await apiClient.submitVerificationIntake(
+        session.sessionId,
+        intakePayload as Record<string, unknown>,
+        sessionProofToken || undefined
+      );
+      if (!intakeResponse.success) {
+        throw new Error(intakeResponse.error || "Could not save the verification intake.");
+      }
+
+      const revealResponse = await apiClient.revealVerificationSession(
+        session.sessionId,
+        sessionProofToken || undefined
+      );
+      if (!revealResponse.success || !revealResponse.data) {
+        throw new Error(revealResponse.error || "Could not reveal the verification result.");
+      }
+
+      const nextSession = revealResponse.data as unknown as VerificationSessionSummary;
+      setSession(nextSession);
+      setResult((nextSession.verification as VerifyPayload | null) || lockedResult);
+      setFlowStep("result");
+      toast({ title: "Verification ready", description: "MSCQR has locked the label decision and recorded your purchase context." });
+    } catch (nextError: unknown) {
+      toast({
+        title: "Could not finish verification",
+        description: nextError instanceof Error ? nextError.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setSubmittingReveal(false);
+    }
+  };
+
+  const handleSkipCurrentStep = useCallback(() => {
+    if (flowStep === "purchase") {
+      setIntake((prev) => ({
+        ...prev,
+        purchaseChannel: "unknown",
+        sourceCategory: "unknown",
+        platformName: "",
+        sellerName: "",
+        listingUrl: "",
+        orderReference: "",
+        storeName: "",
+        purchaseCity: "",
+        purchaseCountry: "",
+        purchaseDate: "",
+      }));
+      toast({ title: "Step skipped", description: "You can continue without purchase answers." });
+      moveToNextStep();
+      return;
+    }
+    if (flowStep === "source") {
+      setIntake((prev) => ({
+        ...prev,
+        platformName: "",
+        sellerName: prev.purchaseChannel === "gifted" || prev.purchaseChannel === "unknown" ? prev.sellerName : "",
+        listingUrl: "",
+        orderReference: "",
+        storeName: "",
+        purchaseCity: "",
+        purchaseCountry: "",
+        purchaseDate: "",
+      }));
+      toast({ title: "Step skipped", description: "You can continue without source details." });
+      moveToNextStep();
+      return;
+    }
+    if (flowStep === "context") {
+      setIntake((prev) => ({
+        ...prev,
+        packagingState: "unsure",
+        packagingConcern: "unsure",
+      }));
+      toast({ title: "Step skipped", description: "MSCQR marked context as unsure." });
+      moveToNextStep();
+      return;
+    }
+    if (flowStep === "concern") {
+      setIntake((prev) => ({
+        ...prev,
+        scanReason: "routine_check",
+      }));
+      toast({ title: "Step skipped", description: "Reason defaulted to routine check." });
+      moveToNextStep();
+      return;
+    }
+    if (flowStep === "intent") {
+      void handleSubmitIntakeAndReveal({ ownershipIntent: "verify_only" });
+    }
+  }, [flowStep, handleSubmitIntakeAndReveal, moveToNextStep, toast]);
+
+  const handleClaimOwnership = async () => {
+    if (!currentCode) return;
+    setClaiming(true);
+    try {
+      const response = await apiClient.claimVerifiedProduct(currentCode);
+      if (!response.success || !response.data) {
+        throw new Error(response.error || "Could not claim this product.");
+      }
+      setResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              ownershipStatus: response.data?.ownershipStatus || prev.ownershipStatus,
+              warningMessage: response.data?.message || prev.warningMessage,
+            }
+          : prev
+      );
+      toast({ title: "Ownership updated", description: response.data.message || "Ownership state has been updated." });
+    } catch (nextError: unknown) {
+      toast({
+        title: "Could not claim ownership",
+        description: nextError instanceof Error ? nextError.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setClaiming(false);
+    }
+  };
+
+  const handleAcceptTransfer = async () => {
+    const transferToken = String(searchParams.get("transfer") || "").trim();
+    if (!transferToken || !authReady) return;
+
+    setAcceptingTransfer(true);
+    try {
+      const response = await apiClient.acceptOwnershipTransfer({ token: transferToken });
+      if (!response.success) {
+        throw new Error(response.error || "Could not accept the ownership transfer.");
+      }
+      toast({ title: "Transfer accepted", description: response.data?.message || "Ownership transfer completed." });
+      await bootstrapSession();
+    } catch (nextError: unknown) {
+      toast({
+        title: "Could not accept transfer",
+        description: nextError instanceof Error ? nextError.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setAcceptingTransfer(false);
+    }
+  };
+
+  const handleReportConcern = async () => {
+    if (!currentCode) return;
+    setReporting(true);
+    try {
+      const response = await apiClient.reportFraud({
+        code: currentCode,
+        reason: reportReason,
+        incidentType: reportReason,
+        description: String(intake.notes || "").trim() || `Customer reported ${reportReason.replace(/_/g, " ")} during verification.`,
+        contactEmail: customerEmail || undefined,
+        observedStatus: result?.status,
+        observedOutcome: result?.latestDecisionOutcome || result?.scanOutcome,
+        pageUrl: window.location.href,
+        sessionId: session?.sessionId,
+        decisionId: result?.decisionId || session?.decisionId,
+      });
+      if (!response.success) {
+        throw new Error(response.error || "Could not submit the concern.");
+      }
+      const reportData = (response.data || {}) as { supportTicketRef?: string | null };
+      toast({
+        title: "Concern submitted",
+        description: reportData.supportTicketRef
+          ? `Support ticket ${reportData.supportTicketRef} has been opened.`
+          : "MSCQR support has received your report.",
+      });
+    } catch (nextError: unknown) {
+      toast({
+        title: "Could not report concern",
+        description: nextError instanceof Error ? nextError.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setReporting(false);
+    }
   };
 
   const handleRegisterPasskey = async () => {
-    if (!customerToken) {
-      toast({ title: "Sign-in required", description: "Sign in before adding a passkey.", variant: "destructive" });
-      return;
-    }
-
-    if (!passkeySupported) {
-      toast({ title: "Passkeys unavailable", description: "This browser does not support WebAuthn passkeys.", variant: "destructive" });
-      return;
-    }
-
+    if (!authReady) return;
     setRegisteringPasskey(true);
     try {
-      const beginResponse = await apiClient.beginCustomerPasskeyRegistration(customerToken);
-      if (!beginResponse.success || !beginResponse.data) {
-        toast({
-          title: "Could not start passkey setup",
-          description: beginResponse.error || "Please try again.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const credential = await startWebAuthnRegistration(beginResponse.data, `${APP_NAME} protection`);
-      const finishResponse = await apiClient.finishCustomerPasskeyRegistration(customerToken, credential);
-      if (!finishResponse.success || !finishResponse.data?.token) {
-        toast({
-          title: "Could not finish passkey setup",
-          description: finishResponse.error || "Please try again.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const nextEmail = finishResponse.data.customer?.email || customerEmail || otpEmail.trim();
-      persistCustomerSession(finishResponse.data.token, nextEmail);
-      await loadCustomerPasskeys(finishResponse.data.token);
-      toast({
-        title: "Passkey added",
-        description: "Future ownership checks can use this passkey for stronger protection.",
-      });
-    } catch (error: unknown) {
+      const begin = await apiClient.beginCustomerPasskeyRegistration();
+      if (!begin.success || !begin.data) throw new Error(begin.error || "Could not start passkey registration.");
+      const credential = await startWebAuthnRegistration(begin.data, `${APP_NAME} customer protection`);
+      const finish = await apiClient.finishCustomerPasskeyRegistration(credential);
+      if (!finish.success || !finish.data?.customer?.email) throw new Error(finish.error || "Could not finish passkey registration.");
+      applySignedInCustomer(finish.data.customer.email || customerEmail || otpEmail);
+      await loadCustomerPasskeys();
+      await bootstrapSession();
+      toast({ title: "Passkey added", description: "Future ownership actions can use stronger proof on this device." });
+    } catch (nextError: unknown) {
       toast({
         title: "Could not add passkey",
-        description: error instanceof Error ? error.message : "Please try again.",
+        description: nextError instanceof Error ? nextError.message : "Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -847,50 +1016,22 @@ export default function VerifyExperience() {
   };
 
   const handleAssertPasskey = async () => {
-    if (!customerToken) {
-      toast({ title: "Sign-in required", description: "Sign in before using a passkey.", variant: "destructive" });
-      return;
-    }
-
-    if (!passkeySupported) {
-      toast({ title: "Passkeys unavailable", description: "This browser does not support WebAuthn passkeys.", variant: "destructive" });
-      return;
-    }
-
+    if (!authReady) return;
     setAssertingPasskey(true);
     try {
-      const beginResponse = await apiClient.beginCustomerPasskeyAssertion(undefined, customerToken);
-      if (!beginResponse.success || !beginResponse.data) {
-        toast({
-          title: "Could not start passkey check",
-          description: beginResponse.error || "Please try again.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const assertion = await startWebAuthnAuthentication(beginResponse.data);
-      const finishResponse = await apiClient.finishCustomerPasskeyAssertion(assertion, customerToken);
-      if (!finishResponse.success || !finishResponse.data?.token) {
-        toast({
-          title: "Passkey verification failed",
-          description: finishResponse.error || "Please try again.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const nextEmail = finishResponse.data.customer?.email || customerEmail || otpEmail.trim();
-      persistCustomerSession(finishResponse.data.token, nextEmail);
-      await loadCustomerPasskeys(finishResponse.data.token);
+      const begin = await apiClient.beginCustomerPasskeyAssertion();
+      if (!begin.success || !begin.data) throw new Error(begin.error || "Could not start passkey verification.");
+      const assertion = await startWebAuthnAuthentication(begin.data);
+      const finish = await apiClient.finishCustomerPasskeyAssertion(assertion);
+      if (!finish.success || !finish.data?.customer?.email) throw new Error(finish.error || "Could not verify the passkey.");
+      applySignedInCustomer(finish.data.customer.email || customerEmail || otpEmail);
+      await loadCustomerPasskeys();
+      await bootstrapSession();
+      toast({ title: "Passkey verified", description: "This session now carries stronger ownership proof." });
+    } catch (nextError: unknown) {
       toast({
-        title: "Passkey verified",
-        description: "This session now carries stronger ownership proof.",
-      });
-    } catch (error: unknown) {
-      toast({
-        title: "Passkey verification failed",
-        description: error instanceof Error ? error.message : "Please try again.",
+        title: "Could not verify passkey",
+        description: nextError instanceof Error ? nextError.message : "Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -899,1550 +1040,943 @@ export default function VerifyExperience() {
   };
 
   const handleDeletePasskey = async (credentialId: string) => {
-    if (!customerToken || !credentialId) return;
-
+    if (!authReady) return;
     setDeletingPasskeyId(credentialId);
     try {
-      const response = await apiClient.deleteCustomerPasskeyCredential(customerToken, credentialId);
-      if (!response.success) {
-        toast({
-          title: "Could not remove passkey",
-          description: response.error || "Please try again.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      await loadCustomerPasskeys(customerToken);
-      toast({ title: "Passkey removed", description: "That passkey can no longer be used for ownership step-up." });
+      const response = await apiClient.deleteCustomerPasskeyCredential(credentialId);
+      if (!response.success) throw new Error(response.error || "Could not remove the passkey.");
+      await loadCustomerPasskeys();
+      toast({ title: "Passkey removed", description: "That device can no longer step up ownership automatically." });
+    } catch (nextError: unknown) {
+      toast({
+        title: "Could not remove passkey",
+        description: nextError instanceof Error ? nextError.message : "Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setDeletingPasskeyId("");
     }
   };
 
-  const handleClaimProduct = async () => {
-    if (!displayedCode || displayedCode === "—") {
-      toast({ title: "Invalid code", description: "Cannot claim without a valid verification code.", variant: "destructive" });
-      return;
-    }
+  if (booting) {
+    return (
+      <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(15,23,42,0.1),transparent_40%),linear-gradient(180deg,#eef2f7_0%,#f8fafc_100%)] px-4 py-10">
+        <div className="mx-auto max-w-5xl">
+          <div className="rounded-[28px] border border-slate-200 bg-white/90 p-6 shadow-[0_32px_96px_rgba(15,23,42,0.12)] sm:p-10">
+            <div className="flex items-start justify-between gap-6">
+              <div className="space-y-4">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-500">MSCQR Secure Verification</div>
+                <h1 className="max-w-3xl text-3xl font-semibold text-slate-950 sm:text-5xl">
+                  Locking the label decision before we ask for your purchase context.
+                </h1>
+                <p className="max-w-2xl text-sm leading-7 text-slate-600 sm:text-base">
+                  MSCQR verifies the label in its governed issuance system first, then records your identity and purchase context separately so your answers never change the locked label result.
+                </p>
+              </div>
+              <Badge className="border-slate-300 bg-slate-100 text-slate-700">{maskCode(codeParam)}</Badge>
+            </div>
+            <div className="mt-10 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-950 px-5 py-4 text-white">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <div className="text-sm">
+                {token ? "Validating signed label and preparing your secure session…" : "Validating label state and preparing your secure session…"}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-    setClaiming(true);
-    try {
-      const response = await apiClient.claimVerifiedProduct(displayedCode, customerToken || undefined);
-      if (!response.success || !response.data) {
-        toast({ title: "Claim failed", description: response.error || "Could not claim this product.", variant: "destructive" });
-        return;
-      }
+  if (error) {
+    return (
+      <div className="min-h-screen bg-slate-950 px-4 py-10 text-white">
+        <div className="mx-auto max-w-3xl rounded-[28px] border border-white/10 bg-white/5 p-8 shadow-[0_32px_96px_rgba(0,0,0,0.28)]">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-400">MSCQR Verification</div>
+          <h1 className="mt-4 text-3xl font-semibold">Verification unavailable</h1>
+          <p className="mt-3 text-sm leading-7 text-slate-300">{error}</p>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <Button asChild>
+              <Link to="/verify">Verify another code</Link>
+            </Button>
+            <Button variant="outline" asChild className="border-white/20 bg-white/5 text-white hover:bg-white/10">
+              <Link to="/trust">Open trust center</Link>
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-      if (response.data.claimResult === "OWNED_BY_ANOTHER_USER") {
-        toast({
-          title: "Ownership conflict",
-          description: response.data.warningMessage || "This product is already claimed by another account.",
-          variant: "destructive",
-        });
-      }
-
-      const claimData = response.data;
-      if (!claimData) return;
-
-      if (claimData.claimResult === "ALREADY_OWNED_BY_YOU") {
-        toast({ title: "Already owned", description: "This product is already linked to your account." });
-      } else if (claimData.claimResult === "LINKED_TO_SIGNED_IN_ACCOUNT") {
-        toast({ title: "Ownership linked", description: "Your device claim is now linked to your signed-in account." });
-      } else {
-        toast({
-          title: "Ownership claimed",
-          description:
-            claimData.claimResult === "CLAIMED_DEVICE"
-              ? "Claim saved for this device/network. Sign in for portable protection."
-              : "Product ownership is now linked to your account.",
-        });
-      }
-
-      const nextOwnership = claimData.ownershipStatus || DEFAULT_OWNERSHIP_STATUS;
-      setResult((prev) =>
-        prev
-          ? {
-              ...prev,
-              classification: (claimData.classification as VerificationClassification | undefined) || prev.classification,
-              reasons: claimData.reasons || prev.reasons,
-              warningMessage: claimData.warningMessage || prev.warningMessage,
-              ownershipStatus: nextOwnership,
-            }
-          : prev
-      );
-      setClaimConfirmOpen(false);
-    } finally {
-      setClaiming(false);
-    }
-  };
-
-  const handleLinkClaimToAccount = async () => {
-    if (!customerToken || !displayedCode || displayedCode === "—") return;
-    setLinkingClaim(true);
-    try {
-      const response = await apiClient.linkDeviceClaimToUser(displayedCode, customerToken);
-      if (!response.success) {
-        toast({
-          title: "Link failed",
-          description: response.error || "Could not link this device claim.",
-          variant: "destructive",
-        });
-        return;
-      }
-      toast({ title: "Linked to your account", description: "Ownership is now portable across your signed-in sessions." });
-      setResult((prev) =>
-        prev
-          ? {
-              ...prev,
-              ownershipStatus: response.data?.ownershipStatus || prev.ownershipStatus,
-            }
-          : prev
-      );
-    } finally {
-      setLinkingClaim(false);
-    }
-  };
-
-  const handleCreateTransfer = async () => {
-    if (!customerToken || !displayedCode || displayedCode === "—") {
-      toast({ title: "Sign-in required", description: "Sign in before starting a transfer.", variant: "destructive" });
-      return;
-    }
-
-    setTransferSubmitting(true);
-    try {
-      const response = await apiClient.createOwnershipTransfer(
-        displayedCode,
-        { recipientEmail: transferRecipientEmail.trim() || undefined },
-        customerToken
-      );
-      if (!response.success || !response.data) {
-        toast({
-          title: "Transfer unavailable",
-          description: response.error || "Could not start the ownership transfer.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      setIssuedTransferLink(response.data.transferLink || response.data.ownershipTransfer?.acceptUrl || null);
-      syncPersistedTransferToken(response.data.transferToken || null);
-      setResult((prev) =>
-        prev
-          ? {
-              ...prev,
-              ownershipStatus: response.data?.ownershipStatus || prev.ownershipStatus,
-              ownershipTransfer: response.data?.ownershipTransfer || prev.ownershipTransfer,
-            }
-          : prev
-      );
-      toast({
-        title: "Transfer ready",
-        description: response.data.message || "Share the secure transfer link with the next owner.",
-      });
-      setQueueTransferDialogAfterSignIn(false);
-      setTransferOpen(false);
-    } finally {
-      setTransferSubmitting(false);
-    }
-  };
-
-  const handleCancelTransfer = async () => {
-    if (!customerToken || !displayedCode || !ownershipTransfer?.transferId) return;
-    setTransferCancelling(true);
-    try {
-      const response = await apiClient.cancelOwnershipTransfer(
-        displayedCode,
-        { transferId: ownershipTransfer.transferId || undefined },
-        customerToken
-      );
-      if (!response.success) {
-        toast({
-          title: "Cancel failed",
-          description: response.error || "Could not cancel the transfer.",
-          variant: "destructive",
-        });
-        return;
-      }
-      toast({ title: "Transfer cancelled", description: response.data?.message || "Pending transfer cancelled." });
-      syncPersistedTransferToken(null);
-      setIssuedTransferLink(null);
-      setResult((prev) =>
-        prev
-          ? {
-              ...prev,
-              ownershipTransfer: response.data?.ownershipTransfer || prev.ownershipTransfer,
-            }
-          : prev
-      );
-    } finally {
-      setTransferCancelling(false);
-    }
-  };
-
-  const handleAcceptTransfer = async () => {
-    if (!customerToken || !transferToken) {
-      toast({ title: "Sign-in required", description: "Sign in before accepting the transfer.", variant: "destructive" });
-      return;
-    }
-    setTransferAccepting(true);
-    try {
-      const response = await apiClient.acceptOwnershipTransfer({ token: transferToken }, customerToken);
-      if (!response.success) {
-        toast({
-          title: "Accept failed",
-          description: response.error || "Could not accept the transfer.",
-          variant: "destructive",
-        });
-        return;
-      }
-      toast({
-        title: "Ownership transferred",
-        description: response.data?.message || "This product is now linked to your account.",
-      });
-      setIssuedTransferLink(null);
-      setResult((prev) =>
-        prev
-          ? {
-              ...prev,
-              code: response.data?.code || prev.code,
-              ownershipStatus: response.data?.ownershipStatus || prev.ownershipStatus,
-              ownershipTransfer: response.data?.ownershipTransfer || prev.ownershipTransfer,
-            }
-          : prev
-      );
-    } finally {
-      setTransferAccepting(false);
-    }
-  };
-
-  const handleCopyTransferLink = async () => {
-    const link = shareableTransferLink;
-    if (!link) return;
-    try {
-      await navigator.clipboard.writeText(link);
-      toast({ title: "Transfer link copied", description: "Send this secure acceptance link to the next owner." });
-    } catch {
-      toast({ title: "Copy failed", description: "Could not copy the transfer link.", variant: "destructive" });
-    }
-  };
-
-  const handleTransferSignInIntent = () => {
-    setQueueTransferDialogAfterSignIn(true);
-    protectionSignInRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-  };
-
-  const handleSubmitReport = async () => {
-    const codeValue = String(displayedCode || "").trim();
-    if (!codeValue || codeValue === "—") {
-      toast({ title: "Report failed", description: "No valid code available.", variant: "destructive" });
-      return;
-    }
-
-    if (reportDescription.trim().length < 6) {
-      toast({
-        title: "More detail required",
-        description: "Please describe what looked suspicious.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setReporting(true);
-    try {
-      const formData = new FormData();
-      formData.append("code", codeValue);
-      formData.append("incidentType", reportType);
-      formData.append("reason", reasons[0] || classification);
-      formData.append("description", reportDescription.trim());
-      if (reportEmail.trim()) formData.append("contactEmail", reportEmail.trim());
-      formData.append("consentToContact", String(Boolean(reportEmail.trim())));
-      formData.append("preferredContactMethod", reportEmail.trim() ? "email" : "none");
-      formData.append("tags", JSON.stringify(["verify_page_report", `classification_${classification.toLowerCase()}`]));
-      for (const photo of reportPhotos.slice(0, 4)) {
-        formData.append("photos", photo);
-      }
-
-      const response = await apiClient.submitFraudReport(formData, customerToken || undefined);
-      if (!response.success) {
-        toast({ title: "Report failed", description: response.error || "Please try again.", variant: "destructive" });
-        return;
-      }
-
-      const payload = (response.data || {}) as {
-        reportId?: string;
-        supportTicketRef?: string;
-        supportTicketStatus?: string;
-        supportTicketSla?: { dueAt?: string } | null;
-        tamperChecks?: { summary?: string | null } | null;
-      };
-      setReportReference(payload.reportId || null);
-      setReportSupportRef(payload.supportTicketRef || null);
-      setReportSupportStatus(payload.supportTicketStatus || null);
-      setReportTamperSummary(payload?.tamperChecks?.summary || null);
-      if (payload?.supportTicketSla?.dueAt) {
-        setReportSupportSla(new Date(payload.supportTicketSla.dueAt).toLocaleString());
-      } else {
-        setReportSupportSla(null);
-      }
-
-      if (payload.supportTicketRef) {
-        const tracking = await apiClient.trackSupportTicket(payload.supportTicketRef, reportEmail.trim() || undefined);
-        if (tracking.success) {
-          const trackData = (tracking.data || {}) as {
-            status?: string;
-            sla?: { dueAt?: string } | null;
-          };
-          setReportSupportStatus(trackData.status || payload.supportTicketStatus || null);
-          if (trackData?.sla?.dueAt) {
-            setReportSupportSla(new Date(trackData.sla.dueAt).toLocaleString());
-          }
-        }
-      }
-
-      toast({ title: "Report submitted", description: "Security team has received your report." });
-    } finally {
-      setReporting(false);
-    }
-  };
-
-  const handleTrackTicket = async () => {
-    const reference = trackReference.trim().toUpperCase();
-    if (!reference) {
-      toast({ title: "Reference required", description: "Enter your support ticket reference.", variant: "destructive" });
-      return;
-    }
-
-    setTrackingTicket(true);
-    try {
-      const response = await apiClient.trackSupportTicket(reference, trackEmail.trim() || undefined);
-      if (!response.success) {
-        setTrackedTicket(null);
-        toast({ title: "Tracking failed", description: response.error || "Could not find this support ticket.", variant: "destructive" });
-        return;
-      }
-
-      setTrackedTicket(
-        (response.data as
-          | {
-              referenceCode?: string;
-              status?: string;
-              handoffStage?: string;
-              sla?: { dueAt?: string; isBreached?: boolean; remainingMinutes?: number } | null;
-            }
-          | null) || null
-      );
-    } finally {
-      setTrackingTicket(false);
-    }
-  };
-
-  const supportEmail = result?.licensee?.supportEmail || "";
-  const supportPhone = result?.licensee?.supportPhone || "";
-  const supportWebsite = result?.licensee?.website || "";
-  const isReportDraftDirty =
-    reportDescription.trim().length > 0 ||
-    reportEmail.trim().length > 0 ||
-    reportPhotos.length > 0 ||
-    reportType !== INCIDENT_TYPE_OPTIONS[0].value;
-  const handleReportDialogOpenChange = (open: boolean) => {
-    if (!open && !reporting && !reportReference && isReportDraftDirty) {
-      const shouldDiscard = window.confirm("Discard this report draft?");
-      if (!shouldDiscard) return;
-    }
-    setReportOpen(open);
-  };
-  const friendlyVerifyError = (() => {
-    const msg = String(error || "").toLowerCase();
-    if (!msg) return "Verification service unavailable";
-    if (msg.includes("network") || msg.includes("offline") || msg.includes("timed out") || msg.includes("timeout")) {
-      return "Network connection is unstable. Reconnect and retry verification.";
-    }
-    if (msg.includes("internal server error") || msg.includes("service unavailable")) {
-      return "The secure registry is temporarily unavailable. Please retry in a moment.";
-    }
-    return "Verification is unavailable right now. Please retry.";
-  })();
+  const canReveal = Boolean(session?.sessionId && authReady);
+  const limitedProvenance = result?.publicOutcome === "LIMITED_PROVENANCE";
+  const proofTitle =
+    result?.proofTier === "SIGNED_LABEL"
+      ? "Signed label check"
+      : result?.proofTier === "MANUAL_REGISTRY_LOOKUP"
+        ? "Manual code record check"
+        : "Fail-safe verification";
+  const proofDetail =
+    result?.proofTier === "SIGNED_LABEL"
+      ? "MSCQR confirmed the issued label token and the current lifecycle state of this label."
+      : result?.proofTier === "MANUAL_REGISTRY_LOOKUP"
+        ? "MSCQR confirmed the registry record and lifecycle state, but not a label-bound signature."
+        : "MSCQR returned a degraded decision because a dependency had to fail safely.";
+  const checkedItems =
+    result?.publicOutcome === "INTEGRITY_ERROR"
+      ? [
+          "MSCQR could not validate the signed-label proof presented for this result.",
+          "The platform did not accept this as a trusted signed-label check.",
+          "Use the brand support channel if this label should still be valid.",
+        ]
+      : result?.publicOutcome === "NOT_FOUND" || classification === "NOT_FOUND"
+      ? [
+          "MSCQR could not match this code to a live governed registry record.",
+          "No customer-ready lifecycle state could be confirmed for this code.",
+          "No signed-label proof could be completed for this result.",
+        ]
+      : limitedProvenance
+        ? [
+            "MSCQR confirmed the signed label token and found a live platform record for this label.",
+            "Governed print provenance is not available for this label, so this result is intentionally limited.",
+            "Treat this as a weaker signed-label result than a governed print confirmation.",
+          ]
+      : classification === "NOT_READY_FOR_CUSTOMER_USE"
+        ? [
+            "The label exists inside MSCQR’s governed issuance registry.",
+            "The lifecycle state is not yet released for customer verification.",
+            proofDetail,
+          ]
+        : classification === "BLOCKED_BY_SECURITY"
+          ? [
+              "The label exists inside MSCQR’s governed issuance registry.",
+              "MSCQR recorded a state or policy condition that currently blocks customer acceptance.",
+              proofDetail,
+            ]
+          : [
+              "The label exists inside MSCQR’s governed issuance registry.",
+              "The current lifecycle state is suitable for customer verification.",
+              proofDetail,
+          ];
+  const resultTone = limitedProvenance ? "border-amber-200 bg-amber-50 text-amber-950" : stepMeta.tone;
+  const resultBadge = limitedProvenance ? "Limited provenance" : stepMeta.badge;
+  const resultTitle = limitedProvenance ? "MSCQR found a weaker provenance path" : stepMeta.title;
 
   return (
-    <div
-      className="relative min-h-screen px-4 py-8"
-      style={{
-        background:
-          "radial-gradient(circle at 8% 8%, rgba(141,157,182,0.34), transparent 40%), radial-gradient(circle at 88% 14%, rgba(241,227,221,0.78), transparent 42%), linear-gradient(160deg, #f7fafd 0%, #eef3f9 46%, #f1e3dd 100%)",
-      }}
-    >
-      <div className="sr-only" aria-live="polite" aria-atomic="true">
-        {loading
-          ? loadingStage === 0
-            ? "Securely verifying QR code."
-            : "Checking secure registry."
-          : error
-            ? "Verification service unavailable."
-            : `${verificationCopy.title}. ${verificationCopy.subtitle}`}
-      </div>
-      <div className="mx-auto w-full max-w-4xl space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <Link to="/verify" className="inline-flex items-center gap-2 text-slate-900">
-            <Shield className="h-6 w-6" />
-            <span className="text-xl font-semibold tracking-tight">{APP_NAME} Verification</span>
-          </Link>
-          <Button asChild variant="outline" className={motionButtonClass}>
-            <Link to="/verify">Verify another code</Link>
-          </Button>
-        </div>
-
-        <Card
-          className="relative overflow-hidden border shadow-[0_20px_44px_rgba(102,114,146,0.18)] premium-surface-in"
-          style={{ borderColor: `${PREMIUM_PALETTE.steel}77` }}
-          aria-busy={loading}
-        >
-          {error ? (
-            <CardContent className="space-y-3 py-12 text-center">
-              <SearchX className="mx-auto h-8 w-8 text-rose-900" />
-              <p className="text-lg font-semibold text-slate-900">Verification service unavailable</p>
-              <p className="text-sm text-slate-600">{friendlyVerifyError}</p>
-              <div className="flex items-center justify-center gap-2">
-                <Button variant="outline" onClick={fetchVerification} disabled={loading}>
-                  Retry now
-                </Button>
-                {isOffline ? (
-                  <Badge variant="outline" className="border-amber-300 text-amber-900">
-                    Offline
-                  </Badge>
-                ) : null}
-              </div>
-              <details className="mx-auto max-w-xl rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs text-slate-600">
-                <summary className="cursor-pointer font-medium text-slate-700">Technical details</summary>
-                <p className="mt-2 break-all">{error}</p>
-              </details>
-            </CardContent>
-          ) : (
-            <CardContent className={cn("space-y-6 p-5 sm:p-6", !showSkeleton && "animate-fade-in")}>
-              {showSkeleton ? (
-                <>
-                  <section className="space-y-3">
-                    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-                      <SkeletonBlock className="h-4 w-44" />
-                      <SkeletonBlock className="mt-3 h-7 w-64" />
-                      <SkeletonBlock className="mt-3 h-4 w-full" />
-                      <SkeletonBlock className="mt-2 h-4 w-5/6" />
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
-                      <SkeletonBlock className="h-3 w-full" />
-                    </div>
-                    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                      <SkeletonBlock className="h-4 w-32" />
-                      <SkeletonBlock className="mt-2 h-8 w-72" />
-                      <SkeletonBlock className="mt-4 h-3 w-24" />
-                      <SkeletonBlock className="mt-2 h-3 w-full" />
-                      <SkeletonBlock className="mt-2 h-3 w-5/6" />
-                    </div>
-                  </section>
-
-                  <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <SkeletonBlock className="h-4 w-32" />
-                    <div className="mt-4 grid gap-3 md:grid-cols-3">
-                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/80 p-4">
-                        <SkeletonBlock className="h-3 w-20" />
-                        <SkeletonBlock className="mt-3 h-8 w-16" />
-                      </div>
-                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/80 p-4">
-                        <SkeletonBlock className="h-3 w-28" />
-                        <SkeletonBlock className="mt-3 h-4 w-full" />
-                        <SkeletonBlock className="mt-2 h-3 w-2/3" />
-                      </div>
-                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/80 p-4">
-                        <SkeletonBlock className="h-3 w-28" />
-                        <SkeletonBlock className="mt-3 h-4 w-full" />
-                        <SkeletonBlock className="mt-2 h-3 w-2/3" />
-                      </div>
-                    </div>
-                  </section>
-
-                  <section className="rounded-xl border border-[#8d9db668] bg-white/95 p-4 shadow-sm premium-surface-in">
-                    <SkeletonBlock className="h-4 w-32" />
-                    <SkeletonBlock className="mt-4 h-20 w-full" />
-                  </section>
-
-                  <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <SkeletonBlock className="h-4 w-28" />
-                    <SkeletonBlock className="mt-4 h-10 w-56" />
-                  </section>
-
-                  <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <SkeletonBlock className="h-4 w-24" />
-                    <SkeletonBlock className="mt-3 h-3 w-full" />
-                    <SkeletonBlock className="mt-2 h-3 w-11/12" />
-                    <SkeletonBlock className="mt-2 h-3 w-4/5" />
-                  </section>
-                </>
-              ) : (
-                <>
-                  {isOffline ? (
-                    <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-                      <div className="flex items-start gap-2">
-                        <WifiOff className="mt-0.5 h-4 w-4" />
-                        <div>
-                          <p className="font-semibold">Offline mode detected</p>
-                          <p className="mt-1">Reconnect to continue secure verification checks.</p>
-                          <Button
-                            variant="outline"
-                            className={cn("mt-2 border-amber-300 bg-white text-amber-900 hover:bg-amber-100", motionButtonClass)}
-                            onClick={fetchVerification}
-                            disabled={loading}
-                          >
-                            Retry verification
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {retryNotice ? (
-                    <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-3 text-sm text-cyan-900">
-                      <div className="flex items-start gap-2">
-                        <Clock3 className="mt-0.5 h-4 w-4" />
-                        <div>
-                          <p className="font-semibold">{retryNotice}</p>
-                          {retryAttempt > 0 ? <p className="mt-1 text-xs text-cyan-800">Retry attempts: {retryAttempt}</p> : null}
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <section className="space-y-3">
-                    <div
-                      className={cn("rounded-2xl p-5 shadow-[0_18px_34px_rgba(102,114,146,0.2)] sm:p-6", classMeta.bannerClass)}
-                      role="status"
-                      aria-live="polite"
-                      aria-atomic="true"
-                    >
-                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="flex min-w-0 gap-4">
-                          <div className="mt-0.5 rounded-xl bg-white/15 p-2.5 ring-1 ring-white/25">{classMeta.icon}</div>
-                          <div className="min-w-0">
-                            <h1 className="mt-1 text-2xl font-semibold tracking-tight">{verificationCopy.title}</h1>
-                            <p className="mt-2 text-sm leading-relaxed text-white/90">{verificationCopy.subtitle}</p>
-                            <p className="mt-2 text-sm leading-relaxed text-white/90">{result?.message || "Verification completed."}</p>
-                            {result?.warningMessage ? (
-                              <p className="mt-2 text-sm leading-relaxed text-white/90">{result.warningMessage}</p>
-                            ) : null}
-                            {showAuthenticStamp ? <VerifiedAuthenticStamp className="mt-3" /> : null}
-                          </div>
-                        </div>
-                        <div className="flex items-start gap-2 sm:gap-3">
-                          <Badge className={cn("h-fit text-[11px] font-semibold uppercase tracking-wide", classMeta.badgeClass)}>
-                            {verificationCopy.badge}
-                          </Badge>
-                          <VerificationConfidenceMeter
-                            classification={classification}
-                            totalScans={scanSummary.totalScans}
-                            distinctDeviceCount24h={result?.scanSignals?.distinctDeviceCount24h}
-                            recentScanCount10m={result?.scanSignals?.recentScanCount10m}
-                            distinctCountryCount24h={result?.scanSignals?.distinctCountryCount24h}
-                            distinctUntrustedDeviceCount24h={result?.scanSignals?.distinctUntrustedDeviceCount24h}
-                            untrustedScanCount10m={result?.scanSignals?.untrustedScanCount10m}
-                            trustedOwnerScanCount24h={result?.scanSignals?.trustedOwnerScanCount24h}
-                            warningMessage={result?.warningMessage || null}
-                            className="w-[182px]"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border border-[#8d9db65e] bg-white/90 px-3 py-2 shadow-sm premium-surface-in">
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                        <span className="inline-flex items-center gap-1.5">
-                          <Shield className="h-3.5 w-3.5 text-slate-700" />
-                          {proofDescriptor.title}
-                        </span>
-                        <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" />
-                        <span>{proofDescriptor.detail}</span>
-                        <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" />
-                        {proofTierLabel ? <span className="font-medium text-slate-700">{proofTierLabel}</span> : null}
-                        {proofTierLabel ? <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" /> : null}
-                        <span className="font-medium text-slate-700">{trustLevelLabel}</span>
-                        <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" />
-                        <span className="font-medium text-slate-700">
-                          Print trust: {result?.printTrustState ? toLabel(result.printTrustState) : "not disclosed"}
-                        </span>
-                        {replacementStatusLabel ? <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" /> : null}
-                        {replacementStatusLabel ? <span className="font-medium text-slate-700">{replacementStatusLabel}</span> : null}
-                        {degradationLabel ? <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" /> : null}
-                        {degradationLabel ? <span className="font-medium text-slate-700">{degradationLabel}</span> : null}
-                        <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" />
-                        <span className="font-medium text-slate-700">Scan history recorded server-side for fraud review</span>
-                        <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:inline-block" />
-                        <span className="font-medium text-slate-700">Confidence {confidenceScore}%</span>
-                      </div>
-                    </div>
-
-                    <PremiumSectionAccordion
-                      defaultOpen={["risk-signals"]}
-                      items={[
-                        {
-                          value: "risk-signals",
-                          title: "Risk Signals",
-                          subtitle: "Model-derived explanation from current verification evidence",
-                          content: verifyUxPolicy.showRiskCards ? (
-                            <div
-                              className={cn(
-                                "rounded-xl border p-4 shadow-sm",
-                                riskExplanation.level === "high"
-                                  ? "border-rose-300 bg-rose-50"
-                                  : riskExplanation.level === "elevated" || riskExplanation.level === "medium"
-                                    ? "border-amber-300 bg-amber-50"
-                                    : "border-emerald-200 bg-emerald-50"
-                              )}
-                            >
-                              <p className="text-xs uppercase tracking-wide text-slate-600">Risk explanation</p>
-                              <p className="mt-1 text-sm font-semibold text-slate-900">{riskExplanation.title}</p>
-                              {Array.isArray(riskExplanation.details) && riskExplanation.details.length ? (
-                                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-700">
-                                  {riskExplanation.details.slice(0, 4).map((detail) => (
-                                    <li key={detail}>{detail}</li>
-                                  ))}
-                                </ul>
-                              ) : null}
-                              <p className="mt-2 text-xs text-slate-700">{riskExplanation.recommendedAction}</p>
-                            </div>
-                          ) : (
-                            <p className="text-sm text-slate-600">Risk card display is disabled by policy for this verification.</p>
-                          ),
-                        },
-                        {
-                          value: "verification-reasons",
-                          title: "Verification Reasons",
-                          subtitle: "Human-readable summary mapped from scan signals",
-                          badge: <Badge className="border-[#8d9db65e] bg-[#bccad638] text-[#4f5b75]">{verificationCopy.badge}</Badge>,
-                          content: (
-                            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                              <p className="text-xs uppercase tracking-wide text-slate-500">Verified Code</p>
-                              <p className="mt-1 font-mono text-xl font-semibold tracking-tight text-slate-900">{displayedCode}</p>
-                              <div className="mt-4 space-y-1.5">
-                                <p className="text-xs uppercase tracking-wide text-slate-500">Reasons</p>
-                                <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-slate-700">
-                                  {reasons.map((reason) => (
-                                    <li key={reason}>{reason}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                            </div>
-                          ),
-                        },
-                        {
-                          value: "decision-trace",
-                          title: "Decision Trace",
-                          subtitle: "Versioned proof, trust, and lifecycle evidence behind this result",
-                          content: (
-                            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                              <div className="grid gap-3 text-sm text-slate-700 sm:grid-cols-2">
-                                <div>
-                                  <p className="text-xs uppercase tracking-wide text-slate-500">Decision version</p>
-                                  <p className="mt-1 font-medium text-slate-900">
-                                    {result?.decisionVersion ? `v${result.decisionVersion}` : "Current"}
-                                  </p>
-                                </div>
-                                <div>
-                                  <p className="text-xs uppercase tracking-wide text-slate-500">Decision id</p>
-                                  <p className="mt-1 font-mono text-xs text-slate-900">{result?.decisionId || "Not disclosed"}</p>
-                                </div>
-                                <div>
-                                  <p className="text-xs uppercase tracking-wide text-slate-500">Label state</p>
-                                  <p className="mt-1 font-medium text-slate-900">{toLabel(result?.labelState || result?.status || "unknown")}</p>
-                                </div>
-                                <div>
-                                  <p className="text-xs uppercase tracking-wide text-slate-500">Latest decision outcome</p>
-                                  <p className="mt-1 font-medium text-slate-900">{toLabel(result?.latestDecisionOutcome || result?.scanOutcome || "unknown")}</p>
-                                </div>
-                              </div>
-                              {Array.isArray(result?.reasonCodes) && result.reasonCodes.length ? (
-                                <div className="mt-4">
-                                  <p className="text-xs uppercase tracking-wide text-slate-500">Decision reason codes</p>
-                                  <div className="mt-2 flex flex-wrap gap-2">
-                                    {result.reasonCodes.slice(0, 6).map((code) => (
-                                      <Badge key={code} variant="outline" className="border-slate-200 bg-slate-50 text-slate-700">
-                                        {code}
-                                      </Badge>
-                                    ))}
-                                  </div>
-                                </div>
-                              ) : null}
-                            </div>
-                          ),
-                        },
-                      ]}
-                    />
-                  </section>
-
-                  <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <p className="text-sm font-semibold text-slate-900">Scan summary</p>
-                    {activitySummary?.summary ? (
-                      <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
-                        {activitySummary.summary}
-                      </div>
-                    ) : null}
-                    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
-                        <p className="text-xs uppercase tracking-wide text-slate-500">Total scans</p>
-                        <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{scanSummary.totalScans}</p>
-                      </div>
-                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
-                        <p className="text-xs uppercase tracking-wide text-slate-500">Trusted repeat activity (24h)</p>
-                        <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{trustedRepeatCount}</p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {activitySummary?.currentActorTrustedOwnerContext
-                            ? "Matches your owner or trusted device context"
-                            : "Trusted owner-linked checks in the last 24 hours"}
-                        </p>
-                      </div>
-                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
-                        <p className="text-xs uppercase tracking-wide text-slate-500">External scans (24h)</p>
-                        <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{externalScanCount}</p>
-                        <p className="mt-1 text-xs text-slate-500">Scans outside the trusted owner context</p>
-                      </div>
-                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
-                        <p className="text-xs uppercase tracking-wide text-slate-500">New external devices (24h)</p>
-                        <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{externalDeviceCount}</p>
-                        <p className="mt-1 text-xs text-slate-500">Distinct devices not matched to the trusted owner</p>
-                      </div>
-                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
-                        <p className="text-xs uppercase tracking-wide text-slate-500">First verified</p>
-                        <p className="mt-2 text-sm font-medium text-slate-900">{formatDateTime(scanSummary.firstVerifiedAt)}</p>
-                        <p className="mt-1 text-xs text-slate-500">{scanSummary.firstVerifiedLocation || "Location unavailable"}</p>
-                      </div>
-                      <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
-                        <p className="text-xs uppercase tracking-wide text-slate-500">Latest verified</p>
-                        <p className="mt-2 text-sm font-medium text-slate-900">{formatDateTime(scanSummary.latestVerifiedAt)}</p>
-                        <p className="mt-1 text-xs text-slate-500">{scanSummary.latestVerifiedLocation || "Location unavailable"}</p>
-                      </div>
-                    </div>
-
-                    <PremiumSectionAccordion
-                      className="mt-4"
-                      defaultOpen={verifyUxPolicy.showTimelineCard ? ["timeline"] : ["supply-chain"]}
-                      items={[
-                        {
-                          value: "timeline",
-                          title: "Verification Timeline",
-                          subtitle: "First and latest verified observations",
-                          content: verifyUxPolicy.showTimelineCard ? (
-                            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                              <div className="grid gap-3 sm:grid-cols-2">
-                                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-                                  <p className="text-[11px] uppercase tracking-wide text-slate-500">First seen</p>
-                                  <p className="text-sm font-medium text-slate-900">{formatDateTime(verificationTimeline.firstSeen)}</p>
-                                </div>
-                                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-                                  <p className="text-[11px] uppercase tracking-wide text-slate-500">Latest seen</p>
-                                  <p className="text-sm font-medium text-slate-900">{formatDateTime(verificationTimeline.latestSeen)}</p>
-                                </div>
-                              </div>
-                              {verificationTimeline.anomalyReason ? (
-                                <div
-                                  className={cn(
-                                    "mt-3 rounded-md border px-3 py-2 text-xs",
-                                    verificationTimeline.visualSignal === "critical"
-                                      ? "border-rose-300 bg-rose-50 text-rose-900"
-                                      : "border-amber-300 bg-amber-50 text-amber-900"
-                                  )}
-                                >
-                                  Anomaly reason: {verificationTimeline.anomalyReason}
-                                </div>
-                              ) : (
-                                <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
-                                  Timeline signals are consistent with normal verification usage.
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <p className="text-sm text-slate-600">Timeline display is disabled by policy for this verification.</p>
-                          ),
-                        },
-                        {
-                          value: "supply-chain",
-                          title: "Supply Chain Details",
-                          subtitle: "Brand and manufacturer metadata from the secure registry",
-                          content: (
-                            <div className="grid gap-3 lg:grid-cols-2">
-                              <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
-                                <p className="text-xs uppercase tracking-wide text-slate-500">Brand owner</p>
-                                <p className="mt-1 text-sm font-semibold text-slate-900">
-                                  {result?.licensee?.brandName || result?.licensee?.name || "Not provided"}
-                                </p>
-                                <div className="mt-3 space-y-1.5 text-xs text-slate-600">
-                                  <p>
-                                    <span className="font-medium text-slate-700">Location:</span> {result?.licensee?.location || "Not provided"}
-                                  </p>
-                                  <p>
-                                    <span className="font-medium text-slate-700">Support email:</span> {result?.licensee?.supportEmail || "Not provided"}
-                                  </p>
-                                  <p>
-                                    <span className="font-medium text-slate-700">Support phone:</span> {result?.licensee?.supportPhone || "Not provided"}
-                                  </p>
-                                  <p>
-                                    <span className="font-medium text-slate-700">Website:</span> {result?.licensee?.website || "Not provided"}
-                                  </p>
-                                </div>
-                              </div>
-
-                              <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-4 shadow-sm">
-                                <p className="text-xs uppercase tracking-wide text-slate-500">Manufacturer</p>
-                                <p className="mt-1 text-sm font-semibold text-slate-900">
-                                  {result?.batch?.manufacturer?.name || "Not provided"}
-                                </p>
-                                <div className="mt-3 space-y-1.5 text-xs text-slate-600">
-                                  <p>
-                                    <span className="font-medium text-slate-700">Email:</span> {result?.batch?.manufacturer?.email || "Not provided"}
-                                  </p>
-                                  <p>
-                                    <span className="font-medium text-slate-700">Location:</span> {result?.batch?.manufacturer?.location || "Not provided"}
-                                  </p>
-                                  <p>
-                                    <span className="font-medium text-slate-700">Website:</span> {result?.batch?.manufacturer?.website || "Not provided"}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          ),
-                        },
-                      ]}
-                    />
-                  </section>
-
-                  <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-slate-900">Protection</p>
-                      {customerToken ? <Badge variant="outline">Signed in for protection</Badge> : null}
-                    </div>
-                    <div className="mt-3 space-y-4">
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                        <p className="font-medium">Protect this item</p>
-                        <p className="mt-1">
-                          Protecting this item helps MSCQR recognise trusted repeat checks and speeds up help if something looks wrong.
-                        </p>
-                        <p className="mt-2 text-xs text-slate-600">
-                          You can protect it on this device right away, or sign in for protection that follows you across devices.
-                        </p>
-                      </div>
-
-                      {ownershipStatus.isOwnedByRequester ? (
-                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-                          <p className="font-semibold">Owned by you</p>
-                          <p className="mt-1">Claimed at: {formatDateTime(ownershipStatus.claimedAt)}</p>
-                          {ownershipStatus.matchMethod === "device_token" ? (
-                            <p className="mt-1 text-xs text-emerald-800">
-                              Current proof: this device.
-                            </p>
-                          ) : null}
-                        </div>
-                      ) : ownershipStatus.isClaimedByAnother ? (
-                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                          <p className="font-semibold">Already claimed</p>
-                          <p className="mt-1">This code is already claimed. If unexpected, submit a counterfeit report.</p>
-                        </div>
-                      ) : ownershipStatus.canClaim ? (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button
-                            type="button"
-                            onClick={() => setClaimConfirmOpen(true)}
-                            disabled={loading || claiming}
-                            className={cn("bg-slate-900 text-white hover:bg-slate-800", motionButtonClass)}
-                          >
-                            {claiming ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Claiming
-                              </>
-                            ) : (
-                              "Protect on this device"
-                            )}
-                          </Button>
-                          {googleOauthUrl && !customerToken ? (
-                            <Button asChild variant="outline" className={motionButtonClass} disabled={loading || claiming}>
-                              <a href={googleOauthUrl}>Sign in with Google for stronger protection</a>
-                            </Button>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                          <p className="font-semibold">Claim currently unavailable</p>
-                          <p className="mt-1">{claimUnavailableReason}</p>
-                        </div>
-                      )}
-
-                      {showLinkClaim ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={handleLinkClaimToAccount}
-                          disabled={loading || linkingClaim}
-                          className={motionButtonClass}
-                        >
-                          {linkingClaim ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Linking
-                            </>
-                          ) : (
-                            "Move this device protection to your account"
-                          )}
-                        </Button>
-                      ) : null}
-
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <p className="font-medium text-slate-900">Transfer to a new owner</p>
-                            <p className="mt-1 text-xs text-slate-600">
-                              Use this when selling or handing over a genuine item. The next owner accepts from a secure link.
-                            </p>
-                          </div>
-                          {ownershipTransfer?.state && ownershipTransfer.state !== "none" ? (
-                            <Badge variant="outline">{toLabel(ownershipTransfer.state)}</Badge>
-                          ) : null}
-                        </div>
-
-                        <div className="mt-3 space-y-3">
-                          {ownershipTransfer?.state === "invalid" ? (
-                            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                              {ownershipTransfer.invalidReason || "This transfer link is invalid or has expired."}
-                            </div>
-                          ) : null}
-
-                          {showOwnerTransferSignInPrompt ? (
-                            <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
-                              <p className="font-medium">
-                                {ownershipTransfer?.active
-                                  ? "Sign in below to manage or resend your active transfer."
-                                  : "Sign in below to start a secure ownership transfer."}
-                              </p>
-                              <p className="mt-1">
-                                Transfers start from a signed-in customer session so the next owner can accept from a secure link.
-                              </p>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={handleTransferSignInIntent}
-                                className="mt-3 border-sky-300 bg-white text-sky-900 hover:bg-sky-100"
-                              >
-                                Sign in to continue
-                              </Button>
-                            </div>
-                          ) : null}
-
-                          {showRecipientTransferSignInPrompt ? (
-                            <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
-                              Sign in below, then accept the transfer to link this product to your account.
-                            </div>
-                          ) : null}
-
-                          {ownershipTransfer?.active ? (
-                            <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
-                              <p>Started: {formatDateTime(ownershipTransfer.initiatedAt)}</p>
-                              <p>Expires: {formatDateTime(ownershipTransfer.expiresAt)}</p>
-                              {ownershipTransfer.recipientEmailMasked ? <p>Recipient: {ownershipTransfer.recipientEmailMasked}</p> : null}
-                            </div>
-                          ) : null}
-
-                          {ownershipTransfer?.canCreate ? (
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Button type="button" variant="outline" onClick={() => setTransferOpen(true)} className={motionButtonClass}>
-                                Start ownership transfer
-                              </Button>
-                              {issuedTransferLink ? (
-                                <Button type="button" variant="outline" onClick={handleCopyTransferLink}>
-                                  Copy latest handover link
-                                </Button>
-                              ) : null}
-                            </div>
-                          ) : null}
-
-                          {ownershipTransfer?.canCreate && ownershipStatus.matchMethod && ownershipStatus.matchMethod !== "user" ? (
-                            <p className="text-xs text-slate-600">
-                              Starting a transfer will also link this device claim to your signed-in account automatically.
-                            </p>
-                          ) : null}
-
-                          {ownershipTransfer?.canCancel ? (
-                            <div className="space-y-2">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <Button type="button" variant="outline" onClick={handleCopyTransferLink} disabled={!shareableTransferLink}>
-                                  Copy handover link
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  onClick={handleCancelTransfer}
-                                  disabled={transferCancelling}
-                                  className="border-rose-300 text-rose-800 hover:bg-rose-50"
-                                >
-                                  {transferCancelling ? (
-                                    <>
-                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                      Cancelling
-                                    </>
-                                  ) : (
-                                    "Cancel transfer"
-                                  )}
-                                </Button>
-                              </div>
-                              {!shareableTransferLink ? (
-                                <p className="text-xs text-slate-600">
-                                  The secure link is only available on the device that created it or in the transfer email. Cancel and create a fresh transfer if you need a new link.
-                                </p>
-                              ) : null}
-                            </div>
-                          ) : null}
-
-                          {ownershipTransfer?.state === "accepted" && ownershipTransfer?.acceptedAt ? (
-                            <p className="text-xs text-slate-600">Accepted: {formatDateTime(ownershipTransfer.acceptedAt)}</p>
-                          ) : null}
-
-                          {ownershipTransfer?.state === "expired" ? (
-                            <p className="text-xs text-slate-600">This transfer expired. Start a new one if you still need to hand over ownership.</p>
-                          ) : null}
-
-                          {ownershipTransfer?.state === "cancelled" ? (
-                            <p className="text-xs text-slate-600">This transfer was cancelled. You can create a fresh transfer when you are ready.</p>
-                          ) : null}
-
-                          {ownershipTransfer?.canAccept ? (
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Button
-                                type="button"
-                                onClick={handleAcceptTransfer}
-                                disabled={transferAccepting}
-                                className={cn("bg-slate-900 text-white hover:bg-slate-800", motionButtonClass)}
-                              >
-                                {transferAccepting ? (
-                                  <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Accepting
-                                  </>
-                                ) : (
-                                  "Accept transfer"
-                                )}
-                              </Button>
-                              <p className="text-xs text-slate-600">Sign-in is required so the new owner gets protection that follows their account.</p>
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      {!customerToken ? (
-                        <div ref={protectionSignInRef} className="space-y-3 rounded-lg border border-slate-200 p-3">
-                          <p className="text-sm font-medium text-slate-900">{signInCardTitle}</p>
-                          <p className="text-xs text-slate-600">{signInCardDescription}</p>
-                          {googleOauthUrl ? (
-                            <Button asChild variant="outline" className={motionButtonClass}>
-                              <a href={googleOauthUrl}>Continue with Google</a>
-                            </Button>
-                          ) : null}
-                          <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
-                            <div className="space-y-2">
-                              <Label>Email OTP sign-in</Label>
-                              <Input
-                                type="email"
-                                value={otpEmail}
-                                onChange={(e) => setOtpEmail(e.target.value)}
-                                placeholder="you@example.com"
-                                disabled={loading || claiming}
-                              />
-                            </div>
-                            <Button
-                              type="button"
-                              onClick={handleRequestOtp}
-                              disabled={loading || claiming || otpSending}
-                              className={cn("bg-slate-900 text-white hover:bg-slate-800", motionButtonClass)}
-                            >
-                              {otpSending ? (
-                                <>
-                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                  Sending OTP
-                                </>
-                              ) : (
-                                "Send OTP"
-                              )}
-                            </Button>
-                          </div>
-                          {otpChallengeToken ? (
-                            <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
-                              <div className="space-y-2">
-                                <Label>One-time code</Label>
-                                <Input
-                                  value={otpCode}
-                                  onChange={(e) => setOtpCode(e.target.value)}
-                                  maxLength={6}
-                                  placeholder="123456"
-                                  disabled={loading || claiming}
-                                />
-                              </div>
-                              <Button
-                                type="button"
-                                onClick={handleVerifyOtp}
-                                disabled={loading || claiming || otpVerifying}
-                                className={cn("bg-slate-900 text-white hover:bg-slate-800", motionButtonClass)}
-                              >
-                                {otpVerifying ? (
-                                  <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Verifying
-                                  </>
-                                ) : (
-                                  "Verify OTP"
-                                )}
-                              </Button>
-                            </div>
-                          ) : null}
-                          {otpChallengeToken ? (
-                            <p className="text-xs text-slate-600">OTP sent to {otpMaskedEmail || "your email"}.</p>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          <div className="flex flex-wrap items-center gap-3">
-                            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                              Signed in as {customerEmail}
-                            </div>
-                            <Button type="button" variant="outline" onClick={handleSignOut} disabled={loading} className={motionButtonClass}>
-                              Sign out
-                            </Button>
-                          </div>
-
-                          {passkeySupported ? (
-                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                              <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div>
-                                  <p className="font-medium text-slate-900">Passkey protection</p>
-                                  <p className="mt-1 text-xs text-slate-600">
-                                    {hasPasskeyTrust
-                                      ? "This session is currently backed by a passkey assertion."
-                                      : passkeyCredentials.length
-                                        ? "Use your passkey to strengthen this session before sensitive ownership actions."
-                                        : "Add a passkey to make future ownership recovery and transfer checks harder to spoof."}
-                                  </p>
-                                </div>
-                                <Badge variant="outline">
-                                  {hasPasskeyTrust ? "Passkey verified" : passkeyCredentials.length ? `${passkeyCredentials.length} enrolled` : "Optional"}
-                                </Badge>
-                              </div>
-
-                              <div className="mt-3 flex flex-wrap items-center gap-2">
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  onClick={handleRegisterPasskey}
-                                  disabled={registeringPasskey || loadingPasskeys}
-                                  className={motionButtonClass}
-                                >
-                                  {registeringPasskey ? (
-                                    <>
-                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                      Adding passkey
-                                    </>
-                                  ) : passkeyCredentials.length ? (
-                                    "Add another passkey"
-                                  ) : (
-                                    "Add passkey for stronger ownership protection"
-                                  )}
-                                </Button>
-                                {passkeyCredentials.length ? (
-                                  <Button
-                                    type="button"
-                                    onClick={handleAssertPasskey}
-                                    disabled={assertingPasskey || loadingPasskeys || hasPasskeyTrust}
-                                    className={cn("bg-slate-900 text-white hover:bg-slate-800", motionButtonClass)}
-                                  >
-                                    {assertingPasskey ? (
-                                      <>
-                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        Verifying passkey
-                                      </>
-                                    ) : hasPasskeyTrust ? (
-                                      "Passkey active"
-                                    ) : (
-                                      "Use passkey on this device"
-                                    )}
-                                  </Button>
-                                ) : null}
-                              </div>
-
-                              {loadingPasskeys ? (
-                                <p className="mt-3 text-xs text-slate-500">Loading enrolled passkeys...</p>
-                              ) : passkeyCredentials.length ? (
-                                <div className="mt-3 space-y-2">
-                                  {passkeyCredentials.map((credential) => (
-                                    <div
-                                      key={credential.id}
-                                      className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2"
-                                    >
-                                      <div className="min-w-0">
-                                        <p className="font-medium text-slate-900">{credential.label || "Passkey"}</p>
-                                        <p className="mt-1 text-xs text-slate-600">
-                                          Added {formatDateTime(credential.createdAt)}. Last used {formatDateTime(credential.lastUsedAt)}.
-                                        </p>
-                                      </div>
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => handleDeletePasskey(credential.id)}
-                                        disabled={deletingPasskeyId === credential.id}
-                                        className="text-slate-600 hover:text-rose-800"
-                                      >
-                                        {deletingPasskeyId === credential.id ? (
-                                          <>
-                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                            Removing
-                                          </>
-                                        ) : (
-                                          "Remove"
-                                        )}
-                                      </Button>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <p className="mt-3 text-xs text-slate-600">
-                                  Email sign-in still works, but passkeys give higher-assurance ownership proof on supported devices.
-                                </p>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                              Passkey protection is available on browsers and devices that support WebAuthn security keys.
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </section>
-
-                  <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-slate-900">Get help with this product</p>
-                      {verifyUxPolicy.allowFraudReport ? (
-                        <Button
-                          data-testid="verify-open-incident-drawer"
-                          type="button"
-                          variant="outline"
-                          disabled={loading || claiming}
-                          onClick={() => {
-                            setReportReference(null);
-                            setReportSupportRef(null);
-                            setReportSupportStatus(null);
-                            setReportSupportSla(null);
-                            setReportTamperSummary(null);
-                            setReportOpen(true);
-                          }}
-                          className={cn("border-rose-300 text-rose-800 hover:bg-rose-50 hover:text-rose-900", motionButtonClass)}
-                        >
-                          Report a problem
-                        </Button>
-                      ) : (
-                        <Badge variant="outline">Help requests are handled by your product team</Badge>
-                      )}
-                    </div>
-                    <p className="mt-3 text-sm leading-relaxed text-slate-700">
-                      {verifyUxPolicy.allowFraudReport
-                        ? "MSCQR adds the verification result, safety signals, and product details for you automatically."
-                        : "Help for this product is currently handled through the product owner's support channel."}
-                    </p>
-
-                    <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Track an existing help request</p>
-                      <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_auto]">
-                        <Input
-                          value={trackReference}
-                          onChange={(e) => setTrackReference(e.target.value)}
-                          placeholder="SUP-XXXXXXXXXX"
-                        />
-                        <Input
-                          value={trackEmail}
-                          onChange={(e) => setTrackEmail(e.target.value)}
-                          placeholder="Contact email (optional)"
-                        />
-                        <Button data-testid="verify-track-ticket" variant="outline" onClick={handleTrackTicket} disabled={trackingTicket || loading}>
-                          {trackingTicket ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Tracking
-                            </>
-                          ) : (
-                            "Check status"
-                          )}
-                        </Button>
-                      </div>
-
-                      {trackedTicket ? (
-                        <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-700">
-                          <p>
-                            Reference:{" "}
-                            <span className="font-semibold">
-                              {friendlyReferenceLabel(trackedTicket.referenceCode || trackReference, "Ticket")}
-                            </span>
-                          </p>
-                          <p className="font-mono text-[11px] text-slate-500">{trackedTicket.referenceCode || trackReference}</p>
-                          <p>Status: {getSupportStatusLabel(trackedTicket.status || "open")}</p>
-                          {trackedTicket.handoffStage ? <p>Current stage: {toLabel(trackedTicket.handoffStage)}</p> : null}
-                          {trackedTicket.sla?.dueAt ? (
-                            <p>
-                              SLA due: {new Date(trackedTicket.sla.dueAt).toLocaleString()}
-                              {trackedTicket.sla?.isBreached ? " (Breached)" : ""}
-                            </p>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-                  </section>
-
-                  <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <p className="text-sm font-semibold text-slate-900">Privacy note</p>
-                    <ul className="mt-3 list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-slate-700">
-                      <li>Sign-in is optional.</li>
-                      <li>Platform stores scan events to detect duplicates.</li>
-                      <li>Only coarse location context may be stored.</li>
-                      <li>No precise tracking interface is shown to customers.</li>
-                    </ul>
-                  </section>
-
-                  {(supportEmail || supportPhone || supportWebsite) && (
-                    <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700 shadow-sm">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Support Contact</p>
-                      <div className="mt-2 space-y-1">
-                        {supportEmail ? <p>Email: {supportEmail}</p> : null}
-                        {supportPhone ? <p>Phone: {supportPhone}</p> : null}
-                        {supportWebsite ? <p>Website: {supportWebsite}</p> : null}
-                      </div>
-                    </section>
-                  )}
-                </>
-              )}
-            </CardContent>
-          )}
-
-          {loading ? (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#66729242] backdrop-blur-[4px]">
-              <PremiumScanLoader />
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(15,23,42,0.08),transparent_36%),linear-gradient(180deg,#f8fafc_0%,#edf2f7_46%,#f8fafc_100%)] px-3 py-4 sm:px-6 sm:py-12">
+      <div className="mx-auto max-w-6xl space-y-5 sm:space-y-8">
+        <header className="grid gap-5 rounded-[24px] border border-slate-200/80 bg-white/90 p-4 shadow-[0_30px_100px_rgba(15,23,42,0.08)] sm:rounded-[32px] sm:p-10 lg:grid-cols-[1.6fr,0.8fr]">
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-500">
+              <span>MSCQR verification review</span>
+              <span className="h-1 w-1 rounded-full bg-slate-300" />
+              <span>{displaySessionSummary?.brandName || "Governed label verification"}</span>
             </div>
-          ) : null}
-        </Card>
-      </div>
-
-      <Dialog open={claimConfirmOpen} onOpenChange={setClaimConfirmOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Confirm protection on this device</DialogTitle>
-            <DialogDescription>
-              This will protect the item on this device first.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-            <p>
-              This protection stays tied to this device first. For stronger protection that follows your account, sign in with Google or email code.
-            </p>
-            <p className="text-xs text-slate-600">MSCQR does not show your raw IP address in the product UI.</p>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setClaimConfirmOpen(false)} disabled={claiming}>
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={handleClaimProduct}
-              disabled={claiming || loading}
-              className="bg-slate-900 text-white hover:bg-slate-800"
-            >
-              {claiming ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Protecting
-                </>
-              ) : (
-                "Confirm protection"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Start ownership transfer</DialogTitle>
-            <DialogDescription>
-              Create a short-lived secure link for the next owner. They can verify the product and accept the handover from that link.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-2">
-              <Label>Recipient email (optional)</Label>
-              <Input
-                type="email"
-                value={transferRecipientEmail}
-                onChange={(e) => setTransferRecipientEmail(e.target.value)}
-                placeholder="buyer@example.com"
-                disabled={transferSubmitting}
-              />
-              <p className="text-xs text-slate-600">
-                Leave this blank if you only want to copy the link and share it yourself.
+            <div className="space-y-3">
+              <h1 className="max-w-3xl text-2xl font-semibold tracking-tight text-slate-950 sm:text-5xl">
+                Review the MSCQR label result with clear proof boundaries.
+              </h1>
+              <p className="max-w-3xl text-sm leading-7 text-slate-600 sm:text-base">
+                MSCQR locks the label result before revealing it. Your identity and purchase answers add context for review and support, but they do not rewrite the original verification outcome.
               </p>
             </div>
-            {issuedTransferLink ? (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
-                <p className="font-medium text-slate-900">Latest handover link</p>
-                <p className="mt-2 break-all font-mono">{issuedTransferLink}</p>
+            <div className="flex flex-wrap gap-3 text-sm">
+              <Badge className="border-slate-300 bg-slate-100 text-slate-700">{displaySessionSummary?.brandName || "MSCQR"}</Badge>
+              <Badge className="border-slate-300 bg-white text-slate-700">{displaySessionSummary?.maskedCode || maskCode(currentCode)}</Badge>
+              <Badge className="border-slate-300 bg-white text-slate-700">
+                {displaySessionSummary?.entryMethod === "SIGNED_SCAN" ? "Signed scan session" : "Manual code session"}
+              </Badge>
+            </div>
+          </div>
+          <div className="rounded-[22px] border border-slate-200 bg-slate-950 p-5 text-white shadow-[0_24px_64px_rgba(15,23,42,0.18)] sm:rounded-[28px] sm:p-6">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-400">What this result is based on</div>
+            <div className="mt-4 space-y-3 text-sm leading-6 text-slate-200">
+              <p>MSCQR checks whether the label exists in the governed issuance registry, whether its lifecycle state is customer-ready, and, when available, whether a signed label token still matches the issued record.</p>
+              <p className="text-slate-400">MSCQR does not prove the physical item is impossible to counterfeit, and a manual code lookup is weaker than a signed-label check.</p>
+            </div>
+            <div className="mt-6 border-t border-white/10 pt-4 text-sm text-slate-300">
+              Session status: {session?.revealed ? "result revealed" : authReady ? "identity verified" : "identity required"}
+            </div>
+          </div>
+        </header>
+
+        <StepRail activeStep={flowStep} authenticated={authReady} />
+
+        {flowStep === "identity" ? (
+          <SectionFrame
+            eyebrow="Step 1"
+            title="Verify who is checking this product"
+            description="Sign in before MSCQR reveals the locked result. Your identity creates a customer trust context that stays separate from the label verdict."
+          >
+            {challengeRequired && !challengeCompleted ? (
+              <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+                This repeat scan needs an additional review check before it should be trusted normally. Sign in first, then MSCQR can re-check it with your verified identity.
               </div>
             ) : null}
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setTransferOpen(false)} disabled={transferSubmitting}>
-              Cancel
-            </Button>
-            {issuedTransferLink ? (
-              <Button type="button" variant="outline" onClick={handleCopyTransferLink} disabled={transferSubmitting}>
-                Copy link
-              </Button>
+            <div className="grid gap-4 lg:grid-cols-[1.15fr,0.85fr]">
+              <div className="space-y-4">
+                {socialProviders.length ? (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {socialProviders.map((provider) => (
+                      <ProviderButton key={provider.id} provider={provider} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-600">
+                    Google sign-in is enabled when configured. Email verification stays the fallback for every customer journey.
+                  </div>
+                )}
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    <Mail className="h-4 w-4" />
+                    Continue with email OTP
+                  </div>
+                  <div className="mt-4 grid gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="otp-email">Email</Label>
+                      <Input
+                        id="otp-email"
+                        value={otpEmail}
+                        onChange={(event) => setOtpEmail(event.target.value)}
+                        placeholder="you@example.com"
+                        type="email"
+                      />
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      <Button onClick={handleRequestOtp} disabled={otpSending}>
+                        {otpSending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        Send code
+                      </Button>
+                      {otpChallengeToken ? (
+                        <Badge className="border-slate-300 bg-white text-slate-700">
+                          Code sent to {otpMaskedEmail || "your inbox"}.
+                        </Badge>
+                      ) : null}
+                    </div>
+                    {otpChallengeToken ? (
+                      <div className="grid gap-4 md:grid-cols-[1fr,auto] md:items-end">
+                        <div className="grid gap-2">
+                          <Label htmlFor="otp-code">6-digit code</Label>
+                          <Input id="otp-code" value={otpCode} onChange={(event) => setOtpCode(event.target.value)} placeholder="123456" />
+                        </div>
+                        <Button onClick={handleVerifyOtp} disabled={otpVerifying}>
+                          {otpVerifying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                          Verify and continue
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <Lock className="h-4 w-4" />
+                  Why MSCQR asks you to sign in first
+                </div>
+                <ul className="mt-4 space-y-3 text-sm leading-6 text-slate-600">
+                  <li>It creates a portable customer trust record instead of treating every visit as anonymous scan count.</li>
+                  <li>It lets MSCQR separate the locked label result from purchase provenance and ownership intent.</li>
+                  <li>It makes later ownership, support, and fraud handling much more defensible.</li>
+                </ul>
+              </div>
+            </div>
+          </SectionFrame>
+        ) : null}
+
+        {authReady && flowStep === "purchase" ? (
+          <SectionFrame
+            eyebrow="Step 2"
+            title="Tell MSCQR how you obtained the product"
+            description="This is provenance evidence, not product proof. The label result was already locked when your session started."
+          >
+            {challengeRequired && !challengeCompleted ? (
+              <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                <div className="font-semibold">Additional review check required</div>
+                <div className="mt-2 leading-6">
+                  MSCQR detected a risky repeat context for this label. Re-check it with your verified identity before you rely on the result.
+                </div>
+                <div className="mt-3">
+                  <Button variant="outline" onClick={handleCompleteChallenge} disabled={challengeRetrying}>
+                    {challengeRetrying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                    Re-check with verified identity
+                  </Button>
+                </div>
+              </div>
             ) : null}
-            <Button
-              type="button"
-              onClick={handleCreateTransfer}
-              disabled={transferSubmitting}
-              className="bg-slate-900 text-white hover:bg-slate-800"
-            >
-              {transferSubmitting ? (
+            {challengeCompleted ? (
+              <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
+                MSCQR completed the additional review check
+                {challengeCompletedBy === "CUSTOMER_IDENTITY" ? " using your verified identity." : "."}
+              </div>
+            ) : null}
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <QuestionOption
+                selected={intake.purchaseChannel === "online"}
+                title="Bought online"
+                body="Marketplace, brand site, or other e-commerce purchase."
+                onClick={() => updateIntake("purchaseChannel", "online")}
+              />
+              <QuestionOption
+                selected={intake.purchaseChannel === "offline"}
+                title="Bought in store"
+                body="Retail, pharmacy, pop-up, distributor, or local reseller."
+                onClick={() => updateIntake("purchaseChannel", "offline")}
+              />
+              <QuestionOption
+                selected={intake.purchaseChannel === "gifted"}
+                title="Gifted or transferred"
+                body="Someone else gave or sold the item to you."
+                onClick={() => updateIntake("purchaseChannel", "gifted")}
+              />
+              <QuestionOption
+                selected={intake.purchaseChannel === "unknown"}
+                title="Unknown source"
+                body="You are unsure where the item originally came from."
+                onClick={() => updateIntake("purchaseChannel", "unknown")}
+              />
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Button variant="outline" onClick={() => setFlowStep("identity")} className="w-full sm:w-auto">
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Back
+              </Button>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                <Button variant="ghost" onClick={handleSkipCurrentStep} className="w-full sm:w-auto">
+                  Skip for now
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (!validateStep("purchase", intake)) {
+                      toast({ title: "Choose a purchase channel", description: "Pick how you obtained the product.", variant: "destructive" });
+                      return;
+                    }
+                    moveToNextStep();
+                  }}
+                  className="w-full sm:w-auto"
+                >
+                  Continue
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </SectionFrame>
+        ) : null}
+
+        {authReady && flowStep === "source" ? (
+          <SectionFrame
+            eyebrow="Step 3"
+            title="Capture seller or source details"
+            description="MSCQR uses this as investigation context. It does not change the locked label result."
+          >
+            <div className="grid gap-4 md:grid-cols-2">
+              {intake.purchaseChannel === "online" ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Creating
+                  <div className="grid gap-2">
+                    <Label htmlFor="platformName">Platform or marketplace</Label>
+                    <Input id="platformName" value={intake.platformName || ""} onChange={(event) => updateIntake("platformName", event.target.value)} placeholder="Amazon, eBay, direct brand site…" />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="sellerName">Seller name</Label>
+                    <Input id="sellerName" value={intake.sellerName || ""} onChange={(event) => updateIntake("sellerName", event.target.value)} placeholder="Seller or storefront name" />
+                  </div>
+                  <div className="grid gap-2 md:col-span-2">
+                    <Label htmlFor="listingUrl">Listing URL</Label>
+                    <Input id="listingUrl" value={intake.listingUrl || ""} onChange={(event) => updateIntake("listingUrl", event.target.value)} placeholder="https://…" />
+                  </div>
+                  <div className="grid gap-2 md:col-span-2">
+                    <Label htmlFor="orderReference">Order reference</Label>
+                    <Input id="orderReference" value={intake.orderReference || ""} onChange={(event) => updateIntake("orderReference", event.target.value)} placeholder="Order number or receipt reference" />
+                  </div>
+                </>
+              ) : intake.purchaseChannel === "offline" ? (
+                <>
+                  <div className="grid gap-2">
+                    <Label htmlFor="storeName">Store name</Label>
+                    <Input id="storeName" value={intake.storeName || ""} onChange={(event) => updateIntake("storeName", event.target.value)} placeholder="Retailer or location" />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="purchaseCity">City</Label>
+                    <Input id="purchaseCity" value={intake.purchaseCity || ""} onChange={(event) => updateIntake("purchaseCity", event.target.value)} placeholder="City" />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="purchaseCountry">Country</Label>
+                    <Input id="purchaseCountry" value={intake.purchaseCountry || ""} onChange={(event) => updateIntake("purchaseCountry", event.target.value)} placeholder="Country" />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="purchaseDate">Approximate purchase date</Label>
+                    <Input id="purchaseDate" type="date" value={intake.purchaseDate || ""} onChange={(event) => updateIntake("purchaseDate", event.target.value)} />
+                  </div>
                 </>
               ) : (
-                "Create handover link"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Sheet open={reportOpen} onOpenChange={handleReportDialogOpenChange}>
-        <SheetContent
-          data-testid="verify-report-sheet"
-          side="right"
-          className="w-full border-l-[#8d9db65f] bg-[linear-gradient(165deg,#fff_0%,#f9fbfd_36%,#f1e3dd_100%)] p-0 sm:max-w-[640px]"
-        >
-          <div className="flex h-full flex-col">
-            <SheetHeader className="border-b border-[#8d9db63f] bg-white/70 px-6 py-5 text-left">
-              <SheetTitle className="text-[#4f5b75]">Report a problem with this product</SheetTitle>
-              <SheetDescription>
-                Tell us what looked wrong. MSCQR adds the verification details for you automatically.
-              </SheetDescription>
-            </SheetHeader>
-
-            <div className="flex-1 overflow-y-auto px-6 py-5">
-              {reportReference ? (
-                <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-                  <p>
-                    Report submitted successfully. Case reference:{" "}
-                    <span className="font-semibold">{friendlyReferenceLabel(reportReference, "Case")}</span>
-                  </p>
-                  <p className="font-mono text-xs text-emerald-950">{reportReference}</p>
-                  {reportSupportRef ? (
-                    <div className="rounded-md border border-emerald-300 bg-white/80 p-3 text-xs text-emerald-950">
-                      <p>
-                        Support ticket: <span className="font-semibold">{friendlyReferenceLabel(reportSupportRef, "Ticket")}</span>
-                      </p>
-                      <p data-testid="verify-report-support-ticket-raw" className="font-mono text-[11px]">{reportSupportRef}</p>
-                      {reportSupportStatus ? <p>Status: {toLabel(reportSupportStatus)}</p> : null}
-                      {reportSupportSla ? <p>SLA due by: {reportSupportSla}</p> : null}
-                    </div>
-                  ) : null}
-                  {reportTamperSummary ? (
-                    <p className="text-xs text-emerald-950">Attachment tamper checks: {reportTamperSummary}</p>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Issue type</Label>
-                    <Select value={reportType} onValueChange={setReportType}>
-                      <SelectTrigger data-testid="verify-report-type">
-                        <SelectValue placeholder="Select issue type" />
+                <>
+                  <div className="grid gap-2 md:col-span-2">
+                    <Label htmlFor="sellerNameAlt">Who gave or sold it to you?</Label>
+                    <Input id="sellerNameAlt" value={intake.sellerName || ""} onChange={(event) => updateIntake("sellerName", event.target.value)} placeholder="Friend, reseller, gift source, or unknown" />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="purchaseDateUnknown">Approximate date</Label>
+                    <Input id="purchaseDateUnknown" type="date" value={intake.purchaseDate || ""} onChange={(event) => updateIntake("purchaseDate", event.target.value)} />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="sourceCategory">Context</Label>
+                    <Select value={intake.sourceCategory || "unknown"} onValueChange={(value) => updateIntake("sourceCategory", value as CustomerTrustIntake["sourceCategory"])}>
+                      <SelectTrigger id="sourceCategory">
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {INCIDENT_TYPE_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
+                        <SelectItem value="gift">Gift</SelectItem>
+                        <SelectItem value="reseller">Reseller</SelectItem>
+                        <SelectItem value="unknown">Unknown</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-
-                  <div className="space-y-2">
-                    <Label>Description</Label>
-                    <Textarea
-                      data-testid="verify-report-description"
-                      value={reportDescription}
-                      onChange={(e) => setReportDescription(e.target.value)}
-                      placeholder="Describe what looked wrong or unexpected."
-                      rows={4}
-                      maxLength={2000}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Email (optional)</Label>
-                    <Input
-                      data-testid="verify-report-email"
-                      type="email"
-                      value={reportEmail}
-                      onChange={(e) => setReportEmail(e.target.value)}
-                      placeholder="you@example.com"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Attachment (optional)</Label>
-                    <Input
-                      type="file"
-                      multiple
-                      accept="image/png,image/jpeg,image/jpg,image/webp"
-                      onChange={(e) => setReportPhotos(Array.from(e.target.files || []))}
-                    />
-                    <p className="text-xs text-slate-500">You can upload up to 4 images.</p>
-                  </div>
-                </div>
+                </>
               )}
             </div>
-
-            <SheetFooter className="border-t border-[#8d9db63f] bg-white/75 px-6 py-4">
-              <Button type="button" variant="outline" onClick={() => setReportOpen(false)} disabled={loading || reporting}>
-                {reportReference ? "Close" : "Cancel"}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Button variant="outline" onClick={moveToPreviousStep} className="w-full sm:w-auto">
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Back
               </Button>
-              {!reportReference ? (
-                <Button
-                  data-testid="verify-report-submit"
-                  type="button"
-                  onClick={handleSubmitReport}
-                  disabled={loading || reporting}
-                  className={cn("bg-rose-900 text-white hover:bg-rose-950", motionButtonClass)}
-                >
-                  {reporting ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Submitting
-                    </>
-                  ) : (
-                    "Send help request"
-                  )}
+              <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                <Button variant="ghost" onClick={handleSkipCurrentStep} className="w-full sm:w-auto">
+                  Skip for now
                 </Button>
+                <Button
+                  onClick={() => {
+                    if (!validateStep("source", intake)) {
+                      toast({ title: "Add source details", description: "MSCQR needs enough purchase-source context to continue.", variant: "destructive" });
+                      return;
+                    }
+                    moveToNextStep();
+                  }}
+                  className="w-full sm:w-auto"
+                >
+                  Continue
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </SectionFrame>
+        ) : null}
+
+        {authReady && flowStep === "context" ? (
+          <SectionFrame
+            eyebrow="Step 4"
+            title="Describe the product condition you saw"
+            description="These answers become customer trust and incident evidence. They do not change the label result already locked by MSCQR."
+          >
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="packagingState">Packaging state</Label>
+                <Select value={intake.packagingState || "sealed"} onValueChange={(value) => updateIntake("packagingState", value as CustomerTrustIntake["packagingState"])}>
+                  <SelectTrigger id="packagingState">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sealed">Sealed</SelectItem>
+                    <SelectItem value="opened">Opened</SelectItem>
+                    <SelectItem value="damaged">Damaged</SelectItem>
+                    <SelectItem value="unsure">Unsure</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="packagingConcern">How concerning did it look?</Label>
+                <Select value={intake.packagingConcern || "none"} onValueChange={(value) => updateIntake("packagingConcern", value as CustomerTrustIntake["packagingConcern"])}>
+                  <SelectTrigger id="packagingConcern">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No concern</SelectItem>
+                    <SelectItem value="minor">Minor concern</SelectItem>
+                    <SelectItem value="major">Major concern</SelectItem>
+                    <SelectItem value="unsure">Unsure</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2 md:col-span-2">
+                <Label htmlFor="notes">Anything unusual?</Label>
+                <Textarea
+                  id="notes"
+                  value={intake.notes || ""}
+                  onChange={(event) => updateIntake("notes", event.target.value)}
+                  placeholder="Example: seal looked broken, print quality looked off, product felt different, or nothing unusual."
+                  rows={5}
+                />
+              </div>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Button variant="outline" onClick={moveToPreviousStep} className="w-full sm:w-auto">
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Back
+              </Button>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                <Button variant="ghost" onClick={handleSkipCurrentStep} className="w-full sm:w-auto">
+                  Skip for now
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (!validateStep("context", intake)) {
+                      toast({ title: "Add product context", description: "Select the packaging state and concern level.", variant: "destructive" });
+                      return;
+                    }
+                    moveToNextStep();
+                  }}
+                  className="w-full sm:w-auto"
+                >
+                  Continue
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </SectionFrame>
+        ) : null}
+
+        {authReady && flowStep === "concern" ? (
+          <SectionFrame
+            eyebrow="Step 5"
+            title="Why did you choose to scan this item?"
+            description="This creates fraud and support context. It helps MSCQR interpret the customer journey without altering the label verdict."
+          >
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+              {[
+                ["routine_check", "Routine check"],
+                ["new_seller", "New seller"],
+                ["pricing_concern", "Pricing concern"],
+                ["packaging_concern", "Packaging concern"],
+                ["authenticity_concern", "Authenticity concern"],
+              ].map(([value, label]) => (
+                <QuestionOption
+                  key={value}
+                  selected={intake.scanReason === value}
+                  title={label}
+                  body="Capture the motive for this verification."
+                  onClick={() => updateIntake("scanReason", value as CustomerTrustIntake["scanReason"])}
+                />
+              ))}
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Button variant="outline" onClick={moveToPreviousStep} className="w-full sm:w-auto">
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Back
+              </Button>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                <Button variant="ghost" onClick={handleSkipCurrentStep} className="w-full sm:w-auto">
+                  Skip for now
+                </Button>
+                <Button onClick={moveToNextStep} className="w-full sm:w-auto">
+                  Continue
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </SectionFrame>
+        ) : null}
+
+        {authReady && flowStep === "intent" ? (
+          <SectionFrame
+            eyebrow="Step 6"
+            title="Choose the next action lane, then reveal the result"
+            description="MSCQR will keep your trust intake separate from the locked label result. Once you submit this step, the result is revealed together with your provenance record."
+          >
+            <div className="grid gap-6 lg:grid-cols-[0.95fr,1.05fr]">
+              <div className="space-y-4">
+                <div className="grid gap-3">
+                  {[
+                    ["verify_only", "Only verify this item"],
+                    ["claim_ownership", "Verify and claim ownership"],
+                    ["report_concern", "Reveal and report a concern"],
+                    ["contact_support", "Reveal and contact support"],
+                  ].map(([value, label]) => (
+                    <QuestionOption
+                      key={value}
+                      selected={intake.ownershipIntent === value}
+                      title={label}
+                      body="This changes the recommended next actions after reveal, not the locked label result."
+                      onClick={() => updateIntake("ownershipIntent", value as CustomerTrustIntake["ownershipIntent"])}
+                    />
+                  ))}
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
+                  Your answers create trust evidence and incident context only. They do not affect the verification basis, replacement status, or the label decision already locked by MSCQR.
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="text-sm font-semibold text-slate-900">Review what MSCQR will record</div>
+                <div className="mt-4 grid gap-3 text-sm">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="font-medium text-slate-900">Purchase channel</div>
+                    <div className="mt-1 text-slate-600">{intake.purchaseChannel}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="font-medium text-slate-900">Source detail</div>
+                    <div className="mt-1 text-slate-600">
+                      {intake.purchaseChannel === "online"
+                        ? `${intake.platformName || "No platform"} · ${intake.sellerName || "No seller"}`
+                        : intake.purchaseChannel === "offline"
+                          ? `${intake.storeName || "No store"} · ${intake.purchaseCity || "No city"}`
+                          : intake.sellerName || "Gift / unknown source"}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="font-medium text-slate-900">Condition observed</div>
+                    <div className="mt-1 text-slate-600">{intake.packagingState} · {intake.packagingConcern} concern</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="font-medium text-slate-900">Verification reason</div>
+                    <div className="mt-1 text-slate-600">{intake.scanReason.replace(/_/g, " ")}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="font-medium text-slate-900">Next action intent</div>
+                    <div className="mt-1 text-slate-600">{intake.ownershipIntent.replace(/_/g, " ")}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Button variant="outline" onClick={moveToPreviousStep} className="w-full sm:w-auto">
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Back
+              </Button>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                <Button variant="ghost" onClick={handleSkipCurrentStep} className="w-full sm:w-auto" disabled={!canReveal || submittingReveal}>
+                  Skip questions and reveal
+                </Button>
+                <Button onClick={() => void handleSubmitIntakeAndReveal()} disabled={!canReveal || submittingReveal} className="w-full sm:w-auto">
+                  {submittingReveal ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                  Submit and reveal result
+                </Button>
+              </div>
+            </div>
+          </SectionFrame>
+        ) : null}
+
+        {flowStep === "result" && result ? (
+          <div className="grid gap-6 xl:grid-cols-[1.15fr,0.85fr]">
+            <SectionFrame
+              eyebrow="Locked label result"
+              title={resultTitle}
+              description="This result was locked from the QR token or code and lifecycle state before MSCQR collected your trust answers."
+            >
+              <div className={`rounded-[26px] border p-5 ${resultTone}`}>
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-full bg-white/70 p-2">{stepMeta.icon}</div>
+                    <div>
+                      <div className="text-lg font-semibold">{result.message || resultTitle}</div>
+                      <div className="mt-1 text-sm">{reasonList[0]}</div>
+                    </div>
+                  </div>
+                  <Badge className="border-current/20 bg-white/60 text-current">{resultBadge}</Badge>
+                </div>
+              </div>
+
+              {result.challenge?.required || result.challenge?.completed || result.warningMessage ? (
+                <div
+                  className={`rounded-2xl border p-5 ${
+                    result.challenge?.completed
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-950"
+                      : "border-amber-200 bg-amber-50 text-amber-950"
+                  }`}
+                >
+                  <div className="text-sm font-semibold">
+                    {result.challenge?.required
+                      ? "Additional review is required for this repeat scan"
+                      : result.challenge?.completed
+                        ? "Additional review check completed"
+                        : "Verification caution"}
+                  </div>
+                  <div className="mt-2 space-y-2 text-sm leading-6">
+                    {result.challenge?.required ? (
+                      <p>{result.challenge.reason || "MSCQR requires an additional challenge before this repeat scan should be trusted."}</p>
+                    ) : null}
+                    {result.challenge?.completed ? (
+                      <p>
+                        MSCQR re-checked this repeat scan
+                        {result.challenge.completedBy === "CUSTOMER_IDENTITY" ? " with a verified customer identity." : "."}
+                      </p>
+                    ) : null}
+                    {result.warningMessage ? <p>{result.warningMessage}</p> : null}
+                  </div>
+                  {result.challenge?.required ? (
+                    <div className="mt-4">
+                      {authReady ? (
+                        <Button variant="outline" onClick={handleCompleteChallenge} disabled={challengeRetrying}>
+                          {challengeRetrying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                          Re-check with verified identity
+                        </Button>
+                      ) : (
+                        <Button variant="outline" onClick={() => setFlowStep("identity")}>
+                          <ArrowLeft className="mr-2 h-4 w-4" />
+                          Return to sign-in
+                        </Button>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
-            </SheetFooter>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                  <div className="text-sm font-semibold text-slate-900">What MSCQR checked</div>
+                  <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+                    {checkedItems.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                  <div className="text-sm font-semibold text-slate-900">What this result does not prove</div>
+                  <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+                    <li>MSCQR does not prove the physical item is impossible to counterfeit.</li>
+                    <li>MSCQR does not guarantee that a copied label was never reused elsewhere.</li>
+                    <li>Your answers add purchase trust context, not product-bound cryptographic proof.</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                <MetricCard title="Verification basis" value={proofTitle} icon={<Lock className="h-4 w-4" />} />
+                <MetricCard title="Requester context" value={trustLevelLabel} icon={<ShieldCheck className="h-4 w-4" />} />
+                <MetricCard
+                  title="Controlled-print status"
+                  value={toLabel(result.printTrustState || "Unknown")}
+                  icon={<CheckCircle2 className="h-4 w-4" />}
+                />
+                <MetricCard
+                  title="Label status"
+                  value={toLabel(result.labelState || result.status || "Unknown")}
+                  icon={<CircleDashed className="h-4 w-4" />}
+                />
+                <MetricCard
+                  title="Replacement state"
+                  value={result.replacementStatus ? result.replacementStatus.replace(/_/g, " ") : "None"}
+                  icon={<ArrowRight className="h-4 w-4" />}
+                />
+                <MetricCard
+                  title="Risk review state"
+                  value={result.riskDisposition ? result.riskDisposition.replace(/_/g, " ") : "Clear"}
+                  icon={<AlertTriangle className="h-4 w-4" />}
+                />
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="text-sm font-semibold text-slate-900">Verification notes</div>
+                <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+                  {reasonList.length ? (
+                    reasonList.map((reason) => <li key={reason}>{reason}</li>)
+                  ) : (
+                    <li>No additional verification notes were recorded for this result.</li>
+                  )}
+                </ul>
+              </div>
+            </SectionFrame>
+
+            <div className="space-y-6">
+              <SectionFrame
+                eyebrow="Your purchase context"
+                title="Customer provenance trust"
+                description="These details are now attached to the verification session as customer trust evidence."
+              >
+                <div className="grid gap-4 text-sm">
+                  <ContextRow icon={<ShoppingBag className="h-4 w-4" />} label="Purchase channel" value={intake.purchaseChannel} />
+                  <ContextRow
+                    icon={<Store className="h-4 w-4" />}
+                    label="Seller or source"
+                    value={
+                      intake.purchaseChannel === "online"
+                        ? `${intake.platformName || "Unknown platform"} · ${intake.sellerName || "Unknown seller"}`
+                        : intake.purchaseChannel === "offline"
+                          ? `${intake.storeName || "Unknown store"} · ${intake.purchaseCity || "Unknown city"}`
+                          : intake.sellerName || "Gift / unknown source"
+                    }
+                  />
+                  <ContextRow icon={<MapPin className="h-4 w-4" />} label="Purchase country" value={intake.purchaseCountry || "Not provided"} />
+                  <ContextRow
+                    icon={<AlertTriangle className="h-4 w-4" />}
+                    label="Scan reason"
+                    value={intake.scanReason.replace(/_/g, " ")}
+                  />
+                  <ContextRow icon={<ShieldCheck className="h-4 w-4" />} label="Intent" value={intake.ownershipIntent.replace(/_/g, " ")} />
+                </div>
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
+                  Your answers did not change the label verdict. They help MSCQR interpret this purchase context, strengthen later ownership actions, and escalate suspicious cases intelligently.
+                </div>
+              </SectionFrame>
+
+              <SectionFrame
+                eyebrow="Next actions"
+                title="What you can do now"
+                description="Choose the operational path that matches your intent."
+              >
+                <div className="grid gap-3">
+                  {intake.ownershipIntent === "claim_ownership" ? (
+                    <Button onClick={handleClaimOwnership} disabled={claiming}>
+                      {claiming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                      Claim ownership
+                    </Button>
+                  ) : null}
+
+                  {String(searchParams.get("transfer") || "").trim() ? (
+                    <Button variant="outline" onClick={handleAcceptTransfer} disabled={!authReady || acceptingTransfer}>
+                      {acceptingTransfer ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
+                      Accept ownership transfer
+                    </Button>
+                  ) : null}
+
+                  {passkeySupported ? (
+                    <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="text-sm font-semibold text-slate-900">Stronger ownership protection</div>
+                      <div className="text-sm leading-6 text-slate-600">Passkeys do not change this QR’s verdict. They strengthen future ownership and transfer actions for this account.</div>
+                      <div className="flex flex-wrap gap-3">
+                        <Button variant="outline" onClick={handleRegisterPasskey} disabled={registeringPasskey}>
+                          {registeringPasskey ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <KeyRound className="mr-2 h-4 w-4" />}
+                          Add passkey
+                        </Button>
+                        <Button variant="outline" onClick={handleAssertPasskey} disabled={assertingPasskey || !passkeyCredentials.length}>
+                          {assertingPasskey ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <KeyRound className="mr-2 h-4 w-4" />}
+                          Verify passkey
+                        </Button>
+                      </div>
+                      {loadingPasskeys ? (
+                        <div className="text-sm text-slate-500">Loading passkeys…</div>
+                      ) : passkeyCredentials.length ? (
+                        <div className="grid gap-2">
+                          {passkeyCredentials.map((credential) => (
+                            <div key={credential.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm">
+                              <div>
+                                <div className="font-medium text-slate-900">{credential.label}</div>
+                                <div className="text-slate-500">Last used: {formatDateTime(credential.lastUsedAt || null)}</div>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeletePasskey(credential.id)}
+                                disabled={deletingPasskeyId === credential.id}
+                              >
+                                {deletingPasskeyId === credential.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Remove"}
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-slate-500">No customer passkeys enrolled yet.</div>
+                      )}
+                    </div>
+                  ) : null}
+
+                  <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4">
+                    <Label htmlFor="report-reason">Report a concern to MSCQR</Label>
+                    <Select value={reportReason} onValueChange={setReportReason}>
+                      <SelectTrigger id="report-reason">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="counterfeit_suspected">Counterfeit suspected</SelectItem>
+                        <SelectItem value="duplicate_scan">Duplicate scan</SelectItem>
+                        <SelectItem value="tampered_label">Tampered label</SelectItem>
+                        <SelectItem value="wrong_product">Wrong product</SelectItem>
+                        <SelectItem value="other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button variant="outline" onClick={handleReportConcern} disabled={reporting}>
+                      {reporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <AlertTriangle className="mr-2 h-4 w-4" />}
+                      Report concern
+                    </Button>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
+                    <div className="font-semibold text-slate-900">Contact support</div>
+                    <div className="mt-2 space-y-1">
+                      <div>{result.licensee?.supportEmail || "support@mscqr.com"}</div>
+                      {result.licensee?.supportPhone ? <div>{result.licensee.supportPhone}</div> : null}
+                      {result.licensee?.website ? (
+                        <a className="inline-flex items-center gap-1 text-slate-900 underline" href={result.licensee.website} target="_blank" rel="noreferrer">
+                          Visit brand site
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              </SectionFrame>
+            </div>
           </div>
-        </SheetContent>
-      </Sheet>
+        ) : null}
+
+        <div className="flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+          <Link to="/verify" className="inline-flex items-center gap-2 hover:text-slate-900">
+            <ArrowLeft className="h-4 w-4" />
+            Verify another code
+          </Link>
+          <Link to="/trust" className="inline-flex items-center gap-2 hover:text-slate-900">
+            Read MSCQR trust model
+            <ExternalLink className="h-4 w-4" />
+          </Link>
+        </div>
+
+        {!authReady && flowStep !== "identity" ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Your verification session is still locked, but result reveal is waiting for sign-in. Return to the identity step if you need to finish authentication.
+          </div>
+        ) : null}
+
+        {authReady ? (
+          <div className="flex items-center justify-end">
+            <Button
+              variant="ghost"
+              onClick={async () => {
+                await apiClient.logoutCustomerVerifySession();
+                clearLegacyStoredCustomerSession();
+                setCustomerAuthenticated(false);
+                setSession((prev) => (prev ? { ...prev, authState: "PENDING" } : prev));
+                setPasskeyCredentials([]);
+                setFlowStep("identity");
+              }}
+            >
+              Sign out
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function MetricCard({
+  title,
+  value,
+  icon,
+  mono = false,
+}: {
+  title: string;
+  value: string;
+  icon: React.ReactNode;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
+        {icon}
+        {title}
+      </div>
+      <div className={`mt-2 text-sm font-semibold text-slate-950 ${mono ? "font-mono text-[13px]" : ""}`}>{value}</div>
+    </div>
+  );
+}
+
+function ContextRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+      <div className="mt-0.5 text-slate-500">{icon}</div>
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</div>
+        <div className="mt-1 text-sm font-medium text-slate-900">{value}</div>
+      </div>
     </div>
   );
 }

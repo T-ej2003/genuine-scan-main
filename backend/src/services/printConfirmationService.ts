@@ -276,6 +276,7 @@ export const confirmPrintItemDispatch = async (params: {
       status: QRStatus.PRINTED,
       printedAt: now,
       printedByUserId: params.actorUserId,
+      customerVerifiableAt: now,
     },
   });
 

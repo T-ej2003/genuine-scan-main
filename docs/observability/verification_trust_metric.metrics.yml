@@ -1,0 +1,76 @@
+schemaVersion: 1
+sourceEvent: verification_trust_metric
+description: >
+  Privacy-minimized metrics extraction mapping for MSCQR trust-critical verification
+  events. These rules are templates for the production log/metrics pipeline; they do
+  not assume a specific vendor.
+metrics:
+  - name: mscqr_verification_events_total
+    type: counter
+    filter:
+      metric: verification_trust_state
+    labels:
+      proofTier: proofTier
+      publicOutcome: publicOutcome
+      riskDisposition: riskDisposition
+      printTrustState: printTrustState
+      issuanceMode: issuanceMode
+      replayState: replayState
+      signingMode: signingMode
+      signingProvider: signingProvider
+      limitedProvenance: limitedProvenance
+      breakGlassUsage: breakGlassUsage
+  - name: mscqr_verification_review_required_total
+    type: counter
+    filter:
+      metric: verification_trust_state
+      publicOutcome: REVIEW_REQUIRED
+    labels:
+      replayState: replayState
+      signingMode: signingMode
+      limitedProvenance: limitedProvenance
+  - name: mscqr_verification_changed_context_repeat_total
+    type: counter
+    filter:
+      metric: verification_trust_state
+      replayState:
+        - CHANGED_CONTEXT_REPEAT
+        - RAPID_CHANGED_CONTEXT_REPEAT
+    labels:
+      proofTier: proofTier
+      challengeRequired: challengeRequired
+      challengeCompleted: challengeCompleted
+  - name: mscqr_verification_limited_provenance_total
+    type: counter
+    filter:
+      metric: verification_trust_state
+      limitedProvenance: true
+    labels:
+      printTrustState: printTrustState
+      issuanceMode: issuanceMode
+  - name: mscqr_verification_challenge_required_total
+    type: counter
+    filter:
+      metric: verification_trust_state
+      challengeRequired: true
+    labels:
+      replayState: replayState
+      proofTier: proofTier
+  - name: mscqr_verification_challenge_completed_total
+    type: counter
+    filter:
+      metric: verification_trust_state
+      challengeCompleted: true
+    labels:
+      challengeCompletedBy: challengeCompletedBy
+      replayState: replayState
+  - name: mscqr_break_glass_generate_total
+    type: counter
+    filter:
+      metric: verification_break_glass_generate
+    labels:
+      quantityBucket: quantityBucket
+privacyNotes:
+  - Use hashed references only; do not promote decisionRef, qrRef, licenseeRef, batchRef, or actorRef into high-cardinality metric labels.
+  - Do not derive metrics from sanitized metadata fields that may still be tenant-specific unless cardinality review has been completed.
+  - Keep customer identity and session-bound values out of metrics; use audit logs and forensic exports for deep investigation.

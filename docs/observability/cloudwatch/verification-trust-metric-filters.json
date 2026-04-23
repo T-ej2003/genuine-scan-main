@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "logGroupName": "/mscqr/backend/application",
+  "filters": [
+    {
+      "name": "mscqr-trust-replay-review-required",
+      "filterPattern": "{ $.metric = \"verification_trust_state\" && $.publicOutcome = \"REVIEW_REQUIRED\" }",
+      "metricNamespace": "MSCQR/Trust",
+      "metricName": "ReplayReviewRequiredCount",
+      "metricValue": "1"
+    },
+    {
+      "name": "mscqr-trust-changed-context-repeat",
+      "filterPattern": "{ $.metric = \"verification_trust_state\" && ($.replayState = \"CHANGED_CONTEXT_REPEAT\" || $.replayState = \"RAPID_CHANGED_CONTEXT_REPEAT\") }",
+      "metricNamespace": "MSCQR/Trust",
+      "metricName": "ChangedContextRepeatCount",
+      "metricValue": "1"
+    },
+    {
+      "name": "mscqr-trust-limited-provenance",
+      "filterPattern": "{ $.metric = \"verification_trust_state\" && $.limitedProvenance = true }",
+      "metricNamespace": "MSCQR/Trust",
+      "metricName": "LimitedProvenanceCount",
+      "metricValue": "1"
+    },
+    {
+      "name": "mscqr-trust-challenge-required",
+      "filterPattern": "{ $.metric = \"verification_trust_state\" && $.challengeRequired = true }",
+      "metricNamespace": "MSCQR/Trust",
+      "metricName": "ChallengeRequiredCount",
+      "metricValue": "1"
+    },
+    {
+      "name": "mscqr-trust-challenge-completed",
+      "filterPattern": "{ $.metric = \"verification_trust_state\" && $.challengeCompleted = true }",
+      "metricNamespace": "MSCQR/Trust",
+      "metricName": "ChallengeCompletedCount",
+      "metricValue": "1"
+    },
+    {
+      "name": "mscqr-trust-break-glass-usage",
+      "filterPattern": "{ $.metric = \"verification_break_glass_generate\" }",
+      "metricNamespace": "MSCQR/Trust",
+      "metricName": "BreakGlassGenerateCount",
+      "metricValue": "1"
+    },
+    {
+      "name": "mscqr-trust-signing-fallback",
+      "filterPattern": "{ $.metric = \"verification_trust_state\" && $.signingMode = \"hmac\" }",
+      "metricNamespace": "MSCQR/Trust",
+      "metricName": "SigningFallbackCount",
+      "metricValue": "1"
+    }
+  ]
+}
+

@@ -34,6 +34,7 @@ ENV NODE_ENV=production
 ENV PORT=4000
 ENV GIT_SHA=${GIT_SHA}
 ENV RUN_DB_MIGRATIONS_ON_START=false
+LABEL org.opencontainers.image.revision=${GIT_SHA}
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*

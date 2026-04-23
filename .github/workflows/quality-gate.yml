@@ -7,27 +7,17 @@ on:
       - main
       - codex/**
 
+concurrency:
+  group: quality-gate-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   security:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Backend security guardrails
-        run: npm run check:security-guardrails
-
-      - name: Baseline secret-pattern guard
-        run: node scripts/check-baseline-secret-patterns.mjs
-
-  frontend:
-    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -35,30 +25,62 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
 
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Strict typecheck
-        run: npm run typecheck
+      - name: Baseline secret-pattern guard
+        run: node scripts/check-baseline-secret-patterns.mjs
 
-      - name: Code-size budgets
-        run: npm run check:budgets
+      - name: Dependency audit gate
+        run: npm run check:dependency-audit
 
-      - name: Unit tests
-        run: npm test
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
 
-      - name: Production build
-        run: npm run build
+      - name: Security and release guardrails
+        env:
+          REQUIRE_RELEASE_EVIDENCE_REFS: ${{ github.ref == 'refs/heads/main' }}
+          PROVENANCE_BACKFILL_EVIDENCE_REF: ${{ vars.RC_PROVENANCE_BACKFILL_EVIDENCE_REF }}
+          SECRET_ROTATION_EVIDENCE_REF: ${{ vars.RC_SECRET_ROTATION_EVIDENCE_REF }}
+          INCIDENT_DRILL_EVIDENCE_REF: ${{ vars.RC_INCIDENT_DRILL_EVIDENCE_REF }}
+        run: npm run verify:ci:security
 
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # TODO(ci-lint): flip ENFORCE_LINT_CHANGED=true and fold this back into verify:ci:frontend
+      # once the existing ESLint debt no longer relies on report-only mode for changed-file checks.
+      - name: Lint changed files report
+        env:
+          ENFORCE_LINT_CHANGED: ${{ vars.ENFORCE_LINT_CHANGED }}
+        run: npm run report:lint:changed
+
+      - name: Frontend quality contract
+        run: npm run verify:ci:frontend
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
-
       - name: Playwright smoke suite
-        run: npm run test:e2e
+        run: npm run verify:ci:frontend:e2e
 
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -71,21 +93,20 @@ jobs:
       - name: Install backend dependencies
         run: npm --prefix backend ci
 
-      - name: Backend build
-        run: npm --prefix backend run build
-
-      - name: Backend test suite
-        run: npm --prefix backend test
+      - name: Backend quality contract
+        run: npm run verify:ci:backend
 
   docker:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      - name: Docker compose build
-        env:
-          MINIO_ROOT_USER: ci-minio-user
-          MINIO_ROOT_PASSWORD: ci-minio-password
-          OBJECT_STORAGE_ACCESS_KEY: ci-object-user
-          OBJECT_STORAGE_SECRET_KEY: ci-object-password
-        run: docker compose build backend frontend
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker verification contract
+        run: npm run verify:ci:docker

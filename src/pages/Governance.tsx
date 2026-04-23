@@ -239,6 +239,15 @@ export default function Governance() {
       toast({ title: "Incident ID required", description: "Enter an incident ID to export the evidence bundle.", variant: "destructive" });
       return;
     }
+    const matchingComplianceJob = complianceJobs.find((job) => String(job?.id || "") === incidentId);
+    if (matchingComplianceJob) {
+      toast({
+        title: "Incident ID required",
+        description: "That ID is a compliance pack job. Enter an incident ID from Incident Response.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setExportingBundle(true);
     try {
@@ -253,6 +262,14 @@ export default function Governance() {
 
   const runCompliancePack = async () => {
     const licenseeId = resolveLicenseeId();
+    if (canSelectLicensee && !licenseeId) {
+      toast({
+        title: "Licensee scope required",
+        description: "Select a licensee before generating a signed compliance pack.",
+        variant: "destructive",
+      });
+      return;
+    }
     setCompliancePackLoading(true);
     try {
       const response = await apiClient.runCompliancePack({
@@ -284,10 +301,16 @@ export default function Governance() {
     }
   };
 
-  const downloadCompliancePack = async (jobId: string) => {
+  const downloadCompliancePack = async (job: any) => {
     try {
+      const jobId = String(job?.id || "").trim();
+      if (!jobId) {
+        toast({ title: "Download failed", description: "Compliance pack job ID is missing.", variant: "destructive" });
+        return;
+      }
       const blob = await apiClient.downloadCompliancePackJob(jobId);
-      saveAs(blob, `compliance-pack-${jobId}.zip`);
+      const safeFileName = String(job?.fileName || "").trim() || `compliance-pack-${jobId}.zip`;
+      saveAs(blob, safeFileName);
     } catch (error: any) {
       toast({ title: "Download failed", description: error?.message || "Could not download compliance pack.", variant: "destructive" });
     }
@@ -570,7 +593,7 @@ export default function Governance() {
                   <Button
                     variant="outline"
                     disabled={job.status !== "COMPLETED"}
-                    onClick={() => downloadCompliancePack(job.id)}
+                    onClick={() => downloadCompliancePack(job)}
                   >
                     <FileDown className="mr-2 h-4 w-4" />
                     Download

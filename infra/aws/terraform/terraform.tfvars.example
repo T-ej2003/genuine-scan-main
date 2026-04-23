@@ -1,0 +1,68 @@
+aws_region                 = "eu-west-2"
+name_prefix                = "mscqr-prod"
+cluster_name               = "mscqr-prod"
+vpc_id                     = "vpc-xxxxxxxx"
+private_subnet_ids         = ["subnet-aaaaaaa", "subnet-bbbbbbb"]
+service_security_group_ids = ["sg-xxxxxxxx"]
+
+backend_execution_role_arn = "arn:aws:iam::123456789012:role/mscqr-backend-execution"
+backend_task_role_arn      = "arn:aws:iam::123456789012:role/mscqr-backend-task"
+worker_execution_role_arn  = "arn:aws:iam::123456789012:role/mscqr-worker-execution"
+worker_task_role_arn       = "arn:aws:iam::123456789012:role/mscqr-worker-task"
+
+backend_target_group_arn = "arn:aws:elasticloadbalancing:eu-west-2:123456789012:targetgroup/mscqr-backend/xxxxxxxxxxxx"
+
+backend_container_definitions_json = jsonencode([
+  {
+    name      = "backend"
+    image     = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:replace-me"
+    essential = true
+    portMappings = [
+      {
+        containerPort = 4000
+        hostPort      = 4000
+        protocol      = "tcp"
+      }
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = "/ecs/mscqr-prod/backend"
+        awslogs-region        = "eu-west-2"
+        awslogs-stream-prefix = "ecs"
+      }
+    }
+    environment = [
+      { name = "NODE_ENV", value = "production" },
+      { name = "PORT", value = "4000" }
+    ]
+    secrets = []
+  }
+])
+
+worker_container_definitions_json = jsonencode([
+  {
+    name      = "worker"
+    image     = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/mscqr-worker@sha256:replace-me"
+    essential = true
+    command   = ["sh", "-c", "npm run worker"]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = "/ecs/mscqr-prod/worker"
+        awslogs-region        = "eu-west-2"
+        awslogs-stream-prefix = "ecs"
+      }
+    }
+    environment = [
+      { name = "NODE_ENV", value = "production" },
+      { name = "RUN_BACKGROUND_WORKERS", value = "true" }
+    ]
+    secrets = []
+  }
+])
+
+tags = {
+  Environment = "production"
+  ManagedBy   = "Terraform"
+}

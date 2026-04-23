@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import { Request } from "express";
+import { normalizeClientIp } from "../utils/ipAddress";
 
 export type PublicVerifyRateLimitScope = "verify" | "scan";
 
@@ -35,7 +36,7 @@ const readActorKey = (req: Request) => {
   const deviceId = readDeviceId(req);
   if (deviceId) return `device:${shortHash(deviceId)}`;
 
-  const ip = normalizeString(req.ip || req.socket?.remoteAddress || "unknown", 256).toLowerCase();
+  const ip = normalizeClientIp(req.ip || req.socket?.remoteAddress || "", { fallback: "unknown" }).toLowerCase();
   return `ip:${shortHash(ip)}`;
 };
 

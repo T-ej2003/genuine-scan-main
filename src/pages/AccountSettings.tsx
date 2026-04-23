@@ -2,37 +2,26 @@ import React, { useEffect, useState } from "react";
 import QRCode from "qrcode";
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { ActionButton } from "@/components/ui/action-button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
+import { AdminMfaCard } from "@/features/account-settings/AdminMfaCard";
+import { PasswordSettingsCard } from "@/features/account-settings/PasswordSettingsCard";
+import { ProfileSettingsCard } from "@/features/account-settings/ProfileSettingsCard";
+import { SessionSecurityCard } from "@/features/account-settings/SessionSecurityCard";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/api-client";
-import { createUiActionState } from "@/lib/ui-actions";
 import {
   isWebAuthnSupported,
   startAdminWebAuthnAuthentication,
   startAdminWebAuthnRegistration,
-  type AdminWebAuthnCredentialSummary,
 } from "@/lib/webauthn";
-
-type AdminMfaStatus = {
-  required: boolean;
-  sessionStage: "ACTIVE" | "MFA_BOOTSTRAP";
-  enrolled: boolean;
-  enabled: boolean;
-  totpEnabled?: boolean;
-  hasWebAuthn?: boolean;
-  methods?: Array<"TOTP" | "WEBAUTHN">;
-  preferredMethod?: "TOTP" | "WEBAUTHN" | null;
-  backupCodesRemaining?: number;
-  verifiedAt?: string | null;
-  lastUsedAt?: string | null;
-  webauthnCredentials?: AdminWebAuthnCredentialSummary[];
-};
+import {
+  type ActiveSessionItem,
+  type AdminMfaStatus,
+  type BrowserStorageSummary,
+  type SessionSecuritySummary,
+  readBrowserStorageSummary,
+  STORAGE_RISK_KEYS,
+} from "@/features/account-settings/types";
 
 export default function AccountSettings() {
   const { user, refresh } = useAuth();
@@ -59,6 +48,12 @@ export default function AccountSettings() {
   const [webauthnLabel, setWebauthnLabel] = useState("");
   const [removingWebAuthnId, setRemovingWebAuthnId] = useState<string | null>(null);
   const [rotatedBackupCodes, setRotatedBackupCodes] = useState<string[] | null>(null);
+  const [sessions, setSessions] = useState<ActiveSessionItem[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [revokingSessionId, setRevokingSessionId] = useState<string | null>(null);
+  const [revokeAllLoading, setRevokeAllLoading] = useState(false);
+  const [storageSummary, setStorageSummary] = useState<BrowserStorageSummary>(() => readBrowserStorageSummary());
+  const [sessionSecuritySummary, setSessionSecuritySummary] = useState<SessionSecuritySummary | null>(null);
 
   const isAdminUser = user?.role === "super_admin" || user?.role === "licensee_admin";
   const webauthnAvailable = isWebAuthnSupported();
@@ -71,6 +66,31 @@ export default function AccountSettings() {
     }
   };
 
+  const refreshStorageSummary = () => {
+    setStorageSummary(readBrowserStorageSummary());
+  };
+
+  const loadSessions = async () => {
+    setSessionsLoading(true);
+    try {
+      const response = await apiClient.listSessions();
+      if (!response.success || !response.data) {
+        throw new Error(response.error || "Could not load active sessions.");
+      }
+      setSessions(response.data.items || []);
+      setSessionSecuritySummary(response.data.summary || null);
+    } catch (error: any) {
+      toast({
+        title: "Could not load sessions",
+        description: error?.message || "Please refresh and try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setSessionsLoading(false);
+      refreshStorageSummary();
+    }
+  };
+
   useEffect(() => {
     setName(user?.name || "");
     setEmail(user?.email || "");
@@ -80,6 +100,12 @@ export default function AccountSettings() {
     void loadMfaStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdminUser]);
+
+  useEffect(() => {
+    void loadSessions();
+    refreshStorageSummary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   useEffect(() => {
     if (!mfaSetup?.otpauthUri) {
@@ -353,6 +379,78 @@ export default function AccountSettings() {
     }
   };
 
+  const revokeSession = async (sessionId: string, current: boolean) => {
+    setRevokingSessionId(sessionId);
+    try {
+      const response = await apiClient.revokeSession(sessionId);
+      if (!response.success) {
+        throw new Error(response.error || "Could not revoke this session.");
+      }
+
+      toast({
+        title: current ? "Current device signed out" : "Session revoked",
+        description: current
+          ? "This device session was revoked and will close immediately."
+          : "That device can no longer refresh its session.",
+      });
+
+      if (current || response.data?.currentSessionRevoked) {
+        window.dispatchEvent(new Event("auth:logout"));
+        return;
+      }
+
+      await loadSessions();
+    } catch (error: any) {
+      toast({
+        title: "Session revoke failed",
+        description: error?.message || "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setRevokingSessionId(null);
+    }
+  };
+
+  const revokeAllSessions = async () => {
+    setRevokeAllLoading(true);
+    try {
+      const response = await apiClient.revokeAllSessions();
+      if (!response.success) {
+        throw new Error(response.error || "Could not revoke active sessions.");
+      }
+
+      toast({
+        title: "All sessions revoked",
+        description: `Revoked ${response.data?.revokedCount ?? 0} active session(s). This device will sign out now.`,
+      });
+      window.dispatchEvent(new Event("auth:logout"));
+    } catch (error: any) {
+      toast({
+        title: "Bulk revoke failed",
+        description: error?.message || "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setRevokeAllLoading(false);
+    }
+  };
+
+  const currentSession = sessions.find((session) => session.current) || null;
+  const currentSessionSecurity = currentSession?.security || null;
+  const storagePostureHealthy =
+    storageSummary.localStorageKeys.every((key) => !STORAGE_RISK_KEYS.includes(key)) &&
+    storageSummary.sessionStorageKeys.every((key) => !["auth_token", "auth_user"].includes(key));
+  const currentDeviceTrustLabel =
+    user?.auth?.sessionStage !== "ACTIVE"
+      ? "Step-up pending"
+      : user?.auth?.authAssurance === "ADMIN_MFA"
+        ? "Elevated admin session"
+        : isAdminUser
+          ? currentSessionSecurity?.riskLevel === "HIGH" || currentSessionSecurity?.riskLevel === "CRITICAL"
+            ? "Admin session needs review"
+            : "Password-verified admin session"
+          : "Cookie-bound operator session";
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -361,268 +459,75 @@ export default function AccountSettings() {
           <p className="text-muted-foreground">Manage your profile, password, and sign-in safety.</p>
         </div>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <div className="font-semibold">Profile</div>
-            <div className="text-sm text-muted-foreground">
-              Update your name. Email changes stay pending until you confirm them from your inbox.
-            </div>
-          </CardHeader>
-          <CardContent>
-            <form className="space-y-4" onSubmit={saveProfile}>
-              <div className="space-y-2">
-                <Label>Name</Label>
-                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" />
-              </div>
+        <ProfileSettingsCard
+          email={email}
+          name={name}
+          onSubmit={saveProfile}
+          profileLoading={profileLoading}
+          setEmail={setEmail}
+          setName={setName}
+          user={user ? { emailVerifiedAt: user.emailVerifiedAt, pendingEmail: user.pendingEmail } : null}
+        />
 
-              <div className="space-y-2">
-                <Label>Email</Label>
-                <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
-                {user?.pendingEmail ? (
-                  <p className="text-sm text-amber-700">
-                    Pending change: <strong>{user.pendingEmail}</strong>. Open the verification email to finish this update.
-                  </p>
-                ) : user?.emailVerifiedAt ? (
-                  <p className="text-sm text-muted-foreground">Verified on {new Date(user.emailVerifiedAt).toLocaleString()}.</p>
-                ) : (
-                  <p className="text-sm text-amber-700">This account email is not verified yet.</p>
-                )}
-              </div>
+        <PasswordSettingsCard
+          changePassword={changePassword}
+          confirmNewPassword={confirmNewPassword}
+          currentPassword={currentPassword}
+          newPassword={newPassword}
+          passwordLoading={passwordLoading}
+          setConfirmNewPassword={setConfirmNewPassword}
+          setCurrentPassword={setCurrentPassword}
+          setNewPassword={setNewPassword}
+          stepUpMethod={user?.auth?.stepUpMethod}
+          stepUpRequired={user?.auth?.stepUpRequired}
+        />
 
-              <div className="flex justify-end">
-                <ActionButton
-                  data-testid="account-save-profile"
-                  type="submit"
-                  state={profileLoading ? createUiActionState("pending", "Saving your latest profile details.") : createUiActionState("enabled")}
-                  idleLabel="Save changes"
-                  pendingLabel="Saving..."
-                  showReasonBelow={false}
-                />
-              </div>
-            </form>
-          </CardContent>
-        </Card>
+        <SessionSecurityCard
+          currentDeviceTrustLabel={currentDeviceTrustLabel}
+          currentSession={currentSession}
+          currentSessionSecurity={currentSessionSecurity}
+          isAdminUser={isAdminUser}
+          loadSessions={loadSessions}
+          revokeAllLoading={revokeAllLoading}
+          revokeAllSessions={revokeAllSessions}
+          revokeSession={revokeSession}
+          revokingSessionId={revokingSessionId}
+          sessionSecuritySummary={sessionSecuritySummary}
+          sessions={sessions}
+          sessionsLoading={sessionsLoading}
+          storagePostureHealthy={storagePostureHealthy}
+          storageSummary={storageSummary}
+          userAuth={user?.auth}
+        />
 
-        <Card>
-          <CardHeader className="pb-2">
-            <div className="font-semibold">Security</div>
-            <div className="text-sm text-muted-foreground">
-              Change your password. You will need your current password.
-            </div>
-          </CardHeader>
-          <CardContent>
-            {user?.auth?.stepUpRequired ? (
-              <Alert className="mb-4 border-amber-200 bg-amber-50 text-amber-950">
-                <AlertDescription>
-                  Sensitive actions are locked until you confirm{" "}
-                  {user.auth.stepUpMethod === "ADMIN_MFA" ? "your authenticator code" : "your current password"} again.
-                </AlertDescription>
-              </Alert>
-            ) : null}
-            <form className="space-y-4" onSubmit={changePassword}>
-              <div className="space-y-2">
-                <Label>Current password</Label>
-                <Input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
-              </div>
-
-              <div className="space-y-2">
-                <Label>New password</Label>
-                <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Confirm new password</Label>
-                <Input type="password" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} />
-              </div>
-
-              <div className="flex justify-end">
-                <ActionButton
-                  data-testid="account-change-password"
-                  type="submit"
-                  state={
-                    passwordLoading
-                      ? createUiActionState("pending", "Saving your new password now.")
-                      : createUiActionState("enabled")
-                  }
-                  idleLabel="Update password"
-                  pendingLabel="Updating..."
-                  showReasonBelow={false}
-                />
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-
-        {isAdminUser ? (
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="font-semibold">Admin MFA</div>
-              <div className="text-sm text-muted-foreground">
-                Sensitive admin actions stay locked behind a recent MFA confirmation.
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {mfaStatus ? (
-                <Alert>
-                  <AlertDescription>
-                    {mfaStatus.enabled
-                      ? `MFA is enabled. Backup codes remaining: ${mfaStatus.backupCodesRemaining ?? 0}.`
-                      : "MFA is not enabled for this admin account yet."}
-                    {mfaStatus.preferredMethod ? ` Preferred method: ${mfaStatus.preferredMethod === "WEBAUTHN" ? "Security key / passkey" : "Authenticator app"}.` : ""}
-                    {mfaStatus.lastUsedAt ? ` Last used: ${new Date(mfaStatus.lastUsedAt).toLocaleString()}.` : ""}
-                  </AlertDescription>
-                </Alert>
-              ) : null}
-
-              {!mfaStatus?.enabled ? (
-                <div className="space-y-4">
-                  {!mfaSetup ? (
-                    <Button onClick={() => void beginMfaSetup()} disabled={mfaLoading}>
-                      {mfaLoading ? "Preparing..." : "Begin MFA setup"}
-                    </Button>
-                  ) : (
-                    <form className="space-y-4" onSubmit={confirmMfaSetup}>
-                      {mfaQrDataUrl ? (
-                        <img src={mfaQrDataUrl} alt="Admin MFA QR code" className="h-52 w-52 rounded-xl border p-2" />
-                      ) : null}
-                      <div className="space-y-2">
-                        <Label>Manual setup key</Label>
-                        <Input value={mfaSetup.secret} readOnly className="font-mono text-sm" />
-                      </div>
-                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-                        <div className="font-medium">Backup codes</div>
-                        <div className="mt-2 grid grid-cols-2 gap-2">
-                          {mfaSetup.backupCodes.map((code) => (
-                            <div key={code} className="rounded-lg border border-amber-200 bg-white px-3 py-2 font-mono text-xs">
-                              {code}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Authenticator code</Label>
-                        <Input value={mfaCode} onChange={(e) => setMfaCode(e.target.value)} placeholder="123456" />
-                      </div>
-                      <div className="flex justify-end gap-3">
-                        <Button type="button" variant="outline" onClick={() => setMfaSetup(null)} disabled={mfaLoading}>
-                          Cancel
-                        </Button>
-                        <Button type="submit" disabled={mfaLoading}>
-                          {mfaLoading ? "Confirming..." : "Enable MFA"}
-                        </Button>
-                      </div>
-                    </form>
-                  )}
-                </div>
-              ) : (
-                <div className="grid gap-6 lg:grid-cols-3">
-                  <div className="space-y-3 rounded-xl border p-4">
-                    <div className="font-medium">Security keys / passkeys</div>
-                    <div className="text-sm text-muted-foreground">
-                      Prefer WebAuthn security keys when this browser supports them. Authenticator codes stay available as a fallback.
-                    </div>
-                    {webauthnAvailable ? (
-                      <>
-                        <div className="space-y-2">
-                          <Label>Device label</Label>
-                          <Input
-                            value={webauthnLabel}
-                            onChange={(e) => setWebauthnLabel(e.target.value)}
-                            placeholder="Factory MacBook or Security key"
-                          />
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <Button onClick={() => void beginWebAuthnSetup()} disabled={mfaLoading}>
-                            {mfaLoading ? "Preparing..." : "Add security key"}
-                          </Button>
-                          {mfaStatus?.hasWebAuthn ? (
-                            <Button variant="outline" onClick={() => void verifyWithWebAuthn()} disabled={mfaLoading}>
-                              {mfaLoading ? "Waiting..." : "Verify with security key"}
-                            </Button>
-                          ) : null}
-                        </div>
-                      </>
-                    ) : (
-                      <div className="text-sm text-muted-foreground">
-                        This browser does not support WebAuthn security keys. You can still use the authenticator-app flow below.
-                      </div>
-                    )}
-
-                    {mfaStatus?.webauthnCredentials?.length ? (
-                      <div className="space-y-3">
-                        {mfaStatus.webauthnCredentials.map((credential) => (
-                          <div key={credential.id} className="rounded-xl border bg-muted/30 p-3">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="space-y-1">
-                                <div className="font-medium">{credential.label}</div>
-                                <div className="text-xs text-muted-foreground">
-                                  {(credential.transports || []).length ? `Transports: ${credential.transports?.join(", ")}.` : "Security key enrolled."}
-                                  {credential.lastUsedAt ? ` Last used ${new Date(credential.lastUsedAt).toLocaleString()}.` : ""}
-                                </div>
-                              </div>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={removingWebAuthnId === credential.id}
-                                onClick={() => void removeWebAuthnCredential(credential.id)}
-                              >
-                                {removingWebAuthnId === credential.id ? "Removing..." : "Remove"}
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-sm text-muted-foreground">No WebAuthn security keys are enrolled yet.</div>
-                    )}
-                  </div>
-
-                  <div className="space-y-3 rounded-xl border p-4">
-                    <div className="font-medium">Rotate backup codes</div>
-                    <div className="text-sm text-muted-foreground">
-                      Enter a current authenticator or backup code to issue a fresh backup-code set.
-                    </div>
-                    <Label>Current MFA code</Label>
-                    <Input value={mfaRotateCode} onChange={(e) => setMfaRotateCode(e.target.value)} placeholder="123456 or ABCDE-12345" />
-                    <Button onClick={() => void rotateBackupCodes()} disabled={mfaLoading}>
-                      {mfaLoading ? "Rotating..." : "Rotate backup codes"}
-                    </Button>
-                    {rotatedBackupCodes?.length ? (
-                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-                        <div className="font-medium text-amber-950">New backup codes</div>
-                        <div className="mt-3 grid grid-cols-2 gap-2">
-                          {rotatedBackupCodes.map((code) => (
-                            <div key={code} className="rounded-lg border border-amber-200 bg-white px-3 py-2 font-mono text-xs">
-                              {code}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="space-y-3 rounded-xl border border-red-200 p-4">
-                    <div className="font-medium text-red-900">Disable MFA</div>
-                    <div className="text-sm text-red-900/80">
-                      This is only for controlled recovery. The next admin sign-in will force MFA setup again.
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Current password</Label>
-                      <Input type="password" value={mfaDisablePassword} onChange={(e) => setMfaDisablePassword(e.target.value)} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Current MFA code</Label>
-                      <Input value={mfaDisableCode} onChange={(e) => setMfaDisableCode(e.target.value)} placeholder="123456 or ABCDE-12345" />
-                    </div>
-                    <Button variant="destructive" onClick={() => void disableMfa()} disabled={mfaLoading}>
-                      {mfaLoading ? "Disabling..." : "Disable MFA"}
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        ) : null}
+        <AdminMfaCard
+          beginMfaSetup={beginMfaSetup}
+          beginWebAuthnSetup={beginWebAuthnSetup}
+          confirmMfaSetup={confirmMfaSetup}
+          disableMfa={disableMfa}
+          disablePassword={mfaDisablePassword}
+          disableCode={mfaDisableCode}
+          isAdminUser={isAdminUser}
+          mfaCode={mfaCode}
+          mfaLoading={mfaLoading}
+          mfaQrDataUrl={mfaQrDataUrl}
+          mfaRotateCode={mfaRotateCode}
+          mfaSetup={mfaSetup}
+          mfaStatus={mfaStatus}
+          onDisableCodeChange={setMfaDisableCode}
+          onDisablePasswordChange={setMfaDisablePassword}
+          onMfaCodeChange={setMfaCode}
+          onRotateCodeChange={setMfaRotateCode}
+          onSetMfaSetup={setMfaSetup}
+          onWebauthnLabelChange={setWebauthnLabel}
+          removeWebAuthnCredential={removeWebAuthnCredential}
+          removingWebAuthnId={removingWebAuthnId}
+          rotateBackupCodes={rotateBackupCodes}
+          rotatedBackupCodes={rotatedBackupCodes}
+          verifyWithWebAuthn={verifyWithWebAuthn}
+          webauthnAvailable={webauthnAvailable}
+          webauthnLabel={webauthnLabel}
+        />
       </div>
     </DashboardLayout>
   );

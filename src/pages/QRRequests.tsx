@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { DialogEmptyState } from "@/components/ui/dialog-empty-state";
 import {
   Dialog,
   DialogContent,
@@ -509,7 +510,11 @@ export default function QRRequests() {
             </DialogHeader>
 
             {!activeReq ? (
-              <div className="text-sm text-muted-foreground">No request selected.</div>
+              <DialogEmptyState
+                title="Choose a request to approve"
+                description="Close this dialog, reopen Approve from a pending code request, and MSCQR will restore the request details and decision form."
+                onClose={() => setApproveOpen(false)}
+              />
             ) : (
               <div className="space-y-4 mt-2">
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -550,7 +555,11 @@ export default function QRRequests() {
             </DialogHeader>
 
             {!activeReq ? (
-              <div className="text-sm text-muted-foreground">No request selected.</div>
+              <DialogEmptyState
+                title="Choose a request to reject"
+                description="Close this dialog, reopen Reject from a pending code request, and MSCQR will restore the request details before you add a decision note."
+                onClose={() => setRejectOpen(false)}
+              />
             ) : (
               <div className="space-y-4 mt-2">
                 <div className="space-y-2">

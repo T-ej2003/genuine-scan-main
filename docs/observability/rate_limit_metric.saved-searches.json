@@ -1,0 +1,20 @@
+{
+  "searches": [
+    {
+      "name": "Top limited route families",
+      "query": "message:\"rate_limit_metric\" | stats count() by meta.family, meta.stage | sort -count"
+    },
+    {
+      "name": "Repeated offenders",
+      "query": "message:\"rate_limit_metric\" | stats count() by meta.offenderRef, meta.offenderKind, meta.family | where count > 2 | sort -count"
+    },
+    {
+      "name": "Tenant burst anomalies",
+      "query": "message:\"rate_limit_metric\" | stats count() by meta.tenantRef, meta.family | where count > 4 | sort -count"
+    },
+    {
+      "name": "Export abuse patterns",
+      "query": "message:\"rate_limit_metric\" meta.family:/export|downloads/ | stats count() by meta.family, meta.route | sort -count"
+    }
+  ]
+}

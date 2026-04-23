@@ -8,6 +8,7 @@ import apiClient from "@/lib/api-client";
 import { useToast } from "@/hooks/use-toast";
 import { PremiumScanLoader } from "@/components/premium/PremiumScanLoader";
 import { PREMIUM_PALETTE } from "@/components/premium/palette";
+import { LegalFooter } from "@/components/trust/LegalFooter";
 
 type NavigatorWithConnection = Navigator & {
   connection?: {
@@ -143,7 +144,7 @@ export default function VerifyLanding() {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center p-4"
+      className="min-h-screen"
       style={{
         background:
           "radial-gradient(circle at 10% 10%, rgba(141,157,182,0.34), transparent 40%), radial-gradient(circle at 90% 20%, rgba(241,227,221,0.72), transparent 38%), linear-gradient(155deg, #f6f9fc 0%, #eef4f9 45%, #f1e3dd 100%)",
@@ -155,15 +156,17 @@ export default function VerifyLanding() {
         </div>
       ) : null}
 
-      <Card
-        className="relative w-full max-w-md overflow-hidden border shadow-[0_20px_40px_rgba(102,114,146,0.2)] premium-surface-in"
-        style={{ borderColor: `${PREMIUM_PALETTE.steel}88` }}
-      >
+      <div className="flex min-h-screen flex-col">
+        <div className="flex flex-1 items-center justify-center p-4">
+          <Card
+            className="relative w-full max-w-md overflow-hidden border shadow-[0_20px_40px_rgba(102,114,146,0.2)] premium-surface-in"
+            style={{ borderColor: `${PREMIUM_PALETTE.steel}88` }}
+          >
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-[#4f5b75]">
             <QrCode className="h-5 w-5" /> Verify a Product
           </CardTitle>
-          <CardDescription>Paste a code value (or scan to open the verify URL directly).</CardDescription>
+          <CardDescription>Paste a code value to start MSCQR’s secure verification journey.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <Input
@@ -233,7 +236,11 @@ export default function VerifyLanding() {
             <PremiumScanLoader compact />
           </div>
         ) : null}
-      </Card>
+          </Card>
+        </div>
+
+        <LegalFooter />
+      </div>
     </div>
   );
 }

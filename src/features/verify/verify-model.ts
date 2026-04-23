@@ -5,7 +5,8 @@ export type VerificationClassification =
   | "LEGIT_REPEAT"
   | "SUSPICIOUS_DUPLICATE"
   | "BLOCKED_BY_SECURITY"
-  | "NOT_READY_FOR_CUSTOMER_USE";
+  | "NOT_READY_FOR_CUSTOMER_USE"
+  | "NOT_FOUND";
 
 export type OwnershipStatus = {
   isClaimed: boolean;
@@ -22,12 +23,71 @@ export type VerificationProofTier = "SIGNED_LABEL" | "MANUAL_REGISTRY_LOOKUP" | 
 export type VerificationRiskBand = "LOW" | "ELEVATED" | "HIGH" | "CRITICAL";
 export type VerificationReplacementStatus = "NONE" | "ACTIVE_REPLACEMENT" | "REPLACED_LABEL";
 export type VerificationDegradationMode = "NORMAL" | "QUEUE_AND_RETRY" | "FAIL_CLOSED";
+export type VerificationPublicOutcome =
+  | "SIGNED_LABEL_ACTIVE"
+  | "MANUAL_RECORD_FOUND"
+  | "LIMITED_PROVENANCE"
+  | "REVIEW_REQUIRED"
+  | "BLOCKED"
+  | "NOT_READY"
+  | "NOT_FOUND"
+  | "INTEGRITY_ERROR"
+  | "PRINTER_SETUP_ONLY";
+export type VerificationRiskDisposition = "CLEAR" | "MONITOR" | "REVIEW_REQUIRED" | "BLOCKED";
 export type CustomerTrustLevel =
   | "ANONYMOUS"
   | "DEVICE_TRUSTED"
   | "ACCOUNT_TRUSTED"
   | "PASSKEY_VERIFIED"
   | "OPERATOR_REVIEWED";
+
+export type CustomerVerificationEntryMethod = "SIGNED_SCAN" | "MANUAL_CODE";
+export type CustomerVerificationAuthState = "PENDING" | "VERIFIED";
+
+export type CustomerTrustIntake = {
+  purchaseChannel: "online" | "offline" | "gifted" | "unknown";
+  sourceCategory?: "marketplace" | "direct_brand" | "retail_store" | "reseller" | "gift" | "unknown" | null;
+  platformName?: string | null;
+  sellerName?: string | null;
+  listingUrl?: string | null;
+  orderReference?: string | null;
+  storeName?: string | null;
+  purchaseCity?: string | null;
+  purchaseCountry?: string | null;
+  purchaseDate?: string | null;
+  packagingState?: "sealed" | "opened" | "damaged" | "unsure" | null;
+  packagingConcern?: "none" | "minor" | "major" | "unsure" | null;
+  scanReason: "routine_check" | "new_seller" | "pricing_concern" | "packaging_concern" | "authenticity_concern";
+  ownershipIntent: "verify_only" | "claim_ownership" | "report_concern" | "contact_support";
+  notes?: string | null;
+};
+
+export type VerificationSessionSummary = {
+  sessionId: string;
+  decisionId: string;
+  code?: string | null;
+  maskedCode?: string | null;
+  brandName?: string | null;
+  entryMethod: CustomerVerificationEntryMethod;
+  authState: CustomerVerificationAuthState;
+  intakeCompleted: boolean;
+  revealed: boolean;
+  startedAt: string;
+  revealAt?: string | null;
+  proofTier?: VerificationProofTier | string | null;
+  proofSource?: VerificationProofSource | string | null;
+  labelState?: string | null;
+  printTrustState?: string | null;
+  challengeRequired?: boolean;
+  challengeCompleted?: boolean;
+  challengeCompletedBy?: string | null;
+  verificationLocked?: boolean;
+  proofBindingRequired?: boolean;
+  proofBindingExpiresAt?: string | null;
+  sessionProofToken?: string | null;
+  intake?: CustomerTrustIntake | null;
+  verification?: VerifyPayload | null;
+};
 
 export type OwnershipTransferView = {
   state?:
@@ -81,6 +141,10 @@ export type VerifyPayload = {
   warningMessage?: string | null;
   proofSource?: VerificationProofSource;
   proofTier?: VerificationProofTier;
+  publicOutcome?: VerificationPublicOutcome | string | null;
+  riskDisposition?: VerificationRiskDisposition | string | null;
+  messageKey?: string | null;
+  nextActionKey?: string | null;
   reasonCodes?: string[];
   riskBand?: VerificationRiskBand;
   replacementStatus?: VerificationReplacementStatus;
@@ -89,6 +153,8 @@ export type VerifyPayload = {
   replacementChainId?: string | null;
   labelState?: string;
   printTrustState?: string;
+  issuanceMode?: string | null;
+  customerVerifiableAt?: string | null;
   latestDecisionOutcome?: string | null;
   proof?: {
     title?: string;
@@ -136,6 +202,13 @@ export type VerifyPayload = {
   previousScanAt?: string | null;
   previousScanLocation?: string | null;
   policy?: Record<string, unknown> | null;
+  challenge?: {
+    required?: boolean;
+    methods?: string[];
+    reason?: string | null;
+    completed?: boolean;
+    completedBy?: string | null;
+  } | null;
   scanSignals?: {
     scanCount24h?: number;
     distinctDeviceCount24h?: number;
@@ -198,10 +271,6 @@ export const INCIDENT_TYPE_OPTIONS = [
   { value: "other", label: "Other" },
 ] as const;
 
-export const CUSTOMER_TOKEN_KEY = "mscqr_verify_customer_token";
-export const LEGACY_CUSTOMER_TOKEN_KEY = "authenticqr_verify_customer_token";
-export const CUSTOMER_EMAIL_KEY = "mscqr_verify_customer_email";
-export const LEGACY_CUSTOMER_EMAIL_KEY = "authenticqr_verify_customer_email";
 export const TRANSFER_TOKEN_KEY_PREFIX = "mscqr_verify_transfer_token:";
 export const LEGACY_TRANSFER_TOKEN_KEY_PREFIX = "authenticqr_verify_transfer_token:";
 export const APP_NAME = "MSCQR";
@@ -220,7 +289,12 @@ export const inferClassification = (result: VerifyPayload | null): VerificationC
   if (result?.classification) return result.classification;
   const status = String(result?.status || "").trim().toUpperCase();
   const scanOutcome = String(result?.scanOutcome || "").trim().toUpperCase();
+  const publicOutcome = String(result?.publicOutcome || "").trim().toUpperCase();
 
+  if (publicOutcome === "NOT_FOUND" || scanOutcome === "NOT_FOUND") return "NOT_FOUND";
+  if (publicOutcome === "REVIEW_REQUIRED") return "SUSPICIOUS_DUPLICATE";
+  if (publicOutcome === "BLOCKED" || publicOutcome === "INTEGRITY_ERROR") return "BLOCKED_BY_SECURITY";
+  if (publicOutcome === "NOT_READY") return "NOT_READY_FOR_CUSTOMER_USE";
   if (result?.isBlocked || status === "BLOCKED" || scanOutcome === "BLOCKED") return "BLOCKED_BY_SECURITY";
   if (result?.isReady === false || ["DORMANT", "ALLOCATED", "ACTIVATED"].includes(status) || scanOutcome === "NOT_READY") {
     return "NOT_READY_FOR_CUSTOMER_USE";
@@ -234,6 +308,18 @@ export const deriveReasons = (result: VerifyPayload | null, classification: Veri
   if (Array.isArray(result?.reasons) && result.reasons.length > 0) return result.reasons;
 
   const signals = result?.scanSignals || {};
+  if (result?.messageKey === "manual_record_signed_history") {
+    return [
+      "MSCQR found the registry record for this code, but the label already has prior signed-label verification history.",
+      "If the original label is available, re-scan it instead of relying on manual entry.",
+    ];
+  }
+  if (result?.publicOutcome === "MANUAL_RECORD_FOUND") {
+    return ["MSCQR found a live registry record for this code and confirmed its current lifecycle state."];
+  }
+  if (result?.publicOutcome === "LIMITED_PROVENANCE") {
+    return ["MSCQR found a live signed-label record, but governed print provenance is not available for this label."];
+  }
   switch (classification) {
     case "FIRST_SCAN":
       return ["This is the first customer-facing verification recorded for this code."];
@@ -241,7 +327,7 @@ export const deriveReasons = (result: VerifyPayload | null, classification: Veri
       return [
         signals.seenByCurrentTrustedActorBefore || signals.previousScanSameTrustedActor
           ? "Repeat checks match the same trusted owner context."
-          : "Verification history looks consistent with normal repeat checks.",
+          : "This code has been checked before, and the history looks consistent with normal repeat use.",
       ];
     case "SUSPICIOUS_DUPLICATE":
       return [
@@ -252,6 +338,8 @@ export const deriveReasons = (result: VerifyPayload | null, classification: Veri
       ];
     case "BLOCKED_BY_SECURITY":
       return ["Security rules blocked this code because scan activity exceeded allowed risk thresholds."];
+    case "NOT_FOUND":
+      return ["MSCQR could not find a live registry record for this code."];
     default:
       return ["This product is not ready for customer verification yet."];
   }
@@ -285,18 +373,6 @@ export const normalizeVerifyCode = (value?: string | null) => String(value || ""
 export const getTransferTokenStorageKey = (value?: string | null) => {
   const normalized = normalizeVerifyCode(value);
   return normalized ? `${TRANSFER_TOKEN_KEY_PREFIX}${normalized}` : "";
-};
-
-export const readStoredValue = (...keys: string[]) => {
-  for (const key of keys) {
-    try {
-      const value = window.localStorage.getItem(key);
-      if (value) return value;
-    } catch {
-      // Ignore storage issues.
-    }
-  }
-  return "";
 };
 
 export const readCachedGeo = () => {

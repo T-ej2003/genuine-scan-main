@@ -1,11 +1,18 @@
 const trimTrailingSlash = (value) => String(value || "").trim().replace(/\/+$/, "");
+const parseBool = (value, fallback = false) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+};
 
-const baseUrl = trimTrailingSlash(
-  process.env.SMOKE_BASE_URL ||
-    process.env.PUBLIC_ADMIN_WEB_BASE_URL ||
-    process.env.WEB_APP_BASE_URL ||
-    "http://127.0.0.1:4000"
-);
+const explicitSmokeBaseUrl = trimTrailingSlash(process.env.SMOKE_BASE_URL || "");
+const allowLocalDefault = parseBool(process.env.SMOKE_ALLOW_LOCAL_DEFAULT, false);
+if (!explicitSmokeBaseUrl && !allowLocalDefault) {
+  throw new Error("SMOKE_BASE_URL is required for release/staging smoke. Use `npm run smoke:dev-local` for local default smoke.");
+}
+
+const baseUrl = trimTrailingSlash(explicitSmokeBaseUrl || process.env.PUBLIC_ADMIN_WEB_BASE_URL || process.env.WEB_APP_BASE_URL || "http://127.0.0.1:4000");
 const apiBaseUrl = trimTrailingSlash(process.env.SMOKE_API_BASE_URL || `${baseUrl}/api`);
 
 const cookieJar = new Map();
@@ -50,10 +57,17 @@ const requestJson = async (url, options = {}) => {
     headers["Content-Type"] = "application/json";
   }
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  });
+  let response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers,
+    });
+  } catch (error) {
+    throw new Error(
+      `Smoke request failed for ${url}. Confirm backend/frontend target is reachable and SMOKE_BASE_URL is correct. (${error instanceof Error ? error.message : String(error)})`
+    );
+  }
 
   recordSetCookies(response.headers);
 
@@ -86,9 +100,9 @@ const run = async () => {
   }
 
   {
-    const { response, payload } = await requestJson(`${apiBaseUrl}/version`);
-    ensureOk("version", response.status, payload);
-    logPass("release version");
+    const { response, payload } = await requestJson(`${apiBaseUrl}/health/live`);
+    ensureOk("health/live", response.status, payload);
+    logPass("live health");
   }
 
   if (process.env.SMOKE_VERIFY_CODE) {
@@ -143,6 +157,16 @@ const run = async () => {
     const { response, payload } = await requestJson(`${apiBaseUrl}/auth/me`);
     ensureOk("auth me", response.status, payload);
     logPass("current user");
+  }
+
+  {
+    const { response, payload } = await requestJson(`${apiBaseUrl}/internal/release`);
+    if (response.status === 401 || response.status === 403) {
+      logSkip("internal release metadata (admin role required)");
+    } else {
+      ensureOk("internal release metadata", response.status, payload);
+      logPass("internal release metadata");
+    }
   }
 
   if (process.env.SMOKE_STEP_UP_PASSWORD) {

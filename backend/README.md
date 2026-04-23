@@ -80,18 +80,15 @@ Then verify:
 - `GET /health/db` returns database reachable
 - `GET /version` returns app name, version, git sha
 
-## Critical migration note
+## Migration validation note
 
-As of `2026-02-21`, migration reproducibility from a clean shadow database fails at:
+`backend/prisma/migrations/20260213120000_add_incident_response/migration.sql` now includes a
+safe bootstrap for the historical `QrScanLog` dependency so clean-environment migration replay can
+proceed.
 
-- `backend/prisma/migrations/20260213120000_add_incident_response/migration.sql`
+Before promoting to a new environment, still re-run:
 
-Reason:
-- The migration alters table `QrScanLog`, but that table is not created in earlier migration history.
+- `npm run prisma:migrate status`
+- `npx prisma migrate reset` (in a non-production validation DB)
 
-Action required before production promotion to new environments:
-- Fix migration chain (or create a safe baseline/squash migration) and re-run:
-  - `npm run prisma:migrate status`
-  - `npx prisma migrate reset` (in non-production validation DB)
-
-Without this fix, greenfield deployments can fail during migration.
+Do not mark this blocker closed until a greenfield validation database finishes the full chain.

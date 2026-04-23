@@ -298,7 +298,7 @@ export default function HelpAssistantWidget() {
       ];
     }
     return [
-      "What does Verified Again mean?",
+      "What does MSCQR confirmed this code again mean?",
       "What does Suspicious Duplicate mean?",
       "How do I claim ownership?",
       "How do I report suspected counterfeit?",

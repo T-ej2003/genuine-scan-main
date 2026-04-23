@@ -1,6 +1,6 @@
 # Genuine Scan (MSCQR)
 
-Production-grade, multi-tenant QR authenticity platform for secure code issuance, controlled print operations, consumer verification, anomaly detection, and auditability.
+Production-grade, multi-tenant QR issuance, controlled-print, verification, anomaly-detection, and auditability platform.
 
 ## Delivery Standards
 
@@ -19,7 +19,7 @@ MSCQR is designed for anti-counterfeit operations across four user types:
 - Super Admin: platform owner across all licensees.
 - Licensee Admin: tenant operator for one licensee/brand.
 - Manufacturer: scoped production user who prints assigned batches.
-- Customer: public verifier who checks product authenticity and can report suspicious products.
+- Customer: public verifier who checks the MSCQR record for a product label and can report suspicious products.
 
 Core outcome:
 
@@ -89,7 +89,16 @@ Targeted verification:
 npm run typecheck:incremental
 npm --prefix backend run build
 npm run build
+npm run verify:rc-local
 ```
+
+Environment setup/doctor scripts:
+
+```bash
+bash scripts/dev/doctor.sh
+```
+
+See [docs/DEV_ENV_SETUP.md](docs/DEV_ENV_SETUP.md) for required toolchain installation.
 
 Optional live smoke run against a ready environment:
 
@@ -245,14 +254,14 @@ Typical status progression:
 
 ## 7. Security Model
 
-Code-level assessment: highly secure,  enterprise-strong t (strongly high).
+Code-level assessment: strong server-governed QR controls with important limits called out explicitly below.
 
 Implemented protections:
 
 - Signed QR tokens (Ed25519 preferred; HMAC fallback).
 - Token hash + nonce binding in DB (`tokenHash`, `tokenNonce`).
 - Licensee/batch/manufacturer binding checks at scan time.
-- One-time redemption semantics.
+- Customer-ready lifecycle gating plus replay-aware downgrade semantics.
 - IP-based scan rate limiting (`SCAN_RATE_LIMIT_PER_MIN`).
 - Audit logs for sensitive transitions.
 - Policy engine for anomaly-triggered auto-block.
@@ -260,6 +269,9 @@ Implemented protections:
 Token signing behavior (`backend/src/services/qrTokenService.ts`):
 
 - Preferred mode: `QR_SIGN_PRIVATE_KEY` + `QR_SIGN_PUBLIC_KEY`.
+- Production hardening can require Ed25519 with `QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION=true`.
+- `QR_SIGN_ACTIVE_KEY_VERSION` pins the signing key version that MSCQR records in verification evidence and trust metrics.
+- `QR_SIGN_PROVIDER=managed` plus `QR_SIGN_KMS_KEY_REF` / `QR_SIGN_KMS_VERIFY_KEY_REF` select a future managed signer bridge, but the bridge must actually be registered by the deployed backend build. MSCQR does not pretend managed signing exists when only the refs are present.
 - Fallback mode: `QR_SIGN_HMAC_SECRET`.
 - If neither is set, signing/verification cannot run.
 
@@ -490,6 +502,8 @@ Recommended:
 
 - `QR_SIGN_PRIVATE_KEY`: Ed25519 private key PEM (`\\n` escaped newlines supported).
 - `QR_SIGN_PUBLIC_KEY`: Ed25519 public key PEM.
+- `QR_SIGN_ACTIVE_KEY_VERSION`: explicit signing key version for evidence, observability, and future rotation hygiene.
+- `QR_SIGN_PROVIDER`: `env` (default) or `managed`; `managed` fails closed unless the runtime registers a managed signer bridge.
 
 Fallback signing option:
 
@@ -499,6 +513,17 @@ Optional:
 
 - `PORT` (default `4000`)
 - `NODE_ENV` (`development`/`production`)
+- `ALLOW_BREAK_GLASS_QR_GENERATE` (default `false`; keep disabled in production so customer-verifiable labels stay on the managed print path)
+- `QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION` (default `true`; refuse production startup if QR signing falls back to HMAC)
+- `QR_SIGN_KMS_KEY_REF` / `QR_SIGN_KMS_VERIFY_KEY_REF` (managed signer integration points; inert unless `QR_SIGN_PROVIDER=managed` and a bridge is registered)
+- `VERIFY_REPLAY_HARDENING_ENABLED` (default `true`; downgrade changed-context signed-label reuse to review-required semantics)
+- `VERIFY_REPLAY_RAPID_REUSE_THRESHOLD_10M` (default `3`; repeat threshold for rapid changed-context signed-label reuse)
+- `VERIFY_REPLAY_IP_VELOCITY_THRESHOLD_10M` (default `2`; IP velocity threshold for replay review escalation)
+- `VERIFY_REPLAY_CHANGED_CONTEXT_LOOKBACK_MINUTES` (default `15`; recent-window check for changed-context signed-label reuse)
+- `VERIFY_SESSION_PROOF_BINDING_REQUIRED` (default `true`; require a short-lived proof-bound session token before revealing signed-scan results)
+- `VERIFY_SESSION_PROOF_TTL_MINUTES` (default `30`; lifespan of the proof-bound verification session token)
+- `VERIFY_REQUIRE_GOVERNED_PRINT_PROVENANCE` (default `true`; restrict strongest customer-verifiable semantics to governed print + confirmed readiness)
+- `VERIFY_OBSERVABILITY_LOGGING_ENABLED` (default `true`; emit privacy-minimized structured `verification_trust_metric` events for replay, provenance, challenge, and signing monitoring)
 - `JWT_EXPIRES_IN` (default `7d`)
 - `CORS_ORIGIN` (comma-separated origins)
 - `PUBLIC_SCAN_WEB_BASE_URL`
@@ -515,6 +540,17 @@ Optional:
 - `QR_ZIP_ULTRA_VOLUME_THRESHOLD` (default `1000000`)
 - `QR_ZIP_STANDARD_LEVEL` (default `6`)
 - `QR_ZIP_HIGH_LEVEL` (default `8`)
+
+Operational monitoring before premium rollout:
+
+- Proof-tier mix: signed-label vs manual record-check traffic.
+- Replay review-required rate: how often changed-context signed reuse is downgraded.
+- Same-context vs changed-context signed repeats: expected customer reuse versus replay-like spread.
+- Limited-provenance rate: governed-print-confirmed labels versus legacy or restricted provenance decisions.
+- Break-glass issuance usage: any direct generation event should be rare, explained, and auditable.
+- Challenge-required frequency and completion rate: identity-based review completion versus abandoned suspicious checks.
+- Signing profile health: active key version, provider mode, and any legacy HMAC fallback warnings.
+- Observability catalog, metrics mapping, and alert templates live under [docs/observability/](docs/observability/).
 - `QR_ZIP_ULTRA_LEVEL` (default `9`)
 - `QR_ZIP_STANDARD_PNG_WIDTH` (default `768`)
 - `QR_ZIP_HIGH_PNG_WIDTH` (default `640`)
@@ -563,6 +599,18 @@ Vite dev proxy (`vite.config.ts`):
 - Frontend runs on `8080`.
 - `/api` proxies to `http://localhost:4000` unless `VITE_API_PROXY_TARGET` is set in shell environment.
 
+### Admin MFA cadence controls
+
+- `ADMIN_LOGIN_MFA_CYCLE_DAYS` (default `28`): max age of previous admin MFA success allowed for new password sign-ins before a fresh MFA challenge is required.
+- `ADMIN_STEP_UP_WINDOW_MINUTES` (default `30`): freshness window for sensitive admin actions after login.
+- `AUTH_PASSWORD_STEP_UP_WINDOW_MINUTES` (default `30`): freshness window for sensitive password step-up on non-admin roles.
+- `AUTH_MFA_TOTP_WINDOW` (default `1`): accepted TOTP drift window in 30-second steps (`1` = +/-30 seconds).
+
+Recommended production posture:
+
+- Keep `ADMIN_LOGIN_MFA_CYCLE_DAYS=28` for predictable sign-in UX.
+- Keep `ADMIN_STEP_UP_WINDOW_MINUTES` short (for example `30`) to preserve high-risk action protection.
+
 ## 11. Seed Data and Demo Credentials
 
 Seed command:
@@ -609,7 +657,7 @@ Manufacturer:
 Consumer/public:
 
 1. Scan tokenized URL (`/scan?t=...`) or verify plain code (`/verify/:code`).
-2. Receive authenticity result + warning context where applicable.
+2. Receive the MSCQR verification result with warning context where applicable.
 
 ## 13. Scripts and Commands
 
@@ -704,6 +752,60 @@ docker compose build
 docker compose up -d
 ```
 
+Local-only shortcut using explicit credentials from your project-root `.env`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+```
+
+Production note:
+- `docker-compose.yml` is now fail-closed for object storage credentials.
+- `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` are only for bootstrapping the local MinIO service.
+- `OBJECT_STORAGE_ACCESS_KEY` and `OBJECT_STORAGE_SECRET_KEY` are only for backend/worker runtime access.
+- `docker-compose.local.yml` no longer injects fallback MinIO credentials. It stays credential-free so local convenience does not leak into committed infrastructure config.
+- On production hosts, create a project-root `.env` beside `docker-compose.yml` so Docker Compose can interpolate these values before startup. `backend/.env` alone is not enough for the `minio` and `minio-init` services.
+- ECS/Fargate deployments do not need the MinIO env set. Use `OBJECT_STORAGE_BUCKET` plus `OBJECT_STORAGE_REGION` or `AWS_REGION`, leave `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_ACCESS_KEY`, and `OBJECT_STORAGE_SECRET_KEY` unset, leave `OBJECT_STORAGE_FORCE_PATH_STYLE` unset or set it to `false`, and grant the task role S3 access.
+
+ECS/Fargate image architecture note:
+- Local Docker Compose remains a developer-native workflow. On Apple Silicon, `docker compose build` will naturally create an `arm64` image unless you explicitly cross-build. That is correct for local development and must not be treated as the production publishing path.
+- Production ECS/Fargate currently runs on `LINUX/X86_64`. Every production backend and worker image pushed to ECR must therefore include `linux/amd64`.
+- The repo standard for production is a multi-arch manifest list built with `docker buildx` for `linux/amd64,linux/arm64`. ECS will pull the `linux/amd64` descriptor while Apple Silicon developers still get a safe, repeatable publishing path.
+- Use the repo-owned publish path documented in [docs/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md](/Users/abhiramteja/Downloads/genuine-scan-main/docs/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md:1) instead of ad hoc `docker build` or `docker push` commands.
+
+Exact production image commands:
+
+```bash
+export AWS_REGION=eu-west-2
+export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+export IMAGE_TAG="$(git rev-parse HEAD)"
+export ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+./scripts/aws/publish-ecs-images.sh backend
+./scripts/aws/publish-ecs-images.sh worker
+./scripts/aws/publish-ecs-images.sh both
+```
+
+Exact manifest verification commands before ECS task-definition updates:
+
+```bash
+REQUIRED_PLATFORMS=linux/amd64,linux/arm64 \
+  ./scripts/aws/verify-image-manifest.sh "${ECR_REGISTRY}/mscqr-backend:${IMAGE_TAG}"
+
+REQUIRED_PLATFORMS=linux/amd64,linux/arm64 \
+  ./scripts/aws/verify-image-manifest.sh "${ECR_REGISTRY}/mscqr-worker:${IMAGE_TAG}"
+```
+
+Operator guidance:
+- Do not update the backend or worker ECS task definition until the SHA-tagged image manifest has been verified.
+- Backend and worker intentionally use the same runtime image content from `backend/Dockerfile`, but they stay in separate ECR repositories for operational clarity.
+- Keep the object-storage task-role deployment guidance separate. See [docs/aws/object-storage-task-role.md](/Users/abhiramteja/Downloads/genuine-scan-main/docs/aws/object-storage-task-role.md:1) for the ECS S3 credential contract.
+- Before production publishing, enforce ECR immutability and lifecycle controls with `./scripts/aws/apply-ecr-repository-controls.sh both`.
+- The publish workflow now signs release images with cosign and attaches SBOM plus provenance attestations. The deploy workflow verifies those artifacts before touching ECS.
+- The audited ECS rollout path is the `Deploy ECS Release` workflow or the repo-owned [`scripts/aws/deploy-ecs-service.sh`](/Users/abhiramteja/Downloads/genuine-scan-main/scripts/aws/deploy-ecs-service.sh:1) helper.
+- Post-deploy runtime verification is now explicit: `./scripts/aws/verify-version-endpoint.sh https://your-backend.example.com/version "$IMAGE_TAG"`.
+- Infrastructure drift control now has a repo-owned Terraform baseline in [infra/aws/terraform/README.md](/Users/abhiramteja/Downloads/genuine-scan-main/infra/aws/terraform/README.md:1) for ECR and ECS service settings.
+- Production approvals are staged through protected GitHub environments in the deploy workflow: release approval, backend canary approval, then worker rollout approval.
+
 Run migrations in container:
 
 ```bash
@@ -714,6 +816,14 @@ Access:
 
 - Frontend at `http://localhost:${FRONTEND_PORT:-80}`
 - API via frontend reverse proxy at `/api/*`
+
+HTTPS for production (`mscqr.com` / `www.mscqr.com`):
+
+- The frontend container already supports HTTP-first boot and automatic HTTPS cutover when Let's Encrypt certs exist in `deploy/certbot/conf`.
+- Issue a certificate with `sh deploy/certbot/issue-letsencrypt.sh`
+- Dry-run renewal with `MSCQR_CERTBOT_DRY_RUN=true sh deploy/certbot/renew-letsencrypt.sh`
+- Full EC2/DNS instructions live in `docs/AWS_EC2_DEPLOY_MSCQR.md`
+- ECS/ECR image architecture instructions live in [docs/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md](/Users/abhiramteja/Downloads/genuine-scan-main/docs/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md:1)
 
 Important compose note:
 
@@ -739,11 +849,19 @@ Recommended smoke checks after changes:
 3. `npm run build`
 4. `npm run test`
 5. Login + dashboard load + scan flow sanity check in UI.
+6. `npm run verify:release`
+
+Historical provenance maintenance:
+
+- Dry-run legacy provenance review: `npm --prefix backend run data:backfill-qr-provenance -- --limit 500 --json`
+- Execute only after review: `npm --prefix backend run data:backfill-qr-provenance -- --execute --limit 500`
+- Unknown historical labels stay unknown unless direct governed-print evidence exists.
 
 ## 17. Operational and Security Checklist (Production)
 
 - Rotate all secrets (DB, JWT, signing keys).
 - Use Ed25519 keys; keep private key in secret manager.
+- If `QR_SIGN_PROVIDER=managed`, verify the managed signer bridge is present before rollout; refs alone are not enough.
 - Restrict CORS to real frontend domains only.
 - Enforce TLS end-to-end.
 - Lock down DB network exposure.
@@ -752,6 +870,7 @@ Recommended smoke checks after changes:
 - Centralize logs and alerting.
 - Validate backup/restore process.
 - Review RBAC and tenant isolation in staging before release.
+- Review [docs/observability/VERIFICATION_TRUST_EVENT_CATALOG.md](docs/observability/VERIFICATION_TRUST_EVENT_CATALOG.md) and [docs/PREMIUM_LAUNCH_INCIDENT_RUNBOOK.md](docs/PREMIUM_LAUNCH_INCIDENT_RUNBOOK.md) before premium launch.
 
 ## 18. Key Files to Understand First
 
@@ -836,8 +955,8 @@ Search/scoring logic lives in `src/help/kb-search.ts`.
 
 ### Rule-based scan explanation (customer verify page)
 
-- `Verified Again`: friendly repeat-verification messaging with “Show details”.
-- `Possible Duplicate`: reasons generated from scan signals (multi-device, burst scans, location/country drift) with clear action CTAs.
+- `MSCQR confirmed this code again`: repeat-verification messaging that keeps proof and scan-history details visible.
+- `Review required`: unusual scan signals (multi-device, burst scans, location/country drift) with clear action CTAs.
 - Fraud report form auto-attaches scan metadata and stores incident report in DB.
 
 ### Screenshots for docs/help pages

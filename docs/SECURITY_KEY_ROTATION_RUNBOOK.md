@@ -67,12 +67,13 @@ export IP_HASH_SALT_CURRENT="<new-ip-salt>"
 ```
 
 Deploy backend and frontend with both slots present.
+Record this in `.security/rotation-evidence.json` with linked deploy SHA(s).
 
 ### 3. Verify During the Cutover
 
 Run:
 
-- health/version checks
+- health/internal-release checks
 - admin login
 - refresh session
 - password reset
@@ -115,6 +116,13 @@ unset IP_HASH_SALT_PREVIOUS
 
 Redeploy again. At that point only the new `CURRENT` secrets remain.
 
+Mark cleanup in `.security/rotation-evidence.json`:
+
+- `cleanupWindowComplete=true`
+- `cleanupCompletedAt=<timestamp>`
+- `cleanupVerifiedBy=<operator>`
+- `linkedDeployShas` includes both deploy SHAs
+
 ## Secret-Specific Notes
 
 ### JWT signing
@@ -128,6 +136,17 @@ Redeploy again. At that point only the new `CURRENT` secrets remain.
 - Only relevant when QR signing is using HMAC fallback instead of Ed25519 keys.
 - With dual-slot support, existing HMAC-signed QR tokens continue to verify during the cutover.
 - Long term, Ed25519 keys are still the preferred posture.
+
+### QR Ed25519 / managed bridge posture
+
+- The repo supports local Ed25519 signing today and exposes a managed signer bridge boundary for a future KMS/HSM integration.
+- Setting `QR_SIGN_KMS_KEY_REF` / `QR_SIGN_KMS_VERIFY_KEY_REF` alone does not enable managed signing.
+- Managed mode is only active when:
+  - `QR_SIGN_PROVIDER=managed`
+  - the deployed backend registers a managed signer bridge
+  - the bridge reports the active key version and key reference
+- If managed mode is selected without a registered bridge, MSCQR now fails closed at startup.
+- Rotation and revocation for managed signing remain operational responsibilities outside this repo until the runtime bridge is implemented.
 
 ### Printer SSE signing
 
@@ -168,7 +187,7 @@ Rollback is allowed only if the new deployment is broken and the previous secret
 
 - `curl -sS /healthz`
 - `curl -sS /api/healthz`
-- `curl -sS /api/version`
+- authenticated `GET /api/internal/release`
 - admin login works
 - refresh works
 - password reset works
@@ -177,6 +196,18 @@ Rollback is allowed only if the new deployment is broken and the previous secret
 - public verify works
 - incident submit works
 - printer SSE stream reconnects cleanly
+
+## CI policy checks
+
+- `npm run check:rotation-evidence`
+- `npm run check:rotation-cleanup`
+
+When the rotation window is closed, run with:
+
+```bash
+ROTATION_WINDOW_COMPLETE=true npm run check:rotation-evidence
+ROTATION_WINDOW_COMPLETE=true npm run check:rotation-cleanup
+```
 
 ## Operational Notes
 

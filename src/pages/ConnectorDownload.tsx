@@ -20,6 +20,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { LegalFooter } from "@/components/trust/LegalFooter";
 import { cn } from "@/lib/utils";
 import apiClient from "@/lib/api-client";
 
@@ -841,6 +842,7 @@ export default function ConnectorDownload() {
           </div>
         </div>
       </div>
+      <LegalFooter />
     </div>
   );
 }

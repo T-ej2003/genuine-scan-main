@@ -45,13 +45,39 @@ export const createAuthApi = (core: ApiClientCore) => ({
         mfaVerifiedAt?: string | null;
         userAgent?: string | null;
         ipHash?: string | null;
+        security: {
+          riskScore: number;
+          riskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+          riskReasons: string[];
+          internalIpReputation: "trusted" | "new" | "elevated" | "high_risk" | "unknown";
+          possibleImpossibleTravel: boolean;
+          possibleImpossibleTravelReason?: string | null;
+        };
       }>;
+      summary: {
+        highestRiskScore: number;
+        highestRiskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+        highRiskSessionCount: number;
+        elevatedRiskSessionCount: number;
+        distinctIpHashes24h: number;
+        possibleImpossibleTravel: boolean;
+        internalIpReputation: "trusted" | "new" | "elevated" | "high_risk" | "unknown";
+      } | null;
     }>("/auth/sessions");
   },
 
   async revokeSession(sessionId: string) {
     return core.request<{ revoked: boolean; currentSessionRevoked?: boolean }>(
       `/auth/sessions/${encodeURIComponent(sessionId)}/revoke`,
+      {
+        method: "POST",
+      }
+    );
+  },
+
+  async revokeAllSessions() {
+    return core.request<{ revoked: boolean; currentSessionRevoked?: boolean; revokedCount?: number }>(
+      "/auth/sessions/revoke-all",
       {
         method: "POST",
       }

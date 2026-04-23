@@ -13,11 +13,13 @@ import {
 } from "../../services/customerWebauthnService";
 import {
   deriveCustomerVerifyUserId,
-  issueCustomerVerifyToken,
+  issueCustomerVerifySession,
   maskEmail,
   normalizeCustomerVerifyEmail,
 } from "../../services/customerVerifyAuthService";
+import { setCustomerVerifySessionCookie } from "../../services/customerVerifyCookieService";
 import { hashIp } from "../../utils/security";
+import { buildCustomerVerifyAuthResponse } from "./customerAuthResponsePolicy";
 
 const passkeyLabelSchema = z.string().trim().min(1).max(120).optional();
 
@@ -162,16 +164,21 @@ export const finishCustomerPasskeyRegistration = async (req: CustomerVerifyReque
       credential: parsed.data.credential,
     });
 
-    const token = issueCustomerVerifyToken(
+    const identity = {
+      userId: customer.userId,
+      email: customer.email,
+      authStrength: "PASSKEY" as const,
+      webauthnVerifiedAt: new Date().toISOString(),
+    };
+    const token = issueCustomerVerifySession(
       {
-        userId: customer.userId,
-        email: customer.email,
-      },
-      {
-        authStrength: "PASSKEY",
-        webauthnVerifiedAt: new Date(),
+        userId: identity.userId,
+        email: identity.email,
+        authStrength: identity.authStrength,
+        webauthnVerifiedAt: identity.webauthnVerifiedAt,
       }
     );
+    setCustomerVerifySessionCookie(res, token);
 
     await createAuditLogSafely({
       action: "VERIFY_CUSTOMER_PASSKEY_REGISTER_FINISH",
@@ -189,12 +196,7 @@ export const finishCustomerPasskeyRegistration = async (req: CustomerVerifyReque
       success: true,
       data: {
         enrolled: true,
-        token,
-        customer: {
-          userId: customer.userId,
-          email: customer.email,
-          maskedEmail: maskEmail(customer.email),
-        },
+        ...buildCustomerVerifyAuthResponse(identity),
       },
     });
   } catch (error: any) {
@@ -259,16 +261,21 @@ export const finishCustomerPasskeyAssertion = async (req: CustomerVerifyRequest,
       return res.status(500).json({ success: false, error: "Passkey assertion completed without a customer identity." });
     }
 
-    const token = issueCustomerVerifyToken(
+    const identity = {
+      userId: result.customerUserId,
+      email,
+      authStrength: "PASSKEY" as const,
+      webauthnVerifiedAt: result.assertedAt.toISOString(),
+    };
+    const token = issueCustomerVerifySession(
       {
-        userId: result.customerUserId,
-        email,
-      },
-      {
-        authStrength: "PASSKEY",
-        webauthnVerifiedAt: result.assertedAt,
+        userId: identity.userId,
+        email: identity.email,
+        authStrength: identity.authStrength,
+        webauthnVerifiedAt: identity.webauthnVerifiedAt,
       }
     );
+    setCustomerVerifySessionCookie(res, token);
 
     await createAuditLogSafely({
       action: "VERIFY_CUSTOMER_PASSKEY_ASSERT_FINISH",
@@ -285,12 +292,7 @@ export const finishCustomerPasskeyAssertion = async (req: CustomerVerifyRequest,
     return res.json({
       success: true,
       data: {
-        token,
-        customer: {
-          userId: result.customerUserId,
-          email,
-          maskedEmail: maskEmail(email),
-        },
+        ...buildCustomerVerifyAuthResponse(identity),
         assertedAt: result.assertedAt.toISOString(),
       },
     });

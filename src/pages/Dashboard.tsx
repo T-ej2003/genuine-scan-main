@@ -87,7 +87,12 @@ export default function Dashboard() {
 
     // setup SSE for realtime (cookie-auth; do not put tokens in URLs)
     {
-      const es = new EventSource(`${API_BASE}/events/dashboard`);
+      let es: EventSource;
+      try {
+        es = new EventSource(`${API_BASE}/events/dashboard`, { withCredentials: true });
+      } catch {
+        es = new EventSource(`${API_BASE}/events/dashboard`);
+      }
       sseRef.current = es;
       setSseConnected(true);
 
@@ -154,9 +159,13 @@ export default function Dashboard() {
   const qrStats = liveQrStats ?? dashboardQuery.data?.qrStats ?? null;
   const logs = liveLogs ?? auditLogsQuery.data ?? [];
   const loading = dashboardQuery.isLoading && !dashboardQuery.data && !liveSummary;
-  const error =
+  const rawError =
     (dashboardQuery.error instanceof Error ? dashboardQuery.error.message : null) ||
     (auditLogsQuery.error instanceof Error ? auditLogsQuery.error.message : null);
+  const error =
+    rawError && /no token provided/i.test(rawError)
+      ? "Your secure session could not be refreshed. Please sign in again."
+      : rawError;
 
   // totals (support multiple backend shapes)
   const totalQRCodes = summary?.totalQRCodes ?? 0;

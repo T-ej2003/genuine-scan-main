@@ -23,6 +23,7 @@ type StepUpEventDetail = {
   message?: string;
   stepUpMethod?: StepUpMethod | null;
 };
+type AdminMfaInputMode = "authenticator" | "backup";
 
 const defaultMessageForMethod = (method: StepUpMethod) =>
   method === "ADMIN_MFA"
@@ -37,7 +38,9 @@ export function StepUpRecoveryDialog() {
   const [stepUpMethod, setStepUpMethod] = useState<StepUpMethod>("PASSWORD_REAUTH");
   const [message, setMessage] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
-  const [mfaCode, setMfaCode] = useState("");
+  const [adminMfaInputMode, setAdminMfaInputMode] = useState<AdminMfaInputMode>("authenticator");
+  const [mfaAuthenticatorCode, setMfaAuthenticatorCode] = useState("");
+  const [mfaBackupCode, setMfaBackupCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const isAdminUser = user?.role === "super_admin" || user?.role === "licensee_admin";
@@ -55,7 +58,9 @@ export function StepUpRecoveryDialog() {
       setStepUpMethod(method);
       setMessage(detail.message || defaultMessageForMethod(method));
       setCurrentPassword("");
-      setMfaCode("");
+      setAdminMfaInputMode("authenticator");
+      setMfaAuthenticatorCode("");
+      setMfaBackupCode("");
       setOpen(true);
     };
 
@@ -73,16 +78,22 @@ export function StepUpRecoveryDialog() {
     if (!nextOpen) {
       setSubmitting(false);
       setCurrentPassword("");
-      setMfaCode("");
+      setAdminMfaInputMode("authenticator");
+      setMfaAuthenticatorCode("");
+      setMfaBackupCode("");
     }
   };
 
   const submit = async () => {
+    const adminCode =
+      adminMfaInputMode === "backup"
+        ? mfaBackupCode.trim().toUpperCase()
+        : mfaAuthenticatorCode.trim();
     setSubmitting(true);
     try {
       const response =
         stepUpMethod === "ADMIN_MFA"
-          ? await apiClient.stepUpWithAdminMfa(mfaCode.trim())
+          ? await apiClient.stepUpWithAdminMfa(adminCode)
           : await apiClient.stepUpWithPassword(currentPassword);
 
       if (!response.success) {
@@ -154,14 +165,50 @@ export function StepUpRecoveryDialog() {
                 </Button>
               ) : null}
               <div className="space-y-2">
-                <Label htmlFor="step-up-mfa-code">Authenticator or backup code</Label>
-                <Input
-                  id="step-up-mfa-code"
-                  value={mfaCode}
-                  onChange={(event) => setMfaCode(event.target.value)}
-                  placeholder="123456 or ABCDE-12345"
-                  autoComplete="one-time-code"
-                />
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={adminMfaInputMode === "authenticator" ? "default" : "outline"}
+                    onClick={() => setAdminMfaInputMode("authenticator")}
+                    disabled={submitting}
+                  >
+                    Authenticator code
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={adminMfaInputMode === "backup" ? "default" : "outline"}
+                    onClick={() => setAdminMfaInputMode("backup")}
+                    disabled={submitting}
+                  >
+                    Backup code
+                  </Button>
+                </div>
+                {adminMfaInputMode === "authenticator" ? (
+                  <>
+                    <Label htmlFor="step-up-mfa-auth-code">Authenticator code</Label>
+                    <Input
+                      id="step-up-mfa-auth-code"
+                      value={mfaAuthenticatorCode}
+                      onChange={(event) => setMfaAuthenticatorCode(event.target.value)}
+                      inputMode="numeric"
+                      placeholder="123456"
+                      autoComplete="one-time-code"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Label htmlFor="step-up-mfa-backup-code">Backup code</Label>
+                    <Input
+                      id="step-up-mfa-backup-code"
+                      value={mfaBackupCode}
+                      onChange={(event) => setMfaBackupCode(event.target.value)}
+                      placeholder="ABCDE-12345"
+                      autoComplete="one-time-code"
+                    />
+                  </>
+                )}
               </div>
             </div>
           ) : (
@@ -186,7 +233,12 @@ export function StepUpRecoveryDialog() {
           <Button
             type="button"
             onClick={() => void submit()}
-            disabled={submitting || (stepUpMethod === "ADMIN_MFA" ? !mfaCode.trim() : !currentPassword)}
+            disabled={
+              submitting ||
+              (stepUpMethod === "ADMIN_MFA"
+                ? !(adminMfaInputMode === "backup" ? mfaBackupCode.trim() : mfaAuthenticatorCode.trim())
+                : !currentPassword)
+            }
           >
             {submitting ? "Verifying..." : "Continue"}
           </Button>

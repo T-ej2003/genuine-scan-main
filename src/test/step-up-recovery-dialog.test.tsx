@@ -100,12 +100,43 @@ describe("StepUpRecoveryDialog", () => {
     expect(await screen.findByText("Confirm Admin Verification")).toBeInTheDocument();
 
     await act(async () => {
-      fireEvent.change(screen.getByLabelText("Authenticator or backup code"), { target: { value: "123456" } });
+      fireEvent.change(screen.getByLabelText("Authenticator code"), { target: { value: "123456" } });
       fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     });
 
     await waitFor(() => {
       expect(stepUpWithAdminMfaMock).toHaveBeenCalledWith("123456");
+    });
+  });
+
+  it("submits backup codes separately for admin MFA recovery", async () => {
+    authStateTyped.user = { role: "super_admin" };
+    render(<StepUpRecoveryDialog />);
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent("auth:step-up-required", {
+          detail: {
+            stepUpMethod: "ADMIN_MFA",
+            message: "Confirm your backup code to continue.",
+          },
+        })
+      );
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Backup code" }));
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Backup code")).toBeInTheDocument();
+    });
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Backup code"), { target: { value: "abcde-12345" } });
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    });
+
+    await waitFor(() => {
+      expect(stepUpWithAdminMfaMock).toHaveBeenCalledWith("ABCDE-12345");
     });
   });
 });

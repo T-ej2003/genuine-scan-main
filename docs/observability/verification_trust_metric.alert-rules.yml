@@ -1,0 +1,31 @@
+version: 1
+alerts:
+  - name: mscqr-trust-break-glass-usage
+    description: Trigger when restricted direct issuance occurs outside approved maintenance windows.
+    query: 'event="verification_trust_metric" metric="verification_break_glass_generate"'
+    severity: critical
+    expected_response_minutes: 15
+
+  - name: mscqr-trust-replay-review-spike
+    description: Trigger when replay-like review-required results exceed the expected baseline.
+    query: 'event="verification_trust_metric" metric="verification_trust_state" publicOutcome="REVIEW_REQUIRED" replayState IN ("CHANGED_CONTEXT_REPEAT","RAPID_CHANGED_CONTEXT_REPEAT")'
+    severity: high
+    expected_response_minutes: 30
+
+  - name: mscqr-trust-limited-provenance-rate
+    description: Trigger when limited-provenance results increase unexpectedly, indicating legacy or bypass labels surfacing in customer flows.
+    query: 'event="verification_trust_metric" metric="verification_trust_state" limitedProvenance=true'
+    severity: medium
+    expected_response_minutes: 60
+
+  - name: mscqr-trust-signing-fallback
+    description: Trigger when QR verification decisions are recorded under HMAC signing mode in environments that should use Ed25519.
+    query: 'event="verification_trust_metric" metric="verification_trust_state" signingMode="hmac"'
+    severity: high
+    expected_response_minutes: 30
+
+  - name: mscqr-trust-challenge-abandonment
+    description: Trigger when challenge-required replay events rise while challenge completion remains low.
+    query: 'event="verification_trust_metric" metric="verification_trust_state" challengeRequired=true'
+    severity: medium
+    expected_response_minutes: 60

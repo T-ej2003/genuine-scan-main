@@ -152,9 +152,9 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
             : Prisma.empty;
 
         const reservedRows = await tx.$queryRaw<
-          Array<{ id: string; code: string; licenseeId: string; batchId: string | null }>
+          Array<{ id: string; code: string; licenseeId: string; batchId: string | null; replayEpoch: number | null }>
         >(Prisma.sql`
-          SELECT q."id", q."code", q."licenseeId", q."batchId"
+          SELECT q."id", q."code", q."licenseeId", q."batchId", q."replayEpoch"
           FROM "QRCode" q
           WHERE q."batchId" = ${batch.id}
             AND q."status" = CAST(${QRStatus.ALLOCATED} AS "QRStatus")
@@ -176,6 +176,7 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
             batch_id: qr.batchId,
             licensee_id: qr.licenseeId,
             manufacturer_id: batch.manufacturerId || null,
+            epoch: Number(qr.replayEpoch || 1),
             iat: Math.floor(now.getTime() / 1000),
             exp: Math.floor(expAt.getTime() / 1000),
             nonce,
@@ -220,7 +221,8 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
             "tokenIssuedAt" = v."tokenIssuedAt",
             "tokenExpiresAt" = v."tokenExpiresAt",
             "tokenHash" = v."tokenHash",
-            "printJobId" = ${createdJob.id}
+            "printJobId" = ${createdJob.id},
+            "issuanceMode" = 'GOVERNED_PRINT'
           FROM (
             VALUES ${Prisma.join(values)}
           ) AS v("id", "tokenNonce", "tokenHash", "tokenIssuedAt", "tokenExpiresAt")

@@ -127,7 +127,7 @@ export default function ManufacturerHelp() {
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ul className="list-disc pl-5">
-                  <li><Badge variant="outline">Connector unavailable</Badge> means MSCQR cannot detect the workstation connector on that device.</li>
+                  <li><Badge variant="outline">Connector unavailable</Badge> means MSCQR cannot detect the printer helper on that device.</li>
                   <li><Badge variant="outline">Connector installed, printer needs attention</Badge> means setup succeeded, but Windows or macOS is not exposing a usable online printer yet.</li>
                   <li><Badge variant="outline">No printer detected</Badge> means the connector is running but the operating system is not exposing a usable printer yet.</li>
                   <li><Badge variant="outline">Needs attention</Badge> means the saved printer route or secure connection still needs review.</li>

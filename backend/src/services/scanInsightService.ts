@@ -3,6 +3,7 @@ import { reverseGeocode } from "./locationService";
 import { isPrismaMissingTableError } from "../utils/prismaStorageGuard";
 import { guardPublicIntegrityFallback } from "../utils/publicIntegrityGuard";
 import { getQrScanHistoryEdges } from "./scanLogReportingService";
+import { normalizeClientIp } from "../utils/ipAddress";
 
 type ScanInsight = {
   firstScanAt: string | null;
@@ -115,7 +116,7 @@ const isPrivateIp = (ip: string) => {
 };
 
 const estimateIpReputationScore = (ip: string | null | undefined) => {
-  const value = String(ip || "").trim();
+  const value = normalizeClientIp(ip);
   if (!value) return 0;
 
   const matchesPattern = (pattern: string) => {
@@ -154,7 +155,7 @@ export const getScanInsight = async (
   const now = Date.now();
   const lookback24h = new Date(now - 24 * 60 * 60 * 1000);
   const lookback10m = new Date(now - 10 * 60 * 1000);
-  const normalizedCurrentIp = String(options?.currentIpAddress || "").trim() || null;
+  const normalizedCurrentIp = normalizeClientIp(options?.currentIpAddress || null) || null;
   const licenseeScope = String(options?.licenseeId || "").trim() || null;
   const sharedScopeWhere = licenseeScope ? { licenseeId: licenseeScope } : {};
   const normalizedCurrentDevice = String(currentDevice || "").trim();

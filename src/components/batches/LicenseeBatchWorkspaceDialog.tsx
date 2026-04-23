@@ -29,6 +29,7 @@ import {
   decisionOutcomeTone,
   decisionRiskTone,
   decisionTrustTone,
+  presentPrintTrustState,
   titleCaseDecisionValue,
 } from "@/lib/verification-decision";
 
@@ -135,6 +136,15 @@ const getPrintJobStatusBadgeVariant = (job: PrintJobRow): "default" | "secondary
   if (job.pipelineState === "FAILED" || job.status === "FAILED") return "destructive";
   if (job.pipelineState === "NEEDS_OPERATOR_ACTION") return "secondary";
   return "outline";
+};
+
+const getPrintJobStageLabel = (job: PrintJobRow) => {
+  if (job.pipelineState === "LOCKED" || job.pipelineState === "PRINT_CONFIRMED" || job.status === "CONFIRMED") {
+    return "Print confirmed";
+  }
+  if (job.pipelineState === "NEEDS_OPERATOR_ACTION") return "Needs operator review";
+  if (job.pipelineState === "FAILED" || job.status === "FAILED") return "Needs attention";
+  return titleCaseDecisionValue(job.pipelineState || job.status || "Queued");
 };
 
 const isEligibleForReissue = (job: PrintJobRow) =>
@@ -504,7 +514,7 @@ export function LicenseeBatchWorkspaceDialog({
                                       <div className="flex flex-wrap items-center gap-2">
                                         <div className="font-medium text-foreground">{job.jobNumber || "Print job"}</div>
                                         <Badge variant={getPrintJobStatusBadgeVariant(job)}>
-                                          {job.pipelineState || job.status}
+                                          {getPrintJobStageLabel(job)}
                                         </Badge>
                                         {job.reprintOfJobId ? <Badge variant="outline">Replacement</Badge> : null}
                                       </div>
@@ -516,19 +526,24 @@ export function LicenseeBatchWorkspaceDialog({
                                         <div className="text-xs text-muted-foreground">Reason: {job.reprintReason}</div>
                                       ) : null}
                                       {job.latestDecision ? (
-                                        <div className="flex flex-wrap gap-1">
-                                          <Badge className={decisionOutcomeTone(job.latestDecision.outcome)}>
-                                            {titleCaseDecisionValue(job.latestDecision.outcome)}
-                                          </Badge>
-                                          <Badge className={decisionRiskTone(job.latestDecision.riskBand)}>
-                                            {titleCaseDecisionValue(job.latestDecision.riskBand)}
-                                          </Badge>
-                                          <Badge className={decisionTrustTone(job.latestDecision.customerTrustReviewState)}>
-                                            {titleCaseDecisionValue(job.latestDecision.customerTrustReviewState)}
-                                          </Badge>
-                                          {job.latestDecision.printTrustState ? (
-                                            <Badge variant="outline">{titleCaseDecisionValue(job.latestDecision.printTrustState)}</Badge>
-                                          ) : null}
+                                        <div className="space-y-2">
+                                          <div className="flex flex-wrap gap-1">
+                                            <Badge className={decisionOutcomeTone(job.latestDecision.outcome)}>
+                                              {titleCaseDecisionValue(job.latestDecision.outcome)}
+                                            </Badge>
+                                            <Badge className={decisionRiskTone(job.latestDecision.riskBand)}>
+                                              {titleCaseDecisionValue(job.latestDecision.riskBand)}
+                                            </Badge>
+                                            <Badge className={decisionTrustTone(job.latestDecision.customerTrustReviewState)}>
+                                              {titleCaseDecisionValue(job.latestDecision.customerTrustReviewState)}
+                                            </Badge>
+                                            <Badge className={presentPrintTrustState(job.latestDecision).tone}>
+                                              {presentPrintTrustState(job.latestDecision).label}
+                                            </Badge>
+                                          </div>
+                                          <div className="text-xs text-muted-foreground">
+                                            {presentPrintTrustState(job.latestDecision).guidance}
+                                          </div>
                                         </div>
                                       ) : null}
                                       {job.failureReason ? (

@@ -1,0 +1,5 @@
+# Local Compose overrides are intentionally credential-free.
+# Define MINIO_ROOT_USER, MINIO_ROOT_PASSWORD, OBJECT_STORAGE_ACCESS_KEY,
+# and OBJECT_STORAGE_SECRET_KEY in the project-root .env (or shell environment)
+# before using `docker compose -f docker-compose.yml -f docker-compose.local.yml ...`.
+services: {}

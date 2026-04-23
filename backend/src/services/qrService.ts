@@ -4,6 +4,7 @@ import { randomNonce } from "./qrTokenService";
 import { reverseGeocode } from "./locationService";
 import { summarizeQrStatusCounts } from "./qrStatusMetrics";
 import { guardPublicIntegrityFallback } from "../utils/publicIntegrityGuard";
+import { normalizeClientIp } from "../utils/ipAddress";
 
 const parseScanRefreshGraceMs = () => {
   const raw = Number(String(process.env.SCAN_REFRESH_GRACE_SECONDS || "").trim());
@@ -14,6 +15,7 @@ const parseScanRefreshGraceMs = () => {
 const SCAN_REFRESH_GRACE_MS = parseScanRefreshGraceMs();
 
 const normalizeActorToken = (value: string | null | undefined) => String(value || "").trim();
+const normalizeScanIp = (value: string | null | undefined) => normalizeClientIp(value);
 
 const isRecentRefreshDuplicate = (params: {
   latestLog:
@@ -65,8 +67,8 @@ const isRecentRefreshDuplicate = (params: {
 
   const currentUserAgent = normalizeActorToken(params.meta?.userAgent);
   const latestUserAgent = normalizeActorToken(params.latestLog.userAgent);
-  const currentIpAddress = normalizeActorToken(params.meta?.ipAddress);
-  const latestIpAddress = normalizeActorToken(params.latestLog.ipAddress);
+  const currentIpAddress = normalizeScanIp(params.meta?.ipAddress);
+  const latestIpAddress = normalizeScanIp(params.latestLog.ipAddress);
 
   return Boolean(currentUserAgent && latestUserAgent && currentIpAddress && latestIpAddress) &&
     currentUserAgent === latestUserAgent &&
@@ -229,6 +231,7 @@ export const recordScan = async (
   };
 
   const updated = await prisma.$transaction(async (tx) => {
+    const normalizedIpAddress = normalizeScanIp(meta?.ipAddress || null);
     const latestLog = await tx.qrScanLog.findFirst({
       where: { qrCodeId: existing.id },
       orderBy: [{ scannedAt: "desc" }, { id: "desc" }],
@@ -244,7 +247,15 @@ export const recordScan = async (
       },
     });
 
-    if (isRecentRefreshDuplicate({ latestLog, meta })) {
+    if (
+      isRecentRefreshDuplicate({
+        latestLog,
+        meta: {
+          ...meta,
+          ipAddress: normalizedIpAddress || null,
+        },
+      })
+    ) {
       return {
         qr: existing,
         scanRecorded: false,
@@ -259,7 +270,7 @@ export const recordScan = async (
         status: isFirstScan ? QRStatus.REDEEMED : existing.status,
         scannedAt: isFirstScan ? new Date() : existing.scannedAt,
         redeemedAt: isFirstScan ? new Date() : existing.redeemedAt,
-        lastScanIp: meta?.ipAddress ?? null,
+        lastScanIp: normalizedIpAddress || null,
         lastScanUserAgent: meta?.userAgent ?? null,
         lastScanDevice: meta?.device ?? null,
         scanCount: { increment: 1 },
@@ -282,7 +293,7 @@ export const recordScan = async (
       ownershipId: meta?.ownershipId ?? null,
       ownershipMatchMethod: meta?.ownershipMatchMethod ?? null,
       isTrustedOwnerContext: meta?.isTrustedOwnerContext === true,
-      ipAddress: meta?.ipAddress ?? null,
+      ipAddress: normalizedIpAddress || null,
       userAgent: meta?.userAgent ?? null,
       device: meta?.device ?? null,
       latitude: meta?.latitude ?? null,

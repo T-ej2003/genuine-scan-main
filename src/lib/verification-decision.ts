@@ -12,6 +12,9 @@ export type LatestDecision = {
   decisionVersion: number;
   outcome: string;
   proofTier: "SIGNED_LABEL" | "MANUAL_REGISTRY_LOOKUP" | "DEGRADED";
+  publicOutcome?: string | null;
+  riskDisposition?: string | null;
+  messageKey?: string | null;
   riskBand: "LOW" | "ELEVATED" | "HIGH" | "CRITICAL";
   replacementStatus: "NONE" | "ACTIVE_REPLACEMENT" | "REPLACED_LABEL";
   customerTrustLevel: CustomerTrustLevel;
@@ -31,6 +34,72 @@ export const titleCaseDecisionValue = (value?: string | null) =>
     .toLowerCase()
     .replace(/_/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
+
+export type PrintTrustPresentation = {
+  label: string;
+  tone: string;
+  guidance: string;
+  emphasis: "governed" | "limited" | "restricted" | "pending" | "neutral";
+};
+
+export const presentPrintTrustState = (
+  decision?: Pick<LatestDecision, "printTrustState" | "publicOutcome" | "messageKey"> | null
+): PrintTrustPresentation => {
+  const normalizedState = String(decision?.printTrustState || "").trim().toUpperCase();
+  const normalizedOutcome = String(decision?.publicOutcome || "").trim().toUpperCase();
+
+  if (normalizedState === "PRINT_CONFIRMED") {
+    return {
+      label: "Governed print confirmed",
+      tone: "border-emerald-200 bg-emerald-50 text-emerald-700",
+      guidance: "This label followed the governed print path and reached customer-verifiable readiness.",
+      emphasis: "governed",
+    };
+  }
+
+  if (normalizedState === "LIMITED_PROVENANCE" || normalizedOutcome === "LIMITED_PROVENANCE") {
+    return {
+      label: "Limited provenance",
+      tone: "border-amber-200 bg-amber-50 text-amber-800",
+      guidance: "MSCQR can still check this label record, but governed print provenance is incomplete or legacy.",
+      emphasis: "limited",
+    };
+  }
+
+  if (normalizedState === "LEGACY_NO_CONTROLLED_PRINT") {
+    return {
+      label: "Legacy label without governed print",
+      tone: "border-amber-200 bg-amber-50 text-amber-800",
+      guidance: "Treat this as a legacy record. Do not present it as equivalent to governed print confirmation.",
+      emphasis: "limited",
+    };
+  }
+
+  if (normalizedState === "RESTRICTED_DIRECT_ISSUANCE") {
+    return {
+      label: "Restricted direct issuance",
+      tone: "border-rose-200 bg-rose-50 text-rose-700",
+      guidance: "This label came from a restricted break-glass path and should stay outside normal premium issuance claims.",
+      emphasis: "restricted",
+    };
+  }
+
+  if (normalizedState === "AWAITING_PRINT_CONFIRMATION") {
+    return {
+      label: "Awaiting print confirmation",
+      tone: "border-slate-300 bg-slate-100 text-slate-700",
+      guidance: "The label exists, but MSCQR has not yet confirmed customer-verifiable print readiness.",
+      emphasis: "pending",
+    };
+  }
+
+  return {
+    label: normalizedState ? titleCaseDecisionValue(normalizedState) : "Governed print status unavailable",
+    tone: "border-slate-300 bg-slate-100 text-slate-700",
+    guidance: "No curated governed-print trust signal is available for this decision yet.",
+    emphasis: "neutral",
+  };
+};
 
 export const decisionOutcomeTone = (value?: string | null) => {
   const normalized = String(value || "").trim().toUpperCase();

@@ -1,4 +1,10 @@
-export { requestCustomerEmailOtp, verifyCustomerEmailOtp } from "./authHandlers";
+export { getCustomerVerifyAuthSession, logoutCustomerVerifySession, requestCustomerEmailOtp, verifyCustomerEmailOtp } from "./authHandlers";
+export {
+  completeCustomerOAuth,
+  exchangeCustomerOAuth,
+  listCustomerOAuthProviders,
+  startCustomerOAuth,
+} from "./oauthHandlers";
 export {
   beginCustomerPasskeyAssertion,
   beginCustomerPasskeyRegistration,
@@ -8,6 +14,12 @@ export {
   listCustomerPasskeyCredentials,
 } from "./passkeyAuthHandlers";
 export { verifyQRCode } from "./verificationHandlers";
+export {
+  getCustomerVerificationSessionState,
+  revealCustomerVerificationResult,
+  startCustomerVerificationSession,
+  submitCustomerVerificationIntake,
+} from "./sessionHandlers";
 export { claimProductOwnership, linkDeviceClaimToCustomer } from "./claimHandlers";
 export {
   acceptOwnershipTransfer,

@@ -1,0 +1,25 @@
+alerts:
+  - name: mscqr-rate-limit-licensee-burst
+    family: licensees.read
+    threshold: 20
+    severity: high
+  - name: mscqr-rate-limit-governance-spike
+    family: governance.read
+    threshold: 12
+    severity: high
+  - name: mscqr-rate-limit-audit-export-abuse
+    family: audit.export
+    threshold: 8
+    severity: high
+  - name: mscqr-rate-limit-verify-claim-abuse
+    family: verify.claim
+    threshold: 10
+    severity: high
+  - name: mscqr-rate-limit-printer-agent-heartbeat-burst
+    family: printer-agent.heartbeat
+    threshold: 25
+    severity: medium
+  - name: mscqr-rate-limit-support-abuse
+    family: support.read
+    threshold: 15
+    severity: medium

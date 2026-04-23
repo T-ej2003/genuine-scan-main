@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { LegalFooter } from "@/components/trust/LegalFooter";
 import { cn } from "@/lib/utils";
 
 const CONTACT_EMAIL = "administration@mscqr.com";
@@ -450,25 +451,7 @@ export default function Index() {
         </section>
       </main>
 
-      <footer className="border-t border-white/8 bg-[#071019]">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-8 text-sm text-slate-400 md:flex-row md:items-center md:justify-between">
-          <div>MSCQR authentication platform for governed product verification and traceability.</div>
-          <div className="flex flex-wrap items-center gap-4">
-            <Link to="/verify" className="transition-colors hover:text-slate-200">
-              Verify
-            </Link>
-            <Link to="/login" className="transition-colors hover:text-slate-200">
-              Platform access
-            </Link>
-            <Link to="/trust" className="transition-colors hover:text-slate-200">
-              Trust Center
-            </Link>
-            <a href={`mailto:${CONTACT_EMAIL}`} className="transition-colors hover:text-slate-200">
-              {CONTACT_EMAIL}
-            </a>
-          </div>
-        </div>
-      </footer>
+      <LegalFooter tone="dark" />
     </div>
   );
 }

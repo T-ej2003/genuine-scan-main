@@ -1,0 +1,32 @@
+[
+  {
+    "event": "rate_limit_metric",
+    "scope": "licensees.read:pre-auth",
+    "family": "licensees.read",
+    "stage": "pre-auth",
+    "method": "GET",
+    "route": "/licensees",
+    "authModel": "bearer",
+    "offenderKind": "bearer",
+    "offenderRef": "v1:5e902a6d10f2efc9b85115d765",
+    "tenantRef": "v1:f28c7c5a43a91609d9f20f5239",
+    "resourceRef": null,
+    "userRole": null,
+    "retryAfterSec": 42
+  },
+  {
+    "event": "rate_limit_metric",
+    "scope": "audit.export",
+    "family": "audit.export",
+    "stage": "route",
+    "method": "GET",
+    "route": "/audit/logs/export",
+    "authModel": "authenticated",
+    "offenderKind": "user",
+    "offenderRef": "v1:0ed02677ed9a2e6b84a08ced8f",
+    "tenantRef": "v1:92ca1e84062f8ec08f74a363fd",
+    "resourceRef": null,
+    "userRole": "PLATFORM_SUPER_ADMIN",
+    "retryAfterSec": 60
+  }
+]

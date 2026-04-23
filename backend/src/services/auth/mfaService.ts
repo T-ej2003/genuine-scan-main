@@ -6,11 +6,16 @@ import { buildTokenHashCandidates, hashToken, matchesHashedToken, randomOpaqueTo
 
 const TOTP_STEP_SECONDS = 30;
 const TOTP_DIGITS = 6;
-const TOTP_WINDOW = 1;
+const DEFAULT_TOTP_WINDOW = 1;
 
 const parseIntEnv = (key: string, fallback: number) => {
   const raw = Number(String(process.env[key] || "").trim());
   return Number.isFinite(raw) ? Math.floor(raw) : fallback;
+};
+
+const getTotpWindow = () => {
+  const configured = parseIntEnv("AUTH_MFA_TOTP_WINDOW", DEFAULT_TOTP_WINDOW);
+  return Math.max(0, Math.min(4, configured));
 };
 
 const issuer = () => String(process.env.MFA_TOTP_ISSUER || process.env.APP_NAME || "MSCQR").trim();
@@ -103,7 +108,8 @@ const verifyTotp = (secretBase32: string, code: string, atMs = Date.now()) => {
   if (!secret.length) return false;
 
   const counter = Math.floor(atMs / (TOTP_STEP_SECONDS * 1000));
-  for (let i = -TOTP_WINDOW; i <= TOTP_WINDOW; i += 1) {
+  const windowSize = getTotpWindow();
+  for (let i = -windowSize; i <= windowSize; i += 1) {
     const expected = hotp(secret, counter + i);
     const exp = Buffer.from(expected);
     const got = Buffer.from(normalizedCode);
