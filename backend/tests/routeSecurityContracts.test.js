@@ -57,6 +57,8 @@ assert(!routesSource.includes("const createJsonRateLimitHandler"), "main routes 
 assert(!auditRoutesSource.includes("...auditExportLimiters"), "audit routes should not use spread-applied audit export limiters");
 
 assert(authRoutesSource.includes("const sessionReadPreAuthRouteLimiter = rateLimit("), "auth routes should define a pre-auth session limiter");
+assert(authRoutesSource.includes("const secureSessionPreAuthRouteLimiter = rateLimit("), "auth routes should define a pre-auth secure-session limiter");
+assert(authRoutesSource.includes("const mfaPreAuthRouteLimiter = rateLimit("), "auth routes should define a pre-auth MFA limiter");
 assert(authRoutesSource.includes("const adminInvitePreAuthRouteLimiter = rateLimit("), "auth routes should define a pre-auth invite limiter");
 assert(realtimeRoutesSource.includes("const dashboardReadPreAuthRouteLimiter: RequestHandler = rateLimit("), "realtime routes should define a pre-auth dashboard read limiter");
 assert(realtimeRoutesSource.includes("const printerAgentHeartbeatPreAuthRouteLimiter: RequestHandler = rateLimit("), "realtime routes should define a pre-auth printer heartbeat limiter");
@@ -67,6 +69,8 @@ assert(auditRoutesSource.includes("const auditFraudReportsRespondPreAuthRouteLim
 
 [
   'router.get("/auth/sessions", sessionReadPreAuthRouteLimiter, authenticate, sessionReadRouteLimiter, listSessions);',
+  'router.post("/auth/sessions/revoke-all", secureSessionPreAuthRouteLimiter, authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, revokeAllSessionsController);',
+  'router.post("/auth/mfa/backup-codes/rotate", mfaPreAuthRouteLimiter, authenticate, requireRecentAdminMfa, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, rotateAdminMfaBackupCodesController);',
   'router.post("/auth/invite", adminInvitePreAuthRouteLimiter, authenticate, requireAnyAdmin, requireRecentAdminMfa, adminInviteRouteLimiter, adminInviteIpLimiter, adminInviteActorLimiter, requireCsrf, invite);',
 ].forEach((pattern) => {
   assert(authRoutesSource.includes(pattern), `auth route contract missing: ${pattern}`);
@@ -106,6 +110,8 @@ assert(auditRoutesSource.includes("const auditFraudReportsRespondPreAuthRouteLim
 });
 
 [
+  '"/verify/session/:id/intake", verifySessionMutationPreAuthRouteLimiter, requireCustomerVerifyAuth, verifyCustomerCookieRouteLimiter,',
+  '"/verify/session/:id/reveal", verifySessionMutationPreAuthRouteLimiter, requireCustomerVerifyAuth, verifyCustomerCookieRouteLimiter,',
   '"/verify/auth/session", verifySessionPreAuthRouteLimiter, optionalCustomerVerifyAuth,',
   '"/verify/auth/logout", verifyCustomerCookiePreAuthRouteLimiter, verifyCustomerCookieRouteLimiter,',
   '"/verify/auth/passkey/register/begin", verifyCustomerCookiePreAuthRouteLimiter, requireCustomerVerifyAuth,',

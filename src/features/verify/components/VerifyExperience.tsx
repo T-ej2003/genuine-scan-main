@@ -32,14 +32,11 @@ import { getOrCreateAnonDeviceId } from "@/lib/anon-device";
 import { BASE_URL } from "@/lib/api/internal-client-core";
 import {
   APP_NAME,
-  CUSTOMER_EMAIL_KEY,
-  LEGACY_CUSTOMER_EMAIL_KEY,
   deriveReasons,
   formatDateTime,
   inferClassification,
   normalizeVerifyCode,
   readCachedGeo,
-  readStoredValue,
   toLabel,
   type CustomerTrustIntake,
   type VerificationClassification,
@@ -116,6 +113,8 @@ const STEP_META: Record<
   },
 };
 
+const LEGACY_VERIFY_EMAIL_STORAGE_KEYS = ["mscqr_verify_customer_email", "authenticqr_verify_customer_email"] as const;
+
 const DEFAULT_INTAKE: CustomerTrustIntake = {
   purchaseChannel: "online",
   sourceCategory: "marketplace",
@@ -140,22 +139,11 @@ const maskCode = (value?: string | null) => {
   return `${normalized.slice(0, Math.min(4, normalized.length))}${normalized.length > 4 ? `-${normalized.slice(-4)}` : ""}`;
 };
 
-const persistCustomerSession = (email: string) => {
-  const nextEmail = String(email || "").trim();
-
+const clearLegacyStoredCustomerSession = () => {
   try {
-    if (nextEmail) window.localStorage.setItem(CUSTOMER_EMAIL_KEY, nextEmail);
-    else window.localStorage.removeItem(CUSTOMER_EMAIL_KEY);
-    window.localStorage.removeItem(LEGACY_CUSTOMER_EMAIL_KEY);
-  } catch {
-    // Ignore storage issues.
-  }
-};
-
-const clearStoredCustomerSession = () => {
-  try {
-    window.localStorage.removeItem(CUSTOMER_EMAIL_KEY);
-    window.localStorage.removeItem(LEGACY_CUSTOMER_EMAIL_KEY);
+    for (const key of LEGACY_VERIFY_EMAIL_STORAGE_KEYS) {
+      window.localStorage.removeItem(key);
+    }
   } catch {
     // Ignore storage issues.
   }
@@ -324,7 +312,7 @@ export default function VerifyExperience() {
   }, [code]);
 
   const [customerAuthenticated, setCustomerAuthenticated] = useState(false);
-  const [customerEmail, setCustomerEmail] = useState(() => readStoredValue(CUSTOMER_EMAIL_KEY, LEGACY_CUSTOMER_EMAIL_KEY));
+  const [customerEmail, setCustomerEmail] = useState("");
   const [session, setSession] = useState<VerificationSessionSummary | null>(null);
   const [lockedResult, setLockedResult] = useState<VerifyPayload | null>(null);
   const [result, setResult] = useState<VerifyPayload | null>(null);
@@ -332,7 +320,7 @@ export default function VerifyExperience() {
   const [booting, setBooting] = useState(true);
   const [oauthResolved, setOauthResolved] = useState(false);
 
-  const [otpEmail, setOtpEmail] = useState(() => readStoredValue(CUSTOMER_EMAIL_KEY, LEGACY_CUSTOMER_EMAIL_KEY));
+  const [otpEmail, setOtpEmail] = useState("");
   const [otpChallengeToken, setOtpChallengeToken] = useState("");
   const [otpMaskedEmail, setOtpMaskedEmail] = useState("");
   const [otpCode, setOtpCode] = useState("");
@@ -416,10 +404,10 @@ export default function VerifyExperience() {
 
   const applySignedInCustomer = useCallback(
     (emailValue: string) => {
-      persistCustomerSession(emailValue);
-      setCustomerAuthenticated(true);
-      setCustomerEmail(emailValue);
-      setOtpEmail(emailValue);
+      const normalizedEmail = String(emailValue || "").trim();
+      setCustomerAuthenticated(Boolean(normalizedEmail));
+      setCustomerEmail(normalizedEmail);
+      setOtpEmail(normalizedEmail);
       setFlowStep("purchase");
     },
     []
@@ -463,6 +451,10 @@ export default function VerifyExperience() {
   }, []);
 
   useEffect(() => {
+    clearLegacyStoredCustomerSession();
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
 
     const handleProviderReturn = async () => {
@@ -495,9 +487,12 @@ export default function VerifyExperience() {
         if (!response.success || !response.data?.customer?.email) {
           throw new Error(response.error || "Could not complete social sign-in.");
         }
-        persistCustomerSession(response.data.customer.email);
         clearHash();
-        window.location.replace(`${window.location.pathname}${window.location.search}`);
+        hydrateCustomerAuthSession(response.data);
+        if (!cancelled) {
+          setBooting(false);
+          setOauthResolved(true);
+        }
       } catch (nextError: unknown) {
         clearHash();
         toast({
@@ -517,7 +512,7 @@ export default function VerifyExperience() {
     return () => {
       cancelled = true;
     };
-  }, [toast]);
+  }, [hydrateCustomerAuthSession, toast]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1936,7 +1931,7 @@ export default function VerifyExperience() {
               variant="ghost"
               onClick={async () => {
                 await apiClient.logoutCustomerVerifySession();
-                clearStoredCustomerSession();
+                clearLegacyStoredCustomerSession();
                 setCustomerAuthenticated(false);
                 setSession((prev) => (prev ? { ...prev, authState: "PENDING" } : prev));
                 setPasskeyCredentials([]);

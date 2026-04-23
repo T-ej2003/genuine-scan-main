@@ -35,9 +35,12 @@ const warnings = [];
 for (const item of requiredRefs) {
   const value = normalize(item.value);
   if (isPlaceholder(value)) {
-    const message = `${item.key} is missing or placeholder (${value || "<empty>"})`;
-    if (enforce) failures.push(message);
-    else warnings.push(message);
+    const issue = {
+      key: item.key,
+      status: value ? "placeholder" : "missing",
+    };
+    if (enforce) failures.push(issue);
+    else warnings.push(issue);
   }
 }
 
@@ -46,21 +49,33 @@ const summary = {
   ref: ref || null,
   enforce,
   checkedAt: new Date().toISOString(),
-  refs: Object.fromEntries(requiredRefs.map((item) => [item.key, normalize(item.value) || null])),
+  refs: Object.fromEntries(
+    requiredRefs.map((item) => {
+      const value = normalize(item.value);
+      return [
+        item.key,
+        {
+          configured: Boolean(value),
+          status: isPlaceholder(value) ? (value ? "placeholder" : "missing") : "configured",
+        },
+      ];
+    })
+  ),
+  warningCount: warnings.length,
+  failureCount: failures.length,
 };
 
 console.log(JSON.stringify(summary, null, 2));
 for (const warning of warnings) {
-  console.warn(`warning: ${warning}`);
+  console.warn(`warning: ${warning.key} is ${warning.status}`);
 }
 
 if (failures.length > 0) {
   console.error("Release evidence reference check failed:");
   for (const failure of failures) {
-    console.error(`- ${failure}`);
+    console.error(`- ${failure.key} is ${failure.status}`);
   }
   process.exit(1);
 }
 
 console.log("Release evidence reference check passed.");
-

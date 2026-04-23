@@ -24,6 +24,16 @@ const requirements = [
   },
   {
     file: "authRoutes",
+    description: "auth revoke-all must keep a pre-auth secure-session limiter before authenticate",
+    pattern: 'router.post("/auth/sessions/revoke-all", secureSessionPreAuthRouteLimiter, authenticate, secureSessionRouteLimiter,',
+  },
+  {
+    file: "authRoutes",
+    description: "auth MFA backup-code rotation must keep a pre-auth MFA limiter before authenticate",
+    pattern: 'router.post("/auth/mfa/backup-codes/rotate", mfaPreAuthRouteLimiter, authenticate, requireRecentAdminMfa, mfaRouteLimiter,',
+  },
+  {
+    file: "authRoutes",
     description: "admin invite must keep a pre-auth invite limiter before authenticate",
     pattern: 'router.post("/auth/invite", adminInvitePreAuthRouteLimiter, authenticate, requireAnyAdmin, requireRecentAdminMfa, adminInviteRouteLimiter, adminInviteIpLimiter, adminInviteActorLimiter, requireCsrf, invite);',
   },
@@ -71,6 +81,16 @@ const requirements = [
     file: "auditRoutes",
     description: "audit fraud respond must keep a pre-auth limiter before authenticate",
     pattern: '"/fraud-reports/:id/respond", auditFraudReportsRespondPreAuthRouteLimiter, authenticate,',
+  },
+  {
+    file: "indexRoutes",
+    description: "verify intake must keep a pre-auth verify-session mutation limiter before auth",
+    pattern: '"/verify/session/:id/intake", verifySessionMutationPreAuthRouteLimiter, requireCustomerVerifyAuth, verifyCustomerCookieRouteLimiter,',
+  },
+  {
+    file: "indexRoutes",
+    description: "verify reveal must keep a pre-auth verify-session mutation limiter before auth",
+    pattern: '"/verify/session/:id/reveal", verifySessionMutationPreAuthRouteLimiter, requireCustomerVerifyAuth, verifyCustomerCookieRouteLimiter,',
   },
   {
     file: "indexRoutes",

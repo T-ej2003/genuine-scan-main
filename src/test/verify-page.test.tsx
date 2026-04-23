@@ -270,6 +270,8 @@ describe("Verify page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Verify and continue" }));
 
     expect(await screen.findByText("Tell MSCQR how you obtained the product")).toBeInTheDocument();
+    expect(localStorageStore.has("mscqr_verify_customer_email")).toBe(false);
+    expect(localStorageStore.has("authenticqr_verify_customer_email")).toBe(false);
   });
 
   it("lets customers skip optional intake questions and still reveal the locked result", async () => {
@@ -297,8 +299,6 @@ describe("Verify page", () => {
         }),
       }),
     } as any);
-    window.localStorage.setItem("mscqr_verify_customer_email", "abhi@example.com");
-
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
     expect(await screen.findByText("Tell MSCQR how you obtained the product")).toBeInTheDocument();
@@ -368,6 +368,13 @@ describe("Verify page", () => {
   });
 
   it("reports a concern with session and decision ids after reveal", async () => {
+    vi.mocked(apiClient.getCustomerAuthSession).mockResolvedValue({
+      success: true,
+      data: {
+        customer: { userId: "cust-1", email: "abhi@example.com", maskedEmail: "ab***@example.com" },
+        auth: { cookieBacked: true, authenticated: true, authStrength: "EMAIL_OTP" },
+      },
+    } as any);
     vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
       success: true,
       data: buildSession({
@@ -393,7 +400,6 @@ describe("Verify page", () => {
       success: true,
       data: { supportTicketRef: "SUP-1001" },
     } as any);
-    window.localStorage.setItem("mscqr_verify_customer_email", "abhi@example.com");
 
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
@@ -456,8 +462,6 @@ describe("Verify page", () => {
         proofBindingRequired: true,
       }),
     } as any);
-    window.localStorage.setItem("mscqr_verify_customer_email", "abhi@example.com");
-
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
     expect(await screen.findByText("Additional review check required")).toBeInTheDocument();
@@ -482,5 +486,21 @@ describe("Verify page", () => {
     await waitFor(() => {
       expect(screen.getByTestId("location-probe")).toHaveTextContent(`/verify/${CODE}?session=session-updated`);
     });
+  });
+
+  it("clears legacy persisted customer email keys instead of reusing them", async () => {
+    localStorageStore.set("mscqr_verify_customer_email", "abhi@example.com");
+    localStorageStore.set("authenticqr_verify_customer_email", "legacy@example.com");
+    vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
+      success: true,
+      data: buildSession(),
+    } as any);
+
+    renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
+
+    await screen.findByText("Verify who is checking this product");
+
+    expect(localStorageStore.has("mscqr_verify_customer_email")).toBe(false);
+    expect(localStorageStore.has("authenticqr_verify_customer_email")).toBe(false);
   });
 });

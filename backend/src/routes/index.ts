@@ -695,6 +695,24 @@ const verifyCustomerCookiePreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("verify.customer-cookie:pre-auth", "Too many customer account actions. Please wait before retrying."),
 });
 
+const verifySessionMutationPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(
+      req,
+      "verify.customer-session-mutation:pre-auth",
+      composeRequestResolvers(fromAuthorizationBearer, fromHeaderFields("x-device-fp"), fromUserAgent),
+      composeRequestResolvers(fromParamFields("id"))
+    ),
+  handler: createRateLimitJsonHandler(
+    "verify.customer-session-mutation:pre-auth",
+    "Too many customer verification actions. Please wait before retrying."
+  ),
+});
+
 const verifyCustomerMutationPreAuthRouteLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 24,
@@ -1268,6 +1286,7 @@ cookieMutationRouter.post("/verify/session/start", verifyLookupRouteLimiter, ver
 cookieReadRouter.get("/verify/session/:id", verifyLookupRouteLimiter, verifyCodeIpLimiter, verifyCodeActorLimiter, optionalCustomerVerifyAuth, getCustomerVerificationSessionState);
 cookieMutationRouter.post(
   "/verify/session/:id/intake",
+  verifySessionMutationPreAuthRouteLimiter,
   requireCustomerVerifyAuth,
   verifyCustomerCookieRouteLimiter,
   verifyCustomerCookieMutationIpLimiter,
@@ -1277,6 +1296,7 @@ cookieMutationRouter.post(
 );
 cookieMutationRouter.post(
   "/verify/session/:id/reveal",
+  verifySessionMutationPreAuthRouteLimiter,
   requireCustomerVerifyAuth,
   verifyCustomerCookieRouteLimiter,
   verifyCustomerCookieMutationIpLimiter,
@@ -2093,6 +2113,7 @@ router.use(protectedMutationRouter);
 export {
   verifySessionPreAuthRouteLimiter,
   verifyCustomerCookiePreAuthRouteLimiter,
+  verifySessionMutationPreAuthRouteLimiter,
   verifyCustomerMutationPreAuthRouteLimiter,
   verifyClaimPreAuthRouteLimiter,
   telemetryMutationPreAuthRouteLimiter,

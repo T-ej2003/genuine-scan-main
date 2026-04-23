@@ -271,10 +271,6 @@ export const INCIDENT_TYPE_OPTIONS = [
   { value: "other", label: "Other" },
 ] as const;
 
-export const CUSTOMER_TOKEN_KEY = "mscqr_verify_customer_token";
-export const LEGACY_CUSTOMER_TOKEN_KEY = "authenticqr_verify_customer_token";
-export const CUSTOMER_EMAIL_KEY = "mscqr_verify_customer_email";
-export const LEGACY_CUSTOMER_EMAIL_KEY = "authenticqr_verify_customer_email";
 export const TRANSFER_TOKEN_KEY_PREFIX = "mscqr_verify_transfer_token:";
 export const LEGACY_TRANSFER_TOKEN_KEY_PREFIX = "authenticqr_verify_transfer_token:";
 export const APP_NAME = "MSCQR";
@@ -377,18 +373,6 @@ export const normalizeVerifyCode = (value?: string | null) => String(value || ""
 export const getTransferTokenStorageKey = (value?: string | null) => {
   const normalized = normalizeVerifyCode(value);
   return normalized ? `${TRANSFER_TOKEN_KEY_PREFIX}${normalized}` : "";
-};
-
-export const readStoredValue = (...keys: string[]) => {
-  for (const key of keys) {
-    try {
-      const value = window.localStorage.getItem(key);
-      if (value) return value;
-    } catch {
-      // Ignore storage issues.
-    }
-  }
-  return "";
 };
 
 export const readCachedGeo = () => {

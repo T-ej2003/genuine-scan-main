@@ -20,16 +20,186 @@ type RequestOptions = RequestInit & {
 };
 
 const stripHtmlError = (value: string) =>
-  value
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/\s+/g, " ")
-    .trim();
+  normalizeWhitespace(
+    extractPlainTextFromHtml(value) ||
+      decodeKnownHtmlEntities(String(value || ""))
+  );
+
+const normalizeWhitespace = (value: string) => {
+  let result = "";
+  let pendingSpace = false;
+
+  for (const character of String(value || "")) {
+    const isWhitespace = character === " " || character === "\n" || character === "\r" || character === "\t" || character === "\f";
+    if (isWhitespace) {
+      pendingSpace = result.length > 0;
+      continue;
+    }
+
+    if (pendingSpace) result += " ";
+    result += character;
+    pendingSpace = false;
+  }
+
+  return result.trim();
+};
+
+const decodeKnownHtmlEntities = (value: string) => {
+  const entityMap: Record<string, string> = {
+    nbsp: " ",
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: '"',
+    apos: "'",
+  };
+
+  let result = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (character !== "&") {
+      result += character;
+      continue;
+    }
+
+    const endIndex = value.indexOf(";", index + 1);
+    if (endIndex === -1 || endIndex - index > 12) {
+      result += character;
+      continue;
+    }
+
+    const entity = value.slice(index + 1, endIndex);
+    if (entityMap[entity]) {
+      result += entityMap[entity];
+      index = endIndex;
+      continue;
+    }
+
+    if (entity.startsWith("#")) {
+      const radix = entity[1]?.toLowerCase() === "x" ? 16 : 10;
+      const numeric = entity[1]?.toLowerCase() === "x" ? entity.slice(2) : entity.slice(1);
+      const codePoint = Number.parseInt(numeric, radix);
+      if (Number.isFinite(codePoint) && codePoint > 0) {
+        result += String.fromCodePoint(codePoint);
+        index = endIndex;
+        continue;
+      }
+    }
+
+    result += character;
+  }
+
+  return result;
+};
+
+const readTagNameFromMarkup = (rawTag: string, isClosing: boolean) => {
+  const source = isClosing ? rawTag.slice(1) : rawTag;
+  let tagName = "";
+  for (const character of source) {
+    const isTagCharacter =
+      (character >= "a" && character <= "z") ||
+      (character >= "A" && character <= "Z") ||
+      (character >= "0" && character <= "9") ||
+      character === ":" ||
+      character === "-" ||
+      character === "_";
+
+    if (!isTagCharacter) break;
+    tagName += character.toLowerCase();
+  }
+  return tagName;
+};
+
+const extractPlainTextFromHtmlWithDom = (value: string) => {
+  if (typeof DOMParser === "undefined") return "";
+  try {
+    const document = new DOMParser().parseFromString(value, "text/html");
+    for (const element of Array.from(document.querySelectorAll("script, style"))) {
+      element.remove();
+    }
+    return document.body?.textContent || document.documentElement?.textContent || "";
+  } catch {
+    return "";
+  }
+};
+
+const extractPlainTextFromHtmlLinear = (value: string) => {
+  const blockTags = new Set(["br", "p", "div", "li", "tr", "section", "article", "header", "footer"]);
+  let result = "";
+  let pendingSpace = false;
+  let ignoredTag: string | null = null;
+
+  const appendCharacter = (character: string) => {
+    const isWhitespace = character === " " || character === "\n" || character === "\r" || character === "\t" || character === "\f";
+    if (isWhitespace) {
+      pendingSpace = result.length > 0;
+      return;
+    }
+    if (pendingSpace) result += " ";
+    result += character;
+    pendingSpace = false;
+  };
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+
+    if (ignoredTag) {
+      if (character !== "<") continue;
+      const tagEnd = value.indexOf(">", index + 1);
+      if (tagEnd === -1) break;
+      const rawTag = value.slice(index + 1, tagEnd).trim();
+      const isClosing = rawTag.startsWith("/");
+      const tagName = readTagNameFromMarkup(rawTag, isClosing);
+      if (isClosing && tagName === ignoredTag) {
+        ignoredTag = null;
+      }
+      index = tagEnd;
+      continue;
+    }
+
+    if (character === "<") {
+      const tagEnd = value.indexOf(">", index + 1);
+      if (tagEnd === -1) break;
+      const rawTag = value.slice(index + 1, tagEnd).trim();
+      const isClosing = rawTag.startsWith("/");
+      const tagName = readTagNameFromMarkup(rawTag, isClosing);
+      if (!isClosing && (tagName === "script" || tagName === "style")) {
+        ignoredTag = tagName;
+      }
+      if (blockTags.has(tagName)) {
+        pendingSpace = result.length > 0;
+      }
+      index = tagEnd;
+      continue;
+    }
+
+    if (character === "&") {
+      const endIndex = value.indexOf(";", index + 1);
+      if (endIndex !== -1 && endIndex - index <= 12) {
+        const decoded = decodeKnownHtmlEntities(value.slice(index, endIndex + 1));
+        if (decoded !== value.slice(index, endIndex + 1)) {
+          for (const decodedCharacter of decoded) appendCharacter(decodedCharacter);
+          index = endIndex;
+          continue;
+        }
+      }
+    }
+
+    appendCharacter(character);
+  }
+
+  return result;
+};
+
+const extractPlainTextFromHtml = (value: string) => {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+
+  const linearText = extractPlainTextFromHtmlLinear(normalized);
+  if (linearText) return linearText;
+
+  return extractPlainTextFromHtmlWithDom(normalized);
+};
 
 const normalizeErrorMessage = (status: number, payload: unknown) => {
   if (payload && typeof payload === "object") {

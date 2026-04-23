@@ -3,7 +3,12 @@ const express = require("express");
 
 process.env.PUBLIC_VERIFY_RATE_LIMIT_PER_MIN = "3";
 
-const { loginIpLimiter, loginActorLimiter } = require("../dist/routes/modules/authRoutes");
+const {
+  loginIpLimiter,
+  loginActorLimiter,
+  secureSessionPreAuthRouteLimiter,
+  mfaPreAuthRouteLimiter,
+} = require("../dist/routes/modules/authRoutes");
 const {
   auditLogsReadPreAuthRouteLimiter,
   auditLogsExportPreAuthRouteLimiter,
@@ -15,6 +20,7 @@ const {
 const {
   auditPackageExportPreAuthRouteLimiter,
   licenseeReadPreAuthRouteLimiter,
+  verifySessionMutationPreAuthRouteLimiter,
   verifyCodeIpLimiter,
   verifyCodeActorLimiter,
   verifyClaimRouteLimiter,
@@ -141,6 +147,15 @@ licenseeReadApp.get("/licensees", licenseeReadPreAuthRouteLimiter, (_req, res) =
 const auditPackageExportApp = express();
 auditPackageExportApp.get("/audit/export/batches/abc/package", auditPackageExportPreAuthRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
 
+const secureSessionApp = express();
+secureSessionApp.post("/auth/sessions/revoke-all", secureSessionPreAuthRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
+
+const mfaMutationApp = express();
+mfaMutationApp.post("/auth/mfa/backup-codes/rotate", mfaPreAuthRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
+
+const verifySessionMutationApp = express();
+verifySessionMutationApp.post("/verify/session/abc/intake", verifySessionMutationPreAuthRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
+
 (async () => {
   await assertRateLimitAfter({
     app: loginApp,
@@ -229,6 +244,27 @@ auditPackageExportApp.get("/audit/export/batches/abc/package", auditPackageExpor
     method: "GET",
     allowed: 14,
     description: "audit package export route family",
+  });
+
+  await assertRateLimitAfter({
+    app: secureSessionApp,
+    path: "/auth/sessions/revoke-all",
+    allowed: 24,
+    description: "secure session pre-auth route family",
+  });
+
+  await assertRateLimitAfter({
+    app: mfaMutationApp,
+    path: "/auth/mfa/backup-codes/rotate",
+    allowed: 18,
+    description: "MFA pre-auth route family",
+  });
+
+  await assertRateLimitAfter({
+    app: verifySessionMutationApp,
+    path: "/verify/session/abc/intake",
+    allowed: 20,
+    description: "verify session mutation pre-auth route family",
   });
 
   console.log("rate limit enforcement tests passed");

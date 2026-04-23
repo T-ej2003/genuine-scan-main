@@ -191,6 +191,24 @@ const secureSessionRouteLimiter = rateLimit({
   ),
 });
 
+const secureSessionPreAuthRouteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 24,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(
+      req,
+      "account.security:pre-auth",
+      composeRequestResolvers(fromAuthorizationBearer, fromUserAgent),
+      composeRequestResolvers(fromParamFields("id"), fromBodyFields("password"))
+    ),
+  handler: createRateLimitJsonHandler(
+    "account.security:pre-auth",
+    "Too many account security actions. Please wait before retrying."
+  ),
+});
+
 const mfaRouteLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 15,
@@ -199,6 +217,21 @@ const mfaRouteLimiter = rateLimit({
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "admin.mfa", (currentReq: any) => currentReq.user?.userId || fromUserAgent(currentReq)),
   handler: createRateLimitJsonHandler("admin.mfa", "Too many MFA security actions. Please wait before retrying."),
+});
+
+const mfaPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 18,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(
+      req,
+      "admin.mfa:pre-auth",
+      composeRequestResolvers(fromAuthorizationBearer, fromUserAgent),
+      composeRequestResolvers(fromParamFields("id"))
+    ),
+  handler: createRateLimitJsonHandler("admin.mfa:pre-auth", "Too many MFA security actions. Please wait before retrying."),
 });
 
 const adminInviteRouteLimiter = rateLimit({
@@ -242,31 +275,36 @@ export const createAuthRoutes = () => {
   router.post("/auth/reset-password", passwordRecoveryIpLimiter, passwordRecoveryActorLimiter, resetPassword);
 
   router.get("/auth/me", authenticateAnySession, sessionReadRouteLimiter, me);
-  router.post("/auth/refresh", secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, refresh);
-  router.post("/auth/logout", authenticateAnySession, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, logout);
+  router.post("/auth/refresh", secureSessionPreAuthRouteLimiter, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, refresh);
+  router.post("/auth/logout", secureSessionPreAuthRouteLimiter, authenticateAnySession, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, logout);
   router.get("/auth/sessions", sessionReadPreAuthRouteLimiter, authenticate, sessionReadRouteLimiter, listSessions);
-  router.post("/auth/sessions/revoke-all", authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, revokeAllSessionsController);
-  router.post("/auth/sessions/:id/revoke", authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, revokeSessionController);
-  router.post("/auth/step-up/password", authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, passwordStepUpController);
+  router.post("/auth/sessions/revoke-all", secureSessionPreAuthRouteLimiter, authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, revokeAllSessionsController);
+  router.post("/auth/sessions/:id/revoke", secureSessionPreAuthRouteLimiter, authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, revokeSessionController);
+  router.post("/auth/step-up/password", secureSessionPreAuthRouteLimiter, authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, passwordStepUpController);
 
   router.get("/auth/mfa/status", authenticateAnySession, sessionReadRouteLimiter, getAdminMfaStatusController);
-  router.post("/auth/mfa/setup/begin", authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminMfaSetupController);
-  router.post("/auth/mfa/setup/confirm", authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, confirmAdminMfaSetupController);
-  router.post("/auth/mfa/challenge/begin", authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminMfaChallengeController);
-  router.post("/auth/mfa/challenge/complete", authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, completeAdminMfaChallengeController);
-  router.post("/auth/mfa/step-up", authenticate, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, adminMfaStepUpController);
-  router.post("/auth/mfa/backup-codes/rotate", authenticate, requireRecentAdminMfa, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, rotateAdminMfaBackupCodesController);
-  router.post("/auth/mfa/disable", authenticate, requireRecentAdminMfa, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, disableAdminMfaController);
+  router.post("/auth/mfa/setup/begin", mfaPreAuthRouteLimiter, authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminMfaSetupController);
+  router.post("/auth/mfa/setup/confirm", mfaPreAuthRouteLimiter, authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, confirmAdminMfaSetupController);
+  router.post("/auth/mfa/challenge/begin", mfaPreAuthRouteLimiter, authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminMfaChallengeController);
+  router.post("/auth/mfa/challenge/complete", mfaPreAuthRouteLimiter, authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, completeAdminMfaChallengeController);
+  router.post("/auth/mfa/step-up", mfaPreAuthRouteLimiter, authenticate, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, adminMfaStepUpController);
+  router.post("/auth/mfa/backup-codes/rotate", mfaPreAuthRouteLimiter, authenticate, requireRecentAdminMfa, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, rotateAdminMfaBackupCodesController);
+  router.post("/auth/mfa/disable", mfaPreAuthRouteLimiter, authenticate, requireRecentAdminMfa, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, disableAdminMfaController);
 
-  router.post("/auth/mfa/webauthn/setup/begin", authenticate, requireRecentAdminMfa, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminWebAuthnSetupController);
-  router.post("/auth/mfa/webauthn/setup/finish", authenticate, requireRecentAdminMfa, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, completeAdminWebAuthnSetupController);
-  router.post("/auth/mfa/webauthn/challenge/begin", authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminWebAuthnChallengeController);
-  router.post("/auth/mfa/webauthn/challenge/finish", authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, completeAdminWebAuthnChallengeController);
-  router.delete("/auth/mfa/webauthn/credentials/:id", authenticate, requireRecentAdminMfa, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, deleteAdminWebAuthnCredentialController);
+  router.post("/auth/mfa/webauthn/setup/begin", mfaPreAuthRouteLimiter, authenticate, requireRecentAdminMfa, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminWebAuthnSetupController);
+  router.post("/auth/mfa/webauthn/setup/finish", mfaPreAuthRouteLimiter, authenticate, requireRecentAdminMfa, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, completeAdminWebAuthnSetupController);
+  router.post("/auth/mfa/webauthn/challenge/begin", mfaPreAuthRouteLimiter, authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminWebAuthnChallengeController);
+  router.post("/auth/mfa/webauthn/challenge/finish", mfaPreAuthRouteLimiter, authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, completeAdminWebAuthnChallengeController);
+  router.delete("/auth/mfa/webauthn/credentials/:id", mfaPreAuthRouteLimiter, authenticate, requireRecentAdminMfa, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, deleteAdminWebAuthnCredentialController);
 
   router.post("/auth/invite", adminInvitePreAuthRouteLimiter, authenticate, requireAnyAdmin, requireRecentAdminMfa, adminInviteRouteLimiter, adminInviteIpLimiter, adminInviteActorLimiter, requireCsrf, invite);
 
   return router;
+};
+
+export {
+  secureSessionPreAuthRouteLimiter,
+  mfaPreAuthRouteLimiter,
 };
 
 export default createAuthRoutes;
