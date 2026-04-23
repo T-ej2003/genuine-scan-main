@@ -12,8 +12,11 @@ import { requireCsrf } from "../../middleware/csrf";
 import { requireManufacturer } from "../../middleware/rbac";
 import {
   buildPublicActorRateLimitKey,
+  composeRequestResolvers,
   createPublicActorRateLimiter,
   createPublicIpRateLimiter,
+  fromAuthorizationBearer,
+  fromUserAgent,
 } from "../../middleware/publicRateLimit";
 
 const createJsonRateLimitHandler =
@@ -35,6 +38,16 @@ const dashboardReadRouteLimiter: RequestHandler = rateLimit({
   handler: createJsonRateLimitHandler("realtime.dashboard-read", "Too many dashboard refreshes. Please wait before retrying."),
 });
 
+const dashboardReadPreAuthRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 80,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "realtime.dashboard-read:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
+  handler: createJsonRateLimitHandler("realtime.dashboard-read:pre-auth", "Too many dashboard refreshes. Please wait before retrying."),
+});
+
 const dashboardStreamRouteLimiter: RequestHandler = rateLimit({
   windowMs: 5 * 60 * 1000,
   max: 20,
@@ -42,6 +55,16 @@ const dashboardStreamRouteLimiter: RequestHandler = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "realtime.dashboard-stream", (currentReq: any) => currentReq.user?.userId || null),
   handler: createJsonRateLimitHandler("realtime.dashboard-stream", "Too many dashboard event stream requests. Please wait before retrying."),
+});
+
+const dashboardStreamPreAuthRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "realtime.dashboard-stream:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
+  handler: createJsonRateLimitHandler("realtime.dashboard-stream:pre-auth", "Too many dashboard event stream requests. Please wait before retrying."),
 });
 
 const notificationReadRouteLimiter: RequestHandler = rateLimit({
@@ -54,6 +77,16 @@ const notificationReadRouteLimiter: RequestHandler = rateLimit({
   handler: createJsonRateLimitHandler("realtime.notifications-read", "Too many notification reads. Please wait before retrying."),
 });
 
+const notificationReadPreAuthRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 110,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "realtime.notifications-read:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
+  handler: createJsonRateLimitHandler("realtime.notifications-read:pre-auth", "Too many notification reads. Please wait before retrying."),
+});
+
 const notificationMutationRouteLimiter: RequestHandler = rateLimit({
   windowMs: 5 * 60 * 1000,
   max: 40,
@@ -62,6 +95,16 @@ const notificationMutationRouteLimiter: RequestHandler = rateLimit({
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "realtime.notifications-mutation", (currentReq: any) => currentReq.user?.userId || null),
   handler: createJsonRateLimitHandler("realtime.notifications-mutation", "Too many notification updates. Please wait before retrying."),
+});
+
+const notificationMutationPreAuthRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "realtime.notifications-mutation:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
+  handler: createJsonRateLimitHandler("realtime.notifications-mutation:pre-auth", "Too many notification updates. Please wait before retrying."),
 });
 
 const printerAgentReadRouteLimiter: RequestHandler = rateLimit({
@@ -73,6 +116,16 @@ const printerAgentReadRouteLimiter: RequestHandler = rateLimit({
   handler: createJsonRateLimitHandler("printer-agent.status", "Too many printer status requests. Please wait before retrying."),
 });
 
+const printerAgentReadPreAuthRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 55,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "printer-agent.status:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
+  handler: createJsonRateLimitHandler("printer-agent.status:pre-auth", "Too many printer status requests. Please wait before retrying."),
+});
+
 const printerAgentStreamRouteLimiter: RequestHandler = rateLimit({
   windowMs: 5 * 60 * 1000,
   max: 15,
@@ -80,6 +133,16 @@ const printerAgentStreamRouteLimiter: RequestHandler = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "printer-agent.events", (currentReq: any) => currentReq.user?.userId || null),
   handler: createJsonRateLimitHandler("printer-agent.events", "Too many printer event stream requests. Please wait before retrying."),
+});
+
+const printerAgentStreamPreAuthRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 24,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "printer-agent.events:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
+  handler: createJsonRateLimitHandler("printer-agent.events:pre-auth", "Too many printer event stream requests. Please wait before retrying."),
 });
 
 const printerAgentHeartbeatRouteLimiter: RequestHandler = rateLimit({
@@ -90,6 +153,16 @@ const printerAgentHeartbeatRouteLimiter: RequestHandler = rateLimit({
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "printer-agent.heartbeat", (currentReq: any) => currentReq.user?.userId || null),
   handler: createJsonRateLimitHandler("printer-agent.heartbeat", "Too many printer heartbeat requests. Please wait before retrying."),
+});
+
+const printerAgentHeartbeatPreAuthRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 55,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "printer-agent.heartbeat:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
+  handler: createJsonRateLimitHandler("printer-agent.heartbeat:pre-auth", "Too many printer heartbeat requests. Please wait before retrying."),
 });
 
 const dashboardReadIpLimiter: RequestHandler = createPublicIpRateLimiter({
@@ -202,6 +275,7 @@ export const createRealtimeReadRoutes = () => {
 
   router.get(
     "/dashboard/stats",
+    dashboardReadPreAuthRouteLimiter,
     authenticate,
     enforceTenantIsolation,
     dashboardReadRouteLimiter,
@@ -211,6 +285,7 @@ export const createRealtimeReadRoutes = () => {
   );
   router.get(
     "/events/dashboard",
+    dashboardStreamPreAuthRouteLimiter,
     authenticateSSE,
     enforceTenantIsolation,
     dashboardStreamRouteLimiter,
@@ -220,6 +295,7 @@ export const createRealtimeReadRoutes = () => {
   );
   router.get(
     "/events/notifications",
+    notificationReadPreAuthRouteLimiter,
     authenticateSSE,
     notificationReadRouteLimiter,
     notificationReadIpLimiter,
@@ -228,6 +304,7 @@ export const createRealtimeReadRoutes = () => {
   );
   router.get(
     "/notifications",
+    notificationReadPreAuthRouteLimiter,
     authenticate,
     notificationReadRouteLimiter,
     notificationReadIpLimiter,
@@ -236,6 +313,7 @@ export const createRealtimeReadRoutes = () => {
   );
   router.get(
     "/manufacturer/printer-agent/status",
+    printerAgentReadPreAuthRouteLimiter,
     authenticate,
     requireManufacturer,
     enforceTenantIsolation,
@@ -246,6 +324,7 @@ export const createRealtimeReadRoutes = () => {
   );
   router.get(
     "/manufacturer/printer-agent/events",
+    printerAgentStreamPreAuthRouteLimiter,
     authenticateSSE,
     requireManufacturer,
     enforceTenantIsolation,
@@ -263,7 +342,9 @@ export const createRealtimeMutationRoutes = () => {
 
   router.post(
     "/notifications/read-all",
+    notificationMutationPreAuthRouteLimiter,
     authenticate,
+    notificationMutationRouteLimiter,
     notificationMutationIpLimiter,
     notificationMutationActorLimiter,
     requireCsrf,
@@ -271,7 +352,9 @@ export const createRealtimeMutationRoutes = () => {
   );
   router.post(
     "/notifications/:id/read",
+    notificationMutationPreAuthRouteLimiter,
     authenticate,
+    notificationMutationRouteLimiter,
     notificationMutationIpLimiter,
     notificationMutationActorLimiter,
     requireCsrf,
@@ -279,6 +362,7 @@ export const createRealtimeMutationRoutes = () => {
   );
   router.post(
     "/manufacturer/printer-agent/heartbeat",
+    printerAgentHeartbeatPreAuthRouteLimiter,
     authenticate,
     requireManufacturer,
     requireRecentSensitiveAuth,

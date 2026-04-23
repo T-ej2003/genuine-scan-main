@@ -14,6 +14,7 @@ import {
   buildPublicIpRateLimitKey,
   createPublicActorRateLimiter,
   createPublicIpRateLimiter,
+  fromAuthorizationBearer,
   fromBodyFields,
   fromParamFields,
   fromUserAgent,
@@ -177,6 +178,16 @@ const sessionReadRouteLimiter = rateLimit({
   ),
 });
 
+const sessionReadPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 70,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "auth.session-read:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
+  handler: createJsonRateLimitHandler("auth.session-read:pre-auth", "Too many account session reads. Please wait before retrying."),
+});
+
 const secureSessionRouteLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
@@ -214,6 +225,21 @@ const adminInviteRouteLimiter = rateLimit({
   handler: createJsonRateLimitHandler("admin.invite", "Too many invite actions. Please wait before retrying."),
 });
 
+const adminInvitePreAuthRouteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 18,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(
+      req,
+      "admin.invite:pre-auth",
+      composeRequestResolvers(fromAuthorizationBearer, fromBodyFields("email"), fromUserAgent),
+      composeRequestResolvers(fromBodyFields("email"), fromParamFields("id"))
+    ),
+  handler: createJsonRateLimitHandler("admin.invite:pre-auth", "Too many invite actions. Please wait before retrying."),
+});
+
 export const createAuthRoutes = () => {
   const router = Router();
 
@@ -227,7 +253,7 @@ export const createAuthRoutes = () => {
   router.get("/auth/me", authenticateAnySession, sessionReadRouteLimiter, me);
   router.post("/auth/refresh", secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, refresh);
   router.post("/auth/logout", authenticateAnySession, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, logout);
-  router.get("/auth/sessions", authenticate, sessionReadRouteLimiter, listSessions);
+  router.get("/auth/sessions", sessionReadPreAuthRouteLimiter, authenticate, sessionReadRouteLimiter, listSessions);
   router.post("/auth/sessions/revoke-all", authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, revokeAllSessionsController);
   router.post("/auth/sessions/:id/revoke", authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, revokeSessionController);
   router.post("/auth/step-up/password", authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, passwordStepUpController);
@@ -247,7 +273,7 @@ export const createAuthRoutes = () => {
   router.post("/auth/mfa/webauthn/challenge/finish", authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, completeAdminWebAuthnChallengeController);
   router.delete("/auth/mfa/webauthn/credentials/:id", authenticate, requireRecentAdminMfa, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, deleteAdminWebAuthnCredentialController);
 
-  router.post("/auth/invite", authenticate, requireAnyAdmin, requireRecentAdminMfa, adminInviteRouteLimiter, adminInviteIpLimiter, adminInviteActorLimiter, requireCsrf, invite);
+  router.post("/auth/invite", adminInvitePreAuthRouteLimiter, authenticate, requireAnyAdmin, requireRecentAdminMfa, adminInviteRouteLimiter, adminInviteIpLimiter, adminInviteActorLimiter, requireCsrf, invite);
 
   return router;
 };

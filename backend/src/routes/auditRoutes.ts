@@ -7,8 +7,12 @@ import { getLogs, streamLogs, exportLogsCsv, getFraudReports, respondToFraudRepo
 import { requireCsrf } from "../middleware/csrf";
 import {
   buildPublicActorRateLimitKey,
+  composeRequestResolvers,
   createPublicActorRateLimiter,
   createPublicIpRateLimiter,
+  fromAuthorizationBearer,
+  fromParamFields,
+  fromUserAgent,
 } from "../middleware/publicRateLimit";
 
 const createJsonRateLimitHandler =
@@ -30,6 +34,16 @@ const auditReadRouteLimiter: RequestHandler = rateLimit({
   handler: createJsonRateLimitHandler("audit.read", "Too many audit read requests. Please wait before retrying."),
 });
 
+const auditLogsReadPreAuthRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 45,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "audit.logs-read:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
+  handler: createJsonRateLimitHandler("audit.logs-read:pre-auth", "Too many audit read requests. Please wait before retrying."),
+});
+
 const auditExportRouteLimiter: RequestHandler = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 10,
@@ -37,6 +51,16 @@ const auditExportRouteLimiter: RequestHandler = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "audit.export", (currentReq: any) => currentReq.user?.userId || null),
   handler: createJsonRateLimitHandler("audit.export", "Too many audit export requests. Please wait before retrying."),
+});
+
+const auditLogsExportPreAuthRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 18,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "audit.logs-export:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
+  handler: createJsonRateLimitHandler("audit.logs-export:pre-auth", "Too many audit export requests. Please wait before retrying."),
 });
 
 const auditFraudReadRouteLimiter: RequestHandler = rateLimit({
@@ -48,6 +72,16 @@ const auditFraudReadRouteLimiter: RequestHandler = rateLimit({
   handler: createJsonRateLimitHandler("audit.fraud-read", "Too many fraud review reads. Please wait before retrying."),
 });
 
+const auditFraudReportsReadPreAuthRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 28,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "audit.fraud-read:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
+  handler: createJsonRateLimitHandler("audit.fraud-read:pre-auth", "Too many fraud review reads. Please wait before retrying."),
+});
+
 const auditFraudMutationRouteLimiter: RequestHandler = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 10,
@@ -55,6 +89,31 @@ const auditFraudMutationRouteLimiter: RequestHandler = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "audit.fraud-mutation", (currentReq: any) => currentReq.user?.userId || null),
   handler: createJsonRateLimitHandler("audit.fraud-mutation", "Too many fraud review actions. Please wait before retrying."),
+});
+
+const auditFraudReportsRespondPreAuthRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 14,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(
+      req,
+      "audit.fraud-mutation:pre-auth",
+      composeRequestResolvers(fromAuthorizationBearer, fromUserAgent),
+      fromParamFields("id")
+    ),
+  handler: createJsonRateLimitHandler("audit.fraud-mutation:pre-auth", "Too many fraud review actions. Please wait before retrying."),
+});
+
+const auditStreamPreAuthRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 24,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "audit.stream:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
+  handler: createJsonRateLimitHandler("audit.stream:pre-auth", "Too many audit stream requests. Please wait before retrying."),
 });
 
 const auditReadIpLimiter: RequestHandler = createPublicIpRateLimiter({
@@ -120,9 +179,20 @@ const auditMutationActorLimiter: RequestHandler = createPublicActorRateLimiter({
 export const createAuditReadRoutes = () => {
   const router = Router();
 
-  router.get("/logs", authenticate, requireAuditViewer, enforceTenantIsolation, auditReadRouteLimiter, auditReadIpLimiter, auditReadActorLimiter, getLogs);
+  router.get(
+    "/logs",
+    auditLogsReadPreAuthRouteLimiter,
+    authenticate,
+    requireAuditViewer,
+    enforceTenantIsolation,
+    auditReadRouteLimiter,
+    auditReadIpLimiter,
+    auditReadActorLimiter,
+    getLogs
+  );
   router.get(
     "/logs/export",
+    auditLogsExportPreAuthRouteLimiter,
     authenticate,
     requireAuditViewer,
     enforceTenantIsolation,
@@ -133,6 +203,7 @@ export const createAuditReadRoutes = () => {
   );
   router.get(
     "/stream",
+    auditStreamPreAuthRouteLimiter,
     authenticateSSE,
     requireAuditViewer,
     enforceTenantIsolation,
@@ -143,6 +214,7 @@ export const createAuditReadRoutes = () => {
   );
   router.get(
     "/fraud-reports",
+    auditFraudReportsReadPreAuthRouteLimiter,
     authenticate,
     requirePlatformAdmin,
     enforceTenantIsolation,
@@ -160,6 +232,7 @@ export const createAuditMutationRoutes = () => {
 
   router.post(
     "/fraud-reports/:id/respond",
+    auditFraudReportsRespondPreAuthRouteLimiter,
     authenticate,
     requirePlatformAdmin,
     requireRecentAdminMfa,
@@ -174,4 +247,14 @@ export const createAuditMutationRoutes = () => {
   return router;
 };
 
-export { auditReadRouteLimiter, auditExportRouteLimiter, auditFraudReadRouteLimiter, auditFraudMutationRouteLimiter };
+export {
+  auditLogsReadPreAuthRouteLimiter,
+  auditLogsExportPreAuthRouteLimiter,
+  auditFraudReportsReadPreAuthRouteLimiter,
+  auditFraudReportsRespondPreAuthRouteLimiter,
+  auditStreamPreAuthRouteLimiter,
+  auditReadRouteLimiter,
+  auditExportRouteLimiter,
+  auditFraudReadRouteLimiter,
+  auditFraudMutationRouteLimiter,
+};

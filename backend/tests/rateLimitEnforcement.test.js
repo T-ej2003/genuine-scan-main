@@ -5,16 +5,16 @@ process.env.PUBLIC_VERIFY_RATE_LIMIT_PER_MIN = "3";
 
 const { loginIpLimiter, loginActorLimiter } = require("../dist/routes/modules/authRoutes");
 const {
-  auditReadRouteLimiter,
-  auditExportRouteLimiter,
+  auditLogsReadPreAuthRouteLimiter,
+  auditLogsExportPreAuthRouteLimiter,
 } = require("../dist/routes/auditRoutes");
 const {
-  governanceReadRouteLimiter,
-  governanceExportRouteLimiter,
+  governanceReadPreAuthRouteLimiter,
+  governanceExportPreAuthRouteLimiter,
 } = require("../dist/routes/modules/governanceRoutes");
 const {
-  auditPackageExportRouteLimiter,
-  licenseeReadRouteLimiter,
+  auditPackageExportPreAuthRouteLimiter,
+  licenseeReadPreAuthRouteLimiter,
   verifyCodeIpLimiter,
   verifyCodeActorLimiter,
   verifyClaimRouteLimiter,
@@ -124,22 +124,22 @@ printMutationApp.post(
 );
 
 const auditReadApp = express();
-auditReadApp.get("/audit/logs", auditReadRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
+auditReadApp.get("/audit/logs", auditLogsReadPreAuthRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
 
 const auditExportApp = express();
-auditExportApp.get("/audit/logs/export", auditExportRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
+auditExportApp.get("/audit/logs/export", auditLogsExportPreAuthRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
 
 const governanceReadApp = express();
-governanceReadApp.get("/governance/feature-flags", governanceReadRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
+governanceReadApp.get("/governance/feature-flags", governanceReadPreAuthRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
 
 const governanceExportApp = express();
-governanceExportApp.get("/governance/compliance/report", governanceExportRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
+governanceExportApp.get("/governance/compliance/report", governanceExportPreAuthRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
 
 const licenseeReadApp = express();
-licenseeReadApp.get("/licensees", licenseeReadRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
+licenseeReadApp.get("/licensees", licenseeReadPreAuthRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
 
 const auditPackageExportApp = express();
-auditPackageExportApp.get("/audit/export/batches/abc/package", auditPackageExportRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
+auditPackageExportApp.get("/audit/export/batches/abc/package", auditPackageExportPreAuthRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
 
 (async () => {
   await assertRateLimitAfter({
@@ -187,7 +187,7 @@ auditPackageExportApp.get("/audit/export/batches/abc/package", auditPackageExpor
     app: auditReadApp,
     path: "/audit/logs",
     method: "GET",
-    allowed: 30,
+    allowed: 45,
     description: "audit read route family",
   });
 
@@ -195,7 +195,7 @@ auditPackageExportApp.get("/audit/export/batches/abc/package", auditPackageExpor
     app: auditExportApp,
     path: "/audit/logs/export",
     method: "GET",
-    allowed: 10,
+    allowed: 18,
     description: "audit export route family",
   });
 
@@ -203,7 +203,7 @@ auditPackageExportApp.get("/audit/export/batches/abc/package", auditPackageExpor
     app: governanceReadApp,
     path: "/governance/feature-flags",
     method: "GET",
-    allowed: 30,
+    allowed: 40,
     description: "governance read route family",
   });
 
@@ -211,7 +211,7 @@ auditPackageExportApp.get("/audit/export/batches/abc/package", auditPackageExpor
     app: governanceExportApp,
     path: "/governance/compliance/report",
     method: "GET",
-    allowed: 10,
+    allowed: 16,
     description: "governance export route family",
   });
 
@@ -219,7 +219,7 @@ auditPackageExportApp.get("/audit/export/batches/abc/package", auditPackageExpor
     app: licenseeReadApp,
     path: "/licensees",
     method: "GET",
-    allowed: 40,
+    allowed: 48,
     description: "licensee protected read route family",
   });
 
@@ -227,7 +227,7 @@ auditPackageExportApp.get("/audit/export/batches/abc/package", auditPackageExpor
     app: auditPackageExportApp,
     path: "/audit/export/batches/abc/package",
     method: "GET",
-    allowed: 10,
+    allowed: 14,
     description: "audit package export route family",
   });
 

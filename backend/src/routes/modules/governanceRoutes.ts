@@ -23,8 +23,12 @@ import {
 } from "../../controllers/approvalController";
 import {
   buildPublicActorRateLimitKey,
+  composeRequestResolvers,
   createPublicActorRateLimiter,
   createPublicIpRateLimiter,
+  fromAuthorizationBearer,
+  fromParamFields,
+  fromUserAgent,
 } from "../../middleware/publicRateLimit";
 
 const createJsonRateLimitHandler =
@@ -46,6 +50,16 @@ const governanceReadRouteLimiter: RequestHandler = rateLimit({
   handler: createJsonRateLimitHandler("governance.read", "Too many governance read requests. Please wait before retrying."),
 });
 
+const governanceReadPreAuthRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "governance.read:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
+  handler: createJsonRateLimitHandler("governance.read:pre-auth", "Too many governance read requests. Please wait before retrying."),
+});
+
 const governanceExportRouteLimiter: RequestHandler = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 10,
@@ -53,6 +67,21 @@ const governanceExportRouteLimiter: RequestHandler = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "governance.export", (currentReq: any) => currentReq.user?.userId || null),
   handler: createJsonRateLimitHandler("governance.export", "Too many governance export requests. Please wait before retrying."),
+});
+
+const governanceExportPreAuthRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 16,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(
+      req,
+      "governance.export:pre-auth",
+      composeRequestResolvers(fromAuthorizationBearer, fromUserAgent),
+      fromParamFields("id")
+    ),
+  handler: createJsonRateLimitHandler("governance.export:pre-auth", "Too many governance export requests. Please wait before retrying."),
 });
 
 const governanceMutationRouteLimiter: RequestHandler = rateLimit({
@@ -64,6 +93,16 @@ const governanceMutationRouteLimiter: RequestHandler = rateLimit({
   handler: createJsonRateLimitHandler("governance.mutation", "Too many governance changes. Please wait before retrying."),
 });
 
+const governanceMutationPreAuthRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "governance.mutation:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
+  handler: createJsonRateLimitHandler("governance.mutation:pre-auth", "Too many governance changes. Please wait before retrying."),
+});
+
 const governanceApprovalMutationRouteLimiter: RequestHandler = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 8,
@@ -72,6 +111,21 @@ const governanceApprovalMutationRouteLimiter: RequestHandler = rateLimit({
   keyGenerator: (req) =>
     buildPublicActorRateLimitKey(req, "governance.approval-mutation", (currentReq: any) => currentReq.user?.userId || null),
   handler: createJsonRateLimitHandler("governance.approval-mutation", "Too many approval decisions. Please wait before retrying."),
+});
+
+const governanceApprovalMutationPreAuthRouteLimiter: RequestHandler = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 12,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(
+      req,
+      "governance.approval-mutation:pre-auth",
+      composeRequestResolvers(fromAuthorizationBearer, fromUserAgent),
+      fromParamFields("id")
+    ),
+  handler: createJsonRateLimitHandler("governance.approval-mutation:pre-auth", "Too many approval decisions. Please wait before retrying."),
 });
 
 const governanceReadIpLimiter: RequestHandler = createPublicIpRateLimiter({
@@ -139,6 +193,7 @@ export const createGovernanceReadRoutes = () => {
 
   router.get(
     "/governance/feature-flags",
+    governanceReadPreAuthRouteLimiter,
     authenticate,
     requirePlatformAdmin,
     governanceReadRouteLimiter,
@@ -148,6 +203,7 @@ export const createGovernanceReadRoutes = () => {
   );
   router.get(
     "/governance/evidence-retention",
+    governanceReadPreAuthRouteLimiter,
     authenticate,
     requirePlatformAdmin,
     governanceReadRouteLimiter,
@@ -157,6 +213,7 @@ export const createGovernanceReadRoutes = () => {
   );
   router.get(
     "/governance/compliance/report",
+    governanceExportPreAuthRouteLimiter,
     authenticate,
     requirePlatformAdmin,
     governanceExportRouteLimiter,
@@ -166,6 +223,7 @@ export const createGovernanceReadRoutes = () => {
   );
   router.get(
     "/governance/compliance/pack/jobs",
+    governanceReadPreAuthRouteLimiter,
     authenticate,
     requirePlatformAdmin,
     governanceReadRouteLimiter,
@@ -175,6 +233,7 @@ export const createGovernanceReadRoutes = () => {
   );
   router.get(
     "/governance/compliance/pack/jobs/:id/download",
+    governanceExportPreAuthRouteLimiter,
     authenticate,
     requirePlatformAdmin,
     governanceExportRouteLimiter,
@@ -184,6 +243,7 @@ export const createGovernanceReadRoutes = () => {
   );
   router.get(
     "/audit/export/incidents/:id/bundle",
+    governanceExportPreAuthRouteLimiter,
     authenticate,
     requirePlatformAdmin,
     governanceExportRouteLimiter,
@@ -193,6 +253,7 @@ export const createGovernanceReadRoutes = () => {
   );
   router.get(
     "/governance/approvals",
+    governanceReadPreAuthRouteLimiter,
     authenticate,
     requirePlatformAdmin,
     governanceReadRouteLimiter,
@@ -209,6 +270,7 @@ export const createGovernanceMutationRoutes = () => {
 
   router.post(
     "/governance/feature-flags",
+    governanceMutationPreAuthRouteLimiter,
     authenticate,
     requirePlatformAdmin,
     requireRecentAdminMfa,
@@ -220,6 +282,7 @@ export const createGovernanceMutationRoutes = () => {
   );
   router.patch(
     "/governance/evidence-retention",
+    governanceMutationPreAuthRouteLimiter,
     authenticate,
     requirePlatformAdmin,
     requireRecentAdminMfa,
@@ -231,6 +294,7 @@ export const createGovernanceMutationRoutes = () => {
   );
   router.post(
     "/governance/evidence-retention/run",
+    governanceMutationPreAuthRouteLimiter,
     authenticate,
     requirePlatformAdmin,
     requireRecentAdminMfa,
@@ -242,6 +306,7 @@ export const createGovernanceMutationRoutes = () => {
   );
   router.post(
     "/governance/compliance/pack/run",
+    governanceExportPreAuthRouteLimiter,
     authenticate,
     requirePlatformAdmin,
     requireRecentAdminMfa,
@@ -253,6 +318,7 @@ export const createGovernanceMutationRoutes = () => {
   );
   router.post(
     "/governance/approvals/:id/approve",
+    governanceApprovalMutationPreAuthRouteLimiter,
     authenticate,
     requirePlatformAdmin,
     requireRecentAdminMfa,
@@ -264,6 +330,7 @@ export const createGovernanceMutationRoutes = () => {
   );
   router.post(
     "/governance/approvals/:id/reject",
+    governanceApprovalMutationPreAuthRouteLimiter,
     authenticate,
     requirePlatformAdmin,
     requireRecentAdminMfa,
@@ -278,6 +345,10 @@ export const createGovernanceMutationRoutes = () => {
 };
 
 export {
+  governanceReadPreAuthRouteLimiter,
+  governanceExportPreAuthRouteLimiter,
+  governanceMutationPreAuthRouteLimiter,
+  governanceApprovalMutationPreAuthRouteLimiter,
   governanceReadRouteLimiter,
   governanceExportRouteLimiter,
   governanceMutationRouteLimiter,

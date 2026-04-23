@@ -323,6 +323,7 @@ const publicClientActor = composeRequestResolvers(
   fromQueryFields("device"),
   fromUserAgent
 );
+const protectedPreAuthActor = composeRequestResolvers(fromAuthorizationBearer, fromUserAgent);
 
 const createJsonRateLimitHandler =
   (scope: string, message: string) =>
@@ -674,6 +675,271 @@ const accountMutationRouteLimiter = rateLimit({
   handler: createJsonRateLimitHandler("account.mutation", "Too many account security changes. Please wait before retrying."),
 });
 
+const verifySessionPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 24,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "verify.customer-session:pre-auth", publicClientActor),
+  handler: createJsonRateLimitHandler("verify.customer-session:pre-auth", "Too many customer session checks. Please wait before retrying."),
+});
+
+const verifyCustomerCookiePreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 24,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "verify.customer-cookie:pre-auth", composeRequestResolvers(fromHeaderFields("x-device-fp"), fromAuthorizationBearer, fromUserAgent)),
+  handler: createJsonRateLimitHandler("verify.customer-cookie:pre-auth", "Too many customer account actions. Please wait before retrying."),
+});
+
+const verifyCustomerMutationPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 24,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "verify.customer-auth:pre-auth", publicClientActor),
+  handler: createJsonRateLimitHandler("verify.customer-auth:pre-auth", "Too many customer authentication actions. Please wait before retrying."),
+});
+
+const verifyClaimPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 18,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(
+      req,
+      "verify.claim:pre-auth",
+      composeRequestResolvers(fromAuthorizationBearer, fromBodyFields("token", "transferId"), publicClientActor),
+      verifyResourceResolver
+    ),
+  handler: createJsonRateLimitHandler("verify.claim:pre-auth", "Too many ownership actions. Please wait before retrying."),
+});
+
+const telemetryMutationPreAuthRouteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 90,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "telemetry.mutation:pre-auth", publicClientActor),
+  handler: createJsonRateLimitHandler("telemetry.mutation:pre-auth", "Too many telemetry submissions. Please wait before retrying."),
+});
+
+const cspTelemetryPreAuthRouteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 90,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "telemetry.csp:pre-auth", publicClientActor),
+  handler: createJsonRateLimitHandler("telemetry.csp:pre-auth", "Too many CSP reports. Please wait before retrying."),
+});
+
+const internalReleasePreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 24,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "internal.release:pre-auth", protectedPreAuthActor),
+  handler: createJsonRateLimitHandler("internal.release:pre-auth", "Too many release metadata lookups. Please wait before retrying."),
+});
+
+const licenseeReadPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 48,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "licensees.read:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id", "licenseeId"))),
+  handler: createJsonRateLimitHandler("licensees.read:pre-auth", "Too many licensee reads. Please wait before retrying."),
+});
+
+const licenseeExportPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 16,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "licensees.export:pre-auth", protectedPreAuthActor),
+  handler: createJsonRateLimitHandler("licensees.export:pre-auth", "Too many licensee export requests. Please wait before retrying."),
+});
+
+const licenseeMutationPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "licensees.mutation:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id", "licenseeId"))),
+  handler: createJsonRateLimitHandler("licensees.mutation:pre-auth", "Too many licensee changes. Please wait before retrying."),
+});
+
+const adminDirectoryReadPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 70,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "admin.directory.read:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id"))),
+  handler: createJsonRateLimitHandler("admin.directory.read:pre-auth", "Too many admin directory reads. Please wait before retrying."),
+});
+
+const adminDirectoryMutationPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 24,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "admin.directory.mutation:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id"))),
+  handler: createJsonRateLimitHandler("admin.directory.mutation:pre-auth", "Too many admin directory changes. Please wait before retrying."),
+});
+
+const qrReadPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 70,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "qr.read:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id", "licenseeId"))),
+  handler: createJsonRateLimitHandler("qr.read:pre-auth", "Too many QR read requests. Please wait before retrying."),
+});
+
+const qrExportPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 16,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "qr.export:pre-auth", protectedPreAuthActor),
+  handler: createJsonRateLimitHandler("qr.export:pre-auth", "Too many QR export requests. Please wait before retrying."),
+});
+
+const qrMutationPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 24,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "qr.mutation:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id", "licenseeId"))),
+  handler: createJsonRateLimitHandler("qr.mutation:pre-auth", "Too many QR changes. Please wait before retrying."),
+});
+
+const qrRequestReadPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 36,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "qr.requests.read:pre-auth", protectedPreAuthActor, fromParamFields("id")),
+  handler: createJsonRateLimitHandler("qr.requests.read:pre-auth", "Too many QR request reads. Please wait before retrying."),
+});
+
+const qrRequestMutationPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 16,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "qr.requests.mutation:pre-auth", protectedPreAuthActor, fromParamFields("id")),
+  handler: createJsonRateLimitHandler("qr.requests.mutation:pre-auth", "Too many QR request actions. Please wait before retrying."),
+});
+
+const policyReadPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 48,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "policy.read:pre-auth", protectedPreAuthActor, fromParamFields("id")),
+  handler: createJsonRateLimitHandler("policy.read:pre-auth", "Too many policy and analytics reads. Please wait before retrying."),
+});
+
+const policyMutationPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 16,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "policy.mutation:pre-auth", protectedPreAuthActor, fromParamFields("id")),
+  handler: createJsonRateLimitHandler("policy.mutation:pre-auth", "Too many policy and analytics changes. Please wait before retrying."),
+});
+
+const supportReadPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 48,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "support.read:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id", "fileName"))),
+  handler: createJsonRateLimitHandler("support.read:pre-auth", "Too many support reads. Please wait before retrying."),
+});
+
+const supportMutationPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "support.mutation:pre-auth", protectedPreAuthActor, fromParamFields("id")),
+  handler: createJsonRateLimitHandler("support.mutation:pre-auth", "Too many support changes. Please wait before retrying."),
+});
+
+const incidentReadPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 36,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "incidents.read:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id", "fileName"))),
+  handler: createJsonRateLimitHandler("incidents.read:pre-auth", "Too many incident reads. Please wait before retrying."),
+});
+
+const incidentMutationPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 16,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "incidents.mutation:pre-auth", protectedPreAuthActor, fromParamFields("id")),
+  handler: createJsonRateLimitHandler("incidents.mutation:pre-auth", "Too many incident changes. Please wait before retrying."),
+});
+
+const incidentExportPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 14,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "incidents.export:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id", "fileName"))),
+  handler: createJsonRateLimitHandler("incidents.export:pre-auth", "Too many incident export requests. Please wait before retrying."),
+});
+
+const irReadPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 36,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "ir.read:pre-auth", protectedPreAuthActor, fromParamFields("id")),
+  handler: createJsonRateLimitHandler("ir.read:pre-auth", "Too many incident response reads. Please wait before retrying."),
+});
+
+const irMutationPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 14,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "ir.mutation:pre-auth", protectedPreAuthActor, fromParamFields("id")),
+  handler: createJsonRateLimitHandler("ir.mutation:pre-auth", "Too many incident response changes. Please wait before retrying."),
+});
+
+const accountMutationPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 14,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "account.mutation:pre-auth", protectedPreAuthActor),
+  handler: createJsonRateLimitHandler("account.mutation:pre-auth", "Too many account security changes. Please wait before retrying."),
+});
+
+const auditPackageExportPreAuthRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 14,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "audit.package-export:pre-auth", protectedPreAuthActor, fromParamFields("id")),
+  handler: createJsonRateLimitHandler("audit.package-export:pre-auth", "Too many audit package export requests. Please wait before retrying."),
+});
+
 const verifyLookupRouteLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 20,
@@ -995,6 +1261,7 @@ cookieMutationRouter.post(
 publicReadRouter.get("/verify/auth/providers", verifyProviderRouteLimiter, verifyCodeIpLimiter, verifyCodeActorLimiter, listCustomerOAuthProviders);
 cookieReadRouter.get(
   "/verify/auth/session",
+  verifySessionPreAuthRouteLimiter,
   optionalCustomerVerifyAuth,
   verifySessionRouteLimiter,
   verifyCustomerSessionReadIpLimiter,
@@ -1009,6 +1276,7 @@ publicMutationRouter.post("/verify/auth/email-otp/request", verifyOtpRequestRout
 publicMutationRouter.post("/verify/auth/email-otp/verify", verifyCustomerMutationRouteLimiter, verifyCustomerMutationIpLimiter, verifyCustomerMutationActorLimiter, verifyCustomerEmailOtp);
 cookieMutationRouter.post(
   "/verify/auth/logout",
+  verifyCustomerCookiePreAuthRouteLimiter,
   verifyCustomerCookieRouteLimiter,
   verifyCustomerCookieMutationIpLimiter,
   verifyCustomerCookieMutationActorLimiter,
@@ -1017,6 +1285,7 @@ cookieMutationRouter.post(
 );
 cookieMutationRouter.post(
   "/verify/auth/passkey/register/begin",
+  verifyCustomerCookiePreAuthRouteLimiter,
   requireCustomerVerifyAuth,
   verifyCustomerCookieRouteLimiter,
   verifyCustomerCookieMutationIpLimiter,
@@ -1026,6 +1295,7 @@ cookieMutationRouter.post(
 );
 cookieMutationRouter.post(
   "/verify/auth/passkey/register/finish",
+  verifyCustomerCookiePreAuthRouteLimiter,
   requireCustomerVerifyAuth,
   verifyCustomerCookieRouteLimiter,
   verifyCustomerCookieMutationIpLimiter,
@@ -1035,6 +1305,7 @@ cookieMutationRouter.post(
 );
 cookieMutationRouter.post(
   "/verify/auth/passkey/assertion/begin",
+  verifyCustomerMutationPreAuthRouteLimiter,
   optionalCustomerVerifyAuth,
   verifyCustomerMutationRouteLimiter,
   verifyCustomerMutationIpLimiter,
@@ -1043,6 +1314,7 @@ cookieMutationRouter.post(
 );
 cookieMutationRouter.post(
   "/verify/auth/passkey/assertion/finish",
+  verifyCustomerMutationPreAuthRouteLimiter,
   optionalCustomerVerifyAuth,
   verifyCustomerMutationRouteLimiter,
   verifyCustomerMutationIpLimiter,
@@ -1052,6 +1324,7 @@ cookieMutationRouter.post(
 cookieReadRouter.get("/verify/auth/passkey/credentials", verifyOtpVerifyIpLimiter, verifyOtpVerifyActorLimiter, requireCustomerVerifyAuth, listCustomerPasskeyCredentials);
 cookieMutationRouter.delete(
   "/verify/auth/passkey/credentials/:id",
+  verifyCustomerCookiePreAuthRouteLimiter,
   requireCustomerVerifyAuth,
   verifyCustomerCookieRouteLimiter,
   verifyCustomerCookieMutationIpLimiter,
@@ -1061,6 +1334,7 @@ cookieMutationRouter.delete(
 );
 cookieMutationRouter.post(
   "/verify/:code/claim",
+  verifyClaimPreAuthRouteLimiter,
   optionalCustomerVerifyAuth,
   verifyClaimRouteLimiter,
   verifyClaimIpLimiter,
@@ -1070,6 +1344,7 @@ cookieMutationRouter.post(
 );
 cookieMutationRouter.post(
   "/verify/:code/link-claim",
+  verifyClaimPreAuthRouteLimiter,
   requireCustomerVerifyAuth,
   verifyClaimRouteLimiter,
   verifyClaimIpLimiter,
@@ -1079,6 +1354,7 @@ cookieMutationRouter.post(
 );
 cookieMutationRouter.post(
   "/verify/:code/transfer",
+  verifyClaimPreAuthRouteLimiter,
   requireCustomerVerifyAuth,
   verifyClaimRouteLimiter,
   verifyClaimIpLimiter,
@@ -1088,6 +1364,7 @@ cookieMutationRouter.post(
 );
 cookieMutationRouter.post(
   "/verify/:code/transfer/cancel",
+  verifyClaimPreAuthRouteLimiter,
   requireCustomerVerifyAuth,
   verifyClaimRouteLimiter,
   verifyClaimIpLimiter,
@@ -1097,6 +1374,7 @@ cookieMutationRouter.post(
 );
 cookieMutationRouter.post(
   "/verify/transfer/accept",
+  verifyClaimPreAuthRouteLimiter,
   requireCustomerVerifyAuth,
   verifyClaimRouteLimiter,
   verifyClaimIpLimiter,
@@ -1136,6 +1414,7 @@ publicReadRouter.get("/support/tickets/track/:reference", supportTicketTrackIpLi
 cookieReadRouter.get("/scan", scanReadIpLimiter, scanReadActorLimiter, optionalCustomerVerifyAuth, scanToken);
 cookieMutationRouter.post(
   "/telemetry/route-transition",
+  telemetryMutationPreAuthRouteLimiter,
   optionalAuth,
   telemetryMutationRouteLimiter,
   telemetryRouteLimiter,
@@ -1145,6 +1424,7 @@ cookieMutationRouter.post(
 );
 cookieMutationRouter.post(
   "/telemetry/csp-report",
+  cspTelemetryPreAuthRouteLimiter,
   optionalAuth,
   cspTelemetryRouteLimiter,
   telemetryRouteLimiter,
@@ -1157,28 +1437,29 @@ publicReadRouter.get("/healthz", publicStatusIpLimiter, publicStatusActorLimiter
 publicReadRouter.get("/health/live", publicStatusIpLimiter, publicStatusActorLimiter, liveHealthCheck);
 publicReadRouter.get("/health/ready", publicStatusIpLimiter, publicStatusActorLimiter, readyHealthCheck);
 publicReadRouter.get("/health/latency", publicStatusIpLimiter, publicStatusActorLimiter, latencySummary);
-protectedReadRouter.get("/internal/release", authenticate, requirePlatformAdmin, internalReleaseRouteLimiter, internalReleaseIpLimiter, internalReleaseActorLimiter, internalReleaseMetadata);
+protectedReadRouter.get("/internal/release", internalReleasePreAuthRouteLimiter, authenticate, requirePlatformAdmin, internalReleaseRouteLimiter, internalReleaseIpLimiter, internalReleaseActorLimiter, internalReleaseMetadata);
 
 // ==================== LICENSEES (SUPER ADMIN) ====================
 protectedReadRouter.get(
   "/licensees/export",
+  licenseeExportPreAuthRouteLimiter,
   authenticate,
   requirePlatformAdmin,
   licenseeExportRouteLimiter,
   protectedReadRouteLimiter,
-  auditPackageExportRouteLimiter,
   exportReadIpLimiter,
   exportReadActorLimiter,
   exportLicenseesCsv
 );
 
-protectedMutationRouter.post("/licensees", authenticate, requirePlatformAdmin, licenseeMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, createLicensee);
-protectedReadRouter.get("/licensees", authenticate, requirePlatformAdmin, licenseeReadRouteLimiter, protectedReadRouteLimiter, getLicensees);
-protectedReadRouter.get("/licensees/:id", authenticate, requirePlatformAdmin, licenseeReadRouteLimiter, protectedReadRouteLimiter, getLicensee);
-protectedMutationRouter.patch("/licensees/:id", authenticate, requirePlatformAdmin, licenseeMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, updateLicensee);
-protectedMutationRouter.delete("/licensees/:id", authenticate, requirePlatformAdmin, licenseeMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, deleteLicensee);
+protectedMutationRouter.post("/licensees", licenseeMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, licenseeMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, createLicensee);
+protectedReadRouter.get("/licensees", licenseeReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin, licenseeReadRouteLimiter, protectedReadRouteLimiter, getLicensees);
+protectedReadRouter.get("/licensees/:id", licenseeReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin, licenseeReadRouteLimiter, protectedReadRouteLimiter, getLicensee);
+protectedMutationRouter.patch("/licensees/:id", licenseeMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, licenseeMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, updateLicensee);
+protectedMutationRouter.delete("/licensees/:id", licenseeMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, licenseeMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, deleteLicensee);
 protectedMutationRouter.post(
   "/licensees/:id/admin-invite/resend",
+  licenseeMutationPreAuthRouteLimiter,
   authenticate,
   requirePlatformAdmin,
   licenseeMutationRouteLimiter,
@@ -1190,17 +1471,18 @@ protectedMutationRouter.post(
 
 // ==================== USERS ====================
 // ✅ recommended: allow LICENSEE_ADMIN to create MANUFACTURER (controller already enforces)
-protectedMutationRouter.post("/users", authenticate, requireAnyAdmin, adminDirectoryMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, createUser);
+protectedMutationRouter.post("/users", adminDirectoryMutationPreAuthRouteLimiter, authenticate, requireAnyAdmin, adminDirectoryMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, createUser);
 
-protectedReadRouter.get("/users", authenticate, requireAnyAdmin, adminDirectoryReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getUsers);
-protectedMutationRouter.patch("/users/:id", authenticate, requireAnyAdmin, adminDirectoryMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, updateUser);
-protectedMutationRouter.delete("/users/:id", authenticate, requireAnyAdmin, adminDirectoryMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, deleteUser);
+protectedReadRouter.get("/users", adminDirectoryReadPreAuthRouteLimiter, authenticate, requireAnyAdmin, adminDirectoryReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getUsers);
+protectedMutationRouter.patch("/users/:id", adminDirectoryMutationPreAuthRouteLimiter, authenticate, requireAnyAdmin, adminDirectoryMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, updateUser);
+protectedMutationRouter.delete("/users/:id", adminDirectoryMutationPreAuthRouteLimiter, authenticate, requireAnyAdmin, adminDirectoryMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, deleteUser);
 
 // ==================== MANUFACTURERS ====================
-protectedReadRouter.get("/manufacturers", authenticate, requireAnyAdmin, adminDirectoryReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getManufacturers);
+protectedReadRouter.get("/manufacturers", adminDirectoryReadPreAuthRouteLimiter, authenticate, requireAnyAdmin, adminDirectoryReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getManufacturers);
 
 protectedMutationRouter.patch(
   "/manufacturers/:id/deactivate",
+  adminDirectoryMutationPreAuthRouteLimiter,
   authenticate,
   requireAnyAdmin,
   adminDirectoryMutationRouteLimiter,
@@ -1213,6 +1495,7 @@ protectedMutationRouter.patch(
 
 protectedMutationRouter.patch(
   "/manufacturers/:id/restore",
+  adminDirectoryMutationPreAuthRouteLimiter,
   authenticate,
   requireAnyAdmin,
   adminDirectoryMutationRouteLimiter,
@@ -1225,6 +1508,7 @@ protectedMutationRouter.patch(
 
 protectedMutationRouter.delete(
   "/manufacturers/:id",
+  adminDirectoryMutationPreAuthRouteLimiter,
   authenticate,
   requireAnyAdmin,
   adminDirectoryMutationRouteLimiter,
@@ -1236,12 +1520,13 @@ protectedMutationRouter.delete(
 );
 
 // ==================== QR (SUPER ADMIN for ranges) ====================
-protectedMutationRouter.post("/qr/ranges/allocate", authenticate, requirePlatformAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, allocateQRRange);
-protectedMutationRouter.post("/qr/generate", authenticate, requirePlatformAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, generateQRCodes);
+protectedMutationRouter.post("/qr/ranges/allocate", qrMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, allocateQRRange);
+protectedMutationRouter.post("/qr/generate", qrMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, generateQRCodes);
 
 // Super admin allocate range to existing licensee
 protectedMutationRouter.post(
   "/admin/licensees/:licenseeId/qr-allocate-range",
+  qrMutationPreAuthRouteLimiter,
   authenticate,
   requirePlatformAdmin,
   qrMutationRouteLimiter,
@@ -1252,12 +1537,13 @@ protectedMutationRouter.post(
 );
 
 // ==================== BATCHES ====================
-protectedMutationRouter.post("/qr/batches", authenticate, requireLicenseeAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, createBatch);
-protectedReadRouter.get("/qr/batches", authenticate, qrReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getBatches);
-protectedReadRouter.get("/qr/batches/:id/allocation-map", authenticate, qrReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getBatchAllocationMap);
+protectedMutationRouter.post("/qr/batches", qrMutationPreAuthRouteLimiter, authenticate, requireLicenseeAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, createBatch);
+protectedReadRouter.get("/qr/batches", qrReadPreAuthRouteLimiter, authenticate, qrReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getBatches);
+protectedReadRouter.get("/qr/batches/:id/allocation-map", qrReadPreAuthRouteLimiter, authenticate, qrReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getBatchAllocationMap);
 
 protectedMutationRouter.post(
   "/qr/batches/:id/assign-manufacturer",
+  qrMutationPreAuthRouteLimiter,
   authenticate,
   requireLicenseeAdmin,
   qrMutationRouteLimiter,
@@ -1269,6 +1555,7 @@ protectedMutationRouter.post(
 );
 protectedMutationRouter.patch(
   "/qr/batches/:id/rename",
+  qrMutationPreAuthRouteLimiter,
   authenticate,
   requireAnyAdmin,
   qrMutationRouteLimiter,
@@ -1280,21 +1567,21 @@ protectedMutationRouter.patch(
 );
 
 // Super admin bulk allocation helper
-protectedMutationRouter.post("/qr/batches/admin-allocate", authenticate, requirePlatformAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, adminAllocateBatch);
+protectedMutationRouter.post("/qr/batches/admin-allocate", qrMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, adminAllocateBatch);
 
 // ✅ IMPORTANT: remove QR Codes page for LICENSEE_ADMIN
 // raw QR list/export should be SUPER_ADMIN only
-protectedReadRouter.get("/qr/codes/export", authenticate, requirePlatformAdmin, qrExportRouteLimiter, protectedReadRouteLimiter, exportReadRouteLimiter, exportReadIpLimiter, exportReadActorLimiter, exportQRCodesCsv);
-protectedReadRouter.get("/qr/codes", authenticate, requirePlatformAdmin, qrReadRouteLimiter, protectedReadRouteLimiter, getQRCodes);
-protectedMutationRouter.post("/qr/codes/signed-links", authenticate, requirePlatformAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, generateSignedScanLinks);
+protectedReadRouter.get("/qr/codes/export", qrExportPreAuthRouteLimiter, authenticate, requirePlatformAdmin, qrExportRouteLimiter, protectedReadRouteLimiter, exportReadRouteLimiter, exportReadIpLimiter, exportReadActorLimiter, exportQRCodesCsv);
+protectedReadRouter.get("/qr/codes", qrReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin, qrReadRouteLimiter, protectedReadRouteLimiter, getQRCodes);
+protectedMutationRouter.post("/qr/codes/signed-links", qrMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, generateSignedScanLinks);
 
 // Stats is still allowed (needed for dashboard chart)
-protectedReadRouter.get("/qr/stats", authenticate, qrReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getStats);
+protectedReadRouter.get("/qr/stats", qrReadPreAuthRouteLimiter, authenticate, qrReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getStats);
 
 // delete endpoints (admins)
-protectedMutationRouter.delete("/qr/batches/:id", authenticate, requireAnyAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, deleteBatch);
-protectedMutationRouter.post("/qr/batches/bulk-delete", authenticate, requireAnyAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, bulkDeleteBatches);
-protectedMutationRouter.delete("/qr/codes", authenticate, requireAnyAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, bulkDeleteQRCodes);
+protectedMutationRouter.delete("/qr/batches/:id", qrMutationPreAuthRouteLimiter, authenticate, requireAnyAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, deleteBatch);
+protectedMutationRouter.post("/qr/batches/bulk-delete", qrMutationPreAuthRouteLimiter, authenticate, requireAnyAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, bulkDeleteBatches);
+protectedMutationRouter.delete("/qr/codes", qrMutationPreAuthRouteLimiter, authenticate, requireAnyAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, bulkDeleteQRCodes);
 
 // ==================== MANUFACTURER PRINT JOBS ====================
 router.post("/print-gateway/heartbeat", gatewayHeartbeatRouteLimiter, gatewayHeartbeatIpLimiter, gatewayHeartbeatActorLimiter, gatewayHeartbeat);
@@ -1510,6 +1797,7 @@ protectedMutationRouter.post(
 // ==================== QR REQUESTS ====================
 protectedMutationRouter.post(
   "/qr/requests",
+  qrRequestMutationPreAuthRouteLimiter,
   authenticate,
   requireAnyAdmin,
   qrRequestMutationRouteLimiter,
@@ -1519,23 +1807,24 @@ protectedMutationRouter.post(
   requireCsrf,
   createQrAllocationRequest
 );
-protectedReadRouter.get("/qr/requests", authenticate, requireAnyAdmin, qrRequestReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getQrAllocationRequests);
-protectedMutationRouter.post("/qr/requests/:id/approve", authenticate, requirePlatformAdmin, qrRequestMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, approveQrAllocationRequest);
-protectedMutationRouter.post("/qr/requests/:id/reject", authenticate, requirePlatformAdmin, qrRequestMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, rejectQrAllocationRequest);
+protectedReadRouter.get("/qr/requests", qrRequestReadPreAuthRouteLimiter, authenticate, requireAnyAdmin, qrRequestReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getQrAllocationRequests);
+protectedMutationRouter.post("/qr/requests/:id/approve", qrRequestMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, qrRequestMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, approveQrAllocationRequest);
+protectedMutationRouter.post("/qr/requests/:id/reject", qrRequestMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, qrRequestMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, rejectQrAllocationRequest);
 
 // ==================== AUDIT ====================
 protectedReadRouter.use("/audit", createAuditReadRoutes());
 protectedMutationRouter.use("/audit", createAuditMutationRoutes());
 
 // ==================== TRACE / ANALYTICS / POLICY ====================
-protectedReadRouter.get("/trace/timeline", authenticate, policyReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getTraceTimelineController);
-protectedReadRouter.get("/analytics/batch-sla", authenticate, requireAnyAdmin, policyReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getBatchSlaAnalyticsController);
-protectedReadRouter.get("/analytics/risk-scores", authenticate, requireAnyAdmin, policyReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getRiskAnalyticsController);
-protectedReadRouter.get("/policy/config", authenticate, requireAnyAdmin, policyReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getPolicyConfigController);
-protectedMutationRouter.patch("/policy/config", authenticate, requireAnyAdmin, policyMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, updatePolicyConfigController);
-protectedReadRouter.get("/policy/alerts", authenticate, requireAnyAdmin, policyReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getPolicyAlertsController);
+protectedReadRouter.get("/trace/timeline", policyReadPreAuthRouteLimiter, authenticate, policyReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getTraceTimelineController);
+protectedReadRouter.get("/analytics/batch-sla", policyReadPreAuthRouteLimiter, authenticate, requireAnyAdmin, policyReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getBatchSlaAnalyticsController);
+protectedReadRouter.get("/analytics/risk-scores", policyReadPreAuthRouteLimiter, authenticate, requireAnyAdmin, policyReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getRiskAnalyticsController);
+protectedReadRouter.get("/policy/config", policyReadPreAuthRouteLimiter, authenticate, requireAnyAdmin, policyReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getPolicyConfigController);
+protectedMutationRouter.patch("/policy/config", policyMutationPreAuthRouteLimiter, authenticate, requireAnyAdmin, policyMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, updatePolicyConfigController);
+protectedReadRouter.get("/policy/alerts", policyReadPreAuthRouteLimiter, authenticate, requireAnyAdmin, policyReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getPolicyAlertsController);
 protectedMutationRouter.post(
   "/policy/alerts/:id/ack",
+  policyMutationPreAuthRouteLimiter,
   authenticate,
   requireAnyAdmin,
   policyMutationRouteLimiter,
@@ -1547,6 +1836,7 @@ protectedMutationRouter.post(
 );
 protectedReadRouter.get(
   "/audit/export/batches/:id/package",
+  auditPackageExportPreAuthRouteLimiter,
   authenticate,
   requireAnyAdmin,
   auditPackageExportRouteLimiter,
@@ -1559,6 +1849,7 @@ protectedReadRouter.get(
 );
 protectedReadRouter.get(
   "/telemetry/route-transition/summary",
+  policyReadPreAuthRouteLimiter,
   authenticate,
   requireAnyAdmin,
   policyReadRouteLimiter,
@@ -1568,10 +1859,11 @@ protectedReadRouter.get(
 );
 
 // ==================== SUPPORT TICKETS ====================
-protectedReadRouter.get("/support/tickets", authenticate, requirePlatformAdmin, supportReadRouteLimiter, protectedReadRouteLimiter, listSupportTickets);
-protectedReadRouter.get("/support/tickets/:id", authenticate, requirePlatformAdmin, supportReadRouteLimiter, protectedReadRouteLimiter, getSupportTicket);
+protectedReadRouter.get("/support/tickets", supportReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin, supportReadRouteLimiter, protectedReadRouteLimiter, listSupportTickets);
+protectedReadRouter.get("/support/tickets/:id", supportReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin, supportReadRouteLimiter, protectedReadRouteLimiter, getSupportTicket);
 protectedMutationRouter.patch(
   "/support/tickets/:id",
+  supportMutationPreAuthRouteLimiter,
   authenticate,
   requirePlatformAdmin,
   supportMutationRouteLimiter,
@@ -1582,6 +1874,7 @@ protectedMutationRouter.patch(
 );
 protectedMutationRouter.post(
   "/support/tickets/:id/messages",
+  supportMutationPreAuthRouteLimiter,
   authenticate,
   requirePlatformAdmin,
   supportMutationRouteLimiter,
@@ -1590,9 +1883,10 @@ protectedMutationRouter.post(
   requireCsrf,
   addSupportMessage
 );
-protectedReadRouter.get("/support/reports", authenticate, requireOpsUser, supportReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, listSupportIssueReports);
+protectedReadRouter.get("/support/reports", supportReadPreAuthRouteLimiter, authenticate, requireOpsUser, supportReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, listSupportIssueReports);
 protectedMutationRouter.post(
   "/support/reports",
+  supportMutationPreAuthRouteLimiter,
   authenticate,
   requireOpsUser,
   supportMutationRouteLimiter,
@@ -1606,6 +1900,7 @@ protectedMutationRouter.post(
 );
 protectedMutationRouter.post(
   "/support/reports/:id/respond",
+  supportMutationPreAuthRouteLimiter,
   authenticate,
   requirePlatformAdmin,
   supportMutationRouteLimiter,
@@ -1616,6 +1911,7 @@ protectedMutationRouter.post(
 );
 protectedReadRouter.get(
   "/support/reports/files/:fileName",
+  supportReadPreAuthRouteLimiter,
   authenticate,
   requireOpsUser,
   supportReadRouteLimiter,
@@ -1625,14 +1921,15 @@ protectedReadRouter.get(
 );
 
 // ==================== QR LOGS (ADMINS) ====================
-protectedReadRouter.get("/admin/qr/scan-logs", authenticate, requireOpsUser, qrReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getScanLogs);
-protectedReadRouter.get("/admin/qr/batch-summary", authenticate, requireOpsUser, qrReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getBatchSummary);
-protectedReadRouter.get("/admin/qr/analytics", authenticate, requireOpsUser, qrReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getQrTrackingAnalyticsController);
+protectedReadRouter.get("/admin/qr/scan-logs", qrReadPreAuthRouteLimiter, authenticate, requireOpsUser, qrReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getScanLogs);
+protectedReadRouter.get("/admin/qr/batch-summary", qrReadPreAuthRouteLimiter, authenticate, requireOpsUser, qrReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getBatchSummary);
+protectedReadRouter.get("/admin/qr/analytics", qrReadPreAuthRouteLimiter, authenticate, requireOpsUser, qrReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getQrTrackingAnalyticsController);
 
 // ==================== INCIDENT RESPONSE ====================
-protectedReadRouter.get("/incidents", authenticate, requireAnyAdmin, incidentReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, listIncidents);
+protectedReadRouter.get("/incidents", incidentReadPreAuthRouteLimiter, authenticate, requireAnyAdmin, incidentReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, listIncidents);
 protectedReadRouter.get(
   "/incidents/evidence-files/:fileName",
+  incidentExportPreAuthRouteLimiter,
   authenticate,
   requireAnyAdmin,
   incidentExportRouteLimiter,
@@ -1640,11 +1937,12 @@ protectedReadRouter.get(
   enforceTenantIsolation,
   serveIncidentEvidenceFile
 );
-protectedReadRouter.get("/incidents/:id", authenticate, requireAnyAdmin, incidentReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getIncident);
-protectedMutationRouter.patch("/incidents/:id", authenticate, requireAnyAdmin, incidentMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, patchIncident);
-protectedMutationRouter.post("/incidents/:id/events", authenticate, requireAnyAdmin, incidentMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, addIncidentEventNote);
+protectedReadRouter.get("/incidents/:id", incidentReadPreAuthRouteLimiter, authenticate, requireAnyAdmin, incidentReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getIncident);
+protectedMutationRouter.patch("/incidents/:id", incidentMutationPreAuthRouteLimiter, authenticate, requireAnyAdmin, incidentMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, patchIncident);
+protectedMutationRouter.post("/incidents/:id/events", incidentMutationPreAuthRouteLimiter, authenticate, requireAnyAdmin, incidentMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, addIncidentEventNote);
 protectedMutationRouter.post(
   "/incidents/:id/evidence",
+  incidentMutationPreAuthRouteLimiter,
   authenticate,
   requireAnyAdmin,
   incidentMutationRouteLimiter,
@@ -1658,6 +1956,7 @@ protectedMutationRouter.post(
 );
 protectedMutationRouter.post(
   "/incidents/:id/email",
+  incidentMutationPreAuthRouteLimiter,
   authenticate,
   requireAnyAdmin,
   incidentMutationRouteLimiter,
@@ -1669,6 +1968,7 @@ protectedMutationRouter.post(
 );
 protectedMutationRouter.post(
   "/incidents/:id/notify-customer",
+  incidentMutationPreAuthRouteLimiter,
   authenticate,
   requireAnyAdmin,
   incidentMutationRouteLimiter,
@@ -1680,6 +1980,7 @@ protectedMutationRouter.post(
 );
 protectedReadRouter.get(
   "/incidents/:id/export-pdf",
+  incidentExportPreAuthRouteLimiter,
   authenticate,
   requireAnyAdmin,
   incidentExportRouteLimiter,
@@ -1689,15 +1990,16 @@ protectedReadRouter.get(
 );
 
 // ==================== IR (PLATFORM SUPERADMIN) ====================
-protectedReadRouter.get("/ir/incidents", authenticate, requirePlatformAdmin, irReadRouteLimiter, protectedReadRouteLimiter, listIrIncidents);
-protectedMutationRouter.post("/ir/incidents", authenticate, requirePlatformAdmin, irMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, createIrIncident);
-protectedReadRouter.get("/ir/incidents/:id", authenticate, requirePlatformAdmin, irReadRouteLimiter, protectedReadRouteLimiter, getIrIncident);
-protectedMutationRouter.patch("/ir/incidents/:id", authenticate, requirePlatformAdmin, irMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, patchIrIncident);
-protectedMutationRouter.post("/ir/incidents/:id/events", authenticate, requirePlatformAdmin, irMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, addIrIncidentEvent);
-protectedMutationRouter.post("/ir/incidents/:id/customer-trust/review", authenticate, requirePlatformAdmin, irMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, reviewIrIncidentCustomerTrust);
-protectedMutationRouter.post("/ir/incidents/:id/actions", authenticate, requirePlatformAdmin, irMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, applyIrIncidentAction);
+protectedReadRouter.get("/ir/incidents", irReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin, irReadRouteLimiter, protectedReadRouteLimiter, listIrIncidents);
+protectedMutationRouter.post("/ir/incidents", irMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, irMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, createIrIncident);
+protectedReadRouter.get("/ir/incidents/:id", irReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin, irReadRouteLimiter, protectedReadRouteLimiter, getIrIncident);
+protectedMutationRouter.patch("/ir/incidents/:id", irMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, irMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, patchIrIncident);
+protectedMutationRouter.post("/ir/incidents/:id/events", irMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, irMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, addIrIncidentEvent);
+protectedMutationRouter.post("/ir/incidents/:id/customer-trust/review", irMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, irMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, reviewIrIncidentCustomerTrust);
+protectedMutationRouter.post("/ir/incidents/:id/actions", irMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, irMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, applyIrIncidentAction);
 protectedMutationRouter.post(
   "/ir/incidents/:id/communications",
+  irMutationPreAuthRouteLimiter,
   authenticate,
   requirePlatformAdmin,
   irMutationRouteLimiter,
@@ -1708,6 +2010,7 @@ protectedMutationRouter.post(
 );
 protectedMutationRouter.post(
   "/ir/incidents/:id/attachments",
+  irMutationPreAuthRouteLimiter,
   authenticate,
   requirePlatformAdmin,
   irMutationRouteLimiter,
@@ -1719,20 +2022,20 @@ protectedMutationRouter.post(
   addIncidentEvidence
 );
 
-protectedReadRouter.get("/ir/policies", authenticate, requirePlatformAdmin, irReadRouteLimiter, protectedReadRouteLimiter, listIrPolicies);
-protectedMutationRouter.post("/ir/policies", authenticate, requirePlatformAdmin, irMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, createIrPolicy);
-protectedMutationRouter.patch("/ir/policies/:id", authenticate, requirePlatformAdmin, irMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, patchIrPolicy);
+protectedReadRouter.get("/ir/policies", irReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin, irReadRouteLimiter, protectedReadRouteLimiter, listIrPolicies);
+protectedMutationRouter.post("/ir/policies", irMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, irMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, createIrPolicy);
+protectedMutationRouter.patch("/ir/policies/:id", irMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, irMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, patchIrPolicy);
 
-protectedReadRouter.get("/ir/alerts", authenticate, requirePlatformAdmin, irReadRouteLimiter, protectedReadRouteLimiter, listIrAlerts);
-protectedMutationRouter.patch("/ir/alerts/:id", authenticate, requirePlatformAdmin, irMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, patchIrAlert);
+protectedReadRouter.get("/ir/alerts", irReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin, irReadRouteLimiter, protectedReadRouteLimiter, listIrAlerts);
+protectedMutationRouter.patch("/ir/alerts/:id", irMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, irMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, patchIrAlert);
 
 // ==================== ADMIN BLOCK ====================
-protectedMutationRouter.post("/admin/qrs/:id/block", authenticate, requirePlatformAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, blockQRCode);
-protectedMutationRouter.post("/admin/batches/:id/block", authenticate, requirePlatformAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, blockBatch);
+protectedMutationRouter.post("/admin/qrs/:id/block", qrMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, blockQRCode);
+protectedMutationRouter.post("/admin/batches/:id/block", qrMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, blockBatch);
 
 // ==================== ACCOUNT ====================
-protectedMutationRouter.patch("/account/profile", authenticate, accountMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentSensitiveAuth, requireCsrf, updateMyProfile);
-protectedMutationRouter.patch("/account/password", authenticate, accountMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentSensitiveAuth, requireCsrf, changeMyPassword);
+protectedMutationRouter.patch("/account/profile", accountMutationPreAuthRouteLimiter, authenticate, accountMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentSensitiveAuth, requireCsrf, updateMyProfile);
+protectedMutationRouter.patch("/account/password", accountMutationPreAuthRouteLimiter, authenticate, accountMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentSensitiveAuth, requireCsrf, changeMyPassword);
 
 router.use(publicReadRouter);
 router.use(publicMutationRouter);
@@ -1742,6 +2045,34 @@ router.use(protectedReadRouter);
 router.use(protectedMutationRouter);
 
 export {
+  verifySessionPreAuthRouteLimiter,
+  verifyCustomerCookiePreAuthRouteLimiter,
+  verifyCustomerMutationPreAuthRouteLimiter,
+  verifyClaimPreAuthRouteLimiter,
+  telemetryMutationPreAuthRouteLimiter,
+  cspTelemetryPreAuthRouteLimiter,
+  internalReleasePreAuthRouteLimiter,
+  licenseeReadPreAuthRouteLimiter,
+  licenseeExportPreAuthRouteLimiter,
+  licenseeMutationPreAuthRouteLimiter,
+  adminDirectoryReadPreAuthRouteLimiter,
+  adminDirectoryMutationPreAuthRouteLimiter,
+  qrReadPreAuthRouteLimiter,
+  qrExportPreAuthRouteLimiter,
+  qrMutationPreAuthRouteLimiter,
+  qrRequestReadPreAuthRouteLimiter,
+  qrRequestMutationPreAuthRouteLimiter,
+  policyReadPreAuthRouteLimiter,
+  policyMutationPreAuthRouteLimiter,
+  supportReadPreAuthRouteLimiter,
+  supportMutationPreAuthRouteLimiter,
+  incidentReadPreAuthRouteLimiter,
+  incidentMutationPreAuthRouteLimiter,
+  incidentExportPreAuthRouteLimiter,
+  irReadPreAuthRouteLimiter,
+  irMutationPreAuthRouteLimiter,
+  accountMutationPreAuthRouteLimiter,
+  auditPackageExportPreAuthRouteLimiter,
   auditPackageExportRouteLimiter,
   licenseeReadRouteLimiter,
   verifyCodeIpLimiter,
