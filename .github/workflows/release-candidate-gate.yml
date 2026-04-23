@@ -13,7 +13,7 @@ on:
 permissions:
   contents: read
   actions: read
-  administration: read
+  
 
 concurrency:
   group: release-candidate-gate-${{ github.ref }}
