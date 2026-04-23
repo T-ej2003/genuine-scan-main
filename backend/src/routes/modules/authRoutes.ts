@@ -48,69 +48,65 @@ import {
   verifyEmailController,
 } from "../../controllers/authController";
 
-const loginLimiters: RequestHandler[] = [
-  createPublicIpRateLimiter({
-    scope: "auth.login:ip",
-    windowMs: 15 * 60 * 1000,
-    max: 25,
-    message: "Too many sign-in attempts. Please wait before trying again.",
-  }),
-  createPublicActorRateLimiter({
-    scope: "auth.login:actor",
-    windowMs: 15 * 60 * 1000,
-    max: 10,
-    message: "Too many sign-in attempts. Please wait before trying again.",
-    actorResolver: composeRequestResolvers(fromBodyFields("email"), fromUserAgent),
-  }),
-];
+export const loginIpLimiter: RequestHandler = createPublicIpRateLimiter({
+  scope: "auth.login:ip",
+  windowMs: 15 * 60 * 1000,
+  max: 25,
+  message: "Too many sign-in attempts. Please wait before trying again.",
+});
 
-const inviteAcceptanceLimiters: RequestHandler[] = [
-  createPublicIpRateLimiter({
-    scope: "auth.invite:ip",
-    windowMs: 15 * 60 * 1000,
-    max: 25,
-    message: "Too many invite attempts. Please wait before retrying.",
-  }),
-  createPublicActorRateLimiter({
-    scope: "auth.invite:actor",
-    windowMs: 15 * 60 * 1000,
-    max: 10,
-    message: "Too many invite attempts. Please wait before retrying.",
-    actorResolver: composeRequestResolvers(fromBodyFields("token"), fromUserAgent),
-  }),
-];
+export const loginActorLimiter: RequestHandler = createPublicActorRateLimiter({
+  scope: "auth.login:actor",
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: "Too many sign-in attempts. Please wait before trying again.",
+  actorResolver: composeRequestResolvers(fromBodyFields("email"), fromUserAgent),
+});
 
-const verifyEmailLimiters: RequestHandler[] = [
-  createPublicIpRateLimiter({
-    scope: "auth.verify-email:ip",
-    windowMs: 15 * 60 * 1000,
-    max: 25,
-    message: "Too many verification attempts. Please wait before retrying.",
-  }),
-  createPublicActorRateLimiter({
-    scope: "auth.verify-email:actor",
-    windowMs: 15 * 60 * 1000,
-    max: 10,
-    message: "Too many verification attempts. Please wait before retrying.",
-    actorResolver: composeRequestResolvers(fromBodyFields("token"), fromUserAgent),
-  }),
-];
+const inviteAcceptanceIpLimiter: RequestHandler = createPublicIpRateLimiter({
+  scope: "auth.invite:ip",
+  windowMs: 15 * 60 * 1000,
+  max: 25,
+  message: "Too many invite attempts. Please wait before retrying.",
+});
 
-const forgotPasswordLimiters: RequestHandler[] = [
-  createPublicIpRateLimiter({
-    scope: "auth.password-reset:ip",
-    windowMs: 15 * 60 * 1000,
-    max: 10,
-    message: "Too many password reset requests. Please wait before trying again.",
-  }),
-  createPublicActorRateLimiter({
-    scope: "auth.password-reset:actor",
-    windowMs: 15 * 60 * 1000,
-    max: 5,
-    message: "Too many password reset requests. Please wait before trying again.",
-    actorResolver: composeRequestResolvers(fromBodyFields("email"), fromUserAgent),
-  }),
-];
+const inviteAcceptanceActorLimiter: RequestHandler = createPublicActorRateLimiter({
+  scope: "auth.invite:actor",
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: "Too many invite attempts. Please wait before retrying.",
+  actorResolver: composeRequestResolvers(fromBodyFields("token"), fromUserAgent),
+});
+
+const verifyEmailIpLimiter: RequestHandler = createPublicIpRateLimiter({
+  scope: "auth.verify-email:ip",
+  windowMs: 15 * 60 * 1000,
+  max: 25,
+  message: "Too many verification attempts. Please wait before retrying.",
+});
+
+const verifyEmailActorLimiter: RequestHandler = createPublicActorRateLimiter({
+  scope: "auth.verify-email:actor",
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: "Too many verification attempts. Please wait before retrying.",
+  actorResolver: composeRequestResolvers(fromBodyFields("token"), fromUserAgent),
+});
+
+const passwordRecoveryIpLimiter: RequestHandler = createPublicIpRateLimiter({
+  scope: "auth.password-reset:ip",
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: "Too many password reset requests. Please wait before trying again.",
+});
+
+const passwordRecoveryActorLimiter: RequestHandler = createPublicActorRateLimiter({
+  scope: "auth.password-reset:actor",
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: "Too many password reset requests. Please wait before trying again.",
+  actorResolver: composeRequestResolvers(fromBodyFields("email"), fromUserAgent),
+});
 
 const secureSessionIpLimiter = createPublicIpRateLimiter({
   scope: "account.security:ip",
@@ -168,6 +164,19 @@ const createJsonRateLimitHandler =
       scope,
     });
 
+const sessionReadRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "auth.session-read", (currentReq: any) => currentReq.user?.userId || fromUserAgent(currentReq)),
+  handler: createJsonRateLimitHandler(
+    "auth.session-read",
+    "Too many account session reads. Please wait before retrying."
+  ),
+});
+
 const secureSessionRouteLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
@@ -208,22 +217,22 @@ const adminInviteRouteLimiter = rateLimit({
 export const createAuthRoutes = () => {
   const router = Router();
 
-  router.post("/auth/login", ...loginLimiters, login);
-  router.post("/auth/accept-invite", ...inviteAcceptanceLimiters, acceptInviteController);
-  router.get("/auth/invite-preview", ...inviteAcceptanceLimiters, invitePreviewController);
-  router.post("/auth/verify-email", ...verifyEmailLimiters, verifyEmailController);
-  router.post("/auth/forgot-password", ...forgotPasswordLimiters, forgotPassword);
-  router.post("/auth/reset-password", ...forgotPasswordLimiters, resetPassword);
+  router.post("/auth/login", loginIpLimiter, loginActorLimiter, login);
+  router.post("/auth/accept-invite", inviteAcceptanceIpLimiter, inviteAcceptanceActorLimiter, acceptInviteController);
+  router.get("/auth/invite-preview", inviteAcceptanceIpLimiter, inviteAcceptanceActorLimiter, invitePreviewController);
+  router.post("/auth/verify-email", verifyEmailIpLimiter, verifyEmailActorLimiter, verifyEmailController);
+  router.post("/auth/forgot-password", passwordRecoveryIpLimiter, passwordRecoveryActorLimiter, forgotPassword);
+  router.post("/auth/reset-password", passwordRecoveryIpLimiter, passwordRecoveryActorLimiter, resetPassword);
 
-  router.get("/auth/me", authenticateAnySession, me);
+  router.get("/auth/me", authenticateAnySession, sessionReadRouteLimiter, me);
   router.post("/auth/refresh", secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, refresh);
   router.post("/auth/logout", authenticateAnySession, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, logout);
-  router.get("/auth/sessions", authenticate, listSessions);
+  router.get("/auth/sessions", authenticate, sessionReadRouteLimiter, listSessions);
   router.post("/auth/sessions/revoke-all", authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, revokeAllSessionsController);
   router.post("/auth/sessions/:id/revoke", authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, revokeSessionController);
   router.post("/auth/step-up/password", authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, passwordStepUpController);
 
-  router.get("/auth/mfa/status", authenticateAnySession, getAdminMfaStatusController);
+  router.get("/auth/mfa/status", authenticateAnySession, sessionReadRouteLimiter, getAdminMfaStatusController);
   router.post("/auth/mfa/setup/begin", authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminMfaSetupController);
   router.post("/auth/mfa/setup/confirm", authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, confirmAdminMfaSetupController);
   router.post("/auth/mfa/challenge/begin", authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminMfaChallengeController);

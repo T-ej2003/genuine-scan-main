@@ -200,10 +200,10 @@ import {
   failGatewayTestJob,
   gatewayHeartbeat,
 } from "../controllers/printerGatewayController";
-import auditRoutes from "./auditRoutes";
+import { createAuditMutationRoutes, createAuditReadRoutes } from "./auditRoutes";
 import createAuthRoutes from "./modules/authRoutes";
-import createGovernanceRoutes from "./modules/governanceRoutes";
-import createRealtimeRoutes from "./modules/realtimeRoutes";
+import { createGovernanceMutationRoutes, createGovernanceReadRoutes } from "./modules/governanceRoutes";
+import { createRealtimeMutationRoutes, createRealtimeReadRoutes } from "./modules/realtimeRoutes";
 import { updateMyProfile, changeMyPassword } from "../controllers/accountController";
 import {
   addIncidentEventNote,
@@ -283,7 +283,7 @@ const buildPublicRateLimitPair = (params: {
   message: string;
   actorResolver?: (req: Request) => string | null | undefined;
   resourceResolver?: (req: Request) => string | null | undefined;
-}) => {
+}): [RequestHandler, RequestHandler] => {
   return [
     createPublicIpRateLimiter({
       scope: `${params.scope}:ip`,
@@ -311,7 +311,7 @@ const buildAuthenticatedRateLimitPair = (params: {
   message: string;
   actorResolver?: (req: Request) => string | null | undefined;
   resourceResolver?: (req: Request) => string | null | undefined;
-}) =>
+}): [RequestHandler, RequestHandler] =>
   buildPublicRateLimitPair({
     ...params,
     actorResolver: params.actorResolver || ((req: any) => req.user?.userId || null),
@@ -412,6 +412,42 @@ const internalReleaseRouteLimiter = rateLimit({
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "internal.release", (currentReq: any) => currentReq.user?.userId || null),
   handler: createJsonRateLimitHandler("internal.release", "Too many release metadata lookups. Please wait before retrying."),
 });
+
+const gatewayHeartbeatRouteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "gateway.heartbeat", gatewayActor),
+  handler: createJsonRateLimitHandler("gateway.heartbeat", "Too many gateway heartbeat requests. Please wait before retrying."),
+});
+
+const gatewayJobRouteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 90,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "gateway.jobs", gatewayActor),
+  handler: createJsonRateLimitHandler("gateway.jobs", "Too many gateway job requests. Please wait before retrying."),
+});
+
+const printMutationRouteLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "print.mutation", (currentReq: any) => currentReq.user?.userId || null),
+  handler: createJsonRateLimitHandler("print.mutation", "Too many printing actions. Please wait before retrying."),
+});
+
+const exportReadRouteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "exports.downloads", (currentReq: any) => currentReq.user?.userId || null),
+  handler: createJsonRateLimitHandler("exports.downloads", "Too many export or download requests. Please wait before retrying."),
+});
 const emailActor = composeRequestResolvers(
   fromBodyFields("email", "contactEmail", "customerEmail", "recipientEmail"),
   fromQueryFields("email"),
@@ -437,7 +473,7 @@ const connectorDownloadResourceResolver = (req: any) =>
   [String(req.params?.version || "").trim(), String(req.params?.platform || "").trim()].filter(Boolean).join(":") || null;
 const supportTicketTrackResourceResolver = (req: any) => String(req.params?.reference || "").trim().toUpperCase() || null;
 
-const verifyOtpRequestLimiters = buildPublicRateLimitPair({
+const [verifyOtpRequestIpLimiter, verifyOtpRequestActorLimiter]: [RequestHandler, RequestHandler] = buildPublicRateLimitPair({
   scope: "verify.otp-request",
   windowMs: 15 * 60 * 1000,
   ipMax: 20,
@@ -446,7 +482,7 @@ const verifyOtpRequestLimiters = buildPublicRateLimitPair({
   actorResolver: emailActor,
 });
 
-const verifyOtpVerifyLimiters = buildPublicRateLimitPair({
+const [verifyOtpVerifyIpLimiter, verifyOtpVerifyActorLimiter]: [RequestHandler, RequestHandler] = buildPublicRateLimitPair({
   scope: "verify.otp-verify",
   windowMs: 15 * 60 * 1000,
   ipMax: 40,
@@ -455,7 +491,7 @@ const verifyOtpVerifyLimiters = buildPublicRateLimitPair({
   actorResolver: composeRequestResolvers(fromBodyFields("challengeToken"), publicClientActor),
 });
 
-const verifyCodeLimiters = buildPublicRateLimitPair({
+const [verifyCodeIpLimiter, verifyCodeActorLimiter]: [RequestHandler, RequestHandler] = buildPublicRateLimitPair({
   scope: "verify.code",
   windowMs: 60 * 1000,
   ipMax: parsePositiveIntEnv("PUBLIC_VERIFY_RATE_LIMIT_PER_MIN", 45, 20, 1000),
@@ -465,7 +501,7 @@ const verifyCodeLimiters = buildPublicRateLimitPair({
   resourceResolver: verifyResourceResolver,
 });
 
-const scanLimiters = buildPublicRateLimitPair({
+const [scanReadIpLimiter, scanReadActorLimiter]: [RequestHandler, RequestHandler] = buildPublicRateLimitPair({
   scope: "scan.token",
   windowMs: 60 * 1000,
   ipMax: parsePositiveIntEnv("SCAN_RATE_LIMIT_PER_MIN", 60, 20, 1000),
@@ -490,7 +526,7 @@ const verifyReportActorLimiter = createPublicActorRateLimiter({
   resourceResolver: composeRequestResolvers(fromBodyFields("code", "qrCodeValue")),
 });
 
-const verifyFeedbackLimiters = buildPublicRateLimitPair({
+const [verifyFeedbackIpLimiter, verifyFeedbackActorLimiter]: [RequestHandler, RequestHandler] = buildPublicRateLimitPair({
   scope: "verify.feedback",
   windowMs: 15 * 60 * 1000,
   ipMax: parsePositiveIntEnv("VERIFY_FEEDBACK_RATE_LIMIT_PER_15MIN", 30, 5, 500),
@@ -500,7 +536,7 @@ const verifyFeedbackLimiters = buildPublicRateLimitPair({
   resourceResolver: composeRequestResolvers(fromBodyFields("code")),
 });
 
-const connectorManifestLimiters = buildPublicRateLimitPair({
+const [connectorManifestIpLimiter, connectorManifestActorLimiter]: [RequestHandler, RequestHandler] = buildPublicRateLimitPair({
   scope: "connector.manifest",
   windowMs: 60 * 1000,
   ipMax: parsePositiveIntEnv("PUBLIC_CONNECTOR_RATE_LIMIT_PER_MIN", 120, 30, 2000),
@@ -508,7 +544,7 @@ const connectorManifestLimiters = buildPublicRateLimitPair({
   message: "Too many connector download checks. Please wait before retrying.",
 });
 
-const connectorDownloadLimiters = buildPublicRateLimitPair({
+const [connectorDownloadIpLimiter, connectorDownloadActorLimiter]: [RequestHandler, RequestHandler] = buildPublicRateLimitPair({
   scope: "connector.download",
   windowMs: 5 * 60 * 1000,
   ipMax: parsePositiveIntEnv("PUBLIC_CONNECTOR_DOWNLOAD_RATE_LIMIT_PER_5MIN", 60, 10, 1000),
@@ -517,7 +553,7 @@ const connectorDownloadLimiters = buildPublicRateLimitPair({
   resourceResolver: connectorDownloadResourceResolver,
 });
 
-const supportTicketTrackLimiters = buildPublicRateLimitPair({
+const [supportTicketTrackIpLimiter, supportTicketTrackActorLimiter]: [RequestHandler, RequestHandler] = buildPublicRateLimitPair({
   scope: "support.ticket-track",
   windowMs: 15 * 60 * 1000,
   ipMax: parsePositiveIntEnv("SUPPORT_TICKET_TRACK_RATE_LIMIT_PER_15MIN", 30, 5, 500),
@@ -527,7 +563,7 @@ const supportTicketTrackLimiters = buildPublicRateLimitPair({
   resourceResolver: supportTicketTrackResourceResolver,
 });
 
-const telemetryLimiters = buildPublicRateLimitPair({
+const [telemetryIpLimiter, telemetryActorLimiter]: [RequestHandler, RequestHandler] = buildPublicRateLimitPair({
   scope: "telemetry.route-transition",
   windowMs: 60 * 1000,
   ipMax: parsePositiveIntEnv("PUBLIC_TELEMETRY_RATE_LIMIT_PER_MIN", 120, 30, 3000),
@@ -537,7 +573,7 @@ const telemetryLimiters = buildPublicRateLimitPair({
   resourceResolver: composeRequestResolvers(fromBodyFields("routeTo")),
 });
 
-const cspReportLimiters = buildPublicRateLimitPair({
+const [cspReportIpLimiter, cspReportActorLimiter]: [RequestHandler, RequestHandler] = buildPublicRateLimitPair({
   scope: "telemetry.csp-report",
   windowMs: 60 * 1000,
   ipMax: parsePositiveIntEnv("PUBLIC_CSP_REPORT_RATE_LIMIT_PER_MIN", 120, 10, 3000),
@@ -546,7 +582,7 @@ const cspReportLimiters = buildPublicRateLimitPair({
   actorResolver: publicClientActor,
 });
 
-const publicStatusLimiters = buildPublicRateLimitPair({
+const [publicStatusIpLimiter, publicStatusActorLimiter]: [RequestHandler, RequestHandler] = buildPublicRateLimitPair({
   scope: "public.status",
   windowMs: 60 * 1000,
   ipMax: parsePositiveIntEnv("PUBLIC_STATUS_RATE_LIMIT_PER_MIN", 240, 60, 5000),
@@ -554,7 +590,7 @@ const publicStatusLimiters = buildPublicRateLimitPair({
   message: "Too many status checks. Please wait before retrying.",
 });
 
-const gatewayHeartbeatLimiters = buildPublicRateLimitPair({
+const [gatewayHeartbeatIpLimiter, gatewayHeartbeatActorLimiter]: [RequestHandler, RequestHandler] = buildPublicRateLimitPair({
   scope: "gateway.heartbeat",
   windowMs: 60 * 1000,
   ipMax: 240,
@@ -563,7 +599,7 @@ const gatewayHeartbeatLimiters = buildPublicRateLimitPair({
   actorResolver: gatewayActor,
 });
 
-const gatewayJobLimiters = buildPublicRateLimitPair({
+const [gatewayJobIpLimiter, gatewayJobActorLimiter]: [RequestHandler, RequestHandler] = buildPublicRateLimitPair({
   scope: "gateway.jobs",
   windowMs: 60 * 1000,
   ipMax: 180,
@@ -572,57 +608,13 @@ const gatewayJobLimiters = buildPublicRateLimitPair({
   actorResolver: gatewayActor,
 });
 
-const adminInviteLimiters = buildAuthenticatedRateLimitPair({
-  scope: "admin.invite",
-  windowMs: 15 * 60 * 1000,
-  ipMax: 40,
-  actorMax: 12,
-  message: "Too many invite actions. Please wait before retrying.",
-  resourceResolver: composeRequestResolvers(fromBodyFields("email"), fromParamFields("id")),
-});
-
-const adminUserMutationLimiters = buildAuthenticatedRateLimitPair({
-  scope: "admin.users",
-  windowMs: 10 * 60 * 1000,
-  ipMax: 80,
-  actorMax: 30,
-  message: "Too many user-management actions. Please slow down and retry.",
-  resourceResolver: composeRequestResolvers(fromParamFields("id"), fromBodyFields("email", "licenseeId")),
-});
-
-const qrMutationLimiters = buildAuthenticatedRateLimitPair({
-  scope: "qr.mutation",
-  windowMs: 10 * 60 * 1000,
-  ipMax: 80,
-  actorMax: 30,
-  message: "Too many allocation or code actions. Please wait before retrying.",
-  resourceResolver: composeRequestResolvers(fromParamFields("licenseeId", "id"), fromBodyFields("licenseeId", "batchId")),
-});
-
-const printMutationLimiters = buildAuthenticatedRateLimitPair({
+const [printMutationIpLimiter, printMutationActorLimiter]: [RequestHandler, RequestHandler] = buildAuthenticatedRateLimitPair({
   scope: "print.mutation",
   windowMs: 5 * 60 * 1000,
   ipMax: 120,
   actorMax: 60,
   message: "Too many printing actions. Please wait before retrying.",
   resourceResolver: composeRequestResolvers(fromParamFields("id"), fromBodyFields("printerId")),
-});
-
-const incidentSupportMutationLimiters = buildAuthenticatedRateLimitPair({
-  scope: "incident-support.mutation",
-  windowMs: 10 * 60 * 1000,
-  ipMax: 80,
-  actorMax: 40,
-  message: "Too many incident or support actions. Please wait before retrying.",
-  resourceResolver: composeRequestResolvers(fromParamFields("id", "reference"), fromBodyFields("incidentId", "ticketId")),
-});
-
-const secureAccountMutationLimiters = buildAuthenticatedRateLimitPair({
-  scope: "account.security",
-  windowMs: 15 * 60 * 1000,
-  ipMax: 40,
-  actorMax: 12,
-  message: "Too many account security actions. Please wait before retrying.",
 });
 
 const verifyCustomerSessionReadIpLimiter = createPublicIpRateLimiter({
@@ -702,7 +694,7 @@ const internalReleaseActorLimiter = createPublicActorRateLimiter({
   actorResolver: (req: any) => req.user?.userId || null,
 });
 
-const exportLimiters = buildAuthenticatedRateLimitPair({
+const [exportReadIpLimiter, exportReadActorLimiter]: [RequestHandler, RequestHandler] = buildAuthenticatedRateLimitPair({
   scope: "exports.downloads",
   windowMs: 10 * 60 * 1000,
   ipMax: 40,
@@ -712,22 +704,18 @@ const exportLimiters = buildAuthenticatedRateLimitPair({
 });
 
 router.use(createAuthRoutes());
-
-protectedMutationRouter.use(createRealtimeRoutes());
-protectedMutationRouter.use(
-  createGovernanceRoutes({
-    exportLimiters,
-    incidentSupportMutationLimiters,
-  })
-);
+protectedReadRouter.use(createRealtimeReadRoutes());
+protectedMutationRouter.use(createRealtimeMutationRoutes());
+protectedReadRouter.use(createGovernanceReadRoutes());
+protectedMutationRouter.use(createGovernanceMutationRoutes());
 
 // ==================== PUBLIC ====================
-publicReadRouter.get("/public/connector/releases", ...connectorManifestLimiters, listConnectorReleasesController);
-publicReadRouter.get("/public/connector/releases/latest", ...connectorManifestLimiters, getLatestConnectorReleaseController);
-publicReadRouter.get("/public/connector/download/:version/:platform", ...connectorDownloadLimiters, downloadConnectorReleaseController);
-cookieReadRouter.get("/verify/:code", ...verifyCodeLimiters, optionalCustomerVerifyAuth, verifyQRCode);
-cookieMutationRouter.post("/verify/session/start", ...verifyCodeLimiters, optionalCustomerVerifyAuth, startCustomerVerificationSession);
-cookieReadRouter.get("/verify/session/:id", ...verifyCodeLimiters, optionalCustomerVerifyAuth, getCustomerVerificationSessionState);
+publicReadRouter.get("/public/connector/releases", connectorManifestIpLimiter, connectorManifestActorLimiter, listConnectorReleasesController);
+publicReadRouter.get("/public/connector/releases/latest", connectorManifestIpLimiter, connectorManifestActorLimiter, getLatestConnectorReleaseController);
+publicReadRouter.get("/public/connector/download/:version/:platform", connectorDownloadIpLimiter, connectorDownloadActorLimiter, downloadConnectorReleaseController);
+cookieReadRouter.get("/verify/:code", verifyCodeIpLimiter, verifyCodeActorLimiter, optionalCustomerVerifyAuth, verifyQRCode);
+cookieMutationRouter.post("/verify/session/start", verifyCodeIpLimiter, verifyCodeActorLimiter, optionalCustomerVerifyAuth, startCustomerVerificationSession);
+cookieReadRouter.get("/verify/session/:id", verifyCodeIpLimiter, verifyCodeActorLimiter, optionalCustomerVerifyAuth, getCustomerVerificationSessionState);
 cookieMutationRouter.post(
   "/verify/session/:id/intake",
   requireCustomerVerifyAuth,
@@ -746,7 +734,7 @@ cookieMutationRouter.post(
   requireCustomerVerifyCsrf,
   revealCustomerVerificationResult
 );
-publicReadRouter.get("/verify/auth/providers", ...verifyCodeLimiters, listCustomerOAuthProviders);
+publicReadRouter.get("/verify/auth/providers", verifyCodeIpLimiter, verifyCodeActorLimiter, listCustomerOAuthProviders);
 cookieReadRouter.get(
   "/verify/auth/session",
   optionalCustomerVerifyAuth,
@@ -755,11 +743,11 @@ cookieReadRouter.get(
   verifyCustomerSessionReadActorLimiter,
   getCustomerVerifyAuthSession
 );
-publicReadRouter.get("/verify/auth/oauth/:provider/start", ...verifyCodeLimiters, startCustomerOAuth);
-publicReadRouter.get("/verify/auth/oauth/:provider/callback", ...verifyCodeLimiters, completeCustomerOAuth);
-publicMutationRouter.post("/verify/auth/oauth/:provider/callback", ...verifyCodeLimiters, completeCustomerOAuth);
+publicReadRouter.get("/verify/auth/oauth/:provider/start", verifyCodeIpLimiter, verifyCodeActorLimiter, startCustomerOAuth);
+publicReadRouter.get("/verify/auth/oauth/:provider/callback", verifyCodeIpLimiter, verifyCodeActorLimiter, completeCustomerOAuth);
+publicMutationRouter.post("/verify/auth/oauth/:provider/callback", verifyCodeIpLimiter, verifyCodeActorLimiter, completeCustomerOAuth);
 publicMutationRouter.post("/verify/auth/oauth/exchange", verifyCustomerMutationRouteLimiter, verifyCustomerMutationIpLimiter, verifyCustomerMutationActorLimiter, exchangeCustomerOAuth);
-publicMutationRouter.post("/verify/auth/email-otp/request", ...verifyOtpRequestLimiters, requestCustomerEmailOtp);
+publicMutationRouter.post("/verify/auth/email-otp/request", verifyOtpRequestIpLimiter, verifyOtpRequestActorLimiter, requestCustomerEmailOtp);
 publicMutationRouter.post("/verify/auth/email-otp/verify", verifyCustomerMutationRouteLimiter, verifyCustomerMutationIpLimiter, verifyCustomerMutationActorLimiter, verifyCustomerEmailOtp);
 cookieMutationRouter.post(
   "/verify/auth/logout",
@@ -803,7 +791,7 @@ cookieMutationRouter.post(
   verifyCustomerMutationActorLimiter,
   finishCustomerPasskeyAssertion
 );
-cookieReadRouter.get("/verify/auth/passkey/credentials", ...verifyOtpVerifyLimiters, requireCustomerVerifyAuth, listCustomerPasskeyCredentials);
+cookieReadRouter.get("/verify/auth/passkey/credentials", verifyOtpVerifyIpLimiter, verifyOtpVerifyActorLimiter, requireCustomerVerifyAuth, listCustomerPasskeyCredentials);
 cookieMutationRouter.delete(
   "/verify/auth/passkey/credentials/:id",
   requireCustomerVerifyAuth,
@@ -876,7 +864,7 @@ publicMutationRouter.post(
   verifyReportActorLimiter,
   reportFraud
 );
-publicMutationRouter.post("/verify/feedback", ...verifyFeedbackLimiters, submitProductFeedback);
+publicMutationRouter.post("/verify/feedback", verifyFeedbackIpLimiter, verifyFeedbackActorLimiter, submitProductFeedback);
 publicMutationRouter.post(
   "/incidents/report",
   verifyReportIpLimiter,
@@ -886,19 +874,19 @@ publicMutationRouter.post(
   verifyReportActorLimiter,
   reportIncident
 );
-publicReadRouter.get("/support/tickets/track/:reference", ...supportTicketTrackLimiters, trackSupportTicketPublic);
-cookieReadRouter.get("/scan", ...scanLimiters, optionalCustomerVerifyAuth, scanToken);
-cookieMutationRouter.post("/telemetry/route-transition", optionalAuth, telemetryRouteLimiter, ...telemetryLimiters, captureRouteTransitionMetric);
-cookieMutationRouter.post("/telemetry/csp-report", optionalAuth, telemetryRouteLimiter, ...cspReportLimiters, captureCspViolationReport);
-publicReadRouter.get("/health", ...publicStatusLimiters, healthCheck);
-publicReadRouter.get("/healthz", ...publicStatusLimiters, healthCheck);
-publicReadRouter.get("/health/live", ...publicStatusLimiters, liveHealthCheck);
-publicReadRouter.get("/health/ready", ...publicStatusLimiters, readyHealthCheck);
-publicReadRouter.get("/health/latency", ...publicStatusLimiters, latencySummary);
+publicReadRouter.get("/support/tickets/track/:reference", supportTicketTrackIpLimiter, supportTicketTrackActorLimiter, trackSupportTicketPublic);
+cookieReadRouter.get("/scan", scanReadIpLimiter, scanReadActorLimiter, optionalCustomerVerifyAuth, scanToken);
+cookieMutationRouter.post("/telemetry/route-transition", optionalAuth, telemetryRouteLimiter, telemetryIpLimiter, telemetryActorLimiter, captureRouteTransitionMetric);
+cookieMutationRouter.post("/telemetry/csp-report", optionalAuth, telemetryRouteLimiter, cspReportIpLimiter, cspReportActorLimiter, captureCspViolationReport);
+publicReadRouter.get("/health", publicStatusIpLimiter, publicStatusActorLimiter, healthCheck);
+publicReadRouter.get("/healthz", publicStatusIpLimiter, publicStatusActorLimiter, healthCheck);
+publicReadRouter.get("/health/live", publicStatusIpLimiter, publicStatusActorLimiter, liveHealthCheck);
+publicReadRouter.get("/health/ready", publicStatusIpLimiter, publicStatusActorLimiter, readyHealthCheck);
+publicReadRouter.get("/health/latency", publicStatusIpLimiter, publicStatusActorLimiter, latencySummary);
 protectedReadRouter.get("/internal/release", authenticate, requirePlatformAdmin, internalReleaseRouteLimiter, internalReleaseIpLimiter, internalReleaseActorLimiter, internalReleaseMetadata);
 
 // ==================== LICENSEES (SUPER ADMIN) ====================
-protectedReadRouter.get("/licensees/export", authenticate, requirePlatformAdmin, protectedReadRouteLimiter, exportLicenseesCsv);
+protectedReadRouter.get("/licensees/export", authenticate, requirePlatformAdmin, protectedReadRouteLimiter, exportReadRouteLimiter, exportReadIpLimiter, exportReadActorLimiter, exportLicenseesCsv);
 
 protectedMutationRouter.post("/licensees", authenticate, requirePlatformAdmin, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, createLicensee);
 protectedReadRouter.get("/licensees", authenticate, requirePlatformAdmin, protectedReadRouteLimiter, getLicensees);
@@ -993,6 +981,7 @@ protectedMutationRouter.patch(
   "/qr/batches/:id/rename",
   authenticate,
   requireAnyAdmin,
+  protectedMutationRouteLimiter,
   requireRecentAdminMfa,
   enforceTenantIsolation,
   requireCsrf,
@@ -1004,7 +993,7 @@ protectedMutationRouter.post("/qr/batches/admin-allocate", authenticate, require
 
 // ✅ IMPORTANT: remove QR Codes page for LICENSEE_ADMIN
 // raw QR list/export should be SUPER_ADMIN only
-protectedReadRouter.get("/qr/codes/export", authenticate, requirePlatformAdmin, protectedReadRouteLimiter, exportQRCodesCsv);
+protectedReadRouter.get("/qr/codes/export", authenticate, requirePlatformAdmin, protectedReadRouteLimiter, exportReadRouteLimiter, exportReadIpLimiter, exportReadActorLimiter, exportQRCodesCsv);
 protectedReadRouter.get("/qr/codes", authenticate, requirePlatformAdmin, protectedReadRouteLimiter, getQRCodes);
 protectedMutationRouter.post("/qr/codes/signed-links", authenticate, requirePlatformAdmin, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, generateSignedScanLinks);
 
@@ -1017,23 +1006,23 @@ protectedMutationRouter.post("/qr/batches/bulk-delete", authenticate, requireAny
 protectedMutationRouter.delete("/qr/codes", authenticate, requireAnyAdmin, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, bulkDeleteQRCodes);
 
 // ==================== MANUFACTURER PRINT JOBS ====================
-router.post("/print-gateway/heartbeat", ...gatewayHeartbeatLimiters, gatewayHeartbeat);
-router.post("/print-gateway/direct/claim", ...gatewayJobLimiters, claimGatewayDirectJob);
-router.post("/print-gateway/direct/ack", ...gatewayJobLimiters, ackGatewayDirectJob);
-router.post("/print-gateway/direct/confirm", ...gatewayJobLimiters, confirmGatewayDirectJob);
-router.post("/print-gateway/direct/fail", ...gatewayJobLimiters, failGatewayDirectJob);
-router.post("/print-gateway/ipp/claim", ...gatewayJobLimiters, claimGatewayIppJob);
-router.post("/print-gateway/ipp/ack", ...gatewayJobLimiters, ackGatewayIppJob);
-router.post("/print-gateway/test/claim", ...gatewayJobLimiters, claimGatewayTestJob);
-router.post("/print-gateway/test/ack", ...gatewayJobLimiters, ackGatewayTestJob);
-router.post("/print-gateway/test/confirm", ...gatewayJobLimiters, confirmGatewayTestJob);
-router.post("/print-gateway/test/fail", ...gatewayJobLimiters, failGatewayTestJob);
-router.post("/printer-agent/local/claim", ...gatewayJobLimiters, claimLocalAgentPrintJob);
-router.post("/printer-agent/local/ack", ...gatewayJobLimiters, ackLocalAgentPrintJob);
-router.post("/printer-agent/local/confirm", ...gatewayJobLimiters, confirmLocalAgentPrintJob);
-router.post("/printer-agent/local/fail", ...gatewayJobLimiters, failLocalAgentPrintJob);
-router.post("/print-gateway/ipp/confirm", ...gatewayJobLimiters, confirmGatewayIppJob);
-router.post("/print-gateway/ipp/fail", ...gatewayJobLimiters, failGatewayIppJob);
+router.post("/print-gateway/heartbeat", gatewayHeartbeatRouteLimiter, gatewayHeartbeatIpLimiter, gatewayHeartbeatActorLimiter, gatewayHeartbeat);
+router.post("/print-gateway/direct/claim", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, claimGatewayDirectJob);
+router.post("/print-gateway/direct/ack", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, ackGatewayDirectJob);
+router.post("/print-gateway/direct/confirm", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, confirmGatewayDirectJob);
+router.post("/print-gateway/direct/fail", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, failGatewayDirectJob);
+router.post("/print-gateway/ipp/claim", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, claimGatewayIppJob);
+router.post("/print-gateway/ipp/ack", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, ackGatewayIppJob);
+router.post("/print-gateway/test/claim", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, claimGatewayTestJob);
+router.post("/print-gateway/test/ack", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, ackGatewayTestJob);
+router.post("/print-gateway/test/confirm", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, confirmGatewayTestJob);
+router.post("/print-gateway/test/fail", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, failGatewayTestJob);
+router.post("/printer-agent/local/claim", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, claimLocalAgentPrintJob);
+router.post("/printer-agent/local/ack", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, ackLocalAgentPrintJob);
+router.post("/printer-agent/local/confirm", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, confirmLocalAgentPrintJob);
+router.post("/printer-agent/local/fail", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, failLocalAgentPrintJob);
+router.post("/print-gateway/ipp/confirm", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, confirmGatewayIppJob);
+router.post("/print-gateway/ipp/fail", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, failGatewayIppJob);
 
 protectedMutationRouter.post(
   "/manufacturer/print-jobs",
@@ -1041,7 +1030,9 @@ protectedMutationRouter.post(
   requireManufacturer,
   requireRecentSensitiveAuth,
   enforceTenantIsolation,
-  ...printMutationLimiters,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
   requireCsrf,
   createPrintJob
 );
@@ -1049,6 +1040,7 @@ protectedReadRouter.get(
   "/manufacturer/printers",
   authenticate,
   requireOpsUser,
+  protectedReadRouteLimiter,
   enforceTenantIsolation,
   listPrinters
 );
@@ -1058,7 +1050,9 @@ protectedMutationRouter.post(
   requireOpsUser,
   requireRecentSensitiveAuth,
   enforceTenantIsolation,
-  ...printMutationLimiters,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
   requireCsrf,
   createNetworkPrinter
 );
@@ -1068,7 +1062,9 @@ protectedMutationRouter.patch(
   requireOpsUser,
   requireRecentSensitiveAuth,
   enforceTenantIsolation,
-  ...printMutationLimiters,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
   requireCsrf,
   updateNetworkPrinter
 );
@@ -1078,7 +1074,9 @@ protectedMutationRouter.delete(
   requireOpsUser,
   requireRecentSensitiveAuth,
   enforceTenantIsolation,
-  ...printMutationLimiters,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
   requireCsrf,
   deleteNetworkPrinter
 );
@@ -1088,7 +1086,9 @@ protectedMutationRouter.post(
   requireOpsUser,
   requireRecentSensitiveAuth,
   enforceTenantIsolation,
-  ...printMutationLimiters,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
   requireCsrf,
   testPrinter
 );
@@ -1098,7 +1098,9 @@ protectedMutationRouter.post(
   requireOpsUser,
   requireRecentSensitiveAuth,
   enforceTenantIsolation,
-  ...printMutationLimiters,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
   requireCsrf,
   testPrinterLabel
 );
@@ -1108,7 +1110,9 @@ protectedMutationRouter.post(
   requireOpsUser,
   requireRecentSensitiveAuth,
   enforceTenantIsolation,
-  ...printMutationLimiters,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
   requireCsrf,
   discoverPrinter
 );
@@ -1116,6 +1120,7 @@ protectedReadRouter.get(
   "/manufacturer/print-jobs",
   authenticate,
   requireOpsUser,
+  protectedReadRouteLimiter,
   enforceTenantIsolation,
   listManufacturerPrintJobs
 );
@@ -1123,6 +1128,7 @@ protectedReadRouter.get(
   "/manufacturer/print-jobs/:id",
   authenticate,
   requireOpsUser,
+  protectedReadRouteLimiter,
   enforceTenantIsolation,
   getManufacturerPrintJobStatus
 );
@@ -1132,7 +1138,9 @@ protectedMutationRouter.post(
   requireOpsUser,
   requireRecentSensitiveAuth,
   enforceTenantIsolation,
-  ...printMutationLimiters,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
   requireCsrf,
   reissueManufacturerPrintJob
 );
@@ -1141,7 +1149,9 @@ protectedReadRouter.get(
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
-  ...exportLimiters,
+  exportReadRouteLimiter,
+  exportReadIpLimiter,
+  exportReadActorLimiter,
   downloadPrintJobPack
 );
 protectedMutationRouter.post(
@@ -1150,7 +1160,9 @@ protectedMutationRouter.post(
   requireManufacturer,
   requireRecentSensitiveAuth,
   enforceTenantIsolation,
-  ...printMutationLimiters,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
   requireCsrf,
   issueDirectPrintTokens
 );
@@ -1159,7 +1171,9 @@ protectedMutationRouter.post(
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
-  ...printMutationLimiters,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
   requireCsrf,
   resolveDirectPrintToken
 );
@@ -1168,7 +1182,9 @@ protectedMutationRouter.post(
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
-  ...printMutationLimiters,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
   requireCsrf,
   confirmDirectPrintItem
 );
@@ -1177,7 +1193,9 @@ protectedMutationRouter.post(
   authenticate,
   requireManufacturer,
   enforceTenantIsolation,
-  ...printMutationLimiters,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
   requireCsrf,
   reportDirectPrintFailure
 );
@@ -1187,7 +1205,9 @@ protectedMutationRouter.post(
   requireManufacturer,
   requireRecentSensitiveAuth,
   enforceTenantIsolation,
-  ...printMutationLimiters,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
   requireCsrf,
   confirmPrintJob
 );
@@ -1208,7 +1228,8 @@ protectedMutationRouter.post("/qr/requests/:id/approve", authenticate, requirePl
 protectedMutationRouter.post("/qr/requests/:id/reject", authenticate, requirePlatformAdmin, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, rejectQrAllocationRequest);
 
 // ==================== AUDIT ====================
-protectedMutationRouter.use("/audit", auditRoutes);
+protectedReadRouter.use("/audit", createAuditReadRoutes());
+protectedMutationRouter.use("/audit", createAuditMutationRoutes());
 
 // ==================== TRACE / ANALYTICS / POLICY ====================
 protectedReadRouter.get("/trace/timeline", authenticate, protectedReadRouteLimiter, enforceTenantIsolation, getTraceTimelineController);
@@ -1232,6 +1253,9 @@ protectedReadRouter.get(
   authenticate,
   requireAnyAdmin,
   protectedReadRouteLimiter,
+  exportReadRouteLimiter,
+  exportReadIpLimiter,
+  exportReadActorLimiter,
   enforceTenantIsolation,
   exportBatchAuditPackageController
 );
@@ -1405,5 +1429,19 @@ router.use(cookieReadRouter);
 router.use(cookieMutationRouter);
 router.use(protectedReadRouter);
 router.use(protectedMutationRouter);
+
+export {
+  verifyCodeIpLimiter,
+  verifyCodeActorLimiter,
+  verifyClaimRouteLimiter,
+  verifyClaimIpLimiter,
+  verifyClaimActorLimiter,
+  gatewayJobRouteLimiter,
+  gatewayJobIpLimiter,
+  gatewayJobActorLimiter,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
+};
 
 export default router;
