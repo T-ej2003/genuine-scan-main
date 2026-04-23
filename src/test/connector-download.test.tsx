@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import ConnectorDownload from "@/pages/ConnectorDownload";
@@ -19,9 +19,6 @@ const expectAllLinksToMatch = (links: HTMLElement[], href: string) => {
     expect(link).toHaveAttribute("href", href);
   }
 };
-
-const hasTextContent = (snippet: RegExp) => (_: string, element: Element | null) =>
-  snippet.test(element?.textContent || "");
 
 describe("ConnectorDownload", () => {
   beforeEach(() => {
@@ -109,7 +106,11 @@ describe("ConnectorDownload", () => {
     expect(screen.getAllByText(/Windows can block this unsigned test package/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Extract the ZIP fully before running/i)).toBeInTheDocument();
     expect(screen.getByText(/Run the installer once/i)).toBeInTheDocument();
-    expect(screen.getAllByText(hasTextContent(/Smart App Control can block the current Windows download/i)).length).toBeGreaterThan(0);
+    const unsignedPackageAlerts = screen
+      .getAllByRole("alert")
+      .filter((alert) => within(alert).queryByText(/Windows can block this unsigned test package/i));
+    expect(unsignedPackageAlerts.length).toBeGreaterThan(0);
+    expect(unsignedPackageAlerts.some((alert) => /Smart App Control/i.test(alert.textContent || ""))).toBe(true);
     expect(screen.getAllByText(/Unsigned test package/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/verifies local printer readiness before it tells you setup is complete/i).length).toBeGreaterThan(0);
   });

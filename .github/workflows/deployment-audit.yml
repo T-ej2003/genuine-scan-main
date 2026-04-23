@@ -99,7 +99,7 @@ jobs:
 
       - name: Trivy IaC scan
         if: steps.iac-detect.outputs.found == 'true'
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
           scan-ref: .
@@ -127,7 +127,7 @@ jobs:
 
       - name: Trivy container scan
         if: steps.docker-detect.outputs.found == 'true'
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
           image-ref: deployment-audit:latest
