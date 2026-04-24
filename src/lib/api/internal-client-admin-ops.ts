@@ -309,6 +309,22 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     return core.request(`/analytics/risk-scores${query}`);
   },
 
+  async getInternalReleaseMetadata() {
+    return core.request<{
+      name: string;
+      version: string;
+      gitSha: string;
+      environment: string;
+      release: string;
+      signing?: {
+        mode: string;
+        provider: string;
+        keyVersion: string;
+        keyRef?: string | null;
+      } | null;
+    }>(`/internal/release`);
+  },
+
   async getPolicyConfig(licenseeId?: string) {
     const query = licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : "";
     return core.request(`/policy/config${query}`);
@@ -493,6 +509,20 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     if (options?.to) params.append("to", options.to);
     const query = params.toString() ? `?${params.toString()}` : "";
     return core.request(`/telemetry/route-transition/summary${query}`);
+  },
+
+  async getRateLimitAnalytics(options?: { windowMs?: number }) {
+    const params = new URLSearchParams();
+    if (options?.windowMs != null) params.append("windowMs", String(options.windowMs));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return core.request(`/security/abuse/rate-limits${query}`);
+  },
+
+  async getRateLimitAlerts(options?: { windowMs?: number }) {
+    const params = new URLSearchParams();
+    if (options?.windowMs != null) params.append("windowMs", String(options.windowMs));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return core.request(`/security/abuse/rate-limits/alerts${query}`);
   },
 });
 

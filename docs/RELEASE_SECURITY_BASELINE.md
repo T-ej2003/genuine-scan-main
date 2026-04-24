@@ -30,7 +30,7 @@ These files may document variable names and fail-closed usage, but they must not
 - AWS/task-role deployments should prefer ambient credentials and keep static object-storage secrets unset unless a custom S3-compatible endpoint requires them.
 - Tracked examples may leave sensitive vars empty, but never populated with realistic defaults.
 
-## Guardrail
+## Guardrails
 
 The baseline guard script `scripts/check-baseline-secret-patterns.mjs` blocks:
 
@@ -39,3 +39,11 @@ The baseline guard script `scripts/check-baseline-secret-patterns.mjs` blocks:
 - fallback default forms on `OBJECT_STORAGE_ACCESS_KEY` / `OBJECT_STORAGE_SECRET_KEY`
 
 This keeps `main` clean so future PRs do not inherit a poisoned secret-scanner baseline.
+
+The branch-diff guard `scripts/check-branch-secret-diff.mjs` inspects tracked infra/config/docs files changed against the branch base and fails if a feature branch reintroduces:
+
+- legacy MinIO/object-storage fallback literals
+- fallback defaults on `MINIO_ROOT_*`
+- fallback defaults on `OBJECT_STORAGE_ACCESS_KEY` / `OBJECT_STORAGE_SECRET_KEY`
+
+This keeps secret-like fallback credentials out of PR diffs before GitGuardian or other scanners have to triage them.
