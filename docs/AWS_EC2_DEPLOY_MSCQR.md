@@ -60,6 +60,9 @@ Update runtime values before first boot:
   - `CORS_ORIGIN`
   - `PUBLIC_*_WEB_BASE_URL`
   - `SUPER_ADMIN_EMAIL=administration@mscqr.com`
+  - `SUPER_ADMIN_BOOTSTRAP_ENABLED=true` for first production boot only
+  - `SUPER_ADMIN_BOOTSTRAP_PASSWORD=<long unique first-login password>`
+  - `SUPER_ADMIN_BOOTSTRAP_AUTO_VERIFY=true` so the initial configured super admin can sign in before SMTP verification is proven
   - `SMTP_*` values (especially `SMTP_PASS`)
 
 ## 5. First boot (HTTP mode)
@@ -70,6 +73,16 @@ Start app before TLS cert exists. Frontend container will use HTTP config automa
 docker compose up -d --build
 docker compose ps
 ```
+
+After the first successful super admin login and MFA setup, remove the bootstrap secret and disable the startup bootstrap:
+
+```bash
+# in backend/.env
+SUPER_ADMIN_BOOTSTRAP_ENABLED=false
+SUPER_ADMIN_BOOTSTRAP_PASSWORD=
+```
+
+Then restart the backend container.
 
 Verify HTTP:
 

@@ -1,8 +1,8 @@
 const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
-const { PrismaClient, UserRole } = require("@prisma/client");
-const bcrypt = require("bcryptjs");
+const { PrismaClient, UserRole, UserStatus } = require("@prisma/client");
+const argon2 = require("argon2");
 
 const prisma = new PrismaClient();
 
@@ -18,7 +18,18 @@ async function main() {
     process.exit(1);
   }
 
-  const passwordHash = await bcrypt.hash(password, 10);
+  if (password.length < 12) {
+    console.error("Password must be at least 12 characters.");
+    process.exit(1);
+  }
+
+  const passwordHash = await argon2.hash(password, {
+    type: argon2.argon2id,
+    memoryCost: 19456,
+    timeCost: 2,
+    parallelism: 1,
+  });
+  const verifiedAt = new Date();
 
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
@@ -28,8 +39,11 @@ async function main() {
         name,
         role: UserRole.SUPER_ADMIN,
         passwordHash,
+        status: UserStatus.ACTIVE,
         isActive: true,
         deletedAt: null,
+        disabledAt: null,
+        emailVerifiedAt: existing.emailVerifiedAt || verifiedAt,
       },
       select: { id: true, email: true, name: true, role: true },
     });
@@ -43,8 +57,11 @@ async function main() {
       passwordHash,
       name,
       role: UserRole.SUPER_ADMIN,
+      status: UserStatus.ACTIVE,
       isActive: true,
       deletedAt: null,
+      disabledAt: null,
+      emailVerifiedAt: verifiedAt,
     },
     select: { id: true, email: true, name: true, role: true },
   });

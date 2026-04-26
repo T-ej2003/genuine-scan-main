@@ -39,7 +39,10 @@ mockModule("services/auth/tokenService.js", {
 });
 
 mockModule("services/auth/refreshTokenService.js", {
-  createRefreshToken: async () => ({ expiresAt: new Date("2026-03-16T12:00:00.000Z") }),
+  createRefreshToken: async () => ({
+    row: { id: "session-1" },
+    expiresAt: new Date("2026-03-16T12:00:00.000Z"),
+  }),
   rotateRefreshToken: async () => null,
   revokeAllUserRefreshTokens: async () => null,
   revokeRefreshTokenByRaw: async () => null,
@@ -70,7 +73,7 @@ const baseUser = {
   email: "ops@example.com",
   name: "Ops User",
   passwordHash: "hash",
-  role: UserRole.SUPER_ADMIN,
+  role: UserRole.MANUFACTURER,
   licenseeId: null,
   orgId: null,
   failedLoginAttempts: 0,
@@ -79,11 +82,12 @@ const baseUser = {
   disabledAt: null,
   isActive: true,
   status: "ACTIVE",
+  emailVerifiedAt: new Date("2026-04-01T09:00:00.000Z"),
   licensee: null,
 };
 
 const run = async () => {
-  prismaUser = { ...baseUser, role: UserRole.PLATFORM_SUPER_ADMIN };
+  prismaUser = { ...baseUser };
 
   const result = await loginWithPassword({
     email: prismaUser.email,

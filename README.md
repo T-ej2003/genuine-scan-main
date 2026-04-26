@@ -563,6 +563,10 @@ Operational monitoring before premium rollout:
 - `QR_ZIP_ULTRA_DB_CHUNK_SIZE` (default `10000`)
 - `PUBLIC_ADMIN_WEB_BASE_URL` (used in incident alert emails; default falls back to verify base URL)
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS` (incident email delivery transport)
+- `SUPER_ADMIN_EMAIL` (the platform owner/admin login identity and preferred reply-to contact)
+- `SUPER_ADMIN_BOOTSTRAP_ENABLED` (`true` only for first boot or audited recovery)
+- `SUPER_ADMIN_BOOTSTRAP_PASSWORD` (required when bootstrap is enabled; hashed with the standard Argon2id password service)
+- `SUPER_ADMIN_BOOTSTRAP_AUTO_VERIFY` (`true` only to allow the initial configured super admin through the normal email-verification gate)
 - `SUPERADMIN_ALERT_EMAILS` (optional comma-separated override for admin incident alerts)
 - `EMAIL_USE_JSON_TRANSPORT` (`true` for local JSON transport testing)
 - `INCIDENT_HASH_SALT` (salt for hashing IP / user-agent fingerprints)
@@ -583,6 +587,7 @@ Operational monitoring before premium rollout:
 Incident email sender behavior:
 
 - `EMAIL_FROM` is no longer used.
+- Auth and incident delivery authenticate with `SMTP_USER`/`SMTP_PASS`; `SUPER_ADMIN_EMAIL` is the platform/admin identity and preferred reply-to contact, not a required SMTP sender account.
 - Admin-triggered incident emails use the logged-in admin profile email from DB as the attempted sender.
 - If SMTP provider rejects sender mismatch (common with Gmail SMTP), delivery retries once with `SMTP_USER` as `from` and the admin email as `reply-to`.
 - Communication + timeline logs include attempted sender, used sender, reply-to, delivery status, provider message id, and error details.
@@ -686,8 +691,15 @@ Useful backend scripts:
 ```bash
 PGCONNECT_TIMEOUT=5 bash backend/scripts/check-db.sh
 node backend/scripts/create-super-admin.js <email> <password> [name]
+SUPER_ADMIN_EMAIL=admin@example.com SUPER_ADMIN_RESET_PASSWORD='use-a-long-secret' npx tsx backend/scripts/resetSuperAdmin.ts
 npx tsx backend/scripts/cleanup-demo.ts
 ```
+
+Production super admin bootstrap:
+
+- Preferred first-boot path is backend startup, not a manual script. Set `SUPER_ADMIN_BOOTSTRAP_ENABLED=true`, `SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_BOOTSTRAP_PASSWORD`, and for first login set `SUPER_ADMIN_BOOTSTRAP_AUTO_VERIFY=true`.
+- Bootstrap is idempotent: if a super admin already exists, startup skips creation. It refuses to silently promote a non-super-admin account that already owns `SUPER_ADMIN_EMAIL`.
+- After the first successful login and MFA enrollment, set `SUPER_ADMIN_BOOTSTRAP_ENABLED=false` and remove `SUPER_ADMIN_BOOTSTRAP_PASSWORD` from production env.
 
 ## 14. Troubleshooting
 
