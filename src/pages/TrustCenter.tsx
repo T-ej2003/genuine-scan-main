@@ -1,8 +1,10 @@
 import { Link } from "react-router-dom";
 import { ArrowRight, LifeBuoy, LockKeyhole, ScanLine, ShieldCheck, ShieldAlert, Waypoints } from "lucide-react";
 
+import { MotionPanel } from "@/components/mscqr/motion";
+import { StatusBadge } from "@/components/mscqr/status";
+import { PublicShell } from "@/components/public/PublicShell";
 import { Button } from "@/components/ui/button";
-import { LegalFooter } from "@/components/trust/LegalFooter";
 
 const CONTACT_EMAIL = "administration@mscqr.com";
 
@@ -46,17 +48,12 @@ const operatorPillars = [
 
 export default function TrustCenter() {
   return (
-    <div className="min-h-screen bg-[#071019] text-slate-100">
-      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_top,_rgba(45,212,191,0.12),_transparent_34%),linear-gradient(180deg,_#071019_0%,_#0b1623_48%,_#071019_100%)]" />
-
+    <PublicShell>
       <main>
         <section className="border-b border-white/8">
           <div className="mx-auto grid min-h-[calc(100svh-1px)] w-full max-w-7xl gap-12 px-4 py-16 md:grid-cols-[1.05fr_0.95fr] md:items-end md:py-20">
-            <div className="max-w-3xl">
-              <div className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/6 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-slate-300">
-                <ShieldCheck className="h-3.5 w-3.5 text-teal-200" />
-                MSCQR Trust Center
-              </div>
+            <MotionPanel className="max-w-3xl">
+              <StatusBadge tone="audit">MSCQR Trust Center</StatusBadge>
               <div className="mt-8 text-sm uppercase tracking-[0.28em] text-slate-400">Governed QR verification</div>
               <h1 className="mt-4 max-w-3xl text-balance text-5xl font-semibold leading-[1.02] text-white md:text-7xl">
                 Server-validated label verification with clear proof tiers and controlled print trust.
@@ -67,22 +64,22 @@ export default function TrustCenter() {
                 suspicious or degraded states are handled.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
-                <Link to="/verify">
-                  <Button size="lg" className="gap-2 bg-teal-300 text-slate-950 hover:bg-teal-200">
-                    <ScanLine className="h-4 w-4" />
+                <Button asChild size="lg" className="bg-none bg-cyan-200 text-slate-950 hover:bg-cyan-100">
+                  <Link to="/verify">
+                    <ScanLine data-icon="inline-start" />
                     Verify a product
-                  </Button>
-                </Link>
-                <Link to="/login">
-                  <Button size="lg" variant="outline" className="gap-2 border-white/12 bg-white/5 text-slate-100 hover:bg-white/10">
-                    <LockKeyhole className="h-4 w-4" />
+                  </Link>
+                </Button>
+                <Button asChild size="lg" variant="outline" className="border-white/12 bg-white/5 text-slate-100 hover:bg-white/10">
+                  <Link to="/login">
+                    <LockKeyhole data-icon="inline-start" />
                     Platform access
-                  </Button>
-                </Link>
+                  </Link>
+                </Button>
               </div>
-            </div>
+            </MotionPanel>
 
-            <div className="grid gap-4 md:pb-4">
+            <MotionPanel className="grid gap-4 md:pb-4">
               <div className="rounded-[1.8rem] border border-white/10 bg-white/[0.05] p-6 shadow-[0_34px_90px_rgba(0,0,0,0.35)]">
                 <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Proof posture</p>
                 <div className="mt-4 space-y-4">
@@ -94,11 +91,12 @@ export default function TrustCenter() {
               <div className="rounded-[1.8rem] border border-white/10 bg-[#0d1825] p-6">
                 <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Important limit</p>
                 <p className="mt-3 text-sm leading-7 text-slate-300">
-                  MSCQR is a strong governed QR platform. It does not claim offline-verifiable or physically
-                  unclonable proof without an additional physical security layer.
+                  MSCQR does not pretend that a printed QR code is impossible to photograph or copy. The platform is
+                  designed to make label state, scan history, duplicate behavior, and operational evidence visible and
+                  reviewable.
                 </p>
               </div>
-            </div>
+            </MotionPanel>
           </div>
         </section>
 
@@ -106,7 +104,7 @@ export default function TrustCenter() {
           <div className="mx-auto w-full max-w-7xl px-4 py-20">
             <div className="max-w-3xl">
               <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-slate-400">
-                <ShieldAlert className="h-3.5 w-3.5 text-teal-200" />
+                <ShieldAlert className="h-3.5 w-3.5 text-cyan-200" />
                 Proof tiers
               </div>
               <h2 className="mt-5 text-balance text-3xl font-semibold text-white md:text-4xl">
@@ -128,7 +126,7 @@ export default function TrustCenter() {
           <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-20 md:grid-cols-[0.44fr_0.56fr]">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-slate-400">
-                <Waypoints className="h-3.5 w-3.5 text-teal-200" />
+                <Waypoints className="h-3.5 w-3.5 text-cyan-200" />
                 Lifecycle trust
               </div>
               <h2 className="mt-5 text-balance text-3xl font-semibold text-white md:text-4xl">
@@ -150,7 +148,7 @@ export default function TrustCenter() {
           <div className="mx-auto w-full max-w-7xl px-4 py-20">
             <div className="max-w-3xl">
               <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-slate-400">
-                <ShieldCheck className="h-3.5 w-3.5 text-teal-200" />
+                <ShieldCheck className="h-3.5 w-3.5 text-cyan-200" />
                 Operations and governance
               </div>
               <h2 className="mt-5 text-balance text-3xl font-semibold text-white md:text-4xl">
@@ -172,7 +170,7 @@ export default function TrustCenter() {
           <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-20 md:grid-cols-[0.55fr_0.45fr]">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-slate-400">
-                <LifeBuoy className="h-3.5 w-3.5 text-teal-200" />
+                <LifeBuoy className="h-3.5 w-3.5 text-cyan-200" />
                 Support and reporting
               </div>
               <h2 className="mt-5 text-balance text-3xl font-semibold text-white md:text-4xl">
@@ -196,8 +194,7 @@ export default function TrustCenter() {
           </div>
         </section>
       </main>
-      <LegalFooter tone="dark" />
-    </div>
+    </PublicShell>
   );
 }
 
@@ -227,7 +224,7 @@ function TrustLink({
         <p className="text-base font-semibold text-white">{title}</p>
         <p className="mt-2 text-sm leading-7 text-slate-300">{body}</p>
       </div>
-      <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-teal-200" />
+      <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-cyan-200" />
     </div>
   );
 

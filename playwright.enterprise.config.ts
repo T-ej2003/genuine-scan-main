@@ -7,7 +7,11 @@ export default defineConfig({
   timeout: 120_000,
   expect: {
     timeout: 20_000,
+    toHaveScreenshot: {
+      maxDiffPixelRatio: 0.08,
+    },
   },
+  snapshotPathTemplate: "{testDir}/{testFilePath}-snapshots/{arg}{ext}",
   fullyParallel: false,
   retries: process.env.CI ? 2 : 0,
   reporter: [
@@ -20,6 +24,12 @@ export default defineConfig({
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
+  },
+  webServer: {
+    command: "npm run dev -- --host 127.0.0.1 --port 8080",
+    url: baseURL,
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
   },
   projects: [
     {

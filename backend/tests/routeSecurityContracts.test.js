@@ -78,6 +78,7 @@ assert(auditRoutesSource.includes("const auditFraudReportsRespondPreAuthRouteLim
 
 [
   '"/dashboard/stats", dashboardReadPreAuthRouteLimiter, authenticate,',
+  '"/dashboard/attention-queue", dashboardReadPreAuthRouteLimiter, authenticate,',
   '"/events/dashboard", dashboardStreamPreAuthRouteLimiter, authenticateSSE,',
   '"/events/notifications", notificationReadPreAuthRouteLimiter, authenticateSSE,',
   '"/notifications", notificationReadPreAuthRouteLimiter, authenticate,',

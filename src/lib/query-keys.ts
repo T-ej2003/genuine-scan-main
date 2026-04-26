@@ -21,6 +21,7 @@ export const queryKeys = {
   layout: {
     notifications: (limit = 24, unreadOnly?: boolean) =>
       ["layout", "notifications", limit, scopedValue(unreadOnly ?? null)] as const,
+    attentionQueue: () => ["layout", "attention-queue"] as const,
   },
   incidents: {
     list: (filters?: Record<string, unknown>) => ["incidents", "list", filters ?? {}] as const,

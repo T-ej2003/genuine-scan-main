@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import QRCode from "qrcode";
 import { AlertCircle, Eye, EyeOff, KeyRound, Loader2, ShieldCheck } from "lucide-react";
@@ -37,7 +37,7 @@ export default function Login() {
   const { login, logout, pendingAuth, completeMfaSession } = useAuth();
   const navigate = useNavigate();
 
-  const humanizeAuthError = (value?: string) => {
+  const humanizeAuthError = useCallback((value?: string) => {
     const text = String(value || "").toLowerCase();
     if (text.includes("invalid email or password") || text.includes("password")) {
       return "Incorrect password. Try again.";
@@ -58,7 +58,7 @@ export default function Login() {
       return "The security code could not be verified. Check the code and try again.";
     }
     return value || "Login failed";
-  };
+  }, []);
 
   useEffect(() => {
     if (!pendingAuth) {
@@ -114,8 +114,8 @@ export default function Login() {
           setMfaSetup(response.data);
           setMfaBackupCodesRevealed(true);
         })
-        .catch((err: any) => {
-          setError(humanizeAuthError(err?.message || "Could not start MFA setup."));
+        .catch((err: unknown) => {
+          setError(humanizeAuthError(err instanceof Error ? err.message : "Could not start MFA setup."));
         })
         .finally(() => setMfaLoading(false));
     }
@@ -129,8 +129,8 @@ export default function Login() {
           }
           setMfaTicket(response.data.ticket);
         })
-        .catch((err: any) => {
-          setError(humanizeAuthError(err?.message || "Could not start MFA challenge."));
+        .catch((err: unknown) => {
+          setError(humanizeAuthError(err instanceof Error ? err.message : "Could not start MFA challenge."));
         })
         .finally(() => setMfaLoading(false));
     }
@@ -228,8 +228,8 @@ export default function Login() {
 
       completeMfaSession({ user: response.data.user, auth: response.data.auth || null });
       navigate("/dashboard");
-    } catch (error: any) {
-      setError(humanizeAuthError(error?.message || "Could not verify the security key."));
+    } catch (error: unknown) {
+      setError(humanizeAuthError(error instanceof Error ? error.message : "Could not verify the security key."));
     } finally {
       setMfaLoading(false);
     }
@@ -314,7 +314,7 @@ export default function Login() {
               <Label htmlFor="password">Password</Label>
               <Link
                 to="/forgot-password"
-                className="text-xs font-medium text-emerald-700 hover:text-emerald-800 underline-offset-4 hover:underline"
+                className="text-xs font-medium text-cyan-200 hover:text-cyan-100 underline-offset-4 hover:underline"
               >
                 Forgot password?
               </Link>
@@ -343,12 +343,12 @@ export default function Login() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 px-4 py-3 text-xs text-emerald-900">
-            Password reset and account verification both use secure email links. Internal admin roles are now required
+          <div className="rounded-2xl border border-cyan-200/20 bg-cyan-200/10 px-4 py-3 text-xs leading-6 text-cyan-50">
+            Password reset and account verification both use secure email links. Platform operator roles are now required
             to finish MFA before MSCQR opens the full session.
           </div>
 
-          <Button type="submit" className="h-11 w-full bg-slate-900 text-white hover:bg-slate-800" disabled={submitting}>
+          <Button type="submit" className="h-11 w-full bg-none bg-cyan-200 text-slate-950 hover:bg-cyan-100" disabled={submitting}>
             {submitting ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -368,12 +368,12 @@ export default function Login() {
             </Alert>
           ) : null}
 
-          <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4 text-sm text-emerald-950">
+          <div className="rounded-2xl border border-cyan-200/20 bg-cyan-200/10 p-4 text-sm text-cyan-50">
             <div className="flex items-center gap-2 font-medium">
               <ShieldCheck className="h-4 w-4" />
               Admin MFA is now required for {pendingAuth.user.email}
             </div>
-            <div className="mt-2 text-xs text-emerald-900/80">
+            <div className="mt-2 text-xs text-cyan-100/80">
               Open Google Authenticator, 1Password, Microsoft Authenticator, or any TOTP app and scan this QR code.
             </div>
           </div>
@@ -393,7 +393,7 @@ export default function Login() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+          <div className="rounded-2xl border border-amber-200/25 bg-amber-200/10 p-4 text-sm text-amber-100">
             <div className="font-medium">Save your backup codes before you continue</div>
             <div className="mt-1 text-xs text-amber-900/80">
               Each code can be used once if you lose access to your authenticator app.
@@ -436,7 +436,7 @@ export default function Login() {
             <Button type="button" variant="outline" className="flex-1" disabled={mfaLoading} onClick={resetMfaFlow}>
               Use different account
             </Button>
-            <Button type="submit" className="flex-1 bg-slate-900 text-white hover:bg-slate-800" disabled={mfaLoading}>
+            <Button type="submit" className="flex-1 bg-none bg-cyan-200 text-slate-950 hover:bg-cyan-100" disabled={mfaLoading}>
               {mfaLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -457,17 +457,17 @@ export default function Login() {
             </Alert>
           ) : null}
 
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 text-sm">
-            <div className="flex items-center gap-2 font-medium text-slate-950">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm">
+            <div className="flex items-center gap-2 font-medium text-white">
               <KeyRound className="h-4 w-4" />
               Second factor required for {pendingAuth.user.email}
             </div>
-            <div className="mt-2 text-xs text-slate-700">
+            <div className="mt-2 text-xs text-slate-300">
               Use your authenticator app or one of your saved backup codes. This keeps high-risk admin actions locked
               until the secure session is fully verified.
             </div>
             {pendingAuth.auth.preferredMfaMethod === "WEBAUTHN" ? (
-              <div className="mt-2 text-xs font-medium text-emerald-800">
+              <div className="mt-2 text-xs font-medium text-cyan-100">
                 This account prefers a security key or passkey first. Authenticator codes still work as fallback.
               </div>
             ) : null}
@@ -540,7 +540,7 @@ export default function Login() {
             <Button type="button" variant="outline" className="flex-1" disabled={mfaLoading} onClick={resetMfaFlow}>
               Use different account
             </Button>
-            <Button type="submit" className="flex-1 bg-slate-900 text-white hover:bg-slate-800" disabled={mfaLoading}>
+            <Button type="submit" className="flex-1 bg-none bg-cyan-200 text-slate-950 hover:bg-cyan-100" disabled={mfaLoading}>
               {mfaLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

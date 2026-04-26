@@ -53,6 +53,37 @@
     --sidebar-accent-foreground: 210 40% 98%;
     --sidebar-border: 215 28% 25%;
     --sidebar-ring: 160 84% 39%;
+
+    /* MSCQR semantic interface tokens */
+    --mscqr-background: 218 42% 97%;
+    --mscqr-background-soft: 214 38% 94%;
+    --mscqr-surface: 0 0% 100%;
+    --mscqr-surface-elevated: 210 35% 99%;
+    --mscqr-surface-muted: 214 32% 92%;
+    --mscqr-border: 214 28% 86%;
+    --mscqr-border-strong: 215 21% 67%;
+    --mscqr-text-primary: 222 47% 11%;
+    --mscqr-text-secondary: 217 20% 32%;
+    --mscqr-text-muted: 215 16% 47%;
+    --mscqr-accent: 187 85% 42%;
+    --mscqr-accent-soft: 187 62% 90%;
+    --mscqr-verified: 158 64% 38%;
+    --mscqr-issued: 199 72% 45%;
+    --mscqr-print-pending: 38 86% 50%;
+    --mscqr-print-confirmed: 166 68% 36%;
+    --mscqr-review-required: 35 90% 50%;
+    --mscqr-duplicate-detected: 24 88% 52%;
+    --mscqr-blocked: 0 72% 51%;
+    --mscqr-replaced: 260 45% 54%;
+    --mscqr-expired: 215 15% 45%;
+    --mscqr-degraded: 45 76% 46%;
+    --mscqr-support-open: 210 74% 48%;
+    --mscqr-audit-exported: 188 64% 36%;
+    --mscqr-risk-low: 158 64% 38%;
+    --mscqr-risk-watch: 42 90% 51%;
+    --mscqr-risk-elevated: 24 88% 52%;
+    --mscqr-risk-high: 0 72% 51%;
+    --mscqr-risk-blocked: 0 72% 36%;
   }
 
   .dark {
@@ -100,6 +131,36 @@
     --sidebar-accent-foreground: 210 40% 98%;
     --sidebar-border: 222 47% 15%;
     --sidebar-ring: 160 84% 45%;
+
+    --mscqr-background: 216 44% 5%;
+    --mscqr-background-soft: 215 36% 8%;
+    --mscqr-surface: 214 34% 9%;
+    --mscqr-surface-elevated: 213 31% 12%;
+    --mscqr-surface-muted: 215 28% 15%;
+    --mscqr-border: 215 25% 18%;
+    --mscqr-border-strong: 213 20% 32%;
+    --mscqr-text-primary: 210 40% 98%;
+    --mscqr-text-secondary: 214 25% 76%;
+    --mscqr-text-muted: 215 16% 55%;
+    --mscqr-accent: 187 92% 72%;
+    --mscqr-accent-soft: 188 60% 18%;
+    --mscqr-verified: 157 72% 62%;
+    --mscqr-issued: 199 89% 68%;
+    --mscqr-print-pending: 41 92% 62%;
+    --mscqr-print-confirmed: 166 76% 60%;
+    --mscqr-review-required: 35 94% 62%;
+    --mscqr-duplicate-detected: 24 96% 64%;
+    --mscqr-blocked: 0 90% 70%;
+    --mscqr-replaced: 262 78% 74%;
+    --mscqr-expired: 215 18% 62%;
+    --mscqr-degraded: 48 88% 64%;
+    --mscqr-support-open: 205 90% 70%;
+    --mscqr-audit-exported: 188 80% 68%;
+    --mscqr-risk-low: 157 72% 62%;
+    --mscqr-risk-watch: 42 96% 64%;
+    --mscqr-risk-elevated: 24 96% 64%;
+    --mscqr-risk-high: 0 90% 70%;
+    --mscqr-risk-blocked: 0 80% 58%;
   }
 }
 
@@ -110,6 +171,10 @@
 
   body {
     @apply bg-background text-foreground antialiased;
+  }
+
+  html {
+    scroll-behavior: smooth;
   }
 }
 
@@ -169,6 +234,17 @@
 
   .premium-pop-in {
     animation: premium-pop-in 420ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .mscqr-public-grid {
+    background-image:
+      linear-gradient(rgba(148, 163, 184, 0.16) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.16) 1px, transparent 1px);
+    background-size: 56px 56px;
+  }
+
+  .mscqr-focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#070b10];
   }
 }
 
@@ -266,7 +342,9 @@
   .premium-grid-bg,
   .premium-verified-seal,
   .premium-surface-in,
-  .premium-pop-in {
+  .premium-pop-in,
+  html {
     animation: none !important;
+    scroll-behavior: auto;
   }
 }

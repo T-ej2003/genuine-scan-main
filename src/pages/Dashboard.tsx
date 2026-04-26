@@ -3,8 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { APP_PATHS, getRoleDisplayLabel } from "@/app/route-metadata";
 import { useAuth } from "@/contexts/AuthContext";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { ErrorState, LoadingState } from "@/components/mscqr/feedback-state";
+import { LabelLifecycleRail } from "@/components/mscqr/lifecycle";
+import { MotionPanel } from "@/components/mscqr/motion";
+import { PrintStateIndicator, StatusBadge } from "@/components/mscqr/status";
 import { DashboardPagePattern } from "@/components/page-patterns/PagePatterns";
-import { StatsCard } from "@/components/dashboard/StatsCard";
 import { QRStatusChart } from "@/components/dashboard/QRStatusChart";
 import { RecentActivityCard } from "@/components/dashboard/RecentActivityCard";
 import { QrCode, Building2, Factory, FileText, RefreshCw, ArrowRight, Boxes } from "lucide-react";
@@ -340,24 +343,66 @@ export default function Dashboard() {
   ]);
 
   const canViewAudit = user?.role === "super_admin" || user?.role === "licensee_admin" || user?.role === "manufacturer";
+  const overviewLifecycleSteps = [
+    {
+      label: "Issue",
+      title: "Issued records",
+      body: `${qrStatusData.dormant.toLocaleString()} waiting for allocation.`,
+      state: qrStatusData.dormant > 0 ? ("current" as const) : ("complete" as const),
+    },
+    {
+      label: "Assign",
+      title: "Batch assignment",
+      body: `${qrStatusData.allocated.toLocaleString()} allocated to production scope.`,
+      state: qrStatusData.allocated > 0 ? ("complete" as const) : ("pending" as const),
+    },
+    {
+      label: "Print",
+      title: "Controlled print",
+      body: `${qrStatusData.printed.toLocaleString()} print-confirmed records.`,
+      state: qrStatusData.printed > 0 ? ("complete" as const) : ("pending" as const),
+    },
+    {
+      label: "Verify",
+      title: "Public checks",
+      body: `${qrStatusData.scanned.toLocaleString()} customer verification events.`,
+      state: qrStatusData.scanned > 0 ? ("complete" as const) : ("pending" as const),
+    },
+    {
+      label: "Review",
+      title: "Evidence review",
+      body: "Scan outcomes and audit events remain reviewable.",
+      state: "current" as const,
+    },
+  ];
 
-  if (loading) return <div className="p-6">Loading…</div>;
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <LoadingState
+          title="Loading operations overview"
+          description="MSCQR is resolving label inventory, controlled print state, and recent audit activity for your role."
+        />
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
       <DashboardPagePattern
-        title="Dashboard"
-        description={`Welcome back, ${user?.name}. Review the activity, queues, and next actions for your ${roleLabel.toLowerCase()} workspace.`}
+        eyebrow="Command center"
+        title="Operations Overview"
+        description={`Review label lifecycle state, controlled print posture, verification activity, and audit evidence for your ${roleLabel.toLowerCase()} workspace.`}
         actions={
           <>
-            <Badge variant={liveUpdates && sseConnected ? "default" : "secondary"}>
+            <StatusBadge tone={liveUpdates && sseConnected ? "verified" : liveUpdates ? "degraded" : "neutral"}>
               {liveUpdates && sseConnected ? "Live Connected" : liveUpdates ? "Live Polling" : "Live Paused"}
-            </Badge>
-            <Badge variant="outline">
+            </StatusBadge>
+            <StatusBadge tone="audit">
               {lastUpdated ? `Updated ${formatDistanceToNow(lastUpdated, { addSuffix: true })}` : "Not updated yet"}
-            </Badge>
-            <div className="flex items-center gap-2 rounded-md border px-3 py-1.5">
-              <span className="text-xs text-muted-foreground">Live</span>
+            </StatusBadge>
+            <div className="flex items-center gap-2 rounded-2xl border border-mscqr-border bg-mscqr-surface px-3 py-1.5">
+              <span className="text-xs text-mscqr-secondary">Live</span>
               <Switch checked={liveUpdates} onCheckedChange={setLiveUpdates} />
             </div>
             <Button variant="outline" size="sm" onClick={() => void refreshDashboard()} className="gap-2">
@@ -369,30 +414,58 @@ export default function Dashboard() {
       >
 
         {error && (
-          <div className="rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-            {error}
-          </div>
+          <ErrorState
+            title="Operations overview unavailable"
+            description={error}
+            action={{ label: "Retry overview", onClick: () => void refreshDashboard() }}
+          />
         )}
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {cards.map((item) => (
-            <StatsCard
+            <MotionPanel
               key={item.title}
-              title={item.title}
-              value={item.value}
-              icon={item.icon}
-              subtitle={item.subtitle}
-              variant={item.variant}
-              onClick={() => (("action" in item && item.action === "scope") ? setScopeDialogOpen(true) : navigate(item.href))}
-              ctaLabel={item.ctaLabel}
-            />
+              className="h-full"
+            >
+              <button
+                type="button"
+                onClick={() => (("action" in item && item.action === "scope") ? setScopeDialogOpen(true) : navigate(item.href))}
+                className="group rounded-[1.55rem] border border-mscqr-border bg-mscqr-surface/92 p-5 text-left shadow-[0_18px_46px_-38px_rgba(15,23,42,0.55)] transition hover:-translate-y-0.5 hover:border-mscqr-accent/45 hover:bg-mscqr-surface-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mscqr-accent motion-reduce:hover:translate-y-0"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-mscqr-muted">{item.title}</p>
+                    <p className="mt-3 text-3xl font-semibold tracking-tight text-mscqr-primary">{item.value.toLocaleString()}</p>
+                  </div>
+                  <div className="flex size-11 items-center justify-center rounded-2xl border border-mscqr-border bg-mscqr-surface-muted text-mscqr-accent transition group-hover:border-mscqr-accent/35">
+                    <item.icon className="size-5" />
+                  </div>
+                </div>
+                <p className="mt-4 min-h-10 text-sm leading-6 text-mscqr-secondary">{item.subtitle}</p>
+                <div className="mt-4 flex items-center justify-between text-sm font-medium text-mscqr-accent">
+                  <span>{item.ctaLabel}</span>
+                  <ArrowRight className="size-4 transition group-hover:translate-x-1" />
+                </div>
+              </button>
+            </MotionPanel>
           ))}
         </div>
 
-        <div className="grid items-start gap-6 lg:grid-cols-2">
-          <Card className="animate-fade-in self-start">
+        <MotionPanel className="rounded-[1.75rem] border border-mscqr-border bg-mscqr-surface/92 p-5">
+          <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-mscqr-accent">Verification lifecycle</p>
+              <h2 className="mt-2 text-xl font-semibold text-mscqr-primary">Governed label movement</h2>
+            </div>
+            <PrintStateIndicator value={qrStatusData.printed > 0 ? "PRINT_CONFIRMED" : "PENDING"} label="controlled print model" />
+          </div>
+          <LabelLifecycleRail steps={overviewLifecycleSteps} compact />
+        </MotionPanel>
+
+        <div className="grid items-start gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+          <Card className="self-start border-mscqr-border bg-mscqr-surface/92">
             <CardHeader>
-              <CardTitle className="text-lg font-semibold">Quick Actions</CardTitle>
+              <CardTitle className="text-lg font-semibold text-mscqr-primary">Role-aware actions</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2">
               {quickActions.map((action) => (
@@ -400,34 +473,34 @@ export default function Dashboard() {
                   key={action.href}
                   type="button"
                   onClick={() => navigate(action.href)}
-                  className="rounded-lg border p-3 text-left transition-colors hover:bg-muted/60"
+                  className="rounded-2xl border border-mscqr-border bg-mscqr-surface-elevated p-4 text-left transition hover:border-mscqr-accent/45 hover:bg-mscqr-surface-muted"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium">{action.label}</span>
-                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                    <span className="font-medium text-mscqr-primary">{action.label}</span>
+                    <ArrowRight className="h-4 w-4 text-mscqr-accent" />
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">{action.description}</p>
+                  <p className="mt-2 text-xs leading-5 text-mscqr-secondary">{action.description}</p>
                 </button>
               ))}
             </CardContent>
           </Card>
 
-          <Card className="animate-fade-in">
+          <Card className="border-mscqr-border bg-mscqr-surface/92">
             <CardHeader>
-              <CardTitle className="text-lg font-semibold">Operational Snapshot</CardTitle>
+              <CardTitle className="text-lg font-semibold text-mscqr-primary">Operational snapshot</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Lifecycle completion</span>
-                  <span className="font-medium">{fulfillmentPct}%</span>
+                  <span className="text-mscqr-secondary">Lifecycle completion</span>
+                  <span className="font-medium text-mscqr-primary">{fulfillmentPct}%</span>
                 </div>
                 <Progress value={fulfillmentPct} />
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Printed to redeemed conversion</span>
-                  <span className="font-medium">{redemptionPct}%</span>
+                  <span className="text-mscqr-secondary">Print-confirmed to verified conversion</span>
+                  <span className="font-medium text-mscqr-primary">{redemptionPct}%</span>
                 </div>
                 <Progress value={redemptionPct} />
               </div>
@@ -440,28 +513,28 @@ export default function Dashboard() {
                     onClick={() => setStatusFocus((prev) => (prev === row.key ? "all" : row.key))}
                     className={cn(
                       "w-full rounded-md border px-3 py-2 text-left transition-colors",
-                      statusFocus === row.key ? "border-primary/40 bg-primary/5" : "hover:bg-muted/60"
+                      statusFocus === row.key ? "border-mscqr-accent/40 bg-mscqr-accent/10" : "border-mscqr-border hover:bg-mscqr-surface-muted/70"
                     )}
                   >
                     <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium">{row.label}</span>
-                      <span>{row.value.toLocaleString()} ({row.pct}%)</span>
+                      <span className="font-medium text-mscqr-primary">{row.label}</span>
+                      <span className="text-mscqr-secondary">{row.value.toLocaleString()} ({row.pct}%)</span>
                     </div>
-                    <p className="text-xs text-muted-foreground">{row.description}</p>
+                    <p className="text-xs text-mscqr-secondary">{row.description}</p>
                   </button>
                 ))}
               </div>
 
               {focusedRow && (
-                <div className="rounded-md border bg-muted/40 p-3">
-                  <div className="font-medium">{focusedRow.label} focus</div>
-                  <p className="text-xs text-muted-foreground">
+                <div className="rounded-2xl border border-mscqr-accent/30 bg-mscqr-accent-soft/40 p-3">
+                  <div className="font-medium text-mscqr-primary">{focusedRow.label} focus</div>
+                  <p className="text-xs text-mscqr-secondary">
                     {focusedRow.value.toLocaleString()} codes currently {focusedRow.description.toLowerCase()}.
                   </p>
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="mt-2 px-0 text-primary"
+                    className="mt-2 px-0 text-mscqr-accent"
                     onClick={() => navigate(focusedRow.href)}
                   >
                     Open related view

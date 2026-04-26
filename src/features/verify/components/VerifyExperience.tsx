@@ -22,6 +22,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { MotionPanel } from "@/components/mscqr/motion";
+import { StatusBadge, VerificationStateBadge } from "@/components/mscqr/status";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -78,37 +80,37 @@ const STEP_META: Record<
   FIRST_SCAN: {
     title: "MSCQR confirmed this label",
     badge: "Confirmed",
-    tone: "border-emerald-200 bg-emerald-50 text-emerald-950",
+    tone: "border-mscqr-verified/35 bg-mscqr-verified/12 text-mscqr-verified",
     icon: <ShieldCheck className="h-5 w-5" />,
   },
   LEGIT_REPEAT: {
     title: "MSCQR confirmed this code again",
     badge: "Recorded",
-    tone: "border-emerald-200 bg-emerald-50 text-emerald-950",
+    tone: "border-mscqr-verified/35 bg-mscqr-verified/12 text-mscqr-verified",
     icon: <ShieldCheck className="h-5 w-5" />,
   },
   SUSPICIOUS_DUPLICATE: {
     title: "Review required",
     badge: "Review required",
-    tone: "border-amber-200 bg-amber-50 text-amber-950",
+    tone: "border-mscqr-review/35 bg-mscqr-review/12 text-mscqr-review",
     icon: <AlertTriangle className="h-5 w-5" />,
   },
   BLOCKED_BY_SECURITY: {
     title: "Do not rely on this code",
     badge: "Blocked",
-    tone: "border-rose-200 bg-rose-50 text-rose-950",
+    tone: "border-mscqr-blocked/35 bg-mscqr-blocked/12 text-mscqr-blocked",
     icon: <Ban className="h-5 w-5" />,
   },
   NOT_READY_FOR_CUSTOMER_USE: {
     title: "Not ready for customer verification",
     badge: "Not ready",
-    tone: "border-slate-200 bg-slate-100 text-slate-950",
+    tone: "border-mscqr-pending/35 bg-mscqr-pending/12 text-mscqr-pending",
     icon: <CircleDashed className="h-5 w-5" />,
   },
   NOT_FOUND: {
     title: "Code not found",
     badge: "Not found",
-    tone: "border-slate-200 bg-slate-100 text-slate-950",
+    tone: "border-mscqr-border bg-mscqr-surface-muted/70 text-mscqr-secondary",
     icon: <CircleDashed className="h-5 w-5" />,
   },
 };
@@ -215,10 +217,10 @@ function StepRail({ activeStep, authenticated }: { activeStep: FlowStep; authent
             key={step.id}
             className={`min-w-[132px] shrink-0 rounded-2xl border px-4 py-3 transition-all sm:min-w-0 ${
               active
-                ? "border-slate-900 bg-slate-950 text-white shadow-[0_18px_40px_rgba(15,23,42,0.22)]"
+                ? "border-mscqr-accent/50 bg-mscqr-accent/12 text-mscqr-accent shadow-[0_18px_40px_rgba(34,211,238,0.12)]"
                 : done
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-950"
-                  : "border-slate-200 bg-white/80 text-slate-600"
+                  ? "border-mscqr-verified/35 bg-mscqr-verified/12 text-mscqr-verified"
+                  : "border-mscqr-border bg-mscqr-surface/80 text-mscqr-muted"
             }`}
           >
             <div className="text-[11px] uppercase tracking-[0.18em]">{index + 1}</div>
@@ -242,12 +244,12 @@ function SectionFrame({
   children: React.ReactNode;
 }) {
   return (
-    <Card className="border-slate-200/80 bg-white/92 shadow-[0_24px_64px_rgba(15,23,42,0.08)]">
-      <CardHeader className="space-y-3 border-b border-slate-100 px-4 pb-5 pt-5 sm:px-6 sm:pb-6 sm:pt-6">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-500">{eyebrow}</div>
+    <Card className="border-mscqr-border bg-mscqr-surface/92 text-mscqr-primary shadow-[0_24px_90px_rgba(0,0,0,0.28)]">
+      <CardHeader className="space-y-3 border-b border-mscqr-border px-4 pb-5 pt-5 sm:px-6 sm:pb-6 sm:pt-6">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-mscqr-muted">{eyebrow}</div>
         <div className="space-y-2">
-          <CardTitle className="text-xl text-slate-950 sm:text-3xl">{title}</CardTitle>
-          <CardDescription className="max-w-2xl text-sm leading-6 text-slate-600">{description}</CardDescription>
+          <CardTitle className="text-xl text-mscqr-primary sm:text-3xl">{title}</CardTitle>
+          <CardDescription className="max-w-2xl text-sm leading-6 text-mscqr-secondary">{description}</CardDescription>
         </div>
       </CardHeader>
       <CardContent className="space-y-6 p-4 sm:p-8">{children}</CardContent>
@@ -259,10 +261,10 @@ function ProviderButton({ provider }: { provider: ProviderOption }) {
   return (
     <a
       href={buildProviderHref(provider.id, `${window.location.origin}${window.location.pathname}${window.location.search}`)}
-      className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-medium text-slate-900 transition hover:-translate-y-0.5 hover:border-slate-900 hover:shadow-[0_16px_32px_rgba(15,23,42,0.12)]"
+      className="flex items-center justify-between rounded-2xl border border-mscqr-border bg-mscqr-surface-elevated px-4 py-4 text-sm font-medium text-mscqr-primary transition hover:-translate-y-0.5 hover:border-mscqr-accent/50 hover:shadow-[0_16px_32px_rgba(34,211,238,0.1)] motion-reduce:hover:translate-y-0"
     >
       <span>Continue with {provider.label}</span>
-      <ExternalLink className="h-4 w-4 text-slate-500" />
+      <ExternalLink className="h-4 w-4 text-mscqr-muted" />
     </a>
   );
 }
@@ -284,12 +286,12 @@ function QuestionOption({
       onClick={onClick}
       className={`rounded-2xl border p-4 text-left transition ${
         selected
-          ? "border-slate-900 bg-slate-950 text-white shadow-[0_16px_32px_rgba(15,23,42,0.18)]"
-          : "border-slate-200 bg-white text-slate-900 hover:border-slate-400"
+          ? "border-mscqr-accent/50 bg-mscqr-accent/12 text-mscqr-accent shadow-[0_16px_32px_rgba(34,211,238,0.12)]"
+          : "border-mscqr-border bg-mscqr-surface-elevated text-mscqr-primary hover:border-mscqr-border-strong"
       }`}
     >
       <div className="text-sm font-semibold">{title}</div>
-      <div className={`mt-1 text-sm ${selected ? "text-slate-200" : "text-slate-600"}`}>{body}</div>
+      <div className={`mt-1 text-sm ${selected ? "text-cyan-100/80" : "text-mscqr-secondary"}`}>{body}</div>
     </button>
   );
 }
@@ -789,7 +791,7 @@ export default function VerifyExperience() {
     }
   };
 
-  const handleSubmitIntakeAndReveal = async (intakeOverride?: Partial<CustomerTrustIntake>) => {
+  const handleSubmitIntakeAndReveal = useCallback(async (intakeOverride?: Partial<CustomerTrustIntake>) => {
     if (!session?.sessionId || !authReady) {
       toast({ title: "Sign in required", description: "Complete sign-in before revealing the result.", variant: "destructive" });
       return;
@@ -841,7 +843,7 @@ export default function VerifyExperience() {
     } finally {
       setSubmittingReveal(false);
     }
-  };
+  }, [authReady, intake, lockedResult, session, toast]);
 
   const handleSkipCurrentStep = useCallback(() => {
     if (flowStep === "purchase") {
@@ -1060,22 +1062,22 @@ export default function VerifyExperience() {
 
   if (booting) {
     return (
-      <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(15,23,42,0.1),transparent_40%),linear-gradient(180deg,#eef2f7_0%,#f8fafc_100%)] px-4 py-10">
+      <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.12),transparent_34%),linear-gradient(180deg,hsl(var(--mscqr-background))_0%,hsl(var(--mscqr-background-soft))_100%)] px-4 py-10 text-mscqr-primary">
         <div className="mx-auto max-w-5xl">
-          <div className="rounded-[28px] border border-slate-200 bg-white/90 p-6 shadow-[0_32px_96px_rgba(15,23,42,0.12)] sm:p-10">
+          <div className="rounded-[28px] border border-mscqr-border bg-mscqr-surface/90 p-6 shadow-[0_32px_96px_rgba(0,0,0,0.32)] sm:p-10">
             <div className="flex items-start justify-between gap-6">
               <div className="space-y-4">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-500">MSCQR Secure Verification</div>
-                <h1 className="max-w-3xl text-3xl font-semibold text-slate-950 sm:text-5xl">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-mscqr-muted">MSCQR Secure Verification</div>
+                <h1 className="max-w-3xl text-3xl font-semibold text-mscqr-primary sm:text-5xl">
                   Locking the label decision before we ask for your purchase context.
                 </h1>
-                <p className="max-w-2xl text-sm leading-7 text-slate-600 sm:text-base">
+                <p className="max-w-2xl text-sm leading-7 text-mscqr-secondary sm:text-base">
                   MSCQR verifies the label in its governed issuance system first, then records your identity and purchase context separately so your answers never change the locked label result.
                 </p>
               </div>
-              <Badge className="border-slate-300 bg-slate-100 text-slate-700">{maskCode(codeParam)}</Badge>
+              <StatusBadge tone="issued">{maskCode(codeParam)}</StatusBadge>
             </div>
-            <div className="mt-10 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-950 px-5 py-4 text-white">
+            <div className="mt-10 flex items-center gap-3 rounded-2xl border border-mscqr-accent/20 bg-[#05080c] px-5 py-4 text-white">
               <Loader2 className="h-5 w-5 animate-spin" />
               <div className="text-sm">
                 {token ? "Validating signed label and preparing your secure session…" : "Validating label state and preparing your secure session…"}
@@ -1089,8 +1091,8 @@ export default function VerifyExperience() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-slate-950 px-4 py-10 text-white">
-        <div className="mx-auto max-w-3xl rounded-[28px] border border-white/10 bg-white/5 p-8 shadow-[0_32px_96px_rgba(0,0,0,0.28)]">
+      <div className="min-h-screen bg-mscqr-background px-4 py-10 text-white">
+        <div className="mx-auto max-w-3xl rounded-[28px] border border-mscqr-border bg-mscqr-surface p-8 shadow-[0_32px_96px_rgba(0,0,0,0.28)]">
           <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-400">MSCQR Verification</div>
           <h1 className="mt-4 text-3xl font-semibold">Verification unavailable</h1>
           <p className="mt-3 text-sm leading-7 text-slate-300">{error}</p>
@@ -1157,37 +1159,38 @@ export default function VerifyExperience() {
               "The current lifecycle state is suitable for customer verification.",
               proofDetail,
           ];
-  const resultTone = limitedProvenance ? "border-amber-200 bg-amber-50 text-amber-950" : stepMeta.tone;
+  const resultTone = limitedProvenance ? "border-mscqr-degraded/35 bg-mscqr-degraded/12 text-mscqr-degraded" : stepMeta.tone;
   const resultBadge = limitedProvenance ? "Limited provenance" : stepMeta.badge;
   const resultTitle = limitedProvenance ? "MSCQR found a weaker provenance path" : stepMeta.title;
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(15,23,42,0.08),transparent_36%),linear-gradient(180deg,#f8fafc_0%,#edf2f7_46%,#f8fafc_100%)] px-3 py-4 sm:px-6 sm:py-12">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.12),transparent_34%),radial-gradient(circle_at_92%_8%,rgba(251,191,36,0.08),transparent_22%),linear-gradient(180deg,hsl(var(--mscqr-background))_0%,hsl(var(--mscqr-background-soft))_46%,hsl(var(--mscqr-background))_100%)] px-3 py-4 text-mscqr-primary sm:px-6 sm:py-12">
       <div className="mx-auto max-w-6xl space-y-5 sm:space-y-8">
-        <header className="grid gap-5 rounded-[24px] border border-slate-200/80 bg-white/90 p-4 shadow-[0_30px_100px_rgba(15,23,42,0.08)] sm:rounded-[32px] sm:p-10 lg:grid-cols-[1.6fr,0.8fr]">
+        <MotionPanel>
+        <header className="grid gap-5 rounded-[24px] border border-mscqr-border bg-mscqr-surface/92 p-4 shadow-[0_30px_100px_rgba(0,0,0,0.24)] sm:rounded-[32px] sm:p-10 lg:grid-cols-[1.6fr,0.8fr]">
           <div className="space-y-5">
-            <div className="flex flex-wrap items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-500">
+            <div className="flex flex-wrap items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.26em] text-mscqr-muted">
               <span>MSCQR verification review</span>
-              <span className="h-1 w-1 rounded-full bg-slate-300" />
+              <span className="h-1 w-1 rounded-full bg-mscqr-border-strong" />
               <span>{displaySessionSummary?.brandName || "Governed label verification"}</span>
             </div>
             <div className="space-y-3">
-              <h1 className="max-w-3xl text-2xl font-semibold tracking-tight text-slate-950 sm:text-5xl">
+              <h1 className="max-w-3xl text-2xl font-semibold tracking-tight text-mscqr-primary sm:text-5xl">
                 Review the MSCQR label result with clear proof boundaries.
               </h1>
-              <p className="max-w-3xl text-sm leading-7 text-slate-600 sm:text-base">
+              <p className="max-w-3xl text-sm leading-7 text-mscqr-secondary sm:text-base">
                 MSCQR locks the label result before revealing it. Your identity and purchase answers add context for review and support, but they do not rewrite the original verification outcome.
               </p>
             </div>
             <div className="flex flex-wrap gap-3 text-sm">
-              <Badge className="border-slate-300 bg-slate-100 text-slate-700">{displaySessionSummary?.brandName || "MSCQR"}</Badge>
-              <Badge className="border-slate-300 bg-white text-slate-700">{displaySessionSummary?.maskedCode || maskCode(currentCode)}</Badge>
-              <Badge className="border-slate-300 bg-white text-slate-700">
+              <StatusBadge tone="issued">{displaySessionSummary?.brandName || "MSCQR"}</StatusBadge>
+              <StatusBadge tone="neutral">{displaySessionSummary?.maskedCode || maskCode(currentCode)}</StatusBadge>
+              <StatusBadge tone={displaySessionSummary?.entryMethod === "SIGNED_SCAN" ? "verified" : "issued"}>
                 {displaySessionSummary?.entryMethod === "SIGNED_SCAN" ? "Signed scan session" : "Manual code session"}
-              </Badge>
+              </StatusBadge>
             </div>
           </div>
-          <div className="rounded-[22px] border border-slate-200 bg-slate-950 p-5 text-white shadow-[0_24px_64px_rgba(15,23,42,0.18)] sm:rounded-[28px] sm:p-6">
+          <div className="rounded-[22px] border border-mscqr-border bg-[#05080c] p-5 text-white shadow-[0_24px_64px_rgba(0,0,0,0.28)] sm:rounded-[28px] sm:p-6">
             <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-400">What this result is based on</div>
             <div className="mt-4 space-y-3 text-sm leading-6 text-slate-200">
               <p>MSCQR checks whether the label exists in the governed issuance registry, whether its lifecycle state is customer-ready, and, when available, whether a signed label token still matches the issued record.</p>
@@ -1198,6 +1201,7 @@ export default function VerifyExperience() {
             </div>
           </div>
         </header>
+        </MotionPanel>
 
         <StepRail activeStep={flowStep} authenticated={authReady} />
 
@@ -1671,7 +1675,7 @@ export default function VerifyExperience() {
                       <div className="mt-1 text-sm">{reasonList[0]}</div>
                     </div>
                   </div>
-                  <Badge className="border-current/20 bg-white/60 text-current">{resultBadge}</Badge>
+                  <VerificationStateBadge value={classification} label={resultBadge} />
                 </div>
               </div>
 
@@ -1679,8 +1683,8 @@ export default function VerifyExperience() {
                 <div
                   className={`rounded-2xl border p-5 ${
                     result.challenge?.completed
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-950"
-                      : "border-amber-200 bg-amber-50 text-amber-950"
+                      ? "border-mscqr-verified/35 bg-mscqr-verified/12 text-mscqr-verified"
+                      : "border-mscqr-review/35 bg-mscqr-review/12 text-mscqr-review"
                   }`}
                 >
                   <div className="text-sm font-semibold">
@@ -1908,19 +1912,19 @@ export default function VerifyExperience() {
           </div>
         ) : null}
 
-        <div className="flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-          <Link to="/verify" className="inline-flex items-center gap-2 hover:text-slate-900">
+        <div className="flex flex-col gap-2 text-sm text-mscqr-muted sm:flex-row sm:items-center sm:justify-between">
+          <Link to="/verify" className="inline-flex items-center gap-2 hover:text-mscqr-primary">
             <ArrowLeft className="h-4 w-4" />
             Verify another code
           </Link>
-          <Link to="/trust" className="inline-flex items-center gap-2 hover:text-slate-900">
+          <Link to="/trust" className="inline-flex items-center gap-2 hover:text-mscqr-primary">
             Read MSCQR trust model
             <ExternalLink className="h-4 w-4" />
           </Link>
         </div>
 
         {!authReady && flowStep !== "identity" ? (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <div className="rounded-2xl border border-mscqr-review/35 bg-mscqr-review/12 px-4 py-3 text-sm text-mscqr-review">
             Your verification session is still locked, but result reveal is waiting for sign-in. Return to the identity step if you need to finish authentication.
           </div>
         ) : null}
@@ -1959,23 +1963,23 @@ function MetricCard({
   mono?: boolean;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-      <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
+    <div className="rounded-2xl border border-mscqr-border bg-mscqr-surface-muted/45 p-4">
+      <div className="flex items-center gap-2 text-sm font-medium text-mscqr-secondary">
         {icon}
         {title}
       </div>
-      <div className={`mt-2 text-sm font-semibold text-slate-950 ${mono ? "font-mono text-[13px]" : ""}`}>{value}</div>
+      <div className={`mt-2 text-sm font-semibold text-mscqr-primary ${mono ? "font-mono text-[13px]" : ""}`}>{value}</div>
     </div>
   );
 }
 
 function ContextRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-      <div className="mt-0.5 text-slate-500">{icon}</div>
+    <div className="flex items-start gap-3 rounded-2xl border border-mscqr-border bg-mscqr-surface-muted/45 px-4 py-3">
+      <div className="mt-0.5 text-mscqr-muted">{icon}</div>
       <div>
-        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</div>
-        <div className="mt-1 text-sm font-medium text-slate-900">{value}</div>
+        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-mscqr-muted">{label}</div>
+        <div className="mt-1 text-sm font-medium text-mscqr-primary">{value}</div>
       </div>
     </div>
   );

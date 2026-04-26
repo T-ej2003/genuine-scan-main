@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import tailwindcssAnimate from "tailwindcss-animate";
 
 export default {
   darkMode: ["class"],
@@ -69,6 +70,39 @@ export default {
           DEFAULT: "hsl(var(--info))",
           foreground: "hsl(var(--info-foreground))",
         },
+        mscqr: {
+          background: "hsl(var(--mscqr-background))",
+          "background-soft": "hsl(var(--mscqr-background-soft))",
+          surface: "hsl(var(--mscqr-surface))",
+          "surface-elevated": "hsl(var(--mscqr-surface-elevated))",
+          "surface-muted": "hsl(var(--mscqr-surface-muted))",
+          border: "hsl(var(--mscqr-border))",
+          "border-strong": "hsl(var(--mscqr-border-strong))",
+          primary: "hsl(var(--mscqr-text-primary))",
+          secondary: "hsl(var(--mscqr-text-secondary))",
+          muted: "hsl(var(--mscqr-text-muted))",
+          accent: "hsl(var(--mscqr-accent))",
+          "accent-soft": "hsl(var(--mscqr-accent-soft))",
+          verified: "hsl(var(--mscqr-verified))",
+          issued: "hsl(var(--mscqr-issued))",
+          pending: "hsl(var(--mscqr-print-pending))",
+          confirmed: "hsl(var(--mscqr-print-confirmed))",
+          review: "hsl(var(--mscqr-review-required))",
+          duplicate: "hsl(var(--mscqr-duplicate-detected))",
+          blocked: "hsl(var(--mscqr-blocked))",
+          replaced: "hsl(var(--mscqr-replaced))",
+          expired: "hsl(var(--mscqr-expired))",
+          degraded: "hsl(var(--mscqr-degraded))",
+          support: "hsl(var(--mscqr-support-open))",
+          audit: "hsl(var(--mscqr-audit-exported))",
+          risk: {
+            low: "hsl(var(--mscqr-risk-low))",
+            watch: "hsl(var(--mscqr-risk-watch))",
+            elevated: "hsl(var(--mscqr-risk-elevated))",
+            high: "hsl(var(--mscqr-risk-high))",
+            blocked: "hsl(var(--mscqr-risk-blocked))",
+          },
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -101,5 +135,5 @@ export default {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [tailwindcssAnimate],
 } satisfies Config;

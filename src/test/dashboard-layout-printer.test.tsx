@@ -88,21 +88,21 @@ describe("DashboardLayout printer connection dialog", () => {
     vi.mocked(apiClient.getNotifications).mockResolvedValue({
       success: true,
       data: { notifications: [], unread: 0 },
-    } as any);
+    } as Awaited<ReturnType<typeof apiClient.getNotifications>>);
     vi.mocked(apiClient.configureLocalPrintAgentBackend).mockResolvedValue({
       success: true,
-    } as any);
+    } as Awaited<ReturnType<typeof apiClient.configureLocalPrintAgentBackend>>);
     vi.mocked(apiClient.streamNotifications).mockImplementation(() => () => undefined);
     vi.mocked(apiClient.streamPrinterConnectionStatus).mockImplementation(() => () => undefined);
     vi.mocked(apiClient.listRegisteredPrinters).mockResolvedValue({
       success: true,
       data: [],
-    } as any);
+    } as Awaited<ReturnType<typeof apiClient.listRegisteredPrinters>>);
     vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
       success: false,
       error: "Local print agent is unavailable",
-    } as any);
-    vi.mocked(apiClient.reportPrinterHeartbeat).mockResolvedValue({ success: true } as any);
+    } as Awaited<ReturnType<typeof apiClient.getLocalPrintAgentStatus>>);
+    vi.mocked(apiClient.reportPrinterHeartbeat).mockResolvedValue({ success: true } as Awaited<ReturnType<typeof apiClient.reportPrinterHeartbeat>>);
     vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValue({
       success: true,
       data: {
@@ -133,7 +133,7 @@ describe("DashboardLayout printer connection dialog", () => {
         calibrationProfile: null,
         error: "Local print agent is unavailable",
       },
-    } as any);
+    } as Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>);
   });
 
   it("opens the printer dialog even when the local agent is unreachable", async () => {
@@ -177,7 +177,9 @@ describe("DashboardLayout printer connection dialog", () => {
       expect(vi.mocked(apiClient.getLocalPrintAgentStatus)).toHaveBeenCalled();
     });
 
-    expect(screen.getByText("Set up printing on this computer")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Set up printing on this computer")).toBeInTheDocument();
+    });
     expect(screen.getByText(/The browser cannot install printers, drivers, or desktop apps by itself/i)).toBeInTheDocument();
     expect(screen.getByText(/If the computer can see the printer, MSCQR will pick it up automatically/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /install printer helper/i })).toBeInTheDocument();
@@ -203,7 +205,7 @@ describe("DashboardLayout printer connection dialog", () => {
           },
         },
       ],
-    } as any);
+    } as Awaited<ReturnType<typeof apiClient.listRegisteredPrinters>>);
 
     renderWithQueryClient(
       <MemoryRouter>
@@ -268,7 +270,7 @@ describe("DashboardLayout printer connection dialog", () => {
         calibrationProfile: null,
         error: null,
       },
-    } as any);
+    } as Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>);
 
     const firstMount = renderWithQueryClient(
       <MemoryRouter>
@@ -329,7 +331,7 @@ describe("DashboardLayout printer connection dialog", () => {
           },
         ],
       },
-    } as any);
+    } as Awaited<ReturnType<typeof apiClient.getLocalPrintAgentStatus>>);
     vi.mocked(apiClient.reportPrinterHeartbeat).mockResolvedValue({
       success: true,
       degraded: true,
@@ -375,7 +377,7 @@ describe("DashboardLayout printer connection dialog", () => {
         calibrationProfile: null,
         error: null,
       },
-    } as any);
+    } as Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>);
 
     renderWithQueryClient(
       <MemoryRouter>
