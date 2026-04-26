@@ -68,6 +68,9 @@ export const requestCustomerEmailOtp = async (req: Request, res: Response) => {
         challengeToken: challenge.challengeToken,
         expiresAt: challenge.expiresAt,
         maskedEmail: maskEmail(challenge.email),
+        ...(process.env.NODE_ENV === "test" && process.env.E2E_EXPOSE_CUSTOMER_OTP === "true"
+          ? { testOtp: challenge.otp }
+          : {}),
       },
     });
   } catch (error) {

@@ -344,6 +344,7 @@ export default function VerifyExperience() {
   const [acceptingTransfer, setAcceptingTransfer] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [reportReason, setReportReason] = useState("counterfeit_suspected");
+  const [lastSupportTicketRef, setLastSupportTicketRef] = useState("");
   const [socialProviders, setSocialProviders] = useState<ProviderOption[]>([]);
 
   const deviceId = useMemo(() => getOrCreateAnonDeviceId(), []);
@@ -976,6 +977,7 @@ export default function VerifyExperience() {
         throw new Error(response.error || "Could not submit the concern.");
       }
       const reportData = (response.data || {}) as { supportTicketRef?: string | null };
+      setLastSupportTicketRef(String(reportData.supportTicketRef || "").trim());
       toast({
         title: "Concern submitted",
         description: reportData.supportTicketRef
@@ -1887,10 +1889,18 @@ export default function VerifyExperience() {
                         <SelectItem value="other">Other</SelectItem>
                       </SelectContent>
                     </Select>
-                    <Button variant="outline" onClick={handleReportConcern} disabled={reporting}>
+                    <Button data-testid="verify-report-concern" variant="outline" onClick={handleReportConcern} disabled={reporting}>
                       {reporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <AlertTriangle className="mr-2 h-4 w-4" />}
                       Report concern
                     </Button>
+                    {lastSupportTicketRef ? (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-950">
+                        Support ticket reference:{" "}
+                        <span data-testid="verify-report-support-ticket-raw" className="font-mono font-semibold">
+                          {lastSupportTicketRef}
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600">

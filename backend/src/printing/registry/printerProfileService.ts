@@ -483,14 +483,6 @@ export const serializePrinterProfileForClient = (profile: Awaited<ReturnType<typ
     notes: profile.notes || null,
     lastVerifiedAt: profile.lastVerifiedAt?.toISOString() || null,
     lastCertifiedAt: profile.lastCertifiedAt?.toISOString() || null,
-    snapshots: profile.snapshots.map((snapshot) => ({
-      id: snapshot.id,
-      snapshotType: snapshot.snapshotType,
-      summary: snapshot.summary || null,
-      warnings: Array.isArray(snapshot.warnings) ? (snapshot.warnings as string[]) : [],
-      capturedAt: snapshot.capturedAt.toISOString(),
-      data: (snapshot.data as Record<string, unknown>) || {},
-    })),
   };
 };
 

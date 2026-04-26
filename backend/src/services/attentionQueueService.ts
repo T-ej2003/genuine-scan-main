@@ -203,7 +203,11 @@ const buildAuditWhere = (req: AuthRequest, since: Date): Prisma.AuditLogWhereInp
   return where;
 };
 
-const firstIso = (value?: Date | null) => (value ? value.toISOString() : null);
+const firstIso = (value?: Date | string | null) => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+};
 
 const notificationRoute = (data: Prisma.JsonValue | null | undefined, role: UserRole) => {
   if (!data || typeof data !== "object" || Array.isArray(data)) return "/dashboard";
