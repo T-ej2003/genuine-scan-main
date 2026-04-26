@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { MotionPage, MotionPanel } from "@/components/mscqr/motion";
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -34,30 +35,30 @@ export function DashboardPagePattern({
   contentClassName,
 }: PagePatternProps) {
   return (
-    <section className={cn("mx-auto w-full max-w-7xl space-y-6", className)}>
-      <header className="overflow-hidden rounded-[28px] border border-border/80 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(246,249,252,0.94))] px-5 py-5 shadow-[0_24px_60px_-48px_rgba(15,23,42,0.45)] sm:px-7 sm:py-6">
+    <MotionPage className={cn("mx-auto w-full max-w-7xl space-y-6", className)}>
+      <header className="overflow-hidden rounded-[30px] border border-mscqr-border bg-[radial-gradient(circle_at_12%_0%,hsl(var(--mscqr-accent)/0.13),transparent_36%),linear-gradient(135deg,hsl(var(--mscqr-surface-elevated)/0.98),hsl(var(--mscqr-surface)/0.94))] px-5 py-5 shadow-[0_24px_60px_-48px_rgba(15,23,42,0.45)] dark:shadow-[0_28px_70px_-46px_rgba(0,0,0,0.9)] sm:px-7 sm:py-6">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-3">
             {eyebrow ? (
-              <div className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-800">
+              <div className="inline-flex rounded-full border border-mscqr-accent/30 bg-mscqr-accent-soft/55 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-mscqr-accent">
                 {eyebrow}
               </div>
             ) : null}
             <div className="space-y-2">
-              <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-[2.1rem]">{title}</h1>
-              {description ? <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p> : null}
+              <h1 className="text-3xl font-semibold tracking-tight text-mscqr-primary sm:text-[2.1rem]">{title}</h1>
+              {description ? <p className="max-w-3xl text-sm leading-6 text-mscqr-secondary">{description}</p> : null}
             </div>
           </div>
           {actions ? <div className="flex flex-wrap gap-2 lg:justify-end">{actions}</div> : null}
         </div>
       </header>
       {filters ? (
-        <div className="rounded-[24px] border border-border/80 bg-card/95 p-4 shadow-[0_20px_44px_-40px_rgba(15,23,42,0.5)]">
+        <MotionPanel className="rounded-[24px] border border-mscqr-border bg-mscqr-surface/95 p-4 shadow-[0_20px_44px_-40px_rgba(15,23,42,0.5)]">
           {filters}
-        </div>
+        </MotionPanel>
       ) : null}
       <div className={cn("space-y-6", contentClassName)}>{children}</div>
-    </section>
+    </MotionPage>
   );
 }
 
@@ -106,16 +107,16 @@ export function PageSection({
   className?: string;
 }) {
   return (
-    <section className={cn("rounded-[26px] border border-border/80 bg-card/95 p-6 shadow-[0_24px_56px_-44px_rgba(15,23,42,0.45)]", className)}>
-      <div className="flex flex-col gap-3 border-b border-border/80 pb-4 sm:flex-row sm:items-start sm:justify-between">
+    <MotionPanel className={cn("rounded-[26px] border border-mscqr-border bg-mscqr-surface/95 p-6 shadow-[0_24px_56px_-44px_rgba(15,23,42,0.45)]", className)}>
+      <div className="flex flex-col gap-3 border-b border-mscqr-border pb-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
-          <h2 className="text-lg font-semibold text-foreground">{title}</h2>
-          {description ? <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p> : null}
+          <h2 className="text-lg font-semibold text-mscqr-primary">{title}</h2>
+          {description ? <p className="max-w-3xl text-sm leading-6 text-mscqr-secondary">{description}</p> : null}
         </div>
         {action ? <div className="flex shrink-0 flex-wrap gap-2">{action}</div> : null}
       </div>
       <div className="pt-4">{children}</div>
-    </section>
+    </MotionPanel>
   );
 }
 
@@ -133,10 +134,10 @@ export function PageEmptyState({
   className?: string;
 }) {
   return (
-    <div className={cn("rounded-[24px] border border-dashed border-border/80 bg-muted/20 px-6 py-10 text-center", className)}>
+    <div className={cn("rounded-[24px] border border-dashed border-mscqr-border bg-mscqr-surface-muted/30 px-6 py-10 text-center", className)}>
       <div className="mx-auto max-w-xl space-y-3">
-        <h3 className="text-lg font-semibold text-foreground">{title}</h3>
-        <p className="text-sm leading-6 text-muted-foreground">{description}</p>
+        <h3 className="text-lg font-semibold text-mscqr-primary">{title}</h3>
+        <p className="text-sm leading-6 text-mscqr-secondary">{description}</p>
         {actionLabel && onAction ? (
           <div className="pt-1">
             <Button onClick={onAction}>{actionLabel}</Button>

@@ -12,6 +12,7 @@ const requireSecret = (key) => {
 
 // Minimum required for a useful smoke run
 requireVar("SMOKE_BASE_URL");
+requireVar("SMOKE_API_BASE_URL");
 requireSecret("SMOKE_LOGIN_EMAIL");
 requireSecret("SMOKE_LOGIN_PASSWORD");
 
@@ -56,7 +57,7 @@ if (missing.length > 0) {
 }
 
 console.log("Staging smoke configuration check passed.");
-console.log("Validated required keys: SMOKE_BASE_URL, SMOKE_LOGIN_EMAIL, SMOKE_LOGIN_PASSWORD");
+console.log("Validated required keys: SMOKE_BASE_URL, SMOKE_API_BASE_URL, SMOKE_LOGIN_EMAIL, SMOKE_LOGIN_PASSWORD");
 
 const configuredOptionalFlows = [
   hasVerifyFlow ? "verify" : null,

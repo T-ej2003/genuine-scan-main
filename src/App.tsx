@@ -35,6 +35,7 @@ const IR = lazy(() => import("@/pages/IR"));
 const IRIncidentDetail = lazy(() => import("@/pages/IRIncidentDetail"));
 const SupportCenter = lazy(() => import("@/pages/SupportCenter"));
 const Governance = lazy(() => import("@/pages/Governance"));
+const ReleaseReadiness = lazy(() => import("@/pages/ReleaseReadiness"));
 const Verify = lazy(() => import("@/pages/Verify"));
 const VerifyLanding = lazy(() => import("@/pages/VerifyLanding"));
 const Index = lazy(() => import("@/pages/Index"));
@@ -456,6 +457,15 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRoles={["super_admin"]}>
               <SupportCenter />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path={APP_PATHS.releaseReadiness}
+          element={
+            <ProtectedRoute allowedRoles={["super_admin"]}>
+              <ReleaseReadiness />
             </ProtectedRoute>
           }
         />

@@ -1,5 +1,65 @@
 import { BASE_URL, type ApiClientCore, type ApiResponse } from "@/lib/api/internal-client-core";
 
+type JsonRecord = Record<string, unknown>;
+
+type UserDirectoryRow = {
+  id: string;
+  email: string;
+  name?: string | null;
+  role?: string | null;
+  licenseeId?: string | null;
+  isActive?: boolean;
+  status?: string | null;
+};
+
+type AuditStreamLog = {
+  id?: string;
+  action?: string;
+  entityType?: string;
+  entityId?: string | null;
+  userId?: string | null;
+  licenseeId?: string | null;
+  orgId?: string | null;
+  ipAddress?: string | null;
+  ipHash?: string | null;
+  userAgent?: string | null;
+  createdAt?: string | Date;
+  details?: unknown;
+};
+
+type NotificationStreamRow = {
+  id: string;
+  title: string;
+  body: string;
+  type?: string;
+  data?: JsonRecord | null;
+  readAt?: string | null;
+  createdAt?: string | Date;
+};
+
+export type OperationalAttentionQueueItem = {
+  id: string;
+  type: "notification" | "incident" | "policy_alert" | "print_job" | "support_ticket" | "audit_event";
+  title: string;
+  body: string;
+  tone: "neutral" | "verified" | "review" | "blocked" | "audit" | "support" | "print";
+  route: string;
+  createdAt?: string | null;
+  count?: number;
+};
+
+export type OperationalAttentionQueueSnapshot = {
+  generatedAt: string;
+  summary: {
+    unreadNotifications: number;
+    reviewSignals: number;
+    printOperations: number;
+    supportEscalations: number;
+    auditEvents24h: number;
+  };
+  items: OperationalAttentionQueueItem[];
+};
+
 export const createAdminOpsApi = (core: ApiClientCore) => ({
   async createUser(payload: {
     email: string;
@@ -19,7 +79,7 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     if (options?.role) params.append("role", options.role);
 
     const query = params.toString() ? `?${params.toString()}` : "";
-    return core.request<any[]>(`/users${query}`);
+    return core.request<UserDirectoryRow[]>(`/users${query}`);
   },
 
   async updateUser(
@@ -80,7 +140,7 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     });
   },
 
-  streamAuditLogs(onMessage: (log: any) => void, onError?: () => void) {
+  streamAuditLogs(onMessage: (log: AuditStreamLog) => void, onError?: () => void) {
     const url = `${BASE_URL}/audit/stream`;
 
     let eventSource: EventSource;
@@ -107,7 +167,7 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
   },
 
   streamNotifications(
-    onEvent: (payload: { kind: "snapshot"; notifications: any[]; unread: number; total: number; reason?: string } | { kind: "version"; reason?: string }) => void,
+    onEvent: (payload: { kind: "snapshot"; notifications: NotificationStreamRow[]; unread: number; total: number; reason?: string } | { kind: "version"; reason?: string }) => void,
     onError?: () => void,
     onOpen?: () => void,
     options?: { limit?: number }
@@ -309,6 +369,22 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     return core.request(`/analytics/risk-scores${query}`);
   },
 
+  async getInternalReleaseMetadata() {
+    return core.request<{
+      name: string;
+      version: string;
+      gitSha: string;
+      environment: string;
+      release: string;
+      signing?: {
+        mode: string;
+        provider: string;
+        keyVersion: string;
+        keyRef?: string | null;
+      } | null;
+    }>(`/internal/release`);
+  },
+
   async getPolicyConfig(licenseeId?: string) {
     const query = licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : "";
     return core.request(`/policy/config${query}`);
@@ -371,6 +447,10 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     return core.request(`/notifications${query}`);
   },
 
+  async getOperationalAttentionQueue() {
+    return core.request<OperationalAttentionQueueSnapshot>("/dashboard/attention-queue");
+  },
+
   async markNotificationRead(id: string) {
     return core.request(`/notifications/${encodeURIComponent(id)}/read`, { method: "POST" });
   },
@@ -388,7 +468,7 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     licenseeId?: string;
     key: string;
     enabled: boolean;
-    config?: any;
+    config?: JsonRecord;
   }) {
     return core.request(`/governance/feature-flags`, { method: "POST", body: JSON.stringify(payload) });
   },
@@ -493,6 +573,20 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     if (options?.to) params.append("to", options.to);
     const query = params.toString() ? `?${params.toString()}` : "";
     return core.request(`/telemetry/route-transition/summary${query}`);
+  },
+
+  async getRateLimitAnalytics(options?: { windowMs?: number }) {
+    const params = new URLSearchParams();
+    if (options?.windowMs != null) params.append("windowMs", String(options.windowMs));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return core.request(`/security/abuse/rate-limits${query}`);
+  },
+
+  async getRateLimitAlerts(options?: { windowMs?: number }) {
+    const params = new URLSearchParams();
+    if (options?.windowMs != null) params.append("windowMs", String(options.windowMs));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return core.request(`/security/abuse/rate-limits/alerts${query}`);
   },
 });
 

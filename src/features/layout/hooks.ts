@@ -16,6 +16,35 @@ export type NotificationsSnapshot = {
   unread: number;
 };
 
+const attentionQueueItemSchema = z
+  .object({
+    id: z.string(),
+    type: z.enum(["notification", "incident", "policy_alert", "print_job", "support_ticket", "audit_event"]),
+    title: z.string(),
+    body: z.string(),
+    tone: z.enum(["neutral", "verified", "review", "blocked", "audit", "support", "print"]),
+    route: z.string(),
+    createdAt: z.string().nullable().optional(),
+    count: z.number().optional(),
+  })
+  .passthrough();
+
+const attentionQueueSchema = z
+  .object({
+    generatedAt: z.string(),
+    summary: z.object({
+      unreadNotifications: z.number(),
+      reviewSignals: z.number(),
+      printOperations: z.number(),
+      supportEscalations: z.number(),
+      auditEvents24h: z.number(),
+    }),
+    items: z.array(attentionQueueItemSchema),
+  })
+  .passthrough();
+
+export type OperationalAttentionQueue = z.infer<typeof attentionQueueSchema>;
+
 const NOTIFICATION_CLEAR_ANIMATION_MS = 260;
 
 const notificationsResponseSchema = z
@@ -222,4 +251,18 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
     clearNotifications,
     loadNotifications,
   };
+}
+
+export function useOperationalAttentionQueue(enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.layout.attentionQueue(),
+    enabled,
+    refetchInterval: enabled ? 45_000 : false,
+    queryFn: async (): Promise<OperationalAttentionQueue> =>
+      unwrapParsedApiResponse(
+        await apiClient.getOperationalAttentionQueue(),
+        attentionQueueSchema,
+        "Failed to load operational attention queue"
+      ),
+  });
 }

@@ -71,8 +71,36 @@ const requestJson = async (url, options = {}) => {
 
   recordSetCookies(response.headers);
 
+  const contentType = response.headers.get("content-type") || "";
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : null;
+  const preview = text.replace(/\s+/g, " ").trim().slice(0, 220);
+  const lowerPreview = preview.toLowerCase();
+  const looksLikeHtml =
+    contentType.toLowerCase().includes("text/html") ||
+    lowerPreview.startsWith("<!doctype html") ||
+    lowerPreview.startsWith("<html");
+
+  if (looksLikeHtml) {
+    throw new Error(
+      `Smoke request expected JSON but received HTML from ${url}. ` +
+        `This usually means an API route is being served by the frontend SPA fallback or nginx error page instead of backend JSON. ` +
+        `Status=${response.status}; content-type=${contentType || "unknown"}; preview=${preview}`
+    );
+  }
+
+  let payload = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch (error) {
+      throw new Error(
+        `Smoke request expected JSON but could not parse response from ${url}. ` +
+          `Status=${response.status}; content-type=${contentType || "unknown"}; preview=${preview}; ` +
+          `parseError=${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
   return { response, payload };
 };
 

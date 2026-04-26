@@ -1,9 +1,9 @@
-import { Router, type RequestHandler } from "express";
+import { Router, type Request, type RequestHandler } from "express";
 import rateLimit from "express-rate-limit";
 
 import { authenticate, authenticateSSE, requireRecentSensitiveAuth } from "../../middleware/auth";
 import { enforceTenantIsolation } from "../../middleware/tenantIsolation";
-import { getDashboardStats } from "../../controllers/dashboardController";
+import { getDashboardAttentionQueue, getDashboardStats } from "../../controllers/dashboardController";
 import { dashboardEvents } from "../../controllers/eventsController";
 import { listNotifications, readAllNotifications, readNotification } from "../../controllers/notificationController";
 import { notificationEvents } from "../../controllers/notificationEventsController";
@@ -20,12 +20,20 @@ import {
 } from "../../middleware/publicRateLimit";
 import { createRateLimitJsonHandler } from "../../observability/rateLimitMetrics";
 
+type RateLimitActorRequest = Request & {
+  user?: {
+    userId?: string | null;
+  };
+};
+
+const resolveAuthenticatedActor = (req: Request) => (req as RateLimitActorRequest).user?.userId || null;
+
 const dashboardReadRouteLimiter: RequestHandler = rateLimit({
   windowMs: 5 * 60 * 1000,
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "realtime.dashboard-read", (currentReq: any) => currentReq.user?.userId || null),
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "realtime.dashboard-read", resolveAuthenticatedActor),
   handler: createRateLimitJsonHandler("realtime.dashboard-read", "Too many dashboard refreshes. Please wait before retrying."),
 });
 
@@ -44,7 +52,7 @@ const dashboardStreamRouteLimiter: RequestHandler = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "realtime.dashboard-stream", (currentReq: any) => currentReq.user?.userId || null),
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "realtime.dashboard-stream", resolveAuthenticatedActor),
   handler: createRateLimitJsonHandler("realtime.dashboard-stream", "Too many dashboard event stream requests. Please wait before retrying."),
 });
 
@@ -64,7 +72,7 @@ const notificationReadRouteLimiter: RequestHandler = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) =>
-    buildPublicActorRateLimitKey(req, "realtime.notifications-read", (currentReq: any) => currentReq.user?.userId || null),
+    buildPublicActorRateLimitKey(req, "realtime.notifications-read", resolveAuthenticatedActor),
   handler: createRateLimitJsonHandler("realtime.notifications-read", "Too many notification reads. Please wait before retrying."),
 });
 
@@ -84,7 +92,7 @@ const notificationMutationRouteLimiter: RequestHandler = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) =>
-    buildPublicActorRateLimitKey(req, "realtime.notifications-mutation", (currentReq: any) => currentReq.user?.userId || null),
+    buildPublicActorRateLimitKey(req, "realtime.notifications-mutation", resolveAuthenticatedActor),
   handler: createRateLimitJsonHandler("realtime.notifications-mutation", "Too many notification updates. Please wait before retrying."),
 });
 
@@ -103,7 +111,7 @@ const printerAgentReadRouteLimiter: RequestHandler = rateLimit({
   max: 40,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "printer-agent.status", (currentReq: any) => currentReq.user?.userId || null),
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "printer-agent.status", resolveAuthenticatedActor),
   handler: createRateLimitJsonHandler("printer-agent.status", "Too many printer status requests. Please wait before retrying."),
 });
 
@@ -122,7 +130,7 @@ const printerAgentStreamRouteLimiter: RequestHandler = rateLimit({
   max: 15,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "printer-agent.events", (currentReq: any) => currentReq.user?.userId || null),
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "printer-agent.events", resolveAuthenticatedActor),
   handler: createRateLimitJsonHandler("printer-agent.events", "Too many printer event stream requests. Please wait before retrying."),
 });
 
@@ -142,7 +150,7 @@ const printerAgentHeartbeatRouteLimiter: RequestHandler = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) =>
-    buildPublicActorRateLimitKey(req, "printer-agent.heartbeat", (currentReq: any) => currentReq.user?.userId || null),
+    buildPublicActorRateLimitKey(req, "printer-agent.heartbeat", resolveAuthenticatedActor),
   handler: createRateLimitJsonHandler("printer-agent.heartbeat", "Too many printer heartbeat requests. Please wait before retrying."),
 });
 
@@ -168,7 +176,7 @@ const dashboardReadActorLimiter: RequestHandler = createPublicActorRateLimiter({
   windowMs: 5 * 60 * 1000,
   max: 60,
   message: "Too many dashboard refreshes. Please wait before retrying.",
-  actorResolver: (req: any) => req.user?.userId || null,
+  actorResolver: resolveAuthenticatedActor,
 });
 
 const dashboardStreamIpLimiter: RequestHandler = createPublicIpRateLimiter({
@@ -183,7 +191,7 @@ const dashboardStreamActorLimiter: RequestHandler = createPublicActorRateLimiter
   windowMs: 5 * 60 * 1000,
   max: 20,
   message: "Too many dashboard event stream requests. Please wait before retrying.",
-  actorResolver: (req: any) => req.user?.userId || null,
+  actorResolver: resolveAuthenticatedActor,
 });
 
 const notificationReadIpLimiter: RequestHandler = createPublicIpRateLimiter({
@@ -198,7 +206,7 @@ const notificationReadActorLimiter: RequestHandler = createPublicActorRateLimite
   windowMs: 5 * 60 * 1000,
   max: 90,
   message: "Too many notification reads. Please wait before retrying.",
-  actorResolver: (req: any) => req.user?.userId || null,
+  actorResolver: resolveAuthenticatedActor,
 });
 
 const notificationMutationIpLimiter: RequestHandler = createPublicIpRateLimiter({
@@ -213,7 +221,7 @@ const notificationMutationActorLimiter: RequestHandler = createPublicActorRateLi
   windowMs: 5 * 60 * 1000,
   max: 60,
   message: "Too many notification updates. Please wait before retrying.",
-  actorResolver: (req: any) => req.user?.userId || null,
+  actorResolver: resolveAuthenticatedActor,
 });
 
 const printerAgentHeartbeatIpLimiter: RequestHandler = createPublicIpRateLimiter({
@@ -228,7 +236,7 @@ const printerAgentHeartbeatActorLimiter: RequestHandler = createPublicActorRateL
   windowMs: 5 * 60 * 1000,
   max: 60,
   message: "Too many printer heartbeat requests. Please wait before retrying.",
-  actorResolver: (req: any) => req.user?.userId || null,
+  actorResolver: resolveAuthenticatedActor,
 });
 
 const printerAgentReadIpLimiter: RequestHandler = createPublicIpRateLimiter({
@@ -243,7 +251,7 @@ const printerAgentReadActorLimiter: RequestHandler = createPublicActorRateLimite
   windowMs: 5 * 60 * 1000,
   max: 60,
   message: "Too many printer status requests. Please wait before retrying.",
-  actorResolver: (req: any) => req.user?.userId || null,
+  actorResolver: resolveAuthenticatedActor,
 });
 
 const printerAgentStreamIpLimiter: RequestHandler = createPublicIpRateLimiter({
@@ -258,7 +266,7 @@ const printerAgentStreamActorLimiter: RequestHandler = createPublicActorRateLimi
   windowMs: 5 * 60 * 1000,
   max: 20,
   message: "Too many printer event stream requests. Please wait before retrying.",
-  actorResolver: (req: any) => req.user?.userId || null,
+  actorResolver: resolveAuthenticatedActor,
 });
 
 export const createRealtimeReadRoutes = () => {
@@ -273,6 +281,16 @@ export const createRealtimeReadRoutes = () => {
     dashboardReadIpLimiter,
     dashboardReadActorLimiter,
     getDashboardStats
+  );
+  router.get(
+    "/dashboard/attention-queue",
+    dashboardReadPreAuthRouteLimiter,
+    authenticate,
+    enforceTenantIsolation,
+    dashboardReadRouteLimiter,
+    dashboardReadIpLimiter,
+    dashboardReadActorLimiter,
+    getDashboardAttentionQueue
   );
   router.get(
     "/events/dashboard",

@@ -197,7 +197,7 @@ export const createRoleNotifications = async (params: {
     if (params.audience === NotificationAudience.MANUFACTURER) {
       userWhere.OR = [
         { licenseeId: params.licenseeId },
-        { manufacturerLicenseeLinks: { some: { licenseeId: params.licenseeId, revokedAt: null } } },
+        { manufacturerLicenseeLinks: { some: { licenseeId: params.licenseeId } } },
       ];
     } else {
       userWhere.licenseeId = params.licenseeId;

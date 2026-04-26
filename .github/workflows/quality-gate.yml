@@ -52,6 +52,20 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: mscqr_e2e
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d mscqr_e2e"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -59,10 +73,15 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
 
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
 
       # TODO(ci-lint): flip ENFORCE_LINT_CHANGED=true and fold this back into verify:ci:frontend
       # once the existing ESLint debt no longer relies on report-only mode for changed-file checks.
@@ -73,6 +92,73 @@ jobs:
 
       - name: Frontend quality contract
         run: npm run verify:ci:frontend
+
+      - name: Generate enterprise E2E secrets and environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          write_secret() {
+            local name="$1"
+            local value
+            value="$(openssl rand -base64 36 | tr -d '\n')"
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$name" "$value" >> "$GITHUB_ENV"
+          }
+
+          write_secret E2E_SUPERADMIN_PASSWORD
+          write_secret E2E_LICENSEE_ADMIN_PASSWORD
+          write_secret E2E_MANUFACTURER_PASSWORD
+          write_secret JWT_SECRET
+          write_secret QR_SIGN_HMAC_SECRET_CURRENT
+          write_secret TOKEN_HASH_SECRET_CURRENT
+          write_secret IP_HASH_SALT_CURRENT
+          write_secret INCIDENT_HASH_SALT_CURRENT
+          write_secret PRINTER_SSE_SIGN_SECRET_CURRENT
+          write_secret CUSTOMER_VERIFY_TOKEN_SECRET
+          write_secret CUSTOMER_VERIFY_OTP_SECRET
+          write_secret SCAN_FINGERPRINT_SECRET
+          write_secret AUTH_MFA_ENCRYPTION_KEY
+
+          {
+            echo "NODE_ENV=test"
+            echo "PORT=4000"
+            echo "DATABASE_URL=postgresql://postgres@127.0.0.1:5432/mscqr_e2e?schema=public"
+            echo "COOKIE_SECURE=false"
+            echo "AUTH_LEGACY_TOKEN_RESPONSE_ENABLED=false"
+            echo "RUN_BACKGROUND_WORKERS=false"
+            echo "CORS_ORIGIN=http://127.0.0.1:8080,http://localhost:8080"
+            echo "AUTH_RISK_STEPUP_THRESHOLD=101"
+            echo "AUTH_RISK_BLOCK_THRESHOLD=101"
+            echo "EMAIL_USE_JSON_TRANSPORT=true"
+            echo "PRINT_AGENT_REQUIRE_SIGNATURE=false"
+            echo "PRINT_AGENT_REQUIRE_MTLS=false"
+            echo "VITE_API_PROXY_TARGET=http://127.0.0.1:4000"
+            echo "E2E_START_BACKEND=true"
+            echo "E2E_REQUIRE_ENTERPRISE_SMOKE=true"
+            echo "E2E_EXPOSE_CUSTOMER_OTP=true"
+            echo "E2E_SUPERADMIN_EMAIL=e2e-super-admin@mscqr.example"
+            echo "E2E_LICENSEE_ADMIN_EMAIL=e2e-licensee-admin@mscqr.example"
+            echo "E2E_MANUFACTURER_EMAIL=e2e-manufacturer@mscqr.example"
+            echo "E2E_LICENSEE_BATCH_QUERY=E2E Source Batch"
+            echo "E2E_ASSIGN_MANUFACTURER_NAME=E2E Manufacturer"
+            echo "E2E_ASSIGN_QUANTITY=1"
+            echo "E2E_MANUFACTURER_BATCH_QUERY=E2E Manufacturer Print Batch"
+            echo "E2E_PRINTER_PROFILE_NAME=E2E Local Agent Printer"
+            echo "E2E_PRINT_QUANTITY=1"
+            echo "E2E_VERIFY_CODE=E2E0000000999"
+            echo "E2E_REPORT_EMAIL=e2e-customer@mscqr.example"
+            echo "PUBLIC_VERIFY_WEB_BASE_URL=http://127.0.0.1:8080"
+            echo "PUBLIC_SCAN_WEB_BASE_URL=http://127.0.0.1:8080"
+            echo "PUBLIC_ADMIN_WEB_BASE_URL=http://127.0.0.1:8080"
+            echo "WEB_APP_BASE_URL=http://127.0.0.1:8080"
+          } >> "$GITHUB_ENV"
+
+      - name: Build and seed enterprise E2E backend
+        run: |
+          npm --prefix backend run build
+          npm --prefix backend exec -- prisma db push --skip-generate --schema backend/prisma/schema.prisma
+          npm --prefix backend run test:e2e:seed
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
       - name: Playwright smoke suite

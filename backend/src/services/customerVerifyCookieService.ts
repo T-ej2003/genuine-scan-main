@@ -35,7 +35,7 @@ const customerVerifyCsrfCookieOptions = (maxAgeMs: number) => ({
   httpOnly: false,
   sameSite: "lax" as const,
   secure: parseBoolEnv(process.env.COOKIE_SECURE, process.env.NODE_ENV === "production"),
-  path: "/api",
+  path: "/",
   maxAge: maxAgeMs,
 });
 

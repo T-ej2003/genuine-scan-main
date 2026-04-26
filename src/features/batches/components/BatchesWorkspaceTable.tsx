@@ -1,8 +1,8 @@
 import { format } from "date-fns";
 import { Download, RefreshCw, Search } from "lucide-react";
 
+import { OperationalTableShell } from "@/components/platform/OperationalTableShell";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -149,8 +149,15 @@ export function BatchesWorkspaceTable({
         </div>
       ) : null}
 
-      <Card>
-        <CardHeader className="pb-4">
+      <OperationalTableShell
+        title={isManufacturer ? "Controlled print queue" : "Batch lifecycle registry"}
+        description={
+          isManufacturer
+            ? "Start governed print runs only from batches with available inventory and confirmed printer readiness."
+            : "Inspect source batches, assignment state, print progress, and allocation evidence without changing scope rules."
+        }
+      >
+        <div className="border-b border-mscqr-border p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -186,12 +193,12 @@ export function BatchesWorkspaceTable({
               </Select>
             )}
           </div>
-        </CardHeader>
+        </div>
 
-        <CardContent>
+        <div className="p-4">
           {isManufacturer ? (
             <>
-              <div className="rounded-md border">
+              <div className="rounded-2xl border border-mscqr-border">
                 <Table className="table-fixed">
                   <TableHeader>
                     <TableRow>
@@ -464,8 +471,8 @@ export function BatchesWorkspaceTable({
               </div>
             </>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </OperationalTableShell>
     </DataTablePagePattern>
   );
 }

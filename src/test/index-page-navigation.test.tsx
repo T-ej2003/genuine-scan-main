@@ -1,6 +1,6 @@
 import React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import Index from "@/pages/Index";
@@ -20,19 +20,18 @@ describe("Index page navigation", () => {
     });
   });
 
-  it("tracks the active section when a header pill is clicked", () => {
+  it("renders production public navigation and CTAs", () => {
     render(
       <MemoryRouter>
         <Index />
       </MemoryRouter>
     );
 
-    const supportButton = screen.getByRole("button", { name: "Support" });
-    fireEvent.click(supportButton);
+    const supportLink = screen.getAllByRole("link", { name: "Support" })[0];
 
-    expect(supportButton).toHaveAttribute("aria-current", "true");
-    expect(screen.getByText("Current focus")).toBeInTheDocument();
-    expect(screen.getByText("Response path")).toBeInTheDocument();
+    expect(supportLink).toHaveAttribute("href", "/help/support");
+    expect(screen.getAllByRole("link", { name: /verify/i })[0]).toHaveAttribute("href", "/verify");
+    expect(screen.getAllByRole("link", { name: /platform access/i })[0]).toHaveAttribute("href", "/login");
     expect(screen.getByRole("link", { name: /trust center/i })).toBeInTheDocument();
   });
 });
