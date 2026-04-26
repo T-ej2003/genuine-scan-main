@@ -402,8 +402,8 @@ export default function SupportCenterPage() {
           description="Choose a case on the left, then update its status, owner, and notes on the right."
           action={<Badge variant="outline">{total} tickets</Badge>}
         >
-          <div className="grid gap-6 xl:grid-cols-[1.05fr,1fr]">
-            <div className="rounded-2xl border">
+          <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.05fr),minmax(0,1fr)]">
+            <div className="min-w-0 rounded-2xl border">
               <div className="border-b px-5 py-4 text-sm font-semibold">Case list</div>
               <div className="max-h-[680px] overflow-auto">
                 <Table>
@@ -463,7 +463,7 @@ export default function SupportCenterPage() {
               </div>
             </div>
 
-            <div className="rounded-2xl border bg-card p-5">
+            <div className="min-w-0 rounded-2xl border bg-card p-5">
               {!detailQuery.data ? (
                 <PageEmptyState
                   title={ticketsQuery.isLoading ? "Loading case details" : "Select a case"}
