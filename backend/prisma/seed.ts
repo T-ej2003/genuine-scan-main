@@ -6,6 +6,7 @@ const prisma = new PrismaClient();
 
 async function main() {
   console.log('🌱 Starting seed...');
+  const seededEmailVerifiedAt = new Date();
 
   // -----------------------------
   // Super Admin
@@ -13,7 +14,7 @@ async function main() {
   const superAdminPassword = await argon2.hash("admin123", { type: argon2.argon2id });
   const superAdmin = await prisma.user.upsert({
     where: { email: 'admin@mscqr.com' },
-    update: { status: UserStatus.ACTIVE, isActive: true },
+    update: { status: UserStatus.ACTIVE, isActive: true, emailVerifiedAt: seededEmailVerifiedAt },
     create: {
       email: 'admin@mscqr.com',
       passwordHash: superAdminPassword,
@@ -21,6 +22,7 @@ async function main() {
       role: UserRole.SUPER_ADMIN,
       status: UserStatus.ACTIVE,
       isActive: true,
+      emailVerifiedAt: seededEmailVerifiedAt,
       orgId: null,
     },
   });
@@ -77,7 +79,7 @@ async function main() {
 
   const licenseeAdminA = await prisma.user.upsert({
     where: { email: 'admin@acme.com' },
-    update: { licenseeId: licenseeA.id, orgId: licenseeA.orgId, status: UserStatus.ACTIVE, isActive: true },
+    update: { licenseeId: licenseeA.id, orgId: licenseeA.orgId, status: UserStatus.ACTIVE, isActive: true, emailVerifiedAt: seededEmailVerifiedAt },
     create: {
       email: 'admin@acme.com',
       passwordHash: licenseeAdminPassword,
@@ -86,13 +88,14 @@ async function main() {
       licenseeId: licenseeA.id,
       orgId: licenseeA.orgId,
       status: UserStatus.ACTIVE,
+      emailVerifiedAt: seededEmailVerifiedAt,
     },
   });
   console.log('✅ Licensee Admin A created:', licenseeAdminA.email);
 
   const licenseeAdminB = await prisma.user.upsert({
     where: { email: 'admin@beta.com' },
-    update: { licenseeId: licenseeB.id, orgId: licenseeB.orgId, status: UserStatus.ACTIVE, isActive: true },
+    update: { licenseeId: licenseeB.id, orgId: licenseeB.orgId, status: UserStatus.ACTIVE, isActive: true, emailVerifiedAt: seededEmailVerifiedAt },
     create: {
       email: 'admin@beta.com',
       passwordHash: licenseeAdminPassword,
@@ -101,6 +104,7 @@ async function main() {
       licenseeId: licenseeB.id,
       orgId: licenseeB.orgId,
       status: UserStatus.ACTIVE,
+      emailVerifiedAt: seededEmailVerifiedAt,
     },
   });
   console.log('✅ Licensee Admin B created:', licenseeAdminB.email);
@@ -112,7 +116,7 @@ async function main() {
 
   const manufacturerA1 = await prisma.user.upsert({
     where: { email: 'factory1@acme.com' },
-    update: { licenseeId: licenseeA.id, orgId: licenseeA.orgId, status: UserStatus.ACTIVE, isActive: true },
+    update: { licenseeId: licenseeA.id, orgId: licenseeA.orgId, status: UserStatus.ACTIVE, isActive: true, emailVerifiedAt: seededEmailVerifiedAt },
     create: {
       email: 'factory1@acme.com',
       passwordHash: manufacturerPassword,
@@ -121,13 +125,14 @@ async function main() {
       licenseeId: licenseeA.id,
       orgId: licenseeA.orgId,
       status: UserStatus.ACTIVE,
+      emailVerifiedAt: seededEmailVerifiedAt,
     },
   });
   console.log('✅ Manufacturer A1 created:', manufacturerA1.email);
 
   const manufacturerA2 = await prisma.user.upsert({
     where: { email: 'factory2@acme.com' },
-    update: { licenseeId: licenseeA.id, orgId: licenseeA.orgId, status: UserStatus.ACTIVE, isActive: true },
+    update: { licenseeId: licenseeA.id, orgId: licenseeA.orgId, status: UserStatus.ACTIVE, isActive: true, emailVerifiedAt: seededEmailVerifiedAt },
     create: {
       email: 'factory2@acme.com',
       passwordHash: manufacturerPassword,
@@ -136,6 +141,7 @@ async function main() {
       licenseeId: licenseeA.id,
       orgId: licenseeA.orgId,
       status: UserStatus.ACTIVE,
+      emailVerifiedAt: seededEmailVerifiedAt,
     },
   });
   console.log('✅ Manufacturer A2 created:', manufacturerA2.email);

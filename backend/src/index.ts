@@ -35,6 +35,7 @@ import {
   hasManagedQrSignerRefs,
   isManagedQrSignerRequested,
 } from "./services/qrTokenService";
+import { bootstrapConfiguredSuperAdmin } from "./services/auth/superAdminBootstrapService";
 
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -519,63 +520,75 @@ app.use((_req, res) => {
   res.status(404).json({ success: false, error: "Endpoint not found" });
 });
 
-const server = app.listen(PORT, () => {
-  let qrSigningProfile: ReturnType<typeof getQrSigningProfile> | null = null;
-  try {
-    qrSigningProfile = getQrSigningProfile();
-  } catch (error) {
-    logger.warn("QR signing profile unavailable at startup", { error: (error as Error)?.message || error });
-  }
-  logger.info("Release metadata loaded", {
-    environment: releaseMetadata.environment,
-    release: releaseMetadata.release,
-    gitSha: releaseMetadata.shortGitSha,
-  });
-  if (qrSigningProfile) {
-    logger.info("QR signing profile ready", {
-      mode: qrSigningProfile.mode,
-      provider: qrSigningProfile.provider,
-      keyVersion: qrSigningProfile.keyVersion,
-      keyRef: qrSigningProfile.keyRef,
-      legacyHmacFallback: Boolean(qrSigningProfile.legacyHmacFallback),
-      managedSigningRequested: managedQrSigningRequested,
-      managedSigningBridgeRegistered: managedQrSigningBridgeRegistered,
-      kmsKeyRefConfigured: managedQrSigningRefsConfigured,
-    });
-  }
-  logger.info(`🚀 Server running on http://localhost:${PORT}`);
-  logger.info(`📚 API available at http://localhost:${PORT}/api`);
-  logger.info(`🔍 Health check at http://localhost:${PORT}/health`);
-  logger.info(`⏱️ Latency summary at http://localhost:${PORT}/health/latency`);
-  if (runBackgroundWorkers) {
-    startAuditLogOutboxWorker();
-    startSecurityEventOutboxWorker();
-    startCompliancePackScheduler();
-    void resumePendingNetworkDirectJobs().catch((error) => {
-      logger.error("Failed to resume pending network-direct jobs", { error: error?.message || error });
-    });
-    void resumePendingNetworkIppJobs().catch((error) => {
-      logger.error("Failed to resume pending network IPP jobs", { error: error?.message || error });
-    });
-    stopPrintConfirmationReconcilerWorker = startPrintConfirmationReconciler();
-    stopAnalyticsRollupWorker = startAnalyticsRollupWorker();
-  } else {
-    logger.info("Background workers disabled for this HTTP process");
-  }
-});
-
-server.on("error", (err: NodeJS.ErrnoException) => {
-  if (err.code === "EADDRINUSE") {
-    logger.error(`Port ${PORT} is already in use. Stop the existing process or set a different PORT in backend/.env.`);
-    process.exit(1);
-  }
-  logger.error("Server failed to start", { error: err?.message || err });
-  process.exit(1);
-});
-
+let server: ReturnType<typeof app.listen> | null = null;
 let shuttingDown = false;
 let stopPrintConfirmationReconcilerWorker: (() => void) | null = null;
 let stopAnalyticsRollupWorker: (() => void) | null = null;
+
+const startServer = async () => {
+  const bootstrapResult = await bootstrapConfiguredSuperAdmin();
+  if (bootstrapResult.status === "blocked") {
+    logger.error("Refusing to start because super admin bootstrap is enabled but not safe to run", {
+      reason: bootstrapResult.reason,
+    });
+    process.exit(1);
+  }
+
+  server = app.listen(PORT, () => {
+    let qrSigningProfile: ReturnType<typeof getQrSigningProfile> | null = null;
+    try {
+      qrSigningProfile = getQrSigningProfile();
+    } catch (error) {
+      logger.warn("QR signing profile unavailable at startup", { error: (error as Error)?.message || error });
+    }
+    logger.info("Release metadata loaded", {
+      environment: releaseMetadata.environment,
+      release: releaseMetadata.release,
+      gitSha: releaseMetadata.shortGitSha,
+    });
+    if (qrSigningProfile) {
+      logger.info("QR signing profile ready", {
+        mode: qrSigningProfile.mode,
+        provider: qrSigningProfile.provider,
+        keyVersion: qrSigningProfile.keyVersion,
+        keyRef: qrSigningProfile.keyRef,
+        legacyHmacFallback: Boolean(qrSigningProfile.legacyHmacFallback),
+        managedSigningRequested: managedQrSigningRequested,
+        managedSigningBridgeRegistered: managedQrSigningBridgeRegistered,
+        kmsKeyRefConfigured: managedQrSigningRefsConfigured,
+      });
+    }
+    logger.info(`🚀 Server running on http://localhost:${PORT}`);
+    logger.info(`📚 API available at http://localhost:${PORT}/api`);
+    logger.info(`🔍 Health check at http://localhost:${PORT}/health`);
+    logger.info(`⏱️ Latency summary at http://localhost:${PORT}/health/latency`);
+    if (runBackgroundWorkers) {
+      startAuditLogOutboxWorker();
+      startSecurityEventOutboxWorker();
+      startCompliancePackScheduler();
+      void resumePendingNetworkDirectJobs().catch((error) => {
+        logger.error("Failed to resume pending network-direct jobs", { error: error?.message || error });
+      });
+      void resumePendingNetworkIppJobs().catch((error) => {
+        logger.error("Failed to resume pending network IPP jobs", { error: error?.message || error });
+      });
+      stopPrintConfirmationReconcilerWorker = startPrintConfirmationReconciler();
+      stopAnalyticsRollupWorker = startAnalyticsRollupWorker();
+    } else {
+      logger.info("Background workers disabled for this HTTP process");
+    }
+  });
+
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      logger.error(`Port ${PORT} is already in use. Stop the existing process or set a different PORT in backend/.env.`);
+      process.exit(1);
+    }
+    logger.error("Server failed to start", { error: err?.message || err });
+    process.exit(1);
+  });
+};
+
 const shutdown = async (signal: string) => {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -589,12 +602,14 @@ const shutdown = async (signal: string) => {
   forceExit.unref?.();
 
   try {
-    await new Promise<void>((resolve, reject) => {
-      server.close((err) => (err ? reject(err) : resolve()));
-    });
-  stopSecurityEventOutboxWorker();
-  stopAuditLogOutboxWorker();
-  stopCompliancePackScheduler();
+    if (server) {
+      await new Promise<void>((resolve, reject) => {
+        server!.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+    stopSecurityEventOutboxWorker();
+    stopAuditLogOutboxWorker();
+    stopCompliancePackScheduler();
     stopPrintConfirmationReconcilerWorker?.();
     stopPrintConfirmationReconcilerWorker = null;
     stopAnalyticsRollupWorker?.();
@@ -628,4 +643,10 @@ process.on("uncaughtException", (error) => {
   captureBackendException(error);
   logger.error("Uncaught exception", { error: error?.message || String(error) });
   void shutdown("uncaughtException");
+});
+
+void startServer().catch((error) => {
+  captureBackendException(error);
+  logger.error("Server startup failed", { error: error?.message || String(error) });
+  process.exit(1);
 });
