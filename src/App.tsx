@@ -13,6 +13,7 @@ import HelpAssistantWidget from "@/components/help/HelpAssistantWidget";
 import { CookieConsentBanner } from "@/components/trust/CookieConsentBanner";
 import { getRoleHelpHome } from "@/help/contextual-help";
 import RouteMetricsTracker from "@/components/RouteMetricsTracker";
+import { SeoController } from "@/components/seo/SeoController";
 import { MutationEventBridge, queryClient } from "@/lib/query-client";
 
 const Login = lazy(() => import("@/pages/Login"));
@@ -43,6 +44,23 @@ const TrustCenter = lazy(() => import("@/pages/TrustCenter"));
 const PrivacyPolicy = lazy(() => import("@/pages/PrivacyPolicy"));
 const TermsOfUse = lazy(() => import("@/pages/TermsOfUse"));
 const CookieNotice = lazy(() => import("@/pages/CookieNotice"));
+const PlatformPage = lazy(() => import("@/pages/PublicMarketing").then((module) => ({ default: module.PlatformPage })));
+const ManufacturersMarketingPage = lazy(() =>
+  import("@/pages/PublicMarketing").then((module) => ({ default: module.ManufacturersPage })),
+);
+const LicenseesMarketingPage = lazy(() =>
+  import("@/pages/PublicMarketing").then((module) => ({ default: module.LicenseesPage })),
+);
+const IndustriesPage = lazy(() => import("@/pages/PublicMarketing").then((module) => ({ default: module.IndustriesPage })));
+const IndustrialComponentsPage = lazy(() =>
+  import("@/pages/PublicMarketing").then((module) => ({ default: module.IndustrialComponentsPage })),
+);
+const SparePartsPage = lazy(() => import("@/pages/PublicMarketing").then((module) => ({ default: module.SparePartsPage })));
+const RegulatedSupplyChainsPage = lazy(() =>
+  import("@/pages/PublicMarketing").then((module) => ({ default: module.RegulatedSupplyChainsPage })),
+);
+const RequestAccessPage = lazy(() => import("@/pages/PublicMarketing").then((module) => ({ default: module.RequestAccessPage })));
+const BlogPage = lazy(() => import("@/pages/PublicMarketing").then((module) => ({ default: module.BlogPage })));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 const SettingsPage = lazy(() => import("@/pages/Settings"));
 const AccountSettings = lazy(() => import("@/pages/AccountSettings"));
@@ -156,6 +174,16 @@ function AppRoutes() {
         <Route path="/privacy" element={<PrivacyPolicy />} />
         <Route path="/terms" element={<TermsOfUse />} />
         <Route path="/cookies" element={<CookieNotice />} />
+        <Route path="/platform" element={<PlatformPage />} />
+        <Route path="/solutions/manufacturers" element={<ManufacturersMarketingPage />} />
+        <Route path="/solutions/licensees" element={<LicenseesMarketingPage />} />
+        <Route path="/industries" element={<IndustriesPage />} />
+        <Route path="/industries/industrial-components" element={<IndustrialComponentsPage />} />
+        <Route path="/industries/spare-parts" element={<SparePartsPage />} />
+        <Route path="/industries/regulated-supply-chains" element={<RegulatedSupplyChainsPage />} />
+        <Route path="/request-access" element={<RequestAccessPage />} />
+        <Route path="/blog" element={<BlogPage />} />
+        <Route path="/verify/" element={<Navigate to="/verify" replace />} />
         <Route path="/verify" element={<VerifyLanding />} />
         <Route path="/verify/:code" element={<Verify />} />
         <Route path="/scan" element={<Verify />} />
@@ -536,6 +564,7 @@ export default function App() {
               v7_relativeSplatPath: true,
             }}
           >
+            <SeoController />
             <AppRoutes />
             <RouteMetricsTracker />
             <HelpAssistantWidget />

@@ -8,11 +8,14 @@ type LegalFooterProps = {
 };
 
 const footerLinks = [
+  { href: "/platform", label: "Platform" },
+  { href: "/solutions/manufacturers", label: "Manufacturers" },
+  { href: "/industries", label: "Industries" },
   { href: "/privacy", label: "Privacy" },
   { href: "/terms", label: "Terms" },
   { href: "/cookies", label: "Cookies" },
   { href: "/trust", label: "Trust" },
-  { href: "/help/support", label: "Support" },
+  { href: "/request-access", label: "Request access" },
 ] as const;
 
 export function LegalFooter({ tone = "light", className }: LegalFooterProps) {
@@ -29,7 +32,7 @@ export function LegalFooter({ tone = "light", className }: LegalFooterProps) {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-6 text-sm md:flex-row md:items-center md:justify-between">
         <div className="max-w-2xl leading-6">
           MSCQR uses cookies and similar technologies for secure sign-in, verification continuity, support diagnostics,
-          and product operation. Final public legal text remains subject to lawyer review before launch.
+          and product operation. Legal and policy wording should be reviewed by MSCQR administration before commercial use.
         </div>
 
         <div className="flex flex-wrap items-center gap-4">

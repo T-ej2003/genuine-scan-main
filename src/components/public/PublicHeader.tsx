@@ -5,11 +5,11 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const publicNavItems = [
-  { href: "/#how-it-works", label: "How it works" },
-  { href: "/#security", label: "Security" },
-  { href: "/#operations", label: "Operations" },
+  { href: "/platform", label: "Platform" },
+  { href: "/solutions/manufacturers", label: "Manufacturers" },
+  { href: "/industries", label: "Industries" },
   { href: "/trust", label: "Trust" },
-  { href: "/help/support", label: "Support" },
+  { href: "/blog", label: "Insights" },
 ] as const;
 
 type PublicHeaderProps = {
@@ -54,7 +54,7 @@ export function PublicHeader({ className }: PublicHeaderProps) {
               variant="outline"
               className="border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]"
             >
-              <Link to="/login" aria-label="Open platform access">
+              <Link to="/request-access" aria-label="Request MSCQR access">
                 <LockKeyhole data-icon="inline-start" />
                 Access
               </Link>
@@ -64,13 +64,13 @@ export function PublicHeader({ className }: PublicHeaderProps) {
 
         <nav className="flex items-center gap-1 overflow-x-auto pb-1 lg:justify-center lg:overflow-visible lg:pb-0">
           {publicNavItems.map((item) => (
-            <a
+            <Link
               key={item.href}
-              href={item.href}
+              to={item.href}
               className="shrink-0 rounded-full px-3 py-2 text-sm text-slate-400 transition-colors duration-200 hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#070b10]"
             >
               {item.label}
-            </a>
+            </Link>
           ))}
         </nav>
 
@@ -86,9 +86,9 @@ export function PublicHeader({ className }: PublicHeaderProps) {
             variant="outline"
             className="border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]"
           >
-            <Link to="/login">
+            <Link to="/request-access">
               <LockKeyhole data-icon="inline-start" />
-              Platform access
+              Request access
             </Link>
           </Button>
         </div>
