@@ -632,11 +632,17 @@ export const renderMarkdownReport = (report) => {
     lines.push("| Status | Check | Finding | Remediation |");
     lines.push("| --- | --- | --- | --- |");
 
-    for (const item of region.findings) {
-      lines.push(
-        `| ${item.status} | \`${item.check}\` | ${String(item.message).replace(/\|/g, "\\|")} | ${String(item.remediation).replace(/\|/g, "\\|")} |`
-      );
-    }
+  const escapeMarkdownTableCell = (value) =>
+      String(value ?? "")
+        .replace(/\\/g, "\\\\")
+        .replace(/\|/g, "\\|")
+        .replace(/\r?\n/g, " ");
+
+  for (const item of region.findings) {
+    lines.push(
+      `| ${escapeMarkdownTableCell(item.status)} | \`${escapeMarkdownTableCell(item.check)}\` | ${escapeMarkdownTableCell(item.message)} | ${escapeMarkdownTableCell(item.remediation)} |`
+    );
+  } 
 
     lines.push("");
   }
