@@ -157,7 +157,7 @@ function HeroSection() {
         <div className="relative z-10 max-w-3xl">
           <SectionEyebrow icon={Fingerprint}>Manufacturer-led authentication operations</SectionEyebrow>
           <h1 className="mt-7 text-balance text-5xl font-semibold leading-[0.98] tracking-[-0.055em] text-white sm:text-6xl lg:text-7xl">
-            Issue, print, verify, and audit every product label from one governed system.
+            Manufacturer-Led Product Authentication Infrastructure
           </h1>
           <p className="mt-6 max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">
             MSCQR connects issued labels, controlled printing, public verification, duplicate review, and audit evidence
@@ -261,7 +261,7 @@ function HeroVerificationPanel() {
                     <p className="mt-1 text-sm font-medium text-cyan-100">Print confirmed</p>
                   </div>
                   <div className="h-px bg-white/10" />
-                  <p className="font-mono text-[11px] leading-5 text-slate-500">audit ref: 9f2a.71c8.b2049</p>
+                  <p className="font-mono text-[11px] leading-5 text-slate-500">Reference ID: MSCQR-B2049</p>
                 </div>
               </div>
             </div>

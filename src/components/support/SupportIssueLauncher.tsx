@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Bug, Camera, Loader2, SendHorizontal } from "lucide-react";
 
 import { useAuth } from "@/contexts/AuthContext";
@@ -114,8 +114,8 @@ export function SupportIssueLauncher() {
     return () => URL.revokeObjectURL(nextUrl);
   }, [screenshotFile]);
 
-  const networkLogCount = useMemo(() => getSupportNetworkLogs().length, [open, submitting]);
-  const runtimeIssueCount = useMemo(() => getSupportRuntimeIssues().length, [open, submitting]);
+  const networkLogCount = getSupportNetworkLogs().length;
+  const runtimeIssueCount = getSupportRuntimeIssues().length;
 
   if (!isEligible) return null;
 
@@ -171,7 +171,7 @@ export function SupportIssueLauncher() {
 
       toast({
         title: "Report sent to super admin",
-        description: "Thanks. We included diagnostics to speed up debugging.",
+        description: "Thanks. We included diagnostics to speed up troubleshooting.",
       });
       setOpen(false);
       resetDialog();
@@ -259,7 +259,7 @@ export function SupportIssueLauncher() {
 
               <div className="flex items-center justify-between gap-3">
                 <div className="text-xs text-muted-foreground">
-                  Screenshot capture, runtime diagnostics, and recent network logs are included to speed up debugging.
+                  Screenshot capture, runtime diagnostics, and recent network logs are included to speed up troubleshooting.
                 </div>
                 <Button
                   type="button"

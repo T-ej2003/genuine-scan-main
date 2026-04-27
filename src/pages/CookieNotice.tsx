@@ -5,7 +5,7 @@ export default function CookieNotice() {
     <LegalDocumentLayout
       title="Cookie Notice"
       updatedAt="14 Apr 2026"
-      summary="This draft notice reflects MSCQR's current implementation of cookies and similar storage technologies, including operator auth, public verification continuity, help drafts, and printer workflow state."
+      summary="This notice describes MSCQR's use of cookies and similar storage technologies, including operator auth, public verification continuity, help drafts, and printer workflow state."
     >
       <h2>1. What MSCQR currently uses</h2>
       <p>Current implementation evidence shows that MSCQR uses:</p>
@@ -33,24 +33,22 @@ export default function CookieNotice() {
         <li>Operational diagnostics and support-related storage.</li>
       </ul>
 
-      <h2>4. Consent implementation status</h2>
+      <h2>4. Consent and configuration</h2>
       <p>
-        MSCQR now includes feature-flagged consent UI plumbing for launch preparation. It remains disabled by default
-        until legal review confirms the final live consent requirement for the deployed runtime stack and operating
-        geography.
+        Cookie consent requirements depend on the deployed runtime stack, operating geography, and active platform
+        configuration. MSCQR administration should keep consent UI and policy wording aligned with the live deployment.
       </p>
 
-      <h2>5. Runtime verification still required</h2>
+      <h2>5. Runtime verification</h2>
       <p>
-        Final production proof still depends on browser-level inspection because proxies, CDNs, or hosting layers can
-        introduce cookies not visible in source code alone. The launch audit manual verification tracker contains the
-        exact evidence collection steps.
+        Runtime verification should include browser-level inspection because proxies, CDNs, or hosting layers can
+        introduce cookies not visible in source code alone.
       </p>
 
-      <h2>6. Final legal completion still required</h2>
+      <h2>6. Updates</h2>
       <p>
-        Exact classification, final retention wording, consent rules, and user-choice language require lawyer approval
-        before this notice is treated as final public policy text.
+        MSCQR may update this notice as storage categories, retention wording, consent rules, and user-choice language
+        evolve.
       </p>
     </LegalDocumentLayout>
   );

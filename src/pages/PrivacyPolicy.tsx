@@ -5,13 +5,13 @@ export default function PrivacyPolicy() {
     <LegalDocumentLayout
       title="Privacy Notice"
       updatedAt="14 Apr 2026"
-      summary="This draft notice reflects MSCQR's current implementation: operator authentication, customer verification sessions, support diagnostics, optional observability, and AWS-hosted service delivery."
+      summary="This notice describes MSCQR's current handling of operator authentication, customer verification sessions, support diagnostics, optional observability, and AWS-hosted service delivery."
     >
-      <h2>1. What this draft covers</h2>
+      <h2>1. What this notice covers</h2>
       <p>
         MSCQR is a production web platform used by super admins, licensee admins, manufacturers, and public customers
-        or consumers verifying products. This draft summarizes the categories of data the product currently handles so
-        legal counsel can finalize the public notice.
+        or consumers verifying products. This notice summarizes the categories of data the product currently handles so
+        MSCQR administration can maintain the public notice.
       </p>
 
       <h2>2. Data MSCQR currently processes</h2>
@@ -49,9 +49,9 @@ export default function PrivacyPolicy() {
 
       <h2>6. Retention and deletion</h2>
       <p>
-        Retention and deletion handling is still being finalized for launch. Engineering implementation notes and the
-        audit artifacts currently track that work. This section must be completed with final retention periods and
-        deletion rules before public launch.
+        Retention and deletion handling depends on account, verification, support, and operational record type. MSCQR
+        administration should keep retention periods and deletion rules aligned with active customer agreements and legal
+        requirements.
       </p>
 
       <h2>7. Support and incident evidence</h2>
@@ -63,8 +63,8 @@ export default function PrivacyPolicy() {
 
       <h2>8. Contact and legal completion</h2>
       <p>
-        Final privacy-contact details, legal bases, rights handling, retention periods, and subprocessor tables must be
-        completed by counsel before this page is treated as final public policy text.
+        For privacy questions or requests, contact MSCQR administration. Legal bases, rights handling, retention periods,
+        and subprocessor disclosures should be reviewed periodically as the platform and operating regions evolve.
       </p>
     </LegalDocumentLayout>
   );

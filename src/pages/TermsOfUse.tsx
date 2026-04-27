@@ -5,13 +5,12 @@ export default function TermsOfUse() {
     <LegalDocumentLayout
       title="Terms of Use"
       updatedAt="14 Apr 2026"
-      summary="This draft terms page is a launch placeholder that reflects MSCQR's current product behavior and role model. It must be finalized by legal counsel before public launch."
+      summary="These terms describe MSCQR's product behavior, role model, and responsible-use expectations for product authentication workflows."
     >
-      <h2>1. Who these draft terms are for</h2>
+      <h2>1. Who these terms are for</h2>
       <p>
         MSCQR is used by internal platform administrators, licensee administrators, manufacturers, and public users who
-        verify products. These draft terms exist to establish the product surface now while the final contract language
-        is under legal review.
+        verify products. Customer-specific commercial terms may add further rights and responsibilities.
       </p>
 
       <h2>2. Intended use of MSCQR</h2>
@@ -38,9 +37,9 @@ export default function TermsOfUse() {
 
       <h2>5. Connector and local install terms</h2>
       <p>
-        MSCQR distributes a local print connector for manufacturer-side workflows. Windows code signing and macOS
-        signing or notarization remain launch requirements for customer-facing distribution. Unsigned test packages are
-        for internal validation only and should not be presented as trusted customer installers.
+        MSCQR distributes a local print connector for manufacturer-side workflows where authorized by an organization.
+        Users should install only the connector package provided through approved MSCQR channels and follow the setup
+        guidance for their printing environment.
       </p>
 
       <h2>6. Support and incident handling</h2>
@@ -57,10 +56,10 @@ export default function TermsOfUse() {
         <li>Do not attempt to bypass rate limits, permission controls, or auditing controls.</li>
       </ul>
 
-      <h2>8. Final legal completion still required</h2>
+      <h2>8. Updates and commercial agreements</h2>
       <p>
-        Governing law, liability caps, termination rights, commercial terms, acceptable-use language, and dispute
-        handling must be finalized by counsel before public launch.
+        Governing law, liability, termination, commercial terms, acceptable-use language, and dispute handling may be
+        further defined in signed agreements between MSCQR and the relevant organization.
       </p>
     </LegalDocumentLayout>
   );
