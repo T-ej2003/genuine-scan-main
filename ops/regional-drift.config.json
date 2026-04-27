@@ -1,0 +1,136 @@
+{
+  "generatedFor": "MSCQR regional operations hardening",
+  "reportTitle": "MSCQR Regional Drift Audit",
+  "snapshotFreshnessHours": 168,
+  "regions": [
+    {
+      "id": "london",
+      "label": "London",
+      "role": "active",
+      "awsRegion": "eu-west-2",
+      "health": {
+        "readyUrl": "https://www.mscqr.com/api/health/ready"
+      },
+      "objectStorage": {
+        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
+        "region": "eu-west-2",
+        "endpoint": null,
+        "mode": "default-credentials"
+      },
+      "runtime": {
+        "awsRegion": "eu-west-2",
+        "repoPath": "~/genuine-scan-main",
+        "sshUser": "ubuntu"
+      },
+      "database": {
+        "instanceIdentifier": "mscqr-prod-db",
+        "endpointRegionToken": "eu-west-2"
+      },
+      "ec2": {
+        "instanceId": "i-024ec40bcbdb30035",
+        "name": "mscqr-prod_london"
+      },
+      "alarms": [
+        "mscqr-ec2-cpu-high",
+        "mscqr-ec2-status-check-failed",
+        "mscqr-rds-cpu-high",
+        "mscqr-rds-db-connections-high",
+        "mscqr-rds-free-storage-low"
+      ],
+      "snapshots": {
+        "dbInstanceIdentifier": "mscqr-prod-db",
+        "manualSnapshotPrefix": "mscqr-prod-db-"
+      },
+      "environment": {
+        "superAdminBootstrapEnabled": false,
+        "minioSteadyState": "rollback-residue-only"
+      }
+    },
+    {
+      "id": "mumbai",
+      "label": "Mumbai",
+      "role": "warm-standby",
+      "awsRegion": "ap-south-1",
+      "health": {
+        "readyUrl": "http://15.206.45.108/api/health/ready"
+      },
+      "objectStorage": {
+        "bucket": "mscqr-prod-aps1-artifacts-368992683803-ap-south-1",
+        "region": "ap-south-1",
+        "endpoint": null,
+        "mode": "default-credentials"
+      },
+      "runtime": {
+        "awsRegion": "ap-south-1",
+        "repoPath": "~/genuine-scan-main",
+        "sshUser": "ubuntu"
+      },
+      "database": {
+        "instanceIdentifier": "mscqr-prod-db-aps1",
+        "endpointRegionToken": "ap-south-1"
+      },
+      "ec2": {
+        "instanceId": "i-04ae3b689ab72a68a",
+        "name": "mscqr-prod-mumbai"
+      },
+      "alarms": [
+        "mscqr-mumbai-ec2-cpu-high",
+        "mscqr-mumbai-ec2-status-check-failed",
+        "mscqr-mumbai-rds-cpu-high",
+        "mscqr-mumbai-rds-db-connections-high",
+        "mscqr-mumbai-rds-free-storage-low"
+      ],
+      "snapshots": {
+        "dbInstanceIdentifier": "mscqr-prod-db-aps1",
+        "manualSnapshotPrefix": "mscqr-prod-db-aps1-"
+      },
+      "environment": {
+        "superAdminBootstrapEnabled": false,
+        "minioSteadyState": "rollback-residue-only"
+      }
+    },
+    {
+      "id": "capetown",
+      "label": "Cape Town",
+      "role": "warm-standby",
+      "awsRegion": "af-south-1",
+      "health": {
+        "readyUrl": "http://15.240.28.113/api/health/ready"
+      },
+      "objectStorage": {
+        "bucket": "mscqr-prod-afs1-artifacts-368992683803-af-south-1",
+        "region": "af-south-1",
+        "endpoint": null,
+        "mode": "default-credentials"
+      },
+      "runtime": {
+        "awsRegion": "af-south-1",
+        "repoPath": "~/genuine-scan-main",
+        "sshUser": "ubuntu"
+      },
+      "database": {
+        "instanceIdentifier": "mscqr-prod-db-afs1",
+        "endpointRegionToken": "af-south-1"
+      },
+      "ec2": {
+        "instanceId": "i-064223a25caf64770",
+        "name": "mscqr-prod-capetown"
+      },
+      "alarms": [
+        "mscqr-capetown-ec2-cpu-high",
+        "mscqr-capetown-ec2-status-check-failed",
+        "mscqr-capetown-rds-cpu-high",
+        "mscqr-capetown-rds-db-connections-high",
+        "mscqr-capetown-rds-free-storage-low"
+      ],
+      "snapshots": {
+        "dbInstanceIdentifier": "mscqr-prod-db-afs1",
+        "manualSnapshotPrefix": "mscqr-prod-db-afs1-"
+      },
+      "environment": {
+        "superAdminBootstrapEnabled": false,
+        "minioSteadyState": "rollback-residue-only"
+      }
+    }
+  ]
+}
