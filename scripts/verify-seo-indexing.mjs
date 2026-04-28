@@ -147,6 +147,12 @@ const requiredRobotsDisallows = [
   "/incidents",
 ];
 
+const requiredRobotsAllows = ["/verify", "/verify/"];
+
+for (const allow of requiredRobotsAllows) {
+  if (!robotsAllowRules.includes(allow)) failures.push(`robots.txt must include Allow: ${allow}.`);
+}
+
 for (const disallow of requiredRobotsDisallows) {
   if (!robotsDisallowRules.includes(disallow)) failures.push(`robots.txt must include Disallow: ${disallow}.`);
 }

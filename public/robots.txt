@@ -1,5 +1,7 @@
 User-agent: *
 Allow: /
+Allow: /verify
+Allow: /verify/
 
 Disallow: /api
 Disallow: /login
