@@ -8,7 +8,6 @@ import {
   FileCheck2,
   Fingerprint,
   Layers3,
-  LockKeyhole,
   PackageCheck,
   QrCode,
   ScanLine,
@@ -27,7 +26,7 @@ import { PublicShell } from "@/components/public/PublicShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-const CONTACT_EMAIL = "administration@mscqr.com";
+
 type Icon = ElementType;
 const lifecycleSteps = [
   {
@@ -89,8 +88,8 @@ const roleOperations = [
   {
     icon: Factory,
     audience: "Manufacturers",
-    summary: "Control the label lifecycle around real production batches.",
-    items: ["Issue and manage labels", "Control print readiness", "Connect verification to production batches"],
+    summary: "Control product authentication around real production batches and label workflows.",
+    items: ["Govern QR/code issuance", "Control print readiness", "Connect verification to production batches"],
   },
   {
     icon: Users,
@@ -155,20 +154,20 @@ function HeroSection() {
       <BackgroundGrid />
       <div className="mx-auto grid min-h-[calc(100svh-145px)] w-full max-w-7xl gap-12 px-4 py-16 lg:min-h-[calc(100svh-81px)] lg:grid-cols-[0.95fr_1.05fr] lg:items-center lg:py-20">
         <div className="relative z-10 max-w-3xl">
-          <SectionEyebrow icon={Fingerprint}>Manufacturer-led authentication operations</SectionEyebrow>
+          <SectionEyebrow icon={Fingerprint}>Product authentication for manufacturers</SectionEyebrow>
           <h1 className="mt-7 text-balance text-5xl font-semibold leading-[0.98] tracking-[-0.055em] text-white sm:text-6xl lg:text-7xl">
             Manufacturer-Led Product Authentication Infrastructure
           </h1>
           <p className="mt-6 max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">
-            MSCQR connects issued labels, controlled printing, public verification, duplicate review, and audit evidence
-            into one operational platform for product authentication workflows.
+            MSCQR helps manufacturers govern QR/code issuance, controlled product labeling, public verification,
+            duplicate and anomaly review, support escalation, and audit evidence across high-trust product workflows.
           </p>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
             <Button asChild size="lg" className="bg-none bg-cyan-200 text-slate-950 hover:bg-cyan-100">
-              <Link to="/verify">
-                <ScanLine data-icon="inline-start" />
-                Verify a product
+              <Link to="/request-access">
+                Request access
+                <ArrowRight data-icon="inline-end" />
               </Link>
             </Button>
             <Button
@@ -177,9 +176,9 @@ function HeroSection() {
               variant="outline"
               className="border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]"
             >
-              <Link to="/login">
-                <LockKeyhole data-icon="inline-start" />
-                Platform access
+              <Link to="/solutions/manufacturers">
+                Explore manufacturer workflows
+                <ArrowRight data-icon="inline-end" />
               </Link>
             </Button>
             <Button
@@ -188,17 +187,17 @@ function HeroSection() {
               variant="ghost"
               className="bg-transparent text-slate-300 hover:bg-white/[0.06] hover:text-white"
             >
-              <Link to="/trust">
-                View trust model
+              <Link to="/platform">
+                Review platform controls
                 <ArrowRight data-icon="inline-end" />
               </Link>
             </Button>
           </div>
 
           <div className="mt-10 grid max-w-3xl gap-3 sm:grid-cols-3">
-            <Signal label="Registry" value="Issued label state" />
-            <Signal label="Print" value="Confirmed before readiness" />
-            <Signal label="Review" value="Duplicate behavior visible" />
+            <Signal label="Issuance" value="Governed QR/code records" />
+            <Signal label="Printing" value="Controlled label readiness" />
+            <Signal label="Review" value="Duplicate and anomaly evidence" />
           </div>
         </div>
 
@@ -477,6 +476,7 @@ function CapabilityMatrix() {
             </div>
           ))}
         </div>
+
       </div>
     </section>
   );
@@ -489,6 +489,10 @@ function RoleOperations() {
         <div className="max-w-3xl">
           <SectionEyebrow icon={Factory}>Role-based operations</SectionEyebrow>
           <SectionHeading>Built for manufacturer control with room for licensees, operators, and consumers.</SectionHeading>
+          <p className="mt-5 text-sm leading-7 text-slate-400">
+            MSCQR is positioned for careful UK, India, and global product authentication rollouts where evidence quality
+            matters more than generic QR campaign volume.
+          </p>
         </div>
 
         <div className="mt-12 grid gap-5 lg:grid-cols-4">
@@ -553,10 +557,10 @@ function TrustModel() {
               variant="outline"
               className="border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]"
             >
-              <a href={`mailto:${CONTACT_EMAIL}?subject=MSCQR%20access%20request`}>
+              <Link to="/request-access">
                 Request access
                 <ArrowRight data-icon="inline-end" />
-              </a>
+              </Link>
             </Button>
           </div>
         </div>
@@ -647,9 +651,9 @@ function FinalCTA() {
         </p>
         <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
           <Button asChild size="lg" className="bg-none bg-cyan-200 text-slate-950 hover:bg-cyan-100">
-            <Link to="/verify">
-              <ScanLine data-icon="inline-start" />
-              Verify a product
+            <Link to="/request-access">
+              Request access
+              <ArrowRight data-icon="inline-end" />
             </Link>
           </Button>
           <Button
@@ -658,9 +662,9 @@ function FinalCTA() {
             variant="outline"
             className="border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]"
           >
-            <Link to="/login">
-              <LockKeyhole data-icon="inline-start" />
-              Platform access
+            <Link to="/verify">
+              <ScanLine data-icon="inline-start" />
+              Verify a product
             </Link>
           </Button>
           <Button
@@ -669,9 +673,7 @@ function FinalCTA() {
             variant="ghost"
             className="bg-transparent text-slate-300 hover:bg-white/[0.06] hover:text-white"
           >
-            <a href={`mailto:${CONTACT_EMAIL}?subject=MSCQR%20administration%20contact`}>
-              Contact administration
-            </a>
+            <Link to="/solutions/manufacturers">Explore manufacturer workflows</Link>
           </Button>
         </div>
       </div>

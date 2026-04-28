@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Camera, Keyboard, Loader2, QrCode, ScanLine, ShieldCheck } from "lucide-react";
@@ -174,7 +174,7 @@ export default function VerifyLanding() {
             </h1>
             <p className="mt-6 max-w-2xl text-base leading-8 text-slate-300">
               Scan a signed MSCQR label or enter the printed code manually. The result is checked against governed
-              issuance, print state, scan history, and review policy.
+              issuance, print state, scan history, and review policy without exposing private operator workflows.
             </p>
             <div className="mt-8 grid gap-3 sm:grid-cols-3">
               <VerificationPromise icon={ShieldCheck} label="Lifecycle checked" />
@@ -295,6 +295,14 @@ export default function VerifyLanding() {
                       <span className="size-2 rounded-full bg-amber-300" />
                       Duplicate or risky behavior can be escalated for review.
                     </div>
+                  </div>
+                  <div className="mt-5 flex flex-wrap gap-3 border-t border-white/10 pt-4 text-sm">
+                    <Link to="/trust" className="font-medium text-cyan-200 hover:text-cyan-100 hover:underline">
+                      Review MSCQR trust posture
+                    </Link>
+                    <Link to="/help" className="font-medium text-cyan-200 hover:text-cyan-100 hover:underline">
+                      Open verification help
+                    </Link>
                   </div>
                 </div>
               </div>

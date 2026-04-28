@@ -41,7 +41,7 @@ type PageShellProps = {
 const platformFeatures: Feature[] = [
   {
     title: "Governed QR issuance",
-    body: "Create and allocate code inventory through role-aware workflows before labels reach production.",
+    body: "Create and allocate QR/code inventory through role-aware workflows before labels reach production.",
     icon: QrCode,
   },
   {
@@ -61,10 +61,41 @@ const platformFeatures: Feature[] = [
   },
 ];
 
+const platformWorkflow = [
+  {
+    step: "Issue",
+    detail: "Create governed code records before label artwork or print files move into production.",
+  },
+  {
+    step: "Assign",
+    detail: "Connect labels to manufacturer, licensee, batch, and product context where authorized.",
+  },
+  {
+    step: "Print",
+    detail: "Use controlled print readiness and confirmation instead of treating labels as loose exports.",
+  },
+  {
+    step: "Verify",
+    detail: "Route QR scans and manual lookup through one public product verification entry point.",
+  },
+  {
+    step: "Review",
+    detail: "Keep duplicate, replay, and anomaly behavior visible for authorized operators.",
+  },
+  {
+    step: "Escalate",
+    detail: "Move suspicious outcomes into support or incident workflows with relevant context.",
+  },
+  {
+    step: "Evidence",
+    detail: "Preserve audit logs and verification decisions for high-trust product operations.",
+  },
+] as const;
+
 const industryLinks = [
   {
     title: "Industrial components",
-    body: "Govern verification and audit evidence for components that need controlled production context.",
+    body: "Govern QR verification and audit evidence for components that need controlled production context.",
     href: "/industries/industrial-components",
   },
   {
@@ -180,12 +211,45 @@ export function PlatformPage() {
       <ContentBand>
         <FeatureGrid items={platformFeatures} />
       </ContentBand>
+      <ContentBand className="bg-[#05080c]">
+        <div className="grid gap-10 lg:grid-cols-[0.34fr_0.66fr] lg:items-start">
+          <TextBlock
+            eyebrow="Operating model"
+            title="From issued code to reviewable verification evidence."
+            body="MSCQR is structured around the operational steps manufacturers need to control before and after a product is verified: issue, assign, print, verify, review, escalate, and preserve evidence."
+          />
+          <div className="grid gap-3 md:grid-cols-2">
+            {platformWorkflow.map((item, index) => (
+              <article key={item.step} className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
+                <p className="font-mono text-xs uppercase tracking-[0.18em] text-slate-500">
+                  {String(index + 1).padStart(2, "0")}
+                </p>
+                <h2 className="mt-3 text-lg font-semibold text-white">{item.step}</h2>
+                <p className="mt-3 text-sm leading-7 text-slate-400">{item.detail}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </ContentBand>
       <ContentBand className="bg-[#080d13]">
-        <TextBlock
-          eyebrow="Operational posture"
-          title="Built for global and regional authentication workflows."
-          body="MSCQR is positioned for manufacturer-led deployments serving UK, India, Hyderabad/India, and global operating teams without claiming automated multi-region failover or formal certifications that are not yet in place."
-        />
+        <div className="grid gap-8 lg:grid-cols-[0.62fr_0.38fr] lg:items-end">
+          <TextBlock
+            eyebrow="Operational posture"
+            title="Built for global and regional authentication workflows."
+            body="MSCQR is positioned for manufacturer-led deployments serving UK, India, Hyderabad/India, and global operating teams without claiming automated multi-region failover or formal certifications that are not yet in place."
+          />
+          <Button
+            asChild
+            size="lg"
+            variant="outline"
+            className="w-fit border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]"
+          >
+            <Link to="/trust">
+              Review trust posture
+              <ArrowRight data-icon="inline-end" />
+            </Link>
+          </Button>
+        </div>
       </ContentBand>
     </PageShell>
   );
@@ -225,6 +289,30 @@ export function ManufacturersPage() {
           ]}
         />
       </ContentBand>
+      <ContentBand className="bg-[#080d13]">
+        <div className="grid gap-8 lg:grid-cols-[0.58fr_0.42fr] lg:items-start">
+          <TextBlock
+            eyebrow="Manufacturer-first"
+            title="Make public verification depend on controlled production context."
+            body="The manufacturer page now points buyers toward the core operating question: who issued the code, who controlled print readiness, what product or batch context exists, and what evidence is available when scan behavior looks unusual."
+          />
+          <div className="rounded-lg border border-white/10 bg-white/[0.035] p-6">
+            <h2 className="text-2xl font-semibold text-white">Useful when teams need</h2>
+            <ul className="mt-5 space-y-3 text-sm leading-7 text-slate-400">
+              <li>Controlled QR issuance before labels reach a printer.</li>
+              <li>Public product verification without exposing internal operations.</li>
+              <li>Duplicate and replay review tied to label lifecycle state.</li>
+              <li>Audit evidence for support, incident, and governance review.</li>
+            </ul>
+            <Button asChild size="lg" className="mt-6 bg-none bg-cyan-200 text-slate-950 hover:bg-cyan-100">
+              <Link to="/request-access">
+                Request manufacturer access
+                <ArrowRight data-icon="inline-end" />
+              </Link>
+            </Button>
+          </div>
+        </div>
+      </ContentBand>
     </PageShell>
   );
 }
@@ -263,6 +351,33 @@ export function LicenseesPage() {
           ]}
         />
       </ContentBand>
+      <ContentBand className="bg-[#080d13]">
+        <div className="grid gap-8 lg:grid-cols-[0.52fr_0.48fr]">
+          <TextBlock
+            eyebrow="Boundaries"
+            title="Licensee workflows stay inside manufacturer-governed operations."
+            body="Licensees and enterprise operators can help monitor assigned inventory, scan outcomes, and support escalation, while MSCQR keeps sensitive dashboard, audit, incident, and account routes private."
+          />
+          <div className="rounded-lg border border-white/10 bg-white/[0.035] p-6">
+            <h2 className="text-2xl font-semibold text-white">Good secondary audience fit</h2>
+            <p className="mt-3 text-sm leading-7 text-slate-400">
+              Licensee pages should support buying committees and operator teams without shifting MSCQR away from the
+              manufacturer-led product authentication position.
+            </p>
+            <Button
+              asChild
+              size="lg"
+              variant="outline"
+              className="mt-6 border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]"
+            >
+              <Link to="/solutions/manufacturers">
+                Compare manufacturer workflows
+                <ArrowRight data-icon="inline-end" />
+              </Link>
+            </Button>
+          </div>
+        </div>
+      </ContentBand>
     </PageShell>
   );
 }
@@ -282,12 +397,19 @@ export function IndustriesPage() {
               <h2 className="text-xl font-semibold text-white">{item.title}</h2>
               <p className="mt-3 text-sm leading-7 text-slate-400">{item.body}</p>
               <span className="mt-5 inline-flex items-center gap-2 text-sm font-medium text-cyan-200">
-                Open industry page
+                Open {item.title.toLowerCase()} page
                 <ArrowRight className="size-4" />
               </span>
             </Link>
           ))}
         </div>
+      </ContentBand>
+      <ContentBand className="bg-[#080d13]">
+        <TextBlock
+          eyebrow="Search intent"
+          title="Built around product categories where verification evidence matters."
+          body="MSCQR copy intentionally focuses on controlled product labeling, QR verification for supply chains, duplicate review, and audit evidence rather than broad anti-counterfeit guarantees. Industry pages should help qualified teams find the right operating model without inventing case studies."
+        />
       </ContentBand>
     </PageShell>
   );
@@ -300,6 +422,24 @@ export function IndustrialComponentsPage() {
       title="Governed QR verification for industrial components and high-trust spare parts."
       body="MSCQR supports component workflows where issued label state, controlled print evidence, scan behavior, and audit history need to remain reviewable for operators."
       icon={PackageCheck}
+      focusItems={[
+        {
+          title: "Component identity",
+          body: "Tie QR verification to issued label records and production context instead of loose code lists.",
+        },
+        {
+          title: "Controlled print evidence",
+          body: "Make label readiness depend on controlled print confirmation where the workflow requires it.",
+        },
+        {
+          title: "Duplicate review",
+          body: "Surface repeated scans for operator review without exposing private investigation data publicly.",
+        },
+        {
+          title: "Audit trail",
+          body: "Preserve verification and lifecycle evidence for support and governance review.",
+        },
+      ]}
     />
   );
 }
@@ -311,6 +451,24 @@ export function SparePartsPage() {
       title="Verify spare parts while keeping duplicate and replay behavior visible."
       body="MSCQR helps manufacturers and operators connect controlled QR issuance, public verification, scan review, and audit evidence around replacement-part workflows."
       icon={BadgeCheck}
+      focusItems={[
+        {
+          title: "Replacement context",
+          body: "Connect spare-part verification to batch, product, or operator context where available.",
+        },
+        {
+          title: "Manual fallback",
+          body: "Keep code lookup available when a damaged label or field environment makes QR scanning difficult.",
+        },
+        {
+          title: "Replay visibility",
+          body: "Help operators review repeated scan patterns without promising counterfeit-proof outcomes.",
+        },
+        {
+          title: "Support escalation",
+          body: "Give teams a route to handle suspicious verification results with relevant evidence.",
+        },
+      ]}
     />
   );
 }
@@ -322,6 +480,24 @@ export function RegulatedSupplyChainsPage() {
       title="Controlled labeling and verification workflows for evidence-sensitive environments."
       body="MSCQR supports product verification infrastructure where controlled labeling, anomaly review, support escalation, and audit evidence need a consistent workflow."
       icon={ShieldCheck}
+      focusItems={[
+        {
+          title: "Controlled labeling",
+          body: "Govern issuance and print state before product verification is exposed publicly.",
+        },
+        {
+          title: "Policy-led verification",
+          body: "Apply consistent public verification outcomes across QR scans and manual lookup.",
+        },
+        {
+          title: "Anomaly review",
+          body: "Route duplicate and unusual scan behavior into review workflows for authorized teams.",
+        },
+        {
+          title: "Evidence retention",
+          body: "Preserve audit records without claiming formal compliance certifications that are not in place.",
+        },
+      ]}
     />
   );
 }
@@ -331,11 +507,30 @@ function IndustryDetail({
   title,
   body,
   icon: Icon,
+  focusItems = [
+    {
+      title: "Controlled QR issuance",
+      body: "Govern issuance before labels are used in product or document workflows.",
+    },
+    {
+      title: "Print confirmation",
+      body: "Connect print state to product verification readiness where controlled printing is required.",
+    },
+    {
+      title: "Duplicate/replay review",
+      body: "Keep suspicious scan behavior visible for authorized operators.",
+    },
+    {
+      title: "Audit evidence",
+      body: "Preserve reviewable evidence for support and governance workflows.",
+    },
+  ],
 }: {
   eyebrow: string;
   title: string;
   body: string;
   icon: ElementType;
+  focusItems?: Array<{ title: string; body: string }>;
 }) {
   return (
     <PageShell eyebrow={eyebrow} title={title} intro={body} imageAlt="MSCQR product verification infrastructure preview">
@@ -350,12 +545,10 @@ function IndustryDetail({
             </p>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
-            {["Controlled QR issuance", "Print confirmation", "Duplicate/replay review", "Audit evidence"].map((item) => (
-              <div key={item} className="rounded-lg border border-white/10 bg-[#080d13] p-5">
-                <h2 className="text-lg font-semibold text-white">{item}</h2>
-                <p className="mt-3 text-sm leading-7 text-slate-400">
-                  MSCQR keeps this stage connected to governed product authentication workflows.
-                </p>
+            {focusItems.map((item) => (
+              <div key={item.title} className="rounded-lg border border-white/10 bg-[#080d13] p-5">
+                <h2 className="text-lg font-semibold text-white">{item.title}</h2>
+                <p className="mt-3 text-sm leading-7 text-slate-400">{item.body}</p>
               </div>
             ))}
           </div>

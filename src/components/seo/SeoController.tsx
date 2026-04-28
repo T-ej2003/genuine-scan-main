@@ -4,11 +4,11 @@ import { useLocation } from "react-router-dom";
 const SITE_NAME = "MSCQR";
 const SITE_ORIGIN = "https://www.mscqr.com";
 const DEFAULT_OG_IMAGE = `${SITE_ORIGIN}/brand/mscqr-og.png`;
-const DEFAULT_TITLE = "MSCQR | Manufacturer-Led Product Authentication Infrastructure";
+const DEFAULT_TITLE = "MSCQR | Product Authentication Infrastructure for Manufacturers";
 const DEFAULT_DESCRIPTION =
   "MSCQR helps manufacturers govern QR issuance, controlled printing, public verification, anomaly review, support escalation, and audit evidence for high-trust products.";
 const HOME_DESCRIPTION =
-  "MSCQR helps manufacturers govern QR issuance, controlled printing, public verification, duplicate/anomaly review, support escalation, and audit evidence.";
+  "MSCQR helps manufacturers control QR/code issuance, product labeling, public verification, duplicate review, support escalation, and audit evidence.";
 
 type SeoMetadata = {
   title: string;
@@ -59,9 +59,9 @@ const PUBLIC_SEO: Record<string, SeoMetadata> = {
     structuredData: [...HOME_STRUCTURED_DATA],
   },
   "/trust": {
-    title: "Trust & Security | MSCQR",
+    title: "Trust & Security for Product Authentication | MSCQR",
     description:
-      "Review MSCQR's trust posture for governed product authentication, controlled QR workflows, audit evidence, and production-grade operational controls.",
+      "Review MSCQR's evidence-oriented trust posture for governed QR workflows, controlled product labeling, audit evidence, and operational security controls.",
     path: "/trust",
   },
   "/privacy": {
@@ -81,14 +81,15 @@ const PUBLIC_SEO: Record<string, SeoMetadata> = {
     path: "/cookies",
   },
   "/connector-download": {
-    title: "Printer Connector Download | MSCQR",
+    title: "Printer Connector for Controlled QR Printing | MSCQR",
     description:
-      "Download MSCQR's printer connector for controlled QR printing workflows where authorized by your organization.",
+      "Download MSCQR's printer connector for authorized controlled QR printing and manufacturer-side label workflow readiness.",
     path: "/connector-download",
   },
   "/verify": {
-    title: "Verify a Product | MSCQR",
-    description: "Use MSCQR to verify a product code or QR code through a manufacturer-led product authentication workflow.",
+    title: "Verify a Product QR Code | MSCQR",
+    description:
+      "Use MSCQR to verify a product QR code or label code through a manufacturer-led product authentication workflow.",
     path: "/verify",
   },
   "/help": {
@@ -98,57 +99,57 @@ const PUBLIC_SEO: Record<string, SeoMetadata> = {
     path: "/help",
   },
   "/platform": {
-    title: "Platform | MSCQR Product Authentication Infrastructure",
+    title: "Platform | Governed QR Issuance & Product Verification | MSCQR",
     description:
-      "Explore MSCQR's governed QR issuance, controlled printing, public verification, anomaly review, support escalation, and audit evidence workflows.",
+      "Explore MSCQR's operating model for governed QR issuance, controlled printing, public verification, anomaly review, support escalation, and audit evidence.",
     path: "/platform",
   },
   "/solutions/manufacturers": {
-    title: "For Manufacturers | MSCQR",
+    title: "Product Authentication for Manufacturers | MSCQR",
     description:
-      "MSCQR helps manufacturers control QR issuance, printing, verification, duplicate review, and audit evidence across high-trust product workflows.",
+      "MSCQR helps manufacturers control QR issuance, product labeling, public verification, duplicate review, support escalation, and audit evidence.",
     path: "/solutions/manufacturers",
   },
   "/solutions/licensees": {
-    title: "For Licensees | MSCQR",
+    title: "Licensee QR Verification Operations | MSCQR",
     description:
-      "MSCQR supports licensee and operator workflows for controlled product verification, scan review, support escalation, and manufacturer-governed QR operations.",
+      "MSCQR supports licensee and operator workflows for assigned inventory, scan review, support escalation, and manufacturer-governed QR verification.",
     path: "/solutions/licensees",
   },
   "/industries": {
-    title: "Industries | MSCQR",
+    title: "Industries for Product Authentication | MSCQR",
     description:
-      "MSCQR supports high-trust product authentication workflows for industrial components, spare parts, regulated supply chains, electronics, cosmetics, certificates, and more.",
+      "Explore product authentication workflows for industrial components, spare parts, regulated supply chains, electronics, cosmetics, certificates, and high-trust brands.",
     path: "/industries",
   },
   "/industries/industrial-components": {
-    title: "Industrial Component Authentication | MSCQR",
+    title: "Industrial Component Authentication & QR Verification | MSCQR",
     description:
-      "MSCQR supports governed QR verification and audit evidence workflows for industrial components and high-trust spare parts.",
+      "MSCQR supports governed QR verification, controlled labeling, duplicate review, and audit evidence workflows for industrial components.",
     path: "/industries/industrial-components",
   },
   "/industries/spare-parts": {
-    title: "Spare Parts Authentication | MSCQR",
+    title: "Spare Parts Authentication & QR Verification | MSCQR",
     description:
-      "MSCQR helps manufacturers and operators verify spare parts with controlled QR issuance, scan review, and audit evidence workflows.",
+      "MSCQR helps manufacturers and operators verify spare parts with controlled QR issuance, scan review, support escalation, and audit evidence.",
     path: "/industries/spare-parts",
   },
   "/industries/regulated-supply-chains": {
     title: "Regulated Supply Chain Product Authentication | MSCQR",
     description:
-      "MSCQR supports controlled labeling, product verification, anomaly review, and audit evidence workflows for regulated supply chain environments.",
+      "MSCQR supports controlled labeling, QR product verification, anomaly review, support escalation, and audit evidence for regulated supply chain environments.",
     path: "/industries/regulated-supply-chains",
   },
   "/request-access": {
-    title: "Request Access | MSCQR",
+    title: "Request Access to MSCQR Product Authentication",
     description:
-      "Contact MSCQR to discuss manufacturer-led product authentication, governed QR issuance, controlled printing, and verification workflows.",
+      "Contact MSCQR to discuss manufacturer-led product authentication, governed QR issuance, controlled printing, public verification, and audit evidence workflows.",
     path: "/request-access",
   },
   "/blog": {
-    title: "MSCQR Insights",
+    title: "MSCQR Insights | Product Authentication Notes",
     description:
-      "Practical notes on product authentication, QR verification, controlled printing, audit evidence, and manufacturer-led anti-counterfeit operations.",
+      "Practical notes on product authentication, QR verification workflows, controlled printing, audit evidence, and manufacturer-led brand protection operations.",
     path: "/blog",
   },
 };
