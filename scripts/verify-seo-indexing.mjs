@@ -216,8 +216,22 @@ if (scanBlock.includes('path: "/verify"')) {
   failures.push("/scan must not canonicalize to the indexable /verify entry page.");
 }
 
-if (!app.includes('path="/verify/"') || !app.includes('to="/verify"')) {
-  failures.push("App routes must redirect /verify/ to /verify so the public entry URL is canonical.");
+if (!app.includes('location.pathname === "/verify/"') || !app.includes('pathname: "/verify"')) {
+  failures.push(
+    "App must canonicalize the exact /verify/ browser path to /verify without using an ambiguous trailing-slash route.",
+  );
+}
+
+if (app.includes('path="/verify/"')) {
+  failures.push("App must not use a path=\"/verify/\" redirect route because React Router can also match /verify.");
+}
+
+if (!app.includes('path="/verify" element={<VerifyLanding />}')) {
+  failures.push("App must render the public VerifyLanding component at /verify.");
+}
+
+if (app.indexOf('path="/verify"') > app.indexOf('path="/verify/:code"')) {
+  failures.push("App must keep the /verify entry route declared before /verify/:code for readability and auditability.");
 }
 
 if (failures.length > 0) {

@@ -86,6 +86,16 @@ function RedirectWithQuery({ to }: { to: string }) {
   return <Navigate to={`${to}${location.search}`} replace />;
 }
 
+function CanonicalPathRedirects() {
+  const location = useLocation();
+
+  if (location.pathname === "/verify/") {
+    return <Navigate to={{ pathname: "/verify", search: location.search, hash: location.hash }} replace />;
+  }
+
+  return null;
+}
+
 /* =========================
    Route Guards
 ========================= */
@@ -183,7 +193,6 @@ function AppRoutes() {
         <Route path="/industries/regulated-supply-chains" element={<RegulatedSupplyChainsPage />} />
         <Route path="/request-access" element={<RequestAccessPage />} />
         <Route path="/blog" element={<BlogPage />} />
-        <Route path="/verify/" element={<Navigate to="/verify" replace />} />
         <Route path="/verify" element={<VerifyLanding />} />
         <Route path="/verify/:code" element={<Verify />} />
         <Route path="/scan" element={<Verify />} />
@@ -565,6 +574,7 @@ export default function App() {
             }}
           >
             <SeoController />
+            <CanonicalPathRedirects />
             <AppRoutes />
             <RouteMetricsTracker />
             <HelpAssistantWidget />

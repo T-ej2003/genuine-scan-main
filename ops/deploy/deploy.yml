@@ -1,0 +1,121 @@
+---
+- name: Deploy MSCQR active and standby instances
+  hosts: mscqr_servers
+  become: yes
+  serial: 1
+
+  vars:
+    app_dir: /home/ubuntu/genuine-scan-main
+    branch: main
+
+  tasks:
+    - name: Confirm app directory exists
+      stat:
+        path: "{{ app_dir }}"
+      register: app_dir_stat
+
+    - name: Stop if app directory is missing
+      fail:
+        msg: "App directory {{ app_dir }} does not exist on {{ inventory_hostname }}."
+      when: not app_dir_stat.stat.exists
+
+    - name: Show target instance
+      debug:
+        msg: "Deploying {{ inventory_hostname }} at {{ ansible_host }}"
+
+    - name: Check git working tree before deploy
+      shell: git status --short
+      args:
+        chdir: "{{ app_dir }}"
+      register: git_status
+      changed_when: false
+
+    - name: Stop if server has uncommitted local changes
+      fail:
+        msg: "Server {{ inventory_hostname }} has uncommitted changes. Refusing to overwrite: {{ git_status.stdout }}"
+      when: git_status.stdout | length > 0
+
+    - name: Fetch latest code
+      shell: git fetch origin {{ branch }}
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Reset to origin/main
+      shell: git reset --hard origin/{{ branch }}
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Install dependencies
+      shell: npm ci
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Run SEO guardrail
+      shell: npm run verify:seo
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Run typecheck
+      shell: npm run typecheck
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Build app
+      shell: npm run build
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Run production guardrails
+      shell: npm run verify:guardrails
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Restart Docker Compose stack
+      shell: docker compose up -d --build
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Show Docker Compose status
+      shell: docker compose ps
+      args:
+        chdir: "{{ app_dir }}"
+      register: compose_ps
+      changed_when: false
+
+    - name: Print Docker Compose status
+      debug:
+        var: compose_ps.stdout_lines
+
+- name: Verify public active production URL
+  hosts: active
+  gather_facts: false
+  tasks:
+    - name: Check homepage
+      uri:
+        url: https://www.mscqr.com/
+        method: GET
+        status_code: 200
+      register: homepage_check
+      retries: 5
+      delay: 5
+      until: homepage_check.status == 200
+
+    - name: Check robots.txt
+      uri:
+        url: https://www.mscqr.com/robots.txt
+        method: GET
+        status_code: 200
+      register: robots_check
+      retries: 5
+      delay: 5
+      until: robots_check.status == 200
+
+    - name: Check sitemap.xml
+      uri:
+        url: https://www.mscqr.com/sitemap.xml
+        method: GET
+        status_code: 200
+      register: sitemap_check
+      retries: 5
+      delay: 5
+      until: sitemap_check.status == 200

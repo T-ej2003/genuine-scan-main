@@ -9,6 +9,7 @@ const publicNavItems = [
   { href: "/solutions/manufacturers", label: "Manufacturers" },
   { href: "/industries", label: "Industries" },
   { href: "/trust", label: "Trust" },
+  { href: "/help/support", label: "Support" },
   { href: "/blog", label: "Insights" },
 ] as const;
 
@@ -54,7 +55,7 @@ export function PublicHeader({ className }: PublicHeaderProps) {
               variant="outline"
               className="border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]"
             >
-              <Link to="/request-access" aria-label="Request MSCQR access">
+              <Link to="/login" aria-label="Platform access">
                 <LockKeyhole data-icon="inline-start" />
                 Access
               </Link>
@@ -86,9 +87,9 @@ export function PublicHeader({ className }: PublicHeaderProps) {
             variant="outline"
             className="border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]"
           >
-            <Link to="/request-access">
+            <Link to="/login">
               <LockKeyhole data-icon="inline-start" />
-              Request access
+              Platform access
             </Link>
           </Button>
         </div>

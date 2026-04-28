@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { ShieldCheck } from "lucide-react";
+import { AlertTriangle, ShieldCheck } from "lucide-react";
 
 import { LegalFooter } from "@/components/trust/LegalFooter";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 type LegalDocumentLayoutProps = {
   title: string;
@@ -22,10 +23,10 @@ export function LegalDocumentLayout({ title, summary, updatedAt, children }: Leg
             </span>
             <div>
               <div className="text-sm font-semibold tracking-[0.18em] text-slate-950">MSCQR</div>
-              <div className="text-xs text-slate-500">Legal and privacy surface</div>
+              <div className="text-xs text-slate-500">Launch legal and privacy surface</div>
             </div>
           </Link>
-          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">MSCQR policy</div>
+          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Review-required draft</div>
         </div>
       </header>
 
@@ -35,6 +36,15 @@ export function LegalDocumentLayout({ title, summary, updatedAt, children }: Leg
           <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{title}</h1>
           <p className="max-w-3xl text-base leading-7 text-slate-600">{summary}</p>
         </div>
+
+        <Alert className="mt-8 border-amber-200 bg-amber-50 text-amber-950">
+          <AlertTriangle className="h-4 w-4 text-amber-700" />
+          <AlertTitle>Lawyer review required before public launch</AlertTitle>
+          <AlertDescription>
+            This page is implementation-grounded content prepared for the pre-launch closing sprint. It is intended to
+            make the product trust surface launch-ready while final legal approval is pending.
+          </AlertDescription>
+        </Alert>
 
         <div className="prose prose-slate mt-8 max-w-none prose-p:leading-7 prose-li:leading-7">{children}</div>
       </main>

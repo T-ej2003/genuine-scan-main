@@ -39,3 +39,5 @@ shared/contracts/runtime/*.js
 shared/contracts/runtime/*.js.map
 shared/contracts/runtime/*.d.ts
 shared/contracts/runtime/*.d.ts.map
+
+ops/deploy/inventory.ini

@@ -191,7 +191,7 @@ const formatTrustLabel = (item: ConnectorPlatformRelease) => {
     return "Trusted Windows installer";
   }
 
-  return item.installerKind === "zip" ? "Unsigned validation package" : "Unsigned validation installer";
+  return item.installerKind === "zip" ? "Unsigned test package" : "Unsigned test installer";
 };
 
 const formatSignatureLabel = (item: ConnectorPlatformRelease) => {
@@ -206,25 +206,25 @@ const getWindowsUnsignedCopy = (
 ): Pick<DownloadCard, "title" | "description" | "action" | "helper" | "icon" | "iconSurfaceClass"> => {
   if (item.installerKind === "zip") {
     return {
-      title: "Windows validation package",
+      title: "Windows test package",
       description:
-        "Download the Windows validation package, extract it to a normal folder, then run Install Connector.cmd on the printing computer.",
-      action: "Download Windows validation package",
+        "Download the Windows test package, extract it to a normal folder, then run Install Connector.cmd on the printing computer.",
+      action: "Download Windows test package",
       icon: MonitorSmartphone,
       helper:
-        "This unsigned ZIP is for authorized validation only. Smart App Control can block it until a signed Windows installer is published.",
+        "This unsigned ZIP is only for internal validation. Smart App Control can block it until a signed Windows installer is published.",
       iconSurfaceClass: "bg-amber-100 text-amber-800",
     };
   }
 
   return {
-    title: "Windows validation installer",
+    title: "Windows test installer",
     description:
-      "Download the unsigned Windows validation installer on the printing computer only when your organization has approved it.",
-    action: "Download Windows validation installer",
+      "Download the unsigned Windows test installer for internal validation on the printing computer.",
+    action: "Download Windows test installer",
     icon: MonitorSmartphone,
     helper:
-      "This unsigned installer is for authorized validation only. Windows can still warn until the signed Windows installer is published.",
+      "This unsigned installer is only for internal validation. Windows can still warn until the signed Windows installer is published.",
     iconSurfaceClass: "bg-amber-100 text-amber-800",
   };
 };
@@ -552,8 +552,8 @@ export default function ConnectorDownload() {
                     <AlertCircle className="h-4 w-4 text-amber-700" />
                     <AlertTitle>
                       {recommendedCardIsUnsignedWindowsZip
-                        ? "Windows can block this unsigned validation package"
-                        : "Windows can still warn on this unsigned validation installer"}
+                        ? "Windows can block this unsigned test package"
+                        : "Windows can still warn on this unsigned test installer"}
                     </AlertTitle>
                     <AlertDescription>
                       {recommendedCardIsUnsignedWindowsZip ? (
@@ -565,8 +565,8 @@ export default function ConnectorDownload() {
                         </>
                       ) : (
                         <>
-                          This Windows validation installer should be used only when your organization has approved an
-                          unsigned package. Smart App Control can still warn because it is not signed yet.
+                          This Windows test installer is only for internal validation. Smart App Control can still warn
+                          because it is not signed yet. Use a signed Windows installer for normal customer rollout.
                         </>
                       )}
                     </AlertDescription>
@@ -693,8 +693,8 @@ export default function ConnectorDownload() {
                                   <AlertCircle className="h-4 w-4 text-amber-700" />
                                   <AlertTitle>
                                     {item.installerKind === "zip"
-                                      ? "Windows can block this unsigned validation package"
-                                      : "Windows can still warn on this unsigned validation installer"}
+                                      ? "Windows can block this unsigned test package"
+                                      : "Windows can still warn on this unsigned test installer"}
                                   </AlertTitle>
                                   <AlertDescription>
                                     {item.installerKind === "zip" ? (
@@ -705,9 +705,8 @@ export default function ConnectorDownload() {
                                       </>
                                     ) : (
                                       <>
-                                        This unsigned Windows validation installer should be used only when your organization
-                                        has approved an unsigned package. Windows can still show a warning until a signed
-                                        Windows installer is published.
+                                        This unsigned Windows test installer is only for internal validation. Windows can
+                                        still show a warning until a signed Windows installer is published.
                                       </>
                                     )}
                                   </AlertDescription>
