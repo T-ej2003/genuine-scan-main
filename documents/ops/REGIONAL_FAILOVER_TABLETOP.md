@@ -87,8 +87,8 @@ Use these checkpoints during the exercise:
 ```bash
 npm run ops:regional-drift -- --out-dir reports/tabletop-checkpoint --no-fail
 curl -fsS https://www.mscqr.com/api/health/ready
-curl -fsS http://15.206.45.108/api/health/ready
-curl -fsS http://15.240.28.113/api/health/ready
+curl -fsS https://mumbai-standby.example.internal/api/health/ready
+curl -fsS https://capetown-standby.example.internal/api/health/ready
 ```
 
 Expected validations:

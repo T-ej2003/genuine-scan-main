@@ -15,9 +15,9 @@ This runbook reflects the current architecture:
 
 | Region | Role | App health endpoint | RDS identifier | S3 artifacts bucket |
 | --- | --- | --- | --- | --- |
-| London / `eu-west-2` | Active production | `https://www.mscqr.com/api/health/ready` | `mscqr-prod-db` | `mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an` |
-| Mumbai / `ap-south-1` | Warm standby | `http://15.206.45.108/api/health/ready` | `mscqr-prod-db-aps1` | `mscqr-prod-aps1-artifacts-368992683803-ap-south-1` |
-| Cape Town / `af-south-1` | Warm standby | `http://15.240.28.113/api/health/ready` | `mscqr-prod-db-afs1` | `mscqr-prod-afs1-artifacts-368992683803-af-south-1` |
+| London / `eu-west-2` | Active production | `https://www.mscqr.com/api/health/ready` | `mscqr-prod-db` | `mscqr-prod-euw2-artifacts-ACCOUNT_ID-eu-west-2` |
+| Mumbai / `ap-south-1` | Warm standby | `https://mumbai-standby.example.internal/api/health/ready` | `mscqr-prod-db-aps1` | `mscqr-prod-aps1-artifacts-ACCOUNT_ID-ap-south-1` |
+| Cape Town / `af-south-1` | Warm standby | `https://capetown-standby.example.internal/api/health/ready` | `mscqr-prod-db-afs1` | `mscqr-prod-afs1-artifacts-ACCOUNT_ID-af-south-1` |
 
 ## Prerequisites
 
@@ -79,13 +79,13 @@ If the target region has a FAIL finding, stop unless the incident commander expl
 
 ```bash
 npm run ops:regional-drift -- --out-dir reports/failover-mumbai-precheck --no-fail
-curl -fsS http://15.206.45.108/api/health/ready
+curl -fsS https://mumbai-standby.example.internal/api/health/ready
 ```
 
 2. Confirm Mumbai app config:
    - `AWS_REGION=ap-south-1`
    - `OBJECT_STORAGE_REGION=ap-south-1`
-   - `OBJECT_STORAGE_BUCKET=mscqr-prod-aps1-artifacts-368992683803-ap-south-1`
+   - `OBJECT_STORAGE_BUCKET=mscqr-prod-aps1-artifacts-ACCOUNT_ID-ap-south-1`
    - `OBJECT_STORAGE_ENDPOINT=`
    - `OBJECT_STORAGE_ACCESS_KEY=`
    - `OBJECT_STORAGE_SECRET_KEY=`
@@ -115,13 +115,13 @@ npm run verify:staging-smoke
 
 ```bash
 npm run ops:regional-drift -- --out-dir reports/failover-capetown-precheck --no-fail
-curl -fsS http://15.240.28.113/api/health/ready
+curl -fsS https://capetown-standby.example.internal/api/health/ready
 ```
 
 2. Confirm Cape Town app config:
    - `AWS_REGION=af-south-1`
    - `OBJECT_STORAGE_REGION=af-south-1`
-   - `OBJECT_STORAGE_BUCKET=mscqr-prod-afs1-artifacts-368992683803-af-south-1`
+   - `OBJECT_STORAGE_BUCKET=mscqr-prod-afs1-artifacts-ACCOUNT_ID-af-south-1`
    - `OBJECT_STORAGE_ENDPOINT=`
    - `OBJECT_STORAGE_ACCESS_KEY=`
    - `OBJECT_STORAGE_SECRET_KEY=`

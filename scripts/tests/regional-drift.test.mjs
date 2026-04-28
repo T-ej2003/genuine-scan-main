@@ -26,7 +26,7 @@ test("parseJsonHealthResponse rejects frontend HTML fallback", () => {
 test("object storage IAM-mode invariants pass for region-local S3", () => {
   const findings = evaluateObjectStorage(
     {
-      bucket: "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
+      bucket: "mscqr-prod-euw2-artifacts-ACCOUNT_ID-eu-west-2",
       region: "eu-west-2",
       endpoint: null,
       mode: "default-credentials",
@@ -34,7 +34,7 @@ test("object storage IAM-mode invariants pass for region-local S3", () => {
     {
       configured: true,
       ready: true,
-      bucket: "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
+      bucket: "mscqr-prod-euw2-artifacts-ACCOUNT_ID-eu-west-2",
       region: "eu-west-2",
       endpoint: null,
       mode: "default-credentials",
@@ -50,7 +50,7 @@ test("object storage IAM-mode invariants pass for region-local S3", () => {
 test("object storage invariants fail on MinIO static-credential drift", () => {
   const findings = evaluateObjectStorage(
     {
-      bucket: "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
+      bucket: "mscqr-prod-euw2-artifacts-ACCOUNT_ID-eu-west-2",
       region: "eu-west-2",
       endpoint: null,
       mode: "default-credentials",
