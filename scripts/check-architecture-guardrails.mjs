@@ -4,7 +4,7 @@ import path from "node:path";
 import { DEFAULT_BUDGETS } from "./code-quality/size-budget-config.mjs";
 
 const ROOT = process.cwd();
-const NOTES_PATH = path.join(ROOT, "docs/architecture/threshold-migration-notes.json");
+const NOTES_PATH = path.join(ROOT, "documents/architecture/threshold-migration-notes.json");
 const REQUIRED_NOTE_FIELDS = ["summary", "nextStep", "targetMaxLines"];
 const WALK_ROOTS = ["backend/src/controllers", "src/pages", "src/features"];
 
@@ -95,7 +95,7 @@ if (missingNotes.length > 0 || invalidNotes.length > 0) {
 
   for (const violation of missingNotes) {
     console.error(
-      `- ${violation.filePath}: ${violation.lines} lines exceeds the default ${violation.budget.label.toLowerCase()} threshold (${violation.budget.maxLines}) without an explicit migration note in docs/architecture/threshold-migration-notes.json`
+      `- ${violation.filePath}: ${violation.lines} lines exceeds the default ${violation.budget.label.toLowerCase()} threshold (${violation.budget.maxLines}) without an explicit migration note in documents/architecture/threshold-migration-notes.json`
     );
   }
 

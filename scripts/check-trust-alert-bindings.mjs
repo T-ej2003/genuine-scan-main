@@ -4,7 +4,7 @@ import path from "node:path";
 const repoRoot = process.cwd();
 const defaultTemplatePath = path.join(
   repoRoot,
-  "docs",
+  "documents",
   "observability",
   "verification_trust_metric.alert-bindings.template.json"
 );

@@ -3,12 +3,12 @@ import path from "node:path";
 
 const repoRoot = process.cwd();
 const files = {
-  matrix: path.join(repoRoot, "docs", "architecture", "RATE_LIMIT_SECURITY_MATRIX.md"),
-  catalog: path.join(repoRoot, "docs", "observability", "RATE_LIMIT_EVENT_CATALOG.md"),
-  metricsMap: path.join(repoRoot, "docs", "observability", "rate_limit_metric.metrics.yml"),
-  alertRules: path.join(repoRoot, "docs", "observability", "rate_limit_metric.alert-rules.yml"),
-  examples: path.join(repoRoot, "docs", "observability", "rate_limit_metric.examples.json"),
-  savedSearches: path.join(repoRoot, "docs", "observability", "rate_limit_metric.saved-searches.json"),
+  matrix: path.join(repoRoot, "documents", "architecture", "RATE_LIMIT_SECURITY_MATRIX.md"),
+  catalog: path.join(repoRoot, "documents", "observability", "RATE_LIMIT_EVENT_CATALOG.md"),
+  metricsMap: path.join(repoRoot, "documents", "observability", "rate_limit_metric.metrics.yml"),
+  alertRules: path.join(repoRoot, "documents", "observability", "rate_limit_metric.alert-rules.yml"),
+  examples: path.join(repoRoot, "documents", "observability", "rate_limit_metric.examples.json"),
+  savedSearches: path.join(repoRoot, "documents", "observability", "rate_limit_metric.saved-searches.json"),
 };
 
 const failures = [];

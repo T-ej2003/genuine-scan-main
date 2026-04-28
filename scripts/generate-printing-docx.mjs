@@ -14,11 +14,13 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
+const documentsRoot = path.join(repoRoot, "documents");
+const outputRoot = path.join(documentsRoot, "generated-docx");
 
 const targets = [
-  "docs/PRINTING_ARCHITECTURE_STANDARD.md",
-  "docs/MANUFACTURER_PRINTER_SETUP_GUIDE.md",
-  "docs/LIGHTSAIL_PRINTING_UPDATE_COMMANDS.md",
+  "documents/PRINTING_ARCHITECTURE_STANDARD.md",
+  "documents/MANUFACTURER_PRINTER_SETUP_GUIDE.md",
+  "documents/LIGHTSAIL_PRINTING_UPDATE_COMMANDS.md",
 ];
 
 const stripInlineMd = (value) =>
@@ -253,8 +255,8 @@ const extractTitle = (markdown, fallback) => {
 };
 
 const toOutputPath = (inputPath) => {
-  const relative = path.relative(repoRoot, inputPath).replace(/\.md$/i, ".docx");
-  return path.join(repoRoot, "DOCUMENTS", relative);
+  const relative = path.relative(documentsRoot, inputPath).replace(/\.md$/i, ".docx");
+  return path.join(outputRoot, relative);
 };
 
 const generateDocx = async (inputPath) => {

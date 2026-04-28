@@ -38,7 +38,7 @@ const matchesTarget = (relativePath) =>
   relativePath === ".env.example" ||
   relativePath === path.join("backend", ".env.example") ||
   relativePath === "README.md" ||
-  relativePath.startsWith("docs/") ||
+  relativePath.startsWith("documents/") ||
   relativePath.startsWith(".github/workflows/");
 
 const rules = [

@@ -14,13 +14,15 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
-const outputRoot = path.join(repoRoot, "DOCUMENTS");
+const documentsRoot = path.join(repoRoot, "documents");
+const outputRoot = path.join(repoRoot, "documents/generated-docx");
+const conventionalMarkdownFiles = ["README.md", "SECURITY.md"].map((file) => path.join(repoRoot, file));
 
 const SKIP_DIRS = new Set([
   ".git",
   "node_modules",
   "dist",
-  "DOCUMENTS",
+  "generated-docx",
   "test-results",
 ]);
 
@@ -293,7 +295,8 @@ const extractTitle = (markdown, fallback) => {
 };
 
 const toOutputPath = (inputPath) => {
-  const relative = path.relative(repoRoot, inputPath).replace(/\.md$/i, ".docx");
+  const basePath = inputPath.startsWith(`${documentsRoot}${path.sep}`) ? documentsRoot : repoRoot;
+  const relative = path.relative(basePath, inputPath).replace(/\.md$/i, ".docx");
   return path.join(outputRoot, relative);
 };
 
@@ -324,7 +327,10 @@ async function main() {
   fs.rmSync(outputRoot, { recursive: true, force: true });
   fs.mkdirSync(outputRoot, { recursive: true });
 
-  const markdownFiles = collectMarkdownFiles(repoRoot).sort((a, b) => a.localeCompare(b));
+  const markdownFiles = [
+    ...conventionalMarkdownFiles.filter((filePath) => fs.existsSync(filePath)),
+    ...collectMarkdownFiles(documentsRoot),
+  ].sort((a, b) => a.localeCompare(b));
   const created = [];
 
   for (const inputPath of markdownFiles) {
@@ -333,7 +339,7 @@ async function main() {
     created.push(written);
   }
 
-  console.log(`Created ${created.length} DOCX files in DOCUMENTS:\n${created.map((p) => `- ${p}`).join("\n")}`);
+  console.log(`Created ${created.length} DOCX files in documents/generated-docx:\n${created.map((p) => `- ${p}`).join("\n")}`);
 }
 
 main().catch((error) => {

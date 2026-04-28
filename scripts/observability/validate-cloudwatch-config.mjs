@@ -2,8 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 const root = process.cwd();
-const filtersPath = path.join(root, "docs", "observability", "cloudwatch", "verification-trust-metric-filters.json");
-const alarmsPath = path.join(root, "docs", "observability", "cloudwatch", "verification-trust-alarms.json");
+const filtersPath = path.join(root, "documents", "observability", "cloudwatch", "verification-trust-metric-filters.json");
+const alarmsPath = path.join(root, "documents", "observability", "cloudwatch", "verification-trust-alarms.json");
 
 const requiredFilterNames = [
   "mscqr-trust-replay-review-required",

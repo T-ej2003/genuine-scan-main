@@ -11,7 +11,7 @@ const explicitTargets = [
   "README.md",
 ];
 
-const recursiveTargets = [".github/workflows", "docs"];
+const recursiveTargets = [".github/workflows", "documents"];
 
 const filesToScan = new Set();
 

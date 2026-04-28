@@ -3,20 +3,20 @@ import path from "node:path";
 
 const repoRoot = process.cwd();
 const files = {
-  catalog: path.join(repoRoot, "docs", "observability", "VERIFICATION_TRUST_EVENT_CATALOG.md"),
-  alertRules: path.join(repoRoot, "docs", "observability", "verification_trust_metric.alert-rules.yml"),
-  metricsMap: path.join(repoRoot, "docs", "observability", "verification_trust_metric.metrics.yml"),
-  examples: path.join(repoRoot, "docs", "observability", "verification_trust_metric.examples.json"),
-  savedSearches: path.join(repoRoot, "docs", "observability", "verification_trust_metric.saved-searches.json"),
-  cloudwatchDeployGuide: path.join(repoRoot, "docs", "observability", "CLOUDWATCH_DEPLOY.md"),
+  catalog: path.join(repoRoot, "documents", "observability", "VERIFICATION_TRUST_EVENT_CATALOG.md"),
+  alertRules: path.join(repoRoot, "documents", "observability", "verification_trust_metric.alert-rules.yml"),
+  metricsMap: path.join(repoRoot, "documents", "observability", "verification_trust_metric.metrics.yml"),
+  examples: path.join(repoRoot, "documents", "observability", "verification_trust_metric.examples.json"),
+  savedSearches: path.join(repoRoot, "documents", "observability", "verification_trust_metric.saved-searches.json"),
+  cloudwatchDeployGuide: path.join(repoRoot, "documents", "observability", "CLOUDWATCH_DEPLOY.md"),
   cloudwatchFilters: path.join(
     repoRoot,
-    "docs",
+    "documents",
     "observability",
     "cloudwatch",
     "verification-trust-metric-filters.json"
   ),
-  cloudwatchAlarms: path.join(repoRoot, "docs", "observability", "cloudwatch", "verification-trust-alarms.json"),
+  cloudwatchAlarms: path.join(repoRoot, "documents", "observability", "cloudwatch", "verification-trust-alarms.json"),
 };
 
 const failures = [];

@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "provider": "cloudwatch|datadog|grafana|other",
+  "bindings": [
+    {
+      "name": "mscqr-trust-break-glass-usage",
+      "severity": "critical",
+      "destination": "oncall-security",
+      "runbook": "documents/PREMIUM_LAUNCH_INCIDENT_RUNBOOK.md#2-break-glass-misuse-spike"
+    },
+    {
+      "name": "mscqr-trust-replay-review-spike",
+      "severity": "high",
+      "destination": "oncall-fraud",
+      "runbook": "documents/PREMIUM_LAUNCH_INCIDENT_RUNBOOK.md#1-replay-spike"
+    },
+    {
+      "name": "mscqr-trust-limited-provenance-rate",
+      "severity": "medium",
+      "destination": "oncall-ops",
+      "runbook": "documents/PREMIUM_LAUNCH_INCIDENT_RUNBOOK.md#4-legacy-provenance-anomaly"
+    },
+    {
+      "name": "mscqr-trust-signing-fallback",
+      "severity": "high",
+      "destination": "oncall-security",
+      "runbook": "documents/PREMIUM_LAUNCH_INCIDENT_RUNBOOK.md#3-signer-misconfiguration"
+    },
+    {
+      "name": "mscqr-trust-challenge-abandonment",
+      "severity": "medium",
+      "destination": "oncall-support",
+      "runbook": "documents/PREMIUM_LAUNCH_INCIDENT_RUNBOOK.md#5-challenge-completion-failures"
+    }
+  ]
+}
