@@ -14,7 +14,6 @@ const mockModule = (relativePath, exportsValue) => {
   };
 };
 
-const now = new Date("2026-04-10T12:00:00.000Z");
 process.env.ADMIN_LOGIN_MFA_CYCLE_DAYS = "28";
 
 let prismaUser = null;
@@ -81,7 +80,7 @@ mockModule("services/auth/emailVerificationService.js", {
 
 let mockedMfaStatus = {
   enabled: true,
-  lastUsedAt: new Date("2026-04-01T10:00:00.000Z"),
+  lastUsedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
 };
 mockModule("services/auth/mfaService.js", {
   getAdminMfaStatus: async () => mockedMfaStatus,
@@ -110,49 +109,44 @@ const baseUser = {
 const run = async () => {
   prismaUser = { ...baseUser };
   auditEvents = [];
-  const realNow = Date.now;
-  Date.now = () => now.getTime();
-  try {
-    const recentMfaSession = await loginWithPassword({
-      email: prismaUser.email,
-      password: "correct-password",
-      ipHash: "ip-hash",
-      userAgent: "agent",
-    });
+  const recentMfaLastUsedAt = mockedMfaStatus.lastUsedAt;
+  const recentMfaSession = await loginWithPassword({
+    email: prismaUser.email,
+    password: "correct-password",
+    ipHash: "ip-hash",
+    userAgent: "agent",
+  });
 
-    assert.strictEqual(recentMfaSession.sessionStage, "ACTIVE", "recent MFA should skip bootstrap challenge");
-    assert.strictEqual(recentMfaSession.auth?.authAssurance, "ADMIN_MFA");
-    assert.strictEqual(
-      String(recentMfaSession.auth?.mfaVerifiedAt || "").startsWith("2026-04-01T10:00:00.000Z"),
-      true,
-      "session should carry the previous verified-at timestamp when login MFA is still fresh"
-    );
-    assert(
-      auditEvents.some((entry) => entry?.action === "AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA"),
-      "recent MFA login should emit dedicated audit action"
-    );
+  assert.strictEqual(recentMfaSession.sessionStage, "ACTIVE", "recent MFA should skip bootstrap challenge");
+  assert.strictEqual(recentMfaSession.auth?.authAssurance, "ADMIN_MFA");
+  assert.strictEqual(
+    recentMfaSession.auth?.mfaVerifiedAt,
+    recentMfaLastUsedAt.toISOString(),
+    "session should carry the previous verified-at timestamp when login MFA is still fresh"
+  );
+  assert(
+    auditEvents.some((entry) => entry?.action === "AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA"),
+    "recent MFA login should emit dedicated audit action"
+  );
 
-    mockedMfaStatus = {
-      enabled: true,
-      lastUsedAt: new Date("2026-02-01T10:00:00.000Z"),
-    };
-    auditEvents = [];
-    const staleMfaSession = await loginWithPassword({
-      email: prismaUser.email,
-      password: "correct-password",
-      ipHash: "ip-hash",
-      userAgent: "agent",
-    });
+  mockedMfaStatus = {
+    enabled: true,
+    lastUsedAt: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000),
+  };
+  auditEvents = [];
+  const staleMfaSession = await loginWithPassword({
+    email: prismaUser.email,
+    password: "correct-password",
+    ipHash: "ip-hash",
+    userAgent: "agent",
+  });
 
-    assert.strictEqual(staleMfaSession.sessionStage, "MFA_BOOTSTRAP", "stale MFA should require a fresh challenge");
-    assert.strictEqual(staleMfaSession.auth?.stepUpMethod, "ADMIN_MFA");
-    assert(
-      auditEvents.some((entry) => entry?.action === "AUTH_LOGIN_MFA_CHALLENGE_REQUIRED"),
-      "stale MFA login should emit challenge-required audit action"
-    );
-  } finally {
-    Date.now = realNow;
-  }
+  assert.strictEqual(staleMfaSession.sessionStage, "MFA_BOOTSTRAP", "stale MFA should require a fresh challenge");
+  assert.strictEqual(staleMfaSession.auth?.stepUpMethod, "ADMIN_MFA");
+  assert(
+    auditEvents.some((entry) => entry?.action === "AUTH_LOGIN_MFA_CHALLENGE_REQUIRED"),
+    "stale MFA login should emit challenge-required audit action"
+  );
 
   console.log("admin login MFA cycle tests passed");
 };

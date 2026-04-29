@@ -232,19 +232,19 @@ const mockPlatformApis = async (page: Page, role: MockRole) => {
 };
 
 test.describe("platform shell visual regression", () => {
-  test.use({ colorScheme: "dark" });
+  test.use({ colorScheme: "light" });
 
-  test("super admin command-center shell", async ({ page }) => {
+  test("platform admin workspace shell", async ({ page }) => {
     await mockPlatformApis(page, "SUPER_ADMIN");
     await page.goto("/dashboard");
-    await expect(page.getByText("Operations Overview")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
     await expect(page).toHaveScreenshot("platform-shell-super-admin-dashboard.png", {
       animations: "disabled",
       maxDiffPixelRatio: 0.08,
     });
   });
 
-  test("licensee admin command-center shell", async ({ page }) => {
+  test("brand admin workspace shell", async ({ page }) => {
     await mockPlatformApis(page, "LICENSEE_ADMIN");
     await page.goto("/dashboard");
     await expect(page.getByText("Acme Corporation", { exact: true }).first()).toBeVisible();
@@ -254,12 +254,12 @@ test.describe("platform shell visual regression", () => {
     });
   });
 
-  test("manufacturer mobile shell with intelligence drawer", async ({ page }) => {
+  test("manufacturer mobile shell with activity sheet", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await mockPlatformApis(page, "MANUFACTURER");
     await page.goto("/dashboard");
-    await page.getByLabel("Open workspace intelligence panel").click();
-    await expect(page.getByRole("dialog").getByText("Attention queue").first()).toBeVisible();
+    await page.getByLabel("Open workspace activity").click();
+    await expect(page.getByRole("dialog").getByText("Workspace activity").first()).toBeVisible();
     await expect(page).toHaveScreenshot("platform-shell-manufacturer-mobile-intelligence.png", {
       animations: "disabled",
       maxDiffPixelRatio: 0.08,
