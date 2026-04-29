@@ -100,9 +100,9 @@ export function LicenseeDialogs({
         </DialogTrigger>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[720px]">
           <DialogHeader>
-            <DialogTitle>Create New Licensee</DialogTitle>
+            <DialogTitle>Create new brand</DialogTitle>
             <DialogDescription>
-              Creates the licensee + admin, allocates a dormant code range, and optionally creates the first manufacturer user.
+              Create the brand workspace, invite the Brand Admin, and optionally add the first manufacturer user.
             </DialogDescription>
           </DialogHeader>
 
@@ -138,7 +138,7 @@ export function LicenseeDialogs({
               <Input
                 value={createForm.description}
                 onChange={(event) => onCreateFormChange((previous) => ({ ...previous, description: event.target.value }))}
-                placeholder="Short note about this licensee"
+                placeholder="Short note about this brand"
                 disabled={creating}
               />
             </div>
@@ -199,7 +199,7 @@ export function LicenseeDialogs({
             </div>
 
             <div className="space-y-3 rounded-md border p-3">
-              <p className="text-sm font-medium">Licensee Admin (required)</p>
+              <p className="text-sm font-medium">Brand Admin (required)</p>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -220,7 +220,7 @@ export function LicenseeDialogs({
                     onChange={(event) =>
                       onCreateFormChange((previous) => ({ ...previous, adminEmail: event.target.value }))
                     }
-                    placeholder="admin@licensee.com"
+                    placeholder="admin@brand.com"
                     disabled={creating}
                   />
                 </div>
@@ -243,7 +243,7 @@ export function LicenseeDialogs({
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Range Start</Label>
+                <Label>First QR label number</Label>
                 <Input
                   type="number"
                   value={createForm.rangeStart}
@@ -253,7 +253,7 @@ export function LicenseeDialogs({
               </div>
 
               <div className="space-y-2">
-                <Label>Range End</Label>
+                <Label>Last QR label number</Label>
                 <Input
                   type="number"
                   value={createForm.rangeEnd}
@@ -330,7 +330,7 @@ export function LicenseeDialogs({
       <Dialog open={isEditOpen} onOpenChange={onEditDialogOpenChange}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[520px]">
           <DialogHeader>
-            <DialogTitle>Edit Licensee</DialogTitle>
+            <DialogTitle>Edit brand</DialogTitle>
             <DialogDescription>Update name, support details, and status.</DialogDescription>
           </DialogHeader>
 
@@ -501,7 +501,7 @@ export function LicenseeDialogs({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="MANUFACTURER">Manufacturer user</SelectItem>
-                    <SelectItem value="LICENSEE_ADMIN">Licensee user</SelectItem>
+                    <SelectItem value="LICENSEE_ADMIN">Brand Admin</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -528,25 +528,25 @@ export function LicenseeDialogs({
       >
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[520px]">
           <DialogHeader>
-            <DialogTitle>Allocate Code Range</DialogTitle>
-            <DialogDescription>Adds new codes to the licensee pool in DORMANT state only.</DialogDescription>
+            <DialogTitle>Add QR labels</DialogTitle>
+            <DialogDescription>Add QR labels to this brand. They start as not used yet until assigned and printed.</DialogDescription>
           </DialogHeader>
 
           {!rangeForm ? (
             <DialogEmptyState
-              title="Select a licensee before allocating codes"
-              description="Close this dialog, reopen Allocate Code Range from the correct licensee row, and MSCQR will load the latest range history for that tenant."
+              title="Select a brand before adding QR labels"
+              description="Close this dialog, reopen Add QR labels from the correct brand row, and MSCQR will load the latest label history for that brand."
               onClose={() => onRangeDialogOpenChange(false)}
             />
           ) : (
             <form className="mt-2 space-y-4" onSubmit={onRangeSubmit}>
               <div className="space-y-1 rounded-md border p-3 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Last allocated range</span>
+                  <span className="text-muted-foreground">Last QR label group</span>
                   <span className="font-mono">
                     {rangeForm.lastStartCode && rangeForm.lastEndCode
                       ? `${rangeForm.lastStartCode} -> ${rangeForm.lastEndCode}`
-                      : "No previous range"}
+                      : "No previous labels"}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -584,7 +584,7 @@ export function LicenseeDialogs({
                     )
                   }
                 >
-                  By range
+                  By exact numbers
                 </Button>
               </div>
 
@@ -643,7 +643,7 @@ export function LicenseeDialogs({
                   placeholder="e.g. March-2026 Topup"
                 />
                 <p className="text-xs text-muted-foreground">
-                  If empty, the system uses an auto name from the allocated range.
+                  If empty, MSCQR uses an automatic name for this label group.
                 </p>
               </div>
 
@@ -652,7 +652,7 @@ export function LicenseeDialogs({
                   Cancel
                 </Button>
                 <Button type="submit" disabled={rangeLoading}>
-                  {rangeLoading ? "Allocating..." : "Allocate Codes"}
+                  {rangeLoading ? "Adding..." : "Add QR labels"}
                 </Button>
               </div>
             </form>

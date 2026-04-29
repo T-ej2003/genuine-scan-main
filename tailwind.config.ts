@@ -70,6 +70,15 @@ export default {
           DEFAULT: "hsl(var(--info))",
           foreground: "hsl(var(--info-foreground))",
         },
+        moonlight: {
+          50: "#FAFAFF",
+          100: "#F4F2FF",
+          200: "#E6E6FF",
+          300: "#CCCCFF",
+          400: "#A3A3CC",
+          700: "#5C5C99",
+          900: "#292966",
+        },
         mscqr: {
           background: "hsl(var(--mscqr-background))",
           "background-soft": "hsl(var(--mscqr-background-soft))",

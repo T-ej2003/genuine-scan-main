@@ -98,7 +98,7 @@ Environment setup/doctor scripts:
 bash scripts/dev/doctor.sh
 ```
 
-See [docs/DEV_ENV_SETUP.md](docs/DEV_ENV_SETUP.md) for required toolchain installation.
+See [documents/DEV_ENV_SETUP.md](documents/DEV_ENV_SETUP.md) for required toolchain installation.
 
 Optional live smoke run against a ready environment:
 
@@ -144,12 +144,12 @@ npm run test:e2e
 │   │   └── seed.ts                   # Seed script
 │   ├── scripts/                      # Ops/dev scripts
 │   └── tests/                        # Lightweight backend tests
-├── docs/
+├── documents/
 │   ├── SUPER_ADMIN_GUIDE.md          # Super Admin manual source
 │   ├── LICENSEE_ADMIN_GUIDE.md       # Licensee Admin manual source
 │   ├── MANUFACTURER_GUIDE.md         # Manufacturer manual source
 │   ├── CUSTOMER_VERIFICATION_GUIDE.md # Customer manual source
-├── DOCUMENTS/                        # Generated DOCX copies of repo markdown
+│   └── generated-docx/                # Generated DOCX copies of documents markdown
 ├── docker-compose.yml
 ├── Dockerfile                        # Frontend image
 ├── backend/Dockerfile                # Backend image
@@ -550,7 +550,7 @@ Operational monitoring before premium rollout:
 - Break-glass issuance usage: any direct generation event should be rare, explained, and auditable.
 - Challenge-required frequency and completion rate: identity-based review completion versus abandoned suspicious checks.
 - Signing profile health: active key version, provider mode, and any legacy HMAC fallback warnings.
-- Observability catalog, metrics mapping, and alert templates live under [docs/observability/](docs/observability/).
+- Observability catalog, metrics mapping, and alert templates live under [documents/observability/](documents/observability/).
 - `QR_ZIP_ULTRA_LEVEL` (default `9`)
 - `QR_ZIP_STANDARD_PNG_WIDTH` (default `768`)
 - `QR_ZIP_HIGH_PNG_WIDTH` (default `640`)
@@ -782,7 +782,7 @@ ECS/Fargate image architecture note:
 - Local Docker Compose remains a developer-native workflow. On Apple Silicon, `docker compose build` will naturally create an `arm64` image unless you explicitly cross-build. That is correct for local development and must not be treated as the production publishing path.
 - Production ECS/Fargate currently runs on `LINUX/X86_64`. Every production backend and worker image pushed to ECR must therefore include `linux/amd64`.
 - The repo standard for production is a multi-arch manifest list built with `docker buildx` for `linux/amd64,linux/arm64`. ECS will pull the `linux/amd64` descriptor while Apple Silicon developers still get a safe, repeatable publishing path.
-- Use the repo-owned publish path documented in [docs/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md](/Users/abhiramteja/Downloads/genuine-scan-main/docs/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md:1) instead of ad hoc `docker build` or `docker push` commands.
+- Use the repo-owned publish path documented in [documents/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md](/Users/abhiramteja/Downloads/genuine-scan-main/documents/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md:1) instead of ad hoc `docker build` or `docker push` commands.
 
 Exact production image commands:
 
@@ -810,12 +810,12 @@ REQUIRED_PLATFORMS=linux/amd64,linux/arm64 \
 Operator guidance:
 - Do not update the backend or worker ECS task definition until the SHA-tagged image manifest has been verified.
 - Backend and worker intentionally use the same runtime image content from `backend/Dockerfile`, but they stay in separate ECR repositories for operational clarity.
-- Keep the object-storage task-role deployment guidance separate. See [docs/aws/object-storage-task-role.md](/Users/abhiramteja/Downloads/genuine-scan-main/docs/aws/object-storage-task-role.md:1) for the ECS S3 credential contract.
+- Keep the object-storage task-role deployment guidance separate. See [documents/aws/object-storage-task-role.md](/Users/abhiramteja/Downloads/genuine-scan-main/documents/aws/object-storage-task-role.md:1) for the ECS S3 credential contract.
 - Before production publishing, enforce ECR immutability and lifecycle controls with `./scripts/aws/apply-ecr-repository-controls.sh both`.
 - The publish workflow now signs release images with cosign and attaches SBOM plus provenance attestations. The deploy workflow verifies those artifacts before touching ECS.
 - The audited ECS rollout path is the `Deploy ECS Release` workflow or the repo-owned [`scripts/aws/deploy-ecs-service.sh`](/Users/abhiramteja/Downloads/genuine-scan-main/scripts/aws/deploy-ecs-service.sh:1) helper.
 - Post-deploy runtime verification is now explicit: `./scripts/aws/verify-version-endpoint.sh https://your-backend.example.com/version "$IMAGE_TAG"`.
-- Infrastructure drift control now has a repo-owned Terraform baseline in [infra/aws/terraform/README.md](/Users/abhiramteja/Downloads/genuine-scan-main/infra/aws/terraform/README.md:1) for ECR and ECS service settings.
+- Infrastructure drift control now has a repo-owned Terraform baseline in [documents/infra/aws/terraform/README.md](/Users/abhiramteja/Downloads/genuine-scan-main/documents/infra/aws/terraform/README.md:1) for ECR and ECS service settings.
 - Production approvals are staged through protected GitHub environments in the deploy workflow: release approval, backend canary approval, then worker rollout approval.
 
 Run migrations in container:
@@ -834,8 +834,8 @@ HTTPS for production (`mscqr.com` / `www.mscqr.com`):
 - The frontend container already supports HTTP-first boot and automatic HTTPS cutover when Let's Encrypt certs exist in `deploy/certbot/conf`.
 - Issue a certificate with `sh deploy/certbot/issue-letsencrypt.sh`
 - Dry-run renewal with `MSCQR_CERTBOT_DRY_RUN=true sh deploy/certbot/renew-letsencrypt.sh`
-- Full EC2/DNS instructions live in `docs/AWS_EC2_DEPLOY_MSCQR.md`
-- ECS/ECR image architecture instructions live in [docs/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md](/Users/abhiramteja/Downloads/genuine-scan-main/docs/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md:1)
+- Full EC2/DNS instructions live in `documents/AWS_EC2_DEPLOY_MSCQR.md`
+- ECS/ECR image architecture instructions live in [documents/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md](/Users/abhiramteja/Downloads/genuine-scan-main/documents/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md:1)
 
 Important compose note:
 
@@ -882,7 +882,7 @@ Historical provenance maintenance:
 - Centralize logs and alerting.
 - Validate backup/restore process.
 - Review RBAC and tenant isolation in staging before release.
-- Review [docs/observability/VERIFICATION_TRUST_EVENT_CATALOG.md](docs/observability/VERIFICATION_TRUST_EVENT_CATALOG.md) and [docs/PREMIUM_LAUNCH_INCIDENT_RUNBOOK.md](docs/PREMIUM_LAUNCH_INCIDENT_RUNBOOK.md) before premium launch.
+- Review [documents/observability/VERIFICATION_TRUST_EVENT_CATALOG.md](documents/observability/VERIFICATION_TRUST_EVENT_CATALOG.md) and [documents/PREMIUM_LAUNCH_INCIDENT_RUNBOOK.md](documents/PREMIUM_LAUNCH_INCIDENT_RUNBOOK.md) before premium launch.
 
 ## 18. Key Files to Understand First
 
@@ -897,7 +897,7 @@ If you are onboarding and want the fastest deep understanding, read these in ord
 7. `src/pages/Dashboard.tsx` (main UX entry point)
 8. `src/pages/QRTracking.tsx` (ops tracking UX)
 9. `src/lib/api-client.ts` (frontend API contract)
-10. `docs/SUPER_ADMIN_GUIDE.md` (role-accurate admin SOP)
+10. `documents/SUPER_ADMIN_GUIDE.md` (role-accurate admin SOP)
 
 ## 19. Connectivity and Export Throughput Notes
 
@@ -971,7 +971,7 @@ Search/scoring logic lives in `src/help/kb-search.ts`.
 - `Review required`: unusual scan signals (multi-device, burst scans, location/country drift) with clear action CTAs.
 - Fraud report form auto-attaches scan metadata and stores incident report in DB.
 
-### Screenshots for docs/help pages
+### Screenshots for documents/help pages
 
 - Store docs images under `public/docs/`.
 - Help pages automatically check image availability and only show capture reminders for missing files.
@@ -990,29 +990,29 @@ Supported environment variables for capture script:
 - `DOCS_MANUFACTURER_EMAIL`, `DOCS_MANUFACTURER_PASSWORD`
 - `DOCS_QR_CODE`
 
-Generate DOCX copies for every markdown file in the repo:
+Generate DOCX copies for every markdown file in `documents/`, plus the conventional root `README.md` and `SECURITY.md`:
 
 ```bash
 npm run docs:docx
 ```
 
-Generated outputs are written under `DOCUMENTS/` using the same relative paths as the source markdown.
+Generated outputs are written under `documents/generated-docx/` using paths relative to `documents/`.
 
 Examples:
 
-- `DOCUMENTS/README.docx`
-- `DOCUMENTS/backend/README.docx`
-- `DOCUMENTS/docs/SUPER_ADMIN_GUIDE.docx`
-- `DOCUMENTS/docs/LICENSEE_ADMIN_GUIDE.docx`
-- `DOCUMENTS/docs/MANUFACTURER_GUIDE.docx`
-- `DOCUMENTS/docs/CUSTOMER_VERIFICATION_GUIDE.docx`
+- `documents/generated-docx/README.docx`
+- `documents/generated-docx/backend/README.docx`
+- `documents/generated-docx/SUPER_ADMIN_GUIDE.docx`
+- `documents/generated-docx/LICENSEE_ADMIN_GUIDE.docx`
+- `documents/generated-docx/MANUFACTURER_GUIDE.docx`
+- `documents/generated-docx/CUSTOMER_VERIFICATION_GUIDE.docx`
 
 ---
 
 Source documentation in repo:
 
-- `docs/SUPER_ADMIN_GUIDE.md`
-- `docs/LICENSEE_ADMIN_GUIDE.md`
-- `docs/MANUFACTURER_GUIDE.md`
-- `docs/CUSTOMER_VERIFICATION_GUIDE.md`
+- `documents/SUPER_ADMIN_GUIDE.md`
+- `documents/LICENSEE_ADMIN_GUIDE.md`
+- `documents/MANUFACTURER_GUIDE.md`
+- `documents/CUSTOMER_VERIFICATION_GUIDE.md`
 - `/help/*` pages in the web app

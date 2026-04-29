@@ -13,9 +13,9 @@ export default function VerifyPage() {
   }
 
   return (
-    <div className="dark min-h-screen bg-mscqr-background text-mscqr-primary">
+    <div className="min-h-screen bg-mscqr-background-soft text-mscqr-primary">
       <VerifyExperience />
-      <LegalFooter tone="dark" className="mt-8 bg-mscqr-background" />
+      <LegalFooter tone="light" className="mt-8" />
     </div>
   );
 }

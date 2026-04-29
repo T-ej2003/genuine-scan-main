@@ -211,7 +211,7 @@ test.describe.serial("Enterprise smoke flows", () => {
     await expect(page.getByTestId("create-print-job-dialog")).toContainText(/Current print job|Printing in progress|Recent print jobs/);
   });
 
-  test("public verify can submit an incident and return a support ticket reference", async ({ page }) => {
+  test("public verify can submit a concern and return a support reference", async ({ page }) => {
     requireEnterpriseEnv(["E2E_VERIFY_CODE", env.verifyCode]);
 
     await goto(page, `/verify/${env.verifyCode}`);
@@ -232,18 +232,11 @@ test.describe.serial("Enterprise smoke flows", () => {
     await page.locator("#otp-code").fill(testOtp);
     await page.getByRole("button", { name: /verify and continue/i }).click();
 
-    await expect(page.getByRole("heading", { name: /tell mscqr how you obtained the product/i })).toBeVisible();
-    await page.getByRole("button", { name: /skip for now/i }).click();
-    await expect(page.getByRole("heading", { name: /capture seller or source details/i })).toBeVisible();
-    await page.getByRole("button", { name: /skip for now/i }).click();
-    await expect(page.getByRole("heading", { name: /describe the product condition/i })).toBeVisible();
-    await page.getByRole("button", { name: /skip for now/i }).click();
-    await expect(page.getByRole("heading", { name: /why did you choose to scan this item/i })).toBeVisible();
-    await page.getByRole("button", { name: /skip for now/i }).click();
-    await expect(page.getByRole("heading", { name: /choose the next action lane/i })).toBeVisible();
-    await page.getByRole("button", { name: /skip questions and reveal/i }).click();
-
-    await expect(page.getByTestId("verify-report-concern")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: /this garment is genuine|we could not fully verify this item/i })).toBeVisible({
+      timeout: 30_000,
+    });
+    await page.getByRole("button", { name: /report a concern/i }).click();
+    await expect(page.getByRole("heading", { name: /report a concern/i })).toBeVisible();
     await page.getByTestId("verify-report-concern").click();
 
     const supportTicketReference = page.getByTestId("verify-report-support-ticket-raw");
@@ -259,7 +252,7 @@ test.describe.serial("Enterprise smoke flows", () => {
     );
     requireEnterpriseCondition(
       Boolean(capturedSupportTicketReference),
-      "Public verify flow did not capture a support ticket reference."
+      "Public verify flow did not capture a support reference."
     );
 
     await login(page, env.superAdminEmail, env.superAdminPassword);

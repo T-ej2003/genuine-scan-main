@@ -91,7 +91,7 @@ export function ManufacturersTable({
 
                 <TableCell>
                   <div className="text-sm font-medium">{stats?.assignedBatches || 0} active batches</div>
-                  <div className="mt-1 text-xs text-muted-foreground">{stats?.assignedCodes || 0} codes assigned</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{stats?.assignedCodes || 0} QR labels assigned</div>
                   <Button size="sm" variant="outline" className="mt-3" onClick={() => onOpenBatches(manufacturer)}>
                     Open batches
                   </Button>
@@ -148,7 +148,7 @@ export function ManufacturersTable({
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem onClick={() => onCopyId(manufacturer.id)}>
                           <Copy className="mr-2 h-4 w-4" />
-                          Copy record ID
+                          Copy support reference
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => onOpenBatches(manufacturer)}>
                           <PackageCheck className="mr-2 h-4 w-4" />

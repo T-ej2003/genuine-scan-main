@@ -133,15 +133,15 @@ const notificationCopy = (notification: DashboardNotification) => {
     const qty = Number(data.quantity || 0);
     return {
       title: "New batch assigned",
-      body: `${batchName}${qty > 0 ? ` is ready for printing (${qty} codes).` : " is ready for printing."}`,
+      body: `${batchName}${qty > 0 ? ` is ready for printing (${qty} QR labels).` : " is ready for printing."}`,
     };
   }
   if (type === "manufacturer_print_job_created") {
     const batchName = String(data.batchName || "batch").trim();
     const qty = Number(data.quantity || 0);
     return {
-      title: "Direct-print job prepared",
-      body: `${batchName}${qty > 0 ? ` ready for secure direct-print (${qty} codes).` : " ready for secure direct-print."}`,
+      title: "Print job ready",
+      body: `${batchName}${qty > 0 ? ` is ready to print (${qty} QR labels).` : " is ready to print."}`,
     };
   }
   if (type === "manufacturer_print_job_confirmed") {
@@ -149,7 +149,7 @@ const notificationCopy = (notification: DashboardNotification) => {
     const qty = Number(data.printedCodes || 0);
     return {
       title: "Printing confirmed",
-      body: `${batchName}${qty > 0 ? ` confirmed with ${qty} printed codes.` : " printing was confirmed."}`,
+      body: `${batchName}${qty > 0 ? ` confirmed with ${qty} printed QR labels.` : " printing was confirmed."}`,
     };
   }
 
@@ -182,7 +182,7 @@ export function NotificationsDropdown({
           data-testid="open-notifications"
           variant="ghost"
           size="icon"
-          className="relative mr-1 overflow-visible rounded-full border-white/50 bg-white/65 shadow-[0_12px_22px_-18px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-white/5"
+          className="relative mr-1 overflow-visible rounded-full border border-mscqr-border bg-white shadow-sm"
           aria-label="Open notifications"
         >
           <Bell className="h-4 w-4 text-muted-foreground" />
@@ -196,32 +196,32 @@ export function NotificationsDropdown({
       <DropdownMenuContent
         align="end"
         sideOffset={10}
-        className="w-[92vw] max-w-[27rem] rounded-2xl border border-white/35 bg-white/78 p-0 text-foreground shadow-[0_26px_60px_-28px_rgba(2,6,23,0.48),0_18px_28px_-22px_rgba(15,23,42,0.35)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/78"
+        className="w-[92vw] max-w-[27rem] rounded-2xl border border-mscqr-border bg-white p-0 text-foreground shadow-lg"
       >
         <div className="relative overflow-hidden rounded-2xl">
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[linear-gradient(180deg,rgba(16,185,129,0.12),rgba(59,130,246,0.04),transparent)]" />
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[linear-gradient(180deg,rgba(204,204,255,0.22),transparent)]" />
 
-          <div className="relative border-b border-white/25 px-4 py-3 dark:border-white/10">
+          <div className="relative border-b border-mscqr-border px-4 py-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <p className="text-base font-semibold tracking-tight">Notifications</p>
-                  <span className="inline-flex h-6 items-center rounded-full border border-white/40 bg-white/45 px-2 text-[11px] font-medium text-foreground/80 dark:border-white/10 dark:bg-white/5 dark:text-foreground/70">
+                  <span className="inline-flex h-6 items-center rounded-full border border-mscqr-border bg-white px-2 text-[11px] font-medium text-foreground/80">
                     {visibleNotifications.length}
                   </span>
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-white/35 bg-white/45 px-2 py-0.5 dark:border-white/10 dark:bg-white/5">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-mscqr-border bg-white px-2 py-0.5">
                     <span
                       className={cn(
                         "inline-block h-2 w-2 rounded-full transition-colors",
                         notificationsLive ? "bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.12)]" : "bg-slate-300"
                       )}
                     />
-                    {notificationsLive ? "Live feed active" : "Polling mode"}
+                    {notificationsLive ? "Updated just now" : "Refreshes automatically"}
                   </span>
                   {visibleNotifications.length > 0 ? (
-                    <span className="rounded-full border border-white/25 bg-white/35 px-2 py-0.5 dark:border-white/10 dark:bg-white/5">
+                    <span className="rounded-full border border-mscqr-border bg-white px-2 py-0.5">
                       {visibleNotifications.length} total
                     </span>
                   ) : null}
@@ -247,7 +247,7 @@ export function NotificationsDropdown({
           </div>
 
           <div className="relative p-3 pt-2">
-            <div className="relative rounded-2xl border border-white/25 bg-white/38 p-2 shadow-[0_10px_24px_-20px_rgba(15,23,42,0.35)] dark:border-white/10 dark:bg-white/5">
+            <div className="relative rounded-2xl border border-mscqr-border bg-mscqr-surface-muted/45 p-2 shadow-sm">
               <div className="relative min-h-[18.5rem]">
                 {notificationsLoading ? (
                   <div className="space-y-2 p-1">
@@ -292,8 +292,8 @@ export function NotificationsDropdown({
                                 tone.border,
                                 tone.glow,
                                 isUnread
-                                  ? "bg-white/80 hover:bg-white/95 dark:bg-slate-900/70 dark:hover:bg-slate-900/90"
-                                  : "bg-white/55 hover:bg-white/75 dark:bg-slate-900/45 dark:hover:bg-slate-900/70"
+                                  ? "bg-white hover:bg-white"
+                                  : "bg-white/75 hover:bg-white"
                               )}
                             >
                               <span
@@ -310,9 +310,7 @@ export function NotificationsDropdown({
                                 <span
                                   className={cn(
                                     "inline-flex h-5 shrink-0 items-center rounded-full border px-1.5 text-[10px] font-semibold uppercase tracking-wide",
-                                    isUnread
-                                      ? tone.chip
-                                      : "border-white/30 bg-white/40 text-muted-foreground dark:border-white/10 dark:bg-white/5"
+                                    isUnread ? tone.chip : "border-mscqr-border bg-mscqr-surface-muted text-muted-foreground"
                                   )}
                                 >
                                   {isUnread ? "New" : "Read"}
@@ -329,8 +327,8 @@ export function NotificationsDropdown({
                   </ScrollArea>
                 ) : (
                   <div className="flex min-h-[18.5rem] items-center justify-center p-3 animate-in fade-in-0 slide-in-from-bottom-1 duration-200">
-                    <div className="w-full rounded-2xl border border-dashed border-white/30 bg-white/50 px-4 py-8 text-center dark:border-white/10 dark:bg-white/5">
-                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/40 bg-white/70 text-emerald-600 shadow-[0_10px_24px_-18px_rgba(16,185,129,0.55)] dark:border-white/10 dark:bg-white/5 dark:text-emerald-300">
+                    <div className="w-full rounded-2xl border border-dashed border-mscqr-border bg-white px-4 py-8 text-center">
+                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-mscqr-border bg-mscqr-surface-muted text-mscqr-accent shadow-sm">
                         <Inbox className="h-5 w-5" />
                       </div>
                       <p className="text-sm font-semibold tracking-tight">
@@ -339,18 +337,18 @@ export function NotificationsDropdown({
                       <p className="mt-1 text-xs leading-5 text-muted-foreground">
                         {notificationPanelCleared
                           ? "New alerts will appear here automatically as activity happens."
-                          : "Your latest alerts, policy events, and incident updates will appear here."}
+                          : "Your latest workspace updates and issues will appear here."}
                       </p>
                     </div>
                   </div>
                 )}
               </div>
 
-              <div className="mt-3 flex items-center justify-end border-t border-white/20 px-1 pt-3 dark:border-white/10">
+              <div className="mt-3 flex items-center justify-end border-t border-mscqr-border px-1 pt-3">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-10 rounded-full border-white/45 bg-white/75 px-3.5 text-xs font-semibold shadow-[0_16px_24px_-16px_rgba(15,23,42,0.5)] dark:border-white/15 dark:bg-slate-900/70"
+                  className="h-10 rounded-full px-3.5 text-xs font-semibold"
                   disabled={!canClearNotifications}
                   onClick={onClearNotifications}
                   aria-label="Clear notifications from the panel"

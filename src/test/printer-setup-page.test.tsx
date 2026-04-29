@@ -87,14 +87,14 @@ describe("PrinterSetupPage", () => {
       </MemoryRouter>
     );
 
-    const hostInput = await screen.findByRole("textbox", { name: /^host$/i });
+    const hostInput = await screen.findByRole("textbox", { name: /^printer address$/i });
     fireEvent.change(hostInput, { target: { value: "192.168.1.44" } });
 
     await waitFor(() => {
-      expect(screen.getByRole("textbox", { name: /^host$/i })).toHaveValue("192.168.1.44");
+      expect(screen.getByRole("textbox", { name: /^printer address$/i })).toHaveValue("192.168.1.44");
     });
 
-    expect(screen.getByRole("button", { name: /save and print live test label/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /save printer and print test label/i })).toBeEnabled();
   });
 
   it("shows inline help for manual printer fields", async () => {

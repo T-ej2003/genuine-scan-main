@@ -41,7 +41,7 @@ export function PasswordSettingsCard({
           <Alert className="mb-4 border-amber-200 bg-amber-50 text-amber-950">
             <AlertDescription>
               Sensitive actions are locked until you confirm{" "}
-              {stepUpMethod === "ADMIN_MFA" ? "your authenticator code" : "your current password"} again.
+              {stepUpMethod === "ADMIN_MFA" ? "your extra sign-in protection code" : "your current password"} again.
             </AlertDescription>
           </Alert>
         ) : null}

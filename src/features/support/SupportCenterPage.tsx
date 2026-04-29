@@ -269,15 +269,15 @@ export default function SupportCenterPage() {
     <DashboardLayout>
       <DataTablePagePattern
         eyebrow="Operations"
-        title="Help Desk"
-        description="Review new help requests, reply to users, and keep every case moving to the next clear step."
+        title="Issues"
+        description="Review help requests, reply to users, and keep every issue moving to the next clear step."
         actions={actions}
         filters={filters}
       >
         {ticketsQuery.error ? (
           <PageInlineNotice
             variant="destructive"
-            title="Could not load support tickets"
+            title="Could not load issues"
             description={ticketsQuery.error instanceof Error ? ticketsQuery.error.message : "Please refresh and try again."}
           />
         ) : null}
@@ -308,7 +308,7 @@ export default function SupportCenterPage() {
                     </div>
                     <div className="flex flex-col items-end gap-2">
                       <Badge variant={report.autoDetected ? "default" : "outline"}>
-                        {report.autoDetected ? "Auto-captured" : "Manual"}
+                        {report.autoDetected ? "Reported by app" : "Manual"}
                       </Badge>
                       <Badge variant="outline">{toLabel(report.status)}</Badge>
                     </div>
@@ -318,7 +318,7 @@ export default function SupportCenterPage() {
 
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
                     <span>{formatDistanceToNowStrict(new Date(report.createdAt), { addSuffix: true })}</span>
-                    {report.sourcePath ? <span>Path: {report.sourcePath}</span> : null}
+                    {report.sourcePath ? <span>Screen: {report.sourcePath}</span> : null}
                   </div>
 
                   {report.screenshotPath ? (
@@ -400,7 +400,7 @@ export default function SupportCenterPage() {
         <PageSection
           title="Case queue"
           description="Choose a case on the left, then update its status, owner, and notes on the right."
-          action={<Badge variant="outline">{total} tickets</Badge>}
+          action={<Badge variant="outline">{total} issues</Badge>}
         >
           <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.05fr),minmax(0,1fr)]">
             <div className="min-w-0 rounded-2xl border">
@@ -418,7 +418,7 @@ export default function SupportCenterPage() {
                   <TableBody>
                     {tickets.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={4} className="text-muted-foreground">No support tickets found.</TableCell>
+                        <TableCell colSpan={4} className="text-muted-foreground">No issues found.</TableCell>
                       </TableRow>
                     ) : (
                       tickets.map((ticket) => (
@@ -432,7 +432,10 @@ export default function SupportCenterPage() {
                             <div className="text-xs font-semibold" title={ticket.referenceCode}>
                               {friendlyReferenceLabel(ticket.referenceCode, "Ticket")}
                             </div>
-                            <div className="font-mono text-[10px] text-muted-foreground">{ticket.referenceCode}</div>
+                            <details className="text-xs text-muted-foreground">
+                              <summary className="cursor-pointer">Support reference</summary>
+                              <div className="mt-1 font-mono text-[10px]">{ticket.referenceCode}</div>
+                            </details>
                             <div className="text-xs text-muted-foreground" title={ticket.incidentId}>
                               {friendlyReferenceLabel(ticket.incidentId, "Case")} · #{shortRawReference(ticket.incidentId, 8)}
                             </div>
@@ -478,7 +481,10 @@ export default function SupportCenterPage() {
                         <div className="font-semibold" title={detailQuery.data.referenceCode}>
                           {friendlyReferenceLabel(detailQuery.data.referenceCode, "Ticket")}
                         </div>
-                        <div className="font-mono text-xs text-muted-foreground">{detailQuery.data.referenceCode}</div>
+                        <details className="text-xs text-muted-foreground">
+                          <summary className="cursor-pointer">Support reference</summary>
+                          <div className="mt-1 font-mono">{detailQuery.data.referenceCode}</div>
+                        </details>
                       </div>
                       <div>
                         <span className="text-muted-foreground">Case status</span>
@@ -587,7 +593,7 @@ export default function SupportCenterPage() {
                         rows={3}
                         value={newMessage}
                         onChange={(event) => setNewMessage(event.target.value)}
-                        placeholder="Add an internal handoff note or customer-ready message..."
+                        placeholder="Add a note for the team or a customer-ready message..."
                       />
                       <div className="flex flex-wrap items-center gap-3">
                         <label className="flex items-center gap-2 text-xs text-muted-foreground">

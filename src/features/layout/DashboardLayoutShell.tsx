@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import { useTheme } from "next-themes";
-import { ChevronDown, CircleHelp, Command, LogOut, Menu, Moon, PanelRight, Printer, Settings, Sun } from "lucide-react";
+import { Activity, ChevronDown, CircleHelp, Command, LogOut, Menu, Moon, Printer, Settings, Sun } from "lucide-react";
 
 import { APP_PATHS, getAppBreadcrumbs, getNavItemsForRole, getRoleDisplayLabel, isAppRouteActive } from "@/app/route-metadata";
 import { ContextualIntelligencePanel } from "@/components/platform/ContextualIntelligencePanel";
@@ -79,6 +79,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   };
 
   const workspaceLabel = resolveWorkspaceLabel(user);
+  const currentPageLabel = breadcrumbs[breadcrumbs.length - 1]?.label || "Workspace";
+  const roleLabel = getRoleDisplayLabel(user?.role);
 
   const contextPanel = (
     <ContextualIntelligencePanel
@@ -109,10 +111,10 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       />
 
       <Sheet open={contextOpen} onOpenChange={setContextOpen}>
-        <SheetContent side="right" className="w-[min(92vw,420px)] overflow-y-auto border-mscqr-border bg-mscqr-background p-4 xl:hidden">
+        <SheetContent side="right" className="w-[min(92vw,420px)] overflow-y-auto border-mscqr-border bg-mscqr-background-soft p-4">
           <SheetHeader className="sr-only">
-            <SheetTitle>Workspace intelligence</SheetTitle>
-            <SheetDescription>Contextual MSCQR lifecycle, risk, print, and audit signals.</SheetDescription>
+            <SheetTitle>Workspace activity</SheetTitle>
+            <SheetDescription>Recent MSCQR workspace updates and role-safe shortcuts.</SheetDescription>
           </SheetHeader>
           {contextPanel}
         </SheetContent>
@@ -132,30 +134,28 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         )}
       >
         <div className="flex h-full flex-col">
-          <div className="border-b border-mscqr-border px-5 py-5">
+          <div className="border-b border-mscqr-border bg-white px-5 py-5">
             <Link to={APP_PATHS.dashboard} className="flex items-center gap-3" onClick={() => setSidebarOpen(false)}>
-              <span className="relative flex size-11 items-center justify-center rounded-2xl border border-mscqr-border bg-mscqr-surface-elevated">
+              <span className="relative flex size-11 items-center justify-center rounded-2xl border border-moonlight-300 bg-moonlight-100">
                 <img src="/brand/mscqr-mark.svg" alt="MSCQR logo" className="h-7 w-7" />
-                <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-mscqr-accent shadow-[0_0_18px_hsl(var(--mscqr-accent))]" />
               </span>
               <span className="min-w-0">
                 <span className="block text-lg font-semibold tracking-tight">MSCQR</span>
-                <span className="block truncate text-xs text-mscqr-secondary">Authentication operations</span>
               </span>
             </Link>
           </div>
 
-          <div className="border-b border-mscqr-border px-5 py-4">
-            <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-mscqr-muted">Workspace</p>
+          <div className="border-b border-mscqr-border bg-white px-5 py-4">
+            <p className="text-xs font-medium text-mscqr-muted">Workspace</p>
             <p className="mt-1 truncate text-sm font-semibold text-mscqr-primary">{workspaceLabel}</p>
-            <p className="mt-1 text-xs text-mscqr-secondary">{getRoleDisplayLabel(user?.role)}</p>
+            <p className="mt-1 text-xs text-mscqr-secondary">{roleLabel}</p>
           </div>
 
           <nav className="flex-1 overflow-y-auto px-3 py-5" aria-label="Authenticated MSCQR navigation">
             <div className="space-y-5">
               {navGroups.map((group) => (
                 <div key={group.section}>
-                  <p className="px-3 font-mono text-[10px] uppercase tracking-[0.22em] text-mscqr-muted">{group.section}</p>
+                  <p className="px-3 text-xs font-semibold text-mscqr-muted">{group.section}</p>
                   <div className="mt-2 space-y-1">
                     {group.items.map((item) => {
                       const isActive = isAppRouteActive(location.pathname, item.href);
@@ -167,7 +167,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                           className={cn(
                             "group relative flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition",
                             isActive
-                              ? "text-mscqr-primary"
+                              ? "text-mscqr-primary shadow-sm"
                               : "text-mscqr-secondary hover:bg-mscqr-surface-muted/70 hover:text-mscqr-primary",
                           )}
                         >
@@ -191,6 +191,11 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                             <item.icon className="size-4" />
                           </span>
                           <span className="relative truncate">{item.label}</span>
+                          {group.section === "Advanced" ? (
+                            <span className="relative ml-auto rounded-full bg-mscqr-surface-muted px-2 py-0.5 text-[11px] font-medium text-mscqr-muted">
+                              Admin
+                            </span>
+                          ) : null}
                         </Link>
                       );
                     })}
@@ -201,7 +206,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="border-t border-mscqr-border p-4">
-            <div className="rounded-2xl border border-mscqr-border bg-mscqr-surface-elevated p-3">
+            <div className="rounded-2xl border border-mscqr-border bg-white p-3">
               <div className="flex items-center gap-3">
                 <div className="flex size-10 items-center justify-center rounded-full bg-mscqr-accent-soft text-sm font-semibold text-mscqr-accent">
                   {user?.name?.charAt(0) || "U"}
@@ -231,7 +236,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           />
         ) : null}
 
-        <header className="sticky top-0 z-30 border-b border-mscqr-border bg-mscqr-background/86 px-3 py-3 backdrop-blur-xl lg:px-6">
+        <header className="sticky top-0 z-30 border-b border-mscqr-border bg-white/90 px-3 py-3 backdrop-blur-xl lg:px-6">
           <div className="flex min-w-0 items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <button
@@ -244,12 +249,10 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
             <div className="hidden min-w-0 sm:block">
               <p className="truncate text-sm font-semibold text-mscqr-primary">
-                {breadcrumbs[breadcrumbs.length - 1]?.label || "Workspace"}
+                {currentPageLabel}
               </p>
               <p className="truncate text-xs text-mscqr-secondary">
-                {workspaceLabel} · {user?.role === "manufacturer"
-                  ? "controlled print and assigned batch operations"
-                  : "governed verification lifecycle operations"}
+                {workspaceLabel} · {roleLabel}
               </p>
             </div>
           </div>
@@ -265,7 +268,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             >
               <span className="inline-flex items-center gap-2">
                 <Command className="h-4 w-4" />
-                Command
+                Search workspace
               </span>
               <kbd className="rounded border border-mscqr-border bg-mscqr-surface-muted px-1.5 py-0.5 font-mono text-[10px] text-mscqr-muted">⌘K</kbd>
             </Button>
@@ -348,12 +351,13 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             <Button
               type="button"
               variant="ghost"
-              size="icon"
+              size="sm"
               onClick={() => setContextOpen(true)}
-              aria-label="Open workspace intelligence panel"
-              className="xl:hidden"
+              aria-label="Open workspace activity"
+              className="gap-2"
             >
-              <PanelRight className="h-4 w-4" />
+              <Activity className="h-4 w-4" />
+              <span className="hidden lg:inline">Activity</span>
             </Button>
 
             <SupportIssueLauncher />
@@ -444,8 +448,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         ) : null}
 
         <main className="relative p-3 lg:p-6">
-          <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_18%_8%,hsl(var(--mscqr-accent)/0.12),transparent_30%),radial-gradient(circle_at_86%_18%,hsl(var(--mscqr-audit-exported)/0.10),transparent_26%)]" />
-          <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_25rem]">
+          <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_18%_8%,hsl(var(--mscqr-accent)/0.08),transparent_30%)]" />
+          <div className="grid items-start gap-6">
             <section className="min-w-0">
               {breadcrumbs.length > 0 ? (
                 <div className="mb-4 rounded-2xl border border-mscqr-border bg-mscqr-surface/70 px-4 py-3">
@@ -466,9 +470,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               {children}
             </section>
 
-            <aside className="sticky top-24 hidden xl:block" aria-label="Workspace intelligence">
-              {contextPanel}
-            </aside>
           </div>
         </main>
 

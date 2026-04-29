@@ -24,7 +24,7 @@ const seededCredentials: Record<SeededRole, RoleCredentials> = {
   licenseeAdmin: {
     email: String(process.env.E2E_LICENSEE_ADMIN_EMAIL || "admin@acme.com").trim(),
     password: process.env.E2E_LICENSEE_ADMIN_PASSWORD?.trim() ?? "",
-    displayName: "Licensee Admin",
+    displayName: "Brand Admin",
   },
   manufacturer: {
     email: String(process.env.E2E_MANUFACTURER_EMAIL || "factory1@acme.com").trim(),

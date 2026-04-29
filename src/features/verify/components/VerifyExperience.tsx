@@ -3,7 +3,6 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import {
   AlertTriangle,
   ArrowLeft,
-  ArrowRight,
   Ban,
   CheckCircle2,
   CircleDashed,
@@ -15,15 +14,12 @@ import {
   MapPin,
   ShieldCheck,
   ShoppingBag,
-  Sparkles,
   Store,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { MotionPanel } from "@/components/mscqr/motion";
-import { StatusBadge, VerificationStateBadge } from "@/components/mscqr/status";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -59,60 +55,73 @@ type ProviderOption = {
   label: string;
 };
 
-const FLOW_STEPS: Array<{ id: FlowStep; label: string }> = [
-  { id: "identity", label: "Identity" },
-  { id: "purchase", label: "Purchase" },
-  { id: "source", label: "Source" },
-  { id: "context", label: "Context" },
-  { id: "concern", label: "Concern" },
-  { id: "intent", label: "Reveal" },
-];
+type CustomerResultCategory = "genuine" | "suspicious" | "invalid" | "blocked" | "pending";
 
-const STEP_META: Record<
-  VerificationClassification,
+const RESULT_COPY: Record<
+  CustomerResultCategory,
   {
     title: string;
+    subtitle: string;
+    explanation: string;
     badge: string;
-    tone: string;
-    icon: React.ReactNode;
+    cardClass: string;
+    iconClass: string;
   }
 > = {
-  FIRST_SCAN: {
-    title: "MSCQR confirmed this label",
-    badge: "Confirmed",
-    tone: "border-mscqr-verified/35 bg-mscqr-verified/12 text-mscqr-verified",
-    icon: <ShieldCheck className="h-5 w-5" />,
+  genuine: {
+    title: "This garment is genuine",
+    subtitle: "Verified by MSCQR",
+    explanation: "This QR label matches a brand record and passed the available verification checks.",
+    badge: "Verified",
+    cardClass: "border-emerald-200 bg-emerald-50 text-emerald-950",
+    iconClass: "bg-emerald-100 text-emerald-700",
   },
-  LEGIT_REPEAT: {
-    title: "MSCQR confirmed this code again",
-    badge: "Recorded",
-    tone: "border-mscqr-verified/35 bg-mscqr-verified/12 text-mscqr-verified",
-    icon: <ShieldCheck className="h-5 w-5" />,
+  suspicious: {
+    title: "We could not fully verify this item",
+    subtitle: "Some scan details need review.",
+    explanation:
+      "This can happen when a QR label is scanned unusually often, from unexpected locations, or when the label status needs checking.",
+    badge: "Review needed",
+    cardClass: "border-amber-200 bg-amber-50 text-amber-950",
+    iconClass: "bg-amber-100 text-amber-700",
   },
-  SUSPICIOUS_DUPLICATE: {
-    title: "Review required",
-    badge: "Review required",
-    tone: "border-mscqr-review/35 bg-mscqr-review/12 text-mscqr-review",
-    icon: <AlertTriangle className="h-5 w-5" />,
-  },
-  BLOCKED_BY_SECURITY: {
-    title: "Do not rely on this code",
-    badge: "Blocked",
-    tone: "border-mscqr-blocked/35 bg-mscqr-blocked/12 text-mscqr-blocked",
-    icon: <Ban className="h-5 w-5" />,
-  },
-  NOT_READY_FOR_CUSTOMER_USE: {
-    title: "Not ready for customer verification",
-    badge: "Not ready",
-    tone: "border-mscqr-pending/35 bg-mscqr-pending/12 text-mscqr-pending",
-    icon: <CircleDashed className="h-5 w-5" />,
-  },
-  NOT_FOUND: {
-    title: "Code not found",
+  invalid: {
+    title: "We could not find this QR label",
+    subtitle: "The code was not found.",
+    explanation: "Check that the code is correct. If this came from a garment tag, you can report it to the brand.",
     badge: "Not found",
-    tone: "border-mscqr-border bg-mscqr-surface-muted/70 text-mscqr-secondary",
-    icon: <CircleDashed className="h-5 w-5" />,
+    cardClass: "border-slate-200 bg-slate-50 text-slate-950",
+    iconClass: "bg-slate-100 text-slate-700",
   },
+  blocked: {
+    title: "This QR label is blocked",
+    subtitle: "The brand has blocked this label.",
+    explanation: "The brand has blocked this label from verification. Please contact the seller or brand before purchasing.",
+    badge: "Blocked",
+    cardClass: "border-red-200 bg-red-50 text-red-950",
+    iconClass: "bg-red-100 text-red-700",
+  },
+  pending: {
+    title: "We could not fully verify this item",
+    subtitle: "This label is not ready for customer verification.",
+    explanation: "The brand record exists, but this QR label is not ready to be shown as verified yet.",
+    badge: "Not ready",
+    cardClass: "border-indigo-200 bg-indigo-50 text-indigo-950",
+    iconClass: "bg-indigo-100 text-indigo-700",
+  },
+};
+
+const LABEL_STATUS_COPY: Record<string, string> = {
+  DORMANT: "Not active yet",
+  ACTIVE: "Active",
+  ALLOCATED: "Assigned",
+  PRINTED: "Printed",
+  REDEEMED: "First scan completed",
+  SCANNED: "Scanned",
+  BLOCKED: "Blocked",
+  PRINT_CONFIRMED: "Printed",
+  NOT_CONFIRMED: "Not confirmed",
+  UNKNOWN: "Not available",
 };
 
 const LEGACY_VERIFY_EMAIL_STORAGE_KEYS = ["mscqr_verify_customer_email", "authenticqr_verify_customer_email"] as const;
@@ -203,35 +212,6 @@ const validateStep = (step: FlowStep, intake: CustomerTrustIntake) => {
   }
 };
 
-function StepRail({ activeStep, authenticated }: { activeStep: FlowStep; authenticated: boolean }) {
-  const visibleSteps = authenticated ? FLOW_STEPS : FLOW_STEPS.filter((step) => step.id === "identity");
-  const activeIndex = visibleSteps.findIndex((step) => step.id === activeStep);
-
-  return (
-    <div className="flex gap-3 overflow-x-auto px-1 pb-1 sm:grid sm:grid-cols-3 sm:overflow-visible sm:px-0 xl:grid-cols-6">
-      {visibleSteps.map((step, index) => {
-        const done = index < activeIndex;
-        const active = step.id === activeStep;
-        return (
-          <div
-            key={step.id}
-            className={`min-w-[132px] shrink-0 rounded-2xl border px-4 py-3 transition-all sm:min-w-0 ${
-              active
-                ? "border-mscqr-accent/50 bg-mscqr-accent/12 text-mscqr-accent shadow-[0_18px_40px_rgba(34,211,238,0.12)]"
-                : done
-                  ? "border-mscqr-verified/35 bg-mscqr-verified/12 text-mscqr-verified"
-                  : "border-mscqr-border bg-mscqr-surface/80 text-mscqr-muted"
-            }`}
-          >
-            <div className="text-[11px] uppercase tracking-[0.18em]">{index + 1}</div>
-            <div className="mt-1 text-sm font-semibold">{step.label}</div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 function SectionFrame({
   eyebrow,
   title,
@@ -244,11 +224,11 @@ function SectionFrame({
   children: React.ReactNode;
 }) {
   return (
-    <Card className="border-mscqr-border bg-mscqr-surface/92 text-mscqr-primary shadow-[0_24px_90px_rgba(0,0,0,0.28)]">
+    <Card className="border-mscqr-border bg-white text-mscqr-primary shadow-sm">
       <CardHeader className="space-y-3 border-b border-mscqr-border px-4 pb-5 pt-5 sm:px-6 sm:pb-6 sm:pt-6">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-mscqr-muted">{eyebrow}</div>
+        <div className="text-sm font-semibold text-mscqr-accent">{eyebrow}</div>
         <div className="space-y-2">
-          <CardTitle className="text-xl text-mscqr-primary sm:text-3xl">{title}</CardTitle>
+          <CardTitle className="text-xl text-mscqr-primary sm:text-2xl">{title}</CardTitle>
           <CardDescription className="max-w-2xl text-sm leading-6 text-mscqr-secondary">{description}</CardDescription>
         </div>
       </CardHeader>
@@ -261,7 +241,7 @@ function ProviderButton({ provider }: { provider: ProviderOption }) {
   return (
     <a
       href={buildProviderHref(provider.id, `${window.location.origin}${window.location.pathname}${window.location.search}`)}
-      className="flex items-center justify-between rounded-2xl border border-mscqr-border bg-mscqr-surface-elevated px-4 py-4 text-sm font-medium text-mscqr-primary transition hover:-translate-y-0.5 hover:border-mscqr-accent/50 hover:shadow-[0_16px_32px_rgba(34,211,238,0.1)] motion-reduce:hover:translate-y-0"
+      className="flex items-center justify-between rounded-2xl border border-mscqr-border bg-white px-4 py-4 text-sm font-medium text-mscqr-primary transition hover:border-mscqr-accent/50 hover:bg-mscqr-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mscqr-accent/35"
     >
       <span>Continue with {provider.label}</span>
       <ExternalLink className="h-4 w-4 text-mscqr-muted" />
@@ -269,30 +249,75 @@ function ProviderButton({ provider }: { provider: ProviderOption }) {
   );
 }
 
-function QuestionOption({
-  selected,
-  title,
-  body,
-  onClick,
-}: {
-  selected: boolean;
-  title: string;
-  body: string;
-  onClick: () => void;
-}) {
+const plainStatus = (value?: string | null) => {
+  const key = String(value || "UNKNOWN").trim().toUpperCase();
+  return LABEL_STATUS_COPY[key] || toLabel(key);
+};
+
+const getCustomerResultCategory = (
+  payload: VerifyPayload | null,
+  classification: VerificationClassification
+): CustomerResultCategory => {
+  const outcome = String(payload?.publicOutcome || "").toUpperCase();
+  const status = String(payload?.status || payload?.labelState || "").toUpperCase();
+  if (payload?.isBlocked || classification === "BLOCKED_BY_SECURITY" || status === "BLOCKED" || outcome === "BLOCKED") {
+    return "blocked";
+  }
+  if (classification === "NOT_FOUND" || outcome === "NOT_FOUND" || outcome === "INTEGRITY_ERROR") {
+    return "invalid";
+  }
+  if (classification === "NOT_READY_FOR_CUSTOMER_USE") {
+    return "pending";
+  }
+  if (
+    classification === "SUSPICIOUS_DUPLICATE" ||
+    outcome === "REVIEW_REQUIRED" ||
+    outcome === "LIMITED_PROVENANCE" ||
+    String(payload?.riskDisposition || "").toUpperCase().includes("REVIEW")
+  ) {
+    return "suspicious";
+  }
+  return payload?.isAuthentic ? "genuine" : "suspicious";
+};
+
+const getScanHistoryLabel = (payload: VerifyPayload | null) => {
+  if (!payload) return "Not available";
+  if (payload.isFirstScan || payload.classification === "FIRST_SCAN") return "First scan completed";
+  const count = payload.scanCount || payload.totalScans || payload.scanSummary?.totalScans;
+  if (count && count > 1) return `${count} scans recorded`;
+  if (payload.latestScanAt || payload.latestVerifiedAt) return "Scanned before";
+  return "No scan history available";
+};
+
+const getPrintCheckLabel = (payload: VerifyPayload | null, session?: VerificationSessionSummary | null) => {
+  const printState = payload?.printTrustState || session?.printTrustState || "";
+  if (!printState) return payload?.batch?.printedAt ? "Printed" : "Not available";
+  return plainStatus(printState);
+};
+
+const getLastCheckedLabel = (payload: VerifyPayload | null) => {
+  const timestamp =
+    payload?.latestVerifiedAt ||
+    payload?.latestScanAt ||
+    payload?.verificationTimeline?.latestSeen ||
+    payload?.scanSummary?.latestVerifiedAt ||
+    null;
+  return timestamp ? formatDateTime(timestamp) : "Checked just now";
+};
+
+function ResultIcon({ category }: { category: CustomerResultCategory }) {
+  if (category === "genuine") return <CheckCircle2 className="h-7 w-7" aria-hidden="true" />;
+  if (category === "blocked") return <Ban className="h-7 w-7" aria-hidden="true" />;
+  if (category === "invalid" || category === "pending") return <CircleDashed className="h-7 w-7" aria-hidden="true" />;
+  return <AlertTriangle className="h-7 w-7" aria-hidden="true" />;
+}
+
+function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-2xl border p-4 text-left transition ${
-        selected
-          ? "border-mscqr-accent/50 bg-mscqr-accent/12 text-mscqr-accent shadow-[0_16px_32px_rgba(34,211,238,0.12)]"
-          : "border-mscqr-border bg-mscqr-surface-elevated text-mscqr-primary hover:border-mscqr-border-strong"
-      }`}
-    >
-      <div className="text-sm font-semibold">{title}</div>
-      <div className={`mt-1 text-sm ${selected ? "text-cyan-100/80" : "text-mscqr-secondary"}`}>{body}</div>
-    </button>
+    <div className="rounded-2xl border border-mscqr-border bg-mscqr-surface-muted/45 px-4 py-3">
+      <div className="text-sm font-medium text-mscqr-secondary">{label}</div>
+      <div className="mt-1 text-base font-semibold text-mscqr-primary">{value}</div>
+    </div>
   );
 }
 
@@ -330,7 +355,7 @@ export default function VerifyExperience() {
   const [otpVerifying, setOtpVerifying] = useState(false);
 
   const [intake, setIntake] = useState<CustomerTrustIntake>(DEFAULT_INTAKE);
-  const [flowStep, setFlowStep] = useState<FlowStep>("identity");
+  const [, setFlowStep] = useState<FlowStep>("identity");
   const [submittingReveal, setSubmittingReveal] = useState(false);
   const [challengeRetrying, setChallengeRetrying] = useState(false);
 
@@ -345,45 +370,26 @@ export default function VerifyExperience() {
   const [reporting, setReporting] = useState(false);
   const [reportReason, setReportReason] = useState("counterfeit_suspected");
   const [lastSupportTicketRef, setLastSupportTicketRef] = useState("");
+  const [showConcernForm, setShowConcernForm] = useState(false);
   const [socialProviders, setSocialProviders] = useState<ProviderOption[]>([]);
 
   const deviceId = useMemo(() => getOrCreateAnonDeviceId(), []);
   const passkeySupported = isWebAuthnSupported();
-  const classification = useMemo(() => inferClassification(result || lockedResult), [lockedResult, result]);
-  const reasonList = useMemo(() => deriveReasons(result || lockedResult, classification), [classification, lockedResult, result]);
-  const stepMeta = STEP_META[classification];
-  const currentCode = normalizeVerifyCode(result?.code || session?.code || codeParam);
+  const classification = useMemo(
+    () => inferClassification(result || lockedResult || session?.verification || null),
+    [lockedResult, result, session?.verification]
+  );
+  const reasonList = useMemo(
+    () => deriveReasons(result || lockedResult || session?.verification || null, classification),
+    [classification, lockedResult, result, session?.verification]
+  );
+  const currentCode = normalizeVerifyCode(result?.code || lockedResult?.code || session?.verification?.code || session?.code || codeParam);
   const authReady = customerAuthenticated || session?.authState === "VERIFIED";
   const displaySessionSummary = session || null;
   const challengeRequired = Boolean(result?.challenge?.required || lockedResult?.challenge?.required || session?.challengeRequired);
   const challengeCompleted = Boolean(result?.challenge?.completed || lockedResult?.challenge?.completed || session?.challengeCompleted);
   const challengeCompletedBy =
     result?.challenge?.completedBy || lockedResult?.challenge?.completedBy || session?.challengeCompletedBy || null;
-  const trustLevelLabel =
-    result?.customerTrustLevel === "PASSKEY_VERIFIED"
-      ? "Passkey-verified requester"
-      : result?.customerTrustLevel === "ACCOUNT_TRUSTED"
-        ? "Signed-in requester"
-        : result?.customerTrustLevel === "DEVICE_TRUSTED"
-          ? "Device-trusted requester"
-          : result?.customerTrustLevel === "OPERATOR_REVIEWED"
-            ? "Operator-reviewed requester"
-            : "Anonymous requester";
-
-  const moveToNextStep = useCallback(() => {
-    const stepOrder: FlowStep[] = authReady ? FLOW_STEPS.map((step) => step.id) : ["identity"];
-    const currentIndex = stepOrder.indexOf(flowStep);
-    if (currentIndex === -1) return;
-    const nextStep = stepOrder[currentIndex + 1];
-    if (nextStep) setFlowStep(nextStep);
-  }, [authReady, flowStep]);
-
-  const moveToPreviousStep = useCallback(() => {
-    const stepOrder: FlowStep[] = authReady ? FLOW_STEPS.map((step) => step.id) : ["identity"];
-    const currentIndex = stepOrder.indexOf(flowStep);
-    if (currentIndex <= 0) return;
-    setFlowStep(stepOrder[currentIndex - 1]);
-  }, [authReady, flowStep]);
 
   const updateIntake = useCallback(<K extends keyof CustomerTrustIntake>(key: K, value: CustomerTrustIntake[K]) => {
     setIntake((prev) => ({ ...prev, [key]: value }));
@@ -566,8 +572,14 @@ export default function VerifyExperience() {
           persistSessionProofToken(nextSession.sessionId, nextSession.sessionProofToken);
         }
         setSession(nextSession);
-        setLockedResult((nextSession.verification as VerifyPayload | null) || null);
-        setResult((nextSession.verification as VerifyPayload | null) || null);
+        const nextVerification = (nextSession.verification as VerifyPayload | null) || null;
+        const sessionCode = normalizeVerifyCode(nextVerification?.code || nextSession.code || codeParam);
+        setLockedResult((prev) =>
+          nextVerification || (normalizeVerifyCode(prev?.code || "") === sessionCode ? prev : null)
+        );
+        setResult((prev) =>
+          nextVerification || (normalizeVerifyCode(prev?.code || "") === sessionCode ? prev : null)
+        );
         if (nextSession.intake) {
           setIntake((prev) => ({ ...prev, ...(nextSession.intake as CustomerTrustIntake) }));
         }
@@ -846,64 +858,24 @@ export default function VerifyExperience() {
     }
   }, [authReady, intake, lockedResult, session, toast]);
 
-  const handleSkipCurrentStep = useCallback(() => {
-    if (flowStep === "purchase") {
-      setIntake((prev) => ({
-        ...prev,
-        purchaseChannel: "unknown",
-        sourceCategory: "unknown",
-        platformName: "",
-        sellerName: "",
-        listingUrl: "",
-        orderReference: "",
-        storeName: "",
-        purchaseCity: "",
-        purchaseCountry: "",
-        purchaseDate: "",
-      }));
-      toast({ title: "Step skipped", description: "You can continue without purchase answers." });
-      moveToNextStep();
-      return;
-    }
-    if (flowStep === "source") {
-      setIntake((prev) => ({
-        ...prev,
-        platformName: "",
-        sellerName: prev.purchaseChannel === "gifted" || prev.purchaseChannel === "unknown" ? prev.sellerName : "",
-        listingUrl: "",
-        orderReference: "",
-        storeName: "",
-        purchaseCity: "",
-        purchaseCountry: "",
-        purchaseDate: "",
-      }));
-      toast({ title: "Step skipped", description: "You can continue without source details." });
-      moveToNextStep();
-      return;
-    }
-    if (flowStep === "context") {
-      setIntake((prev) => ({
-        ...prev,
-        packagingState: "unsure",
-        packagingConcern: "unsure",
-      }));
-      toast({ title: "Step skipped", description: "MSCQR marked context as unsure." });
-      moveToNextStep();
-      return;
-    }
-    if (flowStep === "concern") {
-      setIntake((prev) => ({
-        ...prev,
-        scanReason: "routine_check",
-      }));
-      toast({ title: "Step skipped", description: "Reason defaulted to routine check." });
-      moveToNextStep();
-      return;
-    }
-    if (flowStep === "intent") {
-      void handleSubmitIntakeAndReveal({ ownershipIntent: "verify_only" });
-    }
-  }, [flowStep, handleSubmitIntakeAndReveal, moveToNextStep, toast]);
+  const handleSkipOptionalQuestions = useCallback(() => {
+    void handleSubmitIntakeAndReveal({
+      purchaseChannel: "unknown",
+      sourceCategory: "unknown",
+      platformName: "",
+      sellerName: "",
+      listingUrl: "",
+      orderReference: "",
+      storeName: "",
+      purchaseCity: "",
+      purchaseCountry: "",
+      purchaseDate: "",
+      packagingState: "unsure",
+      packagingConcern: "unsure",
+      scanReason: "routine_check",
+      ownershipIntent: "verify_only",
+    });
+  }, [handleSubmitIntakeAndReveal]);
 
   const handleClaimOwnership = async () => {
     if (!currentCode) return;
@@ -978,6 +950,7 @@ export default function VerifyExperience() {
       }
       const reportData = (response.data || {}) as { supportTicketRef?: string | null };
       setLastSupportTicketRef(String(reportData.supportTicketRef || "").trim());
+      setShowConcernForm(false);
       toast({
         title: "Concern submitted",
         description: reportData.supportTicketRef
@@ -1064,26 +1037,21 @@ export default function VerifyExperience() {
 
   if (booting) {
     return (
-      <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.12),transparent_34%),linear-gradient(180deg,hsl(var(--mscqr-background))_0%,hsl(var(--mscqr-background-soft))_100%)] px-4 py-10 text-mscqr-primary">
-        <div className="mx-auto max-w-5xl">
-          <div className="rounded-[28px] border border-mscqr-border bg-mscqr-surface/90 p-6 shadow-[0_32px_96px_rgba(0,0,0,0.32)] sm:p-10">
-            <div className="flex items-start justify-between gap-6">
-              <div className="space-y-4">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-mscqr-muted">MSCQR Secure Verification</div>
-                <h1 className="max-w-3xl text-3xl font-semibold text-mscqr-primary sm:text-5xl">
-                  Locking the label decision before we ask for your purchase context.
-                </h1>
-                <p className="max-w-2xl text-sm leading-7 text-mscqr-secondary sm:text-base">
-                  MSCQR verifies the label in its governed issuance system first, then records your identity and purchase context separately so your answers never change the locked label result.
-                </p>
-              </div>
-              <StatusBadge tone="issued">{maskCode(codeParam)}</StatusBadge>
+      <div className="min-h-screen bg-mscqr-background-soft px-4 py-10 text-mscqr-primary">
+        <div className="mx-auto max-w-3xl">
+          <div className="rounded-[28px] border border-mscqr-border bg-white p-6 shadow-sm sm:p-10">
+            <div className="space-y-4">
+              <Badge variant="outline" className="bg-mscqr-surface-muted text-mscqr-secondary">
+                {maskCode(codeParam)}
+              </Badge>
+              <h1 className="max-w-2xl text-3xl font-semibold text-mscqr-primary sm:text-4xl">Checking your garment QR label</h1>
+              <p className="max-w-2xl text-sm leading-7 text-mscqr-secondary sm:text-base">
+                MSCQR is checking the QR label, brand record, print status, and unusual scan patterns.
+              </p>
             </div>
-            <div className="mt-10 flex items-center gap-3 rounded-2xl border border-mscqr-accent/20 bg-[#05080c] px-5 py-4 text-white">
+            <div className="mt-8 flex items-center gap-3 rounded-2xl border border-mscqr-border bg-mscqr-surface-muted px-5 py-4 text-mscqr-primary">
               <Loader2 className="h-5 w-5 animate-spin" />
-              <div className="text-sm">
-                {token ? "Validating signed label and preparing your secure session…" : "Validating label state and preparing your secure session…"}
-              </div>
+              <div className="text-sm">{token ? "Reading the scanned QR label..." : "Checking the entered QR label..."}</div>
             </div>
           </div>
         </div>
@@ -1093,17 +1061,19 @@ export default function VerifyExperience() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-mscqr-background px-4 py-10 text-white">
-        <div className="mx-auto max-w-3xl rounded-[28px] border border-mscqr-border bg-mscqr-surface p-8 shadow-[0_32px_96px_rgba(0,0,0,0.28)]">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-400">MSCQR Verification</div>
-          <h1 className="mt-4 text-3xl font-semibold">Verification unavailable</h1>
-          <p className="mt-3 text-sm leading-7 text-slate-300">{error}</p>
+      <div className="min-h-screen bg-mscqr-background-soft px-4 py-10 text-mscqr-primary">
+        <div className="mx-auto max-w-3xl rounded-[28px] border border-mscqr-border bg-white p-8 shadow-sm">
+          <Badge variant="outline" className="bg-mscqr-surface-muted text-mscqr-secondary">
+            MSCQR verification
+          </Badge>
+          <h1 className="mt-4 text-3xl font-semibold">We could not check this garment</h1>
+          <p className="mt-3 text-sm leading-7 text-mscqr-secondary">{error}</p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Button asChild>
-              <Link to="/verify">Verify another code</Link>
+              <Link to="/verify">Enter code again</Link>
             </Button>
-            <Button variant="outline" asChild className="border-white/20 bg-white/5 text-white hover:bg-white/10">
-              <Link to="/trust">Open trust center</Link>
+            <Button variant="outline" asChild>
+              <Link to="/trust">Trust & Security</Link>
             </Button>
           </div>
         </div>
@@ -1112,113 +1082,282 @@ export default function VerifyExperience() {
   }
 
   const canReveal = Boolean(session?.sessionId && authReady);
-  const limitedProvenance = result?.publicOutcome === "LIMITED_PROVENANCE";
-  const proofTitle =
-    result?.proofTier === "SIGNED_LABEL"
-      ? "Signed label check"
-      : result?.proofTier === "MANUAL_REGISTRY_LOOKUP"
-        ? "Manual code record check"
-        : "Fail-safe verification";
-  const proofDetail =
-    result?.proofTier === "SIGNED_LABEL"
-      ? "MSCQR confirmed the issued label token and the current lifecycle state of this label."
-      : result?.proofTier === "MANUAL_REGISTRY_LOOKUP"
-        ? "MSCQR confirmed the registry record and lifecycle state, but not a label-bound signature."
-        : "MSCQR returned a degraded decision because a dependency had to fail safely.";
-  const checkedItems =
-    result?.publicOutcome === "INTEGRITY_ERROR"
-      ? [
-          "MSCQR could not validate the signed-label proof presented for this result.",
-          "The platform did not accept this as a trusted signed-label check.",
-          "Use the brand support channel if this label should still be valid.",
-        ]
-      : result?.publicOutcome === "NOT_FOUND" || classification === "NOT_FOUND"
-      ? [
-          "MSCQR could not match this code to a live governed registry record.",
-          "No customer-ready lifecycle state could be confirmed for this code.",
-          "No signed-label proof could be completed for this result.",
-        ]
-      : limitedProvenance
-        ? [
-            "MSCQR confirmed the signed label token and found a live platform record for this label.",
-            "Governed print provenance is not available for this label, so this result is intentionally limited.",
-            "Treat this as a weaker signed-label result than a governed print confirmation.",
-          ]
-      : classification === "NOT_READY_FOR_CUSTOMER_USE"
-        ? [
-            "The label exists inside MSCQR’s governed issuance registry.",
-            "The lifecycle state is not yet released for customer verification.",
-            proofDetail,
-          ]
-        : classification === "BLOCKED_BY_SECURITY"
-          ? [
-              "The label exists inside MSCQR’s governed issuance registry.",
-              "MSCQR recorded a state or policy condition that currently blocks customer acceptance.",
-              proofDetail,
-            ]
-          : [
-              "The label exists inside MSCQR’s governed issuance registry.",
-              "The current lifecycle state is suitable for customer verification.",
-              proofDetail,
-          ];
-  const resultTone = limitedProvenance ? "border-mscqr-degraded/35 bg-mscqr-degraded/12 text-mscqr-degraded" : stepMeta.tone;
-  const resultBadge = limitedProvenance ? "Limited provenance" : stepMeta.badge;
-  const resultTitle = limitedProvenance ? "MSCQR found a weaker provenance path" : stepMeta.title;
+  const displayResult = result || lockedResult || session?.verification || null;
+  const displayClassification = inferClassification(displayResult);
+  const resultCategory = getCustomerResultCategory(displayResult, displayClassification);
+  const resultCopy = RESULT_COPY[resultCategory];
+  const brandName = displayResult?.licensee?.brandName || displayResult?.licensee?.name || displaySessionSummary?.brandName || "Brand";
+  const manufacturerName = displayResult?.batch?.manufacturer?.name || "";
+  const supportEmail = displayResult?.licensee?.supportEmail || "support@mscqr.com";
+  const supportPhone = displayResult?.licensee?.supportPhone || "";
+  const brandWebsite = displayResult?.licensee?.website || displayResult?.batch?.manufacturer?.website || "";
+  const labelStatus = plainStatus(displayResult?.labelState || displayResult?.status || displaySessionSummary?.labelState);
+  const showQuickCheck = !displayResult || (challengeRequired && !challengeCompleted && !authReady);
+  const canClaimGarment = Boolean(displayResult?.ownershipStatus?.canClaim && authReady);
+  const canReportConcern = Boolean(displayResult?.verifyUxPolicy?.allowFraudReport ?? true);
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.12),transparent_34%),radial-gradient(circle_at_92%_8%,rgba(251,191,36,0.08),transparent_22%),linear-gradient(180deg,hsl(var(--mscqr-background))_0%,hsl(var(--mscqr-background-soft))_46%,hsl(var(--mscqr-background))_100%)] px-3 py-4 text-mscqr-primary sm:px-6 sm:py-12">
-      <div className="mx-auto max-w-6xl space-y-5 sm:space-y-8">
-        <MotionPanel>
-        <header className="grid gap-5 rounded-[24px] border border-mscqr-border bg-mscqr-surface/92 p-4 shadow-[0_30px_100px_rgba(0,0,0,0.24)] sm:rounded-[32px] sm:p-10 lg:grid-cols-[1.6fr,0.8fr]">
-          <div className="space-y-5">
-            <div className="flex flex-wrap items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.26em] text-mscqr-muted">
-              <span>MSCQR verification review</span>
-              <span className="h-1 w-1 rounded-full bg-mscqr-border-strong" />
-              <span>{displaySessionSummary?.brandName || "Governed label verification"}</span>
+    <div className="min-h-screen bg-mscqr-background-soft px-3 py-4 text-mscqr-primary sm:px-6 sm:py-10">
+      <div className="mx-auto max-w-6xl space-y-5 sm:space-y-7">
+        <header className="rounded-[28px] border border-mscqr-border bg-white p-5 shadow-sm sm:p-8">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="bg-mscqr-surface-muted text-mscqr-secondary">
+                  {brandName}
+                </Badge>
+                <Badge variant="outline" className="bg-white text-mscqr-secondary">
+                  {displaySessionSummary?.maskedCode || maskCode(currentCode)}
+                </Badge>
+              </div>
+              <div className={`rounded-[26px] border p-5 sm:p-6 ${showQuickCheck ? RESULT_COPY.suspicious.cardClass : resultCopy.cardClass}`}>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                  <div className={`inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${showQuickCheck ? RESULT_COPY.suspicious.iconClass : resultCopy.iconClass}`}>
+                    {showQuickCheck ? <AlertTriangle className="h-7 w-7" aria-hidden="true" /> : <ResultIcon category={resultCategory} />}
+                  </div>
+                  <div className="min-w-0 space-y-2">
+                    <div className="text-sm font-semibold">{showQuickCheck ? "Quick check needed" : resultCopy.badge}</div>
+                    <h1 className="text-3xl font-semibold tracking-tight sm:text-5xl">
+                      {showQuickCheck ? "We need one quick check before showing the full result." : resultCopy.title}
+                    </h1>
+                    <p className="text-lg font-medium">{showQuickCheck ? "Sign in to continue." : resultCopy.subtitle}</p>
+                    <p className="max-w-3xl text-sm leading-7 sm:text-base">
+                      {showQuickCheck
+                        ? "This helps protect customers and brands when a scan needs extra review."
+                        : resultCopy.explanation}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              {displayResult ? (
+                <div className="flex flex-wrap gap-3">
+                  {canClaimGarment ? (
+                    <Button onClick={handleClaimOwnership} disabled={claiming}>
+                      {claiming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                      Register this garment
+                    </Button>
+                  ) : !authReady ? (
+                    <Button
+                      onClick={() => document.getElementById("customer-sign-in")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                    >
+                      Save this verification
+                    </Button>
+                  ) : null}
+                  {canReportConcern ? (
+                    <Button variant="outline" onClick={() => setShowConcernForm(true)}>
+                      <AlertTriangle className="mr-2 h-4 w-4" />
+                      Report a concern
+                    </Button>
+                  ) : null}
+                  <Button variant="ghost" asChild>
+                    <Link to="/verify">Verify another garment</Link>
+                  </Button>
+                </div>
+              ) : null}
             </div>
-            <div className="space-y-3">
-              <h1 className="max-w-3xl text-2xl font-semibold tracking-tight text-mscqr-primary sm:text-5xl">
-                Review the MSCQR label result with clear proof boundaries.
-              </h1>
-              <p className="max-w-3xl text-sm leading-7 text-mscqr-secondary sm:text-base">
-                MSCQR locks the label result before revealing it. Your identity and purchase answers add context for review and support, but they do not rewrite the original verification outcome.
+
+            <div className="rounded-2xl border border-mscqr-border bg-mscqr-surface-muted p-5 text-sm leading-6 text-mscqr-secondary lg:max-w-sm">
+              <div className="flex items-center gap-2 font-semibold text-mscqr-primary">
+                <ShieldCheck className="h-4 w-4" />
+                What MSCQR checks
+              </div>
+              <p className="mt-3">
+                MSCQR checks the QR label, brand record, print status, and unusual scan patterns. A QR code can be copied, so suspicious repeats may still need brand review.
               </p>
-            </div>
-            <div className="flex flex-wrap gap-3 text-sm">
-              <StatusBadge tone="issued">{displaySessionSummary?.brandName || "MSCQR"}</StatusBadge>
-              <StatusBadge tone="neutral">{displaySessionSummary?.maskedCode || maskCode(currentCode)}</StatusBadge>
-              <StatusBadge tone={displaySessionSummary?.entryMethod === "SIGNED_SCAN" ? "verified" : "issued"}>
-                {displaySessionSummary?.entryMethod === "SIGNED_SCAN" ? "Signed scan session" : "Manual code session"}
-              </StatusBadge>
-            </div>
-          </div>
-          <div className="rounded-[22px] border border-mscqr-border bg-[#05080c] p-5 text-white shadow-[0_24px_64px_rgba(0,0,0,0.28)] sm:rounded-[28px] sm:p-6">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-400">What this result is based on</div>
-            <div className="mt-4 space-y-3 text-sm leading-6 text-slate-200">
-              <p>MSCQR checks whether the label exists in the governed issuance registry, whether its lifecycle state is customer-ready, and, when available, whether a signed label token still matches the issued record.</p>
-              <p className="text-slate-400">MSCQR does not prove the physical item is impossible to counterfeit, and a manual code lookup is weaker than a signed-label check.</p>
-            </div>
-            <div className="mt-6 border-t border-white/10 pt-4 text-sm text-slate-300">
-              Session status: {session?.revealed ? "result revealed" : authReady ? "identity verified" : "identity required"}
             </div>
           </div>
         </header>
-        </MotionPanel>
 
-        <StepRail activeStep={flowStep} authenticated={authReady} />
-
-        {flowStep === "identity" ? (
+        {displayResult ? (
           <SectionFrame
-            eyebrow="Step 1"
-            title="Verify who is checking this product"
-            description="Sign in before MSCQR reveals the locked result. Your identity creates a customer trust context that stays separate from the label verdict."
+            eyebrow="Result details"
+            title="What we found"
+            description="Simple verification details are shown first. Support details are available below if a brand or MSCQR support team asks for them."
           >
             {challengeRequired && !challengeCompleted ? (
-              <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
-                This repeat scan needs an additional review check before it should be trusted normally. Sign in first, then MSCQR can re-check it with your verified identity.
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+                <div className="font-semibold">We need one quick check before showing the full result.</div>
+                <div className="mt-1">This scan needs an extra review step before you rely on it.</div>
+                <div className="mt-3">
+                  {authReady ? (
+                    <Button variant="outline" onClick={handleCompleteChallenge} disabled={challengeRetrying}>
+                      {challengeRetrying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                      Complete quick check
+                    </Button>
+                  ) : (
+                    <Button variant="outline" onClick={() => document.getElementById("customer-sign-in")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+                      Sign in for quick check
+                    </Button>
+                  )}
+                </div>
               </div>
             ) : null}
-            <div className="grid gap-4 lg:grid-cols-[1.15fr,0.85fr]">
+            {challengeCompleted ? (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-950">
+                Additional review check completed{challengeCompletedBy === "CUSTOMER_IDENTITY" ? " with your verified identity." : "."}
+              </div>
+            ) : null}
+            {displayResult.warningMessage ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+                {displayResult.warningMessage}
+              </div>
+            ) : null}
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <DetailRow label="Brand" value={brandName} />
+              {manufacturerName ? <DetailRow label="Manufacturer" value={manufacturerName} /> : null}
+              <DetailRow label="QR label" value={displaySessionSummary?.maskedCode || maskCode(currentCode)} />
+              <DetailRow label="Status" value={labelStatus} />
+              <DetailRow label="Scan history" value={getScanHistoryLabel(displayResult)} />
+              <DetailRow label="Print check" value={getPrintCheckLabel(displayResult, displaySessionSummary)} />
+              <DetailRow label="Last checked" value={getLastCheckedLabel(displayResult)} />
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm leading-6 text-slate-700">
+                <div className="font-semibold text-slate-950">What this means</div>
+                <p className="mt-2">
+                  {resultCategory === "genuine"
+                    ? "The QR label matched an MSCQR brand record and passed the available checks."
+                    : "The scan needs caution. Check the garment tag, seller details, and brand support guidance before relying on it."}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm leading-6 text-slate-700">
+                <div className="font-semibold text-slate-950">A helpful note</div>
+                <p className="mt-2">
+                  MSCQR helps brands spot copied labels and unusual repeat scans, but no QR label can prove by itself that copying is impossible.
+                </p>
+              </div>
+            </div>
+            <details className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-700">
+              <summary className="cursor-pointer font-semibold text-slate-950">Technical details for support</summary>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <DetailRow label="Verification result" value={displayClassification.replace(/_/g, " ").toLowerCase()} />
+                <DetailRow label="Verification confidence" value={plainStatus(displayResult.proofTier || "Not available")} />
+                <DetailRow label="Scan risk" value={plainStatus(displayResult.riskDisposition || "Clear")} />
+                <DetailRow label="Source check" value={plainStatus(displayResult.proofSource || "Not available")} />
+                <DetailRow label="Decision reference" value={<span className="break-all font-mono text-sm">{displayResult.decisionId || session?.decisionId || "Not available"}</span>} />
+                <DetailRow label="Session reference" value={<span className="break-all font-mono text-sm">{session?.sessionId || "Not available"}</span>} />
+              </div>
+              <div className="mt-4 rounded-xl bg-slate-50 p-4">
+                <div className="font-medium text-slate-950">Support notes</div>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {reasonList.length ? reasonList.map((reason) => <li key={reason}>{reason}</li>) : <li>No additional support notes were recorded.</li>}
+                </ul>
+              </div>
+            </details>
+          </SectionFrame>
+        ) : null}
+
+        {!displayResult && authReady && challengeRequired && !challengeCompleted ? (
+          <SectionFrame
+            eyebrow="Quick check"
+            title="Complete one quick check"
+            description="This scan needs an extra review step before MSCQR can show the full result."
+          >
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+              <div className="font-semibold">We need one quick check before showing the full result.</div>
+              <p className="mt-1">This helps the brand review unusual scan activity without changing the original verification decision.</p>
+              <div className="mt-3">
+                <Button variant="outline" onClick={handleCompleteChallenge} disabled={challengeRetrying}>
+                  {challengeRetrying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                  Complete quick check
+                </Button>
+              </div>
+            </div>
+          </SectionFrame>
+        ) : null}
+
+        {authReady && canReveal ? (
+          <SectionFrame
+            eyebrow="Optional"
+            title="Help the brand review this scan"
+            description="These questions are optional. They help the brand understand suspicious scans and do not change the verification result."
+          >
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="purchaseChannel">Where did you get this garment?</Label>
+                <Select value={intake.purchaseChannel || "unknown"} onValueChange={(value) => updateIntake("purchaseChannel", value as CustomerTrustIntake["purchaseChannel"])}>
+                  <SelectTrigger id="purchaseChannel">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="online">Bought online</SelectItem>
+                    <SelectItem value="offline">Bought in store</SelectItem>
+                    <SelectItem value="gifted">Gifted or transferred</SelectItem>
+                    <SelectItem value="unknown">I am not sure</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="sellerName">Seller or store name</Label>
+                <Input id="sellerName" value={intake.sellerName || intake.storeName || ""} onChange={(event) => updateIntake("sellerName", event.target.value)} placeholder="Optional" />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="purchaseCountry">Country</Label>
+                <Input id="purchaseCountry" value={intake.purchaseCountry || ""} onChange={(event) => updateIntake("purchaseCountry", event.target.value)} placeholder="Optional" />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="packagingConcern">Is the QR tag damaged or copied?</Label>
+                <Select value={intake.packagingConcern || "none"} onValueChange={(value) => updateIntake("packagingConcern", value as CustomerTrustIntake["packagingConcern"])}>
+                  <SelectTrigger id="packagingConcern">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No concern</SelectItem>
+                    <SelectItem value="minor">Maybe</SelectItem>
+                    <SelectItem value="major">Yes, it looks concerning</SelectItem>
+                    <SelectItem value="unsure">I am not sure</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="scanReason">Why did you scan?</Label>
+                <Select value={intake.scanReason || "routine_check"} onValueChange={(value) => updateIntake("scanReason", value as CustomerTrustIntake["scanReason"])}>
+                  <SelectTrigger id="scanReason">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="routine_check">Routine check</SelectItem>
+                    <SelectItem value="new_seller">New seller</SelectItem>
+                    <SelectItem value="pricing_concern">Price looked unusual</SelectItem>
+                    <SelectItem value="packaging_concern">Tag or packaging concern</SelectItem>
+                    <SelectItem value="authenticity_concern">Authenticity concern</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2 md:col-span-2">
+                <Label htmlFor="notes">Anything else you want the brand to know?</Label>
+                <Textarea
+                  id="notes"
+                  value={intake.notes || ""}
+                  onChange={(event) => updateIntake("notes", event.target.value)}
+                  placeholder="Optional"
+                  rows={4}
+                />
+              </div>
+            </div>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button variant="ghost" onClick={handleSkipOptionalQuestions} disabled={submittingReveal}>
+                Skip optional questions
+              </Button>
+              <Button onClick={() => void handleSubmitIntakeAndReveal()} disabled={submittingReveal}>
+                {submittingReveal ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                Save answers and update result
+              </Button>
+            </div>
+          </SectionFrame>
+        ) : null}
+
+        {!authReady ? (
+          <SectionFrame
+            eyebrow="Optional sign-in"
+            title={showQuickCheck ? "Sign in to continue" : "Sign in to save this item"}
+            description={
+              showQuickCheck
+                ? "This scan needs one quick check before the full result can be shown."
+                : "You can save proof of verification or register this garment if the brand supports it."
+            }
+          >
+            <div id="customer-sign-in" className="grid gap-4 lg:grid-cols-[1.15fr,0.85fr]">
               <div className="space-y-4">
                 {socialProviders.length ? (
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -1226,16 +1365,11 @@ export default function VerifyExperience() {
                       <ProviderButton key={provider.id} provider={provider} />
                     ))}
                   </div>
-                ) : (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-600">
-                    Google sign-in is enabled when configured. Email verification stays the fallback for every customer journey.
-                  </div>
-                )}
-
+                ) : null}
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
                   <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                     <Mail className="h-4 w-4" />
-                    Continue with email OTP
+                    Continue with email
                   </div>
                   <div className="mt-4 grid gap-4">
                     <div className="grid gap-2">
@@ -1274,670 +1408,179 @@ export default function VerifyExperience() {
                   </div>
                 </div>
               </div>
-
-              <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm leading-6 text-slate-600">
+                <div className="flex items-center gap-2 font-semibold text-slate-900">
                   <Lock className="h-4 w-4" />
-                  Why MSCQR asks you to sign in first
+                  Why sign in?
                 </div>
-                <ul className="mt-4 space-y-3 text-sm leading-6 text-slate-600">
-                  <li>It creates a portable customer trust record instead of treating every visit as anonymous scan count.</li>
-                  <li>It lets MSCQR separate the locked label result from purchase provenance and ownership intent.</li>
-                  <li>It makes later ownership, support, and fraud handling much more defensible.</li>
-                </ul>
+                <p className="mt-3">
+                  Sign-in is optional for normal scans. It helps you save this verification and gives the brand better context if you report a concern.
+                </p>
               </div>
             </div>
           </SectionFrame>
         ) : null}
 
-        {authReady && flowStep === "purchase" ? (
+        {authReady && (canClaimGarment || String(searchParams.get("transfer") || "").trim() || passkeySupported) ? (
           <SectionFrame
-            eyebrow="Step 2"
-            title="Tell MSCQR how you obtained the product"
-            description="This is provenance evidence, not product proof. The label result was already locked when your session started."
+            eyebrow="Account"
+            title="Save or protect this garment"
+            description="These actions are optional and do not change the verification result."
           >
-            {challengeRequired && !challengeCompleted ? (
-              <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-                <div className="font-semibold">Additional review check required</div>
-                <div className="mt-2 leading-6">
-                  MSCQR detected a risky repeat context for this label. Re-check it with your verified identity before you rely on the result.
-                </div>
-                <div className="mt-3">
-                  <Button variant="outline" onClick={handleCompleteChallenge} disabled={challengeRetrying}>
-                    {challengeRetrying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
-                    Re-check with verified identity
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-            {challengeCompleted ? (
-              <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
-                MSCQR completed the additional review check
-                {challengeCompletedBy === "CUSTOMER_IDENTITY" ? " using your verified identity." : "."}
-              </div>
-            ) : null}
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <QuestionOption
-                selected={intake.purchaseChannel === "online"}
-                title="Bought online"
-                body="Marketplace, brand site, or other e-commerce purchase."
-                onClick={() => updateIntake("purchaseChannel", "online")}
-              />
-              <QuestionOption
-                selected={intake.purchaseChannel === "offline"}
-                title="Bought in store"
-                body="Retail, pharmacy, pop-up, distributor, or local reseller."
-                onClick={() => updateIntake("purchaseChannel", "offline")}
-              />
-              <QuestionOption
-                selected={intake.purchaseChannel === "gifted"}
-                title="Gifted or transferred"
-                body="Someone else gave or sold the item to you."
-                onClick={() => updateIntake("purchaseChannel", "gifted")}
-              />
-              <QuestionOption
-                selected={intake.purchaseChannel === "unknown"}
-                title="Unknown source"
-                body="You are unsure where the item originally came from."
-                onClick={() => updateIntake("purchaseChannel", "unknown")}
-              />
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <Button variant="outline" onClick={() => setFlowStep("identity")} className="w-full sm:w-auto">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Back
-              </Button>
-              <div className="flex flex-col-reverse gap-2 sm:flex-row">
-                <Button variant="ghost" onClick={handleSkipCurrentStep} className="w-full sm:w-auto">
-                  Skip for now
+            <div className="grid gap-3">
+              {canClaimGarment ? (
+                <Button onClick={handleClaimOwnership} disabled={claiming}>
+                  {claiming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                  Register this garment
                 </Button>
-                <Button
-                  onClick={() => {
-                    if (!validateStep("purchase", intake)) {
-                      toast({ title: "Choose a purchase channel", description: "Pick how you obtained the product.", variant: "destructive" });
-                      return;
-                    }
-                    moveToNextStep();
-                  }}
-                  className="w-full sm:w-auto"
-                >
-                  Continue
-                  <ArrowRight className="ml-2 h-4 w-4" />
+              ) : null}
+              {String(searchParams.get("transfer") || "").trim() ? (
+                <Button variant="outline" onClick={handleAcceptTransfer} disabled={!authReady || acceptingTransfer}>
+                  {acceptingTransfer ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                  Accept ownership transfer
                 </Button>
-              </div>
+              ) : null}
+              {passkeySupported ? (
+                <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    <KeyRound className="h-4 w-4" />
+                    Extra sign-in protection
+                  </div>
+                  <div className="text-sm leading-6 text-slate-600">
+                    A passkey can protect future saved garment and transfer actions for this account.
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <Button variant="outline" onClick={handleRegisterPasskey} disabled={registeringPasskey}>
+                      {registeringPasskey ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <KeyRound className="mr-2 h-4 w-4" />}
+                      Add passkey
+                    </Button>
+                    <Button variant="outline" onClick={handleAssertPasskey} disabled={assertingPasskey || !passkeyCredentials.length}>
+                      {assertingPasskey ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <KeyRound className="mr-2 h-4 w-4" />}
+                      Verify passkey
+                    </Button>
+                  </div>
+                  {loadingPasskeys ? (
+                    <div className="text-sm text-slate-500">Loading passkeys...</div>
+                  ) : passkeyCredentials.length ? (
+                    <div className="grid gap-2">
+                      {passkeyCredentials.map((credential) => (
+                        <div key={credential.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm">
+                          <div>
+                            <div className="font-medium text-slate-900">{credential.label}</div>
+                            <div className="text-slate-500">Last used: {formatDateTime(credential.lastUsedAt || null)}</div>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDeletePasskey(credential.id)}
+                            disabled={deletingPasskeyId === credential.id}
+                          >
+                            {deletingPasskeyId === credential.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Remove"}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-slate-500">No passkeys added yet.</div>
+                  )}
+                </div>
+              ) : null}
             </div>
           </SectionFrame>
         ) : null}
 
-        {authReady && flowStep === "source" ? (
+        {showConcernForm && canReportConcern ? (
           <SectionFrame
-            eyebrow="Step 3"
-            title="Capture seller or source details"
-            description="MSCQR uses this as investigation context. It does not change the locked label result."
-          >
-            <div className="grid gap-4 md:grid-cols-2">
-              {intake.purchaseChannel === "online" ? (
-                <>
-                  <div className="grid gap-2">
-                    <Label htmlFor="platformName">Platform or marketplace</Label>
-                    <Input id="platformName" value={intake.platformName || ""} onChange={(event) => updateIntake("platformName", event.target.value)} placeholder="Amazon, eBay, direct brand site…" />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="sellerName">Seller name</Label>
-                    <Input id="sellerName" value={intake.sellerName || ""} onChange={(event) => updateIntake("sellerName", event.target.value)} placeholder="Seller or storefront name" />
-                  </div>
-                  <div className="grid gap-2 md:col-span-2">
-                    <Label htmlFor="listingUrl">Listing URL</Label>
-                    <Input id="listingUrl" value={intake.listingUrl || ""} onChange={(event) => updateIntake("listingUrl", event.target.value)} placeholder="https://…" />
-                  </div>
-                  <div className="grid gap-2 md:col-span-2">
-                    <Label htmlFor="orderReference">Order reference</Label>
-                    <Input id="orderReference" value={intake.orderReference || ""} onChange={(event) => updateIntake("orderReference", event.target.value)} placeholder="Order number or receipt reference" />
-                  </div>
-                </>
-              ) : intake.purchaseChannel === "offline" ? (
-                <>
-                  <div className="grid gap-2">
-                    <Label htmlFor="storeName">Store name</Label>
-                    <Input id="storeName" value={intake.storeName || ""} onChange={(event) => updateIntake("storeName", event.target.value)} placeholder="Retailer or location" />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="purchaseCity">City</Label>
-                    <Input id="purchaseCity" value={intake.purchaseCity || ""} onChange={(event) => updateIntake("purchaseCity", event.target.value)} placeholder="City" />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="purchaseCountry">Country</Label>
-                    <Input id="purchaseCountry" value={intake.purchaseCountry || ""} onChange={(event) => updateIntake("purchaseCountry", event.target.value)} placeholder="Country" />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="purchaseDate">Approximate purchase date</Label>
-                    <Input id="purchaseDate" type="date" value={intake.purchaseDate || ""} onChange={(event) => updateIntake("purchaseDate", event.target.value)} />
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="grid gap-2 md:col-span-2">
-                    <Label htmlFor="sellerNameAlt">Who gave or sold it to you?</Label>
-                    <Input id="sellerNameAlt" value={intake.sellerName || ""} onChange={(event) => updateIntake("sellerName", event.target.value)} placeholder="Friend, reseller, gift source, or unknown" />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="purchaseDateUnknown">Approximate date</Label>
-                    <Input id="purchaseDateUnknown" type="date" value={intake.purchaseDate || ""} onChange={(event) => updateIntake("purchaseDate", event.target.value)} />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="sourceCategory">Context</Label>
-                    <Select value={intake.sourceCategory || "unknown"} onValueChange={(value) => updateIntake("sourceCategory", value as CustomerTrustIntake["sourceCategory"])}>
-                      <SelectTrigger id="sourceCategory">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="gift">Gift</SelectItem>
-                        <SelectItem value="reseller">Reseller</SelectItem>
-                        <SelectItem value="unknown">Unknown</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <Button variant="outline" onClick={moveToPreviousStep} className="w-full sm:w-auto">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Back
-              </Button>
-              <div className="flex flex-col-reverse gap-2 sm:flex-row">
-                <Button variant="ghost" onClick={handleSkipCurrentStep} className="w-full sm:w-auto">
-                  Skip for now
-                </Button>
-                <Button
-                  onClick={() => {
-                    if (!validateStep("source", intake)) {
-                      toast({ title: "Add source details", description: "MSCQR needs enough purchase-source context to continue.", variant: "destructive" });
-                      return;
-                    }
-                    moveToNextStep();
-                  }}
-                  className="w-full sm:w-auto"
-                >
-                  Continue
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </SectionFrame>
-        ) : null}
-
-        {authReady && flowStep === "context" ? (
-          <SectionFrame
-            eyebrow="Step 4"
-            title="Describe the product condition you saw"
-            description="These answers become customer trust and incident evidence. They do not change the label result already locked by MSCQR."
+            eyebrow="Report"
+            title="Report a concern"
+            description="Tell the brand what worried you. You can cancel and return to the result at any time."
           >
             <div className="grid gap-4 md:grid-cols-2">
               <div className="grid gap-2">
-                <Label htmlFor="packagingState">Packaging state</Label>
-                <Select value={intake.packagingState || "sealed"} onValueChange={(value) => updateIntake("packagingState", value as CustomerTrustIntake["packagingState"])}>
-                  <SelectTrigger id="packagingState">
+                <Label htmlFor="report-reason">What do you want to report?</Label>
+                <Select value={reportReason} onValueChange={setReportReason}>
+                  <SelectTrigger id="report-reason">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="sealed">Sealed</SelectItem>
-                    <SelectItem value="opened">Opened</SelectItem>
-                    <SelectItem value="damaged">Damaged</SelectItem>
-                    <SelectItem value="unsure">Unsure</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="packagingConcern">How concerning did it look?</Label>
-                <Select value={intake.packagingConcern || "none"} onValueChange={(value) => updateIntake("packagingConcern", value as CustomerTrustIntake["packagingConcern"])}>
-                  <SelectTrigger id="packagingConcern">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No concern</SelectItem>
-                    <SelectItem value="minor">Minor concern</SelectItem>
-                    <SelectItem value="major">Major concern</SelectItem>
-                    <SelectItem value="unsure">Unsure</SelectItem>
+                    <SelectItem value="counterfeit_suspected">I suspect this is not genuine</SelectItem>
+                    <SelectItem value="duplicate_scan">This QR label has been scanned unusually</SelectItem>
+                    <SelectItem value="tampered_label">The tag looks damaged or copied</SelectItem>
+                    <SelectItem value="wrong_product">The label does not match the garment</SelectItem>
+                    <SelectItem value="other">Something else</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="grid gap-2 md:col-span-2">
-                <Label htmlFor="notes">Anything unusual?</Label>
+                <Label htmlFor="report-notes">What happened?</Label>
                 <Textarea
-                  id="notes"
+                  id="report-notes"
                   value={intake.notes || ""}
                   onChange={(event) => updateIntake("notes", event.target.value)}
-                  placeholder="Example: seal looked broken, print quality looked off, product felt different, or nothing unusual."
-                  rows={5}
+                  placeholder="Optional details for the brand"
+                  rows={4}
                 />
               </div>
             </div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <Button variant="outline" onClick={moveToPreviousStep} className="w-full sm:w-auto">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Back
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button variant="ghost" onClick={() => setShowConcernForm(false)} disabled={reporting}>
+                Cancel
               </Button>
-              <div className="flex flex-col-reverse gap-2 sm:flex-row">
-                <Button variant="ghost" onClick={handleSkipCurrentStep} className="w-full sm:w-auto">
-                  Skip for now
-                </Button>
-                <Button
-                  onClick={() => {
-                    if (!validateStep("context", intake)) {
-                      toast({ title: "Add product context", description: "Select the packaging state and concern level.", variant: "destructive" });
-                      return;
-                    }
-                    moveToNextStep();
-                  }}
-                  className="w-full sm:w-auto"
-                >
-                  Continue
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </SectionFrame>
-        ) : null}
-
-        {authReady && flowStep === "concern" ? (
-          <SectionFrame
-            eyebrow="Step 5"
-            title="Why did you choose to scan this item?"
-            description="This creates fraud and support context. It helps MSCQR interpret the customer journey without altering the label verdict."
-          >
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-              {[
-                ["routine_check", "Routine check"],
-                ["new_seller", "New seller"],
-                ["pricing_concern", "Pricing concern"],
-                ["packaging_concern", "Packaging concern"],
-                ["authenticity_concern", "Authenticity concern"],
-              ].map(([value, label]) => (
-                <QuestionOption
-                  key={value}
-                  selected={intake.scanReason === value}
-                  title={label}
-                  body="Capture the motive for this verification."
-                  onClick={() => updateIntake("scanReason", value as CustomerTrustIntake["scanReason"])}
-                />
-              ))}
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <Button variant="outline" onClick={moveToPreviousStep} className="w-full sm:w-auto">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Back
+              <Button data-testid="verify-report-concern" onClick={handleReportConcern} disabled={reporting}>
+                {reporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <AlertTriangle className="mr-2 h-4 w-4" />}
+                Submit concern
               </Button>
-              <div className="flex flex-col-reverse gap-2 sm:flex-row">
-                <Button variant="ghost" onClick={handleSkipCurrentStep} className="w-full sm:w-auto">
-                  Skip for now
-                </Button>
-                <Button onClick={moveToNextStep} className="w-full sm:w-auto">
-                  Continue
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </div>
             </div>
+            {lastSupportTicketRef ? (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
+                Concern submitted. Support reference:{" "}
+                <span data-testid="verify-report-support-ticket-raw" className="font-mono font-semibold">
+                  {lastSupportTicketRef}
+                </span>
+              </div>
+            ) : null}
           </SectionFrame>
-        ) : null}
-
-        {authReady && flowStep === "intent" ? (
-          <SectionFrame
-            eyebrow="Step 6"
-            title="Choose the next action lane, then reveal the result"
-            description="MSCQR will keep your trust intake separate from the locked label result. Once you submit this step, the result is revealed together with your provenance record."
-          >
-            <div className="grid gap-6 lg:grid-cols-[0.95fr,1.05fr]">
-              <div className="space-y-4">
-                <div className="grid gap-3">
-                  {[
-                    ["verify_only", "Only verify this item"],
-                    ["claim_ownership", "Verify and claim ownership"],
-                    ["report_concern", "Reveal and report a concern"],
-                    ["contact_support", "Reveal and contact support"],
-                  ].map(([value, label]) => (
-                    <QuestionOption
-                      key={value}
-                      selected={intake.ownershipIntent === value}
-                      title={label}
-                      body="This changes the recommended next actions after reveal, not the locked label result."
-                      onClick={() => updateIntake("ownershipIntent", value as CustomerTrustIntake["ownershipIntent"])}
-                    />
-                  ))}
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
-                  Your answers create trust evidence and incident context only. They do not affect the verification basis, replacement status, or the label decision already locked by MSCQR.
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                <div className="text-sm font-semibold text-slate-900">Review what MSCQR will record</div>
-                <div className="mt-4 grid gap-3 text-sm">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <div className="font-medium text-slate-900">Purchase channel</div>
-                    <div className="mt-1 text-slate-600">{intake.purchaseChannel}</div>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <div className="font-medium text-slate-900">Source detail</div>
-                    <div className="mt-1 text-slate-600">
-                      {intake.purchaseChannel === "online"
-                        ? `${intake.platformName || "No platform"} · ${intake.sellerName || "No seller"}`
-                        : intake.purchaseChannel === "offline"
-                          ? `${intake.storeName || "No store"} · ${intake.purchaseCity || "No city"}`
-                          : intake.sellerName || "Gift / unknown source"}
-                    </div>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <div className="font-medium text-slate-900">Condition observed</div>
-                    <div className="mt-1 text-slate-600">{intake.packagingState} · {intake.packagingConcern} concern</div>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <div className="font-medium text-slate-900">Verification reason</div>
-                    <div className="mt-1 text-slate-600">{intake.scanReason.replace(/_/g, " ")}</div>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <div className="font-medium text-slate-900">Next action intent</div>
-                    <div className="mt-1 text-slate-600">{intake.ownershipIntent.replace(/_/g, " ")}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <Button variant="outline" onClick={moveToPreviousStep} className="w-full sm:w-auto">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Back
-              </Button>
-              <div className="flex flex-col-reverse gap-2 sm:flex-row">
-                <Button variant="ghost" onClick={handleSkipCurrentStep} className="w-full sm:w-auto" disabled={!canReveal || submittingReveal}>
-                  Skip questions and reveal
-                </Button>
-                <Button onClick={() => void handleSubmitIntakeAndReveal()} disabled={!canReveal || submittingReveal} className="w-full sm:w-auto">
-                  {submittingReveal ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                  Submit and reveal result
-                </Button>
-              </div>
-            </div>
-          </SectionFrame>
-        ) : null}
-
-        {flowStep === "result" && result ? (
-          <div className="grid gap-6 xl:grid-cols-[1.15fr,0.85fr]">
-            <SectionFrame
-              eyebrow="Locked label result"
-              title={resultTitle}
-              description="This result was locked from the QR token or code and lifecycle state before MSCQR collected your trust answers."
-            >
-              <div className={`rounded-[26px] border p-5 ${resultTone}`}>
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="rounded-full bg-white/70 p-2">{stepMeta.icon}</div>
-                    <div>
-                      <div className="text-lg font-semibold">{result.message || resultTitle}</div>
-                      <div className="mt-1 text-sm">{reasonList[0]}</div>
-                    </div>
-                  </div>
-                  <VerificationStateBadge value={classification} label={resultBadge} />
-                </div>
-              </div>
-
-              {result.challenge?.required || result.challenge?.completed || result.warningMessage ? (
-                <div
-                  className={`rounded-2xl border p-5 ${
-                    result.challenge?.completed
-                      ? "border-mscqr-verified/35 bg-mscqr-verified/12 text-mscqr-verified"
-                      : "border-mscqr-review/35 bg-mscqr-review/12 text-mscqr-review"
-                  }`}
-                >
-                  <div className="text-sm font-semibold">
-                    {result.challenge?.required
-                      ? "Additional review is required for this repeat scan"
-                      : result.challenge?.completed
-                        ? "Additional review check completed"
-                        : "Verification caution"}
-                  </div>
-                  <div className="mt-2 space-y-2 text-sm leading-6">
-                    {result.challenge?.required ? (
-                      <p>{result.challenge.reason || "MSCQR requires an additional challenge before this repeat scan should be trusted."}</p>
-                    ) : null}
-                    {result.challenge?.completed ? (
-                      <p>
-                        MSCQR re-checked this repeat scan
-                        {result.challenge.completedBy === "CUSTOMER_IDENTITY" ? " with a verified customer identity." : "."}
-                      </p>
-                    ) : null}
-                    {result.warningMessage ? <p>{result.warningMessage}</p> : null}
-                  </div>
-                  {result.challenge?.required ? (
-                    <div className="mt-4">
-                      {authReady ? (
-                        <Button variant="outline" onClick={handleCompleteChallenge} disabled={challengeRetrying}>
-                          {challengeRetrying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
-                          Re-check with verified identity
-                        </Button>
-                      ) : (
-                        <Button variant="outline" onClick={() => setFlowStep("identity")}>
-                          <ArrowLeft className="mr-2 h-4 w-4" />
-                          Return to sign-in
-                        </Button>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                  <div className="text-sm font-semibold text-slate-900">What MSCQR checked</div>
-                  <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-                    {checkedItems.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                  <div className="text-sm font-semibold text-slate-900">What this result does not prove</div>
-                  <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-                    <li>MSCQR does not prove the physical item is impossible to counterfeit.</li>
-                    <li>MSCQR does not guarantee that a copied label was never reused elsewhere.</li>
-                    <li>Your answers add purchase trust context, not product-bound cryptographic proof.</li>
-                  </ul>
-                </div>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                <MetricCard title="Verification basis" value={proofTitle} icon={<Lock className="h-4 w-4" />} />
-                <MetricCard title="Requester context" value={trustLevelLabel} icon={<ShieldCheck className="h-4 w-4" />} />
-                <MetricCard
-                  title="Controlled-print status"
-                  value={toLabel(result.printTrustState || "Unknown")}
-                  icon={<CheckCircle2 className="h-4 w-4" />}
-                />
-                <MetricCard
-                  title="Label status"
-                  value={toLabel(result.labelState || result.status || "Unknown")}
-                  icon={<CircleDashed className="h-4 w-4" />}
-                />
-                <MetricCard
-                  title="Replacement state"
-                  value={result.replacementStatus ? result.replacementStatus.replace(/_/g, " ") : "None"}
-                  icon={<ArrowRight className="h-4 w-4" />}
-                />
-                <MetricCard
-                  title="Risk review state"
-                  value={result.riskDisposition ? result.riskDisposition.replace(/_/g, " ") : "Clear"}
-                  icon={<AlertTriangle className="h-4 w-4" />}
-                />
-              </div>
-
-              <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                <div className="text-sm font-semibold text-slate-900">Verification notes</div>
-                <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-                  {reasonList.length ? (
-                    reasonList.map((reason) => <li key={reason}>{reason}</li>)
-                  ) : (
-                    <li>No additional verification notes were recorded for this result.</li>
-                  )}
-                </ul>
-              </div>
-            </SectionFrame>
-
-            <div className="space-y-6">
-              <SectionFrame
-                eyebrow="Your purchase context"
-                title="Customer provenance trust"
-                description="These details are now attached to the verification session as customer trust evidence."
-              >
-                <div className="grid gap-4 text-sm">
-                  <ContextRow icon={<ShoppingBag className="h-4 w-4" />} label="Purchase channel" value={intake.purchaseChannel} />
-                  <ContextRow
-                    icon={<Store className="h-4 w-4" />}
-                    label="Seller or source"
-                    value={
-                      intake.purchaseChannel === "online"
-                        ? `${intake.platformName || "Unknown platform"} · ${intake.sellerName || "Unknown seller"}`
-                        : intake.purchaseChannel === "offline"
-                          ? `${intake.storeName || "Unknown store"} · ${intake.purchaseCity || "Unknown city"}`
-                          : intake.sellerName || "Gift / unknown source"
-                    }
-                  />
-                  <ContextRow icon={<MapPin className="h-4 w-4" />} label="Purchase country" value={intake.purchaseCountry || "Not provided"} />
-                  <ContextRow
-                    icon={<AlertTriangle className="h-4 w-4" />}
-                    label="Scan reason"
-                    value={intake.scanReason.replace(/_/g, " ")}
-                  />
-                  <ContextRow icon={<ShieldCheck className="h-4 w-4" />} label="Intent" value={intake.ownershipIntent.replace(/_/g, " ")} />
-                </div>
-                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
-                  Your answers did not change the label verdict. They help MSCQR interpret this purchase context, strengthen later ownership actions, and escalate suspicious cases intelligently.
-                </div>
-              </SectionFrame>
-
-              <SectionFrame
-                eyebrow="Next actions"
-                title="What you can do now"
-                description="Choose the operational path that matches your intent."
-              >
-                <div className="grid gap-3">
-                  {intake.ownershipIntent === "claim_ownership" ? (
-                    <Button onClick={handleClaimOwnership} disabled={claiming}>
-                      {claiming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
-                      Claim ownership
-                    </Button>
-                  ) : null}
-
-                  {String(searchParams.get("transfer") || "").trim() ? (
-                    <Button variant="outline" onClick={handleAcceptTransfer} disabled={!authReady || acceptingTransfer}>
-                      {acceptingTransfer ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
-                      Accept ownership transfer
-                    </Button>
-                  ) : null}
-
-                  {passkeySupported ? (
-                    <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="text-sm font-semibold text-slate-900">Stronger ownership protection</div>
-                      <div className="text-sm leading-6 text-slate-600">Passkeys do not change this QR’s verdict. They strengthen future ownership and transfer actions for this account.</div>
-                      <div className="flex flex-wrap gap-3">
-                        <Button variant="outline" onClick={handleRegisterPasskey} disabled={registeringPasskey}>
-                          {registeringPasskey ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <KeyRound className="mr-2 h-4 w-4" />}
-                          Add passkey
-                        </Button>
-                        <Button variant="outline" onClick={handleAssertPasskey} disabled={assertingPasskey || !passkeyCredentials.length}>
-                          {assertingPasskey ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <KeyRound className="mr-2 h-4 w-4" />}
-                          Verify passkey
-                        </Button>
-                      </div>
-                      {loadingPasskeys ? (
-                        <div className="text-sm text-slate-500">Loading passkeys…</div>
-                      ) : passkeyCredentials.length ? (
-                        <div className="grid gap-2">
-                          {passkeyCredentials.map((credential) => (
-                            <div key={credential.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm">
-                              <div>
-                                <div className="font-medium text-slate-900">{credential.label}</div>
-                                <div className="text-slate-500">Last used: {formatDateTime(credential.lastUsedAt || null)}</div>
-                              </div>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDeletePasskey(credential.id)}
-                                disabled={deletingPasskeyId === credential.id}
-                              >
-                                {deletingPasskeyId === credential.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Remove"}
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-sm text-slate-500">No customer passkeys enrolled yet.</div>
-                      )}
-                    </div>
-                  ) : null}
-
-                  <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4">
-                    <Label htmlFor="report-reason">Report a concern to MSCQR</Label>
-                    <Select value={reportReason} onValueChange={setReportReason}>
-                      <SelectTrigger id="report-reason">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="counterfeit_suspected">Counterfeit suspected</SelectItem>
-                        <SelectItem value="duplicate_scan">Duplicate scan</SelectItem>
-                        <SelectItem value="tampered_label">Tampered label</SelectItem>
-                        <SelectItem value="wrong_product">Wrong product</SelectItem>
-                        <SelectItem value="other">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Button data-testid="verify-report-concern" variant="outline" onClick={handleReportConcern} disabled={reporting}>
-                      {reporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <AlertTriangle className="mr-2 h-4 w-4" />}
-                      Report concern
-                    </Button>
-                    {lastSupportTicketRef ? (
-                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-950">
-                        Support ticket reference:{" "}
-                        <span data-testid="verify-report-support-ticket-raw" className="font-mono font-semibold">
-                          {lastSupportTicketRef}
-                        </span>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
-                    <div className="font-semibold text-slate-900">Contact support</div>
-                    <div className="mt-2 space-y-1">
-                      <div>{result.licensee?.supportEmail || "support@mscqr.com"}</div>
-                      {result.licensee?.supportPhone ? <div>{result.licensee.supportPhone}</div> : null}
-                      {result.licensee?.website ? (
-                        <a className="inline-flex items-center gap-1 text-slate-900 underline" href={result.licensee.website} target="_blank" rel="noreferrer">
-                          Visit brand site
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-              </SectionFrame>
-            </div>
+        ) : lastSupportTicketRef ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
+            Concern submitted. Support reference:{" "}
+            <span data-testid="verify-report-support-ticket-raw" className="font-mono font-semibold">
+              {lastSupportTicketRef}
+            </span>
           </div>
         ) : null}
+
+        <SectionFrame
+          eyebrow="Support"
+          title="Need help with this garment?"
+          description="If the result is unclear, check the tag, contact the brand, or report a concern."
+        >
+          <div className="grid gap-3 text-sm leading-6 text-slate-700">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="font-semibold text-slate-950">Brand support</div>
+              <div className="mt-2 space-y-1">
+                <div>{supportEmail}</div>
+                {supportPhone ? <div>{supportPhone}</div> : null}
+                {brandWebsite ? (
+                  <a className="inline-flex items-center gap-1 text-mscqr-accent underline" href={brandWebsite} target="_blank" rel="noreferrer">
+                    Visit brand site
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </SectionFrame>
 
         <div className="flex flex-col gap-2 text-sm text-mscqr-muted sm:flex-row sm:items-center sm:justify-between">
           <Link to="/verify" className="inline-flex items-center gap-2 hover:text-mscqr-primary">
             <ArrowLeft className="h-4 w-4" />
-            Verify another code
+            Verify another garment
           </Link>
           <Link to="/trust" className="inline-flex items-center gap-2 hover:text-mscqr-primary">
-            Read MSCQR trust model
+            Trust & Security
             <ExternalLink className="h-4 w-4" />
           </Link>
         </div>
-
-        {!authReady && flowStep !== "identity" ? (
-          <div className="rounded-2xl border border-mscqr-review/35 bg-mscqr-review/12 px-4 py-3 text-sm text-mscqr-review">
-            Your verification session is still locked, but result reveal is waiting for sign-in. Return to the identity step if you need to finish authentication.
-          </div>
-        ) : null}
 
         {authReady ? (
           <div className="flex items-center justify-end">
@@ -1956,40 +1599,6 @@ export default function VerifyExperience() {
             </Button>
           </div>
         ) : null}
-      </div>
-    </div>
-  );
-}
-
-function MetricCard({
-  title,
-  value,
-  icon,
-  mono = false,
-}: {
-  title: string;
-  value: string;
-  icon: React.ReactNode;
-  mono?: boolean;
-}) {
-  return (
-    <div className="rounded-2xl border border-mscqr-border bg-mscqr-surface-muted/45 p-4">
-      <div className="flex items-center gap-2 text-sm font-medium text-mscqr-secondary">
-        {icon}
-        {title}
-      </div>
-      <div className={`mt-2 text-sm font-semibold text-mscqr-primary ${mono ? "font-mono text-[13px]" : ""}`}>{value}</div>
-    </div>
-  );
-}
-
-function ContextRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  return (
-    <div className="flex items-start gap-3 rounded-2xl border border-mscqr-border bg-mscqr-surface-muted/45 px-4 py-3">
-      <div className="mt-0.5 text-mscqr-muted">{icon}</div>
-      <div>
-        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-mscqr-muted">{label}</div>
-        <div className="mt-1 text-sm font-medium text-mscqr-primary">{value}</div>
       </div>
     </div>
   );

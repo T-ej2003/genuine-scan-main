@@ -47,23 +47,23 @@ function FeedbackState({ title, description, icon: Icon = CircleDashed, action, 
   return (
     <div
       className={cn(
-        "rounded-[1.75rem] border bg-mscqr-surface/80 p-6 text-mscqr-primary",
-        tone === "error" ? "border-mscqr-blocked/30" : "border-mscqr-border",
+        "rounded-2xl border bg-card p-6 text-foreground shadow-sm",
+        tone === "error" ? "border-destructive/25" : "border-border",
         className,
       )}
     >
       <div
         className={cn(
-          "flex size-11 items-center justify-center rounded-2xl border",
+          "flex size-11 items-center justify-center rounded-xl border",
           tone === "error"
-            ? "border-mscqr-blocked/30 bg-mscqr-blocked/10 text-mscqr-blocked"
-            : "border-mscqr-accent/25 bg-mscqr-accent/10 text-mscqr-accent",
+            ? "border-destructive/25 bg-destructive/10 text-destructive"
+            : "border-primary/20 bg-accent text-accent-foreground",
         )}
       >
         <Icon className={cn("size-5", tone === "loading" && "animate-spin motion-reduce:animate-none")} />
       </div>
       <h3 className="mt-5 text-lg font-semibold">{title}</h3>
-      <p className="mt-2 max-w-xl text-sm leading-7 text-mscqr-secondary">{description}</p>
+      <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{description}</p>
       {action ? (
         <div className="mt-5">
           {action.href ? (

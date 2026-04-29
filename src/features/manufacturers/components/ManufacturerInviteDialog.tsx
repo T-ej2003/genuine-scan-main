@@ -67,11 +67,11 @@ export function ManufacturerInviteDialog({
                 name="licenseeId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Licensee</FormLabel>
+                    <FormLabel>Brand</FormLabel>
                     <Select value={field.value} onValueChange={field.onChange}>
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="Choose a licensee" />
+                          <SelectValue placeholder="Choose a brand" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>

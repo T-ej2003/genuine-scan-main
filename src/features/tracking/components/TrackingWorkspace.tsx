@@ -5,7 +5,6 @@ import { BatchAllocationMapDialog } from "@/components/batches/BatchAllocationMa
 import { PremiumSectionAccordion } from "@/components/premium/PremiumSectionAccordion";
 import { PremiumTableSkeleton } from "@/components/premium/PremiumLoadingBlocks";
 import { TrackingInsightsPanel, type TrackingTotals, type TrackingTrendPoint } from "@/components/premium/TrackingInsightsPanel";
-import { PREMIUM_PALETTE } from "@/components/premium/palette";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +17,7 @@ import {
   decisionTrustTone,
   titleCaseDecisionValue,
 } from "@/lib/verification-decision";
+import { friendlyReferenceLabel } from "@/lib/friendly-reference";
 import {
   describeScanContext,
   formatBatchCreatedDate,
@@ -95,31 +95,26 @@ export function TrackingWorkspace({
     <>
       <div className="space-y-6">
         <div
-          className="flex flex-col gap-3 rounded-2xl border p-4 shadow-[0_16px_32px_rgba(102,114,146,0.14)] sm:flex-row sm:items-center sm:justify-between premium-surface-in"
-          style={{
-            borderColor: `${PREMIUM_PALETTE.steel}66`,
-            background:
-              "linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(241,227,221,0.68) 52%, rgba(188,202,214,0.48) 100%)",
-          }}
+          className="flex flex-col gap-3 rounded-2xl border border-mscqr-border bg-mscqr-surface p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between"
         >
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-[#8d9db668] bg-white/70">
               <ScanEye className="h-5 w-5 text-[#667292]" />
             </div>
             <div>
-              <h1 className="text-3xl font-bold tracking-tight text-[#4f5b75]">Scan Activity</h1>
+              <h1 className="text-3xl font-bold tracking-tight text-mscqr-primary">Scans</h1>
               <p className="text-sm text-slate-600">
                 {role === "manufacturer"
-                  ? "Track scans and product states for your assigned production scope."
-                  : "Monitor scans, warnings, and blocked events in your authorized scope."}
+                  ? "Track customer scans for the garment batches assigned to you."
+                  : "Monitor genuine scans, repeat scans, and items that need attention."}
               </p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge className="border-red-200 bg-red-50 text-red-700">{blockedLogCount} blocked events</Badge>
+            <Badge className="border-red-200 bg-red-50 text-red-700">{blockedLogCount} blocked scans</Badge>
             <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">{firstScanCount} first scans</Badge>
-            <Badge className="border-amber-200 bg-amber-50 text-amber-700">{eventSummary.externalEvents} external scans</Badge>
-            <Badge className="border-sky-200 bg-sky-50 text-sky-700">{eventSummary.trustedOwnerEvents} owner-linked scans</Badge>
+            <Badge className="border-amber-200 bg-amber-50 text-amber-700">{eventSummary.externalEvents} repeat or outside scans</Badge>
+            <Badge className="border-sky-200 bg-sky-50 text-sky-700">{eventSummary.trustedOwnerEvents} known customer scans</Badge>
             <Button variant="outline" onClick={() => onLoad()} disabled={loading}>
               <RefreshCw className="mr-2 h-4 w-4" />
               Refresh
@@ -145,40 +140,40 @@ export function TrackingWorkspace({
         {scopeMeta ? (
           <div className="grid gap-3 md:grid-cols-6">
             <div className="rounded-xl border bg-white p-4 shadow-sm">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">Scope mode</p>
+              <p className="text-sm font-medium text-slate-500">View</p>
               <p className="mt-1 text-lg font-semibold text-slate-900">{scopeMeta.title}</p>
               <p className="mt-1 text-xs text-slate-600">{scopeMeta.description}</p>
             </div>
             <div className="rounded-xl border bg-white p-4 shadow-sm">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">Distinct codes</p>
+              <p className="text-sm font-medium text-slate-500">QR labels scanned</p>
               <p className="mt-1 text-2xl font-semibold text-slate-900">{scopeMeta.quantities.distinctCodes.toLocaleString()}</p>
             </div>
             <div className="rounded-xl border bg-white p-4 shadow-sm">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">Scan events</p>
+              <p className="text-sm font-medium text-slate-500">Total scans</p>
               <p className="mt-1 text-2xl font-semibold text-slate-900">{scopeMeta.quantities.scanEvents.toLocaleString()}</p>
             </div>
             <div className="rounded-xl border bg-white p-4 shadow-sm">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">Matched batches</p>
+              <p className="text-sm font-medium text-slate-500">Matched batches</p>
               <p className="mt-1 text-2xl font-semibold text-slate-900">{scopeMeta.quantities.matchedBatches.toLocaleString()}</p>
             </div>
             <div className="rounded-xl border bg-white p-4 shadow-sm">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">Named locations</p>
+              <p className="text-sm font-medium text-slate-500">Scans with location</p>
               <p className="mt-1 text-2xl font-semibold text-slate-900">{eventSummary.namedLocationEvents.toLocaleString()}</p>
             </div>
             <div className="rounded-xl border bg-white p-4 shadow-sm">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">Known devices</p>
+              <p className="text-sm font-medium text-slate-500">Known customers</p>
               <p className="mt-1 text-2xl font-semibold text-slate-900">{eventSummary.knownDeviceEvents.toLocaleString()}</p>
             </div>
           </div>
         ) : null}
 
         <PremiumSectionAccordion
-          defaultOpen={["tracking-filters"]}
+          defaultOpen={[]}
           items={[
             {
               value: "tracking-filters",
-              title: "Scan Activity Filters",
-              subtitle: "Narrow the results by code, batch, date, and scan behavior",
+              title: "Advanced filters",
+              subtitle: "Optional filters for QR label, batch, date, and scan behavior",
               badge: <Badge className="border-[#8d9db664] bg-[#bccad630] text-[#4f5b75]">Live scope</Badge>,
               content: (
                 <div className="space-y-3">
@@ -215,10 +210,10 @@ export function TrackingWorkspace({
                     {isSuperAdmin ? (
                       <Select value={filters.licenseeId} onValueChange={(value) => onFiltersChange((prev) => ({ ...prev, licenseeId: value }))}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Licensee scope" />
+                          <SelectValue placeholder="Brand" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="all">All licensees</SelectItem>
+                          <SelectItem value="all">All brands</SelectItem>
                           {licensees.map((licensee) => (
                             <SelectItem key={licensee.id} value={licensee.id}>
                               {licensee.name}
@@ -231,7 +226,7 @@ export function TrackingWorkspace({
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                       <Input
-                        placeholder="Search code"
+                        placeholder="Search QR label"
                         value={filters.code}
                         onChange={(event) => onFiltersChange((prev) => ({ ...prev, code: event.target.value }))}
                         className="pl-9"
@@ -239,7 +234,7 @@ export function TrackingWorkspace({
                     </div>
 
                     <Input
-                      placeholder="Batch ID / batch name"
+                      placeholder="Batch name"
                       value={filters.batchQuery}
                       onChange={(event) => onFiltersChange((prev) => ({ ...prev, batchQuery: event.target.value }))}
                     />
@@ -274,12 +269,12 @@ export function TrackingWorkspace({
 
                     <Select value={filters.outcome} onValueChange={(value) => onFiltersChange((prev) => ({ ...prev, outcome: value }))}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Decision outcome" />
+                        <SelectValue placeholder="Scan result" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All outcomes</SelectItem>
                         <SelectItem value="AUTHENTIC">Authentic</SelectItem>
-                        <SelectItem value="SUSPICIOUS_DUPLICATE">Suspicious duplicate</SelectItem>
+                        <SelectItem value="SUSPICIOUS_DUPLICATE">Unusual repeat scan</SelectItem>
                         <SelectItem value="BLOCKED">Blocked</SelectItem>
                         <SelectItem value="NOT_READY">Not ready</SelectItem>
                       </SelectContent>
@@ -287,10 +282,10 @@ export function TrackingWorkspace({
 
                     <Select value={filters.riskBand} onValueChange={(value) => onFiltersChange((prev) => ({ ...prev, riskBand: value }))}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Risk band" />
+                        <SelectValue placeholder="Scan risk" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">All risk bands</SelectItem>
+                        <SelectItem value="all">All scan risks</SelectItem>
                         <SelectItem value="LOW">Low</SelectItem>
                         <SelectItem value="ELEVATED">Elevated</SelectItem>
                         <SelectItem value="HIGH">High</SelectItem>
@@ -349,8 +344,8 @@ export function TrackingWorkspace({
           items={[
             {
               value: "batch-summary",
-              title: "Batch Summary",
-              subtitle: "Inventory state by batch and lifecycle status",
+              title: "Batch summary",
+              subtitle: "Scan and QR label status by garment batch",
               badge: <Badge className="border-[#8d9db664] bg-[#bccad630] text-[#4f5b75]">{summary.length} batches</Badge>,
               content:
                 loading && !summary.length ? (
@@ -361,10 +356,10 @@ export function TrackingWorkspace({
                       <TableHeader>
                         <TableRow className="bg-slate-50">
                           <TableHead>Batch</TableHead>
-                          <TableHead>Batch ID</TableHead>
-                          <TableHead>Range</TableHead>
-                          <TableHead>In Scope</TableHead>
-                          <TableHead>Inventory Total</TableHead>
+                          <TableHead>Support reference</TableHead>
+                          <TableHead>QR labels</TableHead>
+                          <TableHead>Scanned labels</TableHead>
+                          <TableHead>Labels in batch</TableHead>
                           <TableHead>Events</TableHead>
                           <TableHead>Latest verifier state</TableHead>
                           <TableHead>Dormant</TableHead>
@@ -395,19 +390,23 @@ export function TrackingWorkspace({
                                 <TableCell className="font-medium text-slate-900">{batch.name}</TableCell>
                                 <TableCell className="font-mono text-xs text-slate-600">
                                   <div className="flex flex-wrap items-center gap-2">
-                                    <span className="break-all">{batch.id}</span>
+                                    <span>{friendlyReferenceLabel(batch.id, "Batch")}</span>
                                     <Button type="button" variant="outline" size="sm" className="h-9 gap-2 whitespace-nowrap px-3 text-xs font-medium" onClick={() => onCopyBatchId(batch.id)}>
                                       <Copy className="h-3.5 w-3.5" />
-                                      Copy ID
+                                      Copy support reference
                                     </Button>
                                   </div>
                                   <Button type="button" variant="link" className="h-auto px-0 text-xs" onClick={() => onOpenAllocationMap(batch.id)}>
                                     Open allocation map
                                   </Button>
                                 </TableCell>
-                                <TableCell className="font-mono text-xs text-slate-600">
-                                  <div>{batch.startCode}</div>
-                                  <div>{batch.endCode}</div>
+                                <TableCell className="text-sm text-slate-600">
+                                  <div>{Number(batch.batchInventoryTotal || batch.totalCodes || 0).toLocaleString()} QR labels</div>
+                                  <details className="mt-1 text-xs">
+                                    <summary className="cursor-pointer">Technical details</summary>
+                                    <div className="mt-1 break-all font-mono">{batch.startCode}</div>
+                                    <div className="break-all font-mono">{batch.endCode}</div>
+                                  </details>
                                 </TableCell>
                                 <TableCell>{Number(batch.scopeCodeCount || 0).toLocaleString()}</TableCell>
                                 <TableCell>{Number(batch.batchInventoryTotal || batch.totalCodes || 0).toLocaleString()}</TableCell>
@@ -428,7 +427,7 @@ export function TrackingWorkspace({
                                       </div>
                                     </>
                                   ) : (
-                                    <span className="text-xs text-slate-500">No verifier decision</span>
+                                      <span className="text-xs text-slate-500">No scan result yet</span>
                                   )}
                                 </TableCell>
                                 <TableCell>
@@ -458,8 +457,8 @@ export function TrackingWorkspace({
             },
             {
               value: "scan-logs",
-              title: "Scan Logs",
-              subtitle: "Real-time observations and suspicious scan signals",
+              title: "Recent scans",
+              subtitle: "Customer scans and items that may need attention",
               badge: <Badge className="border-[#8d9db664] bg-[#bccad630] text-[#4f5b75]">{logs.length} entries</Badge>,
               content:
                 loading && !logs.length ? (
@@ -470,22 +469,21 @@ export function TrackingWorkspace({
                       <Table>
                         <TableHeader>
                           <TableRow className="bg-slate-50">
-                            <TableHead>Code</TableHead>
+                            <TableHead>QR label</TableHead>
                             <TableHead>Batch</TableHead>
                             <TableHead>Status</TableHead>
                             <TableHead>Scan #</TableHead>
                             <TableHead>Context</TableHead>
-                            <TableHead>Verifier decision</TableHead>
+                            <TableHead>Scan result</TableHead>
                             <TableHead>Location</TableHead>
-                            <TableHead>Device</TableHead>
-                            <TableHead>IP</TableHead>
+                            <TableHead>Support details</TableHead>
                             <TableHead>Scanned At</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {logs.length === 0 ? (
                             <TableRow>
-                              <TableCell colSpan={10} className="text-slate-500">
+                              <TableCell colSpan={9} className="text-slate-500">
                                 No scan logs found.
                               </TableCell>
                             </TableRow>
@@ -542,17 +540,20 @@ export function TrackingWorkspace({
                                         </div>
                                       </>
                                     ) : (
-                                      <span className="text-slate-500">No verifier decision</span>
+                                      <span className="text-slate-500">No scan result yet</span>
                                     )}
                                   </TableCell>
                                   <TableCell className="text-xs text-slate-700">{formatLocation(log)}</TableCell>
-                                  <TableCell className="max-w-[220px] text-xs text-slate-600">
-                                    <div>{log.deviceLabel || "Browser device"}</div>
-                                    <div className="mt-1 text-[11px] text-slate-500">
-                                      {log.userAgent ? "User agent captured" : "Browser fingerprint only"}
-                                    </div>
+                                  <TableCell className="max-w-[240px] text-xs text-slate-600">
+                                    <details>
+                                      <summary className="cursor-pointer">Technical details</summary>
+                                      <div className="mt-1">{log.deviceLabel || "Browser device"}</div>
+                                      <div className="mt-1 break-all">
+                                        {log.userAgent ? "Browser details captured" : "Browser details unavailable"}
+                                      </div>
+                                      <div className="mt-1 break-all">{log.ipAddress || "Network address unavailable"}</div>
+                                    </details>
                                   </TableCell>
-                                  <TableCell className="text-xs text-slate-600">{log.ipAddress || "—"}</TableCell>
                                   <TableCell className="text-xs text-slate-600">{formatScanTimestamp(log.scannedAt)}</TableCell>
                                 </TableRow>
                               );
@@ -563,7 +564,7 @@ export function TrackingWorkspace({
                     </div>
 
                     <div className="mt-3 text-sm text-slate-500">
-                      Scope: {isSuperAdmin ? (scopedLicenseeId ? "Selected licensee" : "All licensees") : "Your assigned tenant only"}
+                      Scope: {isSuperAdmin ? (scopedLicenseeId ? "Selected brand" : "All brands") : "Your assigned workspace only"}
                     </div>
                   </>
                 ),

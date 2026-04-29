@@ -3,7 +3,7 @@ import type { DashboardNotification } from "@/features/layout/components/Notific
 
 export const NOTIFICATION_FETCH_LIMIT = 24;
 
-export const sidebarGroupOrder = ["Command", "Lifecycle", "Review", "Evidence", "Governance", "Settings"] as const;
+export const sidebarGroupOrder = ["Workspace", "Operations", "Review", "Advanced", "Settings"] as const;
 
 const INTERNAL_ROUTE_PREFIXES = [
   APP_PATHS.dashboard,
@@ -49,6 +49,6 @@ export const resolveWorkspaceLabel = (user?: {
   licensee?: { brandName?: string | null; name?: string | null } | null;
 } | null) => {
   if (user?.role === "manufacturer") return user.licensee?.brandName || user.licensee?.name || "Manufacturer workspace";
-  if (user?.role === "licensee_admin") return user.licensee?.brandName || user.licensee?.name || "Licensee workspace";
-  return "Platform operations";
+  if (user?.role === "licensee_admin") return user.licensee?.brandName || user.licensee?.name || "Brand workspace";
+  return "Platform workspace";
 };

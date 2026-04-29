@@ -96,8 +96,8 @@ export function LicenseesWorkspace({
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Licensees</h1>
-          <p className="text-muted-foreground">Manage licensee organizations and code allocations</p>
+          <h1 className="text-3xl font-bold">Brands</h1>
+          <p className="text-muted-foreground">Manage brand workspaces, QR labels, and Brand Admin access.</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -112,7 +112,7 @@ export function LicenseesWorkspace({
 
           <Button onClick={onOpenCreateDialog}>
             <Plus className="mr-2 h-4 w-4" />
-            Add Licensee
+            Add brand
           </Button>
         </div>
       </div>
@@ -123,7 +123,7 @@ export function LicenseesWorkspace({
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="Search licensees..."
+                placeholder="Search brands..."
                 value={search}
                 onChange={(event) => onSearchChange(event.target.value)}
                 className="pl-9"
@@ -151,13 +151,13 @@ export function LicenseesWorkspace({
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Licensee</TableHead>
+                    <TableHead>Brand</TableHead>
                     <TableHead>Prefix</TableHead>
                     <TableHead>Admin Access</TableHead>
-                    <TableHead>Latest Code Range</TableHead>
+                    <TableHead>QR labels</TableHead>
                     <TableHead className="text-right">Users</TableHead>
                     <TableHead className="text-right">Batches</TableHead>
-                    <TableHead className="text-right">Codes</TableHead>
+                    <TableHead className="text-right">Labels</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead className="w-[50px]" />
@@ -213,7 +213,17 @@ export function LicenseesWorkspace({
                           </div>
                         </TableCell>
 
-                        <TableCell className="font-mono text-xs">{latestRangeText}</TableCell>
+                        <TableCell>
+                          <div className="text-sm text-muted-foreground">
+                            {latest ? "Latest label group ready" : "No labels assigned yet"}
+                          </div>
+                          {latest ? (
+                            <details className="mt-1 text-xs text-muted-foreground">
+                              <summary className="cursor-pointer">Technical details</summary>
+                              <div className="mt-1 break-all font-mono">{latestRangeText}</div>
+                            </details>
+                          ) : null}
+                        </TableCell>
 
                         <TableCell className="text-right">{usersCount}</TableCell>
                         <TableCell className="text-right">{batchesCount}</TableCell>
@@ -240,7 +250,7 @@ export function LicenseesWorkspace({
                             <DropdownMenuContent align="end">
                               <DropdownMenuItem onClick={() => onOpenAllocateRange(licensee)}>
                                 <QrCode className="mr-2 h-4 w-4" />
-                                Allocate Code Range
+                                Add QR labels
                               </DropdownMenuItem>
 
                               <DropdownMenuItem onClick={() => onOpenCreateUser(licensee.id)}>
@@ -276,7 +286,7 @@ export function LicenseesWorkspace({
 
                               <DropdownMenuItem className="text-destructive" onClick={() => onHardDelete(licensee)}>
                                 <Trash2 className="mr-2 h-4 w-4" />
-                                Hard Delete
+                                Delete permanently
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -288,7 +298,7 @@ export function LicenseesWorkspace({
                   {filtered.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={10} className="text-center text-sm text-muted-foreground">
-                        No licensees found.
+                        No brands found.
                       </TableCell>
                     </TableRow>
                   ) : null}

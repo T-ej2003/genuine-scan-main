@@ -1,9 +1,11 @@
 import {
+  Archive,
   Building2,
   CircleHelp,
   Factory,
   FileText,
   LayoutDashboard,
+  Printer,
   ScanEye,
   Settings,
   Shield,
@@ -55,8 +57,8 @@ const ROUTES: AppRouteMeta[] = [
   {
     key: "incident-detail",
     href: APP_PATHS.incidentDetailPrefix,
-    title: "Incident details",
-    section: "Incident Response",
+    title: "Issue details",
+    section: "Advanced",
     roles: ["super_admin"],
     nav: false,
     matchMode: "prefix",
@@ -66,20 +68,21 @@ const ROUTES: AppRouteMeta[] = [
   {
     key: "incident-response",
     href: APP_PATHS.incidentResponse,
-    title: "Incident Response",
-    section: "Review",
+    title: "Issues",
+    section: "Advanced",
     roles: ["super_admin"],
     icon: Shield,
     nav: true,
     matchMode: "prefix",
+    navLabel: "Issues",
     aliases: ["/ir", "/incidents"],
     helpRoute: "/help/incident-response",
   },
   {
     key: "dashboard",
     href: APP_PATHS.dashboard,
-    title: "Dashboard",
-    section: "Command",
+    title: "Overview",
+    section: "Workspace",
     roles: ALL_ADMIN_ROLES,
     icon: LayoutDashboard,
     nav: true,
@@ -94,24 +97,25 @@ const ROUTES: AppRouteMeta[] = [
   {
     key: "licensees",
     href: APP_PATHS.licensees,
-    title: "Licensees",
-    section: "Governance",
+    title: "Brands",
+    section: "Workspace",
     roles: ["super_admin"],
     icon: Building2,
     nav: true,
     matchMode: "prefix",
+    navLabel: "Brands",
     helpRoute: "/help/super-admin",
   },
   {
     key: "code-requests",
     href: APP_PATHS.codeRequests,
-    title: "Code Requests",
-    section: "Lifecycle",
+    title: "QR Requests",
+    section: "Operations",
     roles: ["super_admin", "licensee_admin"],
     icon: FileText,
     nav: true,
     matchMode: "prefix",
-    navLabel: "Code Requests",
+    navLabel: "QR Requests",
     aliases: ["/qr-requests"],
     helpRoute: (role) => (role === "super_admin" ? "/help/super-admin" : "/help/licensee-admin"),
   },
@@ -119,12 +123,11 @@ const ROUTES: AppRouteMeta[] = [
     key: "batches",
     href: APP_PATHS.batches,
     title: "Batches",
-    section: "Lifecycle",
+    section: "Operations",
     roles: ALL_ADMIN_ROLES,
     icon: FileText,
     nav: true,
     matchMode: "prefix",
-    roleLabels: { manufacturer: "My Batches" },
     helpRoute: (role) => {
       if (role === "manufacturer") return "/help/manufacturer";
       if (role === "licensee_admin") return "/help/licensee-admin";
@@ -135,7 +138,7 @@ const ROUTES: AppRouteMeta[] = [
     key: "manufacturers",
     href: APP_PATHS.manufacturers,
     title: "Manufacturers",
-    section: "Governance",
+    section: "Workspace",
     roles: ["super_admin", "licensee_admin"],
     icon: Factory,
     nav: true,
@@ -145,14 +148,14 @@ const ROUTES: AppRouteMeta[] = [
   {
     key: "scan-activity",
     href: APP_PATHS.scanActivity,
-    title: "Scan Activity",
+    title: "Scans",
     section: "Review",
     roles: ALL_ADMIN_ROLES,
     icon: ScanEye,
     nav: true,
     matchMode: "prefix",
     aliases: ["/qr-tracking", "/qr-codes"],
-    navLabel: "Verification Activity",
+    navLabel: "Scans",
     helpRoute: (role) => {
       if (role === "manufacturer") return "/help/manufacturer";
       if (role === "licensee_admin") return "/help/licensee-admin";
@@ -174,7 +177,7 @@ const ROUTES: AppRouteMeta[] = [
     key: "release-readiness",
     href: APP_PATHS.releaseReadiness,
     title: "Release Readiness",
-    section: "Governance",
+    section: "Advanced",
     roles: ["super_admin"],
     icon: Shield,
     nav: true,
@@ -185,7 +188,7 @@ const ROUTES: AppRouteMeta[] = [
     key: "governance",
     href: APP_PATHS.governance,
     title: "Governance",
-    section: "Governance",
+    section: "Advanced",
     roles: ["super_admin"],
     icon: Shield,
     nav: false,
@@ -195,14 +198,14 @@ const ROUTES: AppRouteMeta[] = [
   {
     key: "audit-history",
     href: APP_PATHS.auditHistory,
-    title: "Audit History",
-    section: "Evidence",
+    title: "History",
+    section: "Review",
     roles: ALL_ADMIN_ROLES,
-    icon: FileText,
+    icon: Archive,
     nav: true,
     matchMode: "prefix",
     aliases: ["/audit-logs"],
-    navLabel: "Audit Evidence",
+    navLabel: "History",
     helpRoute: "/help/auth-overview",
   },
   {
@@ -230,11 +233,13 @@ const ROUTES: AppRouteMeta[] = [
   {
     key: "printer-setup",
     href: APP_PATHS.printerSetup,
-    title: "Printer Setup",
-    section: "Settings",
+    title: "Printing",
+    section: "Operations",
     roles: ["manufacturer"],
-    nav: false,
+    icon: Printer,
+    nav: true,
     matchMode: "prefix",
+    navLabel: "Printing",
     helpRoute: "/help/manufacturer",
   },
   {
@@ -293,8 +298,8 @@ export const getNavItemsForRole = (role?: UserRole | null) => {
 };
 
 export const getRoleDisplayLabel = (role?: UserRole | null) => {
-  if (role === "super_admin") return "Super Admin";
-  if (role === "licensee_admin") return "Licensee Admin";
+  if (role === "super_admin") return "Platform Admin";
+  if (role === "licensee_admin") return "Brand Admin";
   if (role === "manufacturer") return "Manufacturer Admin";
   return "User";
 };

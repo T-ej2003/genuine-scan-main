@@ -14,10 +14,10 @@ type PublicShellProps = {
 
 export function PublicShell({ children, footer = true, header = true, className }: PublicShellProps) {
   return (
-    <div className={cn("dark min-h-screen overflow-x-hidden bg-mscqr-background text-mscqr-primary", className)}>
+    <div className={cn("min-h-screen overflow-x-hidden bg-mscqr-background text-mscqr-primary", className)}>
       {header ? <PublicHeader /> : null}
       <MotionPage>{children}</MotionPage>
-      {footer ? <LegalFooter tone="dark" className="bg-mscqr-background" /> : null}
+      {footer ? <LegalFooter tone="light" className="bg-white" /> : null}
     </div>
   );
 }

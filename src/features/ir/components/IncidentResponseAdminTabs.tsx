@@ -78,7 +78,7 @@ export function IncidentResponseAdminTabs({
     <Tabs value={activeTab} onValueChange={(value) => onActiveTabChange(value as "incidents" | "alerts" | "policies")}>
       <TabsList className="grid w-full grid-cols-3">
         <TabsTrigger value="incidents">Incidents</TabsTrigger>
-        <TabsTrigger value="alerts">Policy alerts</TabsTrigger>
+        <TabsTrigger value="alerts">Scan alerts</TabsTrigger>
         <TabsTrigger value="policies">Policies</TabsTrigger>
       </TabsList>
 
@@ -156,12 +156,12 @@ export function IncidentResponseAdminTabs({
                 onValueChange={(value) => onIncidentFiltersChange((previous) => ({ ...previous, licenseeId: value }))}
               >
                 <SelectTrigger className="w-[220px]">
-                  <SelectValue placeholder="Licensee" />
+                  <SelectValue placeholder="Brand" />
                 </SelectTrigger>
                 <SelectContent>
                   {licenseeOptions.map((licensee) => (
                     <SelectItem key={licensee.id} value={licensee.id}>
-                      {licensee.id === "all" ? "All licensees" : `${licensee.name} (${licensee.prefix})`}
+                      {licensee.id === "all" ? "All brands" : `${licensee.name} (${licensee.prefix})`}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -178,11 +178,11 @@ export function IncidentResponseAdminTabs({
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>ID</TableHead>
+                      <TableHead>Reference</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Severity</TableHead>
                       <TableHead>Priority</TableHead>
-                      <TableHead>Licensee</TableHead>
+                      <TableHead>Brand</TableHead>
                       <TableHead>Code</TableHead>
                       <TableHead>Verifier</TableHead>
                       <TableHead>Assignee</TableHead>
@@ -301,12 +301,12 @@ export function IncidentResponseAdminTabs({
                 onValueChange={(value) => onAlertFiltersChange((previous) => ({ ...previous, licenseeId: value }))}
               >
                 <SelectTrigger className="w-[220px]">
-                  <SelectValue placeholder="Licensee" />
+                  <SelectValue placeholder="Brand" />
                 </SelectTrigger>
                 <SelectContent>
                   {licenseeOptions.map((licensee) => (
                     <SelectItem key={licensee.id} value={licensee.id}>
-                      {licensee.id === "all" ? "All licensees" : `${licensee.name} (${licensee.prefix})`}
+                      {licensee.id === "all" ? "All brands" : `${licensee.name} (${licensee.prefix})`}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -325,7 +325,7 @@ export function IncidentResponseAdminTabs({
                     <TableRow>
                       <TableHead>Severity</TableHead>
                       <TableHead>Type</TableHead>
-                      <TableHead>Licensee</TableHead>
+                      <TableHead>Brand</TableHead>
                       <TableHead>Code</TableHead>
                       <TableHead>Message</TableHead>
                       <TableHead>Created</TableHead>
@@ -380,7 +380,7 @@ export function IncidentResponseAdminTabs({
           <CardHeader className="pb-4">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <ShieldAlert className="h-4 w-4" />
-              Policy rules are evaluated on scans and can auto-create incidents.
+              Rules are evaluated on scans and can create issues when review is needed.
             </div>
           </CardHeader>
           <CardContent>

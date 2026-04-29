@@ -78,8 +78,8 @@ describe("Incident report form", () => {
       </React.StrictMode>
     );
 
-    expect(await screen.findByText("Verify who is checking this product")).toBeTruthy();
-    expect(screen.queryByText("Reveal and report a concern")).toBeNull();
+    expect(await screen.findByText("We need one quick check before showing the full result.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Report a concern" })).toBeNull();
     expect(vi.mocked(apiClient.reportFraud)).toHaveBeenCalledTimes(0);
   });
 });

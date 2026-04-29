@@ -8,17 +8,17 @@ type LegalFooterProps = {
 };
 
 const footerLinks = [
-  { href: "/platform", label: "Platform" },
-  { href: "/solutions/manufacturers", label: "Manufacturers" },
-  { href: "/industries", label: "Industries" },
-  { href: "/verify", label: "Verify" },
+  { href: "/", label: "Home" },
+  { href: "/solutions/brands", label: "For Brands" },
+  { href: "/solutions/garment-manufacturers", label: "For Manufacturers" },
+  { href: "/how-scanning-works", label: "How Scanning Works" },
+  { href: "/trust", label: "Trust & Security" },
+  { href: "/request-access", label: "Request Access" },
+  { href: "/verify", label: "Verify Product" },
   { href: "/help", label: "Help" },
-  { href: "/blog", label: "Insights" },
   { href: "/privacy", label: "Privacy" },
   { href: "/terms", label: "Terms" },
   { href: "/cookies", label: "Cookies" },
-  { href: "/trust", label: "Trust" },
-  { href: "/request-access", label: "Request access" },
 ] as const;
 
 export function LegalFooter({ tone = "light", className }: LegalFooterProps) {
@@ -34,8 +34,8 @@ export function LegalFooter({ tone = "light", className }: LegalFooterProps) {
     >
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-6 text-sm md:flex-row md:items-center md:justify-between">
         <div className="max-w-2xl leading-6">
-          MSCQR uses cookies and similar technologies for secure sign-in, verification continuity, support diagnostics,
-          and product operation. Legal and policy wording should be reviewed by MSCQR administration before commercial use.
+          MSCQR helps brands and manufacturers make garment QR labels verifiable, review suspicious scans, and support
+          customers with clearer authenticity information.
         </div>
 
         <div className="flex flex-wrap items-center gap-4">

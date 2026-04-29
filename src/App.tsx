@@ -45,19 +45,17 @@ const PrivacyPolicy = lazy(() => import("@/pages/PrivacyPolicy"));
 const TermsOfUse = lazy(() => import("@/pages/TermsOfUse"));
 const CookieNotice = lazy(() => import("@/pages/CookieNotice"));
 const PlatformPage = lazy(() => import("@/pages/PublicMarketing").then((module) => ({ default: module.PlatformPage })));
-const ManufacturersMarketingPage = lazy(() =>
-  import("@/pages/PublicMarketing").then((module) => ({ default: module.ManufacturersPage })),
+const BrandsMarketingPage = lazy(() =>
+  import("@/pages/PublicMarketing").then((module) => ({ default: module.BrandsPage })),
 );
-const LicenseesMarketingPage = lazy(() =>
-  import("@/pages/PublicMarketing").then((module) => ({ default: module.LicenseesPage })),
+const GarmentManufacturersMarketingPage = lazy(() =>
+  import("@/pages/PublicMarketing").then((module) => ({ default: module.GarmentManufacturersPage })),
 );
-const IndustriesPage = lazy(() => import("@/pages/PublicMarketing").then((module) => ({ default: module.IndustriesPage })));
-const IndustrialComponentsPage = lazy(() =>
-  import("@/pages/PublicMarketing").then((module) => ({ default: module.IndustrialComponentsPage })),
+const ApparelAuthenticityPage = lazy(() =>
+  import("@/pages/PublicMarketing").then((module) => ({ default: module.ApparelAuthenticityPage })),
 );
-const SparePartsPage = lazy(() => import("@/pages/PublicMarketing").then((module) => ({ default: module.SparePartsPage })));
-const RegulatedSupplyChainsPage = lazy(() =>
-  import("@/pages/PublicMarketing").then((module) => ({ default: module.RegulatedSupplyChainsPage })),
+const HowScanningWorksPage = lazy(() =>
+  import("@/pages/PublicMarketing").then((module) => ({ default: module.HowScanningWorksPage })),
 );
 const RequestAccessPage = lazy(() => import("@/pages/PublicMarketing").then((module) => ({ default: module.RequestAccessPage })));
 const BlogPage = lazy(() => import("@/pages/PublicMarketing").then((module) => ({ default: module.BlogPage })));
@@ -185,12 +183,16 @@ function AppRoutes() {
         <Route path="/terms" element={<TermsOfUse />} />
         <Route path="/cookies" element={<CookieNotice />} />
         <Route path="/platform" element={<PlatformPage />} />
-        <Route path="/solutions/manufacturers" element={<ManufacturersMarketingPage />} />
-        <Route path="/solutions/licensees" element={<LicenseesMarketingPage />} />
-        <Route path="/industries" element={<IndustriesPage />} />
-        <Route path="/industries/industrial-components" element={<IndustrialComponentsPage />} />
-        <Route path="/industries/spare-parts" element={<SparePartsPage />} />
-        <Route path="/industries/regulated-supply-chains" element={<RegulatedSupplyChainsPage />} />
+        <Route path="/solutions/brands" element={<BrandsMarketingPage />} />
+        <Route path="/solutions/garment-manufacturers" element={<GarmentManufacturersMarketingPage />} />
+        <Route path="/solutions/manufacturers" element={<Navigate to="/solutions/garment-manufacturers" replace />} />
+        <Route path="/solutions/apparel-authenticity" element={<ApparelAuthenticityPage />} />
+        <Route path="/how-scanning-works" element={<HowScanningWorksPage />} />
+        <Route path="/solutions/licensees" element={<Navigate to="/solutions/brands" replace />} />
+        <Route path="/industries" element={<Navigate to="/solutions/apparel-authenticity" replace />} />
+        <Route path="/industries/industrial-components" element={<Navigate to="/solutions/apparel-authenticity" replace />} />
+        <Route path="/industries/spare-parts" element={<Navigate to="/solutions/apparel-authenticity" replace />} />
+        <Route path="/industries/regulated-supply-chains" element={<Navigate to="/solutions/apparel-authenticity" replace />} />
         <Route path="/request-access" element={<RequestAccessPage />} />
         <Route path="/blog" element={<BlogPage />} />
         <Route path="/verify" element={<VerifyLanding />} />
