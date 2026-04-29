@@ -62,7 +62,7 @@ export function IncidentResponseAdminDialogs({
               </div>
 
               <div className="space-y-2">
-                <Label>Licensee (optional)</Label>
+                <Label>Brand (optional)</Label>
                 <Select
                   value={newIncident.licenseeId}
                   onValueChange={(value) => onNewIncidentChange((previous) => ({ ...previous, licenseeId: value }))}
@@ -181,7 +181,7 @@ export function IncidentResponseAdminDialogs({
                     <SelectValue placeholder="Select scope" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All licensees</SelectItem>
+                    <SelectItem value="all">All brands</SelectItem>
                     {licensees.map((licensee) => (
                       <SelectItem key={licensee.id} value={licensee.id}>
                         {licensee.name} ({licensee.prefix})

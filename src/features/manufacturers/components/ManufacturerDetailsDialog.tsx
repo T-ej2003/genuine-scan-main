@@ -51,12 +51,12 @@ export function ManufacturerDetailsDialog({
           <div className="space-y-5">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-2xl border bg-muted/20 p-4">
-                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Manufacturer</div>
+                <div className="text-sm font-medium text-muted-foreground">Manufacturer</div>
                 <div className="mt-2 text-lg font-semibold">{manufacturer.name}</div>
                 <div className="mt-1 text-sm text-muted-foreground">{friendlyReferenceLabel(manufacturer.id, "Factory")}</div>
               </div>
               <div className="rounded-2xl border bg-muted/20 p-4">
-                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Current status</div>
+                <div className="text-sm font-medium text-muted-foreground">Current status</div>
                 <div className="mt-2 text-lg font-semibold">{operationalStatus.label}</div>
                 <div className="mt-1 text-sm text-muted-foreground">
                   Last assignment: {formatAssignmentTimestamp(stats?.lastBatchAt)}
@@ -70,7 +70,7 @@ export function ManufacturerDetailsDialog({
                 <div className="mt-2 text-2xl font-semibold">{stats?.assignedBatches || 0}</div>
               </div>
               <div className="rounded-2xl border p-4">
-                <div className="text-sm text-muted-foreground">Assigned codes</div>
+                <div className="text-sm text-muted-foreground">Assigned QR labels</div>
                 <div className="mt-2 text-2xl font-semibold">{stats?.assignedCodes || 0}</div>
               </div>
               <div className="rounded-2xl border p-4">
@@ -118,12 +118,13 @@ export function ManufacturerDetailsDialog({
                     <div key={batch.id} className="flex flex-col gap-2 rounded-2xl border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <div className="font-medium">{batch.name || "Unnamed batch"}</div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {batch.startCode || "?"} to {batch.endCode || "?"}
-                        </div>
+                        <details className="mt-1 text-xs text-muted-foreground">
+                          <summary className="cursor-pointer">Technical details</summary>
+                          <div className="mt-1 break-all font-mono">{batch.startCode || "?"} to {batch.endCode || "?"}</div>
+                        </details>
                       </div>
                       <div className="text-sm text-muted-foreground sm:text-right">
-                        <div className="font-medium text-foreground">{batch.totalCodes || 0} codes</div>
+                        <div className="font-medium text-foreground">{batch.totalCodes || 0} QR labels</div>
                         <div>{batch.printedAt ? "Printed" : "Ready to print"}</div>
                       </div>
                     </div>
@@ -135,7 +136,7 @@ export function ManufacturerDetailsDialog({
             <div className="flex flex-wrap justify-end gap-2">
               <Button variant="outline" onClick={() => onCopyId(manufacturer.id)}>
                 <Copy className="mr-2 h-4 w-4" />
-                Copy record ID
+                Copy support reference
               </Button>
               <Button onClick={() => onOpenBatches(manufacturer)}>
                 <PackageCheck className="mr-2 h-4 w-4" />

@@ -165,7 +165,7 @@ export default function ManufacturersPage() {
           title: result.linkAction === "ALREADY_LINKED" ? "Manufacturer already linked" : "Manufacturer linked",
           description:
             result.linkAction === "ALREADY_LINKED"
-              ? `${values.email} is already available under this licensee.`
+              ? `${values.email} is already available under this brand.`
               : `${values.email} was linked without creating a new invite.`,
         });
       } else {
@@ -238,7 +238,7 @@ export default function ManufacturersPage() {
       {isSuperAdmin ? (
         <Select value={licenseeFilter} onValueChange={setLicenseeFilter}>
           <SelectTrigger className="w-full sm:w-[280px]">
-            <SelectValue placeholder="Choose a licensee" />
+            <SelectValue placeholder="Choose a brand" />
           </SelectTrigger>
           <SelectContent>
             {licenseesQuery.data?.map((licensee) => (
@@ -272,7 +272,7 @@ export default function ManufacturersPage() {
         title="Manufacturers"
         description={
           isSuperAdmin
-            ? "Review manufacturer readiness and batch workload for the selected licensee."
+            ? "Review manufacturer readiness and batch workload for the selected brand."
             : "Keep manufacturer admins active, assigned, and ready to print."
         }
         actions={actions}
@@ -281,15 +281,15 @@ export default function ManufacturersPage() {
         {hasMissingScope ? (
           <PageInlineNotice
             variant="destructive"
-            title="Missing licensee scope"
-            description="Your account is not linked to a licensee yet. Ask a Super Admin to update your access."
+            title="Missing brand workspace"
+            description="Your account is not linked to a brand yet. Ask a Platform Admin to update your access."
           />
         ) : null}
 
         {isSuperAdmin && !licenseeFilter && !licenseesQuery.isLoading ? (
           <PageInlineNotice
-            title="Choose a licensee"
-            description="Pick a licensee above to load its manufacturer directory."
+            title="Choose a brand"
+            description="Pick a brand above to load its manufacturer directory."
           />
         ) : null}
 

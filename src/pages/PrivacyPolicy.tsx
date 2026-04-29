@@ -5,21 +5,21 @@ export default function PrivacyPolicy() {
     <LegalDocumentLayout
       title="Privacy Notice"
       updatedAt="14 Apr 2026"
-      summary="This notice describes MSCQR's current handling of operator authentication, customer verification sessions, support diagnostics, optional observability, and AWS-hosted service delivery."
+      summary="This notice describes MSCQR's current handling of operator authentication, customer garment verification sessions, support diagnostics, optional observability, and hosted service delivery."
     >
       <h2>1. What this notice covers</h2>
       <p>
-        MSCQR is a production web platform used by super admins, licensee admins, manufacturers, and public customers
-        or consumers verifying products. This notice summarizes the categories of data the product currently handles so
+        MSCQR is a production web platform used by super admins, brand admins, garment manufacturers, and public customers
+        verifying garments. This notice summarizes the categories of data the product currently handles so
         MSCQR administration can maintain the public notice.
       </p>
 
       <h2>2. Data MSCQR currently processes</h2>
       <ul>
-        <li>Operator account data such as name, email, role, organization, and licensee associations.</li>
+        <li>Operator account data such as name, email, role, organization, and company associations.</li>
         <li>Authentication and session data used for secure sign-in and CSRF protection.</li>
-        <li>Customer verification data such as email, verification session identifiers, and device continuity state.</li>
-        <li>Verification event data such as QR code, lifecycle status, IP-derived security signals, and timing.</li>
+        <li>Customer verification data such as email, verification session identifiers, and browser continuity state.</li>
+        <li>Verification event data such as QR label code, garment label status, security signals, and timing.</li>
         <li>Support and incident data such as issue summaries, diagnostics, screenshots, and uploaded evidence.</li>
         <li>Connector and printer-operational data used to help manufacturer-side printing workflows.</li>
       </ul>
@@ -35,7 +35,7 @@ export default function PrivacyPolicy() {
       <ul>
         <li>To authenticate operators and protect the application against misuse or request forgery.</li>
         <li>To let public users complete a verification journey without losing state between steps.</li>
-        <li>To record product verification outcomes, fraud signals, and operational evidence consistently.</li>
+        <li>To record garment verification outcomes, suspicious scan signals, and operational history consistently.</li>
         <li>To allow operators to submit actionable support or incident reports with sufficient context.</li>
         <li>To operate manufacturer connector and printer readiness workflows.</li>
       </ul>

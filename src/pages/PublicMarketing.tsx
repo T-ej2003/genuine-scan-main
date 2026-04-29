@@ -1,164 +1,161 @@
-import { type ElementType, type ReactNode } from "react";
+import { type ElementType, type FormEvent, type ReactNode, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  AlertTriangle,
   ArrowRight,
   BadgeCheck,
   ClipboardCheck,
   Factory,
-  FileClock,
-  Fingerprint,
-  Globe2,
-  Layers3,
-  LifeBuoy,
-  PackageCheck,
+  Mail,
   QrCode,
   ScanLine,
   ShieldCheck,
+  Shirt,
+  Store,
   Users,
-  Waypoints,
 } from "lucide-react";
 
 import { PublicShell } from "@/components/public/PublicShell";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 const CONTACT_EMAIL = "administration@mscqr.com";
 
-type Feature = {
-  title: string;
-  body: string;
-  icon: ElementType;
-};
+type Icon = ElementType;
 
 type PageShellProps = {
-  eyebrow: string;
   title: string;
   intro: string;
   children: ReactNode;
-  imageAlt: string;
+  actions?: ReactNode;
+};
+
+type Feature = {
+  title: string;
+  body: string;
+  icon: Icon;
 };
 
 const platformFeatures: Feature[] = [
   {
-    title: "Governed QR issuance",
-    body: "Create and allocate QR/code inventory through role-aware workflows before labels reach production.",
+    title: "QR labels for garments",
+    body: "Prepare labels for clothing batches, collections, and brand-approved manufacturing runs.",
     icon: QrCode,
   },
   {
-    title: "Controlled printing",
-    body: "Connect print readiness, printer setup, and confirmation evidence to manufacturer-side operations.",
+    title: "Print and attach workflow",
+    body: "Give manufacturing teams a clear process to print, attach, and confirm garment labels.",
     icon: Factory,
   },
   {
-    title: "Public verification",
-    body: "Support QR scans and manual lookup without exposing internal incident, audit, or operator data.",
+    title: "Customer verification",
+    body: "Let customers scan a garment and see a simple result before any optional follow-up steps.",
     icon: ScanLine,
   },
   {
-    title: "Review and escalation",
-    body: "Classify duplicate behavior, raise support or incident reviews, and preserve evidence for operator follow-up.",
+    title: "Suspicious scan review",
+    body: "Help teams review unusual repeat scans without overwhelming customers with technical details.",
+    icon: AlertTriangle,
+  },
+];
+
+const brandFeatures: Feature[] = [
+  {
+    title: "Protect brand trust",
+    body: "Give customers a direct way to check whether a garment is genuine.",
+    icon: Store,
+  },
+  {
+    title: "Issue QR labels",
+    body: "Prepare QR labels for clothing lines, drops, or approved manufacturing runs.",
+    icon: QrCode,
+  },
+  {
+    title: "Review scan patterns",
+    body: "See when a label is scanned repeatedly or in ways that deserve attention.",
+    icon: BadgeCheck,
+  },
+  {
+    title: "Support customers",
+    body: "Explain verification results clearly and give customers a path to report concerns.",
+    icon: Users,
+  },
+];
+
+const manufacturerFeatures: Feature[] = [
+  {
+    title: "Receive assigned labels",
+    body: "Work from brand-approved QR labels intended for garment production.",
+    icon: QrCode,
+  },
+  {
+    title: "Print or attach tags",
+    body: "Support factory workflows for garment tags, care labels, hang tags, or packaging labels.",
+    icon: Shirt,
+  },
+  {
+    title: "Confirm completion",
+    body: "Mark print or attachment work complete so brands know labels reached production.",
+    icon: ClipboardCheck,
+  },
+  {
+    title: "Support verification",
+    body: "Give brands better context when customers scan garments after purchase.",
+    icon: Factory,
+  },
+];
+
+const scanningSteps = [
+  {
+    title: "Scan the QR label",
+    body: "A customer scans the QR label attached to a garment tag, care label, or hang tag.",
+    icon: ScanLine,
+  },
+  {
+    title: "See the result",
+    body: "MSCQR shows whether the garment can be verified before asking anything else.",
     icon: ShieldCheck,
   },
-];
-
-const platformWorkflow = [
   {
-    step: "Issue",
-    detail: "Create governed code records before label artwork or print files move into production.",
+    title: "Check brand details",
+    body: "The result can show brand or manufacturer information that helps the customer understand the item.",
+    icon: Store,
   },
   {
-    step: "Assign",
-    detail: "Connect labels to manufacturer, licensee, batch, and product context where authorized.",
-  },
-  {
-    step: "Print",
-    detail: "Use controlled print readiness and confirmation instead of treating labels as loose exports.",
-  },
-  {
-    step: "Verify",
-    detail: "Route QR scans and manual lookup through one public product verification entry point.",
-  },
-  {
-    step: "Review",
-    detail: "Keep duplicate, replay, and anomaly behavior visible for authorized operators.",
-  },
-  {
-    step: "Escalate",
-    detail: "Move suspicious outcomes into support or incident workflows with relevant context.",
-  },
-  {
-    step: "Evidence",
-    detail: "Preserve audit logs and verification decisions for high-trust product operations.",
+    title: "Choose next steps",
+    body: "A customer can optionally report a concern, sign in, or register the garment when supported.",
+    icon: Users,
   },
 ] as const;
 
-const industryLinks = [
-  {
-    title: "Industrial components",
-    body: "Govern QR verification and audit evidence for components that need controlled production context.",
-    href: "/industries/industrial-components",
-  },
-  {
-    title: "Spare parts",
-    body: "Help operators verify replacement parts while keeping duplicate and replay activity reviewable.",
-    href: "/industries/spare-parts",
-  },
-  {
-    title: "Regulated supply chains",
-    body: "Support controlled labeling and product verification workflows where evidence quality matters.",
-    href: "/industries/regulated-supply-chains",
-  },
-];
-
-const insightTopics = [
-  "Governed QR issuance",
-  "Controlled printing",
-  "Product verification workflows",
-  "Duplicate and replay review",
-  "Audit evidence for product authentication",
-  "Manufacturer-led brand protection operations",
-] as const;
-
-function PageShell({ eyebrow, title, intro, children, imageAlt }: PageShellProps) {
+function PageShell({ title, intro, children, actions }: PageShellProps) {
   return (
     <PublicShell>
       <main>
-        <section className="border-b border-white/10">
-          <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-16 lg:grid-cols-[0.92fr_0.72fr] lg:items-center lg:py-20">
+        <section className="border-b border-border bg-white">
+          <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-16 lg:grid-cols-[0.68fr_0.32fr] lg:items-end lg:py-20">
             <div>
-              <p className="text-xs font-semibold uppercase text-cyan-200">{eyebrow}</p>
-              <h1 className="mt-5 max-w-4xl text-balance text-4xl font-semibold leading-tight text-white sm:text-5xl lg:text-6xl">
+              <h1 className="max-w-4xl text-balance text-4xl font-semibold leading-tight text-foreground sm:text-5xl lg:text-6xl">
                 {title}
               </h1>
-              <p className="mt-6 max-w-3xl text-base leading-8 text-slate-300">{intro}</p>
-              <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-                <Button asChild size="lg" className="bg-none bg-cyan-200 text-slate-950 hover:bg-cyan-100">
-                  <Link to="/request-access">
-                    Request access
-                    <ArrowRight data-icon="inline-end" />
-                  </Link>
-                </Button>
-                <Button
-                  asChild
-                  size="lg"
-                  variant="outline"
-                  className="border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]"
-                >
-                  <Link to="/verify">
-                    <ScanLine data-icon="inline-start" />
-                    Verify a product
-                  </Link>
-                </Button>
-              </div>
+              <p className="mt-6 max-w-3xl text-base leading-8 text-muted-foreground">{intro}</p>
+              {actions ? <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">{actions}</div> : null}
             </div>
-            <div className="overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
-              <img
-                src="/brand/mscqr-og.png"
-                alt={imageAlt}
-                className="aspect-[1200/630] h-auto w-full object-cover"
-                width="1200"
-                height="630"
-              />
+            <div className="rounded-3xl border border-moonlight-300 bg-moonlight-100 p-6">
+              <div className="flex items-center gap-3">
+                <img src="/brand/mscqr-mark.svg" alt="" className="size-10" aria-hidden="true" />
+                <div>
+                  <p className="text-sm font-semibold text-moonlight-900">MSCQR</p>
+                  <p className="text-sm text-moonlight-900/75">Garment verification</p>
+                </div>
+              </div>
+              <div className="mt-6 rounded-2xl bg-white p-5">
+                <p className="text-sm font-semibold text-foreground">Made for clothing QR labels</p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  A focused public experience for brands, manufacturers, and customers.
+                </p>
+              </div>
             </div>
           </div>
         </section>
@@ -168,391 +165,181 @@ function PageShell({ eyebrow, title, intro, children, imageAlt }: PageShellProps
   );
 }
 
+function ContentBand({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <section className={cn("border-b border-border bg-mscqr-background", className)}>
+      <div className="mx-auto w-full max-w-7xl px-4 py-16 lg:py-20">{children}</div>
+    </section>
+  );
+}
+
 function FeatureGrid({ items }: { items: Feature[] }) {
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
       {items.map((item) => (
-        <article key={item.title} className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
-          <item.icon className="size-5 text-cyan-200" />
-          <h2 className="mt-4 text-xl font-semibold text-white">{item.title}</h2>
-          <p className="mt-3 text-sm leading-7 text-slate-400">{item.body}</p>
+        <article key={item.title} className="rounded-2xl border border-border bg-white p-6 shadow-sm">
+          <div className="flex size-11 items-center justify-center rounded-xl bg-accent text-accent-foreground">
+            <item.icon className="size-5" />
+          </div>
+          <h2 className="mt-5 text-lg font-semibold text-foreground">{item.title}</h2>
+          <p className="mt-3 text-sm leading-7 text-muted-foreground">{item.body}</p>
         </article>
       ))}
     </div>
   );
 }
 
-function ContentBand({ children, className }: { children: ReactNode; className?: string }) {
+function PrimaryActions({ secondaryHref = "/verify", secondaryLabel = "Verify a Product" }: { secondaryHref?: string; secondaryLabel?: string }) {
   return (
-    <section className={cn("border-b border-white/10", className)}>
-      <div className="mx-auto w-full max-w-7xl px-4 py-16 lg:py-20">{children}</div>
-    </section>
-  );
-}
-
-function TextBlock({ eyebrow, title, body }: { eyebrow: string; title: string; body: string }) {
-  return (
-    <div className="max-w-3xl">
-      <p className="text-xs font-semibold uppercase text-amber-200">{eyebrow}</p>
-      <h2 className="mt-4 text-3xl font-semibold leading-tight text-white lg:text-4xl">{title}</h2>
-      <p className="mt-4 text-sm leading-7 text-slate-400">{body}</p>
-    </div>
+    <>
+      <Button asChild size="lg">
+        <Link to="/request-access">
+          Request Access
+          <ArrowRight data-icon="inline-end" />
+        </Link>
+      </Button>
+      <Button asChild size="lg" variant="outline">
+        <Link to={secondaryHref}>{secondaryLabel}</Link>
+      </Button>
+    </>
   );
 }
 
 export function PlatformPage() {
   return (
     <PageShell
-      eyebrow="Platform"
-      title="Product authentication infrastructure for governed QR operations."
-      intro="MSCQR connects QR/code issuance, controlled printing, public verification, anomaly review, support escalation, and audit evidence into a manufacturer-led operating model."
-      imageAlt="MSCQR product authentication dashboard preview"
+      title="Garment authentication workspace for brands and manufacturers."
+      intro="MSCQR helps clothing teams prepare QR labels, support factory print and attachment workflows, let customers verify garments, and review suspicious scan activity."
+      actions={<PrimaryActions secondaryHref="/how-scanning-works" secondaryLabel="See how scanning works" />}
     >
       <ContentBand>
         <FeatureGrid items={platformFeatures} />
       </ContentBand>
-      <ContentBand className="bg-[#05080c]">
-        <div className="grid gap-10 lg:grid-cols-[0.34fr_0.66fr] lg:items-start">
-          <TextBlock
-            eyebrow="Operating model"
-            title="From issued code to reviewable verification evidence."
-            body="MSCQR is structured around the operational steps manufacturers need to control before and after a product is verified: issue, assign, print, verify, review, escalate, and preserve evidence."
-          />
-          <div className="grid gap-3 md:grid-cols-2">
-            {platformWorkflow.map((item, index) => (
-              <article key={item.step} className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
-                <p className="font-mono text-xs uppercase tracking-[0.18em] text-slate-500">
-                  {String(index + 1).padStart(2, "0")}
-                </p>
-                <h2 className="mt-3 text-lg font-semibold text-white">{item.step}</h2>
-                <p className="mt-3 text-sm leading-7 text-slate-400">{item.detail}</p>
-              </article>
-            ))}
-          </div>
-        </div>
+      <ContentBand className="bg-white">
+        <TwoColumn
+          title="Focused on clothing, not generic QR generation."
+          body="MSCQR is built for garment labels and authenticity workflows. The public site, customer scan flow, and workspace language should stay focused on brands, manufacturers, garments, labels, scans, and customer trust."
+        />
       </ContentBand>
-      <ContentBand className="bg-[#080d13]">
-        <div className="grid gap-8 lg:grid-cols-[0.62fr_0.38fr] lg:items-end">
-          <TextBlock
-            eyebrow="Operational posture"
-            title="Built for global and regional authentication workflows."
-            body="MSCQR is positioned for manufacturer-led deployments serving UK, India, Hyderabad/India, and global operating teams without claiming automated multi-region failover or formal certifications that are not yet in place."
-          />
-          <Button
-            asChild
-            size="lg"
-            variant="outline"
-            className="w-fit border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]"
-          >
-            <Link to="/trust">
-              Review trust posture
-              <ArrowRight data-icon="inline-end" />
-            </Link>
-          </Button>
-        </div>
+    </PageShell>
+  );
+}
+
+export function BrandsPage() {
+  return (
+    <PageShell
+      title="QR label verification for clothing brands."
+      intro="Protect brand trust, issue QR labels, let customers verify garments, and review suspicious scan patterns without turning your public experience into a technical console."
+      actions={<PrimaryActions secondaryHref="/how-scanning-works" secondaryLabel="See how scanning works" />}
+    >
+      <ContentBand>
+        <FeatureGrid items={brandFeatures} />
+      </ContentBand>
+      <ContentBand className="bg-white">
+        <TwoColumn
+          title="A customer-first result with brand visibility behind it."
+          body="Customers should see whether a garment can be verified first. Brand teams can then review scan history, print confirmation, and unusual repeat activity inside the workspace."
+          ctaHref="/request-access"
+          ctaLabel="Request Access"
+        />
+      </ContentBand>
+    </PageShell>
+  );
+}
+
+export function GarmentManufacturersPage() {
+  return (
+    <PageShell
+      title="Garment manufacturer workflows for QR labels."
+      intro="Receive assigned QR labels, print or attach garment tags, confirm print completion, and support brand verification workflows from production to customer scan."
+      actions={<PrimaryActions secondaryHref="/solutions/brands" secondaryLabel="For Brands" />}
+    >
+      <ContentBand>
+        <FeatureGrid items={manufacturerFeatures} />
+      </ContentBand>
+      <ContentBand className="bg-white">
+        <TwoColumn
+          title="Make the production handoff easier to trust."
+          body="A manufacturer should know which labels are assigned, what needs to be printed or attached, and when completion has been confirmed for the brand."
+          ctaHref="/request-access"
+          ctaLabel="Request Access"
+        />
       </ContentBand>
     </PageShell>
   );
 }
 
 export function ManufacturersPage() {
+  return <GarmentManufacturersPage />;
+}
+
+export function ApparelAuthenticityPage() {
   return (
     <PageShell
-      eyebrow="For manufacturers"
-      title="Control QR issuance, printing, verification, and evidence around real production workflows."
-      intro="MSCQR helps manufacturers govern product code inventory, print readiness, public verification, duplicate review, support escalation, and audit evidence without turning the public verifier into an internal console."
-      imageAlt="MSCQR controlled QR printing workflow preview"
+      title="Apparel authenticity and suspicious scan detection."
+      intro="MSCQR is built for garment and clothing verification, not broad product categories. It helps brands and manufacturers connect QR labels, print confirmation, customer scans, and suspicious repeat activity."
+      actions={<PrimaryActions secondaryHref="/verify" secondaryLabel="Verify a Product" />}
     >
       <ContentBand>
         <FeatureGrid
           items={[
             {
-              title: "Manufacturer control",
-              body: "Manage issued codes and batch context before labels move into production.",
+              title: "Garment-only focus",
+              body: "Public language, workflows, and scan results are centered on clothing QR labels.",
+              icon: Shirt,
+            },
+            {
+              title: "Plain customer results",
+              body: "Customers see a simple result first, then optional next steps when useful.",
+              icon: ScanLine,
+            },
+            {
+              title: "Brand and factory context",
+              body: "Verification can reflect label status, manufacturer workflows, and brand identity.",
               icon: Factory,
             },
             {
-              title: "Print confirmation",
-              body: "Use controlled print workflows and connector support where authorized by your organization.",
-              icon: ClipboardCheck,
-            },
-            {
-              title: "Scan review",
-              body: "Review duplicate or replay patterns against lifecycle state and operational context.",
-              icon: Fingerprint,
-            },
-            {
-              title: "Audit evidence",
-              body: "Preserve workflow and verification evidence for high-trust product operations.",
-              icon: FileClock,
+              title: "Suspicious scan review",
+              body: "Teams can review unusual repeat activity and support customers from clearer context.",
+              icon: AlertTriangle,
             },
           ]}
         />
-      </ContentBand>
-      <ContentBand className="bg-[#080d13]">
-        <div className="grid gap-8 lg:grid-cols-[0.58fr_0.42fr] lg:items-start">
-          <TextBlock
-            eyebrow="Manufacturer-first"
-            title="Make public verification depend on controlled production context."
-            body="The manufacturer page now points buyers toward the core operating question: who issued the code, who controlled print readiness, what product or batch context exists, and what evidence is available when scan behavior looks unusual."
-          />
-          <div className="rounded-lg border border-white/10 bg-white/[0.035] p-6">
-            <h2 className="text-2xl font-semibold text-white">Useful when teams need</h2>
-            <ul className="mt-5 space-y-3 text-sm leading-7 text-slate-400">
-              <li>Controlled QR issuance before labels reach a printer.</li>
-              <li>Public product verification without exposing internal operations.</li>
-              <li>Duplicate and replay review tied to label lifecycle state.</li>
-              <li>Audit evidence for support, incident, and governance review.</li>
-            </ul>
-            <Button asChild size="lg" className="mt-6 bg-none bg-cyan-200 text-slate-950 hover:bg-cyan-100">
-              <Link to="/request-access">
-                Request manufacturer access
-                <ArrowRight data-icon="inline-end" />
-              </Link>
-            </Button>
-          </div>
-        </div>
       </ContentBand>
     </PageShell>
   );
 }
 
-export function LicenseesPage() {
+export function HowScanningWorksPage() {
   return (
     <PageShell
-      eyebrow="For licensees and operators"
-      title="Operate product verification workflows inside manufacturer-governed boundaries."
-      intro="MSCQR supports licensee and enterprise operator workflows for assigned inventory, scan review, support escalation, and controlled QR operations while preserving tenant and role boundaries."
-      imageAlt="MSCQR licensee product verification operations preview"
+      title="How garment scanning works."
+      intro="A customer scans the QR label, sees whether the garment is verified, checks brand or manufacturer information, and can optionally report a concern or register the garment when supported."
+      actions={<PrimaryActions secondaryHref="/verify" secondaryLabel="Verify a Product" />}
     >
       <ContentBand>
-        <FeatureGrid
-          items={[
-            {
-              title: "Assigned operations",
-              body: "Work with allocated batches and manufacturer-governed QR inventory.",
-              icon: Layers3,
-            },
-            {
-              title: "Review queues",
-              body: "Monitor scan activity and route suspicious outcomes into structured review.",
-              icon: Waypoints,
-            },
-            {
-              title: "Support escalation",
-              body: "Attach relevant verification context to support and investigation workflows.",
-              icon: LifeBuoy,
-            },
-            {
-              title: "Role-aware access",
-              body: "Keep platform operations separated from public verification experiences.",
-              icon: Users,
-            },
-          ]}
-        />
-      </ContentBand>
-      <ContentBand className="bg-[#080d13]">
-        <div className="grid gap-8 lg:grid-cols-[0.52fr_0.48fr]">
-          <TextBlock
-            eyebrow="Boundaries"
-            title="Licensee workflows stay inside manufacturer-governed operations."
-            body="Licensees and enterprise operators can help monitor assigned inventory, scan outcomes, and support escalation, while MSCQR keeps sensitive dashboard, audit, incident, and account routes private."
-          />
-          <div className="rounded-lg border border-white/10 bg-white/[0.035] p-6">
-            <h2 className="text-2xl font-semibold text-white">Good secondary audience fit</h2>
-            <p className="mt-3 text-sm leading-7 text-slate-400">
-              Licensee pages should support buying committees and operator teams without shifting MSCQR away from the
-              manufacturer-led product authentication position.
-            </p>
-            <Button
-              asChild
-              size="lg"
-              variant="outline"
-              className="mt-6 border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]"
-            >
-              <Link to="/solutions/manufacturers">
-                Compare manufacturer workflows
-                <ArrowRight data-icon="inline-end" />
-              </Link>
-            </Button>
-          </div>
-        </div>
-      </ContentBand>
-    </PageShell>
-  );
-}
-
-export function IndustriesPage() {
-  return (
-    <PageShell
-      eyebrow="Industries"
-      title="Authentication workflows for high-trust products and controlled supply chains."
-      intro="MSCQR supports product authentication patterns for industrial components, spare parts, regulated supply chains, electronics, cosmetics, alcohol, certificates, documents, and high-trust product brands."
-      imageAlt="MSCQR public product verification screen preview"
-    >
-      <ContentBand>
-        <div className="grid gap-4 md:grid-cols-3">
-          {industryLinks.map((item) => (
-            <Link key={item.href} to={item.href} className="rounded-lg border border-white/10 bg-white/[0.035] p-5 hover:bg-white/[0.055]">
-              <h2 className="text-xl font-semibold text-white">{item.title}</h2>
-              <p className="mt-3 text-sm leading-7 text-slate-400">{item.body}</p>
-              <span className="mt-5 inline-flex items-center gap-2 text-sm font-medium text-cyan-200">
-                Open {item.title.toLowerCase()} page
-                <ArrowRight className="size-4" />
-              </span>
-            </Link>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {scanningSteps.map((step, index) => (
+            <article key={step.title} className="rounded-2xl border border-border bg-white p-6 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex size-11 items-center justify-center rounded-xl bg-accent text-accent-foreground">
+                  <step.icon className="size-5" />
+                </div>
+                <span className="text-sm font-semibold text-primary">{index + 1}</span>
+              </div>
+              <h2 className="mt-5 text-lg font-semibold text-foreground">{step.title}</h2>
+              <p className="mt-3 text-sm leading-7 text-muted-foreground">{step.body}</p>
+            </article>
           ))}
         </div>
       </ContentBand>
-      <ContentBand className="bg-[#080d13]">
-        <TextBlock
-          eyebrow="Search intent"
-          title="Built around product categories where verification evidence matters."
-          body="MSCQR copy intentionally focuses on controlled product labeling, QR verification for supply chains, duplicate review, and audit evidence rather than broad anti-counterfeit guarantees. Industry pages should help qualified teams find the right operating model without inventing case studies."
+      <ContentBand className="bg-white">
+        <TwoColumn
+          title="Result first, questions later."
+          body="MSCQR should not force customers through a long questionnaire before showing the basic result unless security or business rules require it. Extra questions, sign-in, and registration belong behind optional next steps."
+          ctaHref="/verify"
+          ctaLabel="Verify a Product"
         />
-      </ContentBand>
-    </PageShell>
-  );
-}
-
-export function IndustrialComponentsPage() {
-  return (
-    <IndustryDetail
-      eyebrow="Industrial component authentication"
-      title="Governed QR verification for industrial components and high-trust spare parts."
-      body="MSCQR supports component workflows where issued label state, controlled print evidence, scan behavior, and audit history need to remain reviewable for operators."
-      icon={PackageCheck}
-      focusItems={[
-        {
-          title: "Component identity",
-          body: "Tie QR verification to issued label records and production context instead of loose code lists.",
-        },
-        {
-          title: "Controlled print evidence",
-          body: "Make label readiness depend on controlled print confirmation where the workflow requires it.",
-        },
-        {
-          title: "Duplicate review",
-          body: "Surface repeated scans for operator review without exposing private investigation data publicly.",
-        },
-        {
-          title: "Audit trail",
-          body: "Preserve verification and lifecycle evidence for support and governance review.",
-        },
-      ]}
-    />
-  );
-}
-
-export function SparePartsPage() {
-  return (
-    <IndustryDetail
-      eyebrow="Spare parts authentication"
-      title="Verify spare parts while keeping duplicate and replay behavior visible."
-      body="MSCQR helps manufacturers and operators connect controlled QR issuance, public verification, scan review, and audit evidence around replacement-part workflows."
-      icon={BadgeCheck}
-      focusItems={[
-        {
-          title: "Replacement context",
-          body: "Connect spare-part verification to batch, product, or operator context where available.",
-        },
-        {
-          title: "Manual fallback",
-          body: "Keep code lookup available when a damaged label or field environment makes QR scanning difficult.",
-        },
-        {
-          title: "Replay visibility",
-          body: "Help operators review repeated scan patterns without promising counterfeit-proof outcomes.",
-        },
-        {
-          title: "Support escalation",
-          body: "Give teams a route to handle suspicious verification results with relevant evidence.",
-        },
-      ]}
-    />
-  );
-}
-
-export function RegulatedSupplyChainsPage() {
-  return (
-    <IndustryDetail
-      eyebrow="Regulated supply chain product authentication"
-      title="Controlled labeling and verification workflows for evidence-sensitive environments."
-      body="MSCQR supports product verification infrastructure where controlled labeling, anomaly review, support escalation, and audit evidence need a consistent workflow."
-      icon={ShieldCheck}
-      focusItems={[
-        {
-          title: "Controlled labeling",
-          body: "Govern issuance and print state before product verification is exposed publicly.",
-        },
-        {
-          title: "Policy-led verification",
-          body: "Apply consistent public verification outcomes across QR scans and manual lookup.",
-        },
-        {
-          title: "Anomaly review",
-          body: "Route duplicate and unusual scan behavior into review workflows for authorized teams.",
-        },
-        {
-          title: "Evidence retention",
-          body: "Preserve audit records without claiming formal compliance certifications that are not in place.",
-        },
-      ]}
-    />
-  );
-}
-
-function IndustryDetail({
-  eyebrow,
-  title,
-  body,
-  icon: Icon,
-  focusItems = [
-    {
-      title: "Controlled QR issuance",
-      body: "Govern issuance before labels are used in product or document workflows.",
-    },
-    {
-      title: "Print confirmation",
-      body: "Connect print state to product verification readiness where controlled printing is required.",
-    },
-    {
-      title: "Duplicate/replay review",
-      body: "Keep suspicious scan behavior visible for authorized operators.",
-    },
-    {
-      title: "Audit evidence",
-      body: "Preserve reviewable evidence for support and governance workflows.",
-    },
-  ],
-}: {
-  eyebrow: string;
-  title: string;
-  body: string;
-  icon: ElementType;
-  focusItems?: Array<{ title: string; body: string }>;
-}) {
-  return (
-    <PageShell eyebrow={eyebrow} title={title} intro={body} imageAlt="MSCQR product verification infrastructure preview">
-      <ContentBand>
-        <div className="grid gap-8 lg:grid-cols-[0.38fr_0.62fr] lg:items-start">
-          <div className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
-            <Icon className="size-6 text-cyan-200" />
-            <h2 className="mt-4 text-2xl font-semibold text-white">Workflow focus</h2>
-            <p className="mt-3 text-sm leading-7 text-slate-400">
-              Govern issuance before labels are used, confirm print state, support public verification, and preserve the
-              review evidence needed by authorized operators.
-            </p>
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            {focusItems.map((item) => (
-              <div key={item.title} className="rounded-lg border border-white/10 bg-[#080d13] p-5">
-                <h2 className="text-lg font-semibold text-white">{item.title}</h2>
-                <p className="mt-3 text-sm leading-7 text-slate-400">{item.body}</p>
-              </div>
-            ))}
-          </div>
-        </div>
       </ContentBand>
     </PageShell>
   );
@@ -561,31 +348,11 @@ function IndustryDetail({
 export function RequestAccessPage() {
   return (
     <PageShell
-      eyebrow="Request access"
-      title="Discuss manufacturer-led product authentication with MSCQR."
-      intro="Use this page to contact MSCQR about governed QR issuance, controlled printing, public verification, duplicate review, support escalation, and audit evidence workflows."
-      imageAlt="MSCQR request access and product authentication workflow preview"
+      title="Request access to MSCQR."
+      intro="Tell us about your clothing brand or garment manufacturing workflow. We will use your details to understand whether MSCQR is a good fit."
     >
       <ContentBand>
-        <div className="grid gap-8 lg:grid-cols-[0.54fr_0.46fr]">
-          <TextBlock
-            eyebrow="Commercial fit"
-            title="Best suited to manufacturers and governed operator networks."
-            body="MSCQR is a fit for teams that need QR verification infrastructure tied to production, print, support, and audit workflows. UK and India-focused deployments, including Hyderabad/India operations, can be discussed without overclaiming local office or certification status."
-          />
-          <div className="rounded-lg border border-white/10 bg-white/[0.035] p-6">
-            <h2 className="text-2xl font-semibold text-white">Contact</h2>
-            <p className="mt-3 text-sm leading-7 text-slate-400">
-              Send a brief note about your product category, printing workflow, target regions, and verification risk model.
-            </p>
-            <Button asChild size="lg" className="mt-6 bg-none bg-cyan-200 text-slate-950 hover:bg-cyan-100">
-              <a href={`mailto:${CONTACT_EMAIL}?subject=MSCQR%20request%20access`}>
-                Email MSCQR administration
-                <ArrowRight data-icon="inline-end" />
-              </a>
-            </Button>
-          </div>
-        </div>
+        <RequestAccessForm />
       </ContentBand>
     </PageShell>
   );
@@ -594,24 +361,284 @@ export function RequestAccessPage() {
 export function BlogPage() {
   return (
     <PageShell
-      eyebrow="MSCQR Insights"
-      title="Practical notes for manufacturer-led product authentication."
-      intro="The insights library is being structured around QR verification workflows, controlled printing, audit evidence, and brand protection operations. Articles will be published only when reviewed and ready."
-      imageAlt="MSCQR insights library product authentication preview"
+      title="Garment authentication notes from MSCQR."
+      intro="Practical guidance for clothing brands and garment manufacturers will appear here once reviewed. The public site should stay focused on real garment verification workflows."
+      actions={<PrimaryActions secondaryHref="/solutions/apparel-authenticity" secondaryLabel="Apparel Authenticity" />}
     >
       <ContentBand>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {insightTopics.map((topic) => (
-            <article key={topic} className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
-              <Globe2 className="size-5 text-amber-200" />
-              <h2 className="mt-4 text-xl font-semibold text-white">{topic}</h2>
-              <p className="mt-3 text-sm leading-7 text-slate-400">
-                Coming soon. This topic is reserved for reviewed operational guidance, not filler articles.
-              </p>
-            </article>
-          ))}
-        </div>
+        <FeatureGrid
+          items={[
+            {
+              title: "Brand trust",
+              body: "How customer verification can support clothing brand confidence.",
+              icon: Store,
+            },
+            {
+              title: "QR labels",
+              body: "How garment teams can think about label creation, printing, and attachment.",
+              icon: QrCode,
+            },
+            {
+              title: "Suspicious scans",
+              body: "How repeat scan patterns can help teams decide what to review.",
+              icon: AlertTriangle,
+            },
+            {
+              title: "Customer support",
+              body: "How plain-language scan results can reduce confusion.",
+              icon: Users,
+            },
+          ]}
+        />
       </ContentBand>
     </PageShell>
+  );
+}
+
+function TwoColumn({
+  title,
+  body,
+  ctaHref,
+  ctaLabel,
+}: {
+  title: string;
+  body: string;
+  ctaHref?: string;
+  ctaLabel?: string;
+}) {
+  return (
+    <div className="grid gap-8 lg:grid-cols-[0.58fr_0.42fr] lg:items-center">
+      <div>
+        <h2 className="text-3xl font-semibold leading-tight text-foreground lg:text-5xl">{title}</h2>
+        <p className="mt-5 text-base leading-8 text-muted-foreground">{body}</p>
+      </div>
+      <div className="rounded-3xl border border-moonlight-300 bg-moonlight-100 p-6">
+        <div className="rounded-2xl bg-white p-5">
+          <p className="text-sm font-semibold text-foreground">Recommended next step</p>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Start with a focused access request so MSCQR can understand your garment volume, country, and workflow.
+          </p>
+          {ctaHref && ctaLabel ? (
+            <Button asChild className="mt-5">
+              <Link to={ctaHref}>{ctaLabel}</Link>
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type FormValues = {
+  fullName: string;
+  workEmail: string;
+  company: string;
+  role: string;
+  volume: string;
+  country: string;
+  message: string;
+};
+
+const initialFormValues: FormValues = {
+  fullName: "",
+  workEmail: "",
+  company: "",
+  role: "",
+  volume: "",
+  country: "",
+  message: "",
+};
+
+function RequestAccessForm() {
+  const [values, setValues] = useState<FormValues>(initialFormValues);
+  const [errors, setErrors] = useState<Partial<Record<keyof FormValues, string>>>({});
+  const [readyToEmail, setReadyToEmail] = useState(false);
+
+  const mailtoHref = useMemo(() => {
+    const body = [
+      `Full name: ${values.fullName}`,
+      `Work email: ${values.workEmail}`,
+      `Company / brand name: ${values.company}`,
+      `Role: ${values.role}`,
+      `Monthly garment volume: ${values.volume}`,
+      `Country: ${values.country}`,
+      "",
+      "Message:",
+      values.message,
+    ].join("\n");
+
+    return `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent("MSCQR Request Access")}&body=${encodeURIComponent(body)}`;
+  }, [values]);
+
+  const updateField = (field: keyof FormValues, value: string) => {
+    setValues((current) => ({ ...current, [field]: value }));
+    setReadyToEmail(false);
+    setErrors((current) => ({ ...current, [field]: undefined }));
+  };
+
+  const validate = () => {
+    const nextErrors: Partial<Record<keyof FormValues, string>> = {};
+    if (!values.fullName.trim()) nextErrors.fullName = "Enter your full name.";
+    if (!values.workEmail.trim()) nextErrors.workEmail = "Enter your work email.";
+    if (values.workEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.workEmail)) {
+      nextErrors.workEmail = "Enter a valid work email.";
+    }
+    if (!values.company.trim()) nextErrors.company = "Enter your company or brand name.";
+    if (!values.role.trim()) nextErrors.role = "Enter your role.";
+    if (!values.volume.trim()) nextErrors.volume = "Enter your monthly garment volume.";
+    if (!values.country.trim()) nextErrors.country = "Enter your country.";
+    if (!values.message.trim()) nextErrors.message = "Add a short message.";
+    return nextErrors;
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const nextErrors = validate();
+    setErrors(nextErrors);
+    setReadyToEmail(Object.keys(nextErrors).length === 0);
+  };
+
+  return (
+    <div className="grid gap-8 lg:grid-cols-[0.42fr_0.58fr]">
+      <div>
+        <h2 className="text-3xl font-semibold text-foreground">Tell us about your garment workflow.</h2>
+        <p className="mt-4 text-sm leading-7 text-muted-foreground">
+          There is no public self-serve signup connected here yet. This form checks the fields locally and prepares an
+          email to MSCQR administration.
+        </p>
+        <div className="mt-6 rounded-2xl border border-border bg-white p-5">
+          <div className="flex items-start gap-3">
+            <Mail className="mt-1 size-5 text-primary" />
+            <p className="text-sm leading-6 text-muted-foreground">
+              Your email app will open after the form is complete. No information is stored by this page until a backend
+              request-access endpoint is connected.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <form onSubmit={handleSubmit} noValidate className="rounded-3xl border border-border bg-white p-6 shadow-sm">
+        <div className="grid gap-5 sm:grid-cols-2">
+          <FormField label="Full name" id="fullName" error={errors.fullName}>
+            <Input
+              id="fullName"
+              value={values.fullName}
+              onChange={(event) => updateField("fullName", event.target.value)}
+              autoComplete="name"
+              aria-invalid={Boolean(errors.fullName)}
+              aria-describedby={errors.fullName ? "fullName-error" : undefined}
+            />
+          </FormField>
+          <FormField label="Work email" id="workEmail" error={errors.workEmail}>
+            <Input
+              id="workEmail"
+              type="email"
+              value={values.workEmail}
+              onChange={(event) => updateField("workEmail", event.target.value)}
+              autoComplete="email"
+              aria-invalid={Boolean(errors.workEmail)}
+              aria-describedby={errors.workEmail ? "workEmail-error" : undefined}
+            />
+          </FormField>
+          <FormField label="Company / brand name" id="company" error={errors.company}>
+            <Input
+              id="company"
+              value={values.company}
+              onChange={(event) => updateField("company", event.target.value)}
+              autoComplete="organization"
+              aria-invalid={Boolean(errors.company)}
+              aria-describedby={errors.company ? "company-error" : undefined}
+            />
+          </FormField>
+          <FormField label="Role" id="role" error={errors.role}>
+            <Input
+              id="role"
+              value={values.role}
+              onChange={(event) => updateField("role", event.target.value)}
+              placeholder="Founder, operations manager, factory lead"
+              aria-invalid={Boolean(errors.role)}
+              aria-describedby={errors.role ? "role-error" : undefined}
+            />
+          </FormField>
+          <FormField label="Monthly garment volume" id="volume" error={errors.volume}>
+            <Input
+              id="volume"
+              value={values.volume}
+              onChange={(event) => updateField("volume", event.target.value)}
+              placeholder="Example: 25,000 garments"
+              aria-invalid={Boolean(errors.volume)}
+              aria-describedby={errors.volume ? "volume-error" : undefined}
+            />
+          </FormField>
+          <FormField label="Country" id="country" error={errors.country}>
+            <Input
+              id="country"
+              value={values.country}
+              onChange={(event) => updateField("country", event.target.value)}
+              autoComplete="country-name"
+              aria-invalid={Boolean(errors.country)}
+              aria-describedby={errors.country ? "country-error" : undefined}
+            />
+          </FormField>
+        </div>
+
+        <FormField label="Message" id="message" error={errors.message} className="mt-5">
+          <textarea
+            id="message"
+            value={values.message}
+            onChange={(event) => updateField("message", event.target.value)}
+            rows={5}
+            className="flex w-full rounded-xl border border-input bg-background px-3 py-3 text-base text-foreground shadow-sm ring-offset-background transition-colors placeholder:text-muted-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground md:text-sm"
+            placeholder="Tell us what garments you make or sell, how labels are printed, and what you want customers to verify."
+            aria-invalid={Boolean(errors.message)}
+            aria-describedby={errors.message ? "message-error" : undefined}
+          />
+        </FormField>
+
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
+          <Button type="submit">Check form</Button>
+          {readyToEmail ? (
+            <Button asChild variant="outline">
+              <a href={mailtoHref}>Open email draft</a>
+            </Button>
+          ) : null}
+        </div>
+        {readyToEmail ? (
+          <p className="mt-4 text-sm leading-6 text-emerald-700">
+            The form is complete. Open the email draft to send your request to MSCQR administration.
+          </p>
+        ) : null}
+      </form>
+    </div>
+  );
+}
+
+function FormField({
+  label,
+  id,
+  error,
+  children,
+  className,
+}: {
+  label: string;
+  id: string;
+  error?: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  const errorId = `${id}-error`;
+
+  return (
+    <div className={className}>
+      <label htmlFor={id} className="text-sm font-medium text-foreground">
+        {label}
+      </label>
+      <div className="mt-2">{children}</div>
+      {error ? (
+        <p id={errorId} className="mt-2 text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }

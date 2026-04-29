@@ -117,7 +117,7 @@ export function IncidentResponseWorkspace({
             <ShieldAlert className="h-5 w-5 text-red-600" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Incident Desk</h1>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Issues</h1>
             <p className="text-sm text-slate-600">Review reports, assign ownership, update customers, and close each case clearly.</p>
           </div>
         </div>
@@ -156,10 +156,10 @@ export function IncidentResponseWorkspace({
           {userRole === "super_admin" ? (
             <Select value={filters.licenseeId} onValueChange={(value) => setFilters((prev) => ({ ...prev, licenseeId: value }))}>
               <SelectTrigger>
-                <SelectValue placeholder="Licensee" />
+                <SelectValue placeholder="Brand" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All licensees</SelectItem>
+                <SelectItem value="all">All brands</SelectItem>
                 {licensees.map((licensee) => (
                   <SelectItem key={licensee.id} value={licensee.id}>
                     {licensee.name}
@@ -227,7 +227,7 @@ export function IncidentResponseWorkspace({
               <Table>
                 <TableHeader>
                   <TableRow className="bg-slate-50">
-                    <TableHead>Incident</TableHead>
+                    <TableHead>Issue</TableHead>
                     <TableHead>Type</TableHead>
                     <TableHead>Severity</TableHead>
                     <TableHead>Status</TableHead>
@@ -238,7 +238,7 @@ export function IncidentResponseWorkspace({
                   {incidents.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={5} className="text-slate-500">
-                        No incidents found.
+                        No issues found.
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -252,7 +252,10 @@ export function IncidentResponseWorkspace({
                           <div className="text-xs font-semibold" title={item.id}>
                             {friendlyReferenceLabel(item.id, "Case")}
                           </div>
-                          <div className="font-mono text-[10px] text-slate-500">#{shortRawReference(item.id, 8)}</div>
+                          <details className="text-xs text-slate-500">
+                            <summary className="cursor-pointer">Support reference</summary>
+                            <div className="mt-1 font-mono">#{shortRawReference(item.id, 8)}</div>
+                          </details>
                           <div className="text-sm text-slate-700">{item.qrCodeValue}</div>
                           <div className="text-xs text-slate-500">{item.locationName || "Location unknown"}</div>
                         </TableCell>
@@ -288,7 +291,7 @@ export function IncidentResponseWorkspace({
           </CardHeader>
           <CardContent className="space-y-4 pt-4">
             {!detail ? (
-              <div className="text-sm text-slate-500">Select an incident to view details.</div>
+              <div className="text-sm text-slate-500">Select an issue to view details.</div>
             ) : (
               <>
                 <div className="rounded-xl border border-slate-200 bg-white p-3">
@@ -296,7 +299,10 @@ export function IncidentResponseWorkspace({
                     <div>
                       <span className="text-slate-500">Reference</span>
                       <div className="font-semibold" title={detail.id}>{friendlyReferenceLabel(detail.id, "Case")}</div>
-                      <div className="font-mono text-xs text-slate-500">{detail.id}</div>
+                       <details className="text-xs text-slate-500">
+                         <summary className="cursor-pointer">Support reference</summary>
+                         <div className="mt-1 break-all font-mono">{detail.id}</div>
+                       </details>
                     </div>
                     <div>
                       <span className="text-slate-500">Code</span>
@@ -333,7 +339,7 @@ export function IncidentResponseWorkspace({
                     </p>
                   ) : null}
                   <p className="mt-2 text-xs text-slate-600">
-                    Case flow: New report to Review to Containment to Documentation to Resolution.
+                    Case flow: New report to review, investigation, documentation, and resolution.
                   </p>
                 </div>
 
@@ -520,12 +526,10 @@ export function IncidentResponseWorkspace({
                           {lastCustomerEmailDelivery.delivered ? "Live delivery confirmed" : "Delivery failed"}
                         </p>
                         <p>
-                          Sender mode: {lastCustomerEmailDelivery.senderMode || customerSenderMode} | Used from:{" "}
-                          {lastCustomerEmailDelivery.usedFrom || "—"}
+                          Message sent from {lastCustomerEmailDelivery.usedFrom || "MSCQR"}.
                         </p>
                         <p>
-                          Reply-to: {lastCustomerEmailDelivery.replyTo || "—"} | Message ID:{" "}
-                          {lastCustomerEmailDelivery.providerMessageId || "—"}
+                          Reply-to: {lastCustomerEmailDelivery.replyTo || "—"}
                         </p>
                         {!lastCustomerEmailDelivery.delivered && lastCustomerEmailDelivery.error ? (
                           <p>Error: {lastCustomerEmailDelivery.error}</p>

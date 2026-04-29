@@ -70,7 +70,7 @@ export default function QRRequests() {
   const [licensees, setLicensees] = useState<LicenseeOption[]>([]);
   const [licenseeFilter, setLicenseeFilter] = useState<string>("");
 
-  // create request form (licensee admin)
+  // create request form (brand admin)
   const [quantity, setQuantity] = useState<number>(1000);
   const [batchName, setBatchName] = useState("");
   const [note, setNote] = useState("");
@@ -179,9 +179,9 @@ export default function QRRequests() {
     if (showApprovalProgress) {
       progress.start({
         title: "Approving allocation request",
-        description: "Validating request and allocating code inventory for this licensee.",
+        description: "Checking the request and assigning QR labels to this brand.",
         phaseLabel: "Approval",
-        detail: `Allocating ${qty.toLocaleString()} codes.`,
+        detail: `Assigning ${qty.toLocaleString()} QR labels.`,
         mode: "simulated",
         initialValue: 14,
       });
@@ -205,9 +205,9 @@ export default function QRRequests() {
       }
 
       if (showApprovalProgress) {
-        await progress.complete(`Approved request and allocated ${qty.toLocaleString()} codes.`);
+        await progress.complete(`Approved request and assigned ${qty.toLocaleString()} QR labels.`);
       }
-      toast({ title: "Approved", description: "Codes allocated to the licensee pool." });
+      toast({ title: "Approved", description: "QR labels are now available to the brand." });
       setApproveOpen(false);
       setActiveReq(null);
       await loadRequests();
@@ -246,11 +246,11 @@ export default function QRRequests() {
     <DashboardLayout>
       <DataTablePagePattern
         eyebrow={isSuper ? "Approval queue" : "Inventory request"}
-        title="Code Requests"
+        title="QR Requests"
         description={
           isSuper
-            ? "Review and approve code requests from licensee teams."
-            : "Request more codes for a new batch or upcoming production run."
+            ? "Review and approve QR label requests from brand teams."
+            : "Request QR labels for a new garment batch or upcoming production run."
         }
         actions={
           <Button variant="outline" onClick={loadRequests} disabled={loading}>
@@ -276,7 +276,7 @@ export default function QRRequests() {
 
             {isSuper && (
               <div className="flex items-center gap-2">
-                <Label className="text-xs">Licensee</Label>
+                <Label className="text-xs">Brand</Label>
                 <select
                   className="rounded-md border bg-background px-2 py-1 text-sm"
                   value={licenseeFilter}
@@ -296,7 +296,7 @@ export default function QRRequests() {
       >
         {isLicensee && (
           <PageSection
-            title="Request codes"
+            title="Request QR labels"
             description="Enter the quantity you need and the batch name your team will recognize later."
             action={
               <Button onClick={submitRequest} disabled={loading}>
@@ -308,7 +308,7 @@ export default function QRRequests() {
               <CardContent className="px-0 pb-0">
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>Quantity</Label>
+                  <Label>Number of QR labels</Label>
                   <Input
                     type="number"
                     value={quantity}
@@ -316,7 +316,7 @@ export default function QRRequests() {
                   />
                 </div>
                 <div className="text-xs text-muted-foreground self-end pb-2">
-                  The next available code range is assigned automatically after approval.
+                  MSCQR assigns the QR labels automatically after approval.
                 </div>
               </div>
 
@@ -334,19 +334,6 @@ export default function QRRequests() {
               </div>
 
               <div className="space-y-2 mt-3">
-                <Label>Batch name</Label>
-                <Input
-                  value={batchName}
-                  onChange={(e) => setBatchName(e.target.value)}
-                  maxLength={120}
-                  placeholder="Example: March Retail Rollout"
-                />
-                <div className="text-xs text-muted-foreground">
-                  This becomes the received batch label after approval.
-                </div>
-              </div>
-
-              <div className="space-y-2 mt-3">
                 <Label>Note (optional)</Label>
                 <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional context for the approver" />
               </div>
@@ -360,7 +347,7 @@ export default function QRRequests() {
           description={
             isSuper
               ? "Approve or reject requests with clear outcomes for the requesting team."
-              : "Track the status of every code request for your company."
+              : "Track the status of every QR label request for your company."
           }
         >
           <Card className="border-0 shadow-none">
@@ -389,11 +376,11 @@ export default function QRRequests() {
                     <TableRow>
                       <TableCell colSpan={isSuper ? 7 : 6} className="p-6">
                         <PageEmptyState
-                          title={isSuper ? "No code requests to review" : "No code requests yet"}
+                          title={isSuper ? "No QR requests to review" : "No QR requests yet"}
                           description={
                             isSuper
-                              ? "New requests will appear here as licensee teams submit them."
-                              : "Create your first request when you need more codes for a batch."
+                              ? "New requests will appear here as brand teams submit them."
+                              : "Create your first request when you need QR labels for a batch."
                           }
                           actionLabel={!isSuper ? "Open batches" : undefined}
                           onAction={!isSuper ? () => navigate(APP_PATHS.batches) : undefined}
@@ -405,7 +392,7 @@ export default function QRRequests() {
                       <TableRow key={r.id}>
                         <TableCell>
                           <div className="space-y-1">
-                            <div className="font-medium">{`${requestQuantity(r)} codes`}</div>
+                            <div className="font-medium">{`${requestQuantity(r)} QR labels`}</div>
                             {r.batchName && (
                               <div className="text-xs text-muted-foreground">Batch: {r.batchName}</div>
                             )}
@@ -421,7 +408,7 @@ export default function QRRequests() {
                                 <div className="text-xs text-muted-foreground">Prefix: {r.licensee.prefix}</div>
                               </div>
                             ) : (
-                              <span className="text-muted-foreground">{r.licenseeId}</span>
+                              <span className="text-muted-foreground">Brand details unavailable</span>
                             )}
                           </TableCell>
                         )}
@@ -503,16 +490,16 @@ export default function QRRequests() {
         <Dialog open={approveOpen} onOpenChange={setApproveOpen}>
           <DialogContent className="sm:max-w-[520px]">
             <DialogHeader>
-              <DialogTitle>Approve code request</DialogTitle>
+              <DialogTitle>Approve QR request</DialogTitle>
               <DialogDescription>
-                Approve this request and assign the next available code range automatically.
+                Approve this request and assign the next available QR labels automatically.
               </DialogDescription>
             </DialogHeader>
 
             {!activeReq ? (
               <DialogEmptyState
                 title="Choose a request to approve"
-                description="Close this dialog, reopen Approve from a pending code request, and MSCQR will restore the request details and decision form."
+                description="Close this dialog, reopen Approve from a pending QR request, and MSCQR will restore the request details and decision form."
                 onClose={() => setApproveOpen(false)}
               />
             ) : (
@@ -550,14 +537,14 @@ export default function QRRequests() {
         <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
           <DialogContent className="sm:max-w-[520px]">
             <DialogHeader>
-              <DialogTitle>Reject code request</DialogTitle>
+              <DialogTitle>Reject QR request</DialogTitle>
               <DialogDescription>Add an optional note so the requesting team understands what to change.</DialogDescription>
             </DialogHeader>
 
             {!activeReq ? (
               <DialogEmptyState
                 title="Choose a request to reject"
-                description="Close this dialog, reopen Reject from a pending code request, and MSCQR will restore the request details before you add a decision note."
+                description="Close this dialog, reopen Reject from a pending QR request, and MSCQR will restore the request details before you add a decision note."
                 onClose={() => setRejectOpen(false)}
               />
             ) : (

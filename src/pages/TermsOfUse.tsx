@@ -5,27 +5,27 @@ export default function TermsOfUse() {
     <LegalDocumentLayout
       title="Terms of Use"
       updatedAt="14 Apr 2026"
-      summary="These terms describe MSCQR's product behavior, role model, and responsible-use expectations for product authentication workflows."
+      summary="These terms describe MSCQR's product behavior, role model, and responsible-use expectations for garment authentication workflows."
     >
       <h2>1. Who these terms are for</h2>
       <p>
-        MSCQR is used by internal platform administrators, licensee administrators, manufacturers, and public users who
-        verify products. Customer-specific commercial terms may add further rights and responsibilities.
+        MSCQR is used by internal platform administrators, brand admins, garment manufacturers, and public users who
+        verify garments. Customer-specific commercial terms may add further rights and responsibilities.
       </p>
 
       <h2>2. Intended use of MSCQR</h2>
       <ul>
-        <li>Operate governed QR issuance and verification workflows.</li>
-        <li>Support manufacturer-side printing and operational tracking.</li>
+        <li>Create and manage QR labels for garments.</li>
+        <li>Support manufacturer-side label printing and operational tracking.</li>
         <li>Help operators manage incidents, support, governance, and audit activity.</li>
-        <li>Allow customers or consumers to verify a product through the public verification journey.</li>
+        <li>Allow customers to verify a garment through the public verification journey.</li>
       </ul>
 
       <h2>3. Important current product limits</h2>
       <ul>
-        <li>MSCQR provides governed verification and audit evidence based on current platform state.</li>
-        <li>MSCQR does not claim to make a physical item impossible to counterfeit without additional security layers.</li>
-        <li>Manual code lookup is weaker than signed-label verification where signed proof is available.</li>
+        <li>MSCQR provides garment verification context based on current platform status.</li>
+        <li>MSCQR does not claim to make a physical garment impossible to counterfeit without additional security layers.</li>
+        <li>Manual code lookup may provide less confidence than scanning a supported QR label.</li>
       </ul>
 
       <h2>4. Account and access responsibilities</h2>
@@ -51,7 +51,7 @@ export default function TermsOfUse() {
 
       <h2>7. Prohibited behavior</h2>
       <ul>
-        <li>Do not misuse QR issuance or verification features for fraudulent activity.</li>
+        <li>Do not misuse QR label or verification features for fraudulent activity.</li>
         <li>Do not upload malicious files or abusive content through support or incident flows.</li>
         <li>Do not attempt to bypass rate limits, permission controls, or auditing controls.</li>
       </ul>

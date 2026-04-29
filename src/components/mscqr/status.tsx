@@ -20,19 +20,19 @@ export type MscqrStatusTone =
   | "audit";
 
 const toneClasses: Record<MscqrStatusTone, string> = {
-  neutral: "border-mscqr-border bg-mscqr-surface-muted/70 text-mscqr-secondary",
-  verified: "border-mscqr-verified/30 bg-mscqr-verified/12 text-mscqr-verified",
-  issued: "border-mscqr-issued/30 bg-mscqr-issued/12 text-mscqr-issued",
-  printPending: "border-mscqr-pending/35 bg-mscqr-pending/12 text-mscqr-pending",
-  printConfirmed: "border-mscqr-confirmed/35 bg-mscqr-confirmed/12 text-mscqr-confirmed",
-  review: "border-mscqr-review/35 bg-mscqr-review/12 text-mscqr-review",
-  duplicate: "border-mscqr-duplicate/35 bg-mscqr-duplicate/12 text-mscqr-duplicate",
-  blocked: "border-mscqr-blocked/35 bg-mscqr-blocked/12 text-mscqr-blocked",
-  replaced: "border-mscqr-replaced/35 bg-mscqr-replaced/12 text-mscqr-replaced",
-  expired: "border-mscqr-expired/35 bg-mscqr-expired/12 text-mscqr-expired",
-  degraded: "border-mscqr-degraded/35 bg-mscqr-degraded/12 text-mscqr-degraded",
-  support: "border-mscqr-support/35 bg-mscqr-support/12 text-mscqr-support",
-  audit: "border-mscqr-audit/35 bg-mscqr-audit/12 text-mscqr-audit",
+  neutral: "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900/45 dark:text-slate-200",
+  verified: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-700/60 dark:bg-emerald-950/35 dark:text-emerald-200",
+  issued: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-700/60 dark:bg-blue-950/35 dark:text-blue-200",
+  printPending: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-700/60 dark:bg-amber-950/35 dark:text-amber-200",
+  printConfirmed: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-700/60 dark:bg-emerald-950/35 dark:text-emerald-200",
+  review: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-700/60 dark:bg-amber-950/35 dark:text-amber-200",
+  duplicate: "border-orange-200 bg-orange-50 text-orange-800 dark:border-orange-700/60 dark:bg-orange-950/35 dark:text-orange-200",
+  blocked: "border-red-200 bg-red-50 text-red-700 dark:border-red-700/60 dark:bg-red-950/35 dark:text-red-200",
+  replaced: "border-moonlight-300 bg-moonlight-100 text-moonlight-900 dark:border-moonlight-400/60 dark:bg-moonlight-900/35 dark:text-moonlight-200",
+  expired: "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900/45 dark:text-slate-200",
+  degraded: "border-orange-200 bg-orange-50 text-orange-800 dark:border-orange-700/60 dark:bg-orange-950/35 dark:text-orange-200",
+  support: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-700/60 dark:bg-blue-950/35 dark:text-blue-200",
+  audit: "border-moonlight-300 bg-moonlight-100 text-moonlight-900 dark:border-moonlight-400/60 dark:bg-moonlight-900/35 dark:text-moonlight-200",
 };
 
 const verificationToneByValue: Record<string, MscqrStatusTone> = {
@@ -90,7 +90,7 @@ export function StatusBadge({ children, tone = "neutral", className, pulse = fal
   return (
     <Badge
       className={cn(
-        "inline-flex items-center gap-1.5 border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] hover:bg-current/10",
+        "inline-flex items-center gap-1.5 border px-2.5 py-1 text-xs font-medium leading-none tracking-normal hover:bg-current/10",
         toneClasses[tone],
         className,
       )}
@@ -147,11 +147,11 @@ export function PrintStateIndicator({
 export type RiskLevel = "low" | "watch" | "elevated" | "high" | "blocked";
 
 const riskClasses: Record<RiskLevel, string> = {
-  low: "border-mscqr-risk-low/30 bg-mscqr-risk-low/12 text-mscqr-risk-low",
-  watch: "border-mscqr-risk-watch/35 bg-mscqr-risk-watch/12 text-mscqr-risk-watch",
-  elevated: "border-mscqr-risk-elevated/35 bg-mscqr-risk-elevated/12 text-mscqr-risk-elevated",
-  high: "border-mscqr-risk-high/35 bg-mscqr-risk-high/12 text-mscqr-risk-high",
-  blocked: "border-mscqr-risk-blocked/35 bg-mscqr-risk-blocked/12 text-mscqr-risk-blocked",
+  low: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-700/60 dark:bg-emerald-950/35 dark:text-emerald-200",
+  watch: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-700/60 dark:bg-amber-950/35 dark:text-amber-200",
+  elevated: "border-orange-200 bg-orange-50 text-orange-800 dark:border-orange-700/60 dark:bg-orange-950/35 dark:text-orange-200",
+  high: "border-red-200 bg-red-50 text-red-700 dark:border-red-700/60 dark:bg-red-950/35 dark:text-red-200",
+  blocked: "border-red-300 bg-red-50 text-red-800 dark:border-red-700/70 dark:bg-red-950/45 dark:text-red-200",
 };
 
 export function RiskSignal({
@@ -168,11 +168,11 @@ export function RiskSignal({
   return (
     <div className={cn("rounded-2xl border p-4", riskClasses[level], className)}>
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em]">Risk signal</p>
-        <span className="size-2.5 rounded-full bg-current shadow-[0_0_18px_currentColor]" />
+        <p className="text-sm font-medium">Scan risk</p>
+        <span aria-hidden="true" className="size-2.5 rounded-full bg-current" />
       </div>
-      <p className="mt-3 text-sm font-semibold text-mscqr-primary">{label || level}</p>
-      {detail ? <p className="mt-2 text-sm leading-6 text-mscqr-secondary">{detail}</p> : null}
+      <p className="mt-3 text-sm font-semibold text-foreground">{label || level}</p>
+      {detail ? <p className="mt-2 text-sm leading-6 text-muted-foreground">{detail}</p> : null}
     </div>
   );
 }

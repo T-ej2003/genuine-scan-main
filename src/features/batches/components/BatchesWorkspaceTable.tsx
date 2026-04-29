@@ -150,11 +150,11 @@ export function BatchesWorkspaceTable({
       ) : null}
 
       <OperationalTableShell
-        title={isManufacturer ? "Controlled print queue" : "Batch lifecycle registry"}
+        title={isManufacturer ? "Printing queue" : "Batches"}
         description={
           isManufacturer
-            ? "Start governed print runs only from batches with available inventory and confirmed printer readiness."
-            : "Inspect source batches, assignment state, print progress, and allocation evidence without changing scope rules."
+            ? "Start print runs from batches that have QR labels ready and a printer selected."
+            : "Review garment batches, assigned QR labels, print progress, and the next action."
         }
       >
         <div className="border-b border-mscqr-border p-4">
@@ -203,8 +203,8 @@ export function BatchesWorkspaceTable({
                   <TableHeader>
                     <TableRow>
                       <TableHead>Batch</TableHead>
-                      <TableHead>Range</TableHead>
-                      <TableHead>Inventory State</TableHead>
+                      <TableHead>QR labels</TableHead>
+                      <TableHead>Status</TableHead>
                       <TableHead>Manufacturer</TableHead>
                       <TableHead>Printed</TableHead>
                       <TableHead>Created</TableHead>
@@ -250,9 +250,13 @@ export function BatchesWorkspaceTable({
                               </div>
                             </TableCell>
 
-                            <TableCell className="font-mono text-xs">
-                              <div className="break-all">{batch.startCode}</div>
-                              <div className="break-all">{batch.endCode}</div>
+                            <TableCell>
+                              <div className="text-sm font-medium">{Number(batch.totalCodes || 0).toLocaleString()} assigned</div>
+                              <details className="mt-1 text-xs text-muted-foreground">
+                                <summary className="cursor-pointer">Technical details</summary>
+                                <div className="mt-1 break-all font-mono">{batch.startCode}</div>
+                                <div className="break-all font-mono">{batch.endCode}</div>
+                              </details>
                             </TableCell>
 
                             <TableCell>
@@ -263,11 +267,12 @@ export function BatchesWorkspaceTable({
                                 <div className="text-[11px] text-muted-foreground">
                                   Printed {Number(batch.printedCodes || 0).toLocaleString()} · Scanned {Number(batch.redeemedCodes || 0).toLocaleString()}
                                 </div>
-                                <div className="text-[11px] text-muted-foreground font-mono break-all">
-                                  {batch.remainingStartCode && batch.remainingEndCode
-                                    ? `${batch.remainingStartCode} -> ${batch.remainingEndCode}`
-                                    : "-"}
-                                </div>
+                                {batch.remainingStartCode && batch.remainingEndCode ? (
+                                  <details className="text-xs text-muted-foreground">
+                                    <summary className="cursor-pointer">Remaining label details</summary>
+                                    <div className="mt-1 break-all font-mono">{`${batch.remainingStartCode} -> ${batch.remainingEndCode}`}</div>
+                                  </details>
+                                ) : null}
                               </div>
                             </TableCell>
 
@@ -333,7 +338,7 @@ export function BatchesWorkspaceTable({
           ) : (
             <>
               <div className="mb-4 rounded-2xl border bg-muted/10 px-4 py-3 text-sm text-muted-foreground">
-                Each source batch appears once here. Open the workspace to assign more stock, review manufacturer distribution, check print progress, and download audit evidence without split rows in the main list.
+                Each batch appears once here. Open a batch to assign QR labels, review manufacturer work, check print progress, and open technical history when needed.
               </div>
 
               <div className="rounded-md border">
@@ -341,7 +346,7 @@ export function BatchesWorkspaceTable({
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-[24%]">Batch</TableHead>
-                      <TableHead className="w-[16%]">Original range</TableHead>
+                      <TableHead className="w-[16%]">QR labels</TableHead>
                       <TableHead className="w-[19%]">Inventory</TableHead>
                       <TableHead className="w-[16%]">Manufacturers</TableHead>
                       <TableHead className="w-[14%]">Print status</TableHead>
@@ -388,9 +393,13 @@ export function BatchesWorkspaceTable({
                               </div>
                             </TableCell>
 
-                            <TableCell className="font-mono text-[11px] leading-5">
-                              <div className="break-all">{row.sourceOriginalRangeStart}</div>
-                              <div className="break-all">{row.sourceOriginalRangeEnd}</div>
+                            <TableCell>
+                              <div className="text-sm font-medium">{row.originalTotalCodes.toLocaleString()} labels</div>
+                              <details className="mt-1 text-xs text-muted-foreground">
+                                <summary className="cursor-pointer">Technical details</summary>
+                                <div className="mt-1 break-all font-mono">{row.sourceOriginalRangeStart}</div>
+                                <div className="break-all font-mono">{row.sourceOriginalRangeEnd}</div>
+                              </details>
                             </TableCell>
 
                             <TableCell>
@@ -406,11 +415,14 @@ export function BatchesWorkspaceTable({
                                     {row.pendingPrintableCodes.toLocaleString()} ready to print
                                   </Badge>
                                 </div>
-                                <div className="text-[11px] text-muted-foreground font-mono break-all">
-                                  {row.remainingRangeStart && row.remainingRangeEnd
-                                    ? `${row.remainingRangeStart} -> ${row.remainingRangeEnd}`
-                                    : "No unassigned range remains."}
-                                </div>
+                                {row.remainingRangeStart && row.remainingRangeEnd ? (
+                                  <details className="text-xs text-muted-foreground">
+                                    <summary className="cursor-pointer">Remaining label details</summary>
+                                    <div className="mt-1 break-all font-mono">{`${row.remainingRangeStart} -> ${row.remainingRangeEnd}`}</div>
+                                  </details>
+                                ) : (
+                                  <div className="text-xs text-muted-foreground">No unassigned labels remain.</div>
+                                )}
                               </div>
                             </TableCell>
 

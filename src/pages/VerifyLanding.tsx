@@ -1,13 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { Camera, Keyboard, Loader2, QrCode, ScanLine, ShieldCheck, Shirt } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Camera, Keyboard, Loader2, QrCode, ScanLine, ShieldCheck } from "lucide-react";
+import { PublicShell } from "@/components/public/PublicShell";
 import apiClient from "@/lib/api-client";
 import { useToast } from "@/hooks/use-toast";
-import { MotionPanel } from "@/components/mscqr/motion";
-import { StatusBadge } from "@/components/mscqr/status";
-import { PublicShell } from "@/components/public/PublicShell";
 
 type NavigatorWithConnection = Navigator & {
   connection?: {
@@ -37,6 +36,7 @@ export default function VerifyLanding() {
   const { toast } = useToast();
   const timersRef = useRef<number[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const manualInputRef = useRef<HTMLInputElement | null>(null);
 
   const cleaned = useMemo(() => code.trim(), [code]);
   const browserWindow = typeof window !== "undefined" ? (window as WindowWithBarcodeDetector) : undefined;
@@ -65,20 +65,20 @@ export default function VerifyLanding() {
         routeFrom: "/verify",
         routeTo: `/verify/${encodeURIComponent(cleaned)}`,
         source: "verify_redirect",
-        transitionMs: 1250,
+        transitionMs: 900,
         verifyCodePresent: true,
         deviceType: /mobile/i.test(navigator.userAgent) ? "mobile" : "desktop",
         networkType: String(navWithConnection.connection?.effectiveType || "unknown"),
         online: navigator.onLine,
       })
       .catch(() => {
-        // best effort telemetry
+        // Best effort telemetry only.
       });
 
-    const stageTimer = window.setTimeout(() => setScanStage(1), 700);
+    const stageTimer = window.setTimeout(() => setScanStage(1), 450);
     const navTimer = window.setTimeout(() => {
       navigate(`/verify/${encodeURIComponent(cleaned)}`);
-    }, 1250);
+    }, 900);
 
     timersRef.current.push(stageTimer, navTimer);
   };
@@ -86,7 +86,7 @@ export default function VerifyLanding() {
   const handleCameraCapture = async (file: File) => {
     if (!file) return;
     if (!cameraAssistSupported) {
-      setCameraError("Camera code scanning is not supported in this browser. Enter the code manually.");
+      setCameraError("This browser cannot scan a QR label from the camera. Enter the code manually instead.");
       return;
     }
 
@@ -95,7 +95,7 @@ export default function VerifyLanding() {
     try {
       const Detector = browserWindow?.BarcodeDetector;
       if (!Detector) {
-        setCameraError("Camera code scanning is not supported in this browser. Enter the code manually.");
+        setCameraError("This browser cannot scan a QR label from the camera. Enter the code manually instead.");
         return;
       }
       const detector = new Detector({ formats: ["qr_code"] });
@@ -103,38 +103,30 @@ export default function VerifyLanding() {
       const [result] = await detector.detect(bitmap);
       const rawValue = String(result?.rawValue || "").trim();
       if (!rawValue) {
-        setCameraError("No code was detected in the captured image. Try again with better lighting.");
+        setCameraError("No QR label was detected. Try again with better lighting, or enter the code manually.");
         return;
       }
 
       setCode(rawValue);
-      toast({ title: "Code captured", description: "Code detected successfully. Starting verification." });
+      toast({ title: "QR label captured", description: "Starting garment verification." });
       apiClient
         .captureRouteTransition({
           routeFrom: "/verify",
           routeTo: `/verify/${encodeURIComponent(rawValue)}`,
           source: "mobile_camera_scan",
-          transitionMs: 400,
+          transitionMs: 350,
           verifyCodePresent: true,
           deviceType: /mobile/i.test(navigator.userAgent) ? "mobile" : "desktop",
           networkType: String(navWithConnection.connection?.effectiveType || "unknown"),
           online: navigator.onLine,
         })
         .catch(() => {
-          // best effort telemetry
+          // Best effort telemetry only.
         });
-      const settleTimer = window.setTimeout(() => {
-        setCode(rawValue);
-        setCameraDecoding(false);
-        setCameraError("");
-        setIsRedirecting(false);
-        setScanStage(0);
-        const navTimer = window.setTimeout(() => navigate(`/verify/${encodeURIComponent(rawValue)}`), 200);
-        timersRef.current.push(navTimer);
-      }, 100);
-      timersRef.current.push(settleTimer);
+      const navTimer = window.setTimeout(() => navigate(`/verify/${encodeURIComponent(rawValue)}`), 200);
+      timersRef.current.push(navTimer);
     } catch (error: unknown) {
-      setCameraError(error instanceof Error ? error.message : "Camera decode failed. Use manual entry if this continues.");
+      setCameraError(error instanceof Error ? error.message : "Camera scan failed. Enter the code manually if this continues.");
     } finally {
       setCameraDecoding(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -144,181 +136,147 @@ export default function VerifyLanding() {
   return (
     <PublicShell>
       {isRedirecting ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#05080c]/82 backdrop-blur-md">
-          <div className="rounded-[1.75rem] border border-cyan-200/20 bg-mscqr-surface-elevated/95 p-6 text-mscqr-primary shadow-[0_30px_120px_rgba(0,0,0,0.45)]">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-white/82 backdrop-blur-md">
+          <div className="rounded-3xl border border-border bg-white p-6 text-foreground shadow-xl">
             <div className="flex items-center gap-4">
-              <span className="relative flex size-12 items-center justify-center rounded-2xl border border-cyan-200/25 bg-cyan-200/10 text-cyan-100">
-                <span className="absolute inline-flex size-full animate-ping rounded-2xl bg-cyan-200/20 motion-reduce:animate-none" />
+              <span className="relative flex size-12 items-center justify-center rounded-2xl border border-moonlight-300 bg-moonlight-100 text-primary">
                 <ScanLine className="relative size-5" />
               </span>
               <div>
-                <p className="text-sm font-semibold text-white">{scanStage === 0 ? "Scanning code" : "Preparing verification"}</p>
-                <p className="mt-1 text-xs text-slate-400">Opening the governed verification lifecycle.</p>
+                <p className="text-sm font-semibold">{scanStage === 0 ? "Checking QR label" : "Opening result"}</p>
+                <p className="mt-1 text-sm text-muted-foreground">Preparing your garment verification.</p>
               </div>
             </div>
           </div>
         </div>
       ) : null}
 
-      <main className="relative isolate overflow-hidden">
-        <div className="pointer-events-none absolute inset-0 -z-10">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_10%,rgba(34,211,238,0.14),transparent_28%),radial-gradient(circle_at_88%_20%,rgba(251,191,36,0.08),transparent_22%)]" />
-          <div className="absolute inset-0 mscqr-public-grid opacity-70" />
-        </div>
-
-        <div className="mx-auto grid min-h-[calc(100svh-145px)] w-full max-w-7xl gap-10 px-4 py-14 lg:min-h-[calc(100svh-81px)] lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:py-20">
-          <MotionPanel className="max-w-3xl">
-            <StatusBadge tone="issued">Public verification</StatusBadge>
-            <h1 className="mt-7 text-balance text-5xl font-semibold leading-[0.98] tracking-[-0.055em] text-white sm:text-6xl">
-              Check a product without losing the evidence trail.
-            </h1>
-            <p className="mt-6 max-w-2xl text-base leading-8 text-slate-300">
-              Scan a signed MSCQR label or enter the printed code manually. The result is checked against governed
-              issuance, print state, scan history, and review policy without exposing private operator workflows.
-            </p>
-            <div className="mt-8 grid gap-3 sm:grid-cols-3">
-              <VerificationPromise icon={ShieldCheck} label="Lifecycle checked" />
-              <VerificationPromise icon={QrCode} label="Manual fallback" />
-              <VerificationPromise icon={ScanLine} label="Duplicate-aware" />
-            </div>
-          </MotionPanel>
-
-          <MotionPanel>
-            <div className="relative overflow-hidden rounded-[2rem] border border-white/12 bg-mscqr-surface/92 shadow-[0_40px_140px_rgba(0,0,0,0.48)]">
-              <div className="border-b border-white/10 bg-white/[0.035] px-5 py-4 sm:px-6">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.26em] text-slate-500">MSCQR verification entry</p>
-                    <h2 className="mt-1 text-2xl font-semibold text-white">Verify a product</h2>
-                  </div>
-                  <span className="relative flex size-11 items-center justify-center rounded-2xl border border-cyan-200/25 bg-cyan-200/10 text-cyan-100">
-                    <span className="absolute inline-flex size-full animate-ping rounded-2xl bg-cyan-200/20 motion-reduce:animate-none" />
-                    <QrCode className="relative size-5" />
-                  </span>
-                </div>
+      <main className="bg-mscqr-background">
+        <section className="border-b border-border bg-white">
+          <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-16 lg:grid-cols-[0.58fr_0.42fr] lg:items-center lg:py-20">
+            <div>
+              <h1 className="text-balance text-5xl font-semibold leading-tight text-foreground sm:text-6xl">
+                Verify a garment
+              </h1>
+              <p className="mt-6 max-w-2xl text-lg leading-8 text-muted-foreground">
+                Scan the QR label on your garment or enter the code to check if it was verified by MSCQR.
+              </p>
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) handleCameraCapture(file);
+                  }}
+                />
+                <Button type="button" size="lg" onClick={() => fileInputRef.current?.click()} disabled={isRedirecting || cameraDecoding}>
+                  {cameraDecoding ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Camera data-icon="inline-start" />}
+                  Scan QR label
+                </Button>
+                <Button type="button" size="lg" variant="outline" onClick={() => manualInputRef.current?.focus()}>
+                  <Keyboard data-icon="inline-start" />
+                  Enter code manually
+                </Button>
               </div>
+              {cameraError ? (
+                <div className="mt-5 rounded-2xl border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm leading-6 text-destructive">
+                  {cameraError}
+                </div>
+              ) : null}
+              {!cameraAssistSupported ? (
+                <p className="mt-4 text-sm leading-6 text-muted-foreground">
+                  Camera scanning depends on your browser. Manual code entry works on every device.
+                </p>
+              ) : null}
+            </div>
 
-              <div className="grid gap-6 p-5 sm:p-6">
-                <div className="grid gap-2">
-                  <label htmlFor="verify-code" className="text-sm font-medium text-slate-200">
-                    Label code
+            <div className="rounded-3xl border border-moonlight-300 bg-white p-5 shadow-xl shadow-moonlight-900/10">
+              <div className="rounded-2xl border border-border bg-mscqr-background p-5">
+                <div className="flex items-center gap-3">
+                  <div className="flex size-12 items-center justify-center rounded-2xl bg-accent text-accent-foreground">
+                    <Shirt className="size-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-semibold text-foreground">Garment QR label</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">Use the code printed on the garment tag.</p>
+                  </div>
+                </div>
+
+                <div className="mt-6 grid gap-3">
+                  <label htmlFor="verify-code" className="text-sm font-medium text-foreground">
+                    QR label code
                   </label>
                   <Input
+                    ref={manualInputRef}
                     id="verify-code"
                     value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    placeholder="e.g. MSCQR-7F42-91C8"
+                    onChange={(event) => setCode(event.target.value)}
+                    placeholder="Example: MSCQR-7F42-91C8"
                     disabled={isRedirecting}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") go();
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") go();
                     }}
-                    className="h-12 border-white/10 bg-[#05080c] font-mono text-base text-white placeholder:text-slate-600 focus-visible:ring-cyan-200/60"
+                    className="h-12 font-mono"
                   />
-                  <p className="text-xs leading-5 text-slate-500">Manual lookup remains available if scanning is not possible.</p>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Button
-                    className="h-12 bg-none bg-cyan-200 text-slate-950 hover:bg-cyan-100"
-                    onClick={go}
-                    disabled={!cleaned || isRedirecting}
-                  >
+                  <Button className="h-12" onClick={go} disabled={!cleaned || isRedirecting}>
                     {isRedirecting ? (
                       <>
                         <Loader2 data-icon="inline-start" className="animate-spin" />
-                        <span>{scanStage === 0 ? "Scanning" : "Preparing"}</span>
+                        Checking
                       </>
                     ) : (
                       <>
-                        <Keyboard data-icon="inline-start" />
-                        Verify code
+                        <ScanLine data-icon="inline-start" />
+                        Check garment
                       </>
                     )}
                   </Button>
-
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleCameraCapture(file);
-                    }}
-                  />
-
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-12 border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]"
-                    disabled={isRedirecting || cameraDecoding}
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    {cameraDecoding ? (
-                      <>
-                        <Loader2 data-icon="inline-start" className="animate-spin" />
-                        Decoding
-                      </>
-                    ) : (
-                      <>
-                        <Camera data-icon="inline-start" />
-                        Camera capture
-                      </>
-                    )}
-                  </Button>
-                </div>
-
-                {cameraError ? (
-                  <div className="rounded-2xl border border-rose-300/25 bg-rose-300/10 px-4 py-3 text-sm leading-6 text-rose-100">
-                    {cameraError}
-                  </div>
-                ) : null}
-                {!cameraAssistSupported ? (
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-3 text-sm leading-6 text-slate-400">
-                    Camera decode depends on browser support. Manual code entry is always available.
-                  </div>
-                ) : null}
-
-                <div className="rounded-[1.5rem] border border-white/10 bg-[#05080c] p-4">
-                  <p className="text-xs uppercase tracking-[0.22em] text-slate-500">What happens next</p>
-                  <div className="mt-4 grid gap-3 text-sm text-slate-300">
-                    <div className="flex items-center gap-3">
-                      <span className="size-2 rounded-full bg-cyan-200" />
-                      MSCQR checks the governed registry record.
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="size-2 rounded-full bg-emerald-300" />
-                      The result is separated from any purchase answers you later provide.
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="size-2 rounded-full bg-amber-300" />
-                      Duplicate or risky behavior can be escalated for review.
-                    </div>
-                  </div>
-                  <div className="mt-5 flex flex-wrap gap-3 border-t border-white/10 pt-4 text-sm">
-                    <Link to="/trust" className="font-medium text-cyan-200 hover:text-cyan-100 hover:underline">
-                      Review MSCQR trust posture
-                    </Link>
-                    <Link to="/help" className="font-medium text-cyan-200 hover:text-cyan-100 hover:underline">
-                      Open verification help
-                    </Link>
-                  </div>
                 </div>
               </div>
             </div>
-          </MotionPanel>
-        </div>
+          </div>
+        </section>
+
+        <section className="border-b border-border">
+          <div className="mx-auto w-full max-w-7xl px-4 py-12">
+            <div className="rounded-3xl border border-border bg-white p-6">
+              <div className="grid gap-6 lg:grid-cols-[0.4fr_0.6fr] lg:items-center">
+                <div>
+                  <h2 className="text-2xl font-semibold text-foreground">What MSCQR checks</h2>
+                  <p className="mt-3 text-sm leading-7 text-muted-foreground">
+                    MSCQR checks the QR label, brand record, print status, and unusual scan patterns.
+                  </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {[
+                    ["QR label", QrCode],
+                    ["Brand record", ShieldCheck],
+                    ["Print status", Shirt],
+                    ["Scan patterns", ScanLine],
+                  ].map(([label, Icon]) => (
+                    <div key={String(label)} className="rounded-2xl border border-border bg-mscqr-background p-4">
+                      {React.createElement(Icon as typeof QrCode, { className: "size-5 text-primary" })}
+                      <p className="mt-3 text-sm font-semibold text-foreground">{String(label)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="mt-6 flex flex-wrap gap-3 text-sm">
+              <Link to="/how-scanning-works" className="font-medium text-primary underline-offset-4 hover:underline">
+                See how scanning works
+              </Link>
+              <Link to="/trust" className="font-medium text-primary underline-offset-4 hover:underline">
+                Trust & Security
+              </Link>
+            </div>
+          </div>
+        </section>
       </main>
     </PublicShell>
-  );
-}
-
-function VerificationPromise({ icon: Icon, label }: { icon: React.ElementType; label: string }) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
-      <Icon className="size-4 text-cyan-200" />
-      <p className="mt-3 text-sm font-medium text-slate-100">{label}</p>
-    </div>
   );
 }

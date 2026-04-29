@@ -198,7 +198,7 @@ describe("Verify page", () => {
     });
   });
 
-  it("holds the result behind identity when the session is not yet revealed", async () => {
+  it("shows a calm quick-check state when the session is not yet revealed", async () => {
     vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
       success: true,
       data: buildSession(),
@@ -206,8 +206,8 @@ describe("Verify page", () => {
 
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
-    expect(await screen.findByText("Verify who is checking this product")).toBeInTheDocument();
-    expect(screen.queryByText("What MSCQR checked")).toBeNull();
+    expect(await screen.findByText("We need one quick check before showing the full result.")).toBeInTheDocument();
+    expect(screen.queryByText("Result details")).toBeNull();
   });
 
   it("renders configured customer social providers from the backend", async () => {
@@ -226,7 +226,7 @@ describe("Verify page", () => {
     expect(providerLink).toHaveAttribute("href", expect.stringContaining("/verify/auth/oauth/google/start?"));
   });
 
-  it("email OTP sign-in advances the user into the purchase questionnaire", async () => {
+  it("email sign-in advances the user into optional scan review questions", async () => {
     vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
       success: true,
       data: buildSession(),
@@ -269,7 +269,7 @@ describe("Verify page", () => {
     fireEvent.change(screen.getByLabelText("6-digit code"), { target: { value: "123456" } });
     fireEvent.click(screen.getByRole("button", { name: "Verify and continue" }));
 
-    expect(await screen.findByText("Tell MSCQR how you obtained the product")).toBeInTheDocument();
+    expect(await screen.findByText("Help the brand review this scan")).toBeInTheDocument();
     expect(localStorageStore.has("mscqr_verify_customer_email")).toBe(false);
     expect(localStorageStore.has("authenticqr_verify_customer_email")).toBe(false);
   });
@@ -301,20 +301,8 @@ describe("Verify page", () => {
     } as any);
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
-    expect(await screen.findByText("Tell MSCQR how you obtained the product")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
-
-    expect(await screen.findByText("Capture seller or source details")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
-
-    expect(await screen.findByText("Describe the product condition you saw")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
-
-    expect(await screen.findByText("Why did you choose to scan this item?")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
-
-    expect(await screen.findByText("Choose the next action lane, then reveal the result")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Skip questions and reveal" }));
+    expect(await screen.findByText("Help the brand review this scan")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Skip optional questions" }));
 
     await waitFor(() => {
       expect(vi.mocked(apiClient.submitVerificationIntake)).toHaveBeenCalledWith(
@@ -331,7 +319,8 @@ describe("Verify page", () => {
       );
     });
 
-    expect(await screen.findByText("What MSCQR checked")).toBeInTheDocument();
+    expect(await screen.findByText("This garment is genuine")).toBeInTheDocument();
+    expect(screen.getByText("Result details")).toBeInTheDocument();
   });
 
   it("reveals the locked result from the server-side session payload", async () => {
@@ -362,9 +351,9 @@ describe("Verify page", () => {
     } as any);
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
-    expect(await screen.findByText("What MSCQR checked")).toBeInTheDocument();
-    expect(screen.getByText("Signed label check")).toBeInTheDocument();
-    expect(screen.getByText("Requester context")).toBeInTheDocument();
+    expect(await screen.findByText("This garment is genuine")).toBeInTheDocument();
+    expect(screen.getByText("Verified by MSCQR")).toBeInTheDocument();
+    expect(screen.getByText("Result details")).toBeInTheDocument();
   });
 
   it("reports a concern with session and decision ids after reveal", async () => {
@@ -403,7 +392,8 @@ describe("Verify page", () => {
 
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Report concern" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Report a concern" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Submit concern" }));
 
     await waitFor(() => {
       expect(vi.mocked(apiClient.reportFraud)).toHaveBeenCalledWith(
@@ -464,9 +454,9 @@ describe("Verify page", () => {
     } as any);
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
-    expect(await screen.findByText("Additional review check required")).toBeInTheDocument();
+    expect(await screen.findByText("Complete one quick check")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Re-check with verified identity" }));
+    fireEvent.click(screen.getByRole("button", { name: "Complete quick check" }));
 
     await waitFor(() => {
       expect(vi.mocked(apiClient.verifyQRCode)).toHaveBeenCalledWith(
@@ -480,7 +470,7 @@ describe("Verify page", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText(/completed the additional review check/i)).toBeInTheDocument();
+      expect(screen.getByText(/Additional review check completed/i)).toBeInTheDocument();
     });
 
     await waitFor(() => {
@@ -498,7 +488,7 @@ describe("Verify page", () => {
 
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
-    await screen.findByText("Verify who is checking this product");
+    await screen.findByText("We need one quick check before showing the full result.");
 
     expect(localStorageStore.has("mscqr_verify_customer_email")).toBe(false);
     expect(localStorageStore.has("authenticqr_verify_customer_email")).toBe(false);

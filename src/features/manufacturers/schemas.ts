@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const manufacturerInviteSchema = z.object({
-  licenseeId: z.string().min(1, "Choose a licensee."),
+  licenseeId: z.string().min(1, "Choose a brand."),
   name: z.string().trim().min(2, "Enter the manufacturer name."),
   email: z.string().trim().email("Enter a valid email address."),
   location: z.string().trim().optional().default(""),

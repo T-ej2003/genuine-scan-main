@@ -4,7 +4,6 @@ import { APP_PATHS, getRoleDisplayLabel } from "@/app/route-metadata";
 import { useAuth } from "@/contexts/AuthContext";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ErrorState, LoadingState } from "@/components/mscqr/feedback-state";
-import { LabelLifecycleRail } from "@/components/mscqr/lifecycle";
 import { MotionPanel } from "@/components/mscqr/motion";
 import { PrintStateIndicator, StatusBadge } from "@/components/mscqr/status";
 import { DashboardPagePattern } from "@/components/page-patterns/PagePatterns";
@@ -26,6 +25,13 @@ import type { AuditLogDTO, DashboardStatsDTO, QrStatsDTO } from "../../shared/co
 const STATS_POLL_MS = 5000;
 const API_BASE = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
 type StatusFocus = "all" | "dormant" | "allocated" | "printed" | "scanned";
+type DashboardGraphView = "scans" | "confidence" | "printed" | "batches";
+type QrStatsDashboardExtras = QrStatsDTO & {
+  suspiciousScans?: number;
+  suspicious?: number;
+  scansToday?: number;
+  todayScans?: number;
+};
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -42,6 +48,7 @@ export default function Dashboard() {
   const [sseConnected, setSseConnected] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [statusFocus, setStatusFocus] = useState<StatusFocus>("all");
+  const [graphView, setGraphView] = useState<DashboardGraphView>("scans");
   const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
 
   const pollRef = useRef<number | null>(null);
@@ -171,10 +178,7 @@ export default function Dashboard() {
       : rawError;
 
   // totals (support multiple backend shapes)
-  const totalQRCodes = summary?.totalQRCodes ?? 0;
   const activeLicenseesCount = summary?.activeLicensees ?? 0;
-  const manufacturersCount = summary?.manufacturers ?? 0;
-  const batchesCount = summary?.totalBatches ?? 0;
 
   // chart: support both { dormant: n } OR { byStatus: { DORMANT: n } }
   const qrStatusData = useMemo(() => {
@@ -192,17 +196,17 @@ export default function Dashboard() {
     return [
       {
         key: "dormant" as const,
-        label: "Dormant",
+        label: "Not used yet",
         value: qrStatusData.dormant,
-        description: "Commissioned but not allocated",
+        description: "Ready to assign to a batch",
         href: "/batches",
         pct: total > 0 ? Math.round((qrStatusData.dormant / total) * 100) : 0,
       },
       {
         key: "allocated" as const,
-        label: "Allocated",
+        label: "Assigned",
         value: qrStatusData.allocated,
-        description: "Assigned to batches/manufacturers",
+        description: "Assigned to batches or manufacturers",
         href: "/batches",
         pct: total > 0 ? Math.round((qrStatusData.allocated / total) * 100) : 0,
       },
@@ -216,7 +220,7 @@ export default function Dashboard() {
       },
       {
         key: "scanned" as const,
-        label: "Redeemed",
+        label: "First scan completed",
         value: qrStatusData.scanned,
         description: "Customer verifications completed",
         href: APP_PATHS.scanActivity,
@@ -230,113 +234,124 @@ export default function Dashboard() {
   const fulfilled = qrStatusData.printed + qrStatusData.scanned;
   const fulfillmentPct = totalTracked > 0 ? Math.round((fulfilled / totalTracked) * 100) : 0;
   const redemptionPct = fulfilled > 0 ? Math.round((qrStatusData.scanned / fulfilled) * 100) : 0;
+  const rawStatusCounts = qrStats?.byStatus || qrStats?.statusCounts || {};
+  const qrStatsExtras = qrStats as QrStatsDashboardExtras | null;
+  const suspiciousScanCount =
+    qrStatsExtras?.suspiciousScans ??
+    qrStatsExtras?.suspicious ??
+    (rawStatusCounts.SUSPICIOUS ?? 0) + (rawStatusCounts.BLOCKED ?? 0);
+  const scansToday = qrStatsExtras?.scansToday ?? qrStatsExtras?.todayScans ?? null;
+  const qrLabelsAvailable = qrStatusData.dormant + qrStatusData.allocated;
+  const graphOptions: Array<{ id: DashboardGraphView; label: string; description: string }> = [
+    { id: "scans", label: "Scans over time", description: "Shows customer scan activity when the data is available." },
+    { id: "confidence", label: "Genuine vs suspicious", description: "Compares verified scans with scans that need review." },
+    { id: "printed", label: "Labels printed", description: "Tracks labels that have been confirmed as printed." },
+    { id: "batches", label: "Top scanned batches", description: "Highlights the batches customers scan most often." },
+  ];
 
   const roleLabel = useMemo(() => getRoleDisplayLabel(user?.role), [user?.role]);
 
   const quickActions = useMemo(() => {
     if (user?.role === "super_admin") {
       return [
-        { label: "Licensees", description: "Onboard and manage tenants", href: APP_PATHS.licensees },
-        { label: "Code Requests", description: "Review pending allocations", href: APP_PATHS.codeRequests },
-        { label: "Scan Activity", description: "Inspect scans and risk", href: APP_PATHS.scanActivity },
-        { label: "Audit History", description: "Review recent operations", href: APP_PATHS.auditHistory },
+        { label: "Brands", description: "Onboard and manage brand workspaces", href: APP_PATHS.licensees },
+        { label: "QR Requests", description: "Review pending QR label requests", href: APP_PATHS.codeRequests },
+        { label: "View scans", description: "Review scan patterns and items needing attention", href: APP_PATHS.scanActivity },
+        { label: "History", description: "Review recent workspace activity", href: APP_PATHS.auditHistory },
       ];
     }
     if (user?.role === "licensee_admin") {
       return [
-        { label: "Batches", description: "Assign and monitor production", href: APP_PATHS.batches },
+        { label: "View batches", description: "Assign and monitor garment production", href: APP_PATHS.batches },
         { label: "Manufacturers", description: "Manage factory users", href: APP_PATHS.manufacturers },
-        { label: "Code Requests", description: "Request more codes", href: APP_PATHS.codeRequests },
-        { label: "Scan Activity", description: "Monitor scans and alerts", href: APP_PATHS.scanActivity },
+        { label: "Request QR labels", description: "Ask for more labels for an upcoming garment batch", href: APP_PATHS.codeRequests },
+        { label: "View scans", description: "Monitor scans and items needing attention", href: APP_PATHS.scanActivity },
       ];
     }
     return [
-      { label: "My Batches", description: "Create and print jobs", href: APP_PATHS.batches },
-      { label: "Printer Setup", description: "Check printer readiness", href: APP_PATHS.printerSetup },
-      { label: "Scan Activity", description: "Track scans for your assigned batches", href: APP_PATHS.scanActivity },
+      { label: "View batches", description: "Open assigned garment batches and print labels", href: APP_PATHS.batches },
+      { label: "Setup printer", description: "Check the printer before printing QR labels", href: APP_PATHS.printerSetup },
+      { label: "View scans", description: "Track scans for your assigned batches", href: APP_PATHS.scanActivity },
       { label: "Verify Product", description: "Open customer verification", href: APP_PATHS.verify },
     ];
   }, [user?.role]);
 
   const cards = useMemo(() => {
     const totalQrHref = APP_PATHS.scanActivity;
-    const totalQrCta =
-      user?.role === "super_admin" ? "Inspect master inventory" : "Inspect tenant inventory";
-    const manufacturersHref = user?.role === "manufacturer" ? APP_PATHS.scanActivity : APP_PATHS.manufacturers;
-    const manufacturersCta =
-      user?.role === "manufacturer" ? "View manufacturer telemetry" : "Manage manufacturers";
+    const totalQrCta = "View scans";
     const scopeCard =
       user?.role === "manufacturer"
         ? {
-            title: "Linked Licensees",
+            title: "Linked brands",
             value: user?.linkedLicensees?.length || (user?.licenseeId ? 1 : 0),
             icon: Building2,
             variant: "info" as const,
-            subtitle: "Authorized operating scope",
+            subtitle: "Brand workspaces you can print for",
             href: "/dashboard",
             ctaLabel: "Open scope details",
             action: "scope" as const,
           }
         : user?.role === "licensee_admin"
           ? {
-              title: "Unassigned Inventory",
+              title: "QR labels available",
               value: qrStatusData.dormant,
               icon: Boxes,
               variant: "info" as const,
-              subtitle: "Codes still waiting for manufacturer allocation",
+              subtitle: "Labels waiting for a garment batch",
               href: "/batches",
-              ctaLabel: "Review source batches",
+              ctaLabel: "View batches",
               action: "navigate" as const,
             }
           : {
-              title: "Active Licensees",
+              title: "Brands",
               value: activeLicenseesCount,
               icon: Building2,
               variant: "info" as const,
-              subtitle: "Currently enabled tenants",
+              subtitle: "Active brand workspaces",
               href: "/licensees",
-              ctaLabel: "Manage licensees",
+              ctaLabel: "Manage brands",
               action: "navigate" as const,
             };
 
     const items = [
       {
-        title: "Total Codes",
-        value: totalQRCodes,
+        title: "QR labels available",
+        value: qrLabelsAvailable,
         icon: QrCode,
         variant: "default" as const,
-        subtitle: `Dormant ${qrStatusData.dormant.toLocaleString()} • Redeemed ${qrStatusData.scanned.toLocaleString()}`,
+        subtitle: `${qrStatusData.dormant.toLocaleString()} not used yet • ${qrStatusData.allocated.toLocaleString()} assigned`,
         href: totalQrHref,
         ctaLabel: totalQrCta,
       },
       scopeCard,
       {
-        title: "Manufacturers",
-        value: manufacturersCount,
+        title: "Labels printed",
+        value: qrStatusData.printed,
         icon: Factory,
         variant: "warning" as const,
-        subtitle: user?.role === "manufacturer" ? "Your production footprint" : "Operational manufacturing users",
-        href: manufacturersHref,
-        ctaLabel: manufacturersCta,
+        subtitle: "QR labels confirmed as printed",
+        href: user?.role === "manufacturer" ? APP_PATHS.printerSetup : APP_PATHS.batches,
+        ctaLabel: user?.role === "manufacturer" ? "Setup printer" : "View batches",
       },
       {
-        title: "Batches",
-        value: batchesCount,
+        title: "Scans today",
+        value: scansToday ?? qrStatusData.scanned,
         icon: FileText,
         variant: "success" as const,
-        subtitle: "Batch planning, assignment, and print operations",
-        href: "/batches",
-        ctaLabel: "Open batch operations",
+        subtitle: scansToday == null ? "Today count unavailable; showing all scans" : "Customer scans recorded today",
+        href: APP_PATHS.scanActivity,
+        ctaLabel: "View scans",
       },
     ];
     return items;
   }, [
     activeLicenseesCount,
-    batchesCount,
-    manufacturersCount,
     qrStatusData.dormant,
+    qrStatusData.allocated,
+    qrStatusData.printed,
     qrStatusData.scanned,
-    totalQRCodes,
+    qrLabelsAvailable,
+    scansToday,
     user?.licenseeId,
     user?.linkedLicensees,
     user?.role,
@@ -346,20 +361,20 @@ export default function Dashboard() {
   const overviewLifecycleSteps = [
     {
       label: "Issue",
-      title: "Issued records",
+      title: "QR labels ready",
       body: `${qrStatusData.dormant.toLocaleString()} waiting for allocation.`,
       state: qrStatusData.dormant > 0 ? ("current" as const) : ("complete" as const),
     },
     {
       label: "Assign",
       title: "Batch assignment",
-      body: `${qrStatusData.allocated.toLocaleString()} allocated to production scope.`,
+      body: `${qrStatusData.allocated.toLocaleString()} assigned to production.`,
       state: qrStatusData.allocated > 0 ? ("complete" as const) : ("pending" as const),
     },
     {
       label: "Print",
-      title: "Controlled print",
-      body: `${qrStatusData.printed.toLocaleString()} print-confirmed records.`,
+      title: "Print labels",
+      body: `${qrStatusData.printed.toLocaleString()} labels confirmed as printed.`,
       state: qrStatusData.printed > 0 ? ("complete" as const) : ("pending" as const),
     },
     {
@@ -370,8 +385,8 @@ export default function Dashboard() {
     },
     {
       label: "Review",
-      title: "Evidence review",
-      body: "Scan outcomes and audit events remain reviewable.",
+      title: "Review issues",
+      body: "Scan results and workspace history remain reviewable.",
       state: "current" as const,
     },
   ];
@@ -380,8 +395,8 @@ export default function Dashboard() {
     return (
       <DashboardLayout>
         <LoadingState
-          title="Loading operations overview"
-          description="MSCQR is resolving label inventory, controlled print state, and recent audit activity for your role."
+          title="Loading workspace overview"
+          description="MSCQR is loading QR labels, printing status, scans, and recent workspace activity for your role."
         />
       </DashboardLayout>
     );
@@ -390,13 +405,13 @@ export default function Dashboard() {
   return (
     <DashboardLayout>
       <DashboardPagePattern
-        eyebrow="Command center"
-        title="Operations Overview"
-        description={`Review label lifecycle state, controlled print posture, verification activity, and audit evidence for your ${roleLabel.toLowerCase()} workspace.`}
+        eyebrow="Workspace"
+        title="Overview"
+        description={`A simple view of QR labels, batches, printing, scans, and next actions for your ${roleLabel.toLowerCase()} workspace.`}
         actions={
           <>
             <StatusBadge tone={liveUpdates && sseConnected ? "verified" : liveUpdates ? "degraded" : "neutral"}>
-              {liveUpdates && sseConnected ? "Live Connected" : liveUpdates ? "Live Polling" : "Live Paused"}
+              {liveUpdates && sseConnected ? "Updated just now" : liveUpdates ? "Refreshes automatically" : "Auto-refresh paused"}
             </StatusBadge>
             <StatusBadge tone="audit">
               {lastUpdated ? `Updated ${formatDistanceToNow(lastUpdated, { addSuffix: true })}` : "Not updated yet"}
@@ -454,18 +469,33 @@ export default function Dashboard() {
         <MotionPanel className="rounded-[1.75rem] border border-mscqr-border bg-mscqr-surface/92 p-5">
           <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-mscqr-accent">Verification lifecycle</p>
-              <h2 className="mt-2 text-xl font-semibold text-mscqr-primary">Governed label movement</h2>
+              <p className="text-sm font-medium text-mscqr-accent">QR label progress</p>
+              <h2 className="mt-2 text-xl font-semibold text-mscqr-primary">From request to customer scan</h2>
             </div>
-            <PrintStateIndicator value={qrStatusData.printed > 0 ? "PRINT_CONFIRMED" : "PENDING"} label="controlled print model" />
+            <PrintStateIndicator value={qrStatusData.printed > 0 ? "PRINT_CONFIRMED" : "PENDING"} label="print check" />
           </div>
-          <LabelLifecycleRail steps={overviewLifecycleSteps} compact />
+          <div className="grid gap-3 md:grid-cols-5">
+            {overviewLifecycleSteps.map((step, index) => (
+              <div key={step.label} className="rounded-2xl border border-mscqr-border bg-mscqr-surface-elevated p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="flex size-8 items-center justify-center rounded-full bg-mscqr-accent-soft text-sm font-semibold text-mscqr-accent">
+                    {index + 1}
+                  </span>
+                  <Badge variant={step.state === "complete" ? "default" : step.state === "current" ? "secondary" : "outline"}>
+                    {step.state === "complete" ? "Ready" : step.state === "current" ? "In progress" : "Waiting"}
+                  </Badge>
+                </div>
+                <h3 className="mt-4 text-sm font-semibold text-mscqr-primary">{step.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-mscqr-secondary">{step.body}</p>
+              </div>
+            ))}
+          </div>
         </MotionPanel>
 
         <div className="grid items-start gap-6 lg:grid-cols-[0.9fr_1.1fr]">
           <Card className="self-start border-mscqr-border bg-mscqr-surface/92">
             <CardHeader>
-              <CardTitle className="text-lg font-semibold text-mscqr-primary">Role-aware actions</CardTitle>
+              <CardTitle className="text-lg font-semibold text-mscqr-primary">Quick actions</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2">
               {quickActions.map((action) => (
@@ -487,19 +517,19 @@ export default function Dashboard() {
 
           <Card className="border-mscqr-border bg-mscqr-surface/92">
             <CardHeader>
-              <CardTitle className="text-lg font-semibold text-mscqr-primary">Operational snapshot</CardTitle>
+              <CardTitle className="text-lg font-semibold text-mscqr-primary">Workspace snapshot</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-mscqr-secondary">Lifecycle completion</span>
+                  <span className="text-mscqr-secondary">Labels assigned or printed</span>
                   <span className="font-medium text-mscqr-primary">{fulfillmentPct}%</span>
                 </div>
                 <Progress value={fulfillmentPct} />
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-mscqr-secondary">Print-confirmed to verified conversion</span>
+                  <span className="text-mscqr-secondary">Printed labels with scans</span>
                   <span className="font-medium text-mscqr-primary">{redemptionPct}%</span>
                 </div>
                 <Progress value={redemptionPct} />
@@ -529,7 +559,7 @@ export default function Dashboard() {
                 <div className="rounded-2xl border border-mscqr-accent/30 bg-mscqr-accent-soft/40 p-3">
                   <div className="font-medium text-mscqr-primary">{focusedRow.label} focus</div>
                   <p className="text-xs text-mscqr-secondary">
-                    {focusedRow.value.toLocaleString()} codes currently {focusedRow.description.toLowerCase()}.
+                    {focusedRow.value.toLocaleString()} QR labels currently {focusedRow.description.toLowerCase()}.
                   </p>
                   <Button
                     variant="ghost"
@@ -546,7 +576,50 @@ export default function Dashboard() {
         </div>
 
         <div className="grid gap-6 md:grid-cols-2 mt-6">
-          <QRStatusChart data={qrStatusData} selectedStatus={statusFocus} onStatusSelect={setStatusFocus} />
+          <Card className="border-mscqr-border bg-mscqr-surface/92">
+            <CardHeader>
+              <CardTitle className="text-lg font-semibold text-mscqr-primary">Scan trend graph</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                {graphOptions.map((option) => (
+                  <Button
+                    key={option.id}
+                    type="button"
+                    size="sm"
+                    variant={graphView === option.id ? "default" : "outline"}
+                    onClick={() => setGraphView(option.id)}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
+              {graphView === "scans" ? (
+                <QRStatusChart data={qrStatusData} selectedStatus={statusFocus} onStatusSelect={setStatusFocus} />
+              ) : (
+                <div className="rounded-2xl border border-dashed border-mscqr-border bg-mscqr-surface-muted/40 p-6">
+                  <p className="text-sm font-semibold text-mscqr-primary">
+                    {graphOptions.find((option) => option.id === graphView)?.label}
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-mscqr-secondary">
+                    {graphOptions.find((option) => option.id === graphView)?.description} This workspace will show the graph here once matching data is available.
+                  </p>
+                  {graphView === "confidence" ? (
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-2xl border bg-white p-4">
+                        <p className="text-sm text-mscqr-secondary">Genuine scans</p>
+                        <p className="mt-2 text-2xl font-semibold text-mscqr-primary">{Math.max(qrStatusData.scanned - suspiciousScanCount, 0).toLocaleString()}</p>
+                      </div>
+                      <div className="rounded-2xl border bg-white p-4">
+                        <p className="text-sm text-mscqr-secondary">Suspicious scans</p>
+                        <p className="mt-2 text-2xl font-semibold text-mscqr-primary">{suspiciousScanCount.toLocaleString()}</p>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </CardContent>
+          </Card>
           <RecentActivityCard
             logs={logs.map((log) => ({
               ...log,
@@ -566,14 +639,14 @@ export default function Dashboard() {
         <Dialog open={scopeDialogOpen} onOpenChange={setScopeDialogOpen}>
           <DialogContent className="sm:max-w-[620px]">
             <DialogHeader>
-              <DialogTitle>Manufacturer Scope Details</DialogTitle>
+              <DialogTitle>Manufacturer workspace details</DialogTitle>
               <DialogDescription>
-                This shows the tenant boundary applied to your manufacturer account and where to operate within it.
+                This shows the brand workspaces connected to your manufacturer account.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="rounded-xl border bg-slate-50 p-4">
-                <p className="text-[11px] uppercase tracking-wide text-slate-500">Linked Licensees</p>
+                <p className="text-sm font-medium text-slate-500">Linked brands</p>
                 <div className="mt-2 space-y-2">
                   {(user?.linkedLicensees?.length ? user.linkedLicensees : user?.licensee ? [user.licensee] : []).map((entry) => (
                     <div key={entry.id} className="rounded-lg border bg-white px-3 py-2">
@@ -585,7 +658,7 @@ export default function Dashboard() {
                   ))}
                 </div>
                 <p className="mt-3 text-sm text-slate-600">
-                  Manufacturer access is limited to batches, tracking, printing, and incidents inside these linked licensee scopes only.
+                  Manufacturer access is limited to batches, printing, scans, and issues inside these linked brand workspaces only.
                 </p>
               </div>
 
@@ -596,23 +669,23 @@ export default function Dashboard() {
                   onClick={() => navigate("/batches")}
                 >
                   <p className="font-medium text-slate-900">Batches</p>
-                  <p className="mt-1 text-xs text-slate-600">Print assigned inventory and inspect allocation results.</p>
+                  <p className="mt-1 text-xs text-slate-600">Print assigned labels and review batch progress.</p>
                 </button>
                 <button
                   type="button"
                   className="rounded-xl border p-4 text-left hover:bg-slate-50"
                   onClick={() => navigate(APP_PATHS.scanActivity)}
                 >
-                  <p className="font-medium text-slate-900">Scan Activity</p>
-                  <p className="mt-1 text-xs text-slate-600">Review scan analytics within your production scope.</p>
+                  <p className="font-medium text-slate-900">Scans</p>
+                  <p className="mt-1 text-xs text-slate-600">Review scans within your production scope.</p>
                 </button>
                 <button
                   type="button"
                   className="rounded-xl border p-4 text-left hover:bg-slate-50"
-                  onClick={() => navigate("/help/licensee-admin")}
+                  onClick={() => navigate("/help/manufacturer")}
                 >
                   <p className="font-medium text-slate-900">Help</p>
-                  <p className="mt-1 text-xs text-slate-600">See the exact navigation path used by licensee operators.</p>
+                  <p className="mt-1 text-xs text-slate-600">See help for manufacturer workspaces.</p>
                 </button>
               </div>
             </div>

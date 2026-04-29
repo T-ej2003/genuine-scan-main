@@ -113,9 +113,9 @@ export const formatRiskLevel = (value: ActiveSessionItem["security"]["riskLevel"
 };
 
 export const formatIpReputation = (value: ActiveSessionItem["security"]["internalIpReputation"]) => {
-  if (value === "high_risk") return "IP posture: high risk";
-  if (value === "elevated") return "IP posture: elevated";
-  if (value === "trusted") return "IP posture: trusted";
-  if (value === "new") return "IP posture: new";
-  return "IP posture: unknown";
+  if (value === "high_risk") return "Network check: high risk";
+  if (value === "elevated") return "Network check: elevated";
+  if (value === "trusted") return "Network check: trusted";
+  if (value === "new") return "Network check: new";
+  return "Network check: unknown";
 };

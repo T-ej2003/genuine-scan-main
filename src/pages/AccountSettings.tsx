@@ -216,7 +216,7 @@ export default function AccountSettings() {
       setMfaSetup(response.data);
       setRotatedBackupCodes(null);
     } catch (e: any) {
-      toast({ title: "MFA setup failed", description: e?.message || "Error", variant: "destructive" });
+      toast({ title: "Extra protection setup failed", description: e?.message || "Error", variant: "destructive" });
     } finally {
       setMfaLoading(false);
     }
@@ -230,13 +230,13 @@ export default function AccountSettings() {
       if (!response.success) {
         throw new Error(response.error || "Could not confirm MFA setup.");
       }
-      toast({ title: "MFA enabled", description: "Your admin MFA is now active." });
+      toast({ title: "Extra protection enabled", description: "Your admin account now has extra sign-in protection." });
       setMfaCode("");
       setMfaSetup(null);
       await loadMfaStatus();
       await refresh();
     } catch (e: any) {
-      toast({ title: "MFA confirmation failed", description: e?.message || "Error", variant: "destructive" });
+      toast({ title: "Confirmation failed", description: e?.message || "Error", variant: "destructive" });
     } finally {
       setMfaLoading(false);
     }
@@ -276,8 +276,8 @@ export default function AccountSettings() {
       setRotatedBackupCodes(null);
       await loadMfaStatus();
       toast({
-        title: "MFA disabled",
-        description: "MFA is off for this account. The next admin sign-in will require setup again.",
+        title: "Extra protection disabled",
+        description: "Extra sign-in protection is off for this account. The next admin sign-in will require setup again.",
       });
     } catch (e: any) {
       toast({ title: "Disable failed", description: e?.message || "Error", variant: "destructive" });
@@ -292,7 +292,7 @@ export default function AccountSettings() {
       const beginResponse = await apiClient.beginAdminWebAuthnSetup();
       if (!beginResponse.success || !beginResponse.data) {
         if (beginResponse.code === "STEP_UP_REQUIRED") return;
-        throw new Error(beginResponse.error || "Could not start WebAuthn setup.");
+        throw new Error(beginResponse.error || "Could not start passkey setup.");
       }
 
       const registration = await startAdminWebAuthnRegistration(
@@ -302,20 +302,20 @@ export default function AccountSettings() {
       const finishResponse = await apiClient.completeAdminWebAuthnSetup(registration);
       if (!finishResponse.success) {
         if (finishResponse.code === "STEP_UP_REQUIRED") return;
-        throw new Error(finishResponse.error || "Could not save the WebAuthn credential.");
+        throw new Error(finishResponse.error || "Could not save the passkey.");
       }
 
       setWebauthnLabel("");
       await loadMfaStatus();
       await refresh();
       toast({
-        title: "Security key added",
-        description: "WebAuthn is ready and will be preferred for future admin verification when available.",
+        title: "Passkey added",
+        description: "Your passkey is ready and will be preferred for future admin verification when available.",
       });
     } catch (error: any) {
       toast({
-        title: "Security key setup failed",
-        description: error?.message || "Could not add this WebAuthn credential.",
+        title: "Passkey setup failed",
+        description: error?.message || "Could not add this passkey.",
         variant: "destructive",
       });
     } finally {
@@ -328,25 +328,25 @@ export default function AccountSettings() {
     try {
       const beginResponse = await apiClient.beginAdminWebAuthnChallenge();
       if (!beginResponse.success || !beginResponse.data) {
-        throw new Error(beginResponse.error || "Could not start WebAuthn verification.");
+        throw new Error(beginResponse.error || "Could not start passkey verification.");
       }
 
       const assertion = await startAdminWebAuthnAuthentication(beginResponse.data);
       const finishResponse = await apiClient.completeAdminWebAuthnChallenge(assertion);
       if (!finishResponse.success) {
-        throw new Error(finishResponse.error || "Could not verify the WebAuthn credential.");
+        throw new Error(finishResponse.error || "Could not verify the passkey.");
       }
 
       await refresh();
       await loadMfaStatus();
       toast({
         title: "Verification refreshed",
-        description: "Your WebAuthn credential was accepted for admin verification.",
+        description: "Your passkey was accepted for admin verification.",
       });
     } catch (error: any) {
       toast({
         title: "Verification failed",
-        description: error?.message || "Could not verify the WebAuthn credential.",
+        description: error?.message || "Could not verify the passkey.",
         variant: "destructive",
       });
     } finally {
@@ -360,18 +360,18 @@ export default function AccountSettings() {
       const response = await apiClient.deleteAdminWebAuthnCredential(credentialId);
       if (!response.success) {
         if (response.code === "STEP_UP_REQUIRED") return;
-        throw new Error(response.error || "Could not remove the WebAuthn credential.");
+        throw new Error(response.error || "Could not remove the passkey.");
       }
 
       await loadMfaStatus();
       toast({
-        title: "Security key removed",
-        description: "That WebAuthn credential can no longer be used for admin verification.",
+        title: "Passkey removed",
+        description: "That passkey can no longer be used for admin verification.",
       });
     } catch (error: any) {
       toast({
         title: "Removal failed",
-        description: error?.message || "Could not remove the WebAuthn credential.",
+        description: error?.message || "Could not remove the passkey.",
         variant: "destructive",
       });
     } finally {
@@ -444,7 +444,7 @@ export default function AccountSettings() {
     user?.auth?.sessionStage !== "ACTIVE"
       ? "Step-up pending"
       : user?.auth?.authAssurance === "ADMIN_MFA"
-        ? "Elevated admin session"
+        ? "Extra protection verified"
         : isAdminUser
           ? currentSessionSecurity?.riskLevel === "HIGH" || currentSessionSecurity?.riskLevel === "CRITICAL"
             ? "Admin session needs review"

@@ -40,10 +40,8 @@ describe("public verify entry route", () => {
   it("renders /verify for logged-out visitors even when the current-user request returns 401", async () => {
     renderAt("/verify");
 
-    expect(
-      await screen.findByRole("heading", { name: /check a product without losing the evidence trail/i }),
-    ).toBeInTheDocument();
-    expect(screen.getByLabelText(/label code/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /verify a garment/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/qr label code/i)).toBeInTheDocument();
     expect(window.location.pathname).toBe("/verify");
   });
 
@@ -51,8 +49,6 @@ describe("public verify entry route", () => {
     renderAt("/verify/");
 
     await waitFor(() => expect(window.location.pathname).toBe("/verify"));
-    expect(
-      await screen.findByRole("heading", { name: /check a product without losing the evidence trail/i }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /verify a garment/i })).toBeInTheDocument();
   });
 });

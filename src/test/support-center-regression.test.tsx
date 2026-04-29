@@ -87,7 +87,7 @@ describe("SupportCenter regression", () => {
       expect(vi.mocked(apiClient.getSupportTicket)).toHaveBeenCalledWith(ticket.id);
     });
 
-    fireEvent.change(await screen.findByPlaceholderText("Add an internal handoff note or customer-ready message..."), {
+    fireEvent.change(await screen.findByPlaceholderText("Add a note for the team or a customer-ready message..."), {
       target: { value: "Escalated to L2 for root-cause trace." },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add note" }));

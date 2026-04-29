@@ -4,11 +4,11 @@ import { useLocation } from "react-router-dom";
 const SITE_NAME = "MSCQR";
 const SITE_ORIGIN = "https://www.mscqr.com";
 const DEFAULT_OG_IMAGE = `${SITE_ORIGIN}/brand/mscqr-og.png`;
-const DEFAULT_TITLE = "MSCQR | Product Authentication Infrastructure for Manufacturers";
+const DEFAULT_TITLE = "MSCQR | Garment Authentication for Brands and Manufacturers";
 const DEFAULT_DESCRIPTION =
-  "MSCQR helps manufacturers govern QR issuance, controlled printing, public verification, anomaly review, support escalation, and audit evidence for high-trust products.";
+  "MSCQR helps brands and manufacturers create QR labels for garments, support customer verification, and review suspicious scan patterns.";
 const HOME_DESCRIPTION =
-  "MSCQR helps manufacturers control QR/code issuance, product labeling, public verification, duplicate review, support escalation, and audit evidence.";
+  "Make every garment verifiable. MSCQR helps brands and manufacturers let customers scan garments and trust what they buy.";
 
 type SeoMetadata = {
   title: string;
@@ -47,7 +47,7 @@ const HOME_STRUCTURED_DATA = [
     url: SITE_ORIGIN,
     image: DEFAULT_OG_IMAGE,
     description:
-      "Manufacturer-led product authentication infrastructure for governed QR issuance, controlled printing, public verification, anomaly review, support escalation, and audit evidence.",
+      "Garment authentication software for brands and manufacturers using QR labels, customer verification, and suspicious scan review.",
   },
 ] as const;
 
@@ -59,97 +59,121 @@ const PUBLIC_SEO: Record<string, SeoMetadata> = {
     structuredData: [...HOME_STRUCTURED_DATA],
   },
   "/trust": {
-    title: "Trust & Security for Product Authentication | MSCQR",
+    title: "Trust & Security for Garment Verification | MSCQR",
     description:
-      "Review MSCQR's evidence-oriented trust posture for governed QR workflows, controlled product labeling, audit evidence, and operational security controls.",
+      "Learn how MSCQR helps brands review garment label status, print confirmation, scan history, and suspicious repeat scan patterns.",
     path: "/trust",
   },
   "/privacy": {
     title: "Privacy Policy | MSCQR",
     description:
-      "Read MSCQR's privacy policy for product authentication, verification, and manufacturer-led platform workflows.",
+      "Read MSCQR's privacy policy for garment verification, customer scans, and brand or manufacturer workflows.",
     path: "/privacy",
   },
   "/terms": {
     title: "Terms of Service | MSCQR",
-    description: "Read the terms governing use of MSCQR's manufacturer-led product authentication infrastructure.",
+    description: "Read the terms governing use of MSCQR's garment authentication platform.",
     path: "/terms",
   },
   "/cookies": {
     title: "Cookie Policy | MSCQR",
-    description: "Read how MSCQR uses cookies and related technologies across its product authentication platform.",
+    description: "Read how MSCQR uses cookies and related technologies across garment verification workflows.",
     path: "/cookies",
   },
   "/connector-download": {
-    title: "Printer Connector for Controlled QR Printing | MSCQR",
+    title: "Printer Connector for Garment QR Labels | MSCQR",
     description:
-      "Download MSCQR's printer connector for authorized controlled QR printing and manufacturer-side label workflow readiness.",
+      "Download MSCQR's printer connector for supported garment QR label printing workflows.",
     path: "/connector-download",
   },
   "/verify": {
-    title: "Verify a Product QR Code | MSCQR",
+    title: "Verify a Garment QR Label | MSCQR",
     description:
-      "Use MSCQR to verify a product QR code or label code through a manufacturer-led product authentication workflow.",
+      "Use MSCQR to verify a garment QR label and see whether the item can be confirmed.",
     path: "/verify",
   },
   "/help": {
     title: "MSCQR Help Center",
     description:
-      "Find help for MSCQR product verification, manufacturer workflows, controlled printing, and support escalation.",
+      "Find help for MSCQR garment verification, brand workflows, manufacturing label workflows, and customer scans.",
     path: "/help",
   },
   "/platform": {
-    title: "Platform | Governed QR Issuance & Product Verification | MSCQR",
+    title: "Garment Authentication Workspace | MSCQR",
     description:
-      "Explore MSCQR's operating model for governed QR issuance, controlled printing, public verification, anomaly review, support escalation, and audit evidence.",
+      "Explore MSCQR's garment authentication workspace for QR labels, print confirmation, customer scans, and suspicious scan review.",
     path: "/platform",
   },
-  "/solutions/manufacturers": {
-    title: "Product Authentication for Manufacturers | MSCQR",
+  "/solutions/brands": {
+    title: "QR Label Verification for Clothing Brands | MSCQR",
     description:
-      "MSCQR helps manufacturers control QR issuance, product labeling, public verification, duplicate review, support escalation, and audit evidence.",
+      "MSCQR helps clothing brands issue garment QR labels, let customers verify garments, and review suspicious scan patterns.",
+    path: "/solutions/brands",
+  },
+  "/solutions/garment-manufacturers": {
+    title: "QR Label Workflows for Garment Manufacturers | MSCQR",
+    description:
+      "MSCQR helps garment manufacturers receive QR labels, print or attach tags, confirm completion, and support brand verification workflows.",
+    path: "/solutions/garment-manufacturers",
+  },
+  "/solutions/apparel-authenticity": {
+    title: "Apparel Authenticity and Suspicious Scan Detection | MSCQR",
+    description:
+      "MSCQR is built for garment and clothing verification with QR labels, customer scans, and suspicious repeat scan review.",
+    path: "/solutions/apparel-authenticity",
+  },
+  "/how-scanning-works": {
+    title: "How Garment QR Scanning Works | MSCQR",
+    description:
+      "See how customers scan garment QR labels, view verification results, check brand information, and optionally report concerns.",
+    path: "/how-scanning-works",
+  },
+  "/solutions/manufacturers": {
+    title: "QR Label Workflows for Garment Manufacturers | MSCQR",
+    description:
+      "MSCQR helps garment manufacturers receive QR labels, print or attach tags, confirm completion, and support brand verification workflows.",
     path: "/solutions/manufacturers",
   },
   "/solutions/licensees": {
-    title: "Licensee QR Verification Operations | MSCQR",
+    title: "QR Label Verification for Clothing Brands | MSCQR",
     description:
-      "MSCQR supports licensee and operator workflows for assigned inventory, scan review, support escalation, and manufacturer-governed QR verification.",
+      "MSCQR helps clothing brands issue garment QR labels, let customers verify garments, and review suspicious scan patterns.",
     path: "/solutions/licensees",
   },
   "/industries": {
-    title: "Industries for Product Authentication | MSCQR",
+    title: "Apparel Authenticity and Suspicious Scan Detection | MSCQR",
     description:
-      "Explore product authentication workflows for industrial components, spare parts, regulated supply chains, electronics, cosmetics, certificates, and high-trust brands.",
+      "MSCQR is built for garment and clothing verification with QR labels, customer scans, and suspicious repeat scan review.",
     path: "/industries",
   },
   "/industries/industrial-components": {
-    title: "Industrial Component Authentication & QR Verification | MSCQR",
+    title: "Apparel Authenticity and Suspicious Scan Detection | MSCQR",
     description:
-      "MSCQR supports governed QR verification, controlled labeling, duplicate review, and audit evidence workflows for industrial components.",
+      "MSCQR is built for garment and clothing verification with QR labels, customer scans, and suspicious repeat scan review.",
     path: "/industries/industrial-components",
   },
   "/industries/spare-parts": {
-    title: "Spare Parts Authentication & QR Verification | MSCQR",
+    title: "Apparel Authenticity and Suspicious Scan Detection | MSCQR",
     description:
-      "MSCQR helps manufacturers and operators verify spare parts with controlled QR issuance, scan review, support escalation, and audit evidence.",
+      "MSCQR is built for garment and clothing verification with QR labels, customer scans, and suspicious repeat scan review.",
     path: "/industries/spare-parts",
   },
   "/industries/regulated-supply-chains": {
-    title: "Regulated Supply Chain Product Authentication | MSCQR",
+    title: "Apparel Authenticity and Suspicious Scan Detection | MSCQR",
     description:
-      "MSCQR supports controlled labeling, QR product verification, anomaly review, support escalation, and audit evidence for regulated supply chain environments.",
+      "MSCQR is built for garment and clothing verification with QR labels, customer scans, and suspicious repeat scan review.",
     path: "/industries/regulated-supply-chains",
   },
   "/request-access": {
-    title: "Request Access to MSCQR Product Authentication",
+    title: "Request Access to MSCQR Garment Authentication",
     description:
-      "Contact MSCQR to discuss manufacturer-led product authentication, governed QR issuance, controlled printing, public verification, and audit evidence workflows.",
+      "Request access to MSCQR for garment QR labels, customer verification, print confirmation, and suspicious scan review.",
     path: "/request-access",
   },
   "/blog": {
-    title: "MSCQR Insights | Product Authentication Notes",
+    title: "MSCQR Insights | Garment Authentication Notes",
     description:
-      "Practical notes on product authentication, QR verification workflows, controlled printing, audit evidence, and manufacturer-led brand protection operations.",
+      "Practical notes for clothing brands and garment manufacturers using QR labels, customer verification, and suspicious scan review.",
     path: "/blog",
   },
 };
@@ -203,8 +227,8 @@ const getSeoMetadata = (pathname: string): SeoMetadata => {
 
   if (path.startsWith("/verify/")) {
     return {
-      title: "Product Verification | MSCQR",
-      description: "MSCQR product verification result pages are kept out of search indexes to protect scan context.",
+      title: "Garment Verification | MSCQR",
+      description: "MSCQR garment verification result pages are kept out of search indexes to protect scan context.",
       path,
       robots: NOINDEX_ROBOTS,
     };
@@ -212,8 +236,8 @@ const getSeoMetadata = (pathname: string): SeoMetadata => {
 
   if (path === "/scan") {
     return {
-      title: "Scan a Product | MSCQR",
-      description: "MSCQR scanner flows are kept out of search indexes to protect verification context.",
+      title: "Scan a Garment | MSCQR",
+      description: "MSCQR scanner flows are kept out of search indexes to protect garment verification context.",
       path,
       robots: NOINDEX_ROBOTS,
     };
@@ -310,12 +334,12 @@ export function SeoController() {
     upsertMeta("property", "og:image:type", "image/png");
     upsertMeta("property", "og:image:width", "1200");
     upsertMeta("property", "og:image:height", "630");
-    upsertMeta("property", "og:image:alt", "MSCQR product authentication infrastructure preview");
+    upsertMeta("property", "og:image:alt", "MSCQR garment authentication preview");
     upsertMeta("name", "twitter:card", "summary_large_image");
     upsertMeta("name", "twitter:title", ogTitle);
     upsertMeta("name", "twitter:description", ogDescription);
     upsertMeta("name", "twitter:image", DEFAULT_OG_IMAGE);
-    upsertMeta("name", "twitter:image:alt", "MSCQR product authentication infrastructure preview");
+    upsertMeta("name", "twitter:image:alt", "MSCQR garment authentication preview");
     upsertStructuredData(metadata.structuredData);
   }, [location.pathname]);
 

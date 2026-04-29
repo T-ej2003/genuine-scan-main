@@ -59,7 +59,7 @@ export function SessionSecurityCard({
   return (
     <Card>
       <CardHeader className="pb-2">
-        <div className="font-semibold">Session & Device Security</div>
+        <div className="font-semibold">Account sessions</div>
         <div className="text-sm text-muted-foreground">
           Review active sessions, revoke stale devices, and check what this browser can still see locally.
         </div>
@@ -68,10 +68,10 @@ export function SessionSecurityCard({
         <Alert className={storagePostureHealthy ? "border-emerald-200 bg-emerald-50 text-emerald-950" : "border-amber-200 bg-amber-50 text-amber-950"}>
           <AlertDescription>
             Current device trust: <strong>{currentDeviceTrustLabel}</strong>.
-            {userAuth?.mfaVerifiedAt ? ` MFA verified on ${new Date(userAuth.mfaVerifiedAt).toLocaleString()}.` : ""}
+            {userAuth?.mfaVerifiedAt ? ` Extra sign-in protection verified on ${new Date(userAuth.mfaVerifiedAt).toLocaleString()}.` : ""}
             {userAuth?.sessionExpiresAt ? ` Session refresh window ends ${new Date(userAuth.sessionExpiresAt).toLocaleString()}.` : ""}
             {currentSessionSecurity
-              ? ` Current session risk is ${currentSessionSecurity.riskLevel.toLowerCase()} (${currentSessionSecurity.riskScore}/100) with ${formatIpReputation(currentSessionSecurity.internalIpReputation).replace("IP posture: ", "")} network posture.`
+              ? ` Current session risk is ${currentSessionSecurity.riskLevel.toLowerCase()} (${currentSessionSecurity.riskScore}/100) with ${formatIpReputation(currentSessionSecurity.internalIpReputation).replace("Network check: ", "")} network posture.`
               : ""}
             {sessionSecuritySummary?.possibleImpossibleTravel
               ? " MSCQR also detected a possible impossible-travel heuristic across active sessions."
@@ -104,8 +104,8 @@ export function SessionSecurityCard({
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="space-y-1">
                           <div className="font-medium">
-                            {session.current ? "Current device" : "Remote device"}
-                            {session.mfaVerifiedAt ? " · MFA verified" : ""}
+                            {session.current ? "Current device" : "Other device"}
+                            {session.mfaVerifiedAt ? " · extra protection verified" : ""}
                           </div>
                           <div className="flex flex-wrap gap-2">
                             <Badge variant="outline" className={RISK_BADGE_CLASSNAME[session.security.riskLevel]}>
@@ -123,14 +123,20 @@ export function SessionSecurityCard({
                               </Badge>
                             ) : null}
                           </div>
-                          <div className="text-sm text-muted-foreground">{session.userAgent || "User agent unavailable"}</div>
+                          <details className="text-sm text-muted-foreground">
+                            <summary className="cursor-pointer">Technical details</summary>
+                            <div className="mt-1 break-all">{session.userAgent || "Browser details unavailable"}</div>
+                          </details>
                           <div className="text-xs text-muted-foreground">
                             Started {new Date(session.createdAt).toLocaleString()}.
                             {session.lastUsedAt ? ` Last used ${new Date(session.lastUsedAt).toLocaleString()}.` : ""}
                             {session.expiresAt ? ` Expires ${new Date(session.expiresAt).toLocaleString()}.` : ""}
                           </div>
                           {session.ipHash ? (
-                            <div className="text-xs text-muted-foreground">Network fingerprint: {session.ipHash}</div>
+                            <details className="text-xs text-muted-foreground">
+                              <summary className="cursor-pointer">Network detail</summary>
+                              <div className="mt-1 break-all">{session.ipHash}</div>
+                            </details>
                           ) : null}
                           {session.security.possibleImpossibleTravelReason ? (
                             <div className="text-xs text-red-900">{session.security.possibleImpossibleTravelReason}</div>
@@ -169,8 +175,8 @@ export function SessionSecurityCard({
             <div className="rounded-xl border p-4">
               <div className="font-medium">Current device trust details</div>
               <div className="mt-2 space-y-2 text-sm text-muted-foreground">
-                <div>Session ID: {userAuth?.sessionId || currentSession?.id || "Unavailable"}</div>
-                <div>Auth assurance: {userAuth?.authAssurance === "ADMIN_MFA" ? "Admin MFA" : "Password / cookie session"}</div>
+                <div>Support reference: {userAuth?.sessionId || currentSession?.id || "Unavailable"}</div>
+                <div>Sign-in status: {userAuth?.authAssurance === "ADMIN_MFA" ? "Extra protection verified" : "Password verified"}</div>
                 <div>Step-up status: {userAuth?.stepUpRequired ? `Required (${userAuth.stepUpMethod || "unknown method"})` : "Satisfied"}</div>
                 <div>Active session count: {sessions.length}</div>
                 <div>
@@ -182,7 +188,7 @@ export function SessionSecurityCard({
                 <div>
                   Current network posture:{" "}
                   {currentSessionSecurity
-                    ? formatIpReputation(currentSessionSecurity.internalIpReputation).replace("IP posture: ", "")
+                    ? formatIpReputation(currentSessionSecurity.internalIpReputation).replace("Network check: ", "")
                     : "Unavailable"}
                 </div>
                 <div>
@@ -220,7 +226,7 @@ export function SessionSecurityCard({
                   <div className="text-xs uppercase tracking-wide text-muted-foreground">Overall network posture</div>
                   <div className="mt-1 text-lg font-semibold">
                     {sessionSecuritySummary
-                      ? formatIpReputation(sessionSecuritySummary.internalIpReputation).replace("IP posture: ", "")
+                      ? formatIpReputation(sessionSecuritySummary.internalIpReputation).replace("Network check: ", "")
                       : "Unavailable"}
                   </div>
                 </div>
@@ -235,7 +241,7 @@ export function SessionSecurityCard({
             <div className="rounded-xl border p-4">
               <div className="font-medium">Browser storage summary</div>
               <div className="mt-2 text-sm text-muted-foreground">
-                MSCQR keeps operator authentication in HttpOnly cookies, so the main session tokens are intentionally hidden from JavaScript. The lists below show only browser-visible state on this device.
+                MSCQR stores the main sign-in session in protected browser cookies. The lists below show only browser-visible state on this device.
               </div>
               <div className="mt-4 space-y-3 text-sm">
                 <div>
@@ -268,7 +274,7 @@ export function SessionSecurityCard({
             <div className="rounded-xl border p-4">
               <div className="font-medium">Plain-English storage posture</div>
               <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
-                <li>Admin and operator session tokens should live in HttpOnly cookies, not in localStorage.</li>
+                <li>Admin and workspace sessions should stay in protected cookies, not browser storage.</li>
                 <li>Browser storage should be limited to UI preferences, printing helpers, and short-lived verification continuity.</li>
                 <li>Use “Revoke all sessions” after device loss, contractor offboarding, or any suspicious sign-in pattern.</li>
               </ul>

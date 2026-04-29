@@ -75,7 +75,7 @@ const START_CARDS: HubCardConfig[] = [
   },
   {
     title: "Trust Center",
-    description: "Public proof tiers, lifecycle trust, replacement handling, and degraded verification behavior.",
+    description: "Plain-language garment verification, QR label limits, and suspicious scan review.",
     icon: Shield,
     href: "/trust",
     badge: "Public",

@@ -146,7 +146,7 @@ describe("dialog recovery states", () => {
       />,
     );
 
-    expect(screen.getByText("Select a licensee before allocating codes")).toBeInTheDocument();
+    expect(screen.getByText("Select a brand before adding QR labels")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
     expect(onRangeDialogOpenChange).toHaveBeenCalledWith(false);
   });

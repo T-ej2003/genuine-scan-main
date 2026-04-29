@@ -96,9 +96,9 @@ export function IncidentResponseAdminWorkspace({
       <div className="space-y-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Incident Response</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Advanced issues</h1>
             <p className="text-sm text-muted-foreground">
-              Policy alerts, incident triage, containment actions, and communications.
+              Advanced issue review, alert rules, and customer communications for Platform Admins.
             </p>
           </div>
 

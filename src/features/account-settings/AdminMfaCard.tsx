@@ -70,18 +70,18 @@ export function AdminMfaCard({
   return (
     <Card>
       <CardHeader className="pb-2">
-        <div className="font-semibold">Admin MFA</div>
-        <div className="text-sm text-muted-foreground">Sensitive admin actions stay locked behind a recent MFA confirmation.</div>
+        <div className="font-semibold">Extra sign-in protection</div>
+        <div className="text-sm text-muted-foreground">Sensitive admin actions stay locked behind a recent confirmation.</div>
       </CardHeader>
       <CardContent className="space-y-6">
         {mfaStatus ? (
           <Alert>
             <AlertDescription>
               {mfaStatus.enabled
-                ? `MFA is enabled. Backup codes remaining: ${mfaStatus.backupCodesRemaining ?? 0}.`
-                : "MFA is not enabled for this admin account yet."}
+                ? `Extra sign-in protection is enabled. Backup codes remaining: ${mfaStatus.backupCodesRemaining ?? 0}.`
+                : "Extra sign-in protection is not enabled for this admin account yet."}
               {mfaStatus.preferredMethod
-                ? ` Preferred method: ${mfaStatus.preferredMethod === "WEBAUTHN" ? "Security key / passkey" : "Authenticator app"}.`
+                ? ` Preferred method: ${mfaStatus.preferredMethod === "WEBAUTHN" ? "Passkey or security key" : "Authenticator app"}.`
                 : ""}
               {mfaStatus.lastUsedAt ? ` Last used: ${new Date(mfaStatus.lastUsedAt).toLocaleString()}.` : ""}
             </AlertDescription>
@@ -92,11 +92,11 @@ export function AdminMfaCard({
           <div className="space-y-4">
             {!mfaSetup ? (
               <Button onClick={() => void beginMfaSetup()} disabled={mfaLoading}>
-                {mfaLoading ? "Preparing..." : "Begin MFA setup"}
+                {mfaLoading ? "Preparing..." : "Set up extra protection"}
               </Button>
             ) : (
               <form className="space-y-4" onSubmit={confirmMfaSetup}>
-                {mfaQrDataUrl ? <img src={mfaQrDataUrl} alt="Admin MFA QR code" className="h-52 w-52 rounded-xl border p-2" /> : null}
+                {mfaQrDataUrl ? <img src={mfaQrDataUrl} alt="Extra sign-in protection QR code" className="h-52 w-52 rounded-xl border p-2" /> : null}
                 <div className="space-y-2">
                   <Label>Manual setup key</Label>
                   <Input value={mfaSetup.secret} readOnly className="font-mono text-sm" />
@@ -120,7 +120,7 @@ export function AdminMfaCard({
                     Cancel
                   </Button>
                   <Button type="submit" disabled={mfaLoading}>
-                    {mfaLoading ? "Confirming..." : "Enable MFA"}
+                    {mfaLoading ? "Confirming..." : "Enable extra protection"}
                   </Button>
                 </div>
               </form>
@@ -129,9 +129,9 @@ export function AdminMfaCard({
         ) : (
           <div className="grid gap-6 lg:grid-cols-3">
             <div className="space-y-3 rounded-xl border p-4">
-              <div className="font-medium">Security keys / passkeys</div>
+              <div className="font-medium">Passkeys and security keys</div>
               <div className="text-sm text-muted-foreground">
-                Prefer WebAuthn security keys when this browser supports them. Authenticator codes stay available as a fallback.
+                Prefer passkeys when this browser supports them. Authenticator codes stay available as a fallback.
               </div>
               {webauthnAvailable ? (
                 <>
@@ -145,18 +145,18 @@ export function AdminMfaCard({
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button onClick={() => void beginWebAuthnSetup()} disabled={mfaLoading}>
-                      {mfaLoading ? "Preparing..." : "Add security key"}
+                      {mfaLoading ? "Preparing..." : "Add passkey"}
                     </Button>
                     {mfaStatus?.hasWebAuthn ? (
                       <Button variant="outline" onClick={() => void verifyWithWebAuthn()} disabled={mfaLoading}>
-                        {mfaLoading ? "Waiting..." : "Verify with security key"}
+                        {mfaLoading ? "Waiting..." : "Verify with passkey"}
                       </Button>
                     ) : null}
                   </div>
                 </>
               ) : (
                 <div className="text-sm text-muted-foreground">
-                  This browser does not support WebAuthn security keys. You can still use the authenticator-app flow below.
+                  This browser does not support passkeys. You can still use the authenticator-app flow below.
                 </div>
               )}
 
@@ -169,8 +169,8 @@ export function AdminMfaCard({
                           <div className="font-medium">{credential.label}</div>
                           <div className="text-xs text-muted-foreground">
                             {(credential.transports || []).length
-                              ? `Transports: ${credential.transports?.join(", ")}.`
-                              : "Security key enrolled."}
+                              ? "Passkey available on this device."
+                              : "Passkey enrolled."}
                             {credential.lastUsedAt ? ` Last used ${new Date(credential.lastUsedAt).toLocaleString()}.` : ""}
                           </div>
                         </div>
@@ -187,7 +187,7 @@ export function AdminMfaCard({
                   ))}
                 </div>
               ) : (
-                <div className="text-sm text-muted-foreground">No WebAuthn security keys are enrolled yet.</div>
+                <div className="text-sm text-muted-foreground">No passkeys are enrolled yet.</div>
               )}
             </div>
 
@@ -196,7 +196,7 @@ export function AdminMfaCard({
               <div className="text-sm text-muted-foreground">
                 Enter a current authenticator or backup code to issue a fresh backup-code set.
               </div>
-              <Label>Current MFA code</Label>
+              <Label>Current protection code</Label>
               <Input value={mfaRotateCode} onChange={(event) => onRotateCodeChange(event.target.value)} placeholder="123456 or ABCDE-12345" />
               <Button onClick={() => void rotateBackupCodes()} disabled={mfaLoading}>
                 {mfaLoading ? "Rotating..." : "Rotate backup codes"}
@@ -216,20 +216,20 @@ export function AdminMfaCard({
             </div>
 
             <div className="space-y-3 rounded-xl border border-red-200 p-4">
-              <div className="font-medium text-red-900">Disable MFA</div>
+              <div className="font-medium text-red-900">Turn off extra protection</div>
               <div className="text-sm text-red-900/80">
-                This is only for controlled recovery. The next admin sign-in will force MFA setup again.
+                This is only for controlled recovery. The next admin sign-in will require setup again.
               </div>
               <div className="space-y-2">
                 <Label>Current password</Label>
                 <Input type="password" value={disablePassword} onChange={(event) => onDisablePasswordChange(event.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label>Current MFA code</Label>
+                <Label>Current protection code</Label>
                 <Input value={disableCode} onChange={(event) => onDisableCodeChange(event.target.value)} placeholder="123456 or ABCDE-12345" />
               </div>
               <Button variant="destructive" onClick={() => void disableMfa()} disabled={mfaLoading}>
-                {mfaLoading ? "Disabling..." : "Disable MFA"}
+                {mfaLoading ? "Disabling..." : "Turn off extra protection"}
               </Button>
             </div>
           </div>

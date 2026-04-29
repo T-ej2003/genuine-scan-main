@@ -164,16 +164,16 @@ describe("QRTracking", () => {
       expect(vi.mocked(apiClient.getQrTrackingAnalytics)).toHaveBeenCalled();
     });
 
-    expect(await screen.findByText("4 external scans")).toBeInTheDocument();
-    expect(screen.getByText("3 owner-linked scans")).toBeInTheDocument();
-    expect(screen.getByText("Named locations")).toBeInTheDocument();
-    expect(screen.getByText("Known devices")).toBeInTheDocument();
+    expect(await screen.findByText("4 repeat or outside scans")).toBeInTheDocument();
+    expect(screen.getByText("3 known customer scans")).toBeInTheDocument();
+    expect(screen.getByText("Scans with location")).toBeInTheDocument();
+    expect(screen.getByText("Known customers")).toBeInTheDocument();
     expect(screen.getByTestId("tracking-insights")).toHaveTextContent("scan-events:7");
     expect(screen.getByText("GPS 12.346, 78.901 (~42m)")).toBeInTheDocument();
     expect(screen.getByText("Trusted claimed device")).toBeInTheDocument();
     expect(screen.getByText("External / anonymous context")).toBeInTheDocument();
     expect(screen.getByText("Chrome on Android")).toBeInTheDocument();
-    expect(screen.getAllByText("User agent captured").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Browser details captured").length).toBeGreaterThan(0);
     const batchRow = screen.getAllByText("Batch 1")[0]?.closest("tr");
     expect(batchRow).toHaveTextContent("13");
     expect(batchRow).toHaveTextContent("17");

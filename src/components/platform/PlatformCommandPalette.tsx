@@ -46,17 +46,17 @@ export function PlatformCommandPalette({ open, onOpenChange, role, helpRoute }: 
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
-      <DialogTitle className="sr-only">MSCQR command center</DialogTitle>
-      <DialogDescription className="sr-only">Search role-aware MSCQR routes and public support surfaces.</DialogDescription>
+      <DialogTitle className="sr-only">Workspace search</DialogTitle>
+      <DialogDescription className="sr-only">Search role-aware MSCQR workspace pages and support surfaces.</DialogDescription>
       <div className="border-b border-mscqr-border bg-mscqr-surface-elevated px-4 py-3">
-        <p className="text-sm font-semibold text-mscqr-primary">MSCQR command center</p>
-        <p className="text-xs text-mscqr-secondary">Navigate authenticated workspaces without exposing destructive actions.</p>
+        <p className="text-sm font-semibold text-mscqr-primary">Workspace search</p>
+        <p className="text-xs text-mscqr-secondary">Open the pages available to your role.</p>
       </div>
-      <CommandInput placeholder="Search routes, verification, help..." />
+      <CommandInput placeholder="Search workspace pages, scans, help..." />
       <CommandList className="max-h-[420px]">
         <CommandEmpty>No matching command found.</CommandEmpty>
 
-        <CommandGroup heading="Workspace routes">
+        <CommandGroup heading="Workspace pages">
           {navCommands.map((command) => (
             <CommandItem
               key={command.href}
@@ -73,10 +73,10 @@ export function PlatformCommandPalette({ open, onOpenChange, role, helpRoute }: 
 
         <CommandSeparator />
 
-        <CommandGroup heading="Public and support surfaces">
-          <CommandItem value="verify product public verification scan code" onSelect={() => runCommand(APP_PATHS.verify)} className="gap-3">
+        <CommandGroup heading="Public and support">
+          <CommandItem value="verify garment public verification scan qr label" onSelect={() => runCommand(APP_PATHS.verify)} className="gap-3">
             <ScanLine className="h-4 w-4 text-mscqr-accent" />
-            <span>Verify product</span>
+            <span>Verify a garment</span>
             <CommandShortcut>Public</CommandShortcut>
           </CommandItem>
           <CommandItem value="help support documentation" onSelect={() => runCommand(helpRoute)} className="gap-3">
@@ -84,9 +84,9 @@ export function PlatformCommandPalette({ open, onOpenChange, role, helpRoute }: 
             <span>Open contextual help</span>
             <CommandShortcut>Help</CommandShortcut>
           </CommandItem>
-          <CommandItem value="trust center public trust model" onSelect={() => runCommand("/trust")} className="gap-3">
+          <CommandItem value="trust security public scanning" onSelect={() => runCommand("/trust")} className="gap-3">
             <ExternalLink className="h-4 w-4 text-mscqr-secondary" />
-            <span>Trust Center</span>
+            <span>Trust & Security</span>
             <CommandShortcut>Public</CommandShortcut>
           </CommandItem>
         </CommandGroup>

@@ -385,7 +385,7 @@ export default function ConnectorDownload() {
       : "Choose Mac or Windows";
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.16),transparent_26%),radial-gradient(circle_at_top_right,rgba(15,23,42,0.12),transparent_30%),linear-gradient(180deg,#eef8f4_0%,#f8fafc_46%,#ffffff_100%)] text-slate-950">
+    <div className="relative min-h-screen overflow-hidden bg-mscqr-background text-slate-950">
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute left-[-8rem] top-[-6rem] h-72 w-72 rounded-full bg-emerald-300/30 blur-3xl" />
         <div className="absolute right-[-6rem] top-32 h-80 w-80 rounded-full bg-sky-200/35 blur-3xl" />
@@ -402,7 +402,7 @@ export default function ConnectorDownload() {
                 </div>
                 <div>
                   <div className="text-2xl font-semibold tracking-tight text-slate-950">MSCQR</div>
-                  <div className="text-xs uppercase tracking-[0.26em] text-slate-500">Secure QR Operations</div>
+                  <div className="text-sm text-slate-500">Garment authentication Workspace</div>
                 </div>
               </div>
 
@@ -468,15 +468,15 @@ export default function ConnectorDownload() {
             ) : null}
 
             <div className="grid gap-6 xl:grid-cols-[1.08fr_0.92fr]">
-              <section className="relative overflow-hidden rounded-[32px] bg-slate-950 px-6 py-7 text-white sm:px-8 sm:py-8 lg:px-10">
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(52,211,153,0.25),transparent_34%),linear-gradient(135deg,rgba(15,23,42,0.98),rgba(15,23,42,0.92))]" />
+              <section className="relative overflow-hidden rounded-[32px] border border-mscqr-border bg-white px-6 py-7 text-mscqr-primary shadow-sm sm:px-8 sm:py-8 lg:px-10">
+                <div className="absolute inset-0 bg-mscqr-accent-soft/25" />
                 <div className="relative space-y-8">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge className="border border-emerald-300/20 bg-emerald-400/15 text-emerald-100 hover:bg-emerald-400/15">
+                    <Badge className="border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
                       Printing on this computer
                     </Badge>
                     {release ? (
-                      <Badge className="border border-white/10 bg-white/10 text-slate-100 hover:bg-white/10">
+                      <Badge variant="outline">
                         Latest printer helper {release.latestVersion}
                       </Badge>
                     ) : null}
@@ -486,10 +486,8 @@ export default function ConnectorDownload() {
                     <h1 className="max-w-3xl text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl">
                       Install the MSCQR printer helper on the computer that actually prints.
                     </h1>
-                    <p className="max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
-                      This page is now dedicated to installation only: more room, less congestion, and a direct download
-                      flow for the latest published printer-helper packages. Open it on the printer computer, install once, and keep
-                      the rest of the workflow inside MSCQR.
+                    <p className="max-w-2xl text-base leading-7 text-mscqr-secondary sm:text-lg">
+                      Open this page on the computer that prints garment labels, install the printer helper once, then return to batches to print and confirm QR labels.
                     </p>
                   </div>
 
@@ -497,14 +495,14 @@ export default function ConnectorDownload() {
                     {workspaceHighlights.map((item) => (
                       <div
                         key={item.title}
-                        className="rounded-[24px] border border-white/10 bg-white/5 p-4 backdrop-blur-sm"
+                          className="rounded-[24px] border border-mscqr-border bg-mscqr-surface p-4"
                       >
-                        <div className="mb-4 inline-flex rounded-2xl bg-white/10 p-3 text-emerald-200">
+                        <div className="mb-4 inline-flex rounded-2xl bg-mscqr-accent-soft p-3 text-mscqr-accent">
                           <item.icon className="h-5 w-5" />
                         </div>
                         <div className="space-y-2">
-                          <div className="text-sm font-semibold text-white">{item.title}</div>
-                          <div className="text-sm leading-6 text-slate-300">{item.detail}</div>
+                          <div className="text-sm font-semibold text-mscqr-primary">{item.title}</div>
+                          <div className="text-sm leading-6 text-mscqr-secondary">{item.detail}</div>
                         </div>
                       </div>
                     ))}

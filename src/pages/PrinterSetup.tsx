@@ -562,10 +562,10 @@ export default function PrinterSetupPage() {
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <div className="text-sm font-medium text-muted-foreground">Manufacturer Printer Setup</div>
-            <h1 className="text-3xl font-semibold tracking-tight">Connect a printer in one pass</h1>
+            <div className="text-sm font-medium text-muted-foreground">Printing</div>
+            <h1 className="text-3xl font-semibold tracking-tight">Set up garment label printing</h1>
             <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-              Choose the printer this computer already sees, let MSCQR recommend the safest setup, save it, and print one live test label.
+              Follow the steps: install the printer app, choose a printer, print a test label, then print and confirm batch labels.
             </p>
           </div>
           <div className="flex gap-2">
@@ -649,7 +649,7 @@ export default function PrinterSetupPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <ShieldCheck className="h-5 w-5" />
-                Recommended Path
+                Recommended path
               </CardTitle>
               <CardDescription>{recommendedPathLabel}</CardDescription>
             </CardHeader>
@@ -683,7 +683,7 @@ export default function PrinterSetupPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Network className="h-5 w-5" />
-                {suggestion?.routeType === "LOCAL_ONLY" ? "Use the printer on this computer" : "Save this printer"}
+                {suggestion?.routeType === "LOCAL_ONLY" ? "Use the printer on this computer" : "Choose and save this printer"}
               </CardTitle>
               <CardDescription>
                 {suggestion?.routeType === "LOCAL_ONLY"
@@ -766,10 +766,10 @@ export default function PrinterSetupPage() {
 
                 <div className="flex items-center justify-between rounded-lg border p-3">
                   <div>
-                    <div className="font-medium">Add printer details manually</div>
-                    <div className="text-xs text-muted-foreground">
-                      Open this only if MSCQR could not fill in the printer address correctly.
-                    </div>
+                <div className="font-medium">Technical printer details</div>
+                <div className="text-xs text-muted-foreground">
+                  Open this only if MSCQR could not fill in the printer address or label type correctly.
+                </div>
                   </div>
                   <Switch checked={showAdvanced} onCheckedChange={setShowAdvanced} />
                 </div>
@@ -798,7 +798,7 @@ export default function PrinterSetupPage() {
                     {form.connectionType === "NETWORK_IPP" ? (
                       <>
                         <div className="space-y-2">
-                          <FieldLabelWithHelp htmlFor="host" label="Host" field="host" />
+                          <FieldLabelWithHelp htmlFor="host" label="Printer address" field="host" />
                           <Input id="host" value={form.host} onChange={(event) => setForm((current) => ({ ...current, host: event.target.value }))} />
                         </div>
                         <div className="space-y-2">
@@ -814,7 +814,7 @@ export default function PrinterSetupPage() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <FieldLabelWithHelp htmlFor="printer-uri" label="Printer URI" field="printerUri" />
+                          <FieldLabelWithHelp htmlFor="printer-uri" label="Full printer address" field="printerUri" />
                           <Input
                             id="printer-uri"
                             value={form.printerUri}
@@ -825,7 +825,7 @@ export default function PrinterSetupPage() {
                     ) : (
                       <>
                         <div className="space-y-2">
-                          <Label htmlFor="ip-address">Printer IP</Label>
+                          <Label htmlFor="ip-address">Printer network address</Label>
                           <Input
                             id="ip-address"
                             value={form.ipAddress}
@@ -833,11 +833,11 @@ export default function PrinterSetupPage() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="raw-port">Raw TCP port</Label>
+                          <Label htmlFor="raw-port">Printer port</Label>
                           <Input id="raw-port" value={form.port} onChange={(event) => setForm((current) => ({ ...current, port: event.target.value }))} />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="command-language">Label language</Label>
+                          <Label htmlFor="command-language">Label type</Label>
                           <Select
                             value={form.commandLanguage}
                             onValueChange={(value: ManagedRouteForm["commandLanguage"]) =>
@@ -867,7 +867,7 @@ export default function PrinterSetupPage() {
                     data-testid="save-printer-setup"
                     onClick={saveRecommendedPrinter}
                     state={saveActionState}
-                    idleLabel="Save and print live test label"
+                    idleLabel="Save printer and print test label"
                     pendingLabel="Saving and testing..."
                   />
                   <Button variant="outline" onClick={() => navigate(APP_PATHS.batches)}>

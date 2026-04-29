@@ -117,13 +117,13 @@ describe("Dashboard manufacturer multi-licensee scope", () => {
     });
 
     expect(vi.mocked(apiClient.getAuditLogs)).not.toHaveBeenCalled();
-    expect(await screen.findByText("Linked Licensees")).toBeInTheDocument();
-    expect(screen.getByText("Authorized operating scope")).toBeInTheDocument();
-    expect(screen.getByText("Dormant 120 • Redeemed 80")).toBeInTheDocument();
+    expect(await screen.findByText("Linked brands")).toBeInTheDocument();
+    expect(screen.getByText("Brand workspaces you can print for")).toBeInTheDocument();
+    expect(screen.getByText("120 not used yet • 900 assigned")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Open scope details"));
 
-    expect(await screen.findByText("Manufacturer Scope Details")).toBeInTheDocument();
+    expect(await screen.findByText("Manufacturer workspace details")).toBeInTheDocument();
     expect(screen.getByText("Acme Brands")).toBeInTheDocument();
     expect(screen.getByText("Bravo Health")).toBeInTheDocument();
   });

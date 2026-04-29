@@ -44,7 +44,7 @@ export function RenameBatchDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
-          <DialogTitle>Rename Batch</DialogTitle>
+          <DialogTitle>Rename batch</DialogTitle>
           <DialogDescription>Update the batch label for easier operations tracking.</DialogDescription>
         </DialogHeader>
 
@@ -104,7 +104,7 @@ export function DeleteBatchDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[560px]">
         <DialogHeader>
-          <DialogTitle>Delete Batch</DialogTitle>
+          <DialogTitle>Delete batch</DialogTitle>
           <DialogDescription>
             This removes the batch and returns every code in it to the unassigned state.
           </DialogDescription>
@@ -237,9 +237,13 @@ export function BatchPrintJobDialog({
 
             <div className="rounded-md border p-3 text-sm">
               <div className="font-medium">{printBatch.name}</div>
-              <div className="font-mono text-xs text-muted-foreground">
-                {printBatch.startCode} → {printBatch.endCode}
+              <div className="text-xs text-muted-foreground">
+                {Number(printBatch.totalCodes || 0).toLocaleString()} QR labels assigned
               </div>
+              <details className="mt-2 text-xs text-muted-foreground">
+                <summary className="cursor-pointer">Technical details</summary>
+                <div className="mt-1 font-mono break-all">{printBatch.startCode} → {printBatch.endCode}</div>
+              </details>
             </div>
 
             <div className="space-y-2">
@@ -252,7 +256,7 @@ export function BatchPrintJobDialog({
                 onChange={(event) => onPrintQuantityChange(event.target.value)}
                 placeholder="Enter quantity"
               />
-              <div className="text-xs text-muted-foreground">Ready to print: {readyToPrintCount}</div>
+              <div className="text-xs text-muted-foreground">QR labels ready to print: {readyToPrintCount}</div>
             </div>
 
             <div className="space-y-3 rounded-md border p-3">

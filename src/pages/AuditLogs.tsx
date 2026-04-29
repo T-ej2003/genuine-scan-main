@@ -189,16 +189,16 @@ export default function AuditLogs() {
 
     switch (actionCode) {
       case "DIRECT_PRINT_TOKEN_ISSUED":
-        return `Issued ${d.issuedCount || d.count || "secure"} direct-print token(s)${d.expiresAt ? ` (expires ${d.expiresAt})` : ""}.`;
+        return `Prepared ${d.issuedCount || d.count || "secure"} print authorizations${d.expiresAt ? ` (expires ${d.expiresAt})` : ""}.`;
       case "VERIFY_FAILED":
         return `Verification failed${d.reason ? `: ${d.reason}` : "."}`;
       case "VERIFY_SUCCESS":
         return `Verification succeeded${d.isFirstScan ? " (first scan)" : ""}${d.scanCount != null ? `; scan count ${d.scanCount}` : ""}.`;
       case "PRINTED":
         if (String(d.mode || "").toUpperCase() === "DIRECT_PRINT") {
-          return `Secure direct-print rendered${d.code ? ` for ${d.code}` : ""}${d.remainingToPrint != null ? `; ${d.remainingToPrint} remaining` : ""}.`;
+        return `QR label printed${d.code ? ` for ${d.code}` : ""}${d.remainingToPrint != null ? `; ${d.remainingToPrint} remaining` : ""}.`;
         }
-        return `Print completed${d.printedCodes != null ? ` (${d.printedCodes} codes)` : ""}.`;
+        return `Print completed${d.printedCodes != null ? ` (${d.printedCodes} QR labels)` : ""}.`;
       case "CUSTOMER_FRAUD_REPORT":
         return `Fraud report for ${d.code || "—"}${d.reason ? ` (${d.reason})` : ""}.`;
       case "CUSTOMER_FRAUD_REPORT_RESPONSE":
@@ -217,7 +217,7 @@ export default function AuditLogs() {
         return `Incident email ${String(d.status || "processed").toLowerCase()}${d.toAddress ? ` to ${d.toAddress}` : ""}.`;
       case "ALLOCATE_QR_RANGE":
       case "ALLOCATE_QR_RANGE_LICENSEE":
-        return `Allocated QR range ${range || "—"}${d.created || d.quantity ? ` (${d.created || d.quantity} codes)` : ""}.`;
+        return `Added QR labels${d.created || d.quantity ? ` (${d.created || d.quantity} labels)` : ""}.`;
       case "PRINTER_CONNECTION_COMPAT_MODE_ONLINE":
         return "Printer connected in recovery mode while advanced secure verification is still being set up.";
       case "PRINTER_CONNECTION_TRUSTED_ONLINE":
@@ -228,10 +228,10 @@ export default function AuditLogs() {
         const name = d.name || d.batchName || d.licenseeName || d.manufacturerName || null;
         const parts: string[] = [];
         if (name) parts.push(`name ${name}`);
-        if (d.quantity) parts.push(`qty ${d.quantity}`);
-        if (range) parts.push(`range ${range}`);
-        if (d.manufacturerId) parts.push(`manufacturer ${d.manufacturerId}`);
-        if (d.licenseeId) parts.push(`licensee ${d.licenseeId}`);
+        if (d.quantity) parts.push(`quantity ${d.quantity}`);
+        if (range) parts.push("QR label group updated");
+        if (d.manufacturerName) parts.push(`manufacturer ${d.manufacturerName}`);
+        if (d.licenseeName) parts.push(`brand ${d.licenseeName}`);
         return parts.length ? parts.join(" • ") : "Activity recorded.";
       }
     }
@@ -329,8 +329,8 @@ export default function AuditLogs() {
       () => {
         setLive(false);
         toast({
-          title: "Live audit stream unavailable",
-          description: "Realtime updates were paused. Use Refresh to reload latest logs.",
+          title: "Live history updates unavailable",
+          description: "Automatic updates were paused. Use Refresh to reload the latest history.",
           variant: "destructive",
         });
       }
@@ -395,9 +395,9 @@ export default function AuditLogs() {
         <div className="space-y-6">
         <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 via-white to-cyan-50 p-4 sm:flex-row sm:items-center sm:justify-between">
           <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
-            Audit History
+            History
             <Badge className={live ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-600"}>
-              {live ? "LIVE" : "PAUSED"}
+              {live ? "Updated automatically" : "Paused"}
             </Badge>
           </h1>
           <div className="flex gap-2">
@@ -416,7 +416,7 @@ export default function AuditLogs() {
             <CardHeader className="flex flex-col gap-3 border-b bg-red-50/70 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
                 <ShieldAlert className="h-4 w-4 text-red-600" />
-                <span className="font-semibold text-red-800">Fraud Report Queue</span>
+                <span className="font-semibold text-red-800">Customer concerns</span>
                 <Badge className="border-red-200 bg-white text-red-700">{fraudReports.length} cases</Badge>
               </div>
               <div className="flex gap-2">
@@ -436,10 +436,10 @@ export default function AuditLogs() {
             </CardHeader>
             <CardContent className="space-y-3 pt-4">
               {fraudLoading ? (
-                <div className="text-sm text-slate-500">Loading fraud reports...</div>
+                <div className="text-sm text-slate-500">Loading customer concerns...</div>
               ) : fraudReports.length === 0 ? (
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-                  No fraud reports found for this filter.
+                  No customer concerns found for this filter.
                 </div>
               ) : (
                 fraudReports.map((fr) => {
@@ -450,7 +450,7 @@ export default function AuditLogs() {
                         <div className="space-y-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <Badge className={FRAUD_STATUS_TONE[status]}>{status}</Badge>
-                            <span className="font-mono text-sm text-slate-900">{fr.report.code || "Unknown code"}</span>
+                            <span className="font-mono text-sm text-slate-900">{fr.report.code || "Unknown QR label"}</span>
                             {fr.report.reason ? (
                               <Badge className="border-amber-200 bg-amber-50 text-amber-700">{fr.report.reason}</Badge>
                             ) : null}
@@ -509,10 +509,10 @@ export default function AuditLogs() {
             {isSuperAdmin && (
               <Select value={licenseeFilter} onValueChange={setLicenseeFilter}>
                 <SelectTrigger className="w-[220px] bg-white">
-                  <SelectValue placeholder="Licensee" />
+                  <SelectValue placeholder="Brand" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All licensees</SelectItem>
+                  <SelectItem value="all">All brands</SelectItem>
                   {licensees.map((l) => (
                     <SelectItem key={l.id} value={l.id}>
                       {l.name}
@@ -543,8 +543,8 @@ export default function AuditLogs() {
                   <TableRow className="bg-slate-50">
                     <TableHead>Action</TableHead>
                     <TableHead>User</TableHead>
-                    <TableHead>Entity</TableHead>
-                    <TableHead>Details</TableHead>
+                    <TableHead>Record</TableHead>
+                    <TableHead>Summary</TableHead>
                     <TableHead>Time</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -552,7 +552,7 @@ export default function AuditLogs() {
                   {filtered.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={5} className="text-slate-500">
-                        No audit logs found for current filters.
+                        No history found for current filters.
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -588,12 +588,12 @@ export default function AuditLogs() {
                                 {expanded ? (
                                   <>
                                     <ChevronUp className="mr-1 h-3 w-3" />
-                                    Hide details
+                                    Hide technical details
                                   </>
                                 ) : (
                                   <>
                                     <ChevronDown className="mr-1 h-3 w-3" />
-                                    Expand details
+                                    Technical details
                                   </>
                                 )}
                               </Button>
@@ -601,19 +601,19 @@ export default function AuditLogs() {
                                 <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
                                   <div className="grid gap-1 text-xs text-slate-700 sm:grid-cols-2">
                                     <div>
-                                      <span className="font-semibold text-slate-900">Entity ID:</span>{" "}
+                                      <span className="font-semibold text-slate-900">Record reference:</span>{" "}
                                       {l.entityId || "—"}
                                     </div>
                                     <div>
-                                      <span className="font-semibold text-slate-900">Licensee:</span>{" "}
+                                      <span className="font-semibold text-slate-900">Brand reference:</span>{" "}
                                       {l.licenseeId || "—"}
                                     </div>
                                     <div>
-                                      <span className="font-semibold text-slate-900">IP:</span>{" "}
+                                      <span className="font-semibold text-slate-900">Network detail:</span>{" "}
                                       {l.ipAddress || "—"}
                                     </div>
                                     <div>
-                                      <span className="font-semibold text-slate-900">Keys:</span>{" "}
+                                      <span className="font-semibold text-slate-900">Detail fields:</span>{" "}
                                       {Object.keys(details).join(", ") || "—"}
                                     </div>
                                   </div>
@@ -650,16 +650,16 @@ export default function AuditLogs() {
       <Dialog open={respondDialogOpen} onOpenChange={setRespondDialogOpen}>
         <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>
-            <DialogTitle>Resolve Fraud Report</DialogTitle>
+            <DialogTitle>Review customer concern</DialogTitle>
             <DialogDescription>
-              Update fraud status, add investigation notes, and optionally send an automated customer response.
+              Update the concern status, add review notes, and optionally send a customer response.
             </DialogDescription>
           </DialogHeader>
 
           {selectedFraudReport && (
             <div className="space-y-4">
               <div className="rounded-lg border bg-slate-50 p-3 text-sm">
-                <div className="font-mono font-semibold text-slate-900">{selectedFraudReport.report.code || "Unknown code"}</div>
+                <div className="font-mono font-semibold text-slate-900">{selectedFraudReport.report.code || "Unknown QR label"}</div>
                 <div className="text-slate-600">{selectedFraudReport.report.reason || "No reason provided"}</div>
               </div>
 

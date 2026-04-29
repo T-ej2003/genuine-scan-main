@@ -416,7 +416,7 @@ export function IRIncidentDetailWorkspace({
                   {trustCredentialRows.length > 0 ? (
                     <div className="space-y-4 rounded-lg border p-4">
                       <div>
-                        <div className="font-medium">Operator trust review</div>
+                        <div className="font-medium">Team review</div>
                         <div className="text-sm text-muted-foreground">
                           Review the customer trust record linked to this QR so operator and public trust states stay aligned.
                         </div>
@@ -498,7 +498,7 @@ export function IRIncidentDetailWorkspace({
                 <CardHeader className="pb-4">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Flag className="h-4 w-4" />
-                    Containment actions
+                    Advanced actions
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -559,7 +559,10 @@ export function IRIncidentDetailWorkspace({
                     <div className={`rounded-md border px-3 py-2 text-xs ${lastEmailDelivery.delivered ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`}>
                       <div className="font-medium">{lastEmailDelivery.delivered ? "Live delivery confirmed" : "Delivery failed"}</div>
                       <div>Used from: {lastEmailDelivery.usedFrom || "—"} | Reply-to: {lastEmailDelivery.replyTo || "—"}</div>
-                      <div>Message ID: {lastEmailDelivery.providerMessageId || "—"}</div>
+                      <details>
+                        <summary className="cursor-pointer">Technical details</summary>
+                        <div className="mt-1 break-all">Message reference: {lastEmailDelivery.providerMessageId || "—"}</div>
+                      </details>
                       {!lastEmailDelivery.delivered && lastEmailDelivery.error ? <div>Error: {lastEmailDelivery.error}</div> : null}
                     </div>
                   ) : null}
@@ -590,7 +593,7 @@ export function IRIncidentDetailWorkspace({
                 <CardHeader className="pb-4">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Upload className="h-4 w-4" />
-                    Evidence
+                    History files
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -726,7 +729,7 @@ export function IRIncidentDetailWorkspace({
       >
         <DialogContent className="sm:max-w-[620px]">
           <DialogHeader>
-            <DialogTitle>{actionDialog.action ? ACTION_LABEL[actionDialog.action] : "Containment action"}</DialogTitle>
+            <DialogTitle>{actionDialog.action ? ACTION_LABEL[actionDialog.action] : "Advanced action"}</DialogTitle>
             <DialogDescription>Reason is required and will be recorded in the audit log.</DialogDescription>
           </DialogHeader>
 
