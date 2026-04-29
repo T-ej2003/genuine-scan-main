@@ -33,7 +33,6 @@ export function PublicHeader({ className }: PublicHeaderProps) {
             </span>
             <span className="min-w-0">
               <span className="block text-sm font-semibold tracking-normal text-foreground">MSCQR</span>
-              <span className="block truncate text-xs text-muted-foreground">Garment authentication workspace</span>
             </span>
           </Link>
 

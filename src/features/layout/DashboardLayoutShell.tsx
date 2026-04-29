@@ -141,7 +141,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               </span>
               <span className="min-w-0">
                 <span className="block text-lg font-semibold tracking-tight">MSCQR</span>
-                <span className="block truncate text-xs text-mscqr-secondary">Garment authentication Workspace</span>
               </span>
             </Link>
           </div>

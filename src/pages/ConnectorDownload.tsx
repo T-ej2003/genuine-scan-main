@@ -402,7 +402,7 @@ export default function ConnectorDownload() {
                 </div>
                 <div>
                   <div className="text-2xl font-semibold tracking-tight text-slate-950">MSCQR</div>
-                  <div className="text-sm text-slate-500">Garment authentication Workspace</div>
+
                 </div>
               </div>
 

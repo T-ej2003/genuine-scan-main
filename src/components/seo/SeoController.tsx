@@ -101,7 +101,7 @@ const PUBLIC_SEO: Record<string, SeoMetadata> = {
   "/platform": {
     title: "Garment Authentication Workspace | MSCQR",
     description:
-      "Explore MSCQR's garment authentication workspace for QR labels, print confirmation, customer scans, and suspicious scan review.",
+      "Explore MSCQR for QR labels, print confirmation, customer scans, and suspicious scan review.",
     path: "/platform",
   },
   "/solutions/brands": {

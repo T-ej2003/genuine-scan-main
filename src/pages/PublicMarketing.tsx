@@ -208,7 +208,7 @@ function PrimaryActions({ secondaryHref = "/verify", secondaryLabel = "Verify a 
 export function PlatformPage() {
   return (
     <PageShell
-      title="Garment authentication workspace for brands and manufacturers."
+      title="QR label verification for brands and manufacturers."
       intro="MSCQR helps clothing teams prepare QR labels, support factory print and attachment workflows, let customers verify garments, and review suspicious scan activity."
       actions={<PrimaryActions secondaryHref="/how-scanning-works" secondaryLabel="See how scanning works" />}
     >
