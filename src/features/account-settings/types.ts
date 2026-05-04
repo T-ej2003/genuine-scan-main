@@ -1,3 +1,5 @@
+import { DANGEROUS_LEGACY_LOCAL_STORAGE_KEYS } from "@/lib/browser-storage-cleanup";
+
 export type AdminMfaStatus = {
   required: boolean;
   sessionStage: "ACTIVE" | "MFA_BOOTSTRAP";
@@ -54,15 +56,8 @@ export type SessionSecuritySummary = {
   internalIpReputation: "trusted" | "new" | "elevated" | "high_risk" | "unknown";
 };
 
-export const STORAGE_RISK_KEYS = [
-  "auth_token",
-  "auth_user",
-  "mscqr_verify_customer_token",
-  "authenticqr_verify_customer_token",
-  "_3g4_session_id",
-  "authenticqr-theme",
-  "loglevel",
-  "qr_public_base_url",
+export const STORAGE_RISK_KEYS: readonly string[] = [
+  ...DANGEROUS_LEGACY_LOCAL_STORAGE_KEYS,
 ];
 
 export const readBrowserStorageSummary = (): BrowserStorageSummary => {

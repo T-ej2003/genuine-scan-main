@@ -43,15 +43,18 @@ const rules = [
     message: "Server-side child_process usage is only allowed inside backend/src/local-print-agent.",
   },
   {
-    name: "Persistent customer verify token in localStorage",
+    name: "Dangerous legacy browser storage writes",
     matcher: /\.(ts|tsx|js|mjs|cjs)$/,
     allow: (filePath) => filePath.includes(`${path.sep}src${path.sep}test${path.sep}`),
     patterns: [
+      /(?:window\.)?localStorage\.setItem\(\s*["'`](auth_token|auth_user|mscqr_verify_customer_token|authenticqr_verify_customer_token|mscqr_verify_customer_email|authenticqr_verify_customer_email|mscqr_verify_last_geo|authenticqr-theme|qr_public_base_url|loglevel|__3g4_session_id|_3g4_session_id)["'`]/g,
       /localStorage\.setItem\(\s*["'`](mscqr_verify_customer_token|authenticqr_verify_customer_token)["'`]/g,
       /window\.localStorage\.setItem\(\s*CUSTOMER_TOKEN_KEY/g,
       /window\.localStorage\.setItem\(\s*LEGACY_CUSTOMER_TOKEN_KEY/g,
+      /window\.localStorage\.setItem\(\s*VERIFY_GEO_CACHE_KEY/g,
     ],
-    message: "Customer verify bearer tokens must not be persisted in localStorage. Use HttpOnly cookie sessions.",
+    message:
+      "Dangerous legacy auth/customer/location/debug storage must not be persisted in localStorage. Use HttpOnly cookies, session-only state, or the Phase 1 cleanup module.",
   },
 ];
 

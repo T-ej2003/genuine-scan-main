@@ -274,8 +274,6 @@ export const INCIDENT_TYPE_OPTIONS = [
 export const TRANSFER_TOKEN_KEY_PREFIX = "mscqr_verify_transfer_token:";
 export const LEGACY_TRANSFER_TOKEN_KEY_PREFIX = "authenticqr_verify_transfer_token:";
 export const APP_NAME = "MSCQR";
-export const VERIFY_GEO_CACHE_KEY = "mscqr_verify_last_geo";
-export const VERIFY_GEO_CACHE_MAX_AGE_MS = 1000 * 60 * 10;
 
 export const DEFAULT_OWNERSHIP_STATUS: OwnershipStatus = {
   isClaimed: false,
@@ -376,27 +374,9 @@ export const getTransferTokenStorageKey = (value?: string | null) => {
 };
 
 export const readCachedGeo = () => {
-  try {
-    const raw = window.localStorage.getItem(VERIFY_GEO_CACHE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as { lat?: number; lon?: number; acc?: number; at?: number };
-    if (!parsed?.at || Date.now() - parsed.at > VERIFY_GEO_CACHE_MAX_AGE_MS) return {};
-    return { lat: parsed.lat, lon: parsed.lon, acc: parsed.acc };
-  } catch {
-    return {};
-  }
+  return {};
 };
 
-export const writeCachedGeo = (value: { lat?: number; lon?: number; acc?: number }) => {
-  try {
-    window.localStorage.setItem(
-      VERIFY_GEO_CACHE_KEY,
-      JSON.stringify({
-        ...value,
-        at: Date.now(),
-      })
-    );
-  } catch {
-    // Ignore storage issues.
-  }
+export const writeCachedGeo = (_value: { lat?: number; lon?: number; acc?: number }) => {
+  return;
 };
