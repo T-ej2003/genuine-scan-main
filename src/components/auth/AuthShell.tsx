@@ -49,7 +49,6 @@ export function AuthShell({ title, description, sideTitle, sideDescription, chil
                 </div>
                 <div>
                   <div className="text-xl font-semibold tracking-tight text-white">MSCQR</div>
-                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Secure platform access</div>
                 </div>
               </div>
 
@@ -83,7 +82,7 @@ export function AuthShell({ title, description, sideTitle, sideDescription, chil
             </div>
 
             <div className="mt-6 flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-slate-300">
-              <span>MSCQR secure access console</span>
+              <span className="font-semibold text-white">MSCQR</span>
               <StatusBadge tone="verified">Safeguards active</StatusBadge>
             </div>
           </MotionPanel>
@@ -96,7 +95,6 @@ export function AuthShell({ title, description, sideTitle, sideDescription, chil
                     <img src="/brand/mscqr-mark.svg" alt="MSCQR logo" className="h-8 w-8" />
                     <div>
                       <div className="text-base font-semibold text-white">MSCQR</div>
-                      <div className="text-xs text-slate-400">Secure platform access</div>
                     </div>
                   </div>
                   <div className="mt-4 flex flex-col gap-4 lg:mt-0 sm:flex-row sm:items-start sm:justify-between">

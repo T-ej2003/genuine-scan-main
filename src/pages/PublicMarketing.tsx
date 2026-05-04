@@ -147,7 +147,6 @@ function PageShell({ title, intro, children, actions }: PageShellProps) {
                 <img src="/brand/mscqr-mark.svg" alt="" className="size-10" aria-hidden="true" />
                 <div>
                   <p className="text-sm font-semibold text-moonlight-900">MSCQR</p>
-                  <p className="text-sm text-moonlight-900/75">Garment verification</p>
                 </div>
               </div>
               <div className="mt-6 rounded-2xl bg-white p-5">
