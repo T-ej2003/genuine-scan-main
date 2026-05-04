@@ -77,7 +77,7 @@ Open `Printer Setup & Support` and look for a business-safe result:
 
 The operator should never need to read ports, localhost addresses, stack traces, or internal system messages.
 
-![Printer Setup & Support](../public/docs/manufacturer-printer-diagnostics.png)
+![Printer Setup & Support](../public/docs/manufacturer-printer-setup.png)
 
 ## Workstation printer checklist
 

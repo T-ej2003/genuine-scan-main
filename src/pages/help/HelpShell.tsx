@@ -26,7 +26,7 @@ export function HelpShell({
     user?.role === "super_admin"
       ? { href: "/help/incident-response", label: "Incident Response" }
       : user?.role === "licensee_admin"
-      ? { href: "/help/licensee-admin", label: "Licensee/Admin guide" }
+      ? { href: "/help/licensee-admin", label: "Licensee Admin guide" }
       : user?.role === "manufacturer"
       ? { href: "/help/manufacturer", label: "Manufacturer guide" }
       : { href: "/help/customer", label: "Customer guide" };

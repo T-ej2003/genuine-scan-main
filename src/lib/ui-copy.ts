@@ -49,12 +49,12 @@ const VERIFICATION_COPY: Record<
     badge: "Confirmed",
   },
   LEGIT_REPEAT: {
-    title: "MSCQR confirmed this code again",
-    subtitle: "This code has been checked before. Review the scan history and proof details.",
+    title: "This garment is genuine",
+    subtitle: "This code has been checked before and the latest scan pattern did not require review.",
     badge: "Recorded",
   },
   SUSPICIOUS_DUPLICATE: {
-    title: "Review required",
+    title: "We could not fully verify this item",
     subtitle: "This check does not match the usual pattern for this code.",
     badge: "Review",
   },

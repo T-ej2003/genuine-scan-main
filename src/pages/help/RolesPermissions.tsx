@@ -50,7 +50,7 @@ export default function RolesPermissions() {
                   Full platform access: licensees, code allocation flows, audit history, and Incident Response.
                 </p>
                 <p className="text-xs">
-                  Login role: <span className="font-mono">SUPER_ADMIN</span> (legacy aliases map to this role).
+                  Login role: <span className="font-mono">SUPER_ADMIN</span>.
                 </p>
               </CardContent>
             </Card>
@@ -64,7 +64,7 @@ export default function RolesPermissions() {
                   Manages manufacturers and batches within one licensee/org. Can request QR inventory and assign batches.
                 </p>
                 <p className="text-xs">
-                  Login role: <span className="font-mono">LICENSEE_ADMIN</span> (legacy aliases map to this role).
+                  Login role: <span className="font-mono">LICENSEE_ADMIN</span>.
                 </p>
               </CardContent>
             </Card>
@@ -78,7 +78,7 @@ export default function RolesPermissions() {
                   Operates production: create controlled print jobs, let the MSCQR connector or certified printer route claim and complete them, and monitor status for assigned batches only.
                 </p>
                 <p className="text-xs">
-                  Login role: <span className="font-mono">MANUFACTURER</span> (legacy aliases map to this role).
+                  Login role: <span className="font-mono">MANUFACTURER</span>.
                 </p>
               </CardContent>
             </Card>
