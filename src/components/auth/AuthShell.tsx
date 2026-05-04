@@ -2,6 +2,7 @@ import { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { BadgeCheck, Fingerprint, ShieldCheck, Sparkles } from "lucide-react";
 
+import { BrandLockup } from "@/components/brand/BrandLockup";
 import { MotionPanel } from "@/components/mscqr/motion";
 import { StatusBadge } from "@/components/mscqr/status";
 
@@ -43,15 +44,12 @@ export function AuthShell({ title, description, sideTitle, sideDescription, chil
         <div className="grid w-full gap-6 lg:grid-cols-[1.1fr_0.9fr]">
           <MotionPanel className="hidden lg:flex flex-col justify-between rounded-3xl border border-white/10 bg-mscqr-surface/78 p-8 shadow-[0_30px_90px_rgba(0,0,0,0.32)] backdrop-blur-xl">
             <div className="space-y-8">
-              <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-200/20 bg-cyan-200/10">
-                  <img src="/brand/mscqr-mark.svg" alt="MSCQR logo" className="h-7 w-7" />
-                </div>
-                <div>
-                  <div className="text-xl font-semibold tracking-tight text-white">MSCQR</div>
-                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Secure platform access</div>
-                </div>
-              </div>
+              <BrandLockup
+                className="gap-3"
+                markClassName="h-12 w-12 border-cyan-200/20 bg-cyan-200/10"
+                iconClassName="h-7 w-7"
+                textClassName="text-xl text-white"
+              />
 
               <div className="space-y-3">
                 <div className="inline-flex items-center gap-2 rounded-full border border-amber-200/20 bg-amber-200/10 px-3 py-1 text-xs text-amber-100">
@@ -83,7 +81,7 @@ export function AuthShell({ title, description, sideTitle, sideDescription, chil
             </div>
 
             <div className="mt-6 flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-slate-300">
-              <span>MSCQR secure access console</span>
+              <span className="font-semibold text-white">MSCQR</span>
               <StatusBadge tone="verified">Safeguards active</StatusBadge>
             </div>
           </MotionPanel>
@@ -92,13 +90,12 @@ export function AuthShell({ title, description, sideTitle, sideDescription, chil
             <MotionPanel className="w-full rounded-3xl border border-white/10 bg-white/[0.04] p-2 shadow-2xl backdrop-blur-xl">
               <div className="rounded-[1.25rem] border border-white/10 bg-mscqr-surface/92 text-mscqr-primary shadow-[0_24px_80px_rgba(5,15,30,0.35)]">
                 <div className="border-b border-white/10 px-6 py-6 sm:px-8">
-                  <div className="flex items-center gap-3 lg:hidden">
-                    <img src="/brand/mscqr-mark.svg" alt="MSCQR logo" className="h-8 w-8" />
-                    <div>
-                      <div className="text-base font-semibold text-white">MSCQR</div>
-                      <div className="text-xs text-slate-400">Secure platform access</div>
-                    </div>
-                  </div>
+                  <BrandLockup
+                    className="gap-3 lg:hidden"
+                    markClassName="h-8 w-8 rounded-none border-0 bg-transparent"
+                    iconClassName="h-8 w-8"
+                    textClassName="text-base text-white"
+                  />
                   <div className="mt-4 flex flex-col gap-4 lg:mt-0 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <h2 className="text-2xl font-semibold tracking-tight text-white">{title}</h2>

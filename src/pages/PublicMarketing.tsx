@@ -15,6 +15,7 @@ import {
   Users,
 } from "lucide-react";
 
+import { BrandLockup } from "@/components/brand/BrandLockup";
 import { PublicShell } from "@/components/public/PublicShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -143,13 +144,12 @@ function PageShell({ title, intro, children, actions }: PageShellProps) {
               {actions ? <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">{actions}</div> : null}
             </div>
             <div className="rounded-3xl border border-moonlight-300 bg-moonlight-100 p-6">
-              <div className="flex items-center gap-3">
-                <img src="/brand/mscqr-mark.svg" alt="" className="size-10" aria-hidden="true" />
-                <div>
-                  <p className="text-sm font-semibold text-moonlight-900">MSCQR</p>
-                  <p className="text-sm text-moonlight-900/75">Garment verification</p>
-                </div>
-              </div>
+              <BrandLockup
+                className="gap-3"
+                markClassName="size-10 rounded-none border-0 bg-transparent"
+                iconClassName="size-10"
+                textClassName="text-sm text-moonlight-900"
+              />
               <div className="mt-6 rounded-2xl bg-white p-5">
                 <p className="text-sm font-semibold text-foreground">Made for clothing QR labels</p>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">

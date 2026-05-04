@@ -5,6 +5,7 @@ import { useTheme } from "next-themes";
 import { Activity, ChevronDown, CircleHelp, Command, LogOut, Menu, Moon, Printer, Settings, Sun } from "lucide-react";
 
 import { APP_PATHS, getAppBreadcrumbs, getNavItemsForRole, getRoleDisplayLabel, isAppRouteActive } from "@/app/route-metadata";
+import { BrandLockup } from "@/components/brand/BrandLockup";
 import { ContextualIntelligencePanel } from "@/components/platform/ContextualIntelligencePanel";
 import { PlatformCommandPalette } from "@/components/platform/PlatformCommandPalette";
 import { SupportIssueLauncher } from "@/components/support/SupportIssueLauncher";
@@ -135,14 +136,15 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       >
         <div className="flex h-full flex-col">
           <div className="border-b border-mscqr-border bg-white px-5 py-5">
-            <Link to={APP_PATHS.dashboard} className="flex items-center gap-3" onClick={() => setSidebarOpen(false)}>
-              <span className="relative flex size-11 items-center justify-center rounded-2xl border border-moonlight-300 bg-moonlight-100">
-                <img src="/brand/mscqr-mark.svg" alt="MSCQR logo" className="h-7 w-7" />
-              </span>
-              <span className="min-w-0">
-                <span className="block text-lg font-semibold tracking-tight">MSCQR</span>
-              </span>
-            </Link>
+            <BrandLockup
+              to={APP_PATHS.dashboard}
+              className="gap-3"
+              markClassName="size-11"
+              iconClassName="h-7 w-7"
+              textClassName="text-lg"
+              ariaLabel="MSCQR workspace overview"
+              onClick={() => setSidebarOpen(false)}
+            />
           </div>
 
           <div className="border-b border-mscqr-border bg-white px-5 py-4">
