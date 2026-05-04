@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import apiClient from "@/lib/api-client";
+import { getOptionalLocalStorageItem } from "@/lib/consent";
 import { getPrinterDiagnosticSummary, type LocalPrinterAgentSnapshot } from "@/lib/printer-diagnostics";
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
 import { buildSupportDiagnosticsPayload, captureSupportScreenshot } from "@/lib/support-diagnostics";
@@ -328,7 +329,7 @@ export function useBatchPrintWorkflow({
     if (!selectedPrinterId) return;
     const key = `printer-calibration:${selectedPrinterId}`;
     try {
-      const raw = window.localStorage.getItem(key);
+      const raw = getOptionalLocalStorageItem("functional", key);
       if (!raw) return;
       const parsed = JSON.parse(raw) as Partial<CalibrationProfileState>;
       if (!parsed || typeof parsed !== "object") return;

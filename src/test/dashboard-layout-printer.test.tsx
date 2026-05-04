@@ -5,10 +5,21 @@ import { MemoryRouter } from "react-router-dom";
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import apiClient from "@/lib/api-client";
+import { CONSENT_STORAGE_KEY, type ConsentState } from "@/lib/consent";
 import { renderWithQueryClient } from "@/test/render-with-query-client";
 
 const localStorageState = new Map<string, string>();
 const sessionStorageState = new Map<string, string>();
+
+const functionalConsent: ConsentState = {
+  version: 1,
+  updatedAt: "2026-05-04T00:00:00.000Z",
+  categories: {
+    functional: true,
+    analytics: false,
+    marketing: false,
+  },
+};
 
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
@@ -84,6 +95,7 @@ describe("DashboardLayout printer connection dialog", () => {
         },
       },
     });
+    localStorageState.set(CONSENT_STORAGE_KEY, JSON.stringify(functionalConsent));
 
     vi.mocked(apiClient.getNotifications).mockResolvedValue({
       success: true,

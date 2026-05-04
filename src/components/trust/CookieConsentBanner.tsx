@@ -2,33 +2,21 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
+import { grantAllConsent, hasStoredConsentChoice, setEssentialOnlyConsent } from "@/lib/consent";
 
-const CONSENT_KEY = "mscqr_cookie_consent_choice:v1";
 const CONSENT_ENABLED = String(import.meta.env.VITE_ENABLE_COOKIE_CONSENT_UI || "").trim().toLowerCase() === "true";
 
-type ConsentChoice = "accepted" | "essential_only";
-
-const readStoredChoice = (): ConsentChoice | null => {
-  if (typeof window === "undefined") return null;
-  const raw = String(window.localStorage.getItem(CONSENT_KEY) || "").trim();
-  if (raw === "accepted" || raw === "essential_only") return raw;
-  return null;
-};
-
-const persistChoice = (choice: ConsentChoice) => {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(CONSENT_KEY, choice);
-};
-
 export function CookieConsentBanner() {
-  const [choice, setChoice] = useState<ConsentChoice | null>(null);
+  const [choiceRecorded, setChoiceRecorded] = useState(() =>
+    CONSENT_ENABLED ? hasStoredConsentChoice() : true
+  );
 
   useEffect(() => {
     if (!CONSENT_ENABLED) return;
-    setChoice(readStoredChoice());
+    setChoiceRecorded(hasStoredConsentChoice());
   }, []);
 
-  if (!CONSENT_ENABLED || choice) return null;
+  if (!CONSENT_ENABLED || choiceRecorded) return null;
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/95 shadow-[0_-12px_30px_rgba(15,23,42,0.12)] backdrop-blur">
@@ -51,8 +39,8 @@ export function CookieConsentBanner() {
             type="button"
             variant="outline"
             onClick={() => {
-              persistChoice("essential_only");
-              setChoice("essential_only");
+              setEssentialOnlyConsent();
+              setChoiceRecorded(true);
             }}
           >
             Essential only
@@ -60,8 +48,8 @@ export function CookieConsentBanner() {
           <Button
             type="button"
             onClick={() => {
-              persistChoice("accepted");
-              setChoice("accepted");
+              grantAllConsent();
+              setChoiceRecorded(true);
             }}
           >
             Accept

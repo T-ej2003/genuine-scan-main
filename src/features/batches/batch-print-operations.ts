@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 
 import apiClient from "@/lib/api-client";
+import { setOptionalLocalStorageItem } from "@/lib/consent";
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
 
 import { defaultPrinterStatus } from "./print-workflow-utils";
@@ -293,7 +294,8 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
 
   try {
     if (selectedPrinterProfile.connectionType === "LOCAL_AGENT" && selectedPrinterId) {
-      window.localStorage.setItem(
+      setOptionalLocalStorageItem(
+        "functional",
         `printer-calibration:${selectedPrinterId}`,
         JSON.stringify({
           printerId: selectedPrinterId,

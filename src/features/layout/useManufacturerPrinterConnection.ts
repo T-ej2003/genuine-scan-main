@@ -3,6 +3,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { APP_PATHS } from "@/app/route-metadata";
 import apiClient from "@/lib/api-client";
 import {
+  getOptionalLocalStorageItem,
+  getOptionalSessionStorageItem,
+  removeOptionalLocalStorageItem,
+  removeOptionalSessionStorageItem,
+  setOptionalLocalStorageItem,
+  setOptionalSessionStorageItem,
+} from "@/lib/consent";
+import {
   getManagedPrinterDiagnosticSummary,
   getPrinterDiagnosticSummary,
   selectPreferredManagedPrinter,
@@ -108,7 +116,7 @@ export function useManufacturerPrinterConnection({
   const hasSeenPrinterDialogThisSession = () => {
     if (!printerDialogSessionKey) return false;
     try {
-      return String(window.sessionStorage.getItem(printerDialogSessionKey) || "").trim().toLowerCase() === "shown";
+      return String(getOptionalSessionStorageItem("functional", printerDialogSessionKey) || "").trim().toLowerCase() === "shown";
     } catch {
       return false;
     }
@@ -117,7 +125,7 @@ export function useManufacturerPrinterConnection({
   const markPrinterDialogSeenThisSession = () => {
     if (!printerDialogSessionKey) return;
     try {
-      window.sessionStorage.setItem(printerDialogSessionKey, "shown");
+      setOptionalSessionStorageItem("functional", printerDialogSessionKey, "shown");
     } catch {
       // Ignore storage failures.
     }
@@ -126,7 +134,7 @@ export function useManufacturerPrinterConnection({
   const clearPrinterDialogSession = () => {
     if (!printerDialogSessionKey) return;
     try {
-      window.sessionStorage.removeItem(printerDialogSessionKey);
+      removeOptionalSessionStorageItem(printerDialogSessionKey);
     } catch {
       // Ignore storage failures.
     }
@@ -602,7 +610,7 @@ export function useManufacturerPrinterConnection({
     if (!managedPrinterProfilesLoaded) return;
     if (printerReady || managedPrinterDiagnostics?.tone === "success") {
       try {
-        window.localStorage.setItem(printerOnboardingStorageKey, "completed");
+        setOptionalLocalStorageItem("functional", printerOnboardingStorageKey, "completed");
       } catch {
         // Ignore storage failures.
       }
@@ -616,7 +624,7 @@ export function useManufacturerPrinterConnection({
 
     let stored = "";
     try {
-      stored = String(window.localStorage.getItem(printerOnboardingStorageKey) || "").trim().toLowerCase();
+      stored = String(getOptionalLocalStorageItem("functional", printerOnboardingStorageKey) || "").trim().toLowerCase();
     } catch {
       stored = "";
     }
@@ -634,7 +642,7 @@ export function useManufacturerPrinterConnection({
   const dismissPrinterOnboarding = () => {
     if (printerOnboardingStorageKey) {
       try {
-        window.localStorage.setItem(printerOnboardingStorageKey, "dismissed");
+        setOptionalLocalStorageItem("functional", printerOnboardingStorageKey, "dismissed");
       } catch {
         // Ignore storage failures.
       }
@@ -645,7 +653,7 @@ export function useManufacturerPrinterConnection({
   const reopenPrinterOnboarding = () => {
     if (printerOnboardingStorageKey) {
       try {
-        window.localStorage.removeItem(printerOnboardingStorageKey);
+        removeOptionalLocalStorageItem(printerOnboardingStorageKey);
       } catch {
         // Ignore storage failures.
       }

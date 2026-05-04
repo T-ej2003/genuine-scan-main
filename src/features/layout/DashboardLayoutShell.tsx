@@ -38,6 +38,7 @@ import { NOTIFICATION_FETCH_LIMIT, resolveNotificationTarget, resolveWorkspaceLa
 import { useManufacturerPrinterConnection } from "@/features/layout/useManufacturerPrinterConnection";
 import { getContextualHelpRoute } from "@/help/contextual-help";
 import { useToast } from "@/hooks/use-toast";
+import { hasConsent } from "@/lib/consent";
 import { cn } from "@/lib/utils";
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -76,6 +77,13 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   };
 
   const togglePlatformTheme = () => {
+    if (!hasConsent("functional")) {
+      toast({
+        title: "Preference storage disabled",
+        description: "Theme changes can be saved after functional cookies are enabled.",
+      });
+      return;
+    }
     setTheme(resolvedTheme === "dark" ? "light" : "dark");
   };
 

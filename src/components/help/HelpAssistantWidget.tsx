@@ -10,6 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
+import { getOptionalLocalStorageItem, setOptionalLocalStorageItem } from "@/lib/consent";
 import { HELP_ASSISTANT_OPEN_EVENT, type HelpAssistantOpenPayload } from "@/help/assistant-events";
 import { type HelpKbRole } from "@/help/kb";
 import {
@@ -248,7 +249,7 @@ export default function HelpAssistantWidget() {
   const reportMissingHelp = (missingQuery: string) => {
     try {
       const key = "aq_missing_help_requests";
-      const current = JSON.parse(window.localStorage.getItem(key) || "[]");
+      const current = JSON.parse(getOptionalLocalStorageItem("functional", key) || "[]");
       const next = [
         {
           query: missingQuery,
@@ -258,7 +259,7 @@ export default function HelpAssistantWidget() {
         },
         ...current,
       ].slice(0, 100);
-      window.localStorage.setItem(key, JSON.stringify(next));
+      setOptionalLocalStorageItem("functional", key, JSON.stringify(next));
     } catch {
       // Ignore storage errors and still acknowledge.
     }

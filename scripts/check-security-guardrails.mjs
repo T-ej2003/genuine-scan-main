@@ -56,6 +56,21 @@ const rules = [
     message:
       "Dangerous legacy auth/customer/location/debug storage must not be persisted in localStorage. Use HttpOnly cookies, session-only state, or the Phase 1 cleanup module.",
   },
+  {
+    name: "Optional browser storage must use consent API",
+    matcher: /\.(ts|tsx|js|mjs|cjs)$/,
+    allow: (filePath) =>
+      filePath.includes(`${path.sep}src${path.sep}test${path.sep}`) ||
+      filePath === path.join(repoRoot, "src", "lib", "consent.ts"),
+    patterns: [
+      /(?:window\.)?localStorage\.setItem\(\s*["'`](theme|aq_missing_help_requests)["'`]/g,
+      /(?:window\.)?localStorage\.setItem\(\s*`(printer-calibration:|manufacturer-printer-onboarding:)/g,
+      /(?:window\.)?sessionStorage\.setItem\(\s*`manufacturer-printer-dialog-opened:/g,
+      /document\.cookie\s*=\s*["'`]sidebar:state=/g,
+    ],
+    message:
+      "Functional/preference browser storage must be written through src/lib/consent.ts so it is blocked until the user grants consent.",
+  },
 ];
 
 const findings = [];
