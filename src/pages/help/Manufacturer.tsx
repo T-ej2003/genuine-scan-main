@@ -36,8 +36,8 @@ export default function ManufacturerHelp() {
           <Printer className="h-4 w-4" />
           <AlertTitle>Current print workflow</AlertTitle>
           <AlertDescription>
-            Browser ZIP or image-pack printing is not the current production workflow. MSCQR prints through the printer helper
-            or an approved registered printer profile.
+            MSCQR print jobs run through the printer helper or an approved registered printer profile. Confirm printer
+            readiness before starting a production batch.
           </AlertDescription>
         </Alert>
 

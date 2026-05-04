@@ -22,7 +22,7 @@ export const HELP_KB: HelpKbEntry[] = [
       "",
       "1. Open the sign-in page and use your admin email and password.",
       "2. If your account was invite-based, use the invite link first and set your password.",
-      "3. After login, open **Licensees**, **Code Requests**, and **Incident Response** from the left navigation.",
+      "3. After login, open **Brands**, **QR Requests**, and **Incident Response** from the left navigation.",
       "",
       "If sign-in fails, use **Forgot password**. If your account is disabled, contact another active Super Admin.",
     ].join("\n"),
@@ -116,11 +116,11 @@ export const HELP_KB: HelpKbEntry[] = [
     id: "qr-requests-workflow",
     role: "licensee",
     keywords: ["qr request", "request inventory", "approve", "reject", "quantity", "allocation"],
-    title: "Code Requests workflow",
+    title: "QR Requests workflow",
     answer: [
       "Licensee Admin submits quantity requests. Super Admin approves or rejects.",
       "",
-      "1. Licensee Admin opens **Code Requests** and submits quantity.",
+      "1. Licensee Admin opens **QR Requests** and submits quantity, batch name, and request notes.",
       "2. Super Admin reviews pending requests.",
       "3. On approval, the next available code range is allocated automatically.",
       "",
@@ -234,8 +234,8 @@ export const HELP_KB: HelpKbEntry[] = [
   {
     id: "customer-duplicate-explainer",
     role: "customer",
-    keywords: ["possible duplicate", "duplicate", "fraud risk", "different device", "multiple scans", "counterfeit"],
-    title: "How does duplication happen?",
+    keywords: ["review needed", "possible duplicate", "duplicate", "fraud risk", "different device", "multiple scans", "counterfeit"],
+    title: "What does review needed mean?",
     answer: [
       "**We could not fully verify this item** appears when scan signals look unusual enough that MSCQR should not present a normal positive result.",
       "",

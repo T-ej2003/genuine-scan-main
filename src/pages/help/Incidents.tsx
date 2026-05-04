@@ -31,7 +31,7 @@ export default function IncidentsHelp() {
               <ol className="list-decimal pl-5">
                 <li>Filter by status and severity.</li>
                 <li>Prioritize <Badge variant="outline">CRITICAL</Badge> and <Badge variant="outline">HIGH</Badge> items first.</li>
-                <li>Open incident detail and validate signals (classification, scan summary, ownership conflicts).</li>
+                <li>Open incident detail and validate signals such as classification, scan summary, report context, and repeated-scan patterns.</li>
                 <li>Assign owner and target next action.</li>
               </ol>
             </CardContent>

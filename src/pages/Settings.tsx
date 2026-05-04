@@ -177,7 +177,7 @@ export default function SettingsPage() {
               {systemCards.map((item) => (
                 <Card key={item.id} className={cardStyles}>
                   <CardContent className="p-0">
-                    <div className="rounded-2xl bg-amber-100 p-3 text-amber-700">
+                    <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-100 text-amber-700">
                       <item.icon className="h-5 w-5" />
                     </div>
                     <div className="mt-5 space-y-2">

@@ -56,7 +56,7 @@ export default function SupportHelp() {
                   The feed scrolls vertically like a normal inbox so you can review older items without using a slider control.
                 </li>
                 <li>
-                  Click a notification to open the linked page (for example <Badge variant="outline">Code Requests</Badge> or{" "}
+                  Click a notification to open the linked page (for example <Badge variant="outline">QR Requests</Badge> or{" "}
                   <Badge variant="outline">Incident Response</Badge>).
                 </li>
               </ol>

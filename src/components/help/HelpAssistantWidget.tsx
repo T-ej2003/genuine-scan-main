@@ -57,7 +57,8 @@ const routeLabel = (route: string) => {
     "/help/incident-actions": "Incident actions docs",
     "/help/communications": "Communications docs",
     "/verify": "Verify page",
-    "/code-requests": "Code Requests",
+    "/code-requests": "QR Requests",
+    "/qr-requests": "QR Requests",
     "/batches": "Batches",
     "/manufacturers": "Manufacturers",
     "/scan-activity": "Scan Activity",
@@ -112,7 +113,7 @@ const roleScopedIntro = (activeRole: HelpKbRole) => {
   if (activeRole === "manufacturer") {
     return "Manufacturer mode: ask about assigned batches, printer setup, workstation printing, saved factory printers, shared printers, and status updates.";
   }
-  return "Customer mode: ask about verification results, repeat scans, ownership claim, and counterfeit reporting.";
+  return "Customer mode: ask about verification results, repeat scans, review-needed outcomes, and reporting a concern.";
 };
 
 export default function HelpAssistantWidget() {
@@ -273,7 +274,7 @@ export default function HelpAssistantWidget() {
       return [
         "How do I sign in securely?",
         "How do I review incident response lifecycle?",
-        "How do I approve QR requests?",
+        "How do I approve QR Requests?",
         "How do policy alerts work?",
         "How does customer fraud reporting attach metadata?",
       ];
@@ -299,9 +300,8 @@ export default function HelpAssistantWidget() {
     }
     return [
       "Why can a repeat scan still show this garment is genuine?",
-      "What does Suspicious Duplicate mean?",
-      "How do I claim ownership?",
-      "How do I report suspected counterfeit?",
+      "What does review needed mean?",
+      "How do I report a concern?",
     ];
   }, [activeRole]);
 

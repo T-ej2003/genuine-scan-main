@@ -27,7 +27,7 @@ const SCREENSHOTS: ScreenshotNeed[] = [
   { filename: "password-forgot-password.png", whereToCapture: "Forgot Password page with email filled.", usedIn: "Setting Your Password" },
   { filename: "password-reset-password.png", whereToCapture: "Reset Password page with new password fields visible.", usedIn: "Setting Your Password" },
   { filename: "superadmin-create-licensee.png", whereToCapture: "Licensees page with Add Licensee modal open.", usedIn: "Super Admin" },
-  { filename: "superadmin-approve-qr-request.png", whereToCapture: "Code Requests page with Approve Request modal open.", usedIn: "Super Admin" },
+  { filename: "superadmin-approve-qr-request.png", whereToCapture: "QR Requests page with Approve Request modal open.", usedIn: "Super Admin" },
   { filename: "licensee-admin-dashboard.png", whereToCapture: "Licensee Admin Overview page with QR totals and quick actions.", usedIn: "Licensee Admin" },
   { filename: "licensee-admin-qr-request.png", whereToCapture: "Licensee Admin QR Requests page with quantity, batch name, and note filled.", usedIn: "Licensee Admin" },
   { filename: "licensee-admin-manufacturer-invite.png", whereToCapture: "Manufacturers page with Invite Manufacturer dialog open.", usedIn: "Licensee Admin" },

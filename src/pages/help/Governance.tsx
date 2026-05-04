@@ -28,7 +28,7 @@ export default function GovernanceHelp() {
                 <CardTitle className="text-base">Verification UX feature flags</CardTitle>
               </CardHeader>
               <CardContent className="text-sm text-muted-foreground">
-                Enable or disable customer verification behaviors (timeline card, risk card, claim, fraud report, mobile camera assist) per tenant policy.
+                Enable or disable customer verification behaviors such as the timeline card, risk card, report-concern flow, and mobile camera assist per tenant policy.
               </CardContent>
             </Card>
             <Card>

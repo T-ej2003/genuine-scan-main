@@ -63,12 +63,12 @@ export default function SuperAdminHelp() {
               <CardHeader className="space-y-1">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <FileCheck2 className="h-4 w-4 text-primary" />
-                  Approve code requests
+                  Approve QR Requests
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">
-                  <li>Open <Badge variant="outline">Code Requests</Badge>.</li>
+                  <li>Open <Badge variant="outline">QR Requests</Badge>.</li>
                   <li>Filter to <Badge variant="outline">Pending</Badge>.</li>
                   <li>Open a request and select <Badge variant="outline">Approve</Badge> or <Badge variant="outline">Reject</Badge>.</li>
                   <li>Approved requests allocate the next available sequence automatically.</li>
@@ -132,7 +132,7 @@ export default function SuperAdminHelp() {
               description="Use the pending request queue to decide whether the next source sequence should be released."
               filename="superadmin-approve-qr-request.png"
               alt="Approve code request modal"
-              caption="Code Requests: review the request and release or reject the next available sequence."
+              caption="QR Requests: review the request and release or reject the next available sequence."
               highlights={[
                 "Work from the pending queue first.",
                 "Check the quantity and reference before approval.",
@@ -172,7 +172,7 @@ export default function SuperAdminHelp() {
               },
               {
                 filename: "superadmin-approve-qr-request.png",
-                whereToCapture: "Code Requests page with Approve Request modal open.",
+                whereToCapture: "QR Requests page with Approve Request modal open.",
               },
               {
                 filename: "ir-dashboard.png",

@@ -37,8 +37,8 @@ export const getPageGuidance = (pathname: string, role?: UserRole | null): PageG
 
   if (starts(pathname, "/code-requests") || starts(pathname, "/qr-requests")) {
     return {
-      title: "Manage code requests",
-      summary: "Use this page to submit, review, and track code allocation requests.",
+      title: "Manage QR Requests",
+      summary: "Use this page to submit, review, and track QR label allocation requests.",
       firstAction: role === "super_admin" ? "Review pending requests first." : "Create a new request with the quantity you need.",
       note: "Always add clear notes so approvals are easier.",
     };
