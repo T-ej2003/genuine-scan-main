@@ -23,9 +23,9 @@
     "why_it_matters": "MSCQR processes user, customer, support, and device-related data. Without a privacy notice, transparency obligations are not met.",
     "severity": "Critical",
     "evidence": [
-      "documents/CUSTOMER_VERIFICATION_GUIDE.md",
-      "documents/LICENSEE_ADMIN_GUIDE.md",
-      "documents/MANUFACTURER_GUIDE.md"
+      "documents/manuals/MSCQR_CUSTOMER_MANUAL.md",
+      "documents/manuals/MSCQR_LICENSEE_ADMIN_MANUAL.md",
+      "documents/manuals/MSCQR_MANUFACTURER_MANUAL.md"
     ],
     "exact_fix": "Draft lawyer-reviewed Privacy Policy, publish it publicly, and link it from footer, login, verify, and support surfaces.",
     "owner_recommendation": "Legal/Privacy + Product",
@@ -311,7 +311,7 @@
     "why_it_matters": "Customers and internal operators need clarity on how long support, incident, and verification data is retained.",
     "severity": "High",
     "evidence": [
-      "documents/CUSTOMER_VERIFICATION_GUIDE.md"
+      "documents/manuals/MSCQR_CUSTOMER_MANUAL.md"
     ],
     "exact_fix": "Publish retention/deletion policy and align backend jobs, docs, and support procedures to it.",
     "owner_recommendation": "Legal/Privacy + Backend + Ops",
@@ -329,9 +329,9 @@
     "evidence": [
       "src/App.tsx",
       "documents/SUPER_ADMIN_GUIDE.md",
-      "documents/LICENSEE_ADMIN_GUIDE.md",
-      "documents/MANUFACTURER_GUIDE.md",
-      "documents/CUSTOMER_VERIFICATION_GUIDE.md"
+      "documents/manuals/MSCQR_LICENSEE_ADMIN_MANUAL.md",
+      "documents/manuals/MSCQR_MANUFACTURER_MANUAL.md",
+      "documents/manuals/MSCQR_CUSTOMER_MANUAL.md"
     ],
     "exact_fix": "Run scripted UAT for super admin, licensee admin, manufacturer, and public/customer roles with issue tracking and signoff.",
     "owner_recommendation": "QA + Product Ops",
@@ -347,8 +347,8 @@
     "why_it_matters": "First customer onboarding will be slower and riskier without standardized templates and validation steps.",
     "severity": "Medium",
     "evidence": [
-      "documents/LICENSEE_ADMIN_GUIDE.md",
-      "documents/MANUFACTURER_GUIDE.md"
+      "documents/manuals/MSCQR_LICENSEE_ADMIN_MANUAL.md",
+      "documents/manuals/MSCQR_MANUFACTURER_MANUAL.md"
     ],
     "exact_fix": "Create onboarding packet with templates, validation checklist, QR numbering rules, and access prerequisites.",
     "owner_recommendation": "Product Ops + Customer Success",

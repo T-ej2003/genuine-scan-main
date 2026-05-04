@@ -41,7 +41,7 @@ export default function SettingPassword() {
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <CardHeader className="space-y-1">
-                <CardTitle className="text-base">1. Accept invite (Super Admin, Licensee/Admin, Manufacturer)</CardTitle>
+                <CardTitle className="text-base">1. Accept invite (Super Admin, Licensee Admin, Manufacturer)</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">

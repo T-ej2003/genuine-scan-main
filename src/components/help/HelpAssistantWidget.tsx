@@ -49,7 +49,7 @@ const routeLabel = (route: string) => {
     "/help/setting-password": "Setting password",
     "/help/roles-permissions": "Roles & permissions",
     "/help/super-admin": "Super Admin docs",
-    "/help/licensee-admin": "Licensee/Admin docs",
+    "/help/licensee-admin": "Licensee Admin docs",
     "/help/manufacturer": "Manufacturer docs",
     "/help/customer": "Customer docs",
     "/help/incident-response": "Incident Response docs",
@@ -83,7 +83,7 @@ const routeLabel = (route: string) => {
 const ROLE_LABELS: Record<HelpKbRole, string> = {
   all: "All Roles",
   super_admin: "Super Admin",
-  licensee: "Licensee/Admin",
+  licensee: "Licensee Admin",
   manufacturer: "Manufacturer",
   customer: "Customer",
 };
@@ -107,7 +107,7 @@ const roleScopedIntro = (activeRole: HelpKbRole) => {
     return "Super Admin mode: ask about any role workflow, policy, incident response, or customer verification.";
   }
   if (activeRole === "licensee") {
-    return "Licensee/Admin mode: ask about inventory requests, the batch workspace, manufacturers, tracking, and account access.";
+    return "Licensee Admin mode: ask about inventory requests, the batch workspace, manufacturers, tracking, and account access.";
   }
   if (activeRole === "manufacturer") {
     return "Manufacturer mode: ask about assigned batches, printer setup, workstation printing, saved factory printers, shared printers, and status updates.";
@@ -298,7 +298,7 @@ export default function HelpAssistantWidget() {
       ];
     }
     return [
-      "What does MSCQR confirmed this code again mean?",
+      "Why can a repeat scan still show this garment is genuine?",
       "What does Suspicious Duplicate mean?",
       "How do I claim ownership?",
       "How do I report suspected counterfeit?",

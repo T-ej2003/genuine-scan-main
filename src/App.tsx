@@ -244,7 +244,7 @@ function AppRoutes() {
         <Route
           path="/help/licensee-admin"
           element={
-            <HelpRoleRoute allowedRoles={["licensee_admin"]} allowPublic={false}>
+            <HelpRoleRoute allowedRoles={["licensee_admin"]} allowPublic={true}>
               <HelpLicenseeAdmin />
             </HelpRoleRoute>
           }

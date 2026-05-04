@@ -1,192 +1,142 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import { HelpShell } from "@/pages/help/HelpShell";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { DocScreenshot } from "@/components/help/DocScreenshot";
-import { ScreenshotChecklist } from "@/components/help/ScreenshotChecklist";
-import { ScanLine, ShieldCheck, ShieldAlert, Flag } from "lucide-react";
+import { WorkflowScreenshotCard } from "@/components/help/WorkflowScreenshotCard";
+import { Flag, ScanLine, ShieldAlert, ShieldCheck } from "lucide-react";
 
 export default function CustomerHelp() {
   return (
     <HelpShell
-      title="Verify Product"
-      subtitle="Check a product, understand the result, and report a suspected issue."
+      title="Verify a Garment"
+      subtitle="Scan or enter a garment QR label, read the result, and report a concern when something looks suspicious."
     >
       <div className="space-y-6">
         <Card>
-          <CardHeader className="space-y-1">
+          <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <ScanLine className="h-4 w-4 text-primary" />
               What you can do
             </CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
-            <ul className="list-disc pl-5">
-              <li>Scan the code and start a secure verification session.</li>
-              <li>Sign in, answer purchase-context questions, and then reveal the locked label decision.</li>
-              <li>See a clear separation between the label verification result, your purchase context, and next actions.</li>
-              <li>Report suspected counterfeit with contact details and purchase evidence.</li>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Scan the QR label or enter the printed code manually.</li>
+              <li>Read whether MSCQR verified the garment or needs review.</li>
+              <li>Review brand, manufacturer, status, scan summary, and support details.</li>
+              <li>Report a concern if the result, product, seller, or label looks suspicious.</li>
             </ul>
           </CardContent>
         </Card>
 
         <Alert>
           <ShieldCheck className="h-4 w-4" />
-          <AlertTitle>Privacy</AlertTitle>
+          <AlertTitle>Privacy and scan records</AlertTitle>
           <AlertDescription>
-            The verify page stores scan events to detect duplicates and support investigations. Depending on the verification flow, MSCQR may store IP address, device details, and location fields such as city, region, country, and submitted coordinates.
+            MSCQR records scan events to detect unusual repeated use and support investigations. Camera capture depends on browser support;
+            manual code entry works on every device.
           </AlertDescription>
         </Alert>
 
         <section className="space-y-3">
-          <h2 className="text-lg font-semibold text-foreground">Result states</h2>
+          <h2 className="text-lg font-semibold text-foreground">Core workflow</h2>
           <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader className="space-y-1">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                  MSCQR confirmed this label
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm text-muted-foreground">
-                <p>A signed MSCQR label check or a governed record check completed successfully.</p>
-                <p className="text-xs">Review the proof section carefully, especially if the result came from a manual code entry.</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="space-y-1">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                  MSCQR confirmed this code again
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm text-muted-foreground">
-                <p>Repeat scans can be normal, but they should still be reviewed in context.</p>
-                <p className="text-xs">A repeat result does not prove a copied label was never reused elsewhere.</p>
-              </CardContent>
-            </Card>
-
-            <Card className="md:col-span-2">
-              <CardHeader className="space-y-1">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <ShieldAlert className="h-4 w-4 text-amber-600" />
-                  Review required
-                  <Badge variant="outline">Review</Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm text-muted-foreground">
-                <p>This code shows unusual scan patterns that need review before the result should be trusted.</p>
-                <ul className="list-disc pl-5">
-                  <li>Check the scan history summary and the verification notes.</li>
-                  <li>If anything looks wrong, report it so the brand can investigate.</li>
-                </ul>
-              </CardContent>
-            </Card>
-          </div>
-        </section>
-
-        <section className="space-y-3">
-          <h2 className="text-lg font-semibold text-foreground">Step-by-step</h2>
-          <Card>
-            <CardHeader className="space-y-1">
-              <CardTitle className="text-base">Verify a product</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm text-muted-foreground">
-              <ol className="list-decimal pl-5">
-                <li>Scan the code on the product label.</li>
-                <li>Sign in with email OTP or an enabled identity provider.</li>
-                <li>Answer the purchase and packaging questions shown in the verify flow.</li>
-                <li>Reveal the locked label decision and review the verification basis, lifecycle state, and next actions.</li>
-              </ol>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="space-y-1">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Flag className="h-4 w-4 text-red-600" />
-                Report suspected counterfeit
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm text-muted-foreground">
-              <ol className="list-decimal pl-5">
-                <li>Select <Badge variant="outline">Report suspected counterfeit</Badge>.</li>
-                <li>Choose an incident type and describe what you observed.</li>
-                <li>Add optional photos and purchase details if you have them.</li>
-                <li>If you want updates, consent to contact and leave an email.</li>
-              </ol>
-            </CardContent>
-          </Card>
-        </section>
-
-        <section className="space-y-3">
-          <h2 className="text-lg font-semibold text-foreground">Screenshots</h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            <DocScreenshot
-              filename="customer-first-verification.png"
-              alt="MSCQR confirmed this label"
-              caption="First customer-facing verification."
+            <WorkflowScreenshotCard
+              title="Start verification"
+              description="Open the verify page, scan the QR label, or enter the printed code manually."
+              filename="customer-verify-start.png"
+              alt="Customer verify start"
+              caption="Verify: scan a label or enter a garment code."
+              highlights={["Use Scan QR label when your browser supports it.", "Use manual entry on any device.", "Select Check garment to open the result."]}
               eager
             />
-            <DocScreenshot
-              filename="customer-verified-again.png"
-              alt="MSCQR confirmed this code again"
-              caption="Repeat verification with context preserved."
+            <WorkflowScreenshotCard
+              title="Read a verified result"
+              description="A successful check shows the current customer-facing verified result."
+              filename="customer-result-verified.png"
+              alt="Customer verified result"
+              caption="Result: this garment is genuine and verified by MSCQR."
+              highlights={["Read the banner first.", "Review brand and manufacturer details.", "Check the scan summary and support contact."]}
             />
-            <DocScreenshot
-              filename="customer-possible-duplicate.png"
-              alt="Review required"
-              caption="Review-required result with investigation guidance."
+            <WorkflowScreenshotCard
+              title="Understand repeat checks"
+              description="A repeat scan can still be normal when the scan pattern looks consistent."
+              filename="customer-result-verified-again.png"
+              alt="Customer repeat verification"
+              caption="Result: a previously checked code can still be shown as verified when context is normal."
+              highlights={["Repeat checks can happen when you scan again.", "Review scan timing if unsure.", "Report a concern if the item or seller looks suspicious."]}
             />
-            <DocScreenshot
-              filename="customer-report-dialog.png"
-              alt="Report dialog"
-              caption="Report suspected counterfeit form."
+            <WorkflowScreenshotCard
+              title="Read a review-needed result"
+              description="MSCQR uses this state when scan details need review before you rely on the item."
+              filename="customer-result-review-required.png"
+              alt="Customer review-needed result"
+              caption="Result: MSCQR could not fully verify the item."
+              highlights={["Review the warning carefully.", "Check product and seller details.", "Use Report a concern if something looks wrong."]}
+            />
+            <WorkflowScreenshotCard
+              title="Report a concern"
+              description="Send the brand useful context when the label, product, seller, or result seems suspicious."
+              filename="customer-report-concern.png"
+              alt="Customer report concern"
+              caption="Report: choose a reason, add details, and submit the concern."
+              highlights={["Choose the closest reason.", "Describe what happened.", "Keep any support reference shown after submit."]}
             />
           </div>
-          <ScreenshotChecklist
-            items={[
-              {
-                filename: "customer-first-verification.png",
-                whereToCapture: "Public verify page showing MSCQR confirmed this label.",
-              },
-              {
-                filename: "customer-verified-again.png",
-                whereToCapture: "Public verify page showing MSCQR confirmed this code again.",
-              },
-              {
-                filename: "customer-possible-duplicate.png",
-                whereToCapture: "Public verify page showing Review required with verification notes.",
-              },
-              {
-                filename: "customer-report-dialog.png",
-                whereToCapture: "Public verify page with Report suspected counterfeit dialog open.",
-              },
-            ]}
-          />
         </section>
 
         <section className="space-y-3">
-          <h2 className="text-lg font-semibold text-foreground">Troubleshooting</h2>
-          <div className="grid gap-4 md:grid-cols-2">
+          <h2 className="text-lg font-semibold text-foreground">Result states</h2>
+          <div className="grid gap-4 md:grid-cols-3">
             <Card>
-              <CardHeader className="space-y-1">
-                <CardTitle className="text-base">“Verification service unavailable”</CardTitle>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                  This garment is genuine
+                </CardTitle>
               </CardHeader>
               <CardContent className="text-sm text-muted-foreground">
-                The service may be temporarily down. Retry, or try again later. If it persists, contact the brand support shown on the page.
+                MSCQR found the brand record and the available verification checks passed.
               </CardContent>
             </Card>
             <Card>
-              <CardHeader className="space-y-1">
-                <CardTitle className="text-base">Code not registered / invalid</CardTitle>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <ShieldAlert className="h-4 w-4 text-amber-600" />
+                  We could not fully verify this item
+                </CardTitle>
               </CardHeader>
               <CardContent className="text-sm text-muted-foreground">
-                The code may be damaged, tampered, or not issued by the brand. Report it if you suspect counterfeit.
+                Scan details need review. Check the page details and report a concern if the item looks suspicious.
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Flag className="h-4 w-4 text-red-600" />
+                  QR label blocked or not found
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-muted-foreground">
+                Do not rely on the item until you check the code, review the page guidance, or contact the brand.
               </CardContent>
             </Card>
           </div>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold text-foreground">What to do if something looks wrong</h2>
+          <Card>
+            <CardContent className="space-y-2 pt-6 text-sm text-muted-foreground">
+              <p>Use manual code entry if camera scan fails. If the result is review-needed, blocked, or not found, check the tag and product details before relying on the item.</p>
+              <p>When in doubt, use Report a concern or the brand support contact shown on the result page.</p>
+              <Button asChild variant="outline">
+                <Link to="/verify">Open Verify</Link>
+              </Button>
+            </CardContent>
+          </Card>
         </section>
       </div>
     </HelpShell>

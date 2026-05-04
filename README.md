@@ -146,9 +146,10 @@ npm run test:e2e
 │   └── tests/                        # Lightweight backend tests
 ├── documents/
 │   ├── SUPER_ADMIN_GUIDE.md          # Super Admin manual source
-│   ├── LICENSEE_ADMIN_GUIDE.md       # Licensee Admin manual source
-│   ├── MANUFACTURER_GUIDE.md         # Manufacturer manual source
-│   ├── CUSTOMER_VERIFICATION_GUIDE.md # Customer manual source
+│   ├── manuals/
+│   │   ├── MSCQR_LICENSEE_ADMIN_MANUAL.md
+│   │   ├── MSCQR_MANUFACTURER_MANUAL.md
+│   │   └── MSCQR_CUSTOMER_MANUAL.md
 │   └── generated-docx/                # Generated DOCX copies of documents markdown
 ├── docker-compose.yml
 ├── Dockerfile                        # Frontend image
@@ -967,9 +968,9 @@ Search/scoring logic lives in `src/help/kb-search.ts`.
 
 ### Rule-based scan explanation (customer verify page)
 
-- `MSCQR confirmed this code again`: repeat-verification messaging that keeps proof and scan-history details visible.
-- `Review required`: unusual scan signals (multi-device, burst scans, location/country drift) with clear action CTAs.
-- Fraud report form auto-attaches scan metadata and stores incident report in DB.
+- `This garment is genuine`: successful customer-facing verification, including normal repeat checks when scan context remains acceptable.
+- `We could not fully verify this item`: unusual scan signals with clear review and report-a-concern CTAs.
+- Concern reporting auto-attaches scan metadata and stores the customer report for follow-up.
 
 ### Screenshots for documents/help pages
 
@@ -979,16 +980,10 @@ Search/scoring logic lives in `src/help/kb-search.ts`.
 Optional automated capture:
 
 ```bash
-npm run docs:screenshots
+npm run docs:role-screenshots
 ```
 
-Supported environment variables for capture script:
-
-- `DOCS_BASE_URL`
-- `DOCS_SUPERADMIN_EMAIL`, `DOCS_SUPERADMIN_PASSWORD`
-- `DOCS_LICENSEE_ADMIN_EMAIL`, `DOCS_LICENSEE_ADMIN_PASSWORD`
-- `DOCS_MANUFACTURER_EMAIL`, `DOCS_MANUFACTURER_PASSWORD`
-- `DOCS_QR_CODE`
+The role screenshot capture starts the current Vite UI, uses deterministic API mocks, and writes fresh current-version images to `public/docs/`.
 
 Generate DOCX copies for every markdown file in `documents/`, plus the conventional root `README.md` and `SECURITY.md`:
 
@@ -1003,16 +998,16 @@ Examples:
 - `documents/generated-docx/README.docx`
 - `documents/generated-docx/backend/README.docx`
 - `documents/generated-docx/SUPER_ADMIN_GUIDE.docx`
-- `documents/generated-docx/LICENSEE_ADMIN_GUIDE.docx`
-- `documents/generated-docx/MANUFACTURER_GUIDE.docx`
-- `documents/generated-docx/CUSTOMER_VERIFICATION_GUIDE.docx`
+- `documents/generated-docx/manuals/MSCQR_LICENSEE_ADMIN_MANUAL.docx`
+- `documents/generated-docx/manuals/MSCQR_MANUFACTURER_MANUAL.docx`
+- `documents/generated-docx/manuals/MSCQR_CUSTOMER_MANUAL.docx`
 
 ---
 
 Source documentation in repo:
 
 - `documents/SUPER_ADMIN_GUIDE.md`
-- `documents/LICENSEE_ADMIN_GUIDE.md`
-- `documents/MANUFACTURER_GUIDE.md`
-- `documents/CUSTOMER_VERIFICATION_GUIDE.md`
+- `documents/manuals/MSCQR_LICENSEE_ADMIN_MANUAL.md`
+- `documents/manuals/MSCQR_MANUFACTURER_MANUAL.md`
+- `documents/manuals/MSCQR_CUSTOMER_MANUAL.md`
 - `/help/*` pages in the web app

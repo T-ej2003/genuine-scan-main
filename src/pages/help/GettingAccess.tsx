@@ -56,7 +56,7 @@ export default function GettingAccess() {
 
             <Card>
               <CardHeader className="space-y-1">
-                <CardTitle className="text-base">Licensee/Admin (brand/company)</CardTitle>
+                <CardTitle className="text-base">Licensee Admin (brand/company)</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">
@@ -74,7 +74,7 @@ export default function GettingAccess() {
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">
-                  <li>A Licensee/Admin creates or invites the manufacturer user.</li>
+                  <li>A Licensee Admin creates or invites the manufacturer user.</li>
                   <li>You receive an invite email with the password-setup link.</li>
                   <li>The same email also includes the MSCQR Connector download page for Mac and Windows.</li>
                   <li>Install the connector once on the computer that will print, then open the invite link to set your password.</li>
@@ -114,9 +114,9 @@ export default function GettingAccess() {
               caption="Super Admin: create a licensee (tenant)."
             />
             <DocScreenshot
-              filename="licensee-create-manufacturer.png"
-              alt="Licensee/Admin creating a manufacturer account"
-              caption="Licensee/Admin: invite a manufacturer user."
+              filename="licensee-admin-manufacturer-invite.png"
+              alt="Licensee Admin creating a manufacturer account"
+              caption="Licensee Admin: invite a manufacturer user."
             />
             <DocScreenshot
               filename="access-super-admin-login.png"
@@ -124,9 +124,9 @@ export default function GettingAccess() {
               caption="Login page used by all admin/manufacturer roles."
             />
             <DocScreenshot
-              filename="customer-first-verification.png"
+              filename="customer-result-verified.png"
               alt="Customer first verification"
-              caption="Customer: staged verify flow with identity and trust intake."
+              caption="Customer: current verified garment result."
             />
           </div>
 
@@ -137,16 +137,16 @@ export default function GettingAccess() {
                 whereToCapture: "Licensees page with Add Licensee modal open.",
               },
               {
-                filename: "licensee-create-manufacturer.png",
-                whereToCapture: "Manufacturers page with Add Manufacturer modal open (Invite mode).",
+                filename: "licensee-admin-manufacturer-invite.png",
+                whereToCapture: "Manufacturers page with Invite Manufacturer dialog open.",
               },
               {
                 filename: "access-super-admin-login.png",
                 whereToCapture: "Login page with credentials entered (any role).",
               },
               {
-                filename: "customer-first-verification.png",
-                whereToCapture: "Public verify page showing MSCQR confirmed this label.",
+                filename: "customer-result-verified.png",
+                whereToCapture: "Public verify page showing the current verified garment result.",
               },
             ]}
           />
