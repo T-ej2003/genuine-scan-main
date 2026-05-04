@@ -17,6 +17,7 @@ const repoRoot = path.resolve(__dirname, "..");
 const documentsRoot = path.join(repoRoot, "documents");
 const outputRoot = path.join(repoRoot, "documents/generated-docx");
 const conventionalMarkdownFiles = ["README.md", "SECURITY.md"].map((file) => path.join(repoRoot, file));
+const cliInputs = process.argv.slice(2);
 
 const SKIP_DIRS = new Set([
   ".git",
@@ -324,17 +325,32 @@ const generateDocx = async (inputPath) => {
 };
 
 async function main() {
-  fs.rmSync(outputRoot, { recursive: true, force: true });
   fs.mkdirSync(outputRoot, { recursive: true });
 
-  const markdownFiles = [
-    ...conventionalMarkdownFiles.filter((filePath) => fs.existsSync(filePath)),
-    ...collectMarkdownFiles(documentsRoot),
-  ].sort((a, b) => a.localeCompare(b));
+  const markdownFiles = cliInputs.length
+    ? cliInputs.map((input) => path.resolve(repoRoot, input))
+    : [
+        ...conventionalMarkdownFiles.filter((filePath) => fs.existsSync(filePath)),
+        ...collectMarkdownFiles(documentsRoot),
+      ].sort((a, b) => a.localeCompare(b));
+
+  for (const inputPath of markdownFiles) {
+    if (!fs.existsSync(inputPath)) {
+      throw new Error(`Markdown input not found: ${path.relative(repoRoot, inputPath)}`);
+    }
+    if (!inputPath.endsWith(".md")) {
+      throw new Error(`DOCX input must be Markdown: ${path.relative(repoRoot, inputPath)}`);
+    }
+  }
+
+  if (!cliInputs.length) {
+    fs.rmSync(outputRoot, { recursive: true, force: true });
+    fs.mkdirSync(outputRoot, { recursive: true });
+  }
+
   const created = [];
 
   for (const inputPath of markdownFiles) {
-    // eslint-disable-next-line no-await-in-loop
     const written = await generateDocx(inputPath);
     created.push(written);
   }

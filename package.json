@@ -10,7 +10,7 @@
     "build:dev": "vite build --mode development",
     "docs:docx": "npm run docs:role-screenshots && node scripts/generate-user-manual-docx.mjs",
     "docs:docx:printing": "npm run docs:printing:images && node scripts/generate-printing-docx.mjs",
-    "docs:docx:roles": "node scripts/generate-user-manual-docx.mjs",
+    "docs:docx:roles": "npm run docs:role-screenshots && node scripts/generate-user-manual-docx.mjs documents/manuals/MSCQR_LICENSEE_ADMIN_MANUAL.md documents/manuals/MSCQR_MANUFACTURER_MANUAL.md documents/manuals/MSCQR_CUSTOMER_MANUAL.md",
     "docs:role-screenshots": "node scripts/capture-role-manual-screenshots.mjs",
     "docs:meeting": "npm run docs:role-screenshots && node scripts/generate-meeting-role-manual-docx.mjs",
     "docs:meeting:docx": "node scripts/generate-meeting-role-manual-docx.mjs",
