@@ -331,13 +331,14 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
   });
 
   if (!response.success) {
-    const activePrintJobId = String((response.data as any)?.activePrintJobId || (response.data as any)?.job?.id || "").trim();
+    const responseData = response.data as { activePrintJobId?: unknown; job?: Partial<PrintJobRow> | null } | undefined;
+    const activePrintJobId = String(responseData?.activePrintJobId || responseData?.job?.id || "").trim();
     if (activePrintJobId) {
       setPrintJobId(activePrintJobId);
       setPrintProgressOpen(true);
       setPrintProgressError(null);
       setPrintProgressCurrentCode(null);
-      syncProgressFromPrintJob(((response.data as any)?.job || null) as PrintJobRow | null, context);
+      syncProgressFromPrintJob((responseData?.job || null) as PrintJobRow | null, context);
       toast({
         title: "Active print run found",
         description: "A live print job already exists for this batch, so MSCQR resumed its current status instead of creating a duplicate run.",

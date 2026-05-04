@@ -369,7 +369,7 @@ export function useManufacturerPrinterConnection({
         updatedAt: degradedStatus.lastHeartbeatAt || new Date().toISOString(),
       });
 
-      if (!Boolean(degradedStatus.connected && degradedStatus.eligibleForPrinting)) {
+      if (!(degradedStatus.connected && degradedStatus.eligibleForPrinting)) {
         void maybeAutoReportPrinterFailure({
           localResult: local,
           remoteStatus: degradedStatus,

@@ -10,7 +10,7 @@ export type ConsentState = {
   };
 };
 
-type OptionalConsentCategory = Exclude<ConsentCategory, "strictly_necessary">;
+export type OptionalConsentCategory = Exclude<ConsentCategory, "strictly_necessary">;
 
 type CookieOptions = {
   path?: string;

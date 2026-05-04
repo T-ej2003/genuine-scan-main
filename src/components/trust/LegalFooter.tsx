@@ -1,5 +1,7 @@
 import { Link } from "react-router-dom";
 
+import { Button } from "@/components/ui/button";
+import { openCookiePreferences } from "@/lib/cookie-preferences-events";
 import { cn } from "@/lib/utils";
 
 type LegalFooterProps = {
@@ -51,6 +53,18 @@ export function LegalFooter({ tone = "light", className }: LegalFooterProps) {
               {item.label}
             </Link>
           ))}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={openCookiePreferences}
+            className={cn(
+              "h-auto px-0 py-0 text-sm font-normal hover:bg-transparent hover:underline hover:underline-offset-4",
+              isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-700 hover:text-slate-950",
+            )}
+          >
+            Cookie preferences
+          </Button>
         </div>
       </div>
     </footer>

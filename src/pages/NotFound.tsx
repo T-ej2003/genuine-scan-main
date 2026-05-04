@@ -54,7 +54,7 @@ export default function NotFound() {
             <div className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Trusted paths</div>
             <div className="mt-4 space-y-4 text-sm leading-7 text-slate-600">
               <p>Use verification pages for customer checks, the trust center for proof guidance, and the help hub for role-specific support.</p>
-              <p>Legal, privacy, and cookie information is available from the footer below while final launch review is completed.</p>
+              <p>Legal, privacy, cookie, and preference information is available from the footer below.</p>
             </div>
           </div>
         </div>

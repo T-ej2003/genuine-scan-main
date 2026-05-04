@@ -4,21 +4,34 @@ import { MemoryRouter } from "react-router-dom";
 import { render, screen } from "@testing-library/react";
 
 import PrivacyPolicy from "@/pages/PrivacyPolicy";
+import CookieNotice from "@/pages/CookieNotice";
+import TermsOfUse from "@/pages/TermsOfUse";
 import NotFound from "@/pages/NotFound";
 
 describe("launch legal and trust surface", () => {
-  it("renders the privacy notice with review-required messaging and footer links", () => {
+  it("renders finalized public legal notices with coherent footer links", () => {
     render(
       <MemoryRouter>
-        <PrivacyPolicy />
+        <>
+          <PrivacyPolicy />
+          <CookieNotice />
+          <TermsOfUse />
+        </>
       </MemoryRouter>,
     );
 
     expect(screen.getByRole("heading", { name: /privacy notice/i })).toBeInTheDocument();
-    expect(screen.getByText(/lawyer review required before public launch/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Privacy" })).toHaveAttribute("href", "/privacy");
-    expect(screen.getByRole("link", { name: "Terms" })).toHaveAttribute("href", "/terms");
-    expect(screen.getByRole("link", { name: "Cookies" })).toHaveAttribute("href", "/cookies");
+    expect(screen.getByRole("heading", { name: /cookie notice/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /terms of use/i })).toBeInTheDocument();
+    expect(screen.queryByText(/lawyer review required before public launch/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/review-required draft/i)).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Privacy" })[0]).toHaveAttribute("href", "/privacy");
+    expect(screen.getAllByRole("link", { name: "Terms" })[0]).toHaveAttribute("href", "/terms");
+    expect(screen.getAllByRole("link", { name: "Cookies" })[0]).toHaveAttribute("href", "/cookies");
+    expect(screen.getAllByRole("link", { name: /cookie notice/i })[0]).toHaveAttribute("href", "/cookies");
+    expect(screen.getAllByRole("link", { name: /terms of use/i })[0]).toHaveAttribute("href", "/terms");
+    expect(screen.getAllByRole("link", { name: /privacy notice/i })[0]).toHaveAttribute("href", "/privacy");
+    expect(screen.getAllByText(/Version 1.0/i).length).toBeGreaterThanOrEqual(3);
   });
 
   it("renders the branded 404 recovery page with trusted entry points", () => {
