@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { LockKeyhole, ScanLine } from "lucide-react";
 
+import { BrandLockup } from "@/components/brand/BrandLockup";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -23,18 +24,13 @@ export function PublicHeader({ className }: PublicHeaderProps) {
     <header className={cn("sticky top-0 z-50 border-b border-border/80 bg-white/92 backdrop-blur-xl", className)}>
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center justify-between gap-4">
-          <Link
+          <BrandLockup
             to="/"
             className="group flex min-w-0 items-center gap-3 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2"
-            aria-label="MSCQR home"
-          >
-            <span className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-moonlight-300 bg-moonlight-100">
-              <img src="/brand/mscqr-mark.svg" alt="" className="size-7" aria-hidden="true" />
-            </span>
-            <span className="min-w-0">
-              <span className="block text-sm font-semibold tracking-normal text-foreground">MSCQR</span>
-            </span>
-          </Link>
+            markClassName="size-11"
+            textClassName="text-sm tracking-normal text-foreground"
+            ariaLabel="MSCQR home"
+          />
 
           <div className="flex shrink-0 items-center gap-2 lg:hidden">
             <Button asChild size="sm">
