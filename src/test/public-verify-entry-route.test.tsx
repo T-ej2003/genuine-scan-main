@@ -29,7 +29,7 @@ describe("public verify entry route", () => {
     vi.mocked(apiClient.getCurrentUser).mockResolvedValue({
       success: false,
       error: "Unauthorized",
-    } as any);
+    } as Awaited<ReturnType<typeof apiClient.getCurrentUser>>);
   });
 
   afterEach(() => {
@@ -43,6 +43,7 @@ describe("public verify entry route", () => {
     expect(await screen.findByRole("heading", { name: /verify a garment/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/qr label code/i)).toBeInTheDocument();
     expect(window.location.pathname).toBe("/verify");
+    expect(apiClient.getCurrentUser).not.toHaveBeenCalled();
   });
 
   it("canonicalizes /verify/ to /verify without blanking the public entry page", async () => {
@@ -50,5 +51,19 @@ describe("public verify entry route", () => {
 
     await waitFor(() => expect(window.location.pathname).toBe("/verify"));
     expect(await screen.findByRole("heading", { name: /verify a garment/i })).toBeInTheDocument();
+    expect(apiClient.getCurrentUser).not.toHaveBeenCalled();
+  });
+
+  it("does not request the operator session on the anonymous public homepage", async () => {
+    renderAt("/");
+
+    expect((await screen.findAllByRole("link", { name: /verify product/i })).length).toBeGreaterThan(0);
+    expect(apiClient.getCurrentUser).not.toHaveBeenCalled();
+  });
+
+  it("still requests the operator session before protected route decisions", async () => {
+    renderAt("/dashboard");
+
+    await waitFor(() => expect(apiClient.getCurrentUser).toHaveBeenCalledTimes(1));
   });
 });

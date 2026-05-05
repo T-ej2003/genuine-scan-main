@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 
+import { shouldBootstrapCurrentUser } from "@/contexts/auth-bootstrap";
 import apiClient from "@/lib/api-client";
 import type { AuthState, PendingAuthSession, User } from "@/types";
 
@@ -67,6 +69,7 @@ function normalizeUser(u: any): User {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const location = useLocation();
   const [user, setUser] = useState<User | null>(null);
   const [pendingAuth, setPendingAuth] = useState<PendingAuthSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -120,18 +123,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const onAuthLogout = () => clearSession();
     window.addEventListener("auth:logout", onAuthLogout);
 
+    return () => window.removeEventListener("auth:logout", onAuthLogout);
+  }, []);
+
+  useEffect(() => {
+    if (!shouldBootstrapCurrentUser(location.pathname)) {
+      setIsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
     (async () => {
       setIsLoading(true);
       try {
         await refresh();
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     })();
 
-    return () => window.removeEventListener("auth:logout", onAuthLogout);
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [location.pathname]);
 
   const login = async (email: string, password: string) => {
     try {

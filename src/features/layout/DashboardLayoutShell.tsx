@@ -1,8 +1,7 @@
 import React, { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
-import { useTheme } from "next-themes";
-import { Activity, ChevronDown, CircleHelp, Command, LogOut, Menu, Moon, Printer, Settings, Sun } from "lucide-react";
+import { Activity, ChevronDown, CircleHelp, Command, LogOut, Menu, Printer, Settings } from "lucide-react";
 
 import { APP_PATHS, getAppBreadcrumbs, getNavItemsForRole, getRoleDisplayLabel, isAppRouteActive } from "@/app/route-metadata";
 import { BrandLockup } from "@/components/brand/BrandLockup";
@@ -29,6 +28,7 @@ import {
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDashboardNotificationCenter, useOperationalAttentionQueue } from "@/features/layout/hooks";
+import { DashboardThemeToggle } from "@/features/layout/components/DashboardThemeToggle";
 import { NotificationsDropdown } from "@/features/layout/components/NotificationsDropdown";
 import {
   PrinterOnboardingDialog,
@@ -38,7 +38,6 @@ import { NOTIFICATION_FETCH_LIMIT, resolveNotificationTarget, resolveWorkspaceLa
 import { useManufacturerPrinterConnection } from "@/features/layout/useManufacturerPrinterConnection";
 import { getContextualHelpRoute } from "@/help/contextual-help";
 import { useToast } from "@/hooks/use-toast";
-import { hasConsent } from "@/lib/consent";
 import { cn } from "@/lib/utils";
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -50,7 +49,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [commandOpen, setCommandOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const reducedMotion = useReducedMotion();
-  const { resolvedTheme, setTheme } = useTheme();
 
   const filteredNavItems = getNavItemsForRole(user?.role);
   const navGroups = sidebarGroupOrder
@@ -74,17 +72,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     printerConnection.clearPrinterDialogSession();
     logout();
     navigate("/login");
-  };
-
-  const togglePlatformTheme = () => {
-    if (!hasConsent("functional")) {
-      toast({
-        title: "Preference storage disabled",
-        description: "Theme changes can be saved after functional cookies are enabled.",
-      });
-      return;
-    }
-    setTheme(resolvedTheme === "dark" ? "light" : "dark");
   };
 
   const workspaceLabel = resolveWorkspaceLabel(user);
@@ -347,16 +334,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               </Button>
             ) : null}
 
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={togglePlatformTheme}
-              aria-label={`Switch to ${resolvedTheme === "dark" ? "light" : "dark"} theme`}
-              className="hidden sm:inline-flex"
-            >
-              {resolvedTheme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            </Button>
+            <DashboardThemeToggle />
 
             <Button
               type="button"

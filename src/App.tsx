@@ -564,26 +564,26 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <MutationEventBridge />
-      <AuthProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <StepUpRecoveryDialog />
-          <BrowserRouter
-            future={{
-              v7_startTransition: true,
-              v7_relativeSplatPath: true,
-            }}
-          >
+      <BrowserRouter
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
+        <AuthProvider>
+          <TooltipProvider>
+            <Toaster />
+            <Sonner />
+            <StepUpRecoveryDialog />
             <SeoController />
             <CanonicalPathRedirects />
             <AppRoutes />
             <RouteMetricsTracker />
             <HelpAssistantWidget />
             <CookieConsentBanner />
-          </BrowserRouter>
-        </TooltipProvider>
-      </AuthProvider>
+          </TooltipProvider>
+        </AuthProvider>
+      </BrowserRouter>
     </QueryClientProvider>
   );
 }
