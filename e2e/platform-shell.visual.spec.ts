@@ -8,6 +8,16 @@ const roleProfiles: Record<MockRole, { name: string; email: string; licenseeId?:
   MANUFACTURER: { name: "Acme Factory 1", email: "factory1@acme.com", licenseeId: "licensee-acme", orgId: "licensee-acme" },
 };
 
+const visualConsentState = {
+  version: 1,
+  updatedAt: "2026-04-24T12:00:00.000Z",
+  categories: {
+    functional: true,
+    analytics: false,
+    marketing: false,
+  },
+};
+
 const authPayloadForRole = (role: MockRole) => {
   const profile = roleProfiles[role];
   return {
@@ -40,6 +50,10 @@ const authPayloadForRole = (role: MockRole) => {
 };
 
 const mockPlatformApis = async (page: Page, role: MockRole) => {
+  await page.addInitScript((consentState) => {
+    window.localStorage.setItem("mscqr_cookie_consent_state:v1", JSON.stringify(consentState));
+  }, visualConsentState);
+
   if (role === "MANUFACTURER") {
     await page.addInitScript(() => {
       window.sessionStorage.setItem("manufacturer-printer-dialog-opened:v1:manufacturer-visual-user", "shown");
@@ -168,6 +182,8 @@ const mockPlatformApis = async (page: Page, role: MockRole) => {
     }),
   );
   await page.route("http://127.0.0.1:17866/backend/config", (route) => route.fulfill({ json: { success: true } }));
+  await page.route("**/api/printer-agent/local/claim", (route) => route.fulfill({ json: { success: true, data: null } }));
+  await page.route("**/api/manufacturer/printer-agent/events", (route) => route.abort());
   await page.route("**/api/manufacturer/printer-agent/heartbeat", (route) =>
     route.fulfill({
       json: {
@@ -258,7 +274,12 @@ test.describe("platform shell visual regression", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await mockPlatformApis(page, "MANUFACTURER");
     await page.goto("/dashboard");
-    await page.getByLabel("Open workspace activity").click();
+    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+    await expect(page.getByRole("dialog").filter({ hasText: "Printing Status" })).toBeHidden();
+
+    const activityButton = page.getByLabel("Open workspace activity");
+    await activityButton.click({ trial: true });
+    await activityButton.click();
     await expect(page.getByRole("dialog").getByText("Workspace activity").first()).toBeVisible();
     await expect(page).toHaveScreenshot("platform-shell-manufacturer-mobile-intelligence.png", {
       animations: "disabled",
