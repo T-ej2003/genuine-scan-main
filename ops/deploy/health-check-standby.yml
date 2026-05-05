@@ -1,0 +1,48 @@
+---
+- name: Health check MSCQR standby regions
+  hosts: standby_regions
+  gather_facts: false
+
+  vars:
+    app_dir: /home/ubuntu/genuine-scan-main
+    health_base_url: "http://{{ ansible_host }}"
+    health_paths:
+      - /healthz
+      - /api/health/ready
+
+  tasks:
+    - name: Show target standby health check
+      debug:
+        msg: "Checking {{ inventory_hostname }} at {{ health_base_url }}"
+
+    - name: Check standby HTTP health endpoints
+      uri:
+        url: "{{ health_base_url }}{{ item }}"
+        method: GET
+        status_code: 200
+        timeout: 10
+      loop: "{{ health_paths }}"
+      register: standby_http_checks
+      retries: 5
+      delay: 5
+      until: standby_http_checks.status == 200
+
+    - name: Check Docker Compose service status
+      command: docker compose ps
+      args:
+        chdir: "{{ app_dir }}"
+      register: compose_ps
+      changed_when: false
+
+    - name: Capture standby commit
+      command: git rev-parse --short HEAD
+      args:
+        chdir: "{{ app_dir }}"
+      register: standby_commit
+      changed_when: false
+
+    - name: Print standby health result
+      debug:
+        msg:
+          - "Commit: {{ standby_commit.stdout }}"
+          - "{{ compose_ps.stdout_lines }}"

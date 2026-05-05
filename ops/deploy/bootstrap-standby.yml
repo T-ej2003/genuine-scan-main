@@ -1,0 +1,74 @@
+---
+- name: Bootstrap MSCQR standby servers
+  hosts: standby_regions
+  become: yes
+  gather_facts: yes
+
+  vars:
+    standby_packages:
+      - git
+      - curl
+      - ufw
+      - nginx
+      - docker.io
+      - docker-compose-plugin
+      - python3-pip
+    app_user: ubuntu
+
+  tasks:
+    - name: Show target standby region
+      debug:
+        msg: "Bootstrapping {{ inventory_hostname }} in {{ group_names | intersect(['mumbai', 'capetown']) | first | default('standby') }}"
+
+    - name: Update apt package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install standby host packages
+      apt:
+        name: "{{ standby_packages }}"
+        state: present
+
+    - name: Enable and start Docker
+      service:
+        name: docker
+        enabled: yes
+        state: started
+
+    - name: Add ubuntu user to docker group
+      user:
+        name: "{{ app_user }}"
+        groups: docker
+        append: yes
+
+    - name: Allow SSH through UFW
+      command: ufw allow 22/tcp
+      register: ufw_ssh
+      changed_when: "'Rules updated' in ufw_ssh.stdout"
+
+    - name: Allow HTTP through UFW
+      command: ufw allow 80/tcp
+      register: ufw_http
+      changed_when: "'Rules updated' in ufw_http.stdout"
+
+    - name: Enable UFW with the allowed standby ports
+      command: ufw --force enable
+      register: ufw_enable
+      changed_when: "'Firewall is active' in ufw_enable.stdout"
+
+    - name: Stop host Nginx so Docker Compose frontend can bind port 80
+      service:
+        name: nginx
+        enabled: no
+        state: stopped
+      failed_when: false
+
+    - name: Confirm Docker Compose plugin is available
+      command: docker compose version
+      register: compose_version
+      changed_when: false
+
+    - name: Print Docker Compose version
+      debug:
+        var: compose_version.stdout

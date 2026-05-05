@@ -1,0 +1,206 @@
+---
+- name: Deploy MSCQR app to standby regions
+  hosts: standby_regions
+  become: yes
+  serial: 1
+
+  vars:
+    app_dir: /home/ubuntu/genuine-scan-main
+    app_user: ubuntu
+    branch: main
+    repo_url: https://github.com/T-ej2003/genuine-scan-main.git
+    controller_repo_root: "{{ playbook_dir }}/../.."
+    region_env_name: "{{ region_name | default((group_names | intersect(['mumbai', 'capetown']) | first), true) }}"
+    compose_pull_before_up: true
+    host_nginx_config_candidates:
+      - /etc/nginx/sites-enabled/mscqr
+      - /etc/nginx/conf.d/mscqr.conf
+
+  tasks:
+    - name: Refuse deploy when region name cannot be resolved
+      fail:
+        msg: "Set region_name=mumbai or region_name=capetown for {{ inventory_hostname }} in inventory."
+      when: region_env_name is not defined or region_env_name | length == 0
+
+    - name: Show target standby deployment
+      debug:
+        msg: "Deploying {{ branch }} to {{ inventory_hostname }} ({{ region_env_name }}) at {{ ansible_host }}"
+
+    - name: Ensure app parent directory exists
+      file:
+        path: "{{ app_dir | dirname }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0755"
+
+    - name: Clone or update MSCQR repository
+      git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: "{{ branch }}"
+        update: yes
+        force: no
+      become_user: "{{ app_user }}"
+
+    - name: Check git working tree after checkout
+      command: git status --short
+      args:
+        chdir: "{{ app_dir }}"
+      register: git_status
+      changed_when: false
+
+    - name: Stop if standby server has uncommitted local changes
+      fail:
+        msg: "Server {{ inventory_hostname }} has uncommitted changes. Refusing to deploy over them: {{ git_status.stdout }}"
+      when: git_status.stdout | length > 0
+
+    - name: Capture deployed commit
+      command: git rev-parse --short HEAD
+      args:
+        chdir: "{{ app_dir }}"
+      register: deployed_commit
+      changed_when: false
+
+    - name: Check for local operator root env file
+      stat:
+        path: "{{ controller_repo_root }}/.env.production.{{ region_env_name }}"
+      delegate_to: localhost
+      become: no
+      register: local_root_region_env
+
+    - name: Check for local operator backend env file
+      stat:
+        path: "{{ controller_repo_root }}/backend/.env.production.{{ region_env_name }}"
+      delegate_to: localhost
+      become: no
+      register: local_backend_region_env
+
+    - name: Upload local operator root env file when present
+      copy:
+        src: "{{ controller_repo_root }}/.env.production.{{ region_env_name }}"
+        dest: "{{ app_dir }}/.env.production.{{ region_env_name }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0600"
+      when: local_root_region_env.stat.exists
+      no_log: true
+
+    - name: Upload local operator backend env file when present
+      copy:
+        src: "{{ controller_repo_root }}/backend/.env.production.{{ region_env_name }}"
+        dest: "{{ app_dir }}/backend/.env.production.{{ region_env_name }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0600"
+      when: local_backend_region_env.stat.exists
+      no_log: true
+
+    - name: Check for region-specific root env file
+      stat:
+        path: "{{ app_dir }}/.env.production.{{ region_env_name }}"
+      register: root_region_env
+
+    - name: Check for region-specific backend env file
+      stat:
+        path: "{{ app_dir }}/backend/.env.production.{{ region_env_name }}"
+      register: backend_region_env
+
+    - name: Use region-specific root env file when present
+      copy:
+        src: "{{ app_dir }}/.env.production.{{ region_env_name }}"
+        dest: "{{ app_dir }}/.env"
+        remote_src: yes
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0600"
+      when: root_region_env.stat.exists
+
+    - name: Use region-specific backend env file when present
+      copy:
+        src: "{{ app_dir }}/backend/.env.production.{{ region_env_name }}"
+        dest: "{{ app_dir }}/backend/.env"
+        remote_src: yes
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0600"
+      when: backend_region_env.stat.exists
+
+    - name: Use region-specific root env for backend when backend env is not separate
+      copy:
+        src: "{{ app_dir }}/.env.production.{{ region_env_name }}"
+        dest: "{{ app_dir }}/backend/.env"
+        remote_src: yes
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0600"
+      when: root_region_env.stat.exists and not backend_region_env.stat.exists
+
+    - name: Confirm root env file exists
+      stat:
+        path: "{{ app_dir }}/.env"
+      register: root_env
+
+    - name: Confirm backend env file exists
+      stat:
+        path: "{{ app_dir }}/backend/.env"
+      register: backend_env
+
+    - name: Stop if required env files are missing
+      fail:
+        msg: "Missing {{ app_dir }}/.env or {{ app_dir }}/backend/.env. Create .env.production.{{ region_env_name }} on the server or place env files manually before deploying."
+      when: not root_env.stat.exists or not backend_env.stat.exists
+
+    - name: Stamp deployed commit into root env for Docker Compose build metadata
+      lineinfile:
+        path: "{{ app_dir }}/.env"
+        regexp: "^GIT_SHA="
+        line: "GIT_SHA={{ deployed_commit.stdout }}"
+        create: no
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0600"
+
+    - name: Pull upstream images where services use image tags
+      command: docker compose pull
+      args:
+        chdir: "{{ app_dir }}"
+      register: compose_pull
+      changed_when: "'Downloaded newer image' in compose_pull.stdout or 'Pulled' in compose_pull.stdout"
+      failed_when: false
+      when: compose_pull_before_up | bool
+
+    - name: Build and start Docker Compose stack
+      command: docker compose up -d --build
+      args:
+        chdir: "{{ app_dir }}"
+      register: compose_up
+
+    - name: Show Docker Compose deployment output
+      debug:
+        var: compose_up.stdout_lines
+
+    - name: Check for project host Nginx configs
+      stat:
+        path: "{{ item }}"
+      loop: "{{ host_nginx_config_candidates }}"
+      register: host_nginx_configs
+
+    - name: Restart host Nginx only when a project config is present
+      service:
+        name: nginx
+        state: restarted
+      when: host_nginx_configs.results | selectattr('stat.exists') | list | length > 0
+
+    - name: Show Docker Compose status
+      command: docker compose ps
+      args:
+        chdir: "{{ app_dir }}"
+      register: compose_ps
+      changed_when: false
+
+    - name: Print deployed commit and Docker Compose status
+      debug:
+        msg:
+          - "Commit: {{ deployed_commit.stdout }}"
+          - "{{ compose_ps.stdout_lines }}"

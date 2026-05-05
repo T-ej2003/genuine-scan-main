@@ -95,6 +95,12 @@ Deploy standby only after London is healthy:
 ansible-playbook -i ops/deploy/inventory.ini ops/deploy/deploy.yml --limit standby
 ```
 
+For AWS Multi-Region Setup Phase 2 standby-only operations, use the dedicated bootstrap, deploy, and health-check playbooks documented in:
+
+```text
+docs/aws-multi-region-phase-2.md
+```
+
 Confirm all regions:
 
 ```bash
