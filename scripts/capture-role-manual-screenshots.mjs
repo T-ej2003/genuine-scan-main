@@ -36,6 +36,16 @@ const manufacturer = {
 };
 
 const roleProfiles = {
+  SUPER_ADMIN: {
+    id: "platform-admin",
+    email: "administration@mscqr.com",
+    name: "Platform Admin",
+    role: "SUPER_ADMIN",
+    licenseeId: null,
+    orgId: null,
+    licensee: null,
+    linkedLicensees: [],
+  },
   LICENSEE_ADMIN: {
     id: "licensee-admin-manual",
     email: "admin@acme.example",
@@ -726,6 +736,22 @@ const startServer = async () => {
 const preparePage = async (browser, role, viewport = { width: 1440, height: 920 }) => {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1, colorScheme: "light" });
   const page = await context.newPage();
+  const profile = roleProfiles[role];
+  await page.addInitScript(
+    ({ userId }) => {
+      const consent = {
+        version: 1,
+        updatedAt: "2026-05-04T09:30:00.000Z",
+        categories: { functional: true, analytics: false, marketing: false },
+      };
+      window.localStorage.setItem("mscqr_cookie_consent_state:v1", JSON.stringify(consent));
+      if (userId) {
+        window.localStorage.setItem(`manufacturer-printer-onboarding:v1:${userId}`, "dismissed");
+        window.sessionStorage.setItem(`manufacturer-printer-dialog-opened:v1:${userId}`, "shown");
+      }
+    },
+    { userId: profile?.id || "" }
+  );
   await setupApiMocks(page, role);
   await page.addStyleTag({
     content: `
@@ -762,6 +788,20 @@ async function main() {
   const browser = await chromium.launch();
 
   try {
+    {
+      const { context, page } = await preparePage(browser, "SUPER_ADMIN");
+
+      await goto(page, "/licensees");
+      await page.getByRole("button", { name: /add brand/i }).click();
+      await capture(page, "superadmin-create-licensee.png", { locator: page.getByRole("dialog") });
+
+      await goto(page, "/code-requests");
+      await page.getByRole("button", { name: /approve/i }).first().click();
+      await capture(page, "superadmin-approve-qr-request.png", { locator: page.getByRole("dialog") });
+
+      await context.close();
+    }
+
     {
       const { context, page } = await preparePage(browser, "LICENSEE_ADMIN");
 
@@ -853,6 +893,8 @@ async function main() {
   }
 
   const created = [
+    "superadmin-create-licensee.png",
+    "superadmin-approve-qr-request.png",
     "licensee-admin-dashboard.png",
     "licensee-admin-qr-request.png",
     "licensee-admin-manufacturer-invite.png",

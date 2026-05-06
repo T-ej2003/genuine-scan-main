@@ -10,6 +10,7 @@ export interface ApiResponse<T = any> {
   message?: string;
   degraded?: boolean;
   code?: string;
+  retryAfterSec?: number;
 }
 
 type RequestOptions = RequestInit & {
@@ -404,6 +405,17 @@ export function createApiClientCore(): ApiClientCore {
           payload && typeof payload === "object" && typeof (payload as any).code === "string"
             ? String((payload as any).code)
             : undefined;
+        const retryAfterHeader = Number(response.headers.get("retry-after") || "");
+        const retryAfterPayload =
+          payload && typeof payload === "object" && "retryAfterSec" in payload
+            ? Number((payload as any).retryAfterSec)
+            : NaN;
+        const retryAfterSec =
+          Number.isFinite(retryAfterPayload) && retryAfterPayload > 0
+            ? retryAfterPayload
+            : Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+              ? retryAfterHeader
+              : undefined;
         const responseData =
           payload && typeof payload === "object" && "data" in payload ? (payload as any).data : undefined;
         if (response.status === 428 && responseCode === "STEP_UP_REQUIRED") {
@@ -427,6 +439,7 @@ export function createApiClientCore(): ApiClientCore {
           success: false,
           error: message,
           code: responseCode,
+          retryAfterSec,
           data: responseData,
         };
       }

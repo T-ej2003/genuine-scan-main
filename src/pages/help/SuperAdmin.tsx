@@ -11,7 +11,7 @@ export default function SuperAdminHelp() {
   return (
     <HelpShell
       title="Super Admin"
-      subtitle="Manage tenants, code approvals, audit visibility, and incident response across the platform."
+      subtitle="Manage brand workspaces, code approvals, audit visibility, and incident response across the platform."
     >
       <div className="space-y-6">
         <Card>
@@ -23,9 +23,9 @@ export default function SuperAdminHelp() {
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
             <ul className="list-disc pl-5">
-              <li>Create and manage licensees (organizations/tenants).</li>
-              <li>Approve code inventory requests from licensees.</li>
-              <li>Review printer certification state and print trace when a tenant route needs investigation.</li>
+              <li>Create and manage brand workspaces.</li>
+              <li>Approve code inventory requests from brand admins.</li>
+              <li>Review printer certification state and print trace when a workspace route needs investigation.</li>
               <li>View platform audit logs and investigate activity.</li>
               <li>Use Incident Response to triage alerts, open incidents, and apply containment actions.</li>
             </ul>
@@ -47,15 +47,15 @@ export default function SuperAdminHelp() {
               <CardHeader className="space-y-1">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Building2 className="h-4 w-4 text-primary" />
-                  Create a licensee
+                  Create a brand workspace
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">
-                  <li>Open <Badge variant="outline">Licensees</Badge>.</li>
-                  <li>Select <Badge variant="outline">Add Licensee</Badge>.</li>
+                  <li>Open <Badge variant="outline">Brands</Badge>.</li>
+                  <li>Select <Badge variant="outline">Add brand</Badge>.</li>
                   <li>Fill company name, prefix, and optional details.</li>
-                  <li>Create the record. The licensee becomes a new tenant/org.</li>
+                  <li>Create the record. The brand becomes the scoped workspace for admins, batches, and audit history.</li>
                 </ol>
               </CardContent>
             </Card>
@@ -100,7 +100,7 @@ export default function SuperAdminHelp() {
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-muted-foreground">
               <ol className="list-decimal pl-5">
-                <li>Confirm whether the issue is tenant-scoped or affects multiple sites.</li>
+                <li>Confirm whether the issue is brand-scoped or affects multiple sites.</li>
                 <li>Review the saved printer profile, live discovery status, and latest print trace before changing certification.</li>
                 <li>Use the audit trail to decide whether the route should stay certified, move to review, or be blocked.</li>
               </ol>
@@ -111,20 +111,20 @@ export default function SuperAdminHelp() {
         <section className="space-y-3">
           <h2 className="text-lg font-semibold text-foreground">Core workflow screens</h2>
           <p className="text-sm text-muted-foreground">
-            These screens cover the platform-admin loop: create the tenant, approve inventory, triage incidents, and
+            These screens cover the platform-admin loop: create the brand workspace, approve inventory, triage incidents, and
             tune policy rules when the platform needs a control change.
           </p>
           <div className="grid gap-4 md:grid-cols-2">
             <WorkflowScreenshotCard
-              title="Create the licensee"
-              description="Start every new customer rollout here. This tenant record is the anchor for users, batches, scope, and audit history."
+              title="Create the brand workspace"
+              description="Start every new customer rollout here. This workspace is the anchor for users, batches, scope, and audit history."
               filename="superadmin-create-licensee.png"
-              alt="Create licensee modal"
-              caption="Licensees: create the tenant before inviting admins or reviewing request volume."
+              alt="Create brand workspace dialog"
+              caption="Brands: create the workspace before inviting admins or reviewing request volume."
               highlights={[
                 "Confirm the company name and prefix before saving.",
-                "Create the tenant record first, then invite the licensee admin.",
-                "Return here for cross-tenant administration and status checks.",
+                "Create the workspace first, then invite the Brand Admin.",
+                "Return here for cross-workspace administration and status checks.",
               ]}
             />
             <WorkflowScreenshotCard
@@ -168,7 +168,7 @@ export default function SuperAdminHelp() {
             items={[
               {
                 filename: "superadmin-create-licensee.png",
-                whereToCapture: "Licensees page with Add Licensee modal open.",
+                whereToCapture: "Brands page with Add brand dialog open.",
               },
               {
                 filename: "superadmin-approve-qr-request.png",

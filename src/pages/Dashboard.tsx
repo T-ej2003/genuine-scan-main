@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { APP_PATHS, getRoleDisplayLabel } from "@/app/route-metadata";
 import { useAuth } from "@/contexts/AuthContext";
@@ -19,13 +19,13 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { useDashboardAuditLogs, useDashboardStats } from "@/features/dashboard/hooks";
+import { DASHBOARD_GRAPH_OPTIONS, buildOverviewLifecycleSteps, type DashboardGraphView } from "@/features/dashboard/presentation";
 
 import type { AuditLogDTO, DashboardStatsDTO, QrStatsDTO } from "../../shared/contracts/runtime/dashboard.ts";
 
-const STATS_POLL_MS = 5000;
+const STATS_POLL_MS = 30_000;
 const API_BASE = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
 type StatusFocus = "all" | "dormant" | "allocated" | "printed" | "scanned";
-type DashboardGraphView = "scans" | "confidence" | "printed" | "batches";
 type QrStatsDashboardExtras = QrStatsDTO & {
   suspiciousScans?: number;
   suspicious?: number;
@@ -40,6 +40,8 @@ export default function Dashboard() {
   const canReadAuditFeed = user?.role === "super_admin" || user?.role === "licensee_admin";
   const dashboardQuery = useDashboardStats(scopedLicenseeId);
   const auditLogsQuery = useDashboardAuditLogs(canReadAuditFeed, 5);
+  const dashboardRefetch = dashboardQuery.refetch;
+  const auditLogsRefetch = auditLogsQuery.refetch;
 
   const [liveSummary, setLiveSummary] = useState<DashboardStatsDTO | null>(null);
   const [liveQrStats, setLiveQrStats] = useState<QrStatsDTO | null>(null);
@@ -54,13 +56,27 @@ export default function Dashboard() {
   const pollRef = useRef<number | null>(null);
   const sseRef = useRef<EventSource | null>(null);
   const refreshTimerRef = useRef<number | null>(null);
+  const refreshInFlightRef = useRef<Promise<void> | null>(null);
+  const latestAuditLogsRef = useRef<AuditLogDTO[]>([]);
 
-  const refreshDashboard = async () => {
-    await dashboardQuery.refetch();
-    if (canReadAuditFeed) {
-      await auditLogsQuery.refetch();
-    }
-  };
+  useEffect(() => {
+    latestAuditLogsRef.current = (auditLogsQuery.data || []) as AuditLogDTO[];
+  }, [auditLogsQuery.data]);
+
+  const refreshDashboard = useCallback(async () => {
+    if (refreshInFlightRef.current) return refreshInFlightRef.current;
+
+    refreshInFlightRef.current = (async () => {
+      await dashboardRefetch();
+      if (canReadAuditFeed) {
+        await auditLogsRefetch();
+      }
+    })().finally(() => {
+      refreshInFlightRef.current = null;
+    });
+
+    return refreshInFlightRef.current;
+  }, [auditLogsRefetch, canReadAuditFeed, dashboardRefetch]);
 
   useEffect(() => {
     const closeRealtime = () => {
@@ -74,8 +90,6 @@ export default function Dashboard() {
       }
       setSseConnected(false);
     };
-
-    void refreshDashboard();
 
     if (!liveUpdates) {
       setLiveSummary(null);
@@ -133,7 +147,7 @@ export default function Dashboard() {
           if (envelope?.type === "audit.delta") {
             const log = envelope?.payload?.log;
             if (log) {
-              setLiveLogs((prev) => [log, ...((prev || auditLogsQuery.data || []) as AuditLogDTO[])].slice(0, 10));
+              setLiveLogs((prev) => [log, ...(prev || latestAuditLogsRef.current)].slice(0, 10));
             }
             return;
           }
@@ -157,7 +171,7 @@ export default function Dashboard() {
       closeRealtime();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auditLogsQuery.data, canReadAuditFeed, liveUpdates, scopedLicenseeId, user?.role]);
+  }, [canReadAuditFeed, liveUpdates, refreshDashboard, scopedLicenseeId, user?.role]);
 
   useEffect(() => {
     if (dashboardQuery.dataUpdatedAt) {
@@ -242,12 +256,7 @@ export default function Dashboard() {
     (rawStatusCounts.SUSPICIOUS ?? 0) + (rawStatusCounts.BLOCKED ?? 0);
   const scansToday = qrStatsExtras?.scansToday ?? qrStatsExtras?.todayScans ?? null;
   const qrLabelsAvailable = qrStatusData.dormant + qrStatusData.allocated;
-  const graphOptions: Array<{ id: DashboardGraphView; label: string; description: string }> = [
-    { id: "scans", label: "Scans over time", description: "Shows customer scan activity when the data is available." },
-    { id: "confidence", label: "Genuine vs suspicious", description: "Compares verified scans with scans that need review." },
-    { id: "printed", label: "Labels printed", description: "Tracks labels that have been confirmed as printed." },
-    { id: "batches", label: "Top scanned batches", description: "Highlights the batches customers scan most often." },
-  ];
+  const graphOptions = DASHBOARD_GRAPH_OPTIONS;
 
   const roleLabel = useMemo(() => getRoleDisplayLabel(user?.role), [user?.role]);
 
@@ -358,38 +367,7 @@ export default function Dashboard() {
   ]);
 
   const canViewAudit = user?.role === "super_admin" || user?.role === "licensee_admin" || user?.role === "manufacturer";
-  const overviewLifecycleSteps = [
-    {
-      label: "Issue",
-      title: "QR labels ready",
-      body: `${qrStatusData.dormant.toLocaleString()} waiting for allocation.`,
-      state: qrStatusData.dormant > 0 ? ("current" as const) : ("complete" as const),
-    },
-    {
-      label: "Assign",
-      title: "Batch assignment",
-      body: `${qrStatusData.allocated.toLocaleString()} assigned to production.`,
-      state: qrStatusData.allocated > 0 ? ("complete" as const) : ("pending" as const),
-    },
-    {
-      label: "Print",
-      title: "Print labels",
-      body: `${qrStatusData.printed.toLocaleString()} labels confirmed as printed.`,
-      state: qrStatusData.printed > 0 ? ("complete" as const) : ("pending" as const),
-    },
-    {
-      label: "Verify",
-      title: "Public checks",
-      body: `${qrStatusData.scanned.toLocaleString()} customer verification events.`,
-      state: qrStatusData.scanned > 0 ? ("complete" as const) : ("pending" as const),
-    },
-    {
-      label: "Review",
-      title: "Review issues",
-      body: "Scan results and workspace history remain reviewable.",
-      state: "current" as const,
-    },
-  ];
+  const overviewLifecycleSteps = useMemo(() => buildOverviewLifecycleSteps(qrStatusData), [qrStatusData]);
 
   if (loading) {
     return (

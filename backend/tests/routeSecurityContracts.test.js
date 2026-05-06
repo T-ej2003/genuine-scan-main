@@ -26,6 +26,10 @@ assert(!realtimeRoutesSource.includes("const createJsonRateLimitHandler"), "real
 assert(!governanceRoutesSource.includes("const createJsonRateLimitHandler"), "governance routes should use shared rate-limit telemetry handlers");
 assert(!auditRoutesSource.includes("const createJsonRateLimitHandler"), "audit routes should use shared rate-limit telemetry handlers");
 assert(!routesSource.includes("const createJsonRateLimitHandler"), "main routes should use shared rate-limit telemetry handlers");
+assert(
+  indexSource.includes("app.use(express.urlencoded({ extended: false, limit: \"1mb\" })); app.use(express.json({ limit: \"1mb\" })); app.use(sanitizeRequestInput);"),
+  "app root should mount request sanitization globally after body parsers and before routes"
+);
 
 [
   "...loginLimiters",

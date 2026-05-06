@@ -1,9 +1,21 @@
 import type { ApiResponse } from "@/lib/api-client";
 import type { z } from "zod";
 
+export class ApiResponseError extends Error {
+  code?: string;
+  retryAfterSec?: number;
+
+  constructor(message: string, response: ApiResponse<unknown>) {
+    super(message);
+    this.name = "ApiResponseError";
+    this.code = response.code;
+    this.retryAfterSec = response.retryAfterSec;
+  }
+}
+
 export function unwrapApiResponse<T>(response: ApiResponse<unknown>, fallbackMessage: string): T {
   if (!response.success) {
-    throw new Error(response.error || fallbackMessage);
+    throw new ApiResponseError(response.error || fallbackMessage, response);
   }
 
   return response.data as T;
