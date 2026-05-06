@@ -191,19 +191,17 @@ export const recordRateLimitMetric = (req: Request, scope: string) => {
 };
 
 export const createRateLimitJsonHandler =
-  (scope: string, message: string, options: RateLimitHandlerOptions = {}) =>
+  (scope: string, message: string, _options: RateLimitHandlerOptions = {}) =>
   (req: Request, res: Response) => {
     const retryAfterSec = recordRateLimitMetric(req, scope);
-    if (options.includeRetryAfter) {
-      res.setHeader("Retry-After", String(retryAfterSec));
-    }
+    res.setHeader("Retry-After", String(retryAfterSec));
 
     return res.status(429).json({
       success: false,
       code: "RATE_LIMITED",
       error: message,
       scope,
-      ...(options.includeRetryAfter ? { retryAfterSec } : {}),
+      retryAfterSec,
     });
   };
 

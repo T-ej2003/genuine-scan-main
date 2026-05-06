@@ -87,6 +87,16 @@ const assertRateLimitAfter = async ({
     });
 
     assert.strictEqual(limited.status, 429, `${description} should rate-limit the ${allowed + 1}th request`);
+    assert(
+      Number(limited.headers.get("retry-after") || "0") > 0,
+      `${description} should include a standard Retry-After header`
+    );
+    const limitedPayload = await limited.json();
+    assert.strictEqual(limitedPayload.code, "RATE_LIMITED", `${description} should use the standard rate-limit error code`);
+    assert(
+      Number(limitedPayload.retryAfterSec || 0) > 0,
+      `${description} should include a retryAfterSec body field`
+    );
   } finally {
     await stopServer(server);
   }

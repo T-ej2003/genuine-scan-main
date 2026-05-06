@@ -60,7 +60,7 @@ export default function GettingAccess() {
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ol className="list-decimal pl-5">
-                  <li>Super Admin creates the licensee (tenant).</li>
+                  <li>Super Admin creates the brand workspace.</li>
                   <li>Super Admin or an org admin sends you an invite email.</li>
                   <li>You open the invite link and set your password.</li>
                   <li>You sign in and operate only within your org scope.</li>
@@ -110,8 +110,8 @@ export default function GettingAccess() {
           <div className="grid gap-4 md:grid-cols-2">
             <DocScreenshot
               filename="superadmin-create-licensee.png"
-              alt="Super Admin creating a licensee"
-              caption="Super Admin: create a licensee (tenant)."
+              alt="Super Admin creating a brand workspace"
+              caption="Super Admin: create the brand workspace."
             />
             <DocScreenshot
               filename="licensee-admin-manufacturer-invite.png"
@@ -134,7 +134,7 @@ export default function GettingAccess() {
             items={[
               {
                 filename: "superadmin-create-licensee.png",
-                whereToCapture: "Licensees page with Add Licensee modal open.",
+                whereToCapture: "Brands page with Add brand dialog open.",
               },
               {
                 filename: "licensee-admin-manufacturer-invite.png",

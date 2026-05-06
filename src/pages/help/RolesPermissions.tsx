@@ -11,7 +11,7 @@ export default function RolesPermissions() {
   return (
     <HelpShell
       title="Roles & permissions"
-      subtitle="Who can do what, and how organization scoping protects data between tenants."
+      subtitle="Who can do what, and how brand/workspace scoping protects data between customers."
     >
       <div className="space-y-6">
         <Card>
@@ -24,7 +24,7 @@ export default function RolesPermissions() {
           <CardContent className="text-sm text-muted-foreground">
             <ul className="list-disc pl-5">
               <li>Available roles and what each role can access.</li>
-              <li>Organization scoping (tenants) and manufacturer scoping.</li>
+              <li>Brand workspace scoping and manufacturer scoping.</li>
               <li>Where to request access changes.</li>
             </ul>
           </CardContent>
@@ -34,7 +34,7 @@ export default function RolesPermissions() {
           <Gavel className="h-4 w-4" />
           <AlertTitle>Tenant isolation is enforced</AlertTitle>
           <AlertDescription>
-            Licensee users and manufacturer users are scoped to exactly one organization. They cannot view or edit data belonging to another org.
+            Brand admins and manufacturer users are scoped to exactly one workspace. They cannot view or edit data belonging to another customer.
           </AlertDescription>
         </Alert>
 
@@ -43,11 +43,11 @@ export default function RolesPermissions() {
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <CardHeader className="space-y-1">
-                <CardTitle className="text-base">Super User</CardTitle>
+                <CardTitle className="text-base">Super Admin</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  Full platform access: licensees, code allocation flows, audit history, and Incident Response.
+                  Full platform access: Brands, QR Requests, History, Governance, and Incident Response.
                 </p>
                 <p className="text-xs">
                   Login role: <span className="font-mono">SUPER_ADMIN</span>.
@@ -61,7 +61,7 @@ export default function RolesPermissions() {
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  Manages manufacturers and batches within one licensee/org. Can request QR inventory and assign batches.
+                  Manages manufacturers and batches within one brand workspace. Can request QR inventory and assign batches.
                 </p>
                 <p className="text-xs">
                   Login role: <span className="font-mono">LICENSEE_ADMIN</span>.
@@ -100,16 +100,36 @@ export default function RolesPermissions() {
 
         <section className="space-y-3">
           <h2 className="text-lg font-semibold text-foreground">Screenshots</h2>
-          <DocScreenshot
-            filename="superadmin-create-licensee.png"
-            alt="Sidebar navigation by role"
-            caption="Navigation changes by role (example shown as Super Admin)."
-          />
+          <div className="grid gap-4 md:grid-cols-3">
+            <DocScreenshot
+              filename="superadmin-create-licensee.png"
+              alt="Super Admin Brands workspace"
+              caption="Super Admin: platform-wide Brands and approval workflows."
+            />
+            <DocScreenshot
+              filename="licensee-admin-dashboard.png"
+              alt="Brand Admin overview"
+              caption="Licensee Admin: scoped company workspace."
+            />
+            <DocScreenshot
+              filename="manufacturer-dashboard.png"
+              alt="Manufacturer overview"
+              caption="Manufacturer: assigned print-workflow scope."
+            />
+          </div>
           <ScreenshotChecklist
             items={[
               {
                 filename: "superadmin-create-licensee.png",
-                whereToCapture: "Any authenticated page showing the left navigation (Super Admin recommended).",
+                whereToCapture: "Brands page with Add brand dialog open.",
+              },
+              {
+                filename: "licensee-admin-dashboard.png",
+                whereToCapture: "Licensee Admin Overview page with QR totals and quick actions.",
+              },
+              {
+                filename: "manufacturer-dashboard.png",
+                whereToCapture: "Manufacturer Overview page with assigned scope and quick actions.",
               },
             ]}
           />

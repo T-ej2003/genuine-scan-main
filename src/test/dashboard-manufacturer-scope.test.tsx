@@ -118,6 +118,8 @@ describe("Dashboard manufacturer multi-licensee scope", () => {
 
     expect(vi.mocked(apiClient.getAuditLogs)).not.toHaveBeenCalled();
     expect(await screen.findByText("Linked brands")).toBeInTheDocument();
+    expect(vi.mocked(apiClient.getDashboardStats)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(apiClient.getQRStats)).toHaveBeenCalledTimes(1);
     expect(screen.getByText("Brand workspaces you can print for")).toBeInTheDocument();
     expect(screen.getByText("120 not used yet • 900 assigned")).toBeInTheDocument();
 

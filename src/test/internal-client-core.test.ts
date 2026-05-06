@@ -43,4 +43,24 @@ describe("internal client core HTML error handling", () => {
     expect(response.success).toBe(false);
     expect(response.error).toBe("Proxy timeout retry later");
   });
+
+  it("preserves rate-limit metadata from standard 429 responses", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: new Headers({ "content-type": "application/json", "retry-after": "42" }),
+      json: async () => ({
+        success: false,
+        code: "RATE_LIMITED",
+        error: "Too many dashboard refreshes. Please wait before retrying.",
+      }),
+    } as Response);
+
+    const client = createApiClientCore();
+    const response = await client.request("/dashboard/stats", { method: "GET", skipAuthRefresh: true });
+
+    expect(response.success).toBe(false);
+    expect(response.code).toBe("RATE_LIMITED");
+    expect(response.retryAfterSec).toBe(42);
+  });
 });

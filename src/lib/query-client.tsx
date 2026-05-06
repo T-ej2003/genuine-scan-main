@@ -1,12 +1,16 @@
 import { useEffect } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
+import { ApiResponseError } from "@/lib/api/query-utils";
 import { onMutationEvent } from "@/lib/mutation-events";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 1,
+      retry: (failureCount, error) => {
+        if (error instanceof ApiResponseError && error.code === "RATE_LIMITED") return false;
+        return failureCount < 1;
+      },
       staleTime: 10_000,
       refetchOnWindowFocus: false,
     },
