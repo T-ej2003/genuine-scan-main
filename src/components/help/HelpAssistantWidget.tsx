@@ -104,6 +104,8 @@ const canUseEntryForRole = (entryRole: HelpKbRole, activeRole: HelpKbRole) => {
   return entryRole === activeRole;
 };
 
+const legalDocumentRoutes = new Set(["/cookies", "/privacy", "/terms"]);
+
 const roleScopedIntro = (activeRole: HelpKbRole) => {
   if (activeRole === "all") {
     return "Super Admin mode: ask about any role workflow, policy, incident response, or customer verification.";
@@ -307,6 +309,10 @@ export default function HelpAssistantWidget() {
   }, [activeRole]);
 
   const activeRoleLabel = ROLE_LABELS[activeRole] || "General";
+
+  if (legalDocumentRoutes.has(location.pathname)) {
+    return null;
+  }
 
   return (
     <div className="fixed bottom-4 right-4 z-50 sm:bottom-5 sm:right-5">
