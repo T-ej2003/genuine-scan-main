@@ -119,10 +119,11 @@ function HeroSection() {
       <div className="relative mx-auto grid w-full max-w-7xl gap-12 px-4 py-16 lg:min-h-[calc(100svh-84px)] lg:grid-cols-[0.92fr_1.08fr] lg:items-center lg:py-20">
         <div className="max-w-3xl">
           <h1 className="text-balance text-5xl font-semibold leading-[1.02] tracking-normal text-foreground sm:text-6xl lg:text-7xl">
-            Make every garment verifiable.
+            MSCQR Garment Authentication Platform
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-muted-foreground">
-            Let customers scan your garments and trust what they buy.
+            MSCQR is a garment authentication QR platform for brands, manufacturers, and licensees. It helps teams make
+            garment QR labels verifiable, review suspicious scans, and support customers with clearer authenticity information.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
             <Button asChild size="lg">

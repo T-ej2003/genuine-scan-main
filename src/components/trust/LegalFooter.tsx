@@ -11,10 +11,12 @@ type LegalFooterProps = {
 
 const footerLinks = [
   { href: "/", label: "Home" },
+  { href: "/about", label: "About" },
   { href: "/solutions/brands", label: "For Brands" },
   { href: "/solutions/garment-manufacturers", label: "For Manufacturers" },
   { href: "/how-scanning-works", label: "How Scanning Works" },
   { href: "/trust", label: "Trust & Security" },
+  { href: "/contact", label: "Contact" },
   { href: "/request-access", label: "Request Access" },
   { href: "/verify", label: "Verify Product" },
   { href: "/help", label: "Help" },

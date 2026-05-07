@@ -5,6 +5,7 @@ const repoRoot = process.cwd();
 const SITE_ORIGIN = "https://www.mscqr.com";
 
 const files = {
+  index: path.join(repoRoot, "index.html"),
   sitemap: path.join(repoRoot, "public", "sitemap.xml"),
   robots: path.join(repoRoot, "public", "robots.txt"),
   seo: path.join(repoRoot, "src", "components", "seo", "SeoController.tsx"),
@@ -26,6 +27,7 @@ const sitemap = read(files.sitemap, "public/sitemap.xml");
 const robots = read(files.robots, "public/robots.txt");
 const seo = read(files.seo, "src/components/seo/SeoController.tsx");
 const app = read(files.app, "src/App.tsx");
+const indexHtml = read(files.index, "index.html");
 
 const sitemapUrls = Array.from(sitemap.matchAll(/<loc>([^<]+)<\/loc>/g), (match) => match[1].trim());
 const sitemapPaths = sitemapUrls.map((value) => {
@@ -39,8 +41,11 @@ const sitemapPaths = sitemapUrls.map((value) => {
 
 const requiredSitemapUrls = [
   `${SITE_ORIGIN}/`,
-  `${SITE_ORIGIN}/verify`,
-  `${SITE_ORIGIN}/trust`,
+  `${SITE_ORIGIN}/about`,
+  `${SITE_ORIGIN}/contact`,
+  `${SITE_ORIGIN}/privacy`,
+  `${SITE_ORIGIN}/terms`,
+  `${SITE_ORIGIN}/request-access`,
 ];
 
 const forbiddenSitemapPathPrefixes = [
@@ -109,12 +114,41 @@ const isRobotsBlocked = (urlPath) => {
   return best.type === "disallow";
 };
 
-const crawlablePublicPaths = ["/", "/verify", "/platform", "/solutions/manufacturers", "/industries", "/trust"];
+const crawlablePublicPaths = ["/", "/about", "/contact", "/privacy", "/terms", "/request-access", "/verify", "/platform", "/trust"];
 for (const publicPath of crawlablePublicPaths) {
   if (isRobotsBlocked(publicPath)) {
     failures.push(`robots.txt must not block public indexable path ${publicPath}.`);
   }
 }
+
+const assertIndexContains = (needle, message) => {
+  if (!indexHtml.includes(needle)) failures.push(message);
+};
+
+assertIndexContains(
+  "<title>MSCQR | Garment Authentication QR Platform</title>",
+  "Homepage index.html must use the production MSCQR garment authentication title.",
+);
+assertIndexContains(
+  'content="MSCQR helps brands and manufacturers verify garment authenticity using secure QR labels, scan reviews, and customer support workflows."',
+  "Homepage index.html must use the production MSCQR meta description.",
+);
+assertIndexContains(
+  '<link rel="canonical" href="https://www.mscqr.com/"',
+  "Homepage index.html must declare the canonical https://www.mscqr.com/ URL.",
+);
+assertIndexContains(
+  '<meta property="og:title" content="MSCQR | Garment Authentication QR Platform"',
+  "Homepage index.html must declare the production Open Graph title.",
+);
+assertIndexContains(
+  '<meta name="twitter:card" content="summary_large_image"',
+  "Homepage index.html must declare a summary_large_image Twitter card.",
+);
+assertIndexContains('"@type": "Organization"', "Homepage index.html must include Organization JSON-LD.");
+assertIndexContains('"@type": "WebSite"', "Homepage index.html must include WebSite JSON-LD.");
+assertIndexContains('"name": "MSCQR"', "Homepage JSON-LD must identify MSCQR by name.");
+assertIndexContains('"url": "https://www.mscqr.com"', "Homepage JSON-LD must identify the canonical MSCQR URL.");
 
 const requiredRobotsDisallows = [
   "/api",
@@ -168,6 +202,8 @@ const assertSeoContains = (needle, message) => {
 };
 
 assertSeoContains('"/verify"', "SeoController must define /verify as public metadata.");
+assertSeoContains('"/about"', "SeoController must define /about as public metadata.");
+assertSeoContains('"/contact"', "SeoController must define /contact as public metadata.");
 assertSeoContains("INDEX_ROBOTS", "SeoController must keep an explicit index/follow directive for public pages.");
 assertSeoContains('path.startsWith("/verify/")', "SeoController must noindex /verify/:code and deeper result paths.");
 assertSeoContains('path === "/scan"', "SeoController must noindex /scan.");
@@ -234,6 +270,14 @@ if (app.includes('path="/verify/"')) {
 
 if (!app.includes('path="/verify" element={<VerifyLanding />}')) {
   failures.push("App must render the public VerifyLanding component at /verify.");
+}
+
+if (!app.includes('path="/about" element={<AboutPage />}')) {
+  failures.push("App must render the public AboutPage component at /about.");
+}
+
+if (!app.includes('path="/contact" element={<ContactPage />}')) {
+  failures.push("App must render the public ContactPage component at /contact.");
 }
 
 if (app.indexOf('path="/verify"') > app.indexOf('path="/verify/:code"')) {

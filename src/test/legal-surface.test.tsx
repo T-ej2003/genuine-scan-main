@@ -28,6 +28,8 @@ describe("launch legal and trust surface", () => {
     expect(screen.getAllByRole("link", { name: "Privacy" })[0]).toHaveAttribute("href", "/privacy");
     expect(screen.getAllByRole("link", { name: "Terms" })[0]).toHaveAttribute("href", "/terms");
     expect(screen.getAllByRole("link", { name: "Cookies" })[0]).toHaveAttribute("href", "/cookies");
+    expect(screen.getAllByRole("link", { name: "About" })[0]).toHaveAttribute("href", "/about");
+    expect(screen.getAllByRole("link", { name: "Contact" })[0]).toHaveAttribute("href", "/contact");
     expect(screen.getAllByRole("link", { name: /cookie notice/i })[0]).toHaveAttribute("href", "/cookies");
     expect(screen.getAllByRole("link", { name: /terms of use/i })[0]).toHaveAttribute("href", "/terms");
     expect(screen.getAllByRole("link", { name: /privacy notice/i })[0]).toHaveAttribute("href", "/privacy");

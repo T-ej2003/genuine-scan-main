@@ -1,4 +1,4 @@
-# Genuine Scan (MSCQR)
+# MSCQR
 
 Production-grade, multi-tenant QR issuance, controlled-print, verification, anomaly-detection, and auditability platform.
 

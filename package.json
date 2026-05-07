@@ -2,7 +2,7 @@
   "name": "genuine-scan-console",
   "private": true,
   "version": "1.0.0",
-  "description": "Frontend console for the Genuine Scan QR authenticity platform.",
+  "description": "Frontend console for the MSCQR garment authentication platform.",
   "type": "module",
   "scripts": {
     "dev": "vite",

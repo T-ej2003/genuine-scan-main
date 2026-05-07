@@ -7,10 +7,12 @@ import { cn } from "@/lib/utils";
 
 const publicNavItems = [
   { href: "/", label: "Home" },
+  { href: "/about", label: "About" },
   { href: "/solutions/brands", label: "For Brands" },
   { href: "/solutions/garment-manufacturers", label: "For Manufacturers" },
   { href: "/how-scanning-works", label: "How Scanning Works" },
   { href: "/trust", label: "Trust & Security" },
+  { href: "/contact", label: "Contact" },
 ] as const;
 
 type PublicHeaderProps = {

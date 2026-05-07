@@ -4,11 +4,10 @@ import { useLocation } from "react-router-dom";
 const SITE_NAME = "MSCQR";
 const SITE_ORIGIN = "https://www.mscqr.com";
 const DEFAULT_OG_IMAGE = `${SITE_ORIGIN}/brand/mscqr-og.png`;
-const DEFAULT_TITLE = "MSCQR | Garment Authentication for Brands and Manufacturers";
+const DEFAULT_TITLE = "MSCQR | Garment Authentication QR Platform";
 const DEFAULT_DESCRIPTION =
-  "MSCQR helps brands and manufacturers create QR labels for garments, support customer verification, and review suspicious scan patterns.";
-const HOME_DESCRIPTION =
-  "Make every garment verifiable. MSCQR helps brands and manufacturers let customers scan garments and trust what they buy.";
+  "MSCQR helps brands and manufacturers verify garment authenticity using secure QR labels, scan reviews, and customer support workflows.";
+const HOME_DESCRIPTION = DEFAULT_DESCRIPTION;
 
 type SeoMetadata = {
   title: string;
@@ -31,23 +30,14 @@ const HOME_STRUCTURED_DATA = [
     url: SITE_ORIGIN,
     logo: `${SITE_ORIGIN}/brand/mscqr-mark-512.png`,
     image: DEFAULT_OG_IMAGE,
+    description: "MSCQR is a garment authentication QR platform for brands and manufacturers.",
   },
   {
     "@context": "https://schema.org",
     "@type": "WebSite",
     name: SITE_NAME,
-    url: `${SITE_ORIGIN}/`,
-  },
-  {
-    "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    name: SITE_NAME,
-    applicationCategory: "BusinessApplication",
-    operatingSystem: "Web",
     url: SITE_ORIGIN,
-    image: DEFAULT_OG_IMAGE,
-    description:
-      "Garment authentication software for brands and manufacturers using QR labels, customer verification, and suspicious scan review.",
+    description: "Garment authentication QR platform for brands and manufacturers.",
   },
 ] as const;
 
@@ -63,6 +53,18 @@ const PUBLIC_SEO: Record<string, SeoMetadata> = {
     description:
       "Learn how MSCQR helps brands review garment label status, print confirmation, scan history, and suspicious repeat scan patterns.",
     path: "/trust",
+  },
+  "/about": {
+    title: "About MSCQR | Garment Authentication QR Platform",
+    description:
+      "Learn about MSCQR, the garment authentication QR platform for brands, manufacturers, licensees, and authenticity teams.",
+    path: "/about",
+  },
+  "/contact": {
+    title: "Contact MSCQR | Garment Authentication QR Platform",
+    description:
+      "Contact MSCQR about garment authentication QR labels, brand verification workflows, manufacturer onboarding, and customer support.",
+    path: "/contact",
   },
   "/privacy": {
     title: "Privacy Policy | MSCQR",
@@ -334,12 +336,12 @@ export function SeoController() {
     upsertMeta("property", "og:image:type", "image/png");
     upsertMeta("property", "og:image:width", "1200");
     upsertMeta("property", "og:image:height", "630");
-    upsertMeta("property", "og:image:alt", "MSCQR garment authentication preview");
+    upsertMeta("property", "og:image:alt", "MSCQR garment authentication QR platform preview");
     upsertMeta("name", "twitter:card", "summary_large_image");
     upsertMeta("name", "twitter:title", ogTitle);
     upsertMeta("name", "twitter:description", ogDescription);
     upsertMeta("name", "twitter:image", DEFAULT_OG_IMAGE);
-    upsertMeta("name", "twitter:image:alt", "MSCQR garment authentication preview");
+    upsertMeta("name", "twitter:image:alt", "MSCQR garment authentication QR platform preview");
     upsertStructuredData(metadata.structuredData);
   }, [location.pathname]);
 
