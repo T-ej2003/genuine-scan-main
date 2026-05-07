@@ -58,6 +58,8 @@ const HowScanningWorksPage = lazy(() =>
   import("@/pages/PublicMarketing").then((module) => ({ default: module.HowScanningWorksPage })),
 );
 const RequestAccessPage = lazy(() => import("@/pages/PublicMarketing").then((module) => ({ default: module.RequestAccessPage })));
+const AboutPage = lazy(() => import("@/pages/PublicCompanyPages").then((module) => ({ default: module.AboutPage })));
+const ContactPage = lazy(() => import("@/pages/PublicCompanyPages").then((module) => ({ default: module.ContactPage })));
 const BlogPage = lazy(() => import("@/pages/PublicMarketing").then((module) => ({ default: module.BlogPage })));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 const SettingsPage = lazy(() => import("@/pages/Settings"));
@@ -193,6 +195,8 @@ function AppRoutes() {
         <Route path="/industries/industrial-components" element={<Navigate to="/solutions/apparel-authenticity" replace />} />
         <Route path="/industries/spare-parts" element={<Navigate to="/solutions/apparel-authenticity" replace />} />
         <Route path="/industries/regulated-supply-chains" element={<Navigate to="/solutions/apparel-authenticity" replace />} />
+        <Route path="/about" element={<AboutPage />} />
+        <Route path="/contact" element={<ContactPage />} />
         <Route path="/request-access" element={<RequestAccessPage />} />
         <Route path="/blog" element={<BlogPage />} />
         <Route path="/verify" element={<VerifyLanding />} />

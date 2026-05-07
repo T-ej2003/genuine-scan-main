@@ -4,6 +4,8 @@ const publicAuthOptionalPaths = [
   "/privacy",
   "/terms",
   "/cookies",
+  "/about",
+  "/contact",
   "/platform",
   "/request-access",
   "/blog",

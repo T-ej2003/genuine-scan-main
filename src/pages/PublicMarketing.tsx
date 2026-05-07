@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-const CONTACT_EMAIL = "administration@mscqr.com";
+export const CONTACT_EMAIL = "administration@mscqr.com";
 
 type Icon = ElementType;
 
@@ -32,7 +32,7 @@ type PageShellProps = {
   actions?: ReactNode;
 };
 
-type Feature = {
+export type Feature = {
   title: string;
   body: string;
   icon: Icon;
@@ -130,7 +130,7 @@ const scanningSteps = [
   },
 ] as const;
 
-function PageShell({ title, intro, children, actions }: PageShellProps) {
+export function PageShell({ title, intro, children, actions }: PageShellProps) {
   return (
     <PublicShell>
       <main>
@@ -165,7 +165,7 @@ function PageShell({ title, intro, children, actions }: PageShellProps) {
   );
 }
 
-function ContentBand({ children, className }: { children: ReactNode; className?: string }) {
+export function ContentBand({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <section className={cn("border-b border-border bg-mscqr-background", className)}>
       <div className="mx-auto w-full max-w-7xl px-4 py-16 lg:py-20">{children}</div>
@@ -173,7 +173,7 @@ function ContentBand({ children, className }: { children: ReactNode; className?:
   );
 }
 
-function FeatureGrid({ items }: { items: Feature[] }) {
+export function FeatureGrid({ items }: { items: Feature[] }) {
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
       {items.map((item) => (
@@ -189,7 +189,13 @@ function FeatureGrid({ items }: { items: Feature[] }) {
   );
 }
 
-function PrimaryActions({ secondaryHref = "/verify", secondaryLabel = "Verify a Product" }: { secondaryHref?: string; secondaryLabel?: string }) {
+export function PrimaryActions({
+  secondaryHref = "/verify",
+  secondaryLabel = "Verify a Product",
+}: {
+  secondaryHref?: string;
+  secondaryLabel?: string;
+}) {
   return (
     <>
       <Button asChild size="lg">
@@ -395,7 +401,7 @@ export function BlogPage() {
   );
 }
 
-function TwoColumn({
+export function TwoColumn({
   title,
   body,
   ctaHref,
