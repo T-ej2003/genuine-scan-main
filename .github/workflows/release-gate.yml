@@ -6,15 +6,223 @@ on:
       - Deployment Audit
     types:
       - completed
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: "Main-branch commit SHA or ref to deploy after required gates have passed"
+        required: false
+        type: string
+        default: main
 
 permissions:
   contents: read
+  actions: read
+  deployments: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
 
 jobs:
-  deploy:
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' }}
+  verify-gates:
+    name: Verify required main gates
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main'
+        )
+      }}
     runs-on: ubuntu-latest
-    environment: production
+    timeout-minutes: 45
+    outputs:
+      deploy_sha: ${{ steps.resolve.outputs.deploy_sha }}
+      deploy_ref: ${{ steps.resolve.outputs.deploy_ref }}
     steps:
-      - name: Confirm deployment gate
-        run: echo "Deployment audit passed for ${{ github.event.workflow_run.head_sha }}"
+      - name: Checkout deployment tooling
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Resolve deploy SHA
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_GIT_REF: ${{ inputs.git_ref }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            deploy_ref="${INPUT_GIT_REF:-main}"
+            git fetch --prune origin main
+            deploy_sha="$(git rev-parse "${deploy_ref}^{commit}")"
+
+            if ! git merge-base --is-ancestor "$deploy_sha" origin/main; then
+              echo "::error::Manual production deploy ref must resolve to a commit on main."
+              exit 1
+            fi
+          else
+            deploy_ref="main"
+            deploy_sha="$WORKFLOW_RUN_SHA"
+          fi
+
+          echo "deploy_ref=$deploy_ref" >> "$GITHUB_OUTPUT"
+          echo "deploy_sha=$deploy_sha" >> "$GITHUB_OUTPUT"
+          echo "Resolved production deploy SHA: $deploy_sha"
+
+      - name: Wait for required workflow gates
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_BRANCH: main
+          TARGET_EVENT: push
+          TARGET_SHA: ${{ steps.resolve.outputs.deploy_sha }}
+          REQUIRED_WORKFLOW_FILES: quality-gate.yml,secret-scan.yml,deployment-audit.yml
+          MAX_ATTEMPTS: 60
+          POLL_SECONDS: 30
+        run: node scripts/github/check-required-workflow-gates.mjs
+
+  deploy-production:
+    name: Deploy production via Ansible
+    needs: verify-gates
+    if: ${{ needs.verify-gates.outputs.deploy_sha != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+    env:
+      ANSIBLE_HOST_KEY_CHECKING: "true"
+      DEPLOY_SHA: ${{ needs.verify-gates.outputs.deploy_sha }}
+    steps:
+      - name: Checkout deployment tooling
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install Ansible
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user ansible-core
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Verify production environment requires approval
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
+          const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/environments/production`, {
+            headers: {
+              Accept: "application/vnd.github+json",
+              Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+              "X-GitHub-Api-Version": "2022-11-28",
+            },
+          });
+
+          if (!response.ok) {
+            const body = await response.text();
+            throw new Error(`Unable to read production environment protection rules (${response.status}): ${body.slice(0, 300)}`);
+          }
+
+          const environment = await response.json();
+          const requiredReviewersRule = (environment.protection_rules || []).find((rule) => rule.type === "required_reviewers");
+          const reviewers = requiredReviewersRule?.reviewers || [];
+          if (reviewers.length === 0) {
+            throw new Error("The production GitHub Environment must require at least one reviewer before production deployment can run.");
+          }
+
+          console.log("Production environment required reviewers are configured. Reviewer identities were not printed.");
+          NODE
+
+      - name: Validate deployment secrets
+        env:
+          PROD_ANSIBLE_INVENTORY: ${{ secrets.PROD_ANSIBLE_INVENTORY }}
+          PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          if [ -n "$PROD_ANSIBLE_INVENTORY" ]; then
+            [ -n "$PROD_SSH_PRIVATE_KEY" ] || missing+=("PROD_SSH_PRIVATE_KEY")
+            [ -n "$PROD_KNOWN_HOSTS" ] || missing+=("PROD_KNOWN_HOSTS")
+          else
+            [ -n "$PROD_SSH_HOST" ] || missing+=("PROD_SSH_HOST")
+            [ -n "$PROD_SSH_USER" ] || missing+=("PROD_SSH_USER")
+            [ -n "$PROD_SSH_PRIVATE_KEY" ] || missing+=("PROD_SSH_PRIVATE_KEY")
+          fi
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf '::error::Missing required production deployment secret(s): %s\n' "${missing[*]}"
+            exit 1
+          fi
+
+          echo "Required production deployment secret names are configured. Values were not printed."
+
+      - name: Configure SSH and generated inventory
+        env:
+          PROD_ANSIBLE_INVENTORY: ${{ secrets.PROD_ANSIBLE_INVENTORY }}
+          PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+        run: |
+          set -euo pipefail
+
+          install -m 700 -d "$HOME/.ssh"
+
+          ssh_key_file="$HOME/.ssh/prod_deploy_key"
+          printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > "$ssh_key_file"
+          chmod 600 "$ssh_key_file"
+
+          known_hosts_file="$HOME/.ssh/known_hosts"
+          if [ -n "$PROD_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$PROD_KNOWN_HOSTS" > "$known_hosts_file"
+          else
+            prod_ssh_port="${PROD_SSH_PORT:-22}"
+            ssh-keyscan -p "$prod_ssh_port" -H "$PROD_SSH_HOST" 2>/dev/null > "$known_hosts_file"
+          fi
+          chmod 600 "$known_hosts_file"
+
+          if [ ! -s "$known_hosts_file" ]; then
+            echo "::error::Known hosts file is empty. Configure PROD_KNOWN_HOSTS or allow ssh-keyscan for PROD_SSH_HOST."
+            exit 1
+          fi
+
+          if [ -n "$PROD_ANSIBLE_INVENTORY" ]; then
+            printf '%s\n' "$PROD_ANSIBLE_INVENTORY" > ops/deploy/inventory.ini
+          else
+            prod_ssh_port="${PROD_SSH_PORT:-22}"
+            {
+              echo "[active]"
+              printf 'production ansible_host=%s ansible_user=%s ansible_port=%s ansible_ssh_private_key_file=%s ansible_python_interpreter=/usr/bin/python3\n' \
+                "$PROD_SSH_HOST" "$PROD_SSH_USER" "$prod_ssh_port" "$ssh_key_file"
+              echo
+              echo "[mscqr_servers:children]"
+              echo "active"
+            } > ops/deploy/inventory.ini
+          fi
+          chmod 600 ops/deploy/inventory.ini
+
+          echo "Generated production Ansible inventory at ops/deploy/inventory.ini."
+
+      - name: Validate Ansible playbook syntax
+        run: ansible-playbook -i ops/deploy/inventory.ini ops/deploy/deploy.yml --syntax-check
+
+      - name: Deploy gated SHA to production
+        env:
+          ANSIBLE_SSH_ARGS: "-o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes"
+        run: |
+          set -euo pipefail
+          ansible-playbook \
+            -i ops/deploy/inventory.ini \
+            ops/deploy/deploy.yml \
+            --extra-vars "branch=main deploy_ref=$DEPLOY_SHA"

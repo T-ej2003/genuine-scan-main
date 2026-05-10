@@ -24,7 +24,7 @@
 
     - name: Show target standby deployment
       debug:
-        msg: "Deploying {{ branch }} to {{ inventory_hostname }} ({{ region_env_name }}) at {{ ansible_host }}"
+        msg: "Deploying {{ branch }} to {{ inventory_hostname }} ({{ region_env_name }})"
 
     - name: Ensure app parent directory exists
       file:

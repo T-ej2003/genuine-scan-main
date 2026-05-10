@@ -7,8 +7,15 @@
   vars:
     app_dir: /home/ubuntu/genuine-scan-main
     branch: main
+    deploy_ref: "origin/{{ branch }}"
 
   tasks:
+    - name: Validate deploy ref
+      assert:
+        that:
+          - deploy_ref is match('^[A-Za-z0-9._/+-]+$')
+        fail_msg: "deploy_ref contains unsupported characters."
+
     - name: Confirm app directory exists
       stat:
         path: "{{ app_dir }}"
@@ -21,10 +28,10 @@
 
     - name: Show target instance
       debug:
-        msg: "Deploying {{ inventory_hostname }} at {{ ansible_host }}"
+        msg: "Deploying {{ inventory_hostname }} from {{ deploy_ref }}"
 
     - name: Check git working tree before deploy
-      shell: git status --short
+      command: git status --short
       args:
         chdir: "{{ app_dir }}"
       register: git_status
@@ -36,55 +43,64 @@
       when: git_status.stdout | length > 0
 
     - name: Fetch latest code
-      shell: git fetch origin {{ branch }}
+      command: git fetch --prune origin {{ branch }}
       args:
         chdir: "{{ app_dir }}"
 
-    - name: Reset to origin/main
-      shell: git reset --hard origin/{{ branch }}
+    - name: Reset to requested deploy ref
+      command: git reset --hard {{ deploy_ref }}
       args:
         chdir: "{{ app_dir }}"
+
+    - name: Capture deployed commit
+      command: git rev-parse --short HEAD
+      args:
+        chdir: "{{ app_dir }}"
+      register: deployed_commit
+      changed_when: false
 
     - name: Install dependencies
-      shell: npm ci
+      command: npm ci
       args:
         chdir: "{{ app_dir }}"
 
     - name: Run SEO guardrail
-      shell: npm run verify:seo
+      command: npm run verify:seo
       args:
         chdir: "{{ app_dir }}"
 
     - name: Run typecheck
-      shell: npm run typecheck
+      command: npm run typecheck
       args:
         chdir: "{{ app_dir }}"
 
     - name: Build app
-      shell: npm run build
+      command: npm run build
       args:
         chdir: "{{ app_dir }}"
 
     - name: Run production guardrails
-      shell: npm run verify:guardrails
+      command: npm run verify:guardrails
       args:
         chdir: "{{ app_dir }}"
 
     - name: Restart Docker Compose stack
-      shell: docker compose up -d --build
+      command: docker compose up -d --build
       args:
         chdir: "{{ app_dir }}"
 
     - name: Show Docker Compose status
-      shell: docker compose ps
+      command: docker compose ps
       args:
         chdir: "{{ app_dir }}"
       register: compose_ps
       changed_when: false
 
-    - name: Print Docker Compose status
+    - name: Print deployed commit and Docker Compose status
       debug:
-        var: compose_ps.stdout_lines
+        msg:
+          - "Commit: {{ deployed_commit.stdout }}"
+          - "{{ compose_ps.stdout_lines }}"
 
 - name: Verify public active production URL
   hosts: active
