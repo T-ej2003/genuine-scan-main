@@ -114,6 +114,17 @@ const run = async () => {
     "Windows installer builder should scaffold the Inno Setup project and explain the next step when Inno Setup is missing"
   );
   assert(
+    installerBuilder.includes('import { spawnSync } from "node:child_process"') &&
+      installerBuilder.includes("shouldUseShell") &&
+      installerBuilder.includes("Command failed while building the Windows connector installer."),
+    "Windows installer builder should use a Windows-safe child process runner with clear command failure diagnostics"
+  );
+  assert(
+    installerBuilder.includes("const expectedOutput = `${outputBase}.exe`;") &&
+      installerBuilder.includes("Created files: ${createdFiles}"),
+    "Windows installer builder should accept the explicit pkg .exe output and report created files if packaging output is missing"
+  );
+  assert(
     installerVerifier.includes("Get-AuthenticodeSignature"),
     "Windows installer verifier should inspect Authenticode signatures on Windows"
   );

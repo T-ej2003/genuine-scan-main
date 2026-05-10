@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -39,12 +39,39 @@ const writeAsciiFile = (filePath, contents) => {
   fs.writeFileSync(filePath, String(contents), "utf8");
 };
 
+const shouldUseShell = (command) =>
+  process.platform === "win32" && /\.(?:cmd|bat)$/i.test(String(command || ""));
+
+const formatCommand = (command, args) => [command, ...args].join(" ");
+
 const run = (command, args, options = {}) => {
-  execFileSync(command, args, {
+  const cwd = options.cwd || backendRoot;
+  const result = spawnSync(command, args, {
     stdio: "inherit",
-    cwd: options.cwd || backendRoot,
+    cwd,
     env: options.env || process.env,
+    shell: options.shell ?? shouldUseShell(command),
   });
+
+  if (!result.error && result.status === 0 && !result.signal) {
+    return;
+  }
+
+  const attempted = formatCommand(command, args);
+  const exitCode = typeof result.status === "number" ? result.status : "unknown";
+  const signal = result.signal || "none";
+  const cause = result.error?.message || (result.signal ? `terminated by ${result.signal}` : "command exited with a non-zero status");
+
+  throw new Error(
+    [
+      "Command failed while building the Windows connector installer.",
+      `command: ${attempted}`,
+      `cwd: ${cwd}`,
+      `exitCode: ${exitCode}`,
+      `signal: ${signal}`,
+      `cause: ${cause}`,
+    ].join("\n")
+  );
 };
 
 const readWindowsAssetTemplate = (assetName) => {
@@ -82,12 +109,18 @@ const buildWindowsBinary = (binariesDir) => {
   const outputBase = path.join(binariesDir, "mscqr-local-print-agent");
   run(pkgBinary, ["--targets", "node20-win-x64", "--output", outputBase, entry]);
 
+  const expectedOutput = `${outputBase}.exe`;
+  if (fs.existsSync(expectedOutput)) {
+    return expectedOutput;
+  }
+
   const builtFile = fs
     .readdirSync(binariesDir)
-    .find((name) => name.toLowerCase().includes("win") && name.toLowerCase().endsWith(".exe"));
+    .find((name) => name.toLowerCase().endsWith(".exe"));
 
   if (!builtFile) {
-    throw new Error("Expected packaged Windows binary was not created.");
+    const createdFiles = fs.readdirSync(binariesDir).join(", ") || "none";
+    throw new Error(`Expected packaged Windows binary was not created. Looked for ${expectedOutput}. Created files: ${createdFiles}`);
   }
 
   return path.join(binariesDir, builtFile);
