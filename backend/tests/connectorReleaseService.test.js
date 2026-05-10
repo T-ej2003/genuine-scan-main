@@ -7,34 +7,38 @@ const assert = (condition, message) => {
 const run = () => {
   const latest = getLatestConnectorRelease("https://mscqr.example.com/api");
   const latestFromWebOrigin = getLatestConnectorRelease("https://mscqr.example.com");
-  assert(latest.latestVersion === "2026.3.12", "Latest connector version should come from manifest.json");
+  assert(latest.latestVersion === "2026.5.10", "Latest connector version should come from manifest.json");
   assert(
-    latest.release.platforms.windows.downloadPath === "/api/public/connector/download/2026.3.12/windows",
+    latest.release.platforms.windows.downloadPath === "/api/public/connector/download/2026.5.10/windows",
     "Windows download path should route through the API prefix"
   );
   assert(
-    latest.release.platforms.windows.trustLevel === "unsigned",
-    "Unsigned Windows setup packages should expose the trust level"
+    latest.release.platforms.windows.trustLevel === "trusted",
+    "Signed Windows installers should expose the trusted release level"
   );
   assert(
-    latest.release.platforms.windows.signatureStatus === "unsigned",
-    "Unsigned Windows releases should expose the signature status"
+    latest.release.platforms.windows.signatureStatus === "signed",
+    "Signed Windows releases should expose the signature status"
   );
   assert(
-    latest.release.platforms.windows.windowsTrustMode === "unsigned-test",
-    "Unsigned Windows releases should expose the Windows trust mode"
+    latest.release.platforms.windows.windowsTrustMode === "trusted",
+    "Signed Windows releases should expose the Windows trust mode"
   );
   assert(
-    latest.release.platforms.windows.publisherName === null,
-    "Unsigned Windows releases should not report a publisher"
+    latest.release.platforms.windows.publisherName === "L&D Health Ltd",
+    "Signed Windows releases should report the verified publisher"
   );
   assert(
-    latest.release.platforms.windows.signedAt === null,
-    "Unsigned Windows releases should not report a signed timestamp"
+    latest.release.platforms.windows.signedAt === "2026-05-10T01:39:08.000Z",
+    "Signed Windows releases should report the signed timestamp"
+  );
+  assert(
+    latest.release.platforms.windows.installerKind === "exe",
+    "Signed Windows release should be exposed as an EXE installer"
   );
   assert(
     latest.release.platforms.windows.downloadUrl ===
-      "https://mscqr.example.com/api/public/connector/download/2026.3.12/windows",
+      "https://mscqr.example.com/api/public/connector/download/2026.5.10/windows",
     "Windows download URL should be based on the public API base"
   );
   if (latest.release.platforms.macos) {
@@ -52,13 +56,27 @@ const run = () => {
   }
   assert(
     latestFromWebOrigin.release.platforms.windows.downloadUrl ===
-      "https://mscqr.example.com/api/public/connector/download/2026.3.12/windows",
+      "https://mscqr.example.com/api/public/connector/download/2026.5.10/windows",
     "Windows download URL should still resolve from the web origin"
   );
 
-  const windowsPackage = resolveConnectorDownload("2026.3.12", "windows");
-  assert(windowsPackage.filename.endsWith(".zip"), "Windows package should resolve to the ZIP artifact");
-  assert(windowsPackage.bytes > 0, "Windows package bytes should be populated");
+  const windowsPackage = resolveConnectorDownload("2026.5.10", "windows");
+  assert(
+    windowsPackage.filename === "MSCQR-Connector-Windows-2026.5.10.exe",
+    "Windows package should resolve to the signed EXE artifact"
+  );
+  assert(
+    windowsPackage.contentType === "application/vnd.microsoft.portable-executable",
+    "Windows signed EXE should use the portable executable content type"
+  );
+  assert(
+    windowsPackage.sha256 === "0305cc85fe1af4ff65f87d584028d03745b6b70a227100d2f13f9ebe234e2d41",
+    "Windows signed EXE checksum should match the published artifact"
+  );
+  assert(windowsPackage.bytes === 15587056, "Windows package bytes should match the published signed installer");
+
+  const legacyWindowsPackage = resolveConnectorDownload("2026.3.12", "windows");
+  assert(legacyWindowsPackage.filename.endsWith(".zip"), "Legacy Windows package should remain available");
 
   console.log("connector release service tests passed");
 };

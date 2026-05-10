@@ -1,10 +1,42 @@
 {
   "productName": "MSCQR Connector",
-  "latestVersion": "2026.3.12",
+  "latestVersion": "2026.5.10",
   "supportPath": "/help/manufacturer",
   "helpPath": "/connector-download",
   "setupGuidePath": "/help/manufacturer",
   "releases": [
+    {
+      "version": "2026.5.10",
+      "publishedAt": "2026-05-10T01:39:08.000Z",
+      "summary": "Install the signed Windows connector once on the printing computer, then the MSCQR Connector starts automatically in the background.",
+      "notes": [
+        "Use the signed Windows installer on the Windows PC that is connected to the printer.",
+        "Windows installation verifies local printer readiness before claiming success and opens Printer Setup automatically when attention is still needed.",
+        "Windows should show L&D Health Ltd as the verified publisher for this installer."
+      ],
+      "platforms": {
+        "windows": {
+          "label": "Windows installer",
+          "installerKind": "exe",
+          "trustLevel": "trusted",
+          "signatureStatus": "signed",
+          "publisherName": "L&D Health Ltd",
+          "signedAt": "2026-05-10T01:39:08.000Z",
+          "windowsTrustMode": "trusted",
+          "filename": "MSCQR-Connector-Windows-2026.5.10.exe",
+          "relativePath": "2026.5.10/windows/MSCQR-Connector-Windows-2026.5.10.exe",
+          "contentType": "application/vnd.microsoft.portable-executable",
+          "architecture": "x64",
+          "bytes": 15587056,
+          "sha256": "0305cc85fe1af4ff65f87d584028d03745b6b70a227100d2f13f9ebe234e2d41",
+          "notes": [
+            "Run the signed Windows installer once on the Windows computer that will print.",
+            "The installer installs the connector, configures auto-start, and verifies local printer readiness.",
+            "Publisher shown in Windows should be L&D Health Ltd."
+          ]
+        }
+      }
+    },
     {
       "version": "2026.3.12",
       "publishedAt": "2026-03-16T12:36:45.442Z",

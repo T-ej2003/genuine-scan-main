@@ -46,19 +46,29 @@ type ConnectorPlatform = z.infer<typeof connectorPlatformSchema>;
 export type ConnectorPlatformKey = keyof ConnectorRelease["platforms"];
 
 let manifestCache: {
+  root: string;
   mtimeMs: number;
   manifest: ConnectorManifest;
 } | null = null;
 
-const releaseRoot = () => path.resolve(process.cwd(), "local-print-agent", "releases");
+const releaseRoot = () => {
+  const cwd = process.cwd();
+  const candidates = [
+    path.resolve(cwd, "local-print-agent", "releases"),
+    path.resolve(cwd, "backend", "local-print-agent", "releases"),
+  ];
+  return candidates.find((candidate) => fs.existsSync(path.join(candidate, "manifest.json"))) || candidates[0];
+};
 const manifestPath = () => path.join(releaseRoot(), "manifest.json");
 
 const normalizeBaseUrl = (value?: string | null) => String(value || "").trim().replace(/\/+$/, "");
 const stripTrailingApiSegment = (value: string) => value.replace(/\/api$/, "");
 
 const ensureReleaseFileExists = (relativePath: string) => {
-  const resolved = path.resolve(releaseRoot(), relativePath);
-  if (!resolved.startsWith(releaseRoot())) {
+  const root = releaseRoot();
+  const resolved = path.resolve(root, relativePath);
+  const relativeFromRoot = path.relative(root, resolved);
+  if (relativeFromRoot.startsWith("..") || path.isAbsolute(relativeFromRoot)) {
     throw new Error(`Unsafe connector release path: ${relativePath}`);
   }
   if (!fs.existsSync(resolved)) {
@@ -125,7 +135,8 @@ const loadManifestInternal = (): ConnectorManifest => {
   }
 
   const stat = fs.statSync(filePath);
-  if (manifestCache && manifestCache.mtimeMs === stat.mtimeMs) {
+  const root = releaseRoot();
+  if (manifestCache && manifestCache.root === root && manifestCache.mtimeMs === stat.mtimeMs) {
     return manifestCache.manifest;
   }
 
@@ -142,6 +153,7 @@ const loadManifestInternal = (): ConnectorManifest => {
   }
 
   manifestCache = {
+    root,
     mtimeMs: stat.mtimeMs,
     manifest: parsed,
   };

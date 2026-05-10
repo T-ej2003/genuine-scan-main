@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import ConnectorDownload from "@/pages/ConnectorDownload";
@@ -27,13 +27,13 @@ describe("ConnectorDownload", () => {
       success: true,
       data: {
         productName: "MSCQR Connector",
-        latestVersion: "2026.3.12",
+        latestVersion: "2026.5.10",
         supportPath: "/help/manufacturer",
         helpPath: "/connector-download",
         setupGuidePath: "/help/manufacturer",
         release: {
-          version: "2026.3.12",
-          publishedAt: "2026-03-12T20:00:00.000Z",
+          version: "2026.5.10",
+          publishedAt: "2026-05-10T01:39:08.000Z",
           summary: "Install once and print without manual startup.",
           notes: [],
           platforms: {
@@ -53,21 +53,21 @@ describe("ConnectorDownload", () => {
             },
             windows: {
               platform: "windows",
-              label: "Windows test package",
-              installerKind: "zip",
-              trustLevel: "unsigned",
-              signatureStatus: "unsigned",
-              publisherName: null,
-              signedAt: null,
-              windowsTrustMode: "unsigned-test",
-              filename: "MSCQR-Connector-Windows-2026.3.12.zip",
+              label: "Windows installer",
+              installerKind: "exe",
+              trustLevel: "trusted",
+              signatureStatus: "signed",
+              publisherName: "L&D Health Ltd",
+              signedAt: "2026-05-10T01:39:08.000Z",
+              windowsTrustMode: "trusted",
+              filename: "MSCQR-Connector-Windows-2026.5.10.exe",
               architecture: "x64",
-              bytes: 2048,
-              sha256: "b".repeat(64),
-              notes: ["Run Install Connector.cmd once."],
-              contentType: "application/zip",
-              downloadPath: "/api/public/connector/download/2026.3.12/windows",
-              downloadUrl: "https://example.test/api/public/connector/download/2026.3.12/windows",
+              bytes: 15587056,
+              sha256: "0305cc85fe1af4ff65f87d584028d03745b6b70a227100d2f13f9ebe234e2d41",
+              notes: ["Run the signed Windows installer once."],
+              contentType: "application/vnd.microsoft.portable-executable",
+              downloadPath: "/api/public/connector/download/2026.5.10/windows",
+              downloadUrl: "https://example.test/api/public/connector/download/2026.5.10/windows",
             },
           },
         },
@@ -75,8 +75,7 @@ describe("ConnectorDownload", () => {
     } as any);
   });
 
-  // TODO(mscqr-signing): Re-enable when the Windows connector is Azure-signed.
-  it.skip("shows the latest installer choices and onboarding copy", async () => {
+  it("shows the latest installer choices and onboarding copy", async () => {
     vi.mocked(apiClient.getInvitePreview).mockResolvedValue({
       success: true,
       data: {
@@ -101,18 +100,16 @@ describe("ConnectorDownload", () => {
       "https://example.test/api/public/connector/download/2026.3.12/macos",
     );
     expectAllLinksToMatch(
-      await screen.findAllByRole("link", { name: /download windows test package/i }),
-      "https://example.test/api/public/connector/download/2026.3.12/windows",
+      await screen.findAllByRole("link", { name: /download windows installer/i }),
+      "https://example.test/api/public/connector/download/2026.5.10/windows",
     );
-    expect(screen.getAllByText(/Windows can block this unsigned test package/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Extract the ZIP fully before running/i)).toBeInTheDocument();
     expect(screen.getByText(/Run the installer once/i)).toBeInTheDocument();
-    const unsignedPackageAlerts = screen
-      .getAllByRole("alert")
-      .filter((alert) => within(alert).queryByText(/Windows can block this unsigned test package/i));
-    expect(unsignedPackageAlerts.length).toBeGreaterThan(0);
-    expect(unsignedPackageAlerts.some((alert) => /Smart App Control/i.test(alert.textContent || ""))).toBe(true);
-    expect(screen.getAllByText(/Unsigned test package/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Signed Windows installer/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/L&D Health Ltd/i)).toBeInTheDocument();
+    expect(screen.getByText(/Azure Artifact Signing \/ signed/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Windows can block this unsigned test package/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Extract the ZIP fully before running/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Unsigned test package/i)).not.toBeInTheDocument();
     expect(screen.getAllByText(/verifies local printer readiness before it tells you setup is complete/i).length).toBeGreaterThan(0);
   });
 
@@ -191,34 +188,34 @@ describe("ConnectorDownload", () => {
       success: true,
       data: {
         productName: "MSCQR Connector",
-        latestVersion: "2026.3.12",
+        latestVersion: "2026.5.10",
         supportPath: "/help/manufacturer",
         helpPath: "/connector-download",
         setupGuidePath: "/help/manufacturer",
         release: {
-          version: "2026.3.12",
-          publishedAt: "2026-03-12T20:00:00.000Z",
+          version: "2026.5.10",
+          publishedAt: "2026-05-10T01:39:08.000Z",
           summary: "Install once and print without manual startup.",
           notes: [],
           platforms: {
             macos: null,
             windows: {
               platform: "windows",
-              label: "Windows test package",
-              installerKind: "zip",
-              trustLevel: "unsigned",
-              signatureStatus: "unsigned",
-              publisherName: null,
-              signedAt: null,
-              windowsTrustMode: "unsigned-test",
-              filename: "MSCQR-Connector-Windows-2026.3.12.zip",
+              label: "Windows installer",
+              installerKind: "exe",
+              trustLevel: "trusted",
+              signatureStatus: "signed",
+              publisherName: "L&D Health Ltd",
+              signedAt: "2026-05-10T01:39:08.000Z",
+              windowsTrustMode: "trusted",
+              filename: "MSCQR-Connector-Windows-2026.5.10.exe",
               architecture: "x64",
-              bytes: 2048,
-              sha256: "b".repeat(64),
-              notes: ["Run Install Connector.cmd once."],
-              contentType: "application/zip",
-              downloadPath: "/api/public/connector/download/2026.3.12/windows",
-              downloadUrl: "https://example.test/api/public/connector/download/2026.3.12/windows",
+              bytes: 15587056,
+              sha256: "0305cc85fe1af4ff65f87d584028d03745b6b70a227100d2f13f9ebe234e2d41",
+              notes: ["Run the signed Windows installer once."],
+              contentType: "application/vnd.microsoft.portable-executable",
+              downloadPath: "/api/public/connector/download/2026.5.10/windows",
+              downloadUrl: "https://example.test/api/public/connector/download/2026.5.10/windows",
             },
           },
         },
@@ -233,8 +230,8 @@ describe("ConnectorDownload", () => {
 
     expect(screen.queryByRole("link", { name: /download for mac/i })).not.toBeInTheDocument();
     expectAllLinksToMatch(
-      await screen.findAllByRole("link", { name: /download windows test package/i }),
-      "https://example.test/api/public/connector/download/2026.3.12/windows",
+      await screen.findAllByRole("link", { name: /download windows installer/i }),
+      "https://example.test/api/public/connector/download/2026.5.10/windows",
     );
   });
 
@@ -249,34 +246,34 @@ describe("ConnectorDownload", () => {
       success: true,
       data: {
         productName: "MSCQR Connector",
-        latestVersion: "2026.3.12",
+        latestVersion: "2026.5.10",
         supportPath: "/help/manufacturer",
         helpPath: "/connector-download",
         setupGuidePath: "/help/manufacturer",
         release: {
-          version: "2026.3.12",
-          publishedAt: "2026-03-12T20:00:00.000Z",
+          version: "2026.5.10",
+          publishedAt: "2026-05-10T01:39:08.000Z",
           summary: "Install once and print without manual startup.",
           notes: [],
           platforms: {
             macos: null,
             windows: {
               platform: "windows",
-              label: "Windows test package",
-              installerKind: "zip",
-              trustLevel: "unsigned",
-              signatureStatus: "unsigned",
-              publisherName: null,
-              signedAt: null,
-              windowsTrustMode: "unsigned-test",
-              filename: "MSCQR-Connector-Windows-2026.3.12.zip",
+              label: "Windows installer",
+              installerKind: "exe",
+              trustLevel: "trusted",
+              signatureStatus: "signed",
+              publisherName: "L&D Health Ltd",
+              signedAt: "2026-05-10T01:39:08.000Z",
+              windowsTrustMode: "trusted",
+              filename: "MSCQR-Connector-Windows-2026.5.10.exe",
               architecture: "x64",
-              bytes: 2048,
-              sha256: "b".repeat(64),
-              notes: ["Run Install Connector.cmd once."],
-              contentType: "application/zip",
-              downloadPath: "/api/public/connector/download/2026.3.12/windows",
-              downloadUrl: "https://example.test/api/public/connector/download/2026.3.12/windows",
+              bytes: 15587056,
+              sha256: "0305cc85fe1af4ff65f87d584028d03745b6b70a227100d2f13f9ebe234e2d41",
+              notes: ["Run the signed Windows installer once."],
+              contentType: "application/vnd.microsoft.portable-executable",
+              downloadPath: "/api/public/connector/download/2026.5.10/windows",
+              downloadUrl: "https://example.test/api/public/connector/download/2026.5.10/windows",
             },
           },
         },
@@ -292,8 +289,8 @@ describe("ConnectorDownload", () => {
     expect(await screen.findByText(/signed Mac installer not published yet/i)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /get installer for this device/i })).not.toBeInTheDocument();
     expectAllLinksToMatch(
-      await screen.findAllByRole("link", { name: /download windows test package/i }),
-      "https://example.test/api/public/connector/download/2026.3.12/windows",
+      await screen.findAllByRole("link", { name: /download windows installer/i }),
+      "https://example.test/api/public/connector/download/2026.5.10/windows",
     );
 
     userAgentSpy.mockRestore();

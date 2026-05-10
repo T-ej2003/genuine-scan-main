@@ -189,13 +189,14 @@ const formatTrustLabel = (item: ConnectorPlatformRelease) => {
   }
 
   if (item.trustLevel === "trusted") {
-    return "Trusted Windows installer";
+    return "Signed Windows installer";
   }
 
   return item.installerKind === "zip" ? "Unsigned test package" : "Unsigned test installer";
 };
 
 const formatSignatureLabel = (item: ConnectorPlatformRelease) => {
+  if (item.platform === "windows" && item.signatureStatus === "signed") return "Azure Artifact Signing / signed";
   if (item.signatureStatus === "signed") return "Signed";
   if (item.signatureStatus === "unknown") return "Signature not recorded";
   if (item.signatureStatus === "unsigned") return "Unsigned";
