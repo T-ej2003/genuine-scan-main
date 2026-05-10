@@ -1,0 +1,279 @@
+name: Windows Connector Signed Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      connector_release_version:
+        description: "Optional connector version. Defaults to UTC yyyy.M.d, matching the packaging script."
+        required: false
+        type: string
+      web_app_base_url:
+        description: "Public MSCQR web app URL embedded into the connector installer."
+        required: true
+        default: "https://mscqr.com"
+        type: string
+  push:
+    tags:
+      - "connector-v*"
+      - "windows-connector-v*"
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+concurrency:
+  group: windows-connector-signed-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AZURE_ARTIFACT_SIGNING_ENDPOINT: https://weu.codesigning.azure.net/
+  AZURE_ARTIFACT_SIGNING_ACCOUNT: mscqrsigning
+  AZURE_ARTIFACT_SIGNING_PROFILE: mscqr-certification
+
+jobs:
+  build-sign-windows:
+    name: Build and sign Windows connector
+    runs-on: windows-2022
+    # Configure this GitHub Environment with required reviewers before production use.
+    # The job will pause here before Azure OIDC login and signing can access the certificate profile.
+    environment: production-signing
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Azure signing configuration
+        shell: pwsh
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          $missing = @()
+          foreach ($name in @("AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID")) {
+            if (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              continue
+            }
+            $missing += $name
+          }
+
+          if ($missing.Count -gt 0) {
+            throw "Missing required GitHub signing secret(s): $($missing -join ', '). Add them under repository or production-signing environment secrets."
+          }
+
+          Write-Host "Azure signing configuration is present. Secret values were not printed."
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Resolve connector release settings
+        id: release_settings
+        shell: pwsh
+        env:
+          INPUT_CONNECTOR_RELEASE_VERSION: ${{ inputs.connector_release_version }}
+          INPUT_WEB_APP_BASE_URL: ${{ inputs.web_app_base_url }}
+          VAR_WEB_APP_BASE_URL: ${{ vars.WEB_APP_BASE_URL }}
+        run: |
+          $version = "$env:INPUT_CONNECTOR_RELEASE_VERSION".Trim()
+          if (-not $version) {
+            $today = [DateTime]::UtcNow
+            $version = "{0}.{1}.{2}" -f $today.Year, $today.Month, $today.Day
+          }
+
+          $webAppBaseUrl = "$env:INPUT_WEB_APP_BASE_URL".Trim()
+          if (-not $webAppBaseUrl) {
+            $webAppBaseUrl = "$env:VAR_WEB_APP_BASE_URL".Trim()
+          }
+          if (-not $webAppBaseUrl) {
+            throw "WEB_APP_BASE_URL is required. Provide workflow input web_app_base_url or repository variable WEB_APP_BASE_URL."
+          }
+
+          $stageDir = "$env:GITHUB_WORKSPACE\backend\.connector-build\windows-installer\staging"
+          $installerProject = "$env:GITHUB_WORKSPACE\backend\.connector-build\windows-installer\MSCQR-Connector-$version.iss"
+          $releaseOutputDir = "$env:GITHUB_WORKSPACE\backend\local-print-agent\releases\$version\windows"
+
+          # Adjust these paths if the Windows packaging script starts writing artifacts somewhere else.
+          "CONNECTOR_RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "WEB_APP_BASE_URL=$webAppBaseUrl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "WINDOWS_INSTALLER_STAGE_DIR=$stageDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "WINDOWS_INSTALLER_PROJECT=$installerProject" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "WINDOWS_RELEASE_OUTPUT_DIR=$releaseOutputDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          "connector_release_version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "web_app_base_url=$webAppBaseUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "windows_installer_stage_dir=$stageDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "windows_installer_project=$installerProject" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "windows_release_output_dir=$releaseOutputDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Prepare unsigned Windows installer scaffold
+        shell: pwsh
+        env:
+          CONNECTOR_RELEASE_VERSION: ${{ steps.release_settings.outputs.connector_release_version }}
+          WEB_APP_BASE_URL: ${{ steps.release_settings.outputs.web_app_base_url }}
+          INNO_SETUP_COMPILER_PATH: C:\__compile_after_payload_signing__\ISCC.exe
+        run: npm --prefix backend run connector:windows:build-installer
+
+      - name: Azure login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign staged Windows payload files
+        uses: azure/artifact-signing-action@v1
+        with:
+          endpoint: ${{ env.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ env.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ env.AZURE_ARTIFACT_SIGNING_PROFILE }}
+          # This is where build-windows-installer.mjs stages files before Inno Setup packages them.
+          # If the app's output directory changes, adjust WINDOWS_INSTALLER_STAGE_DIR above.
+          files-folder: ${{ steps.release_settings.outputs.windows_installer_stage_dir }}
+          files-folder-filter: exe,dll,msi
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Compile Windows installer
+        shell: pwsh
+        run: |
+          if (-not (Test-Path $env:WINDOWS_INSTALLER_PROJECT)) {
+            throw "Inno Setup project was not generated: $env:WINDOWS_INSTALLER_PROJECT"
+          }
+
+          $isccCandidates = @(
+            "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+            "C:\Program Files\Inno Setup 6\ISCC.exe"
+          )
+          $iscc = $isccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) {
+            throw "ISCC.exe was not found after installing Inno Setup."
+          }
+
+          & $iscc $env:WINDOWS_INSTALLER_PROJECT
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+          if (-not (Test-Path $env:WINDOWS_RELEASE_OUTPUT_DIR)) {
+            throw "Windows release output folder was not created: $env:WINDOWS_RELEASE_OUTPUT_DIR"
+          }
+
+          $artifacts = Get-ChildItem -Path $env:WINDOWS_RELEASE_OUTPUT_DIR -File -Recurse -Include *.exe,*.dll,*.msi
+          if (-not $artifacts) {
+            throw "No Windows .exe, .dll, or .msi artifacts were created in $env:WINDOWS_RELEASE_OUTPUT_DIR"
+          }
+
+      - name: Sign final Windows release artifacts
+        uses: azure/artifact-signing-action@v1
+        with:
+          endpoint: ${{ env.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ env.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ env.AZURE_ARTIFACT_SIGNING_PROFILE }}
+          # Final installer output is generated here by the existing packaging script.
+          # If the artifact path changes, adjust WINDOWS_RELEASE_OUTPUT_DIR in Resolve connector release settings.
+          files-folder: ${{ steps.release_settings.outputs.windows_release_output_dir }}
+          files-folder-filter: exe,dll,msi
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Normalize signed installer name and verify signatures
+        shell: pwsh
+        run: |
+          $unsignedInstaller = Join-Path $env:WINDOWS_RELEASE_OUTPUT_DIR "MSCQR-Connector-Windows-${env:CONNECTOR_RELEASE_VERSION}-unsigned.exe"
+          $signedInstaller = Join-Path $env:WINDOWS_RELEASE_OUTPUT_DIR "MSCQR-Connector-Windows-${env:CONNECTOR_RELEASE_VERSION}.exe"
+          if (Test-Path $unsignedInstaller) {
+            Move-Item -Path $unsignedInstaller -Destination $signedInstaller -Force
+          }
+
+          $signedArtifacts = Get-ChildItem -Path $env:WINDOWS_RELEASE_OUTPUT_DIR -File -Recurse -Include *.exe,*.dll,*.msi
+          if (-not $signedArtifacts) {
+            throw "No signed Windows artifacts found in $env:WINDOWS_RELEASE_OUTPUT_DIR"
+          }
+
+          foreach ($artifact in $signedArtifacts) {
+            $signature = Get-AuthenticodeSignature -FilePath $artifact.FullName
+            if ($signature.Status -ne "Valid") {
+              throw "Invalid signature for $($artifact.FullName): $($signature.Status) $($signature.StatusMessage)"
+            }
+          }
+
+      - name: Generate backend dependency SBOM
+        id: sbom
+        shell: pwsh
+        run: |
+          $sbomPath = Join-Path $env:WINDOWS_RELEASE_OUTPUT_DIR "MSCQR-Connector-Windows-${env:CONNECTOR_RELEASE_VERSION}.spdx.json"
+          npm --prefix backend sbom --sbom-format spdx --sbom-type application | Set-Content -Path $sbomPath -Encoding utf8
+
+          $sbom = Get-Content -Path $sbomPath -Raw | ConvertFrom-Json
+          if ($sbom.spdxVersion -ne "SPDX-2.3") {
+            throw "Expected SPDX-2.3 SBOM, got $($sbom.spdxVersion)"
+          }
+
+          "WINDOWS_SBOM_PATH=$sbomPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "windows_sbom_path=$sbomPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Write release checksums
+        id: checksums
+        shell: pwsh
+        run: |
+          $signedArtifacts = Get-ChildItem -Path $env:WINDOWS_RELEASE_OUTPUT_DIR -File -Recurse -Include *.exe,*.dll,*.msi
+          if (-not $signedArtifacts) {
+            throw "No signed Windows artifacts found in $env:WINDOWS_RELEASE_OUTPUT_DIR"
+          }
+
+          $signedChecksumsPath = Join-Path $env:WINDOWS_RELEASE_OUTPUT_DIR "SIGNED_ARTIFACTS_SHA256SUMS.txt"
+          Get-FileHash -Algorithm SHA256 -Path $signedArtifacts.FullName |
+            Sort-Object Path |
+            ForEach-Object {
+              $relativePath = [System.IO.Path]::GetRelativePath($env:WINDOWS_RELEASE_OUTPUT_DIR, $_.Path).Replace("\", "/")
+              "$($_.Hash.ToLowerInvariant())  $relativePath"
+            } |
+            Set-Content -Path $signedChecksumsPath -Encoding ascii
+
+          $releaseFiles = Get-ChildItem -Path $env:WINDOWS_RELEASE_OUTPUT_DIR -File -Recurse
+          Get-FileHash -Algorithm SHA256 -Path $releaseFiles.FullName |
+            Sort-Object Path |
+            ForEach-Object {
+              $relativePath = [System.IO.Path]::GetRelativePath($env:WINDOWS_RELEASE_OUTPUT_DIR, $_.Path).Replace("\", "/")
+              "$($_.Hash.ToLowerInvariant())  $relativePath"
+            } |
+            Set-Content -Path (Join-Path $env:WINDOWS_RELEASE_OUTPUT_DIR "SHA256SUMS.txt") -Encoding ascii
+
+          "SIGNED_ARTIFACT_CHECKSUMS_PATH=$signedChecksumsPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "signed_artifact_checksums_path=$signedChecksumsPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Attest signed Windows artifact provenance
+        uses: actions/attest@v4
+        with:
+          subject-checksums: ${{ steps.checksums.outputs.signed_artifact_checksums_path }}
+
+      - name: Attest signed Windows artifact SBOM
+        uses: actions/attest@v4
+        with:
+          subject-checksums: ${{ steps.checksums.outputs.signed_artifact_checksums_path }}
+          sbom-path: ${{ steps.sbom.outputs.windows_sbom_path }}
+
+      - name: Upload signed Windows connector artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mscqr-windows-connector-signed-${{ steps.release_settings.outputs.connector_release_version }}
+          path: ${{ steps.release_settings.outputs.windows_release_output_dir }}
+          if-no-files-found: error
