@@ -102,11 +102,19 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Install Ansible
+      - name: Verify Ansible on self-hosted runner
         run: |
           set -euo pipefail
-          python3 -m pip install --user ansible-core
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+          if ! command -v ansible-playbook >/dev/null 2>&1; then
+            echo "ansible-playbook is not installed on this self-hosted runner."
+            echo "Install it on the runner with: sudo apt install -y ansible"
+            exit 1
+          fi
+
+          ansible --version
+          ansible-playbook --version
+
 
       - name: Verify production environment requires approval
         env:
