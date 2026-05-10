@@ -25,4 +25,4 @@ Name: "{group}\Uninstall MSCQR Connector"; Filename: "{app}\Uninstall Connector.
 Filename: "{cmd}"; Parameters: "/c ""{app}\Install Connector.cmd"""; Flags: runhidden waituntilterminated postinstall skipifsilent
 
 [UninstallRun]
-Filename: "{cmd}"; Parameters: "/c ""{app}\Uninstall Connector.cmd"""; Flags: runhidden waituntilterminated skipifsilent
+Filename: "{cmd}"; Parameters: "/c ""{app}\Uninstall Connector.cmd"""; Flags: runhidden waituntilterminated

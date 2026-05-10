@@ -134,6 +134,18 @@ const run = async () => {
       installerTemplate.includes("Uninstall Connector.cmd"),
     "Windows installer template should run the packaged install and uninstall entry points without elevation"
   );
+  const uninstallRunLine = installerTemplate
+    .split(/\r?\n/)
+    .find((line) => line.includes('"{app}\\Uninstall Connector.cmd"') && line.includes("Flags:"));
+  assert(uninstallRunLine, "Windows installer template should include an Inno [UninstallRun] entry");
+  assert(
+    uninstallRunLine.includes("runhidden") && uninstallRunLine.includes("waituntilterminated"),
+    "Windows uninstaller should keep running the cleanup command hidden and wait for it to finish"
+  );
+  assert(
+    !/\b(skipifsilent|skipifnotsilent|postinstall|unchecked|runasoriginaluser)\b/.test(uninstallRunLine),
+    "Windows [UninstallRun] entry should not use flags that Inno Setup only supports in [Run]"
+  );
   assert(installScript.includes("setupVerification"), "Canonical Windows installer should inspect setupVerification from the local agent status payload");
   assert(
     installScript.includes('state -eq "READY"'),
