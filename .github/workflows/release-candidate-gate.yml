@@ -61,11 +61,6 @@ jobs:
     env:
       SMOKE_BASE_URL: ${{ vars.STAGING_SMOKE_BASE_URL }}
       SMOKE_API_BASE_URL: ${{ vars.STAGING_SMOKE_API_BASE_URL }}
-      SMOKE_LOGIN_EMAIL: ${{ secrets.STAGING_SMOKE_LOGIN_EMAIL }}
-      SMOKE_LOGIN_PASSWORD: ${{ secrets.STAGING_SMOKE_LOGIN_PASSWORD }}
-      SMOKE_ADMIN_MFA_CODE: ${{ secrets.STAGING_SMOKE_ADMIN_MFA_CODE }}
-      SMOKE_ADMIN_STEP_UP_CODE: ${{ secrets.STAGING_SMOKE_ADMIN_STEP_UP_CODE }}
-      SMOKE_STEP_UP_PASSWORD: ${{ secrets.STAGING_SMOKE_STEP_UP_PASSWORD }}
       SMOKE_VERIFY_CODE: ${{ vars.STAGING_SMOKE_VERIFY_CODE }}
       SMOKE_BATCH_PRINT_ENDPOINT: ${{ vars.STAGING_SMOKE_BATCH_PRINT_ENDPOINT }}
       SMOKE_BATCH_PRINT_PAYLOAD_JSON: ${{ vars.STAGING_SMOKE_BATCH_PRINT_PAYLOAD_JSON }}
@@ -76,6 +71,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -87,13 +84,84 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Resolve pull request changed files
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed_files="$(git diff --name-only "$BASE_SHA" "$GITHUB_SHA")"
+          {
+            echo "STAGING_SMOKE_CHANGED_FILES<<EOF"
+            echo "$changed_files"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+          echo "Staging smoke changed files:"
+          if [ -n "$changed_files" ]; then
+            echo "$changed_files"
+          else
+            echo "(none detected)"
+          fi
+
+      - name: Decide Dependabot staging smoke handling
+        id: smoke_skip
+        env:
+          ALLOW_DEPENDABOT_DEPENDENCY_SMOKE_SKIP: "true"
+          SMOKE_LOGIN_EMAIL: ${{ secrets.STAGING_SMOKE_LOGIN_EMAIL || secrets.SMOKE_LOGIN_EMAIL }}
+          SMOKE_LOGIN_PASSWORD: ${{ secrets.STAGING_SMOKE_LOGIN_PASSWORD || secrets.SMOKE_LOGIN_PASSWORD }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import {
+            collectStagingSmokeConfig,
+            evaluateDependabotSmokeSkip,
+          } from "./scripts/lib/staging-smoke-config-core.mjs";
+
+          const { missing } = collectStagingSmokeConfig(process.env);
+          const skip = evaluateDependabotSmokeSkip({ env: process.env, missing });
+          const shouldSkip = skip.shouldSkip ? "true" : "false";
+
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `skip_staging_smoke=${shouldSkip}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `SKIP_STAGING_SMOKE=${shouldSkip}\n`);
+
+          if (skip.shouldSkip) {
+            console.log("Staging smoke will be skipped after configuration validation.");
+            console.log("Reason: Dependabot dependency-only PR and staging smoke login credentials are unavailable.");
+            console.log(`Changed files: ${skip.changedFiles.join(", ")}`);
+          } else {
+            console.log("Staging smoke is required for this run.");
+          }
+          NODE
+
       - name: Validate staging smoke configuration
+        env:
+          ALLOW_DEPENDABOT_DEPENDENCY_SMOKE_SKIP: "true"
+          SMOKE_LOGIN_EMAIL: ${{ secrets.STAGING_SMOKE_LOGIN_EMAIL || secrets.SMOKE_LOGIN_EMAIL }}
+          SMOKE_LOGIN_PASSWORD: ${{ secrets.STAGING_SMOKE_LOGIN_PASSWORD || secrets.SMOKE_LOGIN_PASSWORD }}
+          SMOKE_ADMIN_MFA_CODE: ${{ secrets.STAGING_SMOKE_ADMIN_MFA_CODE }}
+          SMOKE_ADMIN_STEP_UP_CODE: ${{ secrets.STAGING_SMOKE_ADMIN_STEP_UP_CODE }}
+          SMOKE_STEP_UP_PASSWORD: ${{ secrets.STAGING_SMOKE_STEP_UP_PASSWORD }}
         run: node scripts/check-staging-smoke-config.mjs
 
       - name: Run staging smoke gate
+        if: ${{ steps.smoke_skip.outputs.skip_staging_smoke != 'true' }}
+        env:
+          SMOKE_LOGIN_EMAIL: ${{ secrets.STAGING_SMOKE_LOGIN_EMAIL || secrets.SMOKE_LOGIN_EMAIL }}
+          SMOKE_LOGIN_PASSWORD: ${{ secrets.STAGING_SMOKE_LOGIN_PASSWORD || secrets.SMOKE_LOGIN_PASSWORD }}
+          SMOKE_ADMIN_MFA_CODE: ${{ secrets.STAGING_SMOKE_ADMIN_MFA_CODE }}
+          SMOKE_ADMIN_STEP_UP_CODE: ${{ secrets.STAGING_SMOKE_ADMIN_STEP_UP_CODE }}
+          SMOKE_STEP_UP_PASSWORD: ${{ secrets.STAGING_SMOKE_STEP_UP_PASSWORD }}
         run: |
           set -o pipefail
           npm run verify:staging-smoke | tee smoke-release.log
+
+      - name: Record skipped staging smoke reason
+        if: ${{ steps.smoke_skip.outputs.skip_staging_smoke == 'true' }}
+        run: |
+          {
+            echo "Staging smoke skipped."
+            echo "Reason: Dependabot dependency-only pull request does not have staging smoke login credentials available."
+            echo "Configure Dependabot secrets SMOKE_LOGIN_EMAIL and SMOKE_LOGIN_PASSWORD to run this smoke job for Dependabot PRs."
+          } | tee smoke-release.log
 
       - name: Upload staging smoke log
         if: always()

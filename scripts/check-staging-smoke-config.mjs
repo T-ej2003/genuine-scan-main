@@ -1,72 +1,41 @@
-const read = (key) => String(process.env[key] || "").trim();
+import {
+  collectStagingSmokeConfig,
+  evaluateDependabotSmokeSkip,
+} from "./lib/staging-smoke-config-core.mjs";
 
-const missing = [];
-
-const requireVar = (key) => {
-  if (!read(key)) missing.push({ key, type: "var" });
-};
-
-const requireSecret = (key) => {
-  if (!read(key)) missing.push({ key, type: "secret" });
-};
-
-// Minimum required for a useful smoke run
-requireVar("SMOKE_BASE_URL");
-requireVar("SMOKE_API_BASE_URL");
-requireSecret("SMOKE_LOGIN_EMAIL");
-requireSecret("SMOKE_LOGIN_PASSWORD");
-
-// Optional grouped flows
-const hasVerifyFlow = Boolean(read("SMOKE_VERIFY_CODE"));
-
-const batchPrintEndpoint = read("SMOKE_BATCH_PRINT_ENDPOINT");
-const batchPrintPayload = read("SMOKE_BATCH_PRINT_PAYLOAD_JSON");
-const hasBatchPrintFlow = Boolean(batchPrintEndpoint && batchPrintPayload);
-if (batchPrintEndpoint || batchPrintPayload) {
-  if (!batchPrintEndpoint) missing.push({ key: "SMOKE_BATCH_PRINT_ENDPOINT", type: "var" });
-  if (!batchPrintPayload) missing.push({ key: "SMOKE_BATCH_PRINT_PAYLOAD_JSON", type: "var" });
-}
-
-const incidentEndpoint = read("SMOKE_INCIDENT_ENDPOINT");
-const incidentPayload = read("SMOKE_INCIDENT_PAYLOAD_JSON");
-const hasIncidentFlow = Boolean(incidentEndpoint && incidentPayload);
-if (incidentEndpoint || incidentPayload) {
-  if (!incidentEndpoint) missing.push({ key: "SMOKE_INCIDENT_ENDPOINT", type: "var" });
-  if (!incidentPayload) missing.push({ key: "SMOKE_INCIDENT_PAYLOAD_JSON", type: "var" });
-}
-
-const evidenceUrl = read("SMOKE_EVIDENCE_URL");
-const evidencePath = read("SMOKE_EVIDENCE_PATH");
-const hasEvidenceFlow = Boolean(evidenceUrl || evidencePath);
-if (evidenceUrl && evidencePath) {
-  missing.push({ key: "only one of SMOKE_EVIDENCE_URL or SMOKE_EVIDENCE_PATH", type: "var" });
-}
-
-const hasStepUpFlow = Boolean(
-  read("SMOKE_STEP_UP_PASSWORD") ||
-  read("SMOKE_ADMIN_STEP_UP_CODE") ||
-  read("SMOKE_ADMIN_MFA_CODE")
-);
+const { missing, configuredOptionalFlows } = collectStagingSmokeConfig(process.env);
 
 if (missing.length > 0) {
+  const skip = evaluateDependabotSmokeSkip({ env: process.env, missing });
+
+  if (skip.shouldSkip) {
+    console.log("Staging smoke configuration check skipped.");
+    console.log(
+      "Reason: Dependabot dependency-only pull request does not have staging smoke login credentials available."
+    );
+    console.log(
+      "Dependabot-triggered workflows use Dependabot secrets, not regular Actions secrets. Add Dependabot secrets SMOKE_LOGIN_EMAIL and SMOKE_LOGIN_PASSWORD to run this smoke job for Dependabot PRs."
+    );
+    console.log(`Actor: ${skip.actor}`);
+    console.log(`Changed files: ${skip.changedFiles.join(", ")}`);
+    console.log(`Missing credentials: ${skip.missingLoginSecrets.join(", ")}`);
+    process.exit(0);
+  }
+
   console.error("Staging smoke configuration is incomplete.");
   for (const item of missing) {
     console.error(`- missing ${item.type}: ${item.key}`);
   }
+
+  if (skip.actor && skip.actor.toLowerCase() === "dependabot[bot]" && !skip.dependencyOnly) {
+    console.error("Dependabot smoke skip was not allowed because this PR is not dependency-only.");
+  }
+
   process.exit(1);
 }
 
 console.log("Staging smoke configuration check passed.");
 console.log("Validated required keys: SMOKE_BASE_URL, SMOKE_API_BASE_URL, SMOKE_LOGIN_EMAIL, SMOKE_LOGIN_PASSWORD");
-
-const configuredOptionalFlows = [
-  hasVerifyFlow ? "verify" : null,
-  hasBatchPrintFlow ? "batch-print" : null,
-  hasIncidentFlow ? "incident" : null,
-  hasEvidenceFlow ? "evidence" : null,
-  hasStepUpFlow ? "step-up-or-mfa" : null,
-].filter(Boolean);
-
 console.log(
   configuredOptionalFlows.length > 0
     ? `Configured optional flows: ${configuredOptionalFlows.join(", ")}`
