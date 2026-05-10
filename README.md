@@ -784,8 +784,19 @@ Production auto-deploy via Ansible:
 - Configure `production` with required reviewers. This keeps deployment automatic after merge but never unattended.
 - Required `production` environment secrets: `PROD_SSH_HOST`, `PROD_SSH_USER`, `PROD_SSH_PRIVATE_KEY`. Optional: `PROD_SSH_PORT` (defaults to `22`) and `PROD_KNOWN_HOSTS` (preferred). Without `PROD_KNOWN_HOSTS`, the workflow uses `ssh-keyscan -H` and strict host checking for the generated inventory.
 - For multi-host active/standby deployment from Actions, set optional `PROD_ANSIBLE_INVENTORY` to the full private inventory content and set each host's `ansible_ssh_private_key_file` to `~/.ssh/prod_deploy_key`. Set `PROD_KNOWN_HOSTS` for every host in that inventory. Do not commit `ops/deploy/inventory.ini`; it is ignored and generated at runtime in CI.
+- The Ansible deployment job must run on a self-hosted runner labeled `self-hosted`, `linux`, and `production-deploy`. GitHub-hosted runners can timeout because production EC2 security groups should not allow public SSH from GitHub's changing runner IP ranges.
+- Place the runner inside AWS/VPC or another secure deploy network path that can SSH to London `13.135.108.69`, Mumbai `15.206.45.108`, and Cape Town `15.240.28.113`.
+- Security groups should allow SSH only from the runner or bastion security group, a private subnet, or a fixed runner Elastic IP `/32`. Never open production SSH to `0.0.0.0/0`.
 - Manual deploy: run the `Release Gate` workflow from GitHub Actions with `git_ref=main` or a main-branch SHA that already has green gates.
 - Rollback: rerun `Release Gate` with the previous known-good main-branch SHA, or from an operator machine run `ansible-playbook -i ops/deploy/inventory.ini ops/deploy/deploy.yml --extra-vars "branch=main deploy_ref=<previous_sha>"`.
+
+Production runner checklist:
+- Create or register the self-hosted runner in GitHub: Settings -> Actions -> Runners -> New self-hosted runner.
+- Configure labels: `self-hosted`, `linux`, `production-deploy`.
+- Run it in AWS/VPC or a secure deploy network with outbound HTTPS to GitHub.
+- Confirm SSH reachability from the runner to all production hosts.
+- Confirm production EC2 security groups only allow SSH from the runner, bastion, or private deploy network.
+- Confirm the runner shows `Idle`, then run `Release Gate` and approve the `production` environment.
 
 ECS/Fargate image architecture note:
 - Local Docker Compose remains a developer-native workflow. On Apple Silicon, `docker compose build` will naturally create an `arm64` image unless you explicitly cross-build. That is correct for local development and must not be treated as the production publishing path.

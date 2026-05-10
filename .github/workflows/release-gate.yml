@@ -89,7 +89,7 @@ jobs:
     name: Deploy production via Ansible
     needs: verify-gates
     if: ${{ needs.verify-gates.outputs.deploy_sha != '' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, production-deploy]
     timeout-minutes: 60
     environment: production
     env:
