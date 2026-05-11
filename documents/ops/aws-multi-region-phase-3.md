@@ -127,5 +127,12 @@ This section is documentation only. Do not implement DNS automation in Phase 3. 
 ## Future Phases
 
 - Phase 4: [controlled manual DNS cutover](aws-multi-region-phase-4.md) only after manual failover is proven.
-- Phase 5: database replication strategy.
-- Phase 6: object storage migration, only if needed.
+- Phase 5: [database recovery strategy](aws-multi-region-phase-5.md) before any real DNS cutover.
+- Phase 6: [object storage DR hardening](aws-multi-region-phase-6.md), only after DB recovery is proven.
+
+## Later Phases
+
+- [Phase 4 controlled manual DNS cutover](aws-multi-region-phase-4.md)
+- [Phase 5 database recovery strategy](aws-multi-region-phase-5.md)
+- [Phase 6 object storage DR hardening](aws-multi-region-phase-6.md)
+- [Final multi-region disaster recovery runbook](aws-multi-region-disaster-recovery-runbook.md)

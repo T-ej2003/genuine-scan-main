@@ -232,5 +232,14 @@ Phase 4 is complete when:
 
 ## Future Phases
 
-- Phase 5 can evaluate database replication strategy after manual cutover is understood.
-- Phase 6 can evaluate object storage migration only if operational evidence shows it is needed.
+## Next Phase
+
+- [Phase 5 database recovery strategy](aws-multi-region-phase-5.md)
+- [Database recovery pack](database-recovery/README.md)
+
+Phase 5 should prove snapshot/backup restore, recovered endpoint approval, app connectivity, schema compatibility, and write gate approval before any real production DNS cutover.
+
+## Later Phases
+
+- [Phase 6 object storage DR hardening](aws-multi-region-phase-6.md)
+- [Final multi-region disaster recovery runbook](aws-multi-region-disaster-recovery-runbook.md)

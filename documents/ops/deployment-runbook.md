@@ -142,6 +142,14 @@ ansible -i ops/deploy/inventory.ini standby -m shell -a 'cd /home/ubuntu/genuine
 - Run URL Inspection in Search Console for `/verify` after public SEO changes.
 - Inspect one sample `/verify/<code>` URL and confirm it remains excluded by `noindex`.
 
+## AWS Multi-Region DR Docs
+
+- [Phase 3 manual failover readiness](aws-multi-region-phase-3.md)
+- [Phase 4 controlled manual DNS cutover](aws-multi-region-phase-4.md)
+- [Phase 5 database recovery strategy](aws-multi-region-phase-5.md)
+- [Phase 6 object storage DR hardening](aws-multi-region-phase-6.md)
+- [Final multi-region disaster recovery runbook](aws-multi-region-disaster-recovery-runbook.md)
+
 ## Safety Boundaries
 
 Deployment work must not change:
