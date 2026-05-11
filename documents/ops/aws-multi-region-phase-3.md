@@ -8,6 +8,15 @@ Phase 2 made Mumbai and Cape Town standby app servers manually deployable and he
 
 The key question for Phase 3 is: if London dies, can MSCQR manually recover service through Mumbai or Cape Town with a known RTO and RPO?
 
+Use the drill pack for execution evidence and operator checklists:
+
+- [Manual failover drill pack](manual-failover-drill/README.md)
+- [Command sheet](manual-failover-drill/command-sheet.md)
+- [RTO/RPO template](manual-failover-drill/rto-rpo-template.md)
+- [Database restore checklist](manual-failover-drill/database-restore-checklist.md)
+- [Object storage checklist](manual-failover-drill/object-storage-checklist.md)
+- [Rollback checklist](manual-failover-drill/rollback-checklist.md)
+
 ## Preconditions
 
 - Standby app servers are deployed and healthy.
