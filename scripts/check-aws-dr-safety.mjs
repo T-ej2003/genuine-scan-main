@@ -45,6 +45,8 @@ const dangerousPatterns = [
   { id: "rds-failover", pattern: /\baws\s+rds\s+failover[-\w]*/i },
   { id: "s3-rb", pattern: /\baws\s+s3\s+rb\b/i },
   { id: "s3-rm-recursive", pattern: /\baws\s+s3\s+rm\b[^\n]*--recursive/i },
+  { id: "s3api-delete-object", pattern: /\baws\s+s3api\s+delete-object\b/i },
+  { id: "s3api-put-object", pattern: /\baws\s+s3api\s+put-object\b/i },
   { id: "docker-system-prune", pattern: /\bdocker\s+system\s+prune\b/i },
   { id: "docker-volume-rm", pattern: /\bdocker\s+volume\s+rm\b/i },
   { id: "rm-docker-data", pattern: /\brm\s+-rf\s+\/var\/lib\/docker\b/i },
@@ -146,6 +148,17 @@ for (const scanRoot of scanRoots) {
             repoPath,
             line: references[0].lineNumber,
             message: `${scriptPath} must be protected by ${gate.environment} and ${gate.confirmation}.`,
+          });
+        }
+      }
+
+      const s3RmRegex = /\baws\s+s3\s+rm\b/gi;
+      for (const match of source.matchAll(s3RmRegex)) {
+        if (repoPath !== "scripts/dr/object-storage-write-test-approved.sh") {
+          findings.push({
+            repoPath,
+            line: lineNumber(source, match.index ?? 0),
+            message: "aws s3 rm is only allowed in the approved object storage write-test cleanup script.",
           });
         }
       }

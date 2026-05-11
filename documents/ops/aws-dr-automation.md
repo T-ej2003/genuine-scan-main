@@ -218,6 +218,32 @@ test_object_key: blank
 
 Do not run `AWS DR Apply` for smoke tests.
 
+## Troubleshooting Object Storage Readiness
+
+If `object-storage-readiness` fails with:
+
+```text
+AWS_DR_OBJECT_STORAGE_ROLE_ARN is required
+```
+
+or:
+
+```text
+AWS_DR_OBJECT_STORAGE_ROLE_ARN is missing.
+```
+
+check:
+
+1. GitHub repo -> Settings -> Environments.
+2. Open `dr-object-storage-write-test`.
+3. Confirm the Environment variable exists:
+   `AWS_DR_OBJECT_STORAGE_ROLE_ARN`
+4. Confirm the value is the object storage role ARN:
+   `arn:aws:iam::<account-id>:role/MSCQRGitHubDRObjectStorageRole`
+5. Re-run `AWS DR Operations` -> `object-storage-readiness`.
+
+The current expected setup is a GitHub Environment variable exposed through `vars.AWS_DR_OBJECT_STORAGE_ROLE_ARN`. If the ARN is stored as an Environment secret instead, update the workflow wiring to use `secrets.AWS_DR_OBJECT_STORAGE_ROLE_ARN`.
+
 ## Safety Guarantees
 
 - No blind automatic failover.

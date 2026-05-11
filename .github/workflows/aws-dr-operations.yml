@@ -42,16 +42,136 @@ permissions:
   id-token: write
 
 jobs:
-  read_only_smoke_test:
+  public_health:
+    if: ${{ inputs.operation == 'public-health' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     env:
       OPERATION: ${{ inputs.operation }}
       TARGET_REGION: ${{ inputs.target_region }}
       HOSTNAME: ${{ inputs.hostname }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Run AWS DR safety scanner
+        run: npm run check:aws-dr-safety
+
+      - name: Check public health script syntax
+        run: /bin/sh -n scripts/dr/public-health.sh
+
+      - name: Prepare DR artifact directory
+        run: |
+          mkdir -p "artifacts/dr/github-actions-${{ github.run_id }}"
+          {
+            echo "operation=${OPERATION}"
+            echo "target_region=${TARGET_REGION}"
+            echo "hostname=${HOSTNAME}"
+            echo "run_id=${{ github.run_id }}"
+            echo "run_attempt=${{ github.run_attempt }}"
+          } > "artifacts/dr/github-actions-${{ github.run_id }}/context.txt"
+
+      - name: Run public health smoke test
+        run: |
+          echo "Selected operation: ${OPERATION}"
+          echo "Logical target region/group: ${TARGET_REGION}"
+          echo "This public health smoke test does not use AWS credentials."
+          scripts/dr/public-health.sh
+
+      - name: Upload DR smoke-test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-dr-operations-${{ inputs.operation }}-${{ github.run_id }}
+          path: artifacts/dr/**
+          if-no-files-found: warn
+
+  dns_inventory:
+    if: ${{ inputs.operation == 'dns-inventory' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPERATION: ${{ inputs.operation }}
+      TARGET_REGION: ${{ inputs.target_region }}
+      HOSTNAME: ${{ inputs.hostname }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Run AWS DR safety scanner
+        run: npm run check:aws-dr-safety
+
+      - name: Check DNS inventory script syntax
+        run: /bin/sh -n scripts/dr/dns-inventory.sh
+
+      - name: Prepare DR artifact directory
+        run: |
+          mkdir -p "artifacts/dr/github-actions-${{ github.run_id }}"
+          {
+            echo "operation=${OPERATION}"
+            echo "target_region=${TARGET_REGION}"
+            echo "hostname=${HOSTNAME}"
+            echo "run_id=${{ github.run_id }}"
+            echo "run_attempt=${{ github.run_attempt }}"
+          } > "artifacts/dr/github-actions-${{ github.run_id }}/context.txt"
+
+      - name: Run DNS inventory smoke test
+        run: |
+          echo "Selected operation: ${OPERATION}"
+          echo "Logical target region/group: ${TARGET_REGION}"
+          echo "Hostname: ${HOSTNAME}"
+          echo "This DNS inventory smoke test is read-only and does not use AWS credentials."
+          scripts/dr/dns-inventory.sh "$HOSTNAME"
+
+      - name: Upload DR smoke-test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-dr-operations-${{ inputs.operation }}-${{ github.run_id }}
+          path: artifacts/dr/**
+          if-no-files-found: warn
+
+  object_storage_readiness:
+    if: ${{ inputs.operation == 'object-storage-readiness' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: dr-object-storage-write-test
+    env:
+      OPERATION: ${{ inputs.operation }}
+      TARGET_REGION: ${{ inputs.target_region }}
       BUCKET: ${{ inputs.bucket }}
       TEST_OBJECT_KEY: ${{ inputs.test_object_key }}
-      AWS_DR_OBJECT_STORAGE_ROLE_ARN: ${{ vars.AWS_DR_OBJECT_STORAGE_ROLE_ARN || secrets.AWS_DR_OBJECT_STORAGE_ROLE_ARN }}
+      AWS_DR_OBJECT_STORAGE_ROLE_ARN: ${{ vars.AWS_DR_OBJECT_STORAGE_ROLE_ARN }}
       AWS_REGION: eu-west-2
     steps:
       - name: Checkout repository
@@ -75,11 +195,8 @@ jobs:
       - name: Run AWS DR safety scanner
         run: npm run check:aws-dr-safety
 
-      - name: Check read-only DR script syntax
-        run: |
-          /bin/sh -n scripts/dr/public-health.sh
-          /bin/sh -n scripts/dr/dns-inventory.sh
-          /bin/sh -n scripts/dr/object-storage-readiness.sh
+      - name: Check object storage readiness script syntax
+        run: /bin/sh -n scripts/dr/object-storage-readiness.sh
 
       - name: Prepare DR artifact directory
         run: |
@@ -87,45 +204,44 @@ jobs:
           {
             echo "operation=${OPERATION}"
             echo "target_region=${TARGET_REGION}"
-            echo "hostname=${HOSTNAME}"
             echo "bucket=${BUCKET}"
-            echo "test_object_key=${TEST_OBJECT_KEY}"
+            if [ -n "$TEST_OBJECT_KEY" ]; then
+              echo "test_object_key=set"
+            else
+              echo "test_object_key=blank"
+            fi
             echo "run_id=${{ github.run_id }}"
             echo "run_attempt=${{ github.run_attempt }}"
           } > "artifacts/dr/github-actions-${{ github.run_id }}/context.txt"
 
-      - name: Require object storage OIDC role
-        if: ${{ inputs.operation == 'object-storage-readiness' }}
+      - name: Validate object storage OIDC role wiring
         run: |
+          echo "Selected operation: ${OPERATION}"
+          echo "Logical target region/group: ${TARGET_REGION}"
+          echo "Selected bucket: ${BUCKET}"
+          if [ -n "$TEST_OBJECT_KEY" ]; then
+            echo "TEST_OBJECT_KEY is set."
+          else
+            echo "TEST_OBJECT_KEY is blank."
+          fi
+          echo "This object storage readiness smoke test is read-only."
           if [ -z "$AWS_DR_OBJECT_STORAGE_ROLE_ARN" ]; then
-            echo "AWS_DR_OBJECT_STORAGE_ROLE_ARN is required for object-storage-readiness in GitHub Actions."
+            echo "AWS_DR_OBJECT_STORAGE_ROLE_ARN is missing."
+            echo "Set it in GitHub repo Settings -> Environments -> dr-object-storage-write-test -> Environment variables."
             exit 2
           fi
+          echo "Object storage OIDC role variable is present."
 
       - name: Configure AWS credentials for object storage readiness
-        if: ${{ inputs.operation == 'object-storage-readiness' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: eu-west-2
-          role-to-assume: ${{ vars.AWS_DR_OBJECT_STORAGE_ROLE_ARN || secrets.AWS_DR_OBJECT_STORAGE_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_DR_OBJECT_STORAGE_ROLE_ARN }}
 
-      - name: Run selected read-only DR operation
+      - name: Run read-only S3 readiness check
         run: |
-          case "$OPERATION" in
-            public-health)
-              scripts/dr/public-health.sh
-              ;;
-            dns-inventory)
-              scripts/dr/dns-inventory.sh "$HOSTNAME"
-              ;;
-            object-storage-readiness)
-              BUCKET="$BUCKET" TEST_OBJECT_KEY="$TEST_OBJECT_KEY" scripts/dr/object-storage-readiness.sh
-              ;;
-            *)
-              echo "::error::Unsupported read-only DR operation: $OPERATION"
-              exit 2
-              ;;
-          esac
+          echo "Running read-only S3 readiness check."
+          BUCKET="$BUCKET" TEST_OBJECT_KEY="$TEST_OBJECT_KEY" scripts/dr/object-storage-readiness.sh
 
       - name: Upload DR smoke-test artifacts
         if: always()
