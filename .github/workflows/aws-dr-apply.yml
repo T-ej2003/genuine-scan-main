@@ -1,0 +1,310 @@
+name: AWS DR Apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Approval-gated DR apply operation"
+        required: true
+        type: choice
+        options:
+          - apply-route53-change
+          - apply-route53-rollback
+          - apply-db-restore-approved
+          - object-storage-write-test-approved
+      aws_region:
+        description: "AWS region for OIDC session setup and regional APIs"
+        required: true
+        type: string
+        default: eu-west-2
+      hosted_zone_id:
+        description: "Route 53 hosted zone ID for DNS apply operations"
+        required: false
+        type: string
+      hostname:
+        description: "Hostname to inspect before/after DNS apply"
+        required: false
+        type: string
+        default: www.mscqr.com
+      change_batch_json:
+        description: "Reviewed Route 53 cutover change batch JSON"
+        required: false
+        type: string
+      rollback_batch_json:
+        description: "Reviewed Route 53 rollback change batch JSON"
+        required: false
+        type: string
+      target_region:
+        description: "Target AWS region for approved DB restore"
+        required: false
+        type: string
+      snapshot_identifier:
+        description: "Snapshot identifier for approved DB restore"
+        required: false
+        type: string
+      source_db_identifier:
+        description: "Source DB identifier for point-in-time approved restore"
+        required: false
+        type: string
+      recovery_point:
+        description: "Recovery point timestamp for point-in-time approved restore"
+        required: false
+        type: string
+      target_db_identifier:
+        description: "New recovery target DB identifier"
+        required: false
+        type: string
+      bucket:
+        description: "Bucket for approved object storage write test"
+        required: false
+        type: string
+      delete_test_object:
+        description: "Delete only the generated dr-tests object after verifying it"
+        required: false
+        type: boolean
+        default: false
+      confirm_dns_cutover:
+        description: "Must equal I_APPROVE_MANUAL_DNS_CUTOVER"
+        required: false
+        type: string
+      confirm_dns_rollback:
+        description: "Must equal I_APPROVE_MANUAL_DNS_ROLLBACK"
+        required: false
+        type: string
+      confirm_db_restore:
+        description: "Must equal I_APPROVE_DB_RESTORE_TO_RECOVERY_TARGET"
+        required: false
+        type: string
+      confirm_object_write_test:
+        description: "Must equal I_APPROVE_OBJECT_STORAGE_WRITE_TEST"
+        required: false
+        type: string
+      confirm_delete_test_object:
+        description: "Must equal I_APPROVE_DELETE_DR_TEST_OBJECT when delete_test_object is true"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  dns-cutover:
+    if: ${{ inputs.operation == 'apply-route53-change' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: dr-dns-cutover
+    env:
+      AWS_REGION: ${{ inputs.aws_region }}
+      HOSTED_ZONE_ID: ${{ inputs.hosted_zone_id }}
+      HOSTNAME: ${{ inputs.hostname }}
+      CHANGE_BATCH_JSON: ${{ inputs.change_batch_json }}
+      CONFIRM_DNS_CUTOVER: ${{ inputs.confirm_dns_cutover }}
+      AWS_ROLE_TO_ASSUME: ${{ vars.DR_DNS_CUTOVER_ROLE_TO_ASSUME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate DNS cutover approval inputs
+        run: |
+          set -euo pipefail
+          [ "$CONFIRM_DNS_CUTOVER" = "I_APPROVE_MANUAL_DNS_CUTOVER" ] || {
+            echo "::error::confirm_dns_cutover must equal I_APPROVE_MANUAL_DNS_CUTOVER."
+            exit 2
+          }
+          [ -n "$HOSTED_ZONE_ID" ] || { echo "::error::hosted_zone_id is required."; exit 2; }
+          [ -n "$CHANGE_BATCH_JSON" ] || { echo "::error::change_batch_json is required."; exit 2; }
+          [ -n "$AWS_ROLE_TO_ASSUME" ] || { echo "::error::Set DR_DNS_CUTOVER_ROLE_TO_ASSUME on the dr-dns-cutover environment."; exit 2; }
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ vars.DR_DNS_CUTOVER_ROLE_TO_ASSUME }}
+
+      - name: Apply reviewed Route 53 cutover batch
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dr/manual-input
+          printf '%s\n' "$CHANGE_BATCH_JSON" > artifacts/dr/manual-input/route53-change-batch.json
+          python3 -m json.tool artifacts/dr/manual-input/route53-change-batch.json > artifacts/dr/manual-input/route53-change-batch.pretty.json
+          mv artifacts/dr/manual-input/route53-change-batch.pretty.json artifacts/dr/manual-input/route53-change-batch.json
+          CHANGE_BATCH_FILE=artifacts/dr/manual-input/route53-change-batch.json scripts/dr/apply-route53-change.sh
+
+      - name: Write immutable evidence manifest
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dr
+          find artifacts/dr -type f -print0 | sort -z | xargs -0 shasum -a 256 > artifacts/dr/sha256-manifest.txt
+
+      - name: Upload immutable DR evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-dns-cutover-evidence-${{ github.run_id }}
+          path: artifacts/dr
+          if-no-files-found: error
+          retention-days: 90
+
+  dns-rollback:
+    if: ${{ inputs.operation == 'apply-route53-rollback' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: dr-dns-rollback
+    env:
+      AWS_REGION: ${{ inputs.aws_region }}
+      HOSTED_ZONE_ID: ${{ inputs.hosted_zone_id }}
+      HOSTNAME: ${{ inputs.hostname }}
+      ROLLBACK_BATCH_JSON: ${{ inputs.rollback_batch_json }}
+      CONFIRM_DNS_ROLLBACK: ${{ inputs.confirm_dns_rollback }}
+      AWS_ROLE_TO_ASSUME: ${{ vars.DR_DNS_ROLLBACK_ROLE_TO_ASSUME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate DNS rollback approval inputs
+        run: |
+          set -euo pipefail
+          [ "$CONFIRM_DNS_ROLLBACK" = "I_APPROVE_MANUAL_DNS_ROLLBACK" ] || {
+            echo "::error::confirm_dns_rollback must equal I_APPROVE_MANUAL_DNS_ROLLBACK."
+            exit 2
+          }
+          [ -n "$HOSTED_ZONE_ID" ] || { echo "::error::hosted_zone_id is required."; exit 2; }
+          [ -n "$ROLLBACK_BATCH_JSON" ] || { echo "::error::rollback_batch_json is required."; exit 2; }
+          [ -n "$AWS_ROLE_TO_ASSUME" ] || { echo "::error::Set DR_DNS_ROLLBACK_ROLE_TO_ASSUME on the dr-dns-rollback environment."; exit 2; }
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ vars.DR_DNS_ROLLBACK_ROLE_TO_ASSUME }}
+
+      - name: Apply reviewed Route 53 rollback batch
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dr/manual-input
+          printf '%s\n' "$ROLLBACK_BATCH_JSON" > artifacts/dr/manual-input/route53-rollback-batch.json
+          python3 -m json.tool artifacts/dr/manual-input/route53-rollback-batch.json > artifacts/dr/manual-input/route53-rollback-batch.pretty.json
+          mv artifacts/dr/manual-input/route53-rollback-batch.pretty.json artifacts/dr/manual-input/route53-rollback-batch.json
+          ROLLBACK_BATCH_FILE=artifacts/dr/manual-input/route53-rollback-batch.json scripts/dr/apply-route53-rollback.sh
+
+      - name: Write immutable evidence manifest
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dr
+          find artifacts/dr -type f -print0 | sort -z | xargs -0 shasum -a 256 > artifacts/dr/sha256-manifest.txt
+
+      - name: Upload immutable DR evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-dns-rollback-evidence-${{ github.run_id }}
+          path: artifacts/dr
+          if-no-files-found: error
+          retention-days: 90
+
+  db-restore:
+    if: ${{ inputs.operation == 'apply-db-restore-approved' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: dr-db-restore
+    env:
+      AWS_REGION: ${{ inputs.aws_region }}
+      TARGET_REGION: ${{ inputs.target_region }}
+      SNAPSHOT_IDENTIFIER: ${{ inputs.snapshot_identifier }}
+      SOURCE_DB_IDENTIFIER: ${{ inputs.source_db_identifier }}
+      RECOVERY_POINT: ${{ inputs.recovery_point }}
+      TARGET_DB_IDENTIFIER: ${{ inputs.target_db_identifier }}
+      CONFIRM_DB_RESTORE: ${{ inputs.confirm_db_restore }}
+      AWS_ROLE_TO_ASSUME: ${{ vars.DR_DB_RESTORE_ROLE_TO_ASSUME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate DB restore approval inputs
+        run: |
+          set -euo pipefail
+          [ "$CONFIRM_DB_RESTORE" = "I_APPROVE_DB_RESTORE_TO_RECOVERY_TARGET" ] || {
+            echo "::error::confirm_db_restore must equal I_APPROVE_DB_RESTORE_TO_RECOVERY_TARGET."
+            exit 2
+          }
+          [ -n "$TARGET_REGION" ] || { echo "::error::target_region is required."; exit 2; }
+          [ -n "$TARGET_DB_IDENTIFIER" ] || { echo "::error::target_db_identifier is required."; exit 2; }
+          if [ -z "$SNAPSHOT_IDENTIFIER" ] && [ -z "$SOURCE_DB_IDENTIFIER" ]; then
+            echo "::error::snapshot_identifier or source_db_identifier is required."
+            exit 2
+          fi
+          [ -n "$AWS_ROLE_TO_ASSUME" ] || { echo "::error::Set DR_DB_RESTORE_ROLE_TO_ASSUME on the dr-db-restore environment."; exit 2; }
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ vars.DR_DB_RESTORE_ROLE_TO_ASSUME }}
+
+      - name: Restore approved DB recovery target
+        run: scripts/dr/apply-db-restore-approved.sh
+
+      - name: Write immutable evidence manifest
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dr
+          find artifacts/dr -type f -print0 | sort -z | xargs -0 shasum -a 256 > artifacts/dr/sha256-manifest.txt
+
+      - name: Upload immutable DR evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-db-restore-evidence-${{ github.run_id }}
+          path: artifacts/dr
+          if-no-files-found: error
+          retention-days: 90
+
+  object-storage-write-test:
+    if: ${{ inputs.operation == 'object-storage-write-test-approved' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: dr-object-storage-write-test
+    env:
+      AWS_REGION: ${{ inputs.aws_region }}
+      BUCKET: ${{ inputs.bucket }}
+      CONFIRM_OBJECT_WRITE_TEST: ${{ inputs.confirm_object_write_test }}
+      CONFIRM_DELETE_TEST_OBJECT: ${{ inputs.delete_test_object && inputs.confirm_delete_test_object || '' }}
+      AWS_ROLE_TO_ASSUME: ${{ vars.DR_OBJECT_STORAGE_WRITE_TEST_ROLE_TO_ASSUME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate object storage write-test approval inputs
+        run: |
+          set -euo pipefail
+          [ "$CONFIRM_OBJECT_WRITE_TEST" = "I_APPROVE_OBJECT_STORAGE_WRITE_TEST" ] || {
+            echo "::error::confirm_object_write_test must equal I_APPROVE_OBJECT_STORAGE_WRITE_TEST."
+            exit 2
+          }
+          [ -n "$BUCKET" ] || { echo "::error::bucket is required."; exit 2; }
+          [ -n "$AWS_ROLE_TO_ASSUME" ] || { echo "::error::Set DR_OBJECT_STORAGE_WRITE_TEST_ROLE_TO_ASSUME on the dr-object-storage-write-test environment."; exit 2; }
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ vars.DR_OBJECT_STORAGE_WRITE_TEST_ROLE_TO_ASSUME }}
+
+      - name: Run approved object storage write test
+        run: scripts/dr/object-storage-write-test-approved.sh
+
+      - name: Write immutable evidence manifest
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dr
+          find artifacts/dr -type f -print0 | sort -z | xargs -0 shasum -a 256 > artifacts/dr/sha256-manifest.txt
+
+      - name: Upload immutable DR evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-object-storage-write-test-evidence-${{ github.run_id }}
+          path: artifacts/dr
+          if-no-files-found: error
+          retention-days: 90

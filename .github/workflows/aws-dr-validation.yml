@@ -1,0 +1,68 @@
+name: AWS DR Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "documents/ops/**"
+      - "scripts/**"
+      - "ops/deploy/**"
+      - "ops/aws/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Validate DR guardrails
+        run: |
+          npm run check:documents
+          npm run verify:guardrails
+          npm run check:aws-dr-safety
+          /bin/sh -n scripts/deploy-standby.sh
+          /bin/sh -n scripts/health-check-regions.sh
+          for file in scripts/dr/*.sh; do
+            /bin/sh -n "$file"
+          done
+          for file in ops/aws/iam/dr/*.json; do
+            python3 -m json.tool "$file" >/dev/null
+          done
+          git diff --check
+
+      - name: Install Ansible safely for syntax checks
+        run: |
+          python3 -m pip install --user ansible-core
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Validate Ansible standby playbooks
+        run: |
+          ansible-inventory -i ops/deploy/inventory.example.ini --list
+          ansible-playbook -i ops/deploy/inventory.example.ini ops/deploy/bootstrap-standby.yml --syntax-check
+          ansible-playbook -i ops/deploy/inventory.example.ini ops/deploy/deploy-standby.yml --syntax-check
+          ansible-playbook -i ops/deploy/inventory.example.ini ops/deploy/health-check-standby.yml --syntax-check

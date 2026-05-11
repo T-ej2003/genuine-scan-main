@@ -1,0 +1,136 @@
+name: AWS DR Operations
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Read-only DR operation to run"
+        required: true
+        type: choice
+        options:
+          - public-health
+          - dns-inventory
+          - object-storage-readiness
+      target_region:
+        description: "Logical target region/group for logs only"
+        required: false
+        default: standby
+        type: choice
+        options:
+          - standby
+          - mumbai
+          - capetown
+          - standby_regions
+      hostname:
+        description: "Hostname for public health or DNS inventory"
+        required: false
+        default: www.mscqr.com
+        type: string
+      bucket:
+        description: "S3 bucket for read-only object storage readiness"
+        required: false
+        default: mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an
+        type: string
+      test_object_key:
+        description: "Optional object key for read-only head-object check"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  read_only_smoke_test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OPERATION: ${{ inputs.operation }}
+      TARGET_REGION: ${{ inputs.target_region }}
+      HOSTNAME: ${{ inputs.hostname }}
+      BUCKET: ${{ inputs.bucket }}
+      TEST_OBJECT_KEY: ${{ inputs.test_object_key }}
+      AWS_DR_OBJECT_STORAGE_ROLE_ARN: ${{ vars.AWS_DR_OBJECT_STORAGE_ROLE_ARN || secrets.AWS_DR_OBJECT_STORAGE_ROLE_ARN }}
+      AWS_REGION: eu-west-2
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Run AWS DR safety scanner
+        run: npm run check:aws-dr-safety
+
+      - name: Check read-only DR script syntax
+        run: |
+          /bin/sh -n scripts/dr/public-health.sh
+          /bin/sh -n scripts/dr/dns-inventory.sh
+          /bin/sh -n scripts/dr/object-storage-readiness.sh
+
+      - name: Prepare DR artifact directory
+        run: |
+          mkdir -p "artifacts/dr/github-actions-${{ github.run_id }}"
+          {
+            echo "operation=${OPERATION}"
+            echo "target_region=${TARGET_REGION}"
+            echo "hostname=${HOSTNAME}"
+            echo "bucket=${BUCKET}"
+            echo "test_object_key=${TEST_OBJECT_KEY}"
+            echo "run_id=${{ github.run_id }}"
+            echo "run_attempt=${{ github.run_attempt }}"
+          } > "artifacts/dr/github-actions-${{ github.run_id }}/context.txt"
+
+      - name: Require object storage OIDC role
+        if: ${{ inputs.operation == 'object-storage-readiness' }}
+        run: |
+          if [ -z "$AWS_DR_OBJECT_STORAGE_ROLE_ARN" ]; then
+            echo "AWS_DR_OBJECT_STORAGE_ROLE_ARN is required for object-storage-readiness in GitHub Actions."
+            exit 2
+          fi
+
+      - name: Configure AWS credentials for object storage readiness
+        if: ${{ inputs.operation == 'object-storage-readiness' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: eu-west-2
+          role-to-assume: ${{ vars.AWS_DR_OBJECT_STORAGE_ROLE_ARN || secrets.AWS_DR_OBJECT_STORAGE_ROLE_ARN }}
+
+      - name: Run selected read-only DR operation
+        run: |
+          case "$OPERATION" in
+            public-health)
+              scripts/dr/public-health.sh
+              ;;
+            dns-inventory)
+              scripts/dr/dns-inventory.sh "$HOSTNAME"
+              ;;
+            object-storage-readiness)
+              BUCKET="$BUCKET" TEST_OBJECT_KEY="$TEST_OBJECT_KEY" scripts/dr/object-storage-readiness.sh
+              ;;
+            *)
+              echo "::error::Unsupported read-only DR operation: $OPERATION"
+              exit 2
+              ;;
+          esac
+
+      - name: Upload DR smoke-test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-dr-operations-${{ inputs.operation }}-${{ github.run_id }}
+          path: artifacts/dr/**
+          if-no-files-found: warn

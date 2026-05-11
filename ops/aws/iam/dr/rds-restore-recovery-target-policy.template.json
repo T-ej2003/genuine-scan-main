@@ -1,0 +1,33 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadRecoveryMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "rds:DescribeDBInstances",
+        "rds:DescribeDBClusters",
+        "rds:DescribeDBSnapshots",
+        "rds:DescribeDBClusterSnapshots",
+        "rds:DescribeDBSubnetGroups",
+        "rds:DescribeOptionGroups",
+        "rds:DescribeDBParameterGroups"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CreateOnlyApprovedRecoveryTarget",
+      "Effect": "Allow",
+      "Action": [
+        "rds:RestoreDBInstanceFromDBSnapshot",
+        "rds:RestoreDBInstanceToPointInTime",
+        "rds:AddTagsToResource"
+      ],
+      "Resource": [
+        "arn:aws:rds:<TARGET_REGION>:<AWS_ACCOUNT_ID>:db:<RECOVERY_TARGET_PREFIX>*",
+        "arn:aws:rds:<SOURCE_REGION>:<AWS_ACCOUNT_ID>:db:<SOURCE_DB_IDENTIFIER>",
+        "arn:aws:rds:<SOURCE_REGION>:<AWS_ACCOUNT_ID>:snapshot:<SNAPSHOT_IDENTIFIER>"
+      ]
+    }
+  ]
+}
