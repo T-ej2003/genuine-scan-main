@@ -31,10 +31,10 @@ The current recovery direction is region-local: Mumbai standby should use an `ap
 
 1. Collect topology: `scripts/dr/aws-dr-topology-inventory.sh`.
 2. Generate snapshot copy plan: `scripts/dr/generate-cross-region-snapshot-copy-plan.sh`.
-3. Copy snapshot only through `AWS DR Apply` with `I_APPROVE_CROSS_REGION_SNAPSHOT_COPY`.
-4. Restore region-local DB only through `AWS DR Apply` with `I_APPROVE_REGION_LOCAL_DB_RESTORE`.
+3. Copy snapshot only through `AWS DR Snapshot Apply` with `I_APPROVE_CROSS_REGION_SNAPSHOT_COPY`.
+4. Restore region-local DB only through `AWS DR DB Apply` with `I_APPROVE_REGION_LOCAL_DB_RESTORE`.
 5. Check target DB readiness: `scripts/dr/target-region-db-readiness.sh`.
 6. Diagnose standby-to-DB network path: `scripts/dr/diagnose-standby-db-network.sh`.
 7. Cut over one standby app with `scripts/dr/test-standby-recovered-db.sh`.
 8. Roll back the standby env with `scripts/dr/rollback-standby-db-env.sh`.
-9. Cleanup recovery DB only through `AWS DR Apply` with `I_APPROVE_RECOVERY_DB_CLEANUP`.
+9. Cleanup recovery DB only through `AWS DR Cleanup Apply` with `I_APPROVE_RECOVERY_DB_CLEANUP`.

@@ -53,6 +53,7 @@ jobs:
           for file in ops/aws/iam/dr/*.json; do
             python3 -m json.tool "$file" >/dev/null
           done
+          ruby -e 'require "yaml"; Dir[".github/workflows/aws-dr-*.yml"].sort.each { |file| workflow = YAML.load_file(file); dispatch = (workflow["on"] || workflow[true] || {})["workflow_dispatch"] || {}; count = (dispatch["inputs"] || {}).length; puts "#{file}: #{count} workflow_dispatch input(s)"; raise "#{file} has more than 25 workflow_dispatch inputs" if count > 25 }'
           git diff --check
 
       - name: Install Ansible safely for syntax checks

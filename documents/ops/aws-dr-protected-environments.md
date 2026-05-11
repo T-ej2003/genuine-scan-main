@@ -34,12 +34,16 @@ Set these environment-scoped variables:
 
 The workflow uses GitHub OIDC through `aws-actions/configure-aws-credentials@v4`. Long-lived AWS access keys are not required.
 
-## Manual Apply Workflow
+## Manual Apply Workflows
 
-Use:
+Use focused manual workflows instead of the old combined apply workflow:
 
 ```text
-.github/workflows/aws-dr-apply.yml
+.github/workflows/aws-dr-dns-apply.yml
+.github/workflows/aws-dr-snapshot-apply.yml
+.github/workflows/aws-dr-db-apply.yml
+.github/workflows/aws-dr-cleanup-apply.yml
+.github/workflows/aws-dr-object-storage-apply.yml
 ```
 
 Supported operations:
@@ -71,7 +75,7 @@ Each operation requires both:
 
 ## Immutable Evidence
 
-The apply workflow writes logs under `artifacts/dr/`, generates `artifacts/dr/sha256-manifest.txt`, and uploads evidence with `actions/upload-artifact@v4`.
+The apply workflows write logs under `artifacts/dr/`, generate `artifacts/dr/sha256-manifest.txt`, and upload evidence with `actions/upload-artifact@v4`.
 
 Artifact v4 uploads are immutable for the workflow run. Retention is set to 90 days. Incident commanders should copy the artifact URL into the incident record.
 
@@ -98,7 +102,7 @@ Replace placeholders such as `<AWS_ACCOUNT_ID>`, `<GITHUB_ORG>`, `<GITHUB_REPO>`
 ## Safety Notes
 
 - The safe operations workflow still does not expose mutation operations.
-- The apply workflow is manual-only.
+- The apply workflows are manual-only and each has fewer than 25 `workflow_dispatch` inputs.
 - No health check triggers DNS movement.
 - DNS cutover and rollback call the local gated scripts.
 - DB restore creates only a new recovery target and does not modify the primary DB.

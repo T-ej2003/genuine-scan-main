@@ -7,7 +7,19 @@ const allowedRoute53Apply = new Set([
   "scripts/dr/apply-route53-change.sh",
   "scripts/dr/apply-route53-rollback.sh",
 ]);
-const allowedApplyWorkflow = ".github/workflows/aws-dr-apply.yml";
+const dnsApplyWorkflow = ".github/workflows/aws-dr-dns-apply.yml";
+const snapshotApplyWorkflow = ".github/workflows/aws-dr-snapshot-apply.yml";
+const dbApplyWorkflow = ".github/workflows/aws-dr-db-apply.yml";
+const cleanupApplyWorkflow = ".github/workflows/aws-dr-cleanup-apply.yml";
+const objectStorageApplyWorkflow = ".github/workflows/aws-dr-object-storage-apply.yml";
+const operationsWorkflow = ".github/workflows/aws-dr-operations.yml";
+const applyWorkflowPaths = new Set([
+  dnsApplyWorkflow,
+  snapshotApplyWorkflow,
+  dbApplyWorkflow,
+  cleanupApplyWorkflow,
+  objectStorageApplyWorkflow,
+]);
 const allowedRdsRestoreScripts = new Set([
   "scripts/dr/apply-db-restore-approved.sh",
   "scripts/dr/apply-region-local-db-restore-approved.sh",
@@ -31,6 +43,7 @@ const gatedApplyScripts = new Map([
     {
       confirmation: "I_APPROVE_MANUAL_DNS_CUTOVER",
       environment: "dr-dns-cutover",
+      workflow: dnsApplyWorkflow,
     },
   ],
   [
@@ -38,6 +51,7 @@ const gatedApplyScripts = new Map([
     {
       confirmation: "I_APPROVE_MANUAL_DNS_ROLLBACK",
       environment: "dr-dns-rollback",
+      workflow: dnsApplyWorkflow,
     },
   ],
   [
@@ -45,6 +59,7 @@ const gatedApplyScripts = new Map([
     {
       confirmation: "I_APPROVE_DB_RESTORE_TO_RECOVERY_TARGET",
       environment: "dr-db-restore",
+      workflow: dbApplyWorkflow,
     },
   ],
   [
@@ -52,6 +67,7 @@ const gatedApplyScripts = new Map([
     {
       confirmation: "I_APPROVE_OBJECT_STORAGE_WRITE_TEST",
       environment: "dr-object-storage-write-test",
+      workflow: objectStorageApplyWorkflow,
     },
   ],
   [
@@ -59,6 +75,7 @@ const gatedApplyScripts = new Map([
     {
       confirmation: "I_APPROVE_CROSS_REGION_SNAPSHOT_COPY",
       environment: "dr-db-restore",
+      workflow: snapshotApplyWorkflow,
     },
   ],
   [
@@ -66,6 +83,7 @@ const gatedApplyScripts = new Map([
     {
       confirmation: "I_APPROVE_REGION_LOCAL_DB_RESTORE",
       environment: "dr-db-restore",
+      workflow: dbApplyWorkflow,
     },
   ],
   [
@@ -73,10 +91,20 @@ const gatedApplyScripts = new Map([
     {
       confirmation: "I_APPROVE_RECOVERY_DB_CLEANUP",
       environment: "dr-recovery-cleanup",
+      workflow: cleanupApplyWorkflow,
     },
   ],
 ]);
 const selfPath = "scripts/check-aws-dr-safety.mjs";
+const mutationOperationNames = [
+  "apply-route53-change",
+  "apply-route53-rollback",
+  "apply-db-restore-approved",
+  "object-storage-write-test-approved",
+  "apply-cross-region-snapshot-copy-approved",
+  "apply-region-local-db-restore-approved",
+  "cleanup-recovery-db-approved",
+];
 
 const dangerousPatterns = [
   { id: "rds-failover", pattern: /\baws\s+rds\s+failover[-\w]*/i },
@@ -145,6 +173,49 @@ function executableLineReferences(source, pattern) {
     });
 }
 
+function workflowDispatchInputCount(source) {
+  const lines = source.split("\n");
+  let workflowDispatchIndent = null;
+  let inputsIndent = null;
+  let count = 0;
+
+  for (const line of lines) {
+    if (line.trim() === "" || line.trim().startsWith("#")) continue;
+    const indent = line.match(/^ */)?.[0].length ?? 0;
+
+    if (workflowDispatchIndent === null) {
+      if (/^\s*workflow_dispatch:\s*$/.test(line)) {
+        workflowDispatchIndent = indent;
+      }
+      continue;
+    }
+
+    if (indent <= workflowDispatchIndent) break;
+
+    if (inputsIndent === null) {
+      if (/^\s*inputs:\s*$/.test(line)) {
+        inputsIndent = indent;
+      }
+      continue;
+    }
+
+    if (indent <= inputsIndent) break;
+    if (indent === inputsIndent + 2 && /^\s*[A-Za-z_][A-Za-z0-9_-]*:\s*$/.test(line)) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function hasWorkflowDispatch(source) {
+  return /^\s*workflow_dispatch:\s*$/m.test(source);
+}
+
+function hasPushOrPullRequestTrigger(source) {
+  return /^\s*(push|pull_request):\s*$/m.test(source);
+}
+
 const findings = [];
 
 for (const scanRoot of scanRoots) {
@@ -157,6 +228,46 @@ for (const scanRoot of scanRoots) {
     const isExecutable = isWorkflowOrExecutable(repoPath);
 
     if (isExecutable) {
+      if (repoPath.startsWith(".github/workflows/aws-dr-") && repoPath.endsWith(".yml")) {
+        const inputCount = workflowDispatchInputCount(source);
+        if (inputCount > 25) {
+          findings.push({
+            repoPath,
+            line: 1,
+            message: `workflow_dispatch defines ${inputCount} inputs; GitHub allows at most 25.`,
+          });
+        }
+      }
+
+      if (applyWorkflowPaths.has(repoPath)) {
+        if (!hasWorkflowDispatch(source)) {
+          findings.push({
+            repoPath,
+            line: 1,
+            message: "DR apply workflows must be workflow_dispatch only.",
+          });
+        }
+        if (hasPushOrPullRequestTrigger(source)) {
+          findings.push({
+            repoPath,
+            line: 1,
+            message: "DR apply workflows must not define push or pull_request triggers.",
+          });
+        }
+      }
+
+      if (repoPath === operationsWorkflow) {
+        for (const operationName of mutationOperationNames) {
+          if (source.includes(operationName)) {
+            findings.push({
+              repoPath,
+              line: 1,
+              message: `Read-only DR operations workflow must not expose mutation operation ${operationName}.`,
+            });
+          }
+        }
+      }
+
       const route53Regex = /\baws\s+route53\s+change-resource-record-sets\b/gi;
       for (const match of source.matchAll(route53Regex)) {
         if (!allowedRoute53Apply.has(repoPath)) {
@@ -183,11 +294,11 @@ for (const scanRoot of scanRoots) {
       for (const [scriptPath, gate] of gatedApplyScripts.entries()) {
         const references = applyScriptReferences(source, scriptPath);
         if (references.length === 0) continue;
-        if (repoPath !== allowedApplyWorkflow) {
+        if (repoPath !== gate.workflow) {
           findings.push({
             repoPath,
             line: references[0].lineNumber,
-            message: `${scriptPath} may only be called from ${allowedApplyWorkflow}.`,
+            message: `${scriptPath} may only be called from ${gate.workflow}.`,
           });
           continue;
         }

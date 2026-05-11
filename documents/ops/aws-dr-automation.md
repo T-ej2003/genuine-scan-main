@@ -158,13 +158,13 @@ Exact Mumbai sequence:
 
 1. `AWS DR Operations` -> `aws-topology-inventory`.
 2. `AWS DR Operations` -> `generate-cross-region-snapshot-copy-plan`.
-3. `AWS DR Apply` -> `apply-cross-region-snapshot-copy-approved`.
-4. `AWS DR Apply` -> `apply-region-local-db-restore-approved`.
+3. `AWS DR Snapshot Apply` -> `apply-cross-region-snapshot-copy-approved`.
+4. `AWS DR DB Apply` -> `apply-region-local-db-restore-approved`.
 5. `AWS DR Operations` -> `target-region-db-readiness` until `available`.
 6. `AWS DR Operations` -> `diagnose-standby-db-network`.
 7. `AWS DR Standby DB Test` -> `test-standby-recovered-db`.
 8. `AWS DR Standby DB Test` -> `rollback-standby-db-env` after evidence capture.
-9. `AWS DR Apply` -> `cleanup-recovery-db-approved` only after explicit cleanup approval.
+9. `AWS DR Cleanup Apply` -> cleanup only after explicit cleanup approval.
 
 Local commands:
 
@@ -285,7 +285,11 @@ scripts/dr/object-storage-write-test-approved.sh
 
 - `AWS DR Validation` validates scripts, guardrails, and Ansible syntax without production secrets, SSH, or deploy.
 - `AWS DR Operations` is `workflow_dispatch` only and exposes read-only or artifact-only checks. It does not include DNS apply, snapshot copy apply, DB restore apply, cleanup, or object write-test apply.
-- `AWS DR Apply` is `workflow_dispatch` only and exposes mutation-capable operations only behind protected GitHub Environments, OIDC AWS role assumption, and exact confirmation phrases.
+- `AWS DR DNS Apply` handles approved Route 53 cutover and rollback only.
+- `AWS DR Snapshot Apply` handles approved cross-region snapshot copy only.
+- `AWS DR DB Apply` handles approved DB restore and region-local DB restore only.
+- `AWS DR Cleanup Apply` handles approved recovery DB cleanup only.
+- `AWS DR Object Storage Apply` handles approved object-storage write tests only.
 - `AWS DR Standby DB Test` is `workflow_dispatch` only and validates one selected standby app against an already-restored recovery DB behind the protected `dr-standby-db-test` environment.
 - Standby deploy from Actions requires an approved `STANDBY_ANSIBLE_INVENTORY` secret and an intentional `deploy-standby` selection.
 
@@ -360,7 +364,7 @@ db_subnet_group_name: rds-ec2-db-subnet-group-1
 db_vpc_security_group_ids: sg-07db1a9130c6df8d5
 ```
 
-`db-readiness` uses the `dr-db-restore` environment and OIDC to run read-only RDS describe commands. `generate-db-restore-plan` writes a markdown artifact only. Actual DB restore remains in `AWS DR Apply` and requires confirmation plus protected environment approval.
+`db-readiness` uses the `dr-db-restore` environment and OIDC to run read-only RDS describe commands. `generate-db-restore-plan` writes a markdown artifact only. Actual DB restore remains in `AWS DR DB Apply` and requires confirmation plus protected environment approval.
 
 Additional region-local DB operations:
 
@@ -369,7 +373,7 @@ Additional region-local DB operations:
 - `target-region-db-readiness`: read-only recovery DB status and endpoint evidence.
 - `diagnose-standby-db-network`: read-only DNS/TCP check from one standby to a DB endpoint.
 
-Do not run `AWS DR Apply` for smoke tests.
+Do not run apply workflows for smoke tests.
 
 ## Troubleshooting Object Storage Readiness
 

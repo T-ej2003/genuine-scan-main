@@ -1,0 +1,163 @@
+name: AWS DR DNS Apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Approval-gated DNS apply operation"
+        required: true
+        type: choice
+        options:
+          - apply-route53-change
+          - apply-route53-rollback
+      aws_region:
+        description: "AWS region for OIDC session setup"
+        required: true
+        type: string
+        default: eu-west-2
+      hosted_zone_id:
+        description: "Route 53 hosted zone ID"
+        required: true
+        type: string
+      hostname:
+        description: "Hostname to inspect before/after DNS apply"
+        required: false
+        type: string
+        default: www.mscqr.com
+      change_batch_json:
+        description: "Reviewed Route 53 cutover change batch JSON"
+        required: false
+        type: string
+      rollback_batch_json:
+        description: "Reviewed Route 53 rollback change batch JSON"
+        required: false
+        type: string
+      confirm_dns_cutover:
+        description: "Must equal I_APPROVE_MANUAL_DNS_CUTOVER"
+        required: false
+        type: string
+      confirm_dns_rollback:
+        description: "Must equal I_APPROVE_MANUAL_DNS_ROLLBACK"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  dns-cutover:
+    if: ${{ inputs.operation == 'apply-route53-change' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: dr-dns-cutover
+    env:
+      AWS_REGION: ${{ inputs.aws_region }}
+      HOSTED_ZONE_ID: ${{ inputs.hosted_zone_id }}
+      HOSTNAME: ${{ inputs.hostname }}
+      CHANGE_BATCH_JSON: ${{ inputs.change_batch_json }}
+      CONFIRM_DNS_CUTOVER: ${{ inputs.confirm_dns_cutover }}
+      AWS_ROLE_TO_ASSUME: ${{ vars.DR_DNS_CUTOVER_ROLE_TO_ASSUME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate DNS cutover approval inputs
+        run: |
+          set -euo pipefail
+          [ "$CONFIRM_DNS_CUTOVER" = "I_APPROVE_MANUAL_DNS_CUTOVER" ] || {
+            echo "::error::confirm_dns_cutover must equal I_APPROVE_MANUAL_DNS_CUTOVER."
+            exit 2
+          }
+          [ -n "$HOSTED_ZONE_ID" ] || { echo "::error::hosted_zone_id is required."; exit 2; }
+          [ -n "$CHANGE_BATCH_JSON" ] || { echo "::error::change_batch_json is required."; exit 2; }
+          [ -n "$AWS_ROLE_TO_ASSUME" ] || { echo "::error::Set DR_DNS_CUTOVER_ROLE_TO_ASSUME on the dr-dns-cutover environment."; exit 2; }
+          echo "::add-mask::$AWS_ROLE_TO_ASSUME"
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ vars.DR_DNS_CUTOVER_ROLE_TO_ASSUME }}
+
+      - name: Apply reviewed Route 53 cutover batch
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dr/manual-input
+          printf '%s\n' "$CHANGE_BATCH_JSON" > artifacts/dr/manual-input/route53-change-batch.json
+          python3 -m json.tool artifacts/dr/manual-input/route53-change-batch.json > artifacts/dr/manual-input/route53-change-batch.pretty.json
+          mv artifacts/dr/manual-input/route53-change-batch.pretty.json artifacts/dr/manual-input/route53-change-batch.json
+          CHANGE_BATCH_FILE=artifacts/dr/manual-input/route53-change-batch.json scripts/dr/apply-route53-change.sh
+
+      - name: Write immutable evidence manifest
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dr
+          find artifacts/dr -type f -print0 | sort -z | xargs -0 shasum -a 256 > artifacts/dr/sha256-manifest.txt
+
+      - name: Upload immutable DR evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-dns-cutover-evidence-${{ github.run_id }}
+          path: artifacts/dr
+          if-no-files-found: error
+          retention-days: 90
+
+  dns-rollback:
+    if: ${{ inputs.operation == 'apply-route53-rollback' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: dr-dns-rollback
+    env:
+      AWS_REGION: ${{ inputs.aws_region }}
+      HOSTED_ZONE_ID: ${{ inputs.hosted_zone_id }}
+      HOSTNAME: ${{ inputs.hostname }}
+      ROLLBACK_BATCH_JSON: ${{ inputs.rollback_batch_json }}
+      CONFIRM_DNS_ROLLBACK: ${{ inputs.confirm_dns_rollback }}
+      AWS_ROLE_TO_ASSUME: ${{ vars.DR_DNS_ROLLBACK_ROLE_TO_ASSUME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate DNS rollback approval inputs
+        run: |
+          set -euo pipefail
+          [ "$CONFIRM_DNS_ROLLBACK" = "I_APPROVE_MANUAL_DNS_ROLLBACK" ] || {
+            echo "::error::confirm_dns_rollback must equal I_APPROVE_MANUAL_DNS_ROLLBACK."
+            exit 2
+          }
+          [ -n "$HOSTED_ZONE_ID" ] || { echo "::error::hosted_zone_id is required."; exit 2; }
+          [ -n "$ROLLBACK_BATCH_JSON" ] || { echo "::error::rollback_batch_json is required."; exit 2; }
+          [ -n "$AWS_ROLE_TO_ASSUME" ] || { echo "::error::Set DR_DNS_ROLLBACK_ROLE_TO_ASSUME on the dr-dns-rollback environment."; exit 2; }
+          echo "::add-mask::$AWS_ROLE_TO_ASSUME"
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ vars.DR_DNS_ROLLBACK_ROLE_TO_ASSUME }}
+
+      - name: Apply reviewed Route 53 rollback batch
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dr/manual-input
+          printf '%s\n' "$ROLLBACK_BATCH_JSON" > artifacts/dr/manual-input/route53-rollback-batch.json
+          python3 -m json.tool artifacts/dr/manual-input/route53-rollback-batch.json > artifacts/dr/manual-input/route53-rollback-batch.pretty.json
+          mv artifacts/dr/manual-input/route53-rollback-batch.pretty.json artifacts/dr/manual-input/route53-rollback-batch.json
+          ROLLBACK_BATCH_FILE=artifacts/dr/manual-input/route53-rollback-batch.json scripts/dr/apply-route53-rollback.sh
+
+      - name: Write immutable evidence manifest
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dr
+          find artifacts/dr -type f -print0 | sort -z | xargs -0 shasum -a 256 > artifacts/dr/sha256-manifest.txt
+
+      - name: Upload immutable DR evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-dns-rollback-evidence-${{ github.run_id }}
+          path: artifacts/dr
+          if-no-files-found: error
+          retention-days: 90

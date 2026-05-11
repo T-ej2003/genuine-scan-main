@@ -126,9 +126,9 @@ Available operations:
 - `db-readiness`: performs read-only RDS inventory and snapshot checks using the protected `dr-db-restore` environment.
 - `generate-db-restore-plan`: creates a markdown restore plan artifact before any approved DB restore drill.
 
-This workflow does not deploy, SSH, use real inventory, change DNS, restore databases, or write/delete objects. Use it before `AWS DR Apply`; do not use the apply workflow for smoke tests.
+This workflow does not deploy, SSH, use real inventory, change DNS, restore databases, or write/delete objects. Use it before any apply workflow; do not use apply workflows for smoke tests.
 
-Before a DB restore drill, run `db-readiness` first, then run `generate-db-restore-plan`, then get incident commander approval before using the DB restore operation in `AWS DR Apply`.
+Before a DB restore drill, run `db-readiness` first, then run `generate-db-restore-plan`, then get incident commander approval before using the DB restore operation in `AWS DR DB Apply`.
 
 Approved DB restore requires an approved DB subnet group and, when appropriate, approved VPC security group IDs. The current London restore drill used these values from readiness output:
 
@@ -147,13 +147,13 @@ Run sequence:
 
 1. `AWS DR Operations` -> `aws-topology-inventory`.
 2. `AWS DR Operations` -> `generate-cross-region-snapshot-copy-plan`.
-3. `AWS DR Apply` -> `apply-cross-region-snapshot-copy-approved`.
-4. `AWS DR Apply` -> `apply-region-local-db-restore-approved`.
+3. `AWS DR Snapshot Apply` -> `apply-cross-region-snapshot-copy-approved`.
+4. `AWS DR DB Apply` -> `apply-region-local-db-restore-approved`.
 5. `AWS DR Operations` -> `target-region-db-readiness` until `available`.
 6. `AWS DR Operations` -> `diagnose-standby-db-network`.
 7. `AWS DR Standby DB Test` -> `test-standby-recovered-db`.
 8. `AWS DR Standby DB Test` -> `rollback-standby-db-env` after evidence.
-9. `AWS DR Apply` -> `cleanup-recovery-db-approved` only after explicit cleanup approval.
+9. `AWS DR Cleanup Apply` -> cleanup only after explicit cleanup approval.
 
 This sequence still does not change DNS, Route 53, London, primary DB, MinIO, or production object storage.
 
