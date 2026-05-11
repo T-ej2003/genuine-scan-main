@@ -35,6 +35,8 @@ Do not use it for cosmetic UI issues, isolated support tickets, or short-lived a
 
 Do not move DNS until app, DB, object storage, TLS, rollback, and write gate are approved.
 
+Do not run apply commands without incident commander approval.
+
 ## Operator Sequence
 
 1. Confirm outage.
@@ -69,6 +71,45 @@ curl -fsS https://www.mscqr.com/api/health/ready
 
 These commands observe or deploy through the existing safe deployment path. They do not change DNS or delete data.
 
+## DR Automation Commands
+
+Use the operator-controlled automation guide for the full framework:
+
+```text
+documents/ops/aws-dr-automation.md
+```
+
+Safe local commands:
+
+```bash
+scripts/dr/dr-preflight.sh
+scripts/dr/check-standby.sh standby
+scripts/dr/deploy-standby.sh standby
+scripts/dr/dns-inventory.sh www.mscqr.com
+scripts/dr/public-health.sh
+AWS_REGION=eu-west-2 DB_IDENTIFIER=mscqr-prod scripts/dr/db-readiness.sh
+BUCKET=mscqr-prod-assets scripts/dr/object-storage-readiness.sh
+```
+
+Generate review artifacts without applying changes:
+
+```bash
+HOSTNAME=www.mscqr.com TARGET_VALUE=standby.example.com TTL=60 ACTION=UPSERT scripts/dr/generate-route53-change-batch.sh
+HOSTNAME=www.mscqr.com ROLLBACK_VALUE=primary.example.com TTL=60 scripts/dr/generate-route53-rollback-batch.sh
+SOURCE_DB_IDENTIFIER=mscqr-prod TARGET_REGION=ap-south-1 SNAPSHOT_IDENTIFIER=rds:mscqr-prod-2026-05-11 TARGET_DB_IDENTIFIER=mscqr-dr-recovery-20260511 scripts/dr/generate-db-restore-plan.sh
+```
+
+Approval-gated commands:
+
+```bash
+HOSTED_ZONE_ID=Zxxxxxxxx CHANGE_BATCH_FILE=artifacts/dr/<timestamp>/route53-change-batch.json CONFIRM_DNS_CUTOVER=I_APPROVE_MANUAL_DNS_CUTOVER scripts/dr/apply-route53-change.sh
+HOSTED_ZONE_ID=Zxxxxxxxx ROLLBACK_BATCH_FILE=artifacts/dr/<timestamp>/route53-rollback-batch.json CONFIRM_DNS_ROLLBACK=I_APPROVE_MANUAL_DNS_ROLLBACK scripts/dr/apply-route53-rollback.sh
+TARGET_REGION=ap-south-1 SNAPSHOT_IDENTIFIER=rds:mscqr-prod-2026-05-11 TARGET_DB_IDENTIFIER=mscqr-dr-recovery-20260511 CONFIRM_DB_RESTORE=I_APPROVE_DB_RESTORE_TO_RECOVERY_TARGET scripts/dr/apply-db-restore-approved.sh
+BUCKET=mscqr-prod-assets CONFIRM_OBJECT_WRITE_TEST=I_APPROVE_OBJECT_STORAGE_WRITE_TEST scripts/dr/object-storage-write-test-approved.sh
+```
+
+Every DR script writes evidence under `artifacts/dr/<timestamp>/`. Those artifacts are intentionally ignored by Git.
+
 ## RTO/RPO Evidence Links
 
 - [Manual failover RTO/RPO template](manual-failover-drill/rto-rpo-template.md)
@@ -88,7 +129,7 @@ These commands observe or deploy through the existing safe deployment path. They
 ## What Not To Do
 
 - Do not implement automatic failover.
-- Do not implement Route 53 automation.
+- Do not run Route 53 apply automation without explicit incident commander approval.
 - Do not implement health-check-driven DNS switching.
 - Do not allow active-active writes.
 - Do not wipe or destructively clean up databases.

@@ -1,0 +1,158 @@
+name: AWS DR Operations
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Safe DR operation to run"
+        required: true
+        type: choice
+        options:
+          - preflight
+          - check-standby
+          - deploy-standby
+          - dns-inventory
+          - public-health
+          - generate-route53-change-batch
+          - generate-route53-rollback-batch
+          - db-readiness
+          - generate-db-restore-plan
+          - object-storage-readiness
+      target_region:
+        description: "Standby target"
+        required: true
+        type: choice
+        default: standby
+        options:
+          - standby
+          - mumbai
+          - capetown
+          - standby_regions
+      hostname:
+        description: "DNS hostname"
+        required: false
+        type: string
+        default: www.mscqr.com
+      target_value:
+        description: "DNS target or rollback value for generated batches"
+        required: false
+        type: string
+      ttl:
+        description: "DNS TTL for generated batches"
+        required: false
+        type: string
+        default: "60"
+      bucket:
+        description: "Object storage bucket for read-only checks"
+        required: false
+        type: string
+      test_object_key:
+        description: "Optional object key for read-only head-object"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  operate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OPERATION: ${{ inputs.operation }}
+      TARGET_REGION: ${{ inputs.target_region }}
+      HOSTNAME: ${{ inputs.hostname }}
+      TARGET_VALUE: ${{ inputs.target_value }}
+      TTL: ${{ inputs.ttl }}
+      BUCKET: ${{ inputs.bucket }}
+      TEST_OBJECT_KEY: ${{ inputs.test_object_key }}
+      STANDBY_ANSIBLE_INVENTORY: ${{ secrets.STANDBY_ANSIBLE_INVENTORY }}
+      DR_SOURCE_DB_IDENTIFIER: ${{ vars.DR_SOURCE_DB_IDENTIFIER }}
+      DR_SOURCE_CLUSTER_IDENTIFIER: ${{ vars.DR_SOURCE_CLUSTER_IDENTIFIER }}
+      DR_SNAPSHOT_IDENTIFIER: ${{ vars.DR_SNAPSHOT_IDENTIFIER }}
+      DR_RECOVERY_POINT: ${{ vars.DR_RECOVERY_POINT }}
+      DR_TARGET_AWS_REGION: ${{ vars.DR_TARGET_AWS_REGION }}
+      DR_TARGET_DB_IDENTIFIER: ${{ vars.DR_TARGET_DB_IDENTIFIER }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Prepare optional standby inventory
+        if: ${{ inputs.operation == 'check-standby' || inputs.operation == 'deploy-standby' }}
+        run: |
+          if [ -z "$STANDBY_ANSIBLE_INVENTORY" ]; then
+            echo "::error::STANDBY_ANSIBLE_INVENTORY is not configured. Configure an approved standby inventory secret before running standby Ansible operations from GitHub Actions."
+            exit 1
+          fi
+          printf '%s\n' "$STANDBY_ANSIBLE_INVENTORY" > ops/deploy/inventory.ini
+          chmod 600 ops/deploy/inventory.ini
+          python3 -m pip install --user ansible-core
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run selected safe DR operation
+        run: |
+          case "$OPERATION" in
+            preflight)
+              scripts/dr/dr-preflight.sh
+              ;;
+            check-standby)
+              scripts/dr/check-standby.sh "$TARGET_REGION"
+              ;;
+            deploy-standby)
+              scripts/dr/deploy-standby.sh "$TARGET_REGION"
+              ;;
+            dns-inventory)
+              scripts/dr/dns-inventory.sh "$HOSTNAME"
+              ;;
+            public-health)
+              scripts/dr/public-health.sh
+              ;;
+            generate-route53-change-batch)
+              ACTION=UPSERT HOSTNAME="$HOSTNAME" TARGET_VALUE="$TARGET_VALUE" TTL="$TTL" scripts/dr/generate-route53-change-batch.sh
+              ;;
+            generate-route53-rollback-batch)
+              HOSTNAME="$HOSTNAME" ROLLBACK_VALUE="$TARGET_VALUE" TTL="$TTL" scripts/dr/generate-route53-rollback-batch.sh
+              ;;
+            db-readiness)
+              AWS_REGION="${DR_TARGET_AWS_REGION:-}" DB_IDENTIFIER="${DR_SOURCE_DB_IDENTIFIER:-}" DB_CLUSTER_IDENTIFIER="${DR_SOURCE_CLUSTER_IDENTIFIER:-}" scripts/dr/db-readiness.sh
+              ;;
+            generate-db-restore-plan)
+              SOURCE_DB_IDENTIFIER="${DR_SOURCE_DB_IDENTIFIER:-}" \
+              SOURCE_CLUSTER_IDENTIFIER="${DR_SOURCE_CLUSTER_IDENTIFIER:-}" \
+              SNAPSHOT_IDENTIFIER="${DR_SNAPSHOT_IDENTIFIER:-}" \
+              RECOVERY_POINT="${DR_RECOVERY_POINT:-}" \
+              TARGET_REGION="${DR_TARGET_AWS_REGION:-}" \
+              TARGET_DB_IDENTIFIER="${DR_TARGET_DB_IDENTIFIER:-}" \
+              scripts/dr/generate-db-restore-plan.sh
+              ;;
+            object-storage-readiness)
+              BUCKET="$BUCKET" TEST_OBJECT_KEY="$TEST_OBJECT_KEY" scripts/dr/object-storage-readiness.sh
+              ;;
+            *)
+              echo "::error::Unsupported operation: $OPERATION"
+              exit 2
+              ;;
+          esac
+
+      - name: Upload DR artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-dr-artifacts
+          path: artifacts/dr
+          if-no-files-found: ignore
