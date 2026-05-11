@@ -226,10 +226,18 @@ jobs:
         run: ansible-playbook -i ops/deploy/inventory.ini ops/deploy/deploy.yml --syntax-check
 
       - name: Deploy gated SHA to production
-        env:
-          ANSIBLE_SSH_ARGS: "-o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes"
         run: |
           set -euo pipefail
+
+          known_hosts_file="${HOME}/.ssh/known_hosts"
+
+          if [ ! -s "$known_hosts_file" ]; then
+            echo "::error::Known hosts file is missing or empty at ${known_hosts_file}."
+            exit 1
+          fi
+
+          export ANSIBLE_SSH_ARGS="-o UserKnownHostsFile=${known_hosts_file} -o StrictHostKeyChecking=yes"
+
           ansible-playbook \
             -i ops/deploy/inventory.ini \
             ops/deploy/deploy.yml \
