@@ -216,6 +216,31 @@ test_object_key: blank
 
 `public-health` and `dns-inventory` do not change AWS and do not require AWS credentials. `object-storage-readiness` uses OIDC only when `AWS_DR_OBJECT_STORAGE_ROLE_ARN` is configured and performs read-only S3 checks: `aws s3 ls` and optional `aws s3api head-object`. Each run uploads `artifacts/dr/**` as a GitHub artifact.
 
+4. DB readiness
+
+```text
+Branch: aws-dr-finish
+operation: db-readiness
+target_region: standby
+aws_region: eu-west-2
+db_identifier: blank initially
+```
+
+5. DB restore plan generation
+
+```text
+Branch: aws-dr-finish
+operation: generate-db-restore-plan
+aws_region: eu-west-2
+source_db_identifier: <approved source identifier>
+db_snapshot_identifier: <approved snapshot id, if used>
+target_db_region: eu-west-2 / ap-south-1 / af-south-1
+target_db_identifier: mscqr-dr-restore-test-YYYYMMDD
+recovery_point: blank unless using point-in-time planning
+```
+
+`db-readiness` uses the `dr-db-restore` environment and OIDC to run read-only RDS describe commands. `generate-db-restore-plan` writes a markdown artifact only. Actual DB restore remains in `AWS DR Apply` and requires confirmation plus protected environment approval.
+
 Do not run `AWS DR Apply` for smoke tests.
 
 ## Troubleshooting Object Storage Readiness
@@ -243,6 +268,21 @@ check:
 5. Re-run `AWS DR Operations` -> `object-storage-readiness`.
 
 The current expected setup is a GitHub Environment variable exposed through `vars.AWS_DR_OBJECT_STORAGE_ROLE_ARN`. If the ARN is stored as an Environment secret instead, update the workflow wiring to use `secrets.AWS_DR_OBJECT_STORAGE_ROLE_ARN`.
+
+## Troubleshooting DB Readiness
+
+`db-readiness` and `generate-db-restore-plan` run under the `dr-db-restore` GitHub Environment. Configure one of these Environment variables:
+
+- Preferred: `AWS_DR_DB_RESTORE_ROLE_ARN`
+- Backward-compatible: `DR_DB_RESTORE_ROLE_TO_ASSUME`
+
+If both are missing, the workflow fails before AWS authentication with:
+
+```text
+Set AWS_DR_DB_RESTORE_ROLE_ARN or DR_DB_RESTORE_ROLE_TO_ASSUME on the dr-db-restore environment.
+```
+
+Do not store static AWS access keys for this workflow.
 
 ## Safety Guarantees
 

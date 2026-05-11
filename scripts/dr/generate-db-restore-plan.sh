@@ -14,13 +14,9 @@ snapshot_identifier="${SNAPSHOT_IDENTIFIER:-}"
 target_db="${TARGET_DB_IDENTIFIER:-}"
 
 missing=0
-if [ -z "$source_db" ] && [ -z "$source_cluster" ]; then
-  echo "Missing SOURCE_DB_IDENTIFIER or SOURCE_CLUSTER_IDENTIFIER." >&2
-  missing=1
-fi
 [ -n "$target_region" ] || { print_missing TARGET_REGION; missing=1; }
-if [ -z "$recovery_point" ] && [ -z "$snapshot_identifier" ]; then
-  echo "Missing RECOVERY_POINT or SNAPSHOT_IDENTIFIER." >&2
+if [ -z "$snapshot_identifier" ] && [ -z "$source_db" ] && [ -z "$source_cluster" ]; then
+  echo "Missing SNAPSHOT_IDENTIFIER, SOURCE_DB_IDENTIFIER, or SOURCE_CLUSTER_IDENTIFIER." >&2
   missing=1
 fi
 [ -n "$target_db" ] || { print_missing TARGET_DB_IDENTIFIER; missing=1; }
@@ -67,7 +63,11 @@ output_file="$DR_ARTIFACT_DIR/db-restore-plan.md"
     echo "#   --region '$target_region' \\"
     echo "#   --source-db-instance-identifier '$source_db' \\"
     echo "#   --target-db-instance-identifier '$target_db' \\"
-    echo "#   --restore-time '$recovery_point' \\"
+    if [ -n "$recovery_point" ]; then
+      echo "#   --restore-time '$recovery_point' \\"
+    else
+      echo "#   --use-latest-restorable-time \\"
+    fi
     echo "#   --no-publicly-accessible"
   fi
   if [ -n "$source_cluster" ]; then
@@ -75,7 +75,11 @@ output_file="$DR_ARTIFACT_DIR/db-restore-plan.md"
     echo "#   --region '$target_region' \\"
     echo "#   --source-db-cluster-identifier '$source_cluster' \\"
     echo "#   --db-cluster-identifier '$target_db' \\"
-    echo "#   --restore-to-time '$recovery_point'"
+    if [ -n "$recovery_point" ]; then
+      echo "#   --restore-to-time '$recovery_point'"
+    else
+      echo "#   --use-latest-restorable-time"
+    fi
   fi
   echo '```'
   echo

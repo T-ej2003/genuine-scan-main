@@ -18,10 +18,6 @@ set +e
   echo "Purpose: read-only RDS recovery readiness inspection"
   missing=0
   [ -n "$aws_region" ] || { echo "Missing AWS_REGION."; missing=1; }
-  if [ -z "$db_identifier" ] && [ -z "$db_cluster_identifier" ]; then
-    echo "Missing DB_IDENTIFIER or DB_CLUSTER_IDENTIFIER."
-    missing=1
-  fi
   if ! command -v aws >/dev/null 2>&1; then
     echo "Missing aws CLI."
     missing=1
@@ -30,6 +26,7 @@ set +e
     echo
     echo "Example:"
     echo "AWS_PROFILE=dr-operator AWS_REGION=eu-west-2 DB_IDENTIFIER=mscqr-prod scripts/dr/db-readiness.sh"
+    echo "AWS_PROFILE=dr-operator AWS_REGION=eu-west-2 scripts/dr/db-readiness.sh"
     exit 2
   fi
 
@@ -37,12 +34,42 @@ set +e
   echo "AWS_REGION: $aws_region"
   echo
 
+  if [ -z "$db_identifier" ] && [ -z "$db_cluster_identifier" ]; then
+    echo "No DB_IDENTIFIER or DB_CLUSTER_IDENTIFIER provided; listing recent read-only DB inventory and snapshots."
+    echo
+    echo "=== describe-db-instances ==="
+    aws rds describe-db-instances --region "$aws_region" --max-items 25
+    echo
+    echo "=== describe-db-clusters ==="
+    aws rds describe-db-clusters --region "$aws_region" --max-items 25
+    echo
+    echo "=== describe-db-snapshots automated ==="
+    aws rds describe-db-snapshots --region "$aws_region" --snapshot-type automated --max-items 25
+    echo
+    echo "=== describe-db-cluster-snapshots automated ==="
+    aws rds describe-db-cluster-snapshots --region "$aws_region" --snapshot-type automated --max-items 25
+  fi
+
   if [ -n "$db_identifier" ]; then
     echo "=== describe-db-instances $db_identifier ==="
-    aws rds describe-db-instances --region "$aws_region" --db-instance-identifier "$db_identifier"
+    if ! aws rds describe-db-instances --region "$aws_region" --db-instance-identifier "$db_identifier"; then
+      echo "DB instance lookup did not match $db_identifier; trying cluster and snapshot inventory next."
+    fi
     echo
     echo "=== describe-db-snapshots $db_identifier ==="
-    aws rds describe-db-snapshots --region "$aws_region" --db-instance-identifier "$db_identifier"
+    if ! aws rds describe-db-snapshots --region "$aws_region" --db-instance-identifier "$db_identifier"; then
+      echo "DB instance snapshot lookup did not match $db_identifier."
+    fi
+    echo
+    echo "=== describe-db-clusters $db_identifier ==="
+    if ! aws rds describe-db-clusters --region "$aws_region" --db-cluster-identifier "$db_identifier"; then
+      echo "DB cluster lookup did not match $db_identifier."
+    fi
+    echo
+    echo "=== describe-db-cluster-snapshots $db_identifier ==="
+    if ! aws rds describe-db-cluster-snapshots --region "$aws_region" --db-cluster-identifier "$db_identifier"; then
+      echo "DB cluster snapshot lookup did not match $db_identifier."
+    fi
   fi
 
   if [ -n "$db_cluster_identifier" ]; then

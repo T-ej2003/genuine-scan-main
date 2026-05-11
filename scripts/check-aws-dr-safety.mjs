@@ -97,6 +97,17 @@ function applyScriptReferences(source, scriptPath) {
     });
 }
 
+function executableLineReferences(source, pattern) {
+  return source
+    .split("\n")
+    .map((line, index) => ({ line, lineNumber: index + 1 }))
+    .filter(({ line }) => pattern.test(line))
+    .filter(({ line }) => {
+      const trimmed = line.trim();
+      return !trimmed.startsWith("#") && !trimmed.startsWith("echo ");
+    });
+}
+
 const findings = [];
 
 for (const scanRoot of scanRoots) {
@@ -161,6 +172,18 @@ for (const scanRoot of scanRoots) {
             message: "aws s3 rm is only allowed in the approved object storage write-test cleanup script.",
           });
         }
+      }
+
+      const rdsRestoreReferences = executableLineReferences(
+        source,
+        /\baws\s+rds\s+restore[-\w]*/i,
+      );
+      if (rdsRestoreReferences.length > 0 && repoPath !== "scripts/dr/apply-db-restore-approved.sh") {
+        findings.push({
+          repoPath,
+          line: rdsRestoreReferences[0].lineNumber,
+          message: "RDS restore commands are only allowed in the approved gated DB restore script.",
+        });
       }
     }
 

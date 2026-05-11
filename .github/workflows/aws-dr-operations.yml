@@ -11,6 +11,8 @@ on:
           - public-health
           - dns-inventory
           - object-storage-readiness
+          - db-readiness
+          - generate-db-restore-plan
       target_region:
         description: "Logical target region/group for logs only"
         required: false
@@ -33,6 +35,41 @@ on:
         type: string
       test_object_key:
         description: "Optional object key for read-only head-object check"
+        required: false
+        default: ""
+        type: string
+      aws_region:
+        description: "AWS region for OIDC session and read-only DB APIs"
+        required: false
+        default: eu-west-2
+        type: string
+      db_identifier:
+        description: "Optional DB instance or cluster identifier for read-only DB readiness"
+        required: false
+        default: ""
+        type: string
+      db_snapshot_identifier:
+        description: "Optional snapshot identifier for restore plan generation"
+        required: false
+        default: ""
+        type: string
+      source_db_identifier:
+        description: "Optional source DB identifier for restore plan generation"
+        required: false
+        default: ""
+        type: string
+      target_db_region:
+        description: "Target region for restore plan generation only"
+        required: false
+        default: eu-west-2
+        type: string
+      target_db_identifier:
+        description: "New recovery target DB identifier for restore plan generation only"
+        required: false
+        default: ""
+        type: string
+      recovery_point:
+        description: "Optional recovery point timestamp for plan generation only"
         required: false
         default: ""
         type: string
@@ -242,6 +279,141 @@ jobs:
         run: |
           echo "Running read-only S3 readiness check."
           BUCKET="$BUCKET" TEST_OBJECT_KEY="$TEST_OBJECT_KEY" scripts/dr/object-storage-readiness.sh
+
+      - name: Upload DR smoke-test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-dr-operations-${{ inputs.operation }}-${{ github.run_id }}
+          path: artifacts/dr/**
+          if-no-files-found: warn
+
+  db_readiness:
+    if: ${{ inputs.operation == 'db-readiness' || inputs.operation == 'generate-db-restore-plan' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: dr-db-restore
+    env:
+      OPERATION: ${{ inputs.operation }}
+      TARGET_REGION_GROUP: ${{ inputs.target_region }}
+      AWS_REGION: ${{ inputs.aws_region }}
+      DB_IDENTIFIER: ${{ inputs.db_identifier }}
+      SOURCE_DB_IDENTIFIER: ${{ inputs.source_db_identifier }}
+      SNAPSHOT_IDENTIFIER: ${{ inputs.db_snapshot_identifier }}
+      TARGET_REGION: ${{ inputs.target_db_region }}
+      TARGET_DB_IDENTIFIER: ${{ inputs.target_db_identifier }}
+      RECOVERY_POINT: ${{ inputs.recovery_point }}
+      AWS_DR_DB_RESTORE_ROLE_ARN: ${{ vars.AWS_DR_DB_RESTORE_ROLE_ARN }}
+      DR_DB_RESTORE_ROLE_TO_ASSUME: ${{ vars.DR_DB_RESTORE_ROLE_TO_ASSUME }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Run AWS DR safety scanner
+        run: npm run check:aws-dr-safety
+
+      - name: Check DB DR script syntax
+        run: |
+          /bin/sh -n scripts/dr/db-readiness.sh
+          /bin/sh -n scripts/dr/generate-db-restore-plan.sh
+
+      - name: Prepare DR artifact directory
+        run: |
+          mkdir -p "artifacts/dr/github-actions-${{ github.run_id }}"
+          {
+            echo "operation=${OPERATION}"
+            echo "target_region_group=${TARGET_REGION_GROUP}"
+            echo "aws_region=${AWS_REGION}"
+            if [ -n "$DB_IDENTIFIER" ]; then
+              echo "db_identifier=set"
+            else
+              echo "db_identifier=blank"
+            fi
+            if [ -n "$SNAPSHOT_IDENTIFIER" ]; then
+              echo "db_snapshot_identifier=set"
+            else
+              echo "db_snapshot_identifier=blank"
+            fi
+            if [ -n "$SOURCE_DB_IDENTIFIER" ]; then
+              echo "source_db_identifier=set"
+            else
+              echo "source_db_identifier=blank"
+            fi
+            echo "target_db_region=${TARGET_REGION}"
+            if [ -n "$TARGET_DB_IDENTIFIER" ]; then
+              echo "target_db_identifier=set"
+            else
+              echo "target_db_identifier=blank"
+            fi
+            if [ -n "$RECOVERY_POINT" ]; then
+              echo "recovery_point=set"
+            else
+              echo "recovery_point=blank"
+            fi
+            echo "run_id=${{ github.run_id }}"
+            echo "run_attempt=${{ github.run_attempt }}"
+          } > "artifacts/dr/github-actions-${{ github.run_id }}/context.txt"
+
+      - name: Resolve DB OIDC role
+        id: resolve_db_role
+        run: |
+          role_arn="$AWS_DR_DB_RESTORE_ROLE_ARN"
+          if [ -z "$role_arn" ]; then
+            role_arn="$DR_DB_RESTORE_ROLE_TO_ASSUME"
+          fi
+          if [ -z "$role_arn" ]; then
+            echo "Set AWS_DR_DB_RESTORE_ROLE_ARN or DR_DB_RESTORE_ROLE_TO_ASSUME on the dr-db-restore environment."
+            exit 2
+          fi
+          echo "::add-mask::$role_arn"
+          echo "role_arn=$role_arn" >> "$GITHUB_OUTPUT"
+          echo "DB OIDC role variable is present."
+
+      - name: Configure AWS credentials for DB readiness
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ steps.resolve_db_role.outputs.role_arn }}
+
+      - name: Run selected DB DR operation
+        run: |
+          echo "Selected operation: ${OPERATION}"
+          echo "Logical target region/group: ${TARGET_REGION_GROUP}"
+          echo "AWS region: ${AWS_REGION}"
+          case "$OPERATION" in
+            db-readiness)
+              echo "Running read-only RDS readiness inspection."
+              AWS_REGION="$AWS_REGION" DB_IDENTIFIER="$DB_IDENTIFIER" scripts/dr/db-readiness.sh
+              ;;
+            generate-db-restore-plan)
+              echo "Generating DB restore plan artifact only. No AWS restore command will be executed."
+              SOURCE_DB_IDENTIFIER="$SOURCE_DB_IDENTIFIER" \
+              SNAPSHOT_IDENTIFIER="$SNAPSHOT_IDENTIFIER" \
+              TARGET_REGION="$TARGET_REGION" \
+              TARGET_DB_IDENTIFIER="$TARGET_DB_IDENTIFIER" \
+              RECOVERY_POINT="$RECOVERY_POINT" \
+              scripts/dr/generate-db-restore-plan.sh
+              ;;
+            *)
+              echo "::error::Unsupported DB DR operation: $OPERATION"
+              exit 2
+              ;;
+          esac
 
       - name: Upload DR smoke-test artifacts
         if: always()

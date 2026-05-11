@@ -123,8 +123,12 @@ Available operations:
 - `public-health`: checks `https://www.mscqr.com/healthz` and `https://www.mscqr.com/api/health/ready`.
 - `dns-inventory`: captures read-only DNS inventory for `www.mscqr.com` or the selected hostname.
 - `object-storage-readiness`: performs read-only S3 listing and optional `head-object` using OIDC role `AWS_DR_OBJECT_STORAGE_ROLE_ARN`.
+- `db-readiness`: performs read-only RDS inventory and snapshot checks using the protected `dr-db-restore` environment.
+- `generate-db-restore-plan`: creates a markdown restore plan artifact before any approved DB restore drill.
 
 This workflow does not deploy, SSH, use real inventory, change DNS, restore databases, or write/delete objects. Use it before `AWS DR Apply`; do not use the apply workflow for smoke tests.
+
+Before a DB restore drill, run `db-readiness` first, then run `generate-db-restore-plan`, then get incident commander approval before using the DB restore operation in `AWS DR Apply`.
 
 ## RTO/RPO Evidence Links
 
