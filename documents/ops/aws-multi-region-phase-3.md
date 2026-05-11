@@ -126,6 +126,6 @@ This section is documentation only. Do not implement DNS automation in Phase 3. 
 
 ## Future Phases
 
-- Phase 4: controlled Route 53/DNS failover only after manual failover is proven.
+- Phase 4: [controlled manual DNS cutover](aws-multi-region-phase-4.md) only after manual failover is proven.
 - Phase 5: database replication strategy.
 - Phase 6: object storage migration, only if needed.
