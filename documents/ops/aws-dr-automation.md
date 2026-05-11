@@ -133,11 +133,13 @@ scripts/dr/generate-db-restore-plan.sh
 TARGET_REGION=ap-south-1 \
 SNAPSHOT_IDENTIFIER=rds:mscqr-prod-2026-05-11 \
 TARGET_DB_IDENTIFIER=mscqr-dr-recovery-20260511 \
+DB_SUBNET_GROUP_NAME=rds-ec2-db-subnet-group-1 \
+DB_VPC_SECURITY_GROUP_IDS=sg-07db1a9130c6df8d5 \
 CONFIRM_DB_RESTORE=I_APPROVE_DB_RESTORE_TO_RECOVERY_TARGET \
 scripts/dr/apply-db-restore-approved.sh
 ```
 
-The restore script creates only a new recovery target. It refuses identifiers that look like production primary and does not delete, overwrite, modify primary, or fail over.
+The restore script creates only a new recovery target. It refuses identifiers that look like production primary and does not delete, overwrite, modify primary, or fail over. If the AWS restore command fails, the script exits non-zero and the workflow fails.
 
 ## Object Storage Readiness
 
@@ -237,6 +239,8 @@ db_snapshot_identifier: <approved snapshot id, if used>
 target_db_region: eu-west-2 / ap-south-1 / af-south-1
 target_db_identifier: mscqr-dr-restore-test-YYYYMMDD
 recovery_point: blank unless using point-in-time planning
+db_subnet_group_name: rds-ec2-db-subnet-group-1
+db_vpc_security_group_ids: sg-07db1a9130c6df8d5
 ```
 
 `db-readiness` uses the `dr-db-restore` environment and OIDC to run read-only RDS describe commands. `generate-db-restore-plan` writes a markdown artifact only. Actual DB restore remains in `AWS DR Apply` and requires confirmation plus protected environment approval.
@@ -283,6 +287,28 @@ Set AWS_DR_DB_RESTORE_ROLE_ARN or DR_DB_RESTORE_ROLE_TO_ASSUME on the dr-db-rest
 ```
 
 Do not store static AWS access keys for this workflow.
+
+## Troubleshooting Approved DB Restore
+
+If an approved DB restore fails with:
+
+```text
+InvalidSubnet: No default subnet detected in VPC
+```
+
+set:
+
+```text
+db_subnet_group_name: rds-ec2-db-subnet-group-1
+```
+
+Optionally set:
+
+```text
+db_vpc_security_group_ids: sg-07db1a9130c6df8d5
+```
+
+These values came from the current London restore drill and should be re-validated before production incident use. A dedicated recovery subnet group/security group is preferable once approved.
 
 ## Safety Guarantees
 

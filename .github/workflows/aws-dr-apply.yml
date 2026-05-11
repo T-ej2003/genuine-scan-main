@@ -54,6 +54,16 @@ on:
         description: "New recovery target DB identifier"
         required: false
         type: string
+      db_subnet_group_name:
+        description: "DB subnet group name for approved DB restore target"
+        required: false
+        type: string
+        default: ""
+      db_vpc_security_group_ids:
+        description: "Comma-separated VPC security group IDs for approved DB restore target"
+        required: false
+        type: string
+        default: ""
       bucket:
         description: "Bucket for approved object storage write test"
         required: false
@@ -215,6 +225,8 @@ jobs:
       SOURCE_DB_IDENTIFIER: ${{ inputs.source_db_identifier }}
       RECOVERY_POINT: ${{ inputs.recovery_point }}
       TARGET_DB_IDENTIFIER: ${{ inputs.target_db_identifier }}
+      DB_SUBNET_GROUP_NAME: ${{ inputs.db_subnet_group_name }}
+      DB_VPC_SECURITY_GROUP_IDS: ${{ inputs.db_vpc_security_group_ids }}
       CONFIRM_DB_RESTORE: ${{ inputs.confirm_db_restore }}
       AWS_ROLE_TO_ASSUME: ${{ vars.DR_DB_RESTORE_ROLE_TO_ASSUME }}
     steps:

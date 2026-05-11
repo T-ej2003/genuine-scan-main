@@ -12,6 +12,8 @@ target_region="${TARGET_REGION:-}"
 recovery_point="${RECOVERY_POINT:-}"
 snapshot_identifier="${SNAPSHOT_IDENTIFIER:-}"
 target_db="${TARGET_DB_IDENTIFIER:-}"
+db_subnet_group_name="${DB_SUBNET_GROUP_NAME:-}"
+db_vpc_security_group_ids="${DB_VPC_SECURITY_GROUP_IDS:-}"
 
 missing=0
 [ -n "$target_region" ] || { print_missing TARGET_REGION; missing=1; }
@@ -38,6 +40,8 @@ output_file="$DR_ARTIFACT_DIR/db-restore-plan.md"
   echo "- Recovery point: ${recovery_point:-not used}"
   echo "- Snapshot identifier: ${snapshot_identifier:-not used}"
   echo "- Target DB identifier: $target_db"
+  echo "- DB subnet group name: ${db_subnet_group_name:-not provided}"
+  echo "- VPC security group IDs: ${db_vpc_security_group_ids:-not provided}"
   echo
   echo "## Operator Review Checklist"
   echo
@@ -45,6 +49,8 @@ output_file="$DR_ARTIFACT_DIR/db-restore-plan.md"
   echo "- [ ] Recovery point satisfies the incident RPO."
   echo "- [ ] Target DB identifier is new and is not the production primary."
   echo "- [ ] Target region network, subnet group, and security groups are approved."
+  echo "- [ ] DB subnet group is set when the target VPC has no default subnets."
+  echo "- [ ] VPC security group IDs are approved for the recovery target."
   echo "- [ ] Secrets will be updated through the approved secret process only."
   echo "- [ ] Standby application will be validated before any DNS move."
   echo "- [ ] Rollback owner and rollback DNS value are recorded."
@@ -57,6 +63,12 @@ output_file="$DR_ARTIFACT_DIR/db-restore-plan.md"
     echo "#   --region '$target_region' \\"
     echo "#   --db-instance-identifier '$target_db' \\"
     echo "#   --db-snapshot-identifier '$snapshot_identifier' \\"
+    if [ -n "$db_subnet_group_name" ]; then
+      echo "#   --db-subnet-group-name '$db_subnet_group_name' \\"
+    fi
+    if [ -n "$db_vpc_security_group_ids" ]; then
+      echo "#   --vpc-security-group-ids $db_vpc_security_group_ids \\"
+    fi
     echo "#   --no-publicly-accessible"
   elif [ -n "$source_db" ]; then
     echo "# aws rds restore-db-instance-to-point-in-time \\"
@@ -67,6 +79,12 @@ output_file="$DR_ARTIFACT_DIR/db-restore-plan.md"
       echo "#   --restore-time '$recovery_point' \\"
     else
       echo "#   --use-latest-restorable-time \\"
+    fi
+    if [ -n "$db_subnet_group_name" ]; then
+      echo "#   --db-subnet-group-name '$db_subnet_group_name' \\"
+    fi
+    if [ -n "$db_vpc_security_group_ids" ]; then
+      echo "#   --vpc-security-group-ids $db_vpc_security_group_ids \\"
     fi
     echo "#   --no-publicly-accessible"
   fi
@@ -82,6 +100,12 @@ output_file="$DR_ARTIFACT_DIR/db-restore-plan.md"
     fi
   fi
   echo '```'
+  echo
+  echo "## Network Notes"
+  echo
+  echo "The initial London restore drill failed with InvalidSubnet because no default subnet existed in the target VPC."
+  echo "For London restore drills, set db_subnet_group_name to rds-ec2-db-subnet-group-1 unless a dedicated recovery subnet group is approved."
+  echo "The current London drill security group observed during readiness was sg-07db1a9130c6df8d5. Re-validate this before production incident use."
   echo
   echo "## Non-Goals"
   echo

@@ -130,6 +130,13 @@ This workflow does not deploy, SSH, use real inventory, change DNS, restore data
 
 Before a DB restore drill, run `db-readiness` first, then run `generate-db-restore-plan`, then get incident commander approval before using the DB restore operation in `AWS DR Apply`.
 
+Approved DB restore requires an approved DB subnet group and, when appropriate, approved VPC security group IDs. The current London restore drill used these values from readiness output:
+
+- DB subnet group: `rds-ec2-db-subnet-group-1`
+- VPC security group: `sg-07db1a9130c6df8d5`
+
+These are examples from the current drill. Re-validate them before production incident use.
+
 ## RTO/RPO Evidence Links
 
 - [Manual failover RTO/RPO template](manual-failover-drill/rto-rpo-template.md)

@@ -73,6 +73,16 @@ on:
         required: false
         default: ""
         type: string
+      db_subnet_group_name:
+        description: "DB subnet group name for restore plan generation only"
+        required: false
+        default: ""
+        type: string
+      db_vpc_security_group_ids:
+        description: "Comma-separated VPC security group IDs for restore plan generation only"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -303,6 +313,8 @@ jobs:
       TARGET_REGION: ${{ inputs.target_db_region }}
       TARGET_DB_IDENTIFIER: ${{ inputs.target_db_identifier }}
       RECOVERY_POINT: ${{ inputs.recovery_point }}
+      DB_SUBNET_GROUP_NAME: ${{ inputs.db_subnet_group_name }}
+      DB_VPC_SECURITY_GROUP_IDS: ${{ inputs.db_vpc_security_group_ids }}
       AWS_DR_DB_RESTORE_ROLE_ARN: ${{ vars.AWS_DR_DB_RESTORE_ROLE_ARN }}
       DR_DB_RESTORE_ROLE_TO_ASSUME: ${{ vars.DR_DB_RESTORE_ROLE_TO_ASSUME }}
     steps:
@@ -365,6 +377,16 @@ jobs:
             else
               echo "recovery_point=blank"
             fi
+            if [ -n "$DB_SUBNET_GROUP_NAME" ]; then
+              echo "db_subnet_group_name=set"
+            else
+              echo "db_subnet_group_name=blank"
+            fi
+            if [ -n "$DB_VPC_SECURITY_GROUP_IDS" ]; then
+              echo "db_vpc_security_group_ids=set"
+            else
+              echo "db_vpc_security_group_ids=blank"
+            fi
             echo "run_id=${{ github.run_id }}"
             echo "run_attempt=${{ github.run_attempt }}"
           } > "artifacts/dr/github-actions-${{ github.run_id }}/context.txt"
@@ -407,6 +429,8 @@ jobs:
               TARGET_REGION="$TARGET_REGION" \
               TARGET_DB_IDENTIFIER="$TARGET_DB_IDENTIFIER" \
               RECOVERY_POINT="$RECOVERY_POINT" \
+              DB_SUBNET_GROUP_NAME="$DB_SUBNET_GROUP_NAME" \
+              DB_VPC_SECURITY_GROUP_IDS="$DB_VPC_SECURITY_GROUP_IDS" \
               scripts/dr/generate-db-restore-plan.sh
               ;;
             *)
