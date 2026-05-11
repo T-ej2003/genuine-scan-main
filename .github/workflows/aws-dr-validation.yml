@@ -8,6 +8,7 @@ on:
       - "documents/ops/**"
       - "scripts/**"
       - "ops/deploy/**"
+      - "ops/aws/**"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/**"
@@ -48,6 +49,9 @@ jobs:
           /bin/sh -n scripts/health-check-regions.sh
           for file in scripts/dr/*.sh; do
             /bin/sh -n "$file"
+          done
+          for file in ops/aws/iam/dr/*.json; do
+            python3 -m json.tool "$file" >/dev/null
           done
           git diff --check
 

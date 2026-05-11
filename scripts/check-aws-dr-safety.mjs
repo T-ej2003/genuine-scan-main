@@ -7,6 +7,37 @@ const allowedRoute53Apply = new Set([
   "scripts/dr/apply-route53-change.sh",
   "scripts/dr/apply-route53-rollback.sh",
 ]);
+const allowedApplyWorkflow = ".github/workflows/aws-dr-apply-operations.yml";
+const gatedApplyScripts = new Map([
+  [
+    "scripts/dr/apply-route53-change.sh",
+    {
+      confirmation: "I_APPROVE_MANUAL_DNS_CUTOVER",
+      environment: "dr-dns-cutover",
+    },
+  ],
+  [
+    "scripts/dr/apply-route53-rollback.sh",
+    {
+      confirmation: "I_APPROVE_MANUAL_DNS_ROLLBACK",
+      environment: "dr-dns-rollback",
+    },
+  ],
+  [
+    "scripts/dr/apply-db-restore-approved.sh",
+    {
+      confirmation: "I_APPROVE_DB_RESTORE_TO_RECOVERY_TARGET",
+      environment: "dr-db-restore",
+    },
+  ],
+  [
+    "scripts/dr/object-storage-write-test-approved.sh",
+    {
+      confirmation: "I_APPROVE_OBJECT_STORAGE_WRITE_TEST",
+      environment: "dr-object-storage-write-test",
+    },
+  ],
+]);
 const selfPath = "scripts/check-aws-dr-safety.mjs";
 
 const dangerousPatterns = [
@@ -53,6 +84,17 @@ function lineNumber(source, index) {
   return source.slice(0, index).split("\n").length;
 }
 
+function applyScriptReferences(source, scriptPath) {
+  return source
+    .split("\n")
+    .map((line, index) => ({ line, lineNumber: index + 1 }))
+    .filter(({ line }) => line.includes(scriptPath))
+    .filter(({ line }) => {
+      const trimmed = line.trim();
+      return !trimmed.startsWith("#") && !trimmed.startsWith("echo ");
+    });
+}
+
 const findings = [];
 
 for (const scanRoot of scanRoots) {
@@ -84,6 +126,26 @@ for (const scanRoot of scanRoots) {
             repoPath,
             line: lineNumber(source, match.index ?? 0),
             message: `Route 53 mutation must be gated by ${requiredConfirmation}.`,
+          });
+        }
+      }
+
+      for (const [scriptPath, gate] of gatedApplyScripts.entries()) {
+        const references = applyScriptReferences(source, scriptPath);
+        if (references.length === 0) continue;
+        if (repoPath !== allowedApplyWorkflow) {
+          findings.push({
+            repoPath,
+            line: references[0].lineNumber,
+            message: `${scriptPath} may only be called from ${allowedApplyWorkflow}.`,
+          });
+          continue;
+        }
+        if (!source.includes(gate.confirmation) || !source.includes(gate.environment)) {
+          findings.push({
+            repoPath,
+            line: references[0].lineNumber,
+            message: `${scriptPath} must be protected by ${gate.environment} and ${gate.confirmation}.`,
           });
         }
       }

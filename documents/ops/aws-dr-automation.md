@@ -167,7 +167,14 @@ scripts/dr/object-storage-write-test-approved.sh
 
 - `AWS DR Validation` validates scripts, guardrails, and Ansible syntax without production secrets, SSH, or deploy.
 - `AWS DR Operations` is `workflow_dispatch` only and exposes safe operations. It does not include DNS apply, DNS rollback apply, DB restore apply, or object write-test apply.
+- `AWS DR Apply Operations` is `workflow_dispatch` only and exposes mutation-capable operations only behind protected GitHub Environments, OIDC AWS role assumption, and exact confirmation phrases.
 - Standby deploy from Actions requires an approved `STANDBY_ANSIBLE_INVENTORY` secret and an intentional `deploy-standby` selection.
+
+Protected environment and IAM setup are documented in:
+
+```text
+documents/ops/aws-dr-protected-environments.md
+```
 
 ## Safety Guarantees
 
