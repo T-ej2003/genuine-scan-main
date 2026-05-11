@@ -13,6 +13,10 @@ on:
           - object-storage-readiness
           - db-readiness
           - generate-db-restore-plan
+          - aws-topology-inventory
+          - generate-cross-region-snapshot-copy-plan
+          - target-region-db-readiness
+          - diagnose-standby-db-network
       target_region:
         description: "Logical target region/group for logs only"
         required: false
@@ -73,15 +77,50 @@ on:
         required: false
         default: ""
         type: string
+      source_region:
+        description: "Source AWS region for DB recovery inventory or snapshot copy planning"
+        required: false
+        default: eu-west-2
+        type: string
+      source_snapshot_identifier:
+        description: "Source DB snapshot identifier for cross-region snapshot copy planning"
+        required: false
+        default: ""
+        type: string
+      target_snapshot_identifier:
+        description: "Target DB snapshot identifier for cross-region snapshot copy planning"
+        required: false
+        default: ""
+        type: string
+      source_kms_key_id:
+        description: "Optional source KMS key ID for planning context"
+        required: false
+        default: ""
+        type: string
+      target_kms_key_id:
+        description: "Optional target-region KMS key ID for encrypted snapshot copy planning"
+        required: false
+        default: ""
+        type: string
       db_subnet_group_name:
-        description: "DB subnet group name for restore plan generation only"
+        description: "DB subnet group name for restore planning or target readiness"
         required: false
         default: ""
         type: string
       db_vpc_security_group_ids:
-        description: "Comma-separated VPC security group IDs for restore plan generation only"
+        description: "Comma-separated VPC security group IDs for restore planning or target readiness"
         required: false
         default: ""
+        type: string
+      db_host:
+        description: "Region-local DB endpoint host for standby network diagnostics"
+        required: false
+        default: ""
+        type: string
+      db_port:
+        description: "DB endpoint port for standby network diagnostics"
+        required: false
+        default: "5432"
         type: string
 
 permissions:
@@ -299,7 +338,7 @@ jobs:
           if-no-files-found: warn
 
   db_readiness:
-    if: ${{ inputs.operation == 'db-readiness' || inputs.operation == 'generate-db-restore-plan' }}
+    if: ${{ inputs.operation == 'db-readiness' || inputs.operation == 'generate-db-restore-plan' || inputs.operation == 'aws-topology-inventory' || inputs.operation == 'generate-cross-region-snapshot-copy-plan' || inputs.operation == 'target-region-db-readiness' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: dr-db-restore
@@ -307,12 +346,17 @@ jobs:
       OPERATION: ${{ inputs.operation }}
       TARGET_REGION_GROUP: ${{ inputs.target_region }}
       AWS_REGION: ${{ inputs.aws_region }}
+      SOURCE_REGION: ${{ inputs.source_region }}
       DB_IDENTIFIER: ${{ inputs.db_identifier }}
       SOURCE_DB_IDENTIFIER: ${{ inputs.source_db_identifier }}
+      SOURCE_SNAPSHOT_IDENTIFIER: ${{ inputs.source_snapshot_identifier }}
       SNAPSHOT_IDENTIFIER: ${{ inputs.db_snapshot_identifier }}
       TARGET_REGION: ${{ inputs.target_db_region }}
+      TARGET_SNAPSHOT_IDENTIFIER: ${{ inputs.target_snapshot_identifier }}
       TARGET_DB_IDENTIFIER: ${{ inputs.target_db_identifier }}
       RECOVERY_POINT: ${{ inputs.recovery_point }}
+      SOURCE_KMS_KEY_ID: ${{ inputs.source_kms_key_id }}
+      TARGET_KMS_KEY_ID: ${{ inputs.target_kms_key_id }}
       DB_SUBNET_GROUP_NAME: ${{ inputs.db_subnet_group_name }}
       DB_VPC_SECURITY_GROUP_IDS: ${{ inputs.db_vpc_security_group_ids }}
       AWS_DR_DB_RESTORE_ROLE_ARN: ${{ vars.AWS_DR_DB_RESTORE_ROLE_ARN }}
@@ -343,6 +387,9 @@ jobs:
         run: |
           /bin/sh -n scripts/dr/db-readiness.sh
           /bin/sh -n scripts/dr/generate-db-restore-plan.sh
+          /bin/sh -n scripts/dr/aws-dr-topology-inventory.sh
+          /bin/sh -n scripts/dr/generate-cross-region-snapshot-copy-plan.sh
+          /bin/sh -n scripts/dr/target-region-db-readiness.sh
 
       - name: Prepare DR artifact directory
         run: |
@@ -433,11 +480,164 @@ jobs:
               DB_VPC_SECURITY_GROUP_IDS="$DB_VPC_SECURITY_GROUP_IDS" \
               scripts/dr/generate-db-restore-plan.sh
               ;;
+            aws-topology-inventory)
+              echo "Collecting read-only AWS DR topology inventory."
+              topology_target_region="$TARGET_REGION"
+              case "$TARGET_REGION_GROUP" in
+                mumbai)
+                  if [ -z "$topology_target_region" ] || [ "$topology_target_region" = "eu-west-2" ]; then
+                    topology_target_region="ap-south-1"
+                  fi
+                  ;;
+                capetown)
+                  if [ -z "$topology_target_region" ] || [ "$topology_target_region" = "eu-west-2" ]; then
+                    topology_target_region="af-south-1"
+                  fi
+                  ;;
+              esac
+              SOURCE_REGION="$SOURCE_REGION" \
+              TARGET_REGION="$topology_target_region" \
+              TARGET_STANDBY="$TARGET_REGION_GROUP" \
+              SOURCE_DB_IDENTIFIER="${SOURCE_DB_IDENTIFIER:-mscqr-prod-db}" \
+              scripts/dr/aws-dr-topology-inventory.sh
+              ;;
+            generate-cross-region-snapshot-copy-plan)
+              echo "Generating cross-region snapshot copy plan artifact only."
+              copy_plan_target_region="$TARGET_REGION"
+              case "$TARGET_REGION_GROUP" in
+                mumbai)
+                  if [ -z "$copy_plan_target_region" ] || [ "$copy_plan_target_region" = "eu-west-2" ]; then
+                    copy_plan_target_region="ap-south-1"
+                  fi
+                  ;;
+                capetown)
+                  if [ -z "$copy_plan_target_region" ] || [ "$copy_plan_target_region" = "eu-west-2" ]; then
+                    copy_plan_target_region="af-south-1"
+                  fi
+                  ;;
+              esac
+              SOURCE_REGION="$SOURCE_REGION" \
+              TARGET_REGION="$copy_plan_target_region" \
+              SOURCE_SNAPSHOT_IDENTIFIER="$SOURCE_SNAPSHOT_IDENTIFIER" \
+              TARGET_SNAPSHOT_IDENTIFIER="$TARGET_SNAPSHOT_IDENTIFIER" \
+              SOURCE_KMS_KEY_ID="$SOURCE_KMS_KEY_ID" \
+              TARGET_KMS_KEY_ID="$TARGET_KMS_KEY_ID" \
+              TARGET_STANDBY="$TARGET_REGION_GROUP" \
+              scripts/dr/generate-cross-region-snapshot-copy-plan.sh
+              ;;
+            target-region-db-readiness)
+              echo "Running read-only target-region DB readiness inspection."
+              readiness_target_region="$TARGET_REGION"
+              case "$TARGET_REGION_GROUP" in
+                mumbai)
+                  if [ -z "$readiness_target_region" ] || [ "$readiness_target_region" = "eu-west-2" ]; then
+                    readiness_target_region="ap-south-1"
+                  fi
+                  ;;
+                capetown)
+                  if [ -z "$readiness_target_region" ] || [ "$readiness_target_region" = "eu-west-2" ]; then
+                    readiness_target_region="af-south-1"
+                  fi
+                  ;;
+              esac
+              TARGET_STANDBY="$TARGET_REGION_GROUP" \
+              TARGET_REGION="$readiness_target_region" \
+              TARGET_DB_IDENTIFIER="$TARGET_DB_IDENTIFIER" \
+              DB_SUBNET_GROUP_NAME="$DB_SUBNET_GROUP_NAME" \
+              DB_VPC_SECURITY_GROUP_IDS="$DB_VPC_SECURITY_GROUP_IDS" \
+              scripts/dr/target-region-db-readiness.sh
+              ;;
             *)
               echo "::error::Unsupported DB DR operation: $OPERATION"
               exit 2
               ;;
           esac
+
+      - name: Upload DR smoke-test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-dr-operations-${{ inputs.operation }}-${{ github.run_id }}
+          path: artifacts/dr/**
+          if-no-files-found: warn
+
+  standby_network_diagnostic:
+    if: ${{ inputs.operation == 'diagnose-standby-db-network' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: dr-standby-db-test
+    env:
+      OPERATION: ${{ inputs.operation }}
+      TARGET_REGION_GROUP: ${{ inputs.target_region }}
+      DB_HOST: ${{ inputs.db_host }}
+      DB_PORT: ${{ inputs.db_port }}
+      STANDBY_ANSIBLE_INVENTORY: ${{ secrets.STANDBY_ANSIBLE_INVENTORY }}
+      STANDBY_KNOWN_HOSTS: ${{ secrets.STANDBY_KNOWN_HOSTS }}
+      STANDBY_SSH_PRIVATE_KEY: ${{ secrets.STANDBY_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Install Ansible
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user ansible-core
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run AWS DR safety scanner
+        run: npm run check:aws-dr-safety
+
+      - name: Check standby DB network diagnostic script syntax
+        run: /bin/sh -n scripts/dr/diagnose-standby-db-network.sh
+
+      - name: Validate diagnostic inputs
+        run: |
+          set -euo pipefail
+          case "$TARGET_REGION_GROUP" in
+            mumbai|capetown) ;;
+            *) echo "::error::target_region must be mumbai or capetown for network diagnostics."; exit 2 ;;
+          esac
+          [ -n "$DB_HOST" ] || { echo "::error::db_host is required."; exit 2; }
+          [ -n "$DB_PORT" ] || { echo "::error::db_port is required."; exit 2; }
+          [ -n "$STANDBY_ANSIBLE_INVENTORY" ] || { echo "::error::Set STANDBY_ANSIBLE_INVENTORY on dr-standby-db-test."; exit 2; }
+          [ -n "$STANDBY_SSH_PRIVATE_KEY" ] || { echo "::error::Set STANDBY_SSH_PRIVATE_KEY on dr-standby-db-test."; exit 2; }
+          [ -n "$STANDBY_KNOWN_HOSTS" ] || { echo "::error::Set STANDBY_KNOWN_HOSTS on dr-standby-db-test."; exit 2; }
+          echo "Running read-only DB network diagnostic from $TARGET_REGION_GROUP to $DB_HOST:$DB_PORT."
+
+      - name: Configure SSH and standby inventory
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          ssh_key_file="$HOME/.ssh/standby_dr_key"
+          printf '%s\n' "$STANDBY_SSH_PRIVATE_KEY" > "$ssh_key_file"
+          chmod 600 "$ssh_key_file"
+          known_hosts_file="$HOME/.ssh/known_hosts"
+          printf '%s\n' "$STANDBY_KNOWN_HOSTS" > "$known_hosts_file"
+          chmod 600 "$known_hosts_file"
+          printf '%s\n' "$STANDBY_ANSIBLE_INVENTORY" > ops/deploy/inventory.ini
+          chmod 600 ops/deploy/inventory.ini
+          {
+            echo "ANSIBLE_PRIVATE_KEY_FILE=$ssh_key_file"
+            echo "ANSIBLE_SSH_ARGS=-o UserKnownHostsFile=$known_hosts_file -o StrictHostKeyChecking=yes"
+          } >> "$GITHUB_ENV"
+
+      - name: Run read-only standby DB network diagnostic
+        run: DB_HOST="$DB_HOST" DB_PORT="$DB_PORT" scripts/dr/diagnose-standby-db-network.sh "$TARGET_REGION_GROUP"
 
       - name: Upload DR smoke-test artifacts
         if: always()

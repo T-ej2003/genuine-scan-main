@@ -12,6 +12,8 @@ Create these GitHub Environments and require reviewers for each:
 - `dr-dns-rollback`
 - `dr-db-restore`
 - `dr-object-storage-write-test`
+- `dr-standby-db-test`
+- `dr-recovery-cleanup`
 
 Recommended environment controls:
 
@@ -28,6 +30,7 @@ Set these environment-scoped variables:
 - `DR_DNS_ROLLBACK_ROLE_TO_ASSUME` on `dr-dns-rollback`.
 - `DR_DB_RESTORE_ROLE_TO_ASSUME` on `dr-db-restore`.
 - `DR_OBJECT_STORAGE_WRITE_TEST_ROLE_TO_ASSUME` on `dr-object-storage-write-test`.
+- `DR_RECOVERY_CLEANUP_ROLE_TO_ASSUME` on `dr-recovery-cleanup`.
 
 The workflow uses GitHub OIDC through `aws-actions/configure-aws-credentials@v4`. Long-lived AWS access keys are not required.
 
@@ -44,7 +47,10 @@ Supported operations:
 - `apply-route53-change`
 - `apply-route53-rollback`
 - `apply-db-restore-approved`
+- `apply-cross-region-snapshot-copy-approved`
+- `apply-region-local-db-restore-approved`
 - `object-storage-write-test-approved`
+- `cleanup-recovery-db-approved`
 
 Each operation requires both:
 
@@ -56,8 +62,12 @@ Each operation requires both:
 - DNS cutover: `I_APPROVE_MANUAL_DNS_CUTOVER`
 - DNS rollback: `I_APPROVE_MANUAL_DNS_ROLLBACK`
 - DB restore: `I_APPROVE_DB_RESTORE_TO_RECOVERY_TARGET`
+- Cross-region snapshot copy: `I_APPROVE_CROSS_REGION_SNAPSHOT_COPY`
+- Region-local DB restore: `I_APPROVE_REGION_LOCAL_DB_RESTORE`
 - Object storage write test: `I_APPROVE_OBJECT_STORAGE_WRITE_TEST`
 - Delete generated object storage test object: `I_APPROVE_DELETE_DR_TEST_OBJECT`
+- Recovery DB cleanup: `I_APPROVE_RECOVERY_DB_CLEANUP`
+- Skip final recovery DB cleanup snapshot: `I_APPROVE_SKIP_FINAL_SNAPSHOT`
 
 ## Immutable Evidence
 
@@ -79,6 +89,7 @@ Templates:
 - `route53-dns-cutover-policy.template.json`
 - `route53-dns-rollback-policy.template.json`
 - `rds-restore-recovery-target-policy.template.json`
+- `recovery-cleanup-policy.template.json`
 - `object-storage-write-test-policy.template.json`
 - `dr-explicit-deny-guardrail-policy.template.json`
 
@@ -91,5 +102,7 @@ Replace placeholders such as `<AWS_ACCOUNT_ID>`, `<GITHUB_ORG>`, `<GITHUB_REPO>`
 - No health check triggers DNS movement.
 - DNS cutover and rollback call the local gated scripts.
 - DB restore creates only a new recovery target and does not modify the primary DB.
+- Snapshot copy and region-local restore are manual-only and protected by `dr-db-restore`.
+- Recovery DB cleanup is isolated behind `dr-recovery-cleanup` and must never target production identifiers.
 - Object storage write testing writes only under `dr-tests/<timestamp>/`.
 - Bucket deletion, DB deletion, DB failover, recursive object deletion, Docker prune, and MinIO decommission remain out of scope.

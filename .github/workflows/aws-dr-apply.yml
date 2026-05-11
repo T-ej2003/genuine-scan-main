@@ -12,6 +12,9 @@ on:
           - apply-route53-rollback
           - apply-db-restore-approved
           - object-storage-write-test-approved
+          - apply-cross-region-snapshot-copy-approved
+          - apply-region-local-db-restore-approved
+          - cleanup-recovery-db-approved
       aws_region:
         description: "AWS region for OIDC session setup and regional APIs"
         required: true
@@ -35,11 +38,39 @@ on:
         required: false
         type: string
       target_region:
-        description: "Target AWS region for approved DB restore"
+        description: "Target AWS region for approved DB restore, snapshot copy, or cleanup"
         required: false
         type: string
+      target_standby:
+        description: "Selected standby region for region-local DB restore"
+        required: false
+        type: choice
+        options:
+          - mumbai
+          - capetown
+      source_region:
+        description: "Source AWS region for cross-region snapshot copy"
+        required: false
+        type: string
+        default: eu-west-2
       snapshot_identifier:
         description: "Snapshot identifier for approved DB restore"
+        required: false
+        type: string
+      source_snapshot_identifier:
+        description: "Source snapshot identifier for approved cross-region snapshot copy"
+        required: false
+        type: string
+      source_snapshot_arn:
+        description: "Optional source snapshot ARN for approved cross-region snapshot copy"
+        required: false
+        type: string
+      target_snapshot_identifier:
+        description: "Target snapshot identifier for approved cross-region snapshot copy"
+        required: false
+        type: string
+      target_kms_key_id:
+        description: "Optional target-region KMS key ID for encrypted snapshot copy"
         required: false
         type: string
       source_db_identifier:
@@ -64,6 +95,25 @@ on:
         required: false
         type: string
         default: ""
+      db_instance_class:
+        description: "DB instance class for approved region-local restore"
+        required: false
+        type: string
+        default: db.t4g.micro
+      db_port:
+        description: "DB port for approved region-local restore"
+        required: false
+        type: string
+        default: "5432"
+      publicly_accessible:
+        description: "Whether the recovery DB should be publicly accessible"
+        required: false
+        type: boolean
+        default: false
+      final_snapshot_identifier:
+        description: "Optional final snapshot identifier for recovery DB cleanup"
+        required: false
+        type: string
       bucket:
         description: "Bucket for approved object storage write test"
         required: false
@@ -91,6 +141,22 @@ on:
         type: string
       confirm_delete_test_object:
         description: "Must equal I_APPROVE_DELETE_DR_TEST_OBJECT when delete_test_object is true"
+        required: false
+        type: string
+      confirm_snapshot_copy:
+        description: "Must equal I_APPROVE_CROSS_REGION_SNAPSHOT_COPY"
+        required: false
+        type: string
+      confirm_region_local_db_restore:
+        description: "Must equal I_APPROVE_REGION_LOCAL_DB_RESTORE"
+        required: false
+        type: string
+      confirm_recovery_db_cleanup:
+        description: "Must equal I_APPROVE_RECOVERY_DB_CLEANUP"
+        required: false
+        type: string
+      confirm_skip_final_snapshot:
+        description: "Must equal I_APPROVE_SKIP_FINAL_SNAPSHOT when no final snapshot is requested"
         required: false
         type: string
 
@@ -317,6 +383,182 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dr-object-storage-write-test-evidence-${{ github.run_id }}
+          path: artifacts/dr
+          if-no-files-found: error
+          retention-days: 90
+
+  snapshot-copy:
+    if: ${{ inputs.operation == 'apply-cross-region-snapshot-copy-approved' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: dr-db-restore
+    env:
+      SOURCE_REGION: ${{ inputs.source_region }}
+      TARGET_REGION: ${{ inputs.target_region }}
+      SOURCE_SNAPSHOT_IDENTIFIER: ${{ inputs.source_snapshot_identifier }}
+      SOURCE_SNAPSHOT_ARN: ${{ inputs.source_snapshot_arn }}
+      TARGET_SNAPSHOT_IDENTIFIER: ${{ inputs.target_snapshot_identifier }}
+      TARGET_KMS_KEY_ID: ${{ inputs.target_kms_key_id }}
+      CONFIRM_SNAPSHOT_COPY: ${{ inputs.confirm_snapshot_copy }}
+      AWS_ROLE_TO_ASSUME: ${{ vars.DR_DB_RESTORE_ROLE_TO_ASSUME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate snapshot copy approval inputs
+        run: |
+          set -euo pipefail
+          [ "$CONFIRM_SNAPSHOT_COPY" = "I_APPROVE_CROSS_REGION_SNAPSHOT_COPY" ] || {
+            echo "::error::confirm_snapshot_copy must equal I_APPROVE_CROSS_REGION_SNAPSHOT_COPY."
+            exit 2
+          }
+          [ -n "$SOURCE_REGION" ] || { echo "::error::source_region is required."; exit 2; }
+          [ -n "$TARGET_REGION" ] || { echo "::error::target_region is required."; exit 2; }
+          if [ -z "$SOURCE_SNAPSHOT_IDENTIFIER" ] && [ -z "$SOURCE_SNAPSHOT_ARN" ]; then
+            echo "::error::source_snapshot_identifier or source_snapshot_arn is required."
+            exit 2
+          fi
+          [ -n "$TARGET_SNAPSHOT_IDENTIFIER" ] || { echo "::error::target_snapshot_identifier is required."; exit 2; }
+          [ -n "$AWS_ROLE_TO_ASSUME" ] || { echo "::error::Set DR_DB_RESTORE_ROLE_TO_ASSUME on the dr-db-restore environment."; exit 2; }
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.target_region }}
+          role-to-assume: ${{ vars.DR_DB_RESTORE_ROLE_TO_ASSUME }}
+
+      - name: Copy approved snapshot to target region
+        run: scripts/dr/apply-cross-region-snapshot-copy-approved.sh
+
+      - name: Write immutable evidence manifest
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dr
+          find artifacts/dr -type f -print0 | sort -z | xargs -0 shasum -a 256 > artifacts/dr/sha256-manifest.txt
+
+      - name: Upload immutable DR evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-snapshot-copy-evidence-${{ github.run_id }}
+          path: artifacts/dr
+          if-no-files-found: error
+          retention-days: 90
+
+  region-local-db-restore:
+    if: ${{ inputs.operation == 'apply-region-local-db-restore-approved' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: dr-db-restore
+    env:
+      TARGET_STANDBY: ${{ inputs.target_standby }}
+      TARGET_REGION: ${{ inputs.target_region }}
+      SNAPSHOT_IDENTIFIER: ${{ inputs.snapshot_identifier }}
+      TARGET_DB_IDENTIFIER: ${{ inputs.target_db_identifier }}
+      DB_SUBNET_GROUP_NAME: ${{ inputs.db_subnet_group_name }}
+      DB_VPC_SECURITY_GROUP_IDS: ${{ inputs.db_vpc_security_group_ids }}
+      DB_INSTANCE_CLASS: ${{ inputs.db_instance_class }}
+      DB_PORT: ${{ inputs.db_port }}
+      PUBLICLY_ACCESSIBLE: ${{ inputs.publicly_accessible && 'true' || 'false' }}
+      CONFIRM_REGION_LOCAL_DB_RESTORE: ${{ inputs.confirm_region_local_db_restore }}
+      AWS_ROLE_TO_ASSUME: ${{ vars.DR_DB_RESTORE_ROLE_TO_ASSUME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate region-local DB restore approval inputs
+        run: |
+          set -euo pipefail
+          [ "$CONFIRM_REGION_LOCAL_DB_RESTORE" = "I_APPROVE_REGION_LOCAL_DB_RESTORE" ] || {
+            echo "::error::confirm_region_local_db_restore must equal I_APPROVE_REGION_LOCAL_DB_RESTORE."
+            exit 2
+          }
+          case "$TARGET_STANDBY" in
+            mumbai|capetown) ;;
+            *) echo "::error::target_standby must be mumbai or capetown."; exit 2 ;;
+          esac
+          [ -n "$TARGET_REGION" ] || { echo "::error::target_region is required."; exit 2; }
+          [ -n "$SNAPSHOT_IDENTIFIER" ] || { echo "::error::snapshot_identifier is required."; exit 2; }
+          [ -n "$TARGET_DB_IDENTIFIER" ] || { echo "::error::target_db_identifier is required."; exit 2; }
+          [ -n "$DB_SUBNET_GROUP_NAME" ] || { echo "::error::db_subnet_group_name is required."; exit 2; }
+          [ -n "$DB_VPC_SECURITY_GROUP_IDS" ] || { echo "::error::db_vpc_security_group_ids is required."; exit 2; }
+          [ -n "$AWS_ROLE_TO_ASSUME" ] || { echo "::error::Set DR_DB_RESTORE_ROLE_TO_ASSUME on the dr-db-restore environment."; exit 2; }
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.target_region }}
+          role-to-assume: ${{ vars.DR_DB_RESTORE_ROLE_TO_ASSUME }}
+
+      - name: Restore approved region-local DB recovery target
+        run: scripts/dr/apply-region-local-db-restore-approved.sh
+
+      - name: Write immutable evidence manifest
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dr
+          find artifacts/dr -type f -print0 | sort -z | xargs -0 shasum -a 256 > artifacts/dr/sha256-manifest.txt
+
+      - name: Upload immutable DR evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-region-local-db-restore-evidence-${{ github.run_id }}
+          path: artifacts/dr
+          if-no-files-found: error
+          retention-days: 90
+
+  recovery-cleanup:
+    if: ${{ inputs.operation == 'cleanup-recovery-db-approved' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: dr-recovery-cleanup
+    env:
+      TARGET_REGION: ${{ inputs.target_region }}
+      TARGET_DB_IDENTIFIER: ${{ inputs.target_db_identifier }}
+      FINAL_SNAPSHOT_IDENTIFIER: ${{ inputs.final_snapshot_identifier }}
+      CONFIRM_RECOVERY_DB_CLEANUP: ${{ inputs.confirm_recovery_db_cleanup }}
+      CONFIRM_SKIP_FINAL_SNAPSHOT: ${{ inputs.confirm_skip_final_snapshot }}
+      AWS_ROLE_TO_ASSUME: ${{ vars.DR_RECOVERY_CLEANUP_ROLE_TO_ASSUME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate recovery cleanup approval inputs
+        run: |
+          set -euo pipefail
+          [ "$CONFIRM_RECOVERY_DB_CLEANUP" = "I_APPROVE_RECOVERY_DB_CLEANUP" ] || {
+            echo "::error::confirm_recovery_db_cleanup must equal I_APPROVE_RECOVERY_DB_CLEANUP."
+            exit 2
+          }
+          [ -n "$TARGET_REGION" ] || { echo "::error::target_region is required."; exit 2; }
+          [ -n "$TARGET_DB_IDENTIFIER" ] || { echo "::error::target_db_identifier is required."; exit 2; }
+          if [ -z "$FINAL_SNAPSHOT_IDENTIFIER" ] && [ "$CONFIRM_SKIP_FINAL_SNAPSHOT" != "I_APPROVE_SKIP_FINAL_SNAPSHOT" ]; then
+            echo "::error::final_snapshot_identifier or confirm_skip_final_snapshot is required."
+            exit 2
+          fi
+          [ -n "$AWS_ROLE_TO_ASSUME" ] || { echo "::error::Set DR_RECOVERY_CLEANUP_ROLE_TO_ASSUME on the dr-recovery-cleanup environment."; exit 2; }
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.target_region }}
+          role-to-assume: ${{ vars.DR_RECOVERY_CLEANUP_ROLE_TO_ASSUME }}
+
+      - name: Delete approved recovery DB target
+        run: scripts/dr/cleanup-recovery-db-approved.sh
+
+      - name: Write immutable evidence manifest
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dr
+          find artifacts/dr -type f -print0 | sort -z | xargs -0 shasum -a 256 > artifacts/dr/sha256-manifest.txt
+
+      - name: Upload immutable DR evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-recovery-cleanup-evidence-${{ github.run_id }}
           path: artifacts/dr
           if-no-files-found: error
           retention-days: 90

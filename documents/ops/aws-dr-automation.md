@@ -15,6 +15,10 @@ This guide covers the MSCQR operator-controlled AWS multi-region DR automation f
 - Route 53 rollback batch generation for review.
 - Read-only RDS inventory and snapshot readiness inspection.
 - DB restore plan generation.
+- Read-only AWS topology inventory for region-local DB recovery.
+- Cross-region snapshot copy plan generation.
+- Target-region DB readiness inspection.
+- Standby-to-DB network diagnostics.
 - Object storage read-path inspection.
 - Evidence capture under `artifacts/dr/<timestamp>/`.
 - CI validation and AWS DR safety scanning.
@@ -24,8 +28,11 @@ This guide covers the MSCQR operator-controlled AWS multi-region DR automation f
 - DNS cutover apply requires `CONFIRM_DNS_CUTOVER=I_APPROVE_MANUAL_DNS_CUTOVER`.
 - DNS rollback apply requires `CONFIRM_DNS_ROLLBACK=I_APPROVE_MANUAL_DNS_ROLLBACK`.
 - DB restore to a new recovery target requires `CONFIRM_DB_RESTORE=I_APPROVE_DB_RESTORE_TO_RECOVERY_TARGET`.
+- Cross-region snapshot copy requires `CONFIRM_SNAPSHOT_COPY=I_APPROVE_CROSS_REGION_SNAPSHOT_COPY`.
+- Region-local DB restore requires `CONFIRM_REGION_LOCAL_DB_RESTORE=I_APPROVE_REGION_LOCAL_DB_RESTORE`.
 - Object storage write test requires `CONFIRM_OBJECT_WRITE_TEST=I_APPROVE_OBJECT_STORAGE_WRITE_TEST`.
 - Optional deletion of the generated write-test object requires `CONFIRM_DELETE_TEST_OBJECT=I_APPROVE_DELETE_DR_TEST_OBJECT`.
+- Recovery DB cleanup requires `CONFIRM_RECOVERY_DB_CLEANUP=I_APPROVE_RECOVERY_DB_CLEANUP` and either a final snapshot identifier or `CONFIRM_SKIP_FINAL_SNAPSHOT=I_APPROVE_SKIP_FINAL_SNAPSHOT`.
 
 Do not run apply commands without incident commander approval.
 
@@ -141,6 +148,41 @@ scripts/dr/apply-db-restore-approved.sh
 
 The restore script creates only a new recovery target. It refuses identifiers that look like production primary and does not delete, overwrite, modify primary, or fail over. If the AWS restore command fails, the script exits non-zero and the workflow fails.
 
+## Region-Local DB Recovery
+
+Do not point Mumbai or Cape Town at a private London RDS endpoint. The supported DR path is to copy or restore the database into the selected standby region, verify the region-local endpoint, then point only that standby app at the region-local recovered DB.
+
+Target mapping: Mumbai -> `ap-south-1`, Cape Town -> `af-south-1`, London/source -> `eu-west-2`.
+
+Exact Mumbai sequence:
+
+1. `AWS DR Operations` -> `aws-topology-inventory`.
+2. `AWS DR Operations` -> `generate-cross-region-snapshot-copy-plan`.
+3. `AWS DR Apply` -> `apply-cross-region-snapshot-copy-approved`.
+4. `AWS DR Apply` -> `apply-region-local-db-restore-approved`.
+5. `AWS DR Operations` -> `target-region-db-readiness` until `available`.
+6. `AWS DR Operations` -> `diagnose-standby-db-network`.
+7. `AWS DR Standby DB Test` -> `test-standby-recovered-db`.
+8. `AWS DR Standby DB Test` -> `rollback-standby-db-env` after evidence capture.
+9. `AWS DR Apply` -> `cleanup-recovery-db-approved` only after explicit cleanup approval.
+
+Local commands:
+
+```bash
+SOURCE_REGION=eu-west-2 TARGET_STANDBY=mumbai TARGET_REGION=ap-south-1 SOURCE_DB_IDENTIFIER=mscqr-prod-db scripts/dr/aws-dr-topology-inventory.sh
+SOURCE_REGION=eu-west-2 TARGET_REGION=ap-south-1 SOURCE_SNAPSHOT_IDENTIFIER=rds:mscqr-prod-db-YYYY-MM-DD-HH-MM TARGET_SNAPSHOT_IDENTIFIER=mscqr-dr-mumbai-copy-YYYYMMDD TARGET_STANDBY=mumbai scripts/dr/generate-cross-region-snapshot-copy-plan.sh
+CONFIRM_SNAPSHOT_COPY=I_APPROVE_CROSS_REGION_SNAPSHOT_COPY SOURCE_REGION=eu-west-2 TARGET_REGION=ap-south-1 SOURCE_SNAPSHOT_IDENTIFIER=rds:mscqr-prod-db-YYYY-MM-DD-HH-MM TARGET_SNAPSHOT_IDENTIFIER=mscqr-dr-mumbai-copy-YYYYMMDD scripts/dr/apply-cross-region-snapshot-copy-approved.sh
+CONFIRM_REGION_LOCAL_DB_RESTORE=I_APPROVE_REGION_LOCAL_DB_RESTORE TARGET_STANDBY=mumbai TARGET_REGION=ap-south-1 SNAPSHOT_IDENTIFIER=mscqr-dr-mumbai-copy-YYYYMMDD TARGET_DB_IDENTIFIER=mscqr-dr-mumbai-restore-test-YYYYMMDD DB_SUBNET_GROUP_NAME=<approved-mumbai-db-subnet-group> DB_VPC_SECURITY_GROUP_IDS=<approved-mumbai-db-security-group> scripts/dr/apply-region-local-db-restore-approved.sh
+TARGET_STANDBY=mumbai TARGET_REGION=ap-south-1 TARGET_DB_IDENTIFIER=mscqr-dr-mumbai-restore-test-YYYYMMDD scripts/dr/target-region-db-readiness.sh
+DB_HOST=<region-local-rds-endpoint> DB_PORT=5432 scripts/dr/diagnose-standby-db-network.sh mumbai
+```
+
+Cleanup is separate and dangerous:
+
+```bash
+CONFIRM_RECOVERY_DB_CLEANUP=I_APPROVE_RECOVERY_DB_CLEANUP TARGET_REGION=ap-south-1 TARGET_DB_IDENTIFIER=mscqr-dr-mumbai-restore-test-YYYYMMDD FINAL_SNAPSHOT_IDENTIFIER=mscqr-dr-mumbai-final-YYYYMMDD scripts/dr/cleanup-recovery-db-approved.sh
+```
+
 ## Standby Recovered DB Connection Test
 
 Use this only after the approved DB restore has created a recovery DB target and the incident commander has approved a single-standby validation. This test changes the selected standby server only, creates a timestamped backup of `/home/ubuntu/genuine-scan-main/backend/.env`, updates only `DATABASE_URL`, restarts the selected standby Docker Compose app services, runs `/healthz` and `/api/health/ready`, and records evidence under `artifacts/dr/<timestamp>/`.
@@ -242,7 +284,7 @@ scripts/dr/object-storage-write-test-approved.sh
 ## GitHub Actions
 
 - `AWS DR Validation` validates scripts, guardrails, and Ansible syntax without production secrets, SSH, or deploy.
-- `AWS DR Operations` is `workflow_dispatch` only and exposes read-only smoke tests. It does not include standby deploy, DNS apply, DNS rollback apply, DB restore apply, or object write-test apply.
+- `AWS DR Operations` is `workflow_dispatch` only and exposes read-only or artifact-only checks. It does not include DNS apply, snapshot copy apply, DB restore apply, cleanup, or object write-test apply.
 - `AWS DR Apply` is `workflow_dispatch` only and exposes mutation-capable operations only behind protected GitHub Environments, OIDC AWS role assumption, and exact confirmation phrases.
 - `AWS DR Standby DB Test` is `workflow_dispatch` only and validates one selected standby app against an already-restored recovery DB behind the protected `dr-standby-db-test` environment.
 - Standby deploy from Actions requires an approved `STANDBY_ANSIBLE_INVENTORY` secret and an intentional `deploy-standby` selection.
@@ -320,6 +362,13 @@ db_vpc_security_group_ids: sg-07db1a9130c6df8d5
 
 `db-readiness` uses the `dr-db-restore` environment and OIDC to run read-only RDS describe commands. `generate-db-restore-plan` writes a markdown artifact only. Actual DB restore remains in `AWS DR Apply` and requires confirmation plus protected environment approval.
 
+Additional region-local DB operations:
+
+- `aws-topology-inventory`: read-only source/target AWS topology evidence.
+- `generate-cross-region-snapshot-copy-plan`: markdown snapshot copy plan only.
+- `target-region-db-readiness`: read-only recovery DB status and endpoint evidence.
+- `diagnose-standby-db-network`: read-only DNS/TCP check from one standby to a DB endpoint.
+
 Do not run `AWS DR Apply` for smoke tests.
 
 ## Troubleshooting Object Storage Readiness
@@ -393,8 +442,8 @@ These values came from the current London restore drill and should be re-validat
 - No unattended production DB restore.
 - No standby recovered DB test without a single `mumbai` or `capetown` target and protected environment approval.
 - No active-active multi-write.
-- No destructive cleanup.
-- No bucket or database deletion.
+- No destructive cleanup unless it targets a recovery DB identifier and passes the explicit `dr-recovery-cleanup` approval gate.
+- No bucket deletion or production database deletion.
 - No Docker prune, volume wiping, or MinIO decommission.
 - No secrets, real `.env`, or real `ops/deploy/inventory.ini` committed.
 - Documentation-only changes do not wake the production deploy chain.

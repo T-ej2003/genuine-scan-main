@@ -1,0 +1,26 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadRecoveryTargetsBeforeCleanup",
+      "Effect": "Allow",
+      "Action": [
+        "rds:DescribeDBInstances",
+        "rds:DescribeDBSnapshots"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DeleteOnlyApprovedRecoveryTargets",
+      "Effect": "Allow",
+      "Action": [
+        "rds:DeleteDBInstance",
+        "rds:AddTagsToResource"
+      ],
+      "Resource": [
+        "arn:aws:rds:<TARGET_REGION>:<AWS_ACCOUNT_ID>:db:<RECOVERY_TARGET_PREFIX>*",
+        "arn:aws:rds:<TARGET_REGION>:<AWS_ACCOUNT_ID>:snapshot:<FINAL_RECOVERY_SNAPSHOT_PREFIX>*"
+      ]
+    }
+  ]
+}

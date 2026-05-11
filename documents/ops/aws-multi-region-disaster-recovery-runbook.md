@@ -137,6 +137,26 @@ Approved DB restore requires an approved DB subnet group and, when appropriate, 
 
 These are examples from the current drill. Re-validate them before production incident use.
 
+## Region-Local DB Recovery Path
+
+The Mumbai test proved that a private London RDS endpoint is not a valid standby target from `ap-south-1`. For real standby recovery, copy or restore the DB into the selected standby region first, then point only that standby app at the region-local endpoint.
+
+Mumbai target region is `ap-south-1`; Cape Town target region is `af-south-1`; London/source is `eu-west-2`.
+
+Run sequence:
+
+1. `AWS DR Operations` -> `aws-topology-inventory`.
+2. `AWS DR Operations` -> `generate-cross-region-snapshot-copy-plan`.
+3. `AWS DR Apply` -> `apply-cross-region-snapshot-copy-approved`.
+4. `AWS DR Apply` -> `apply-region-local-db-restore-approved`.
+5. `AWS DR Operations` -> `target-region-db-readiness` until `available`.
+6. `AWS DR Operations` -> `diagnose-standby-db-network`.
+7. `AWS DR Standby DB Test` -> `test-standby-recovered-db`.
+8. `AWS DR Standby DB Test` -> `rollback-standby-db-env` after evidence.
+9. `AWS DR Apply` -> `cleanup-recovery-db-approved` only after explicit cleanup approval.
+
+This sequence still does not change DNS, Route 53, London, primary DB, MinIO, or production object storage.
+
 ## Standby Recovered DB Connection Test
 
 After a recovery DB is available, validate one standby app against it before any traffic movement is considered. Use only `mumbai` or `capetown`; do not target London, primary, `standby`, `standby_regions`, or all hosts.

@@ -8,6 +8,16 @@ const allowedRoute53Apply = new Set([
   "scripts/dr/apply-route53-rollback.sh",
 ]);
 const allowedApplyWorkflow = ".github/workflows/aws-dr-apply.yml";
+const allowedRdsRestoreScripts = new Set([
+  "scripts/dr/apply-db-restore-approved.sh",
+  "scripts/dr/apply-region-local-db-restore-approved.sh",
+]);
+const allowedRdsSnapshotCopyScripts = new Set([
+  "scripts/dr/apply-cross-region-snapshot-copy-approved.sh",
+]);
+const allowedRdsDeleteScripts = new Set([
+  "scripts/dr/cleanup-recovery-db-approved.sh",
+]);
 const standbyRecoveredDbTestFiles = new Set([
   ".github/workflows/aws-dr-standby-db-test.yml",
   "ops/deploy/test-standby-recovered-db.yml",
@@ -44,11 +54,31 @@ const gatedApplyScripts = new Map([
       environment: "dr-object-storage-write-test",
     },
   ],
+  [
+    "scripts/dr/apply-cross-region-snapshot-copy-approved.sh",
+    {
+      confirmation: "I_APPROVE_CROSS_REGION_SNAPSHOT_COPY",
+      environment: "dr-db-restore",
+    },
+  ],
+  [
+    "scripts/dr/apply-region-local-db-restore-approved.sh",
+    {
+      confirmation: "I_APPROVE_REGION_LOCAL_DB_RESTORE",
+      environment: "dr-db-restore",
+    },
+  ],
+  [
+    "scripts/dr/cleanup-recovery-db-approved.sh",
+    {
+      confirmation: "I_APPROVE_RECOVERY_DB_CLEANUP",
+      environment: "dr-recovery-cleanup",
+    },
+  ],
 ]);
 const selfPath = "scripts/check-aws-dr-safety.mjs";
 
 const dangerousPatterns = [
-  { id: "rds-delete", pattern: /\baws\s+rds\s+delete[-\w]*/i },
   { id: "rds-failover", pattern: /\baws\s+rds\s+failover[-\w]*/i },
   { id: "s3-rb", pattern: /\baws\s+s3\s+rb\b/i },
   { id: "s3-rm-recursive", pattern: /\baws\s+s3\s+rm\b[^\n]*--recursive/i },
@@ -185,12 +215,47 @@ for (const scanRoot of scanRoots) {
         source,
         /\baws\s+rds\s+restore[-\w]*/i,
       );
-      if (rdsRestoreReferences.length > 0 && repoPath !== "scripts/dr/apply-db-restore-approved.sh") {
+      if (rdsRestoreReferences.length > 0 && !allowedRdsRestoreScripts.has(repoPath)) {
         findings.push({
           repoPath,
           line: rdsRestoreReferences[0].lineNumber,
           message: "RDS restore commands are only allowed in the approved gated DB restore script.",
         });
+      }
+
+      const rdsCopySnapshotReferences = executableLineReferences(
+        source,
+        /\baws\s+rds\s+copy-db-snapshot\b/i,
+      );
+      if (rdsCopySnapshotReferences.length > 0 && !allowedRdsSnapshotCopyScripts.has(repoPath)) {
+        findings.push({
+          repoPath,
+          line: rdsCopySnapshotReferences[0].lineNumber,
+          message: "RDS snapshot copy commands are only allowed in the approved gated snapshot copy script.",
+        });
+      }
+
+      const rdsDeleteReferences = executableLineReferences(
+        source,
+        /\baws\s+rds\s+delete-db-instance\b/i,
+      );
+      if (rdsDeleteReferences.length > 0) {
+        if (!allowedRdsDeleteScripts.has(repoPath)) {
+          findings.push({
+            repoPath,
+            line: rdsDeleteReferences[0].lineNumber,
+            message: "RDS delete-db-instance is only allowed in the approved gated recovery cleanup script.",
+          });
+        } else if (
+          !source.includes("I_APPROVE_RECOVERY_DB_CLEANUP") ||
+          !source.includes("I_APPROVE_SKIP_FINAL_SNAPSHOT")
+        ) {
+          findings.push({
+            repoPath,
+            line: rdsDeleteReferences[0].lineNumber,
+            message: "Recovery DB cleanup must require cleanup and final-snapshot/skip confirmations.",
+          });
+        }
       }
 
       if (standbyRecoveredDbTestFiles.has(repoPath)) {

@@ -11,9 +11,25 @@
         "rds:DescribeDBClusterSnapshots",
         "rds:DescribeDBSubnetGroups",
         "rds:DescribeOptionGroups",
-        "rds:DescribeDBParameterGroups"
+        "rds:DescribeDBParameterGroups",
+        "ec2:DescribeVpcs",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeSecurityGroups",
+        "kms:DescribeKey"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "CopyApprovedSnapshotForRegionLocalRecovery",
+      "Effect": "Allow",
+      "Action": [
+        "rds:CopyDBSnapshot",
+        "rds:AddTagsToResource"
+      ],
+      "Resource": [
+        "arn:aws:rds:<SOURCE_REGION>:<AWS_ACCOUNT_ID>:snapshot:<SOURCE_SNAPSHOT_IDENTIFIER>",
+        "arn:aws:rds:<TARGET_REGION>:<AWS_ACCOUNT_ID>:snapshot:<RECOVERY_SNAPSHOT_PREFIX>*"
+      ]
     },
     {
       "Sid": "CreateOnlyApprovedRecoveryTarget",
@@ -28,6 +44,19 @@
         "arn:aws:rds:<SOURCE_REGION>:<AWS_ACCOUNT_ID>:db:<SOURCE_DB_IDENTIFIER>",
         "arn:aws:rds:<SOURCE_REGION>:<AWS_ACCOUNT_ID>:snapshot:<SNAPSHOT_IDENTIFIER>"
       ]
+    },
+    {
+      "Sid": "AllowEncryptedSnapshotCopyGrantWhenApproved",
+      "Effect": "Allow",
+      "Action": [
+        "kms:CreateGrant"
+      ],
+      "Resource": "arn:aws:kms:<TARGET_REGION>:<AWS_ACCOUNT_ID>:key/<TARGET_KMS_KEY_ID>",
+      "Condition": {
+        "Bool": {
+          "kms:GrantIsForAWSResource": "true"
+        }
+      }
     }
   ]
 }
