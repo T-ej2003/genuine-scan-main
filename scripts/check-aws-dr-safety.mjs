@@ -7,7 +7,7 @@ const allowedRoute53Apply = new Set([
   "scripts/dr/apply-route53-change.sh",
   "scripts/dr/apply-route53-rollback.sh",
 ]);
-const allowedApplyWorkflow = ".github/workflows/aws-dr-apply-operations.yml";
+const allowedApplyWorkflow = ".github/workflows/aws-dr-apply.yml";
 const gatedApplyScripts = new Map([
   [
     "scripts/dr/apply-route53-change.sh",

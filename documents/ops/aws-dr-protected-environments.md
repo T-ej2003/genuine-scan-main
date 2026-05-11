@@ -36,7 +36,7 @@ The workflow uses GitHub OIDC through `aws-actions/configure-aws-credentials@v4`
 Use:
 
 ```text
-.github/workflows/aws-dr-apply-operations.yml
+.github/workflows/aws-dr-apply.yml
 ```
 
 Supported operations:

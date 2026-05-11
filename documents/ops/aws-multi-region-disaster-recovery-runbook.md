@@ -110,6 +110,22 @@ BUCKET=mscqr-prod-assets CONFIRM_OBJECT_WRITE_TEST=I_APPROVE_OBJECT_STORAGE_WRIT
 
 Every DR script writes evidence under `artifacts/dr/<timestamp>/`. Those artifacts are intentionally ignored by Git.
 
+## Read-Only Smoke Test Workflow
+
+Before any apply workflow is considered, operators can run safe read-only smoke tests from GitHub Actions:
+
+```text
+GitHub repo -> Actions -> AWS DR Operations -> Run workflow
+```
+
+Available operations:
+
+- `public-health`: checks `https://www.mscqr.com/healthz` and `https://www.mscqr.com/api/health/ready`.
+- `dns-inventory`: captures read-only DNS inventory for `www.mscqr.com` or the selected hostname.
+- `object-storage-readiness`: performs read-only S3 listing and optional `head-object` using OIDC role `AWS_DR_OBJECT_STORAGE_ROLE_ARN`.
+
+This workflow does not deploy, SSH, use real inventory, change DNS, restore databases, or write/delete objects. Use it before `AWS DR Apply`; do not use the apply workflow for smoke tests.
+
 ## RTO/RPO Evidence Links
 
 - [Manual failover RTO/RPO template](manual-failover-drill/rto-rpo-template.md)

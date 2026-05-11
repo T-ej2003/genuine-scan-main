@@ -166,8 +166,8 @@ scripts/dr/object-storage-write-test-approved.sh
 ## GitHub Actions
 
 - `AWS DR Validation` validates scripts, guardrails, and Ansible syntax without production secrets, SSH, or deploy.
-- `AWS DR Operations` is `workflow_dispatch` only and exposes safe operations. It does not include DNS apply, DNS rollback apply, DB restore apply, or object write-test apply.
-- `AWS DR Apply Operations` is `workflow_dispatch` only and exposes mutation-capable operations only behind protected GitHub Environments, OIDC AWS role assumption, and exact confirmation phrases.
+- `AWS DR Operations` is `workflow_dispatch` only and exposes read-only smoke tests. It does not include standby deploy, DNS apply, DNS rollback apply, DB restore apply, or object write-test apply.
+- `AWS DR Apply` is `workflow_dispatch` only and exposes mutation-capable operations only behind protected GitHub Environments, OIDC AWS role assumption, and exact confirmation phrases.
 - Standby deploy from Actions requires an approved `STANDBY_ANSIBLE_INVENTORY` secret and an intentional `deploy-standby` selection.
 
 Protected environment and IAM setup are documented in:
@@ -175,6 +175,48 @@ Protected environment and IAM setup are documented in:
 ```text
 documents/ops/aws-dr-protected-environments.md
 ```
+
+## Read-Only GitHub Actions Smoke Tests
+
+Click path:
+
+```text
+GitHub repo -> Actions -> AWS DR Operations -> Run workflow
+```
+
+Run these smoke tests from branch `aws-dr-finish`:
+
+1. Public health
+
+```text
+Branch: aws-dr-finish
+operation: public-health
+target_region: standby
+hostname: www.mscqr.com
+```
+
+2. DNS inventory
+
+```text
+Branch: aws-dr-finish
+operation: dns-inventory
+target_region: standby
+hostname: www.mscqr.com
+```
+
+3. Object storage readiness
+
+```text
+Branch: aws-dr-finish
+operation: object-storage-readiness
+target_region: standby
+bucket: mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an
+test_object_key: blank
+```
+
+`public-health` and `dns-inventory` do not change AWS and do not require AWS credentials. `object-storage-readiness` uses OIDC only when `AWS_DR_OBJECT_STORAGE_ROLE_ARN` is configured and performs read-only S3 checks: `aws s3 ls` and optional `aws s3api head-object`. Each run uploads `artifacts/dr/**` as a GitHub artifact.
+
+Do not run `AWS DR Apply` for smoke tests.
 
 ## Safety Guarantees
 

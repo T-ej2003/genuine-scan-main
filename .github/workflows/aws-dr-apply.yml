@@ -1,4 +1,4 @@
-name: AWS DR Apply Operations
+name: AWS DR Apply
 
 on:
   workflow_dispatch:

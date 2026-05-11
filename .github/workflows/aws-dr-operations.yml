@@ -4,77 +4,57 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: "Safe DR operation to run"
+        description: "Read-only DR operation to run"
         required: true
         type: choice
         options:
-          - preflight
-          - check-standby
-          - deploy-standby
-          - dns-inventory
           - public-health
-          - generate-route53-change-batch
-          - generate-route53-rollback-batch
-          - db-readiness
-          - generate-db-restore-plan
+          - dns-inventory
           - object-storage-readiness
       target_region:
-        description: "Standby target"
-        required: true
-        type: choice
+        description: "Logical target region/group for logs only"
+        required: false
         default: standby
+        type: choice
         options:
           - standby
           - mumbai
           - capetown
           - standby_regions
       hostname:
-        description: "DNS hostname"
+        description: "Hostname for public health or DNS inventory"
         required: false
-        type: string
         default: www.mscqr.com
-      target_value:
-        description: "DNS target or rollback value for generated batches"
-        required: false
         type: string
-      ttl:
-        description: "DNS TTL for generated batches"
-        required: false
-        type: string
-        default: "60"
       bucket:
-        description: "Object storage bucket for read-only checks"
+        description: "S3 bucket for read-only object storage readiness"
         required: false
+        default: mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an
         type: string
       test_object_key:
-        description: "Optional object key for read-only head-object"
+        description: "Optional object key for read-only head-object check"
         required: false
+        default: ""
         type: string
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
-  operate:
+  read_only_smoke_test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     env:
       OPERATION: ${{ inputs.operation }}
       TARGET_REGION: ${{ inputs.target_region }}
       HOSTNAME: ${{ inputs.hostname }}
-      TARGET_VALUE: ${{ inputs.target_value }}
-      TTL: ${{ inputs.ttl }}
       BUCKET: ${{ inputs.bucket }}
       TEST_OBJECT_KEY: ${{ inputs.test_object_key }}
-      STANDBY_ANSIBLE_INVENTORY: ${{ secrets.STANDBY_ANSIBLE_INVENTORY }}
-      DR_SOURCE_DB_IDENTIFIER: ${{ vars.DR_SOURCE_DB_IDENTIFIER }}
-      DR_SOURCE_CLUSTER_IDENTIFIER: ${{ vars.DR_SOURCE_CLUSTER_IDENTIFIER }}
-      DR_SNAPSHOT_IDENTIFIER: ${{ vars.DR_SNAPSHOT_IDENTIFIER }}
-      DR_RECOVERY_POINT: ${{ vars.DR_RECOVERY_POINT }}
-      DR_TARGET_AWS_REGION: ${{ vars.DR_TARGET_AWS_REGION }}
-      DR_TARGET_DB_IDENTIFIER: ${{ vars.DR_TARGET_DB_IDENTIFIER }}
+      AWS_DR_OBJECT_STORAGE_ROLE_ARN: ${{ vars.AWS_DR_OBJECT_STORAGE_ROLE_ARN || secrets.AWS_DR_OBJECT_STORAGE_ROLE_ARN }}
+      AWS_REGION: eu-west-2
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Node
@@ -92,67 +72,65 @@ jobs:
             npm install
           fi
 
-      - name: Prepare optional standby inventory
-        if: ${{ inputs.operation == 'check-standby' || inputs.operation == 'deploy-standby' }}
-        run: |
-          if [ -z "$STANDBY_ANSIBLE_INVENTORY" ]; then
-            echo "::error::STANDBY_ANSIBLE_INVENTORY is not configured. Configure an approved standby inventory secret before running standby Ansible operations from GitHub Actions."
-            exit 1
-          fi
-          printf '%s\n' "$STANDBY_ANSIBLE_INVENTORY" > ops/deploy/inventory.ini
-          chmod 600 ops/deploy/inventory.ini
-          python3 -m pip install --user ansible-core
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Run AWS DR safety scanner
+        run: npm run check:aws-dr-safety
 
-      - name: Run selected safe DR operation
+      - name: Check read-only DR script syntax
+        run: |
+          /bin/sh -n scripts/dr/public-health.sh
+          /bin/sh -n scripts/dr/dns-inventory.sh
+          /bin/sh -n scripts/dr/object-storage-readiness.sh
+
+      - name: Prepare DR artifact directory
+        run: |
+          mkdir -p "artifacts/dr/github-actions-${{ github.run_id }}"
+          {
+            echo "operation=${OPERATION}"
+            echo "target_region=${TARGET_REGION}"
+            echo "hostname=${HOSTNAME}"
+            echo "bucket=${BUCKET}"
+            echo "test_object_key=${TEST_OBJECT_KEY}"
+            echo "run_id=${{ github.run_id }}"
+            echo "run_attempt=${{ github.run_attempt }}"
+          } > "artifacts/dr/github-actions-${{ github.run_id }}/context.txt"
+
+      - name: Require object storage OIDC role
+        if: ${{ inputs.operation == 'object-storage-readiness' }}
+        run: |
+          if [ -z "$AWS_DR_OBJECT_STORAGE_ROLE_ARN" ]; then
+            echo "AWS_DR_OBJECT_STORAGE_ROLE_ARN is required for object-storage-readiness in GitHub Actions."
+            exit 2
+          fi
+
+      - name: Configure AWS credentials for object storage readiness
+        if: ${{ inputs.operation == 'object-storage-readiness' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: eu-west-2
+          role-to-assume: ${{ vars.AWS_DR_OBJECT_STORAGE_ROLE_ARN || secrets.AWS_DR_OBJECT_STORAGE_ROLE_ARN }}
+
+      - name: Run selected read-only DR operation
         run: |
           case "$OPERATION" in
-            preflight)
-              scripts/dr/dr-preflight.sh
-              ;;
-            check-standby)
-              scripts/dr/check-standby.sh "$TARGET_REGION"
-              ;;
-            deploy-standby)
-              scripts/dr/deploy-standby.sh "$TARGET_REGION"
-              ;;
-            dns-inventory)
-              scripts/dr/dns-inventory.sh "$HOSTNAME"
-              ;;
             public-health)
               scripts/dr/public-health.sh
               ;;
-            generate-route53-change-batch)
-              ACTION=UPSERT HOSTNAME="$HOSTNAME" TARGET_VALUE="$TARGET_VALUE" TTL="$TTL" scripts/dr/generate-route53-change-batch.sh
-              ;;
-            generate-route53-rollback-batch)
-              HOSTNAME="$HOSTNAME" ROLLBACK_VALUE="$TARGET_VALUE" TTL="$TTL" scripts/dr/generate-route53-rollback-batch.sh
-              ;;
-            db-readiness)
-              AWS_REGION="${DR_TARGET_AWS_REGION:-}" DB_IDENTIFIER="${DR_SOURCE_DB_IDENTIFIER:-}" DB_CLUSTER_IDENTIFIER="${DR_SOURCE_CLUSTER_IDENTIFIER:-}" scripts/dr/db-readiness.sh
-              ;;
-            generate-db-restore-plan)
-              SOURCE_DB_IDENTIFIER="${DR_SOURCE_DB_IDENTIFIER:-}" \
-              SOURCE_CLUSTER_IDENTIFIER="${DR_SOURCE_CLUSTER_IDENTIFIER:-}" \
-              SNAPSHOT_IDENTIFIER="${DR_SNAPSHOT_IDENTIFIER:-}" \
-              RECOVERY_POINT="${DR_RECOVERY_POINT:-}" \
-              TARGET_REGION="${DR_TARGET_AWS_REGION:-}" \
-              TARGET_DB_IDENTIFIER="${DR_TARGET_DB_IDENTIFIER:-}" \
-              scripts/dr/generate-db-restore-plan.sh
+            dns-inventory)
+              scripts/dr/dns-inventory.sh "$HOSTNAME"
               ;;
             object-storage-readiness)
               BUCKET="$BUCKET" TEST_OBJECT_KEY="$TEST_OBJECT_KEY" scripts/dr/object-storage-readiness.sh
               ;;
             *)
-              echo "::error::Unsupported operation: $OPERATION"
+              echo "::error::Unsupported read-only DR operation: $OPERATION"
               exit 2
               ;;
           esac
 
-      - name: Upload DR artifacts
+      - name: Upload DR smoke-test artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: aws-dr-artifacts
-          path: artifacts/dr
-          if-no-files-found: ignore
+          name: aws-dr-operations-${{ inputs.operation }}-${{ github.run_id }}
+          path: artifacts/dr/**
+          if-no-files-found: warn
