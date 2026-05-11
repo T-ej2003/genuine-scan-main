@@ -8,6 +8,10 @@ Production baseline after SEO polish: `9148e06`
 
 MSCQR production currently uses London as the active production region, with Mumbai and Cape Town as warm standby targets.
 
+Documentation-only changes under `documents/**`, `docs/**`, Markdown/MDX, or DOCX files no longer trigger the deployment audit path that can wake the production deploy chain. Validation workflows still run where configured; production server deploys remain on the approved deployment flow.
+
+DR automation work should happen on `aws-dr-finish` or an approved feature branch, not directly on `main`.
+
 Deploy sequence:
 
 1. Deploy London first.
@@ -144,6 +148,7 @@ ansible -i ops/deploy/inventory.ini standby -m shell -a 'cd /home/ubuntu/genuine
 
 ## AWS Multi-Region DR Docs
 
+- [AWS DR automation framework](aws-dr-automation.md)
 - [Phase 3 manual failover readiness](aws-multi-region-phase-3.md)
 - [Phase 4 controlled manual DNS cutover](aws-multi-region-phase-4.md)
 - [Phase 5 database recovery strategy](aws-multi-region-phase-5.md)

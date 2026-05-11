@@ -1,0 +1,223 @@
+name: AWS DR Standby DB Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Approval-gated standby DB test operation"
+        required: true
+        type: choice
+        options:
+          - test-standby-recovered-db
+          - rollback-standby-db-env
+      target_region:
+        description: "Single standby region to operate on"
+        required: true
+        type: choice
+        options:
+          - mumbai
+          - capetown
+      recovered_db_host:
+        description: "Recovered DB endpoint for test-standby-recovered-db"
+        required: false
+        type: string
+      recovered_db_port:
+        description: "Recovered DB port for test-standby-recovered-db"
+        required: false
+        type: string
+        default: "5432"
+      recovered_db_name:
+        description: "Recovered DB name for test-standby-recovered-db"
+        required: false
+        type: string
+        default: postgres
+      recovered_db_user:
+        description: "Recovered DB username for test-standby-recovered-db"
+        required: false
+        type: string
+        default: postgres
+      backup_path_for_rollback:
+        description: "Remote env backup path for rollback-standby-db-env"
+        required: false
+        type: string
+      confirmation:
+        description: "Required approval phrase for the selected operation"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  standby_db_test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: dr-standby-db-test
+    env:
+      OPERATION: ${{ inputs.operation }}
+      TARGET_REGION: ${{ inputs.target_region }}
+      RECOVERED_DB_HOST: ${{ inputs.recovered_db_host }}
+      RECOVERED_DB_PORT: ${{ inputs.recovered_db_port }}
+      RECOVERED_DB_NAME: ${{ inputs.recovered_db_name }}
+      RECOVERED_DB_USER: ${{ inputs.recovered_db_user }}
+      BACKUP_PATH_FOR_ROLLBACK: ${{ inputs.backup_path_for_rollback }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+      RECOVERED_DB_PASSWORD: ${{ secrets.RECOVERED_DB_PASSWORD }}
+      STANDBY_ANSIBLE_INVENTORY: ${{ secrets.STANDBY_ANSIBLE_INVENTORY }}
+      STANDBY_KNOWN_HOSTS: ${{ secrets.STANDBY_KNOWN_HOSTS }}
+      STANDBY_SSH_PRIVATE_KEY: ${{ secrets.STANDBY_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Install Ansible
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user ansible-core
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run AWS DR safety scanner
+        run: npm run check:aws-dr-safety
+
+      - name: Validate approval and standby inputs
+        run: |
+          set -euo pipefail
+
+          case "$TARGET_REGION" in
+            mumbai|capetown) ;;
+            *)
+              echo "::error::target_region must be mumbai or capetown."
+              exit 2
+              ;;
+          esac
+
+          case "$OPERATION" in
+            test-standby-recovered-db)
+              [ "$CONFIRMATION" = "I_APPROVE_STANDBY_RECOVERED_DB_TEST" ] || {
+                echo "::error::confirmation must equal I_APPROVE_STANDBY_RECOVERED_DB_TEST."
+                exit 2
+              }
+              [ -n "$RECOVERED_DB_HOST" ] || { echo "::error::recovered_db_host is required."; exit 2; }
+              [ -n "$RECOVERED_DB_PORT" ] || { echo "::error::recovered_db_port is required."; exit 2; }
+              [ -n "$RECOVERED_DB_NAME" ] || { echo "::error::recovered_db_name is required."; exit 2; }
+              [ -n "$RECOVERED_DB_USER" ] || { echo "::error::recovered_db_user is required."; exit 2; }
+              [ -n "$RECOVERED_DB_PASSWORD" ] || {
+                echo "::error::Set RECOVERED_DB_PASSWORD as an Environment secret on dr-standby-db-test."
+                exit 2
+              }
+              ;;
+            rollback-standby-db-env)
+              [ "$CONFIRMATION" = "I_APPROVE_STANDBY_DB_ENV_ROLLBACK" ] || {
+                echo "::error::confirmation must equal I_APPROVE_STANDBY_DB_ENV_ROLLBACK."
+                exit 2
+              }
+              [ -n "$BACKUP_PATH_FOR_ROLLBACK" ] || { echo "::error::backup_path_for_rollback is required."; exit 2; }
+              ;;
+            *)
+              echo "::error::Unsupported operation: $OPERATION"
+              exit 2
+              ;;
+          esac
+
+          [ -n "$STANDBY_ANSIBLE_INVENTORY" ] || {
+            echo "::error::Set STANDBY_ANSIBLE_INVENTORY as an Environment secret on dr-standby-db-test."
+            exit 2
+          }
+          [ -n "$STANDBY_SSH_PRIVATE_KEY" ] || {
+            echo "::error::Set STANDBY_SSH_PRIVATE_KEY as an Environment secret on dr-standby-db-test."
+            exit 2
+          }
+          [ -n "$STANDBY_KNOWN_HOSTS" ] || {
+            echo "::error::Set STANDBY_KNOWN_HOSTS as an Environment secret on dr-standby-db-test."
+            exit 2
+          }
+
+          echo "Operation: $OPERATION"
+          echo "Target standby region: $TARGET_REGION"
+          echo "This workflow does not change DNS, Route 53, London, primary, or production DB."
+
+      - name: Configure SSH and standby inventory
+        run: |
+          set -euo pipefail
+
+          install -m 700 -d "$HOME/.ssh"
+
+          ssh_key_file="$HOME/.ssh/standby_dr_key"
+          printf '%s\n' "$STANDBY_SSH_PRIVATE_KEY" > "$ssh_key_file"
+          chmod 600 "$ssh_key_file"
+
+          known_hosts_file="$HOME/.ssh/known_hosts"
+          printf '%s\n' "$STANDBY_KNOWN_HOSTS" > "$known_hosts_file"
+          chmod 600 "$known_hosts_file"
+
+          if [ ! -s "$known_hosts_file" ]; then
+            echo "::error::STANDBY_KNOWN_HOSTS produced an empty known_hosts file."
+            exit 2
+          fi
+
+          printf '%s\n' "$STANDBY_ANSIBLE_INVENTORY" > ops/deploy/inventory.ini
+          chmod 600 ops/deploy/inventory.ini
+
+          {
+            echo "ANSIBLE_PRIVATE_KEY_FILE=$ssh_key_file"
+            echo "ANSIBLE_SSH_ARGS=-o UserKnownHostsFile=$known_hosts_file -o StrictHostKeyChecking=yes"
+          } >> "$GITHUB_ENV"
+
+          echo "Standby inventory and SSH materials were configured without printing secret values."
+
+      - name: Validate standby DB playbook syntax
+        run: |
+          ansible-playbook -i ops/deploy/inventory.ini ops/deploy/test-standby-recovered-db.yml --syntax-check
+          ansible-playbook -i ops/deploy/inventory.ini ops/deploy/rollback-standby-db-env.yml --syntax-check
+
+      - name: Run selected standby DB operation
+        run: |
+          set -euo pipefail
+          mkdir -p "artifacts/dr/github-actions-${{ github.run_id }}"
+          {
+            echo "operation=$OPERATION"
+            echo "target_region=$TARGET_REGION"
+            echo "run_id=${{ github.run_id }}"
+            echo "run_attempt=${{ github.run_attempt }}"
+          } > "artifacts/dr/github-actions-${{ github.run_id }}/context.txt"
+
+          if [ "$OPERATION" = "test-standby-recovered-db" ]; then
+            echo "Running approved standby recovered DB test for $TARGET_REGION."
+            echo "Recovered DB host: $RECOVERED_DB_HOST"
+            echo "Recovered DB password is supplied through an Environment secret and will not be printed."
+            scripts/dr/test-standby-recovered-db.sh "$TARGET_REGION"
+          else
+            echo "Running approved standby DB env rollback for $TARGET_REGION."
+            scripts/dr/rollback-standby-db-env.sh "$TARGET_REGION" "$BACKUP_PATH_FOR_ROLLBACK"
+          fi
+
+      - name: Write immutable evidence manifest
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dr
+          find artifacts/dr -type f -print0 | sort -z | xargs -0 shasum -a 256 > artifacts/dr/sha256-manifest.txt
+
+      - name: Upload standby DB test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-standby-db-test-evidence-${{ inputs.operation }}-${{ github.run_id }}
+          path: artifacts/dr
+          if-no-files-found: warn
+          retention-days: 90

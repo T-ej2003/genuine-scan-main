@@ -1,0 +1,648 @@
+name: AWS DR Operations
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Read-only DR operation to run"
+        required: true
+        type: choice
+        options:
+          - public-health
+          - dns-inventory
+          - object-storage-readiness
+          - db-readiness
+          - generate-db-restore-plan
+          - aws-topology-inventory
+          - generate-cross-region-snapshot-copy-plan
+          - target-region-db-readiness
+          - diagnose-standby-db-network
+      target_region:
+        description: "Logical target region/group for logs only"
+        required: false
+        default: standby
+        type: choice
+        options:
+          - standby
+          - mumbai
+          - capetown
+          - standby_regions
+      hostname:
+        description: "Hostname for public health or DNS inventory"
+        required: false
+        default: www.mscqr.com
+        type: string
+      bucket:
+        description: "S3 bucket for read-only object storage readiness"
+        required: false
+        default: mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an
+        type: string
+      test_object_key:
+        description: "Optional object key for read-only head-object check"
+        required: false
+        default: ""
+        type: string
+      aws_region:
+        description: "AWS region for OIDC session and read-only DB APIs"
+        required: false
+        default: eu-west-2
+        type: string
+      db_identifier:
+        description: "Optional DB instance or cluster identifier for read-only DB readiness"
+        required: false
+        default: ""
+        type: string
+      db_snapshot_identifier:
+        description: "Optional snapshot identifier for restore plan generation"
+        required: false
+        default: ""
+        type: string
+      source_db_identifier:
+        description: "Optional source DB identifier for restore plan generation"
+        required: false
+        default: ""
+        type: string
+      target_db_region:
+        description: "Target region for restore plan generation only"
+        required: false
+        default: eu-west-2
+        type: string
+      target_db_identifier:
+        description: "New recovery target DB identifier for restore plan generation only"
+        required: false
+        default: ""
+        type: string
+      recovery_point:
+        description: "Optional recovery point timestamp for plan generation only"
+        required: false
+        default: ""
+        type: string
+      source_region:
+        description: "Source AWS region for DB recovery inventory or snapshot copy planning"
+        required: false
+        default: eu-west-2
+        type: string
+      source_snapshot_identifier:
+        description: "Source DB snapshot identifier for cross-region snapshot copy planning"
+        required: false
+        default: ""
+        type: string
+      target_snapshot_identifier:
+        description: "Target DB snapshot identifier for cross-region snapshot copy planning"
+        required: false
+        default: ""
+        type: string
+      source_kms_key_id:
+        description: "Optional source KMS key ID for planning context"
+        required: false
+        default: ""
+        type: string
+      target_kms_key_id:
+        description: "Optional target-region KMS key ID for encrypted snapshot copy planning"
+        required: false
+        default: ""
+        type: string
+      db_subnet_group_name:
+        description: "DB subnet group name for restore planning or target readiness"
+        required: false
+        default: ""
+        type: string
+      db_vpc_security_group_ids:
+        description: "Comma-separated VPC security group IDs for restore planning or target readiness"
+        required: false
+        default: ""
+        type: string
+      db_host:
+        description: "Region-local DB endpoint host for standby network diagnostics"
+        required: false
+        default: ""
+        type: string
+      db_port:
+        description: "DB endpoint port for standby network diagnostics"
+        required: false
+        default: "5432"
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  public_health:
+    if: ${{ inputs.operation == 'public-health' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPERATION: ${{ inputs.operation }}
+      TARGET_REGION: ${{ inputs.target_region }}
+      HOSTNAME: ${{ inputs.hostname }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Run AWS DR safety scanner
+        run: npm run check:aws-dr-safety
+
+      - name: Check public health script syntax
+        run: /bin/sh -n scripts/dr/public-health.sh
+
+      - name: Prepare DR artifact directory
+        run: |
+          mkdir -p "artifacts/dr/github-actions-${{ github.run_id }}"
+          {
+            echo "operation=${OPERATION}"
+            echo "target_region=${TARGET_REGION}"
+            echo "hostname=${HOSTNAME}"
+            echo "run_id=${{ github.run_id }}"
+            echo "run_attempt=${{ github.run_attempt }}"
+          } > "artifacts/dr/github-actions-${{ github.run_id }}/context.txt"
+
+      - name: Run public health smoke test
+        run: |
+          echo "Selected operation: ${OPERATION}"
+          echo "Logical target region/group: ${TARGET_REGION}"
+          echo "This public health smoke test does not use AWS credentials."
+          scripts/dr/public-health.sh
+
+      - name: Upload DR smoke-test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-dr-operations-${{ inputs.operation }}-${{ github.run_id }}
+          path: artifacts/dr/**
+          if-no-files-found: warn
+
+  dns_inventory:
+    if: ${{ inputs.operation == 'dns-inventory' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPERATION: ${{ inputs.operation }}
+      TARGET_REGION: ${{ inputs.target_region }}
+      HOSTNAME: ${{ inputs.hostname }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Run AWS DR safety scanner
+        run: npm run check:aws-dr-safety
+
+      - name: Check DNS inventory script syntax
+        run: /bin/sh -n scripts/dr/dns-inventory.sh
+
+      - name: Prepare DR artifact directory
+        run: |
+          mkdir -p "artifacts/dr/github-actions-${{ github.run_id }}"
+          {
+            echo "operation=${OPERATION}"
+            echo "target_region=${TARGET_REGION}"
+            echo "hostname=${HOSTNAME}"
+            echo "run_id=${{ github.run_id }}"
+            echo "run_attempt=${{ github.run_attempt }}"
+          } > "artifacts/dr/github-actions-${{ github.run_id }}/context.txt"
+
+      - name: Run DNS inventory smoke test
+        run: |
+          echo "Selected operation: ${OPERATION}"
+          echo "Logical target region/group: ${TARGET_REGION}"
+          echo "Hostname: ${HOSTNAME}"
+          echo "This DNS inventory smoke test is read-only and does not use AWS credentials."
+          scripts/dr/dns-inventory.sh "$HOSTNAME"
+
+      - name: Upload DR smoke-test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-dr-operations-${{ inputs.operation }}-${{ github.run_id }}
+          path: artifacts/dr/**
+          if-no-files-found: warn
+
+  object_storage_readiness:
+    if: ${{ inputs.operation == 'object-storage-readiness' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: dr-object-storage-write-test
+    env:
+      OPERATION: ${{ inputs.operation }}
+      TARGET_REGION: ${{ inputs.target_region }}
+      BUCKET: ${{ inputs.bucket }}
+      TEST_OBJECT_KEY: ${{ inputs.test_object_key }}
+      AWS_DR_OBJECT_STORAGE_ROLE_ARN: ${{ vars.AWS_DR_OBJECT_STORAGE_ROLE_ARN }}
+      AWS_REGION: eu-west-2
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Run AWS DR safety scanner
+        run: npm run check:aws-dr-safety
+
+      - name: Check object storage readiness script syntax
+        run: /bin/sh -n scripts/dr/object-storage-readiness.sh
+
+      - name: Prepare DR artifact directory
+        run: |
+          mkdir -p "artifacts/dr/github-actions-${{ github.run_id }}"
+          {
+            echo "operation=${OPERATION}"
+            echo "target_region=${TARGET_REGION}"
+            echo "bucket=${BUCKET}"
+            if [ -n "$TEST_OBJECT_KEY" ]; then
+              echo "test_object_key=set"
+            else
+              echo "test_object_key=blank"
+            fi
+            echo "run_id=${{ github.run_id }}"
+            echo "run_attempt=${{ github.run_attempt }}"
+          } > "artifacts/dr/github-actions-${{ github.run_id }}/context.txt"
+
+      - name: Validate object storage OIDC role wiring
+        run: |
+          echo "Selected operation: ${OPERATION}"
+          echo "Logical target region/group: ${TARGET_REGION}"
+          echo "Selected bucket: ${BUCKET}"
+          if [ -n "$TEST_OBJECT_KEY" ]; then
+            echo "TEST_OBJECT_KEY is set."
+          else
+            echo "TEST_OBJECT_KEY is blank."
+          fi
+          echo "This object storage readiness smoke test is read-only."
+          if [ -z "$AWS_DR_OBJECT_STORAGE_ROLE_ARN" ]; then
+            echo "AWS_DR_OBJECT_STORAGE_ROLE_ARN is missing."
+            echo "Set it in GitHub repo Settings -> Environments -> dr-object-storage-write-test -> Environment variables."
+            exit 2
+          fi
+          echo "Object storage OIDC role variable is present."
+
+      - name: Configure AWS credentials for object storage readiness
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: eu-west-2
+          role-to-assume: ${{ env.AWS_DR_OBJECT_STORAGE_ROLE_ARN }}
+
+      - name: Run read-only S3 readiness check
+        run: |
+          echo "Running read-only S3 readiness check."
+          BUCKET="$BUCKET" TEST_OBJECT_KEY="$TEST_OBJECT_KEY" scripts/dr/object-storage-readiness.sh
+
+      - name: Upload DR smoke-test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-dr-operations-${{ inputs.operation }}-${{ github.run_id }}
+          path: artifacts/dr/**
+          if-no-files-found: warn
+
+  db_readiness:
+    if: ${{ inputs.operation == 'db-readiness' || inputs.operation == 'generate-db-restore-plan' || inputs.operation == 'aws-topology-inventory' || inputs.operation == 'generate-cross-region-snapshot-copy-plan' || inputs.operation == 'target-region-db-readiness' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: dr-db-restore
+    env:
+      OPERATION: ${{ inputs.operation }}
+      TARGET_REGION_GROUP: ${{ inputs.target_region }}
+      AWS_REGION: ${{ inputs.aws_region }}
+      SOURCE_REGION: ${{ inputs.source_region }}
+      DB_IDENTIFIER: ${{ inputs.db_identifier }}
+      SOURCE_DB_IDENTIFIER: ${{ inputs.source_db_identifier }}
+      SOURCE_SNAPSHOT_IDENTIFIER: ${{ inputs.source_snapshot_identifier }}
+      SNAPSHOT_IDENTIFIER: ${{ inputs.db_snapshot_identifier }}
+      TARGET_REGION: ${{ inputs.target_db_region }}
+      TARGET_SNAPSHOT_IDENTIFIER: ${{ inputs.target_snapshot_identifier }}
+      TARGET_DB_IDENTIFIER: ${{ inputs.target_db_identifier }}
+      RECOVERY_POINT: ${{ inputs.recovery_point }}
+      SOURCE_KMS_KEY_ID: ${{ inputs.source_kms_key_id }}
+      TARGET_KMS_KEY_ID: ${{ inputs.target_kms_key_id }}
+      DB_SUBNET_GROUP_NAME: ${{ inputs.db_subnet_group_name }}
+      DB_VPC_SECURITY_GROUP_IDS: ${{ inputs.db_vpc_security_group_ids }}
+      AWS_DR_DB_RESTORE_ROLE_ARN: ${{ vars.AWS_DR_DB_RESTORE_ROLE_ARN }}
+      DR_DB_RESTORE_ROLE_TO_ASSUME: ${{ vars.DR_DB_RESTORE_ROLE_TO_ASSUME }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Run AWS DR safety scanner
+        run: npm run check:aws-dr-safety
+
+      - name: Check DB DR script syntax
+        run: |
+          /bin/sh -n scripts/dr/db-readiness.sh
+          /bin/sh -n scripts/dr/generate-db-restore-plan.sh
+          /bin/sh -n scripts/dr/aws-dr-topology-inventory.sh
+          /bin/sh -n scripts/dr/generate-cross-region-snapshot-copy-plan.sh
+          /bin/sh -n scripts/dr/target-region-db-readiness.sh
+
+      - name: Prepare DR artifact directory
+        run: |
+          mkdir -p "artifacts/dr/github-actions-${{ github.run_id }}"
+          {
+            echo "operation=${OPERATION}"
+            echo "target_region_group=${TARGET_REGION_GROUP}"
+            echo "aws_region=${AWS_REGION}"
+            if [ -n "$DB_IDENTIFIER" ]; then
+              echo "db_identifier=set"
+            else
+              echo "db_identifier=blank"
+            fi
+            if [ -n "$SNAPSHOT_IDENTIFIER" ]; then
+              echo "db_snapshot_identifier=set"
+            else
+              echo "db_snapshot_identifier=blank"
+            fi
+            if [ -n "$SOURCE_DB_IDENTIFIER" ]; then
+              echo "source_db_identifier=set"
+            else
+              echo "source_db_identifier=blank"
+            fi
+            echo "target_db_region=${TARGET_REGION}"
+            if [ -n "$TARGET_DB_IDENTIFIER" ]; then
+              echo "target_db_identifier=set"
+            else
+              echo "target_db_identifier=blank"
+            fi
+            if [ -n "$RECOVERY_POINT" ]; then
+              echo "recovery_point=set"
+            else
+              echo "recovery_point=blank"
+            fi
+            if [ -n "$DB_SUBNET_GROUP_NAME" ]; then
+              echo "db_subnet_group_name=set"
+            else
+              echo "db_subnet_group_name=blank"
+            fi
+            if [ -n "$DB_VPC_SECURITY_GROUP_IDS" ]; then
+              echo "db_vpc_security_group_ids=set"
+            else
+              echo "db_vpc_security_group_ids=blank"
+            fi
+            echo "run_id=${{ github.run_id }}"
+            echo "run_attempt=${{ github.run_attempt }}"
+          } > "artifacts/dr/github-actions-${{ github.run_id }}/context.txt"
+
+      - name: Resolve DB OIDC role
+        id: resolve_db_role
+        run: |
+          role_arn="$AWS_DR_DB_RESTORE_ROLE_ARN"
+          if [ -z "$role_arn" ]; then
+            role_arn="$DR_DB_RESTORE_ROLE_TO_ASSUME"
+          fi
+          if [ -z "$role_arn" ]; then
+            echo "Set AWS_DR_DB_RESTORE_ROLE_ARN or DR_DB_RESTORE_ROLE_TO_ASSUME on the dr-db-restore environment."
+            exit 2
+          fi
+          echo "::add-mask::$role_arn"
+          echo "role_arn=$role_arn" >> "$GITHUB_OUTPUT"
+          echo "DB OIDC role variable is present."
+
+      - name: Configure AWS credentials for DB readiness
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ steps.resolve_db_role.outputs.role_arn }}
+
+      - name: Run selected DB DR operation
+        run: |
+          echo "Selected operation: ${OPERATION}"
+          echo "Logical target region/group: ${TARGET_REGION_GROUP}"
+          echo "AWS region: ${AWS_REGION}"
+          case "$OPERATION" in
+            db-readiness)
+              echo "Running read-only RDS readiness inspection."
+              AWS_REGION="$AWS_REGION" DB_IDENTIFIER="$DB_IDENTIFIER" scripts/dr/db-readiness.sh
+              ;;
+            generate-db-restore-plan)
+              echo "Generating DB restore plan artifact only. No AWS restore command will be executed."
+              SOURCE_DB_IDENTIFIER="$SOURCE_DB_IDENTIFIER" \
+              SNAPSHOT_IDENTIFIER="$SNAPSHOT_IDENTIFIER" \
+              TARGET_REGION="$TARGET_REGION" \
+              TARGET_DB_IDENTIFIER="$TARGET_DB_IDENTIFIER" \
+              RECOVERY_POINT="$RECOVERY_POINT" \
+              DB_SUBNET_GROUP_NAME="$DB_SUBNET_GROUP_NAME" \
+              DB_VPC_SECURITY_GROUP_IDS="$DB_VPC_SECURITY_GROUP_IDS" \
+              scripts/dr/generate-db-restore-plan.sh
+              ;;
+            aws-topology-inventory)
+              echo "Collecting read-only AWS DR topology inventory."
+              topology_target_region="$TARGET_REGION"
+              case "$TARGET_REGION_GROUP" in
+                mumbai)
+                  if [ -z "$topology_target_region" ] || [ "$topology_target_region" = "eu-west-2" ]; then
+                    topology_target_region="ap-south-1"
+                  fi
+                  ;;
+                capetown)
+                  if [ -z "$topology_target_region" ] || [ "$topology_target_region" = "eu-west-2" ]; then
+                    topology_target_region="af-south-1"
+                  fi
+                  ;;
+              esac
+              SOURCE_REGION="$SOURCE_REGION" \
+              TARGET_REGION="$topology_target_region" \
+              TARGET_STANDBY="$TARGET_REGION_GROUP" \
+              SOURCE_DB_IDENTIFIER="${SOURCE_DB_IDENTIFIER:-mscqr-prod-db}" \
+              scripts/dr/aws-dr-topology-inventory.sh
+              ;;
+            generate-cross-region-snapshot-copy-plan)
+              echo "Generating cross-region snapshot copy plan artifact only."
+              copy_plan_target_region="$TARGET_REGION"
+              case "$TARGET_REGION_GROUP" in
+                mumbai)
+                  if [ -z "$copy_plan_target_region" ] || [ "$copy_plan_target_region" = "eu-west-2" ]; then
+                    copy_plan_target_region="ap-south-1"
+                  fi
+                  ;;
+                capetown)
+                  if [ -z "$copy_plan_target_region" ] || [ "$copy_plan_target_region" = "eu-west-2" ]; then
+                    copy_plan_target_region="af-south-1"
+                  fi
+                  ;;
+              esac
+              SOURCE_REGION="$SOURCE_REGION" \
+              TARGET_REGION="$copy_plan_target_region" \
+              SOURCE_SNAPSHOT_IDENTIFIER="$SOURCE_SNAPSHOT_IDENTIFIER" \
+              TARGET_SNAPSHOT_IDENTIFIER="$TARGET_SNAPSHOT_IDENTIFIER" \
+              SOURCE_KMS_KEY_ID="$SOURCE_KMS_KEY_ID" \
+              TARGET_KMS_KEY_ID="$TARGET_KMS_KEY_ID" \
+              TARGET_STANDBY="$TARGET_REGION_GROUP" \
+              scripts/dr/generate-cross-region-snapshot-copy-plan.sh
+              ;;
+            target-region-db-readiness)
+              echo "Running read-only target-region DB readiness inspection."
+              readiness_target_region="$TARGET_REGION"
+              case "$TARGET_REGION_GROUP" in
+                mumbai)
+                  if [ -z "$readiness_target_region" ] || [ "$readiness_target_region" = "eu-west-2" ]; then
+                    readiness_target_region="ap-south-1"
+                  fi
+                  ;;
+                capetown)
+                  if [ -z "$readiness_target_region" ] || [ "$readiness_target_region" = "eu-west-2" ]; then
+                    readiness_target_region="af-south-1"
+                  fi
+                  ;;
+              esac
+              TARGET_STANDBY="$TARGET_REGION_GROUP" \
+              TARGET_REGION="$readiness_target_region" \
+              TARGET_DB_IDENTIFIER="$TARGET_DB_IDENTIFIER" \
+              DB_SUBNET_GROUP_NAME="$DB_SUBNET_GROUP_NAME" \
+              DB_VPC_SECURITY_GROUP_IDS="$DB_VPC_SECURITY_GROUP_IDS" \
+              scripts/dr/target-region-db-readiness.sh
+              ;;
+            *)
+              echo "::error::Unsupported DB DR operation: $OPERATION"
+              exit 2
+              ;;
+          esac
+
+      - name: Upload DR smoke-test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-dr-operations-${{ inputs.operation }}-${{ github.run_id }}
+          path: artifacts/dr/**
+          if-no-files-found: warn
+
+  standby_network_diagnostic:
+    if: ${{ inputs.operation == 'diagnose-standby-db-network' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: dr-standby-db-test
+    env:
+      OPERATION: ${{ inputs.operation }}
+      TARGET_REGION_GROUP: ${{ inputs.target_region }}
+      DB_HOST: ${{ inputs.db_host }}
+      DB_PORT: ${{ inputs.db_port }}
+      STANDBY_ANSIBLE_INVENTORY: ${{ secrets.STANDBY_ANSIBLE_INVENTORY }}
+      STANDBY_KNOWN_HOSTS: ${{ secrets.STANDBY_KNOWN_HOSTS }}
+      STANDBY_SSH_PRIVATE_KEY: ${{ secrets.STANDBY_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Install Ansible
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user ansible-core
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run AWS DR safety scanner
+        run: npm run check:aws-dr-safety
+
+      - name: Check standby DB network diagnostic script syntax
+        run: /bin/sh -n scripts/dr/diagnose-standby-db-network.sh
+
+      - name: Validate diagnostic inputs
+        run: |
+          set -euo pipefail
+          case "$TARGET_REGION_GROUP" in
+            mumbai|capetown) ;;
+            *) echo "::error::target_region must be mumbai or capetown for network diagnostics."; exit 2 ;;
+          esac
+          [ -n "$DB_HOST" ] || { echo "::error::db_host is required."; exit 2; }
+          [ -n "$DB_PORT" ] || { echo "::error::db_port is required."; exit 2; }
+          [ -n "$STANDBY_ANSIBLE_INVENTORY" ] || { echo "::error::Set STANDBY_ANSIBLE_INVENTORY on dr-standby-db-test."; exit 2; }
+          [ -n "$STANDBY_SSH_PRIVATE_KEY" ] || { echo "::error::Set STANDBY_SSH_PRIVATE_KEY on dr-standby-db-test."; exit 2; }
+          [ -n "$STANDBY_KNOWN_HOSTS" ] || { echo "::error::Set STANDBY_KNOWN_HOSTS on dr-standby-db-test."; exit 2; }
+          echo "Running read-only DB network diagnostic from $TARGET_REGION_GROUP to $DB_HOST:$DB_PORT."
+
+      - name: Configure SSH and standby inventory
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          ssh_key_file="$HOME/.ssh/standby_dr_key"
+          printf '%s\n' "$STANDBY_SSH_PRIVATE_KEY" > "$ssh_key_file"
+          chmod 600 "$ssh_key_file"
+          known_hosts_file="$HOME/.ssh/known_hosts"
+          printf '%s\n' "$STANDBY_KNOWN_HOSTS" > "$known_hosts_file"
+          chmod 600 "$known_hosts_file"
+          printf '%s\n' "$STANDBY_ANSIBLE_INVENTORY" > ops/deploy/inventory.ini
+          chmod 600 ops/deploy/inventory.ini
+          {
+            echo "ANSIBLE_PRIVATE_KEY_FILE=$ssh_key_file"
+            echo "ANSIBLE_SSH_ARGS=-o UserKnownHostsFile=$known_hosts_file -o StrictHostKeyChecking=yes"
+          } >> "$GITHUB_ENV"
+
+      - name: Run read-only standby DB network diagnostic
+        run: DB_HOST="$DB_HOST" DB_PORT="$DB_PORT" scripts/dr/diagnose-standby-db-network.sh "$TARGET_REGION_GROUP"
+
+      - name: Upload DR smoke-test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-dr-operations-${{ inputs.operation }}-${{ github.run_id }}
+          path: artifacts/dr/**
+          if-no-files-found: warn

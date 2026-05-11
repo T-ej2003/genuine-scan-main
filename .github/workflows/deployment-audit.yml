@@ -4,6 +4,14 @@ on:
   push:
     branches:
       - main
+    # Documentation-only changes are ignored here so they do not wake the
+    # production deploy chain through the Release Gate workflow_run trigger.
+    paths-ignore:
+      - 'documents/**'
+      - 'docs/**'
+      - '**/*.md'
+      - '**/*.mdx'
+      - '**/*.docx'
   pull_request:
 
 concurrency:

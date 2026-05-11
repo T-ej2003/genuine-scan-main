@@ -1,0 +1,81 @@
+name: AWS DR Object Storage Apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      aws_region:
+        description: "AWS region for OIDC session setup"
+        required: true
+        type: string
+        default: eu-west-2
+      bucket:
+        description: "Bucket for approved object storage write test"
+        required: true
+        type: string
+      delete_test_object:
+        description: "Delete only the generated dr-tests object after verifying it"
+        required: false
+        type: boolean
+        default: false
+      confirm_object_write_test:
+        description: "Must equal I_APPROVE_OBJECT_STORAGE_WRITE_TEST"
+        required: true
+        type: string
+      confirm_delete_test_object:
+        description: "Must equal I_APPROVE_DELETE_DR_TEST_OBJECT when delete_test_object is true"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  object-storage-write-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: dr-object-storage-write-test
+    env:
+      AWS_REGION: ${{ inputs.aws_region }}
+      BUCKET: ${{ inputs.bucket }}
+      CONFIRM_OBJECT_WRITE_TEST: ${{ inputs.confirm_object_write_test }}
+      CONFIRM_DELETE_TEST_OBJECT: ${{ inputs.delete_test_object && inputs.confirm_delete_test_object || '' }}
+      AWS_ROLE_TO_ASSUME: ${{ vars.DR_OBJECT_STORAGE_WRITE_TEST_ROLE_TO_ASSUME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate object storage write-test approval inputs
+        run: |
+          set -euo pipefail
+          [ "$CONFIRM_OBJECT_WRITE_TEST" = "I_APPROVE_OBJECT_STORAGE_WRITE_TEST" ] || {
+            echo "::error::confirm_object_write_test must equal I_APPROVE_OBJECT_STORAGE_WRITE_TEST."
+            exit 2
+          }
+          [ -n "$BUCKET" ] || { echo "::error::bucket is required."; exit 2; }
+          [ -n "$AWS_ROLE_TO_ASSUME" ] || { echo "::error::Set DR_OBJECT_STORAGE_WRITE_TEST_ROLE_TO_ASSUME on the dr-object-storage-write-test environment."; exit 2; }
+          echo "::add-mask::$AWS_ROLE_TO_ASSUME"
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ vars.DR_OBJECT_STORAGE_WRITE_TEST_ROLE_TO_ASSUME }}
+
+      - name: Run approved object storage write test
+        run: scripts/dr/object-storage-write-test-approved.sh
+
+      - name: Write immutable evidence manifest
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dr
+          find artifacts/dr -type f -print0 | sort -z | xargs -0 shasum -a 256 > artifacts/dr/sha256-manifest.txt
+
+      - name: Upload immutable DR evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-object-storage-write-test-evidence-${{ github.run_id }}
+          path: artifacts/dr
+          if-no-files-found: error
+          retention-days: 90
