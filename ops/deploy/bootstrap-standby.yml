@@ -1,6 +1,6 @@
 ---
 - name: Bootstrap MSCQR standby servers
-  hosts: standby_regions
+  hosts: standby:standby_regions
   become: yes
   gather_facts: yes
 

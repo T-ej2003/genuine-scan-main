@@ -1,6 +1,6 @@
 ---
 - name: Health check MSCQR standby regions
-  hosts: standby_regions
+  hosts: standby:standby_regions
   gather_facts: false
 
   vars:

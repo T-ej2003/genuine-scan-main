@@ -1,30 +1,31 @@
 # AWS Multi-Region Setup Phase 2
 
-Last updated: 2026-05-05
+Last updated: 2026-05-11
 
-## Architecture summary
+## Architecture Summary
 
-MSCQR / Genuine Scan keeps the current primary production region as the active serving region. Mumbai and Cape Town are manually deployable standby regions. Operators can bootstrap, deploy, and health-check each standby region with Ansible, but traffic movement remains a manual business and incident-command decision.
+MSCQR / Genuine Scan keeps London as the active production region. Mumbai and Cape Town are manually deployable standby app-server regions. Phase 2 is about making those standby servers repeatable to deploy and verify; it is not a traffic automation, DNS, database-replication, or object-storage migration phase.
 
-Phase 2 uses the existing repository deployment model:
+The tested deployment model remains the existing project convention:
 
 - Git branch: `main`
 - Remote app path: `/home/ubuntu/genuine-scan-main`
+- Remote user: `ubuntu`
+- Deployment playbook: `ops/deploy/deploy.yml`
 - Runtime: Docker / Docker Compose
 - Edge container: the existing frontend Nginx container from `docker-compose.yml`
-- Host OS: Ubuntu
 - Local operator inventory: `ops/deploy/inventory.ini`
 
-## Phase 2 includes
+## Phase 2 Includes
 
-- Safe sample inventory groups for `primary`, `mumbai`, `capetown`, and `standby_regions`.
-- Manual bootstrap for Mumbai and Cape Town hosts.
-- Manual app deployment to Mumbai and Cape Town from `main`.
-- Region env-file handoff for standby secrets and per-region URLs.
+- Safe sample inventory groups for `primary`, `mumbai`, `capetown`, `standby`, and `standby_regions`.
+- Manual bootstrap playbook for new Mumbai and Cape Town hosts.
+- Manual standby deployment through the same known-good `ops/deploy/deploy.yml` flow.
 - Manual HTTP health checks by server IP.
-- Documentation and local helper scripts for repeatable operator commands.
+- Local helper scripts for deploy and health-check commands.
+- Region env examples that use placeholders only and do not contain secrets.
 
-## Phase 2 excludes
+## Phase 2 Excludes
 
 - Automatic failover.
 - Route 53 failover routing.
@@ -32,7 +33,31 @@ Phase 2 uses the existing repository deployment model:
 - Active-active multi-write database architecture.
 - MinIO cleanup, MinIO decommission, or destructive object-storage migration.
 
-## Inventory setup
+## Verified State
+
+The known-good deploy command successfully deployed both standby servers:
+
+- Mumbai
+- Cape Town
+
+Both standby servers previously reported commit `bd73ba9`.
+
+Health checks passed on both:
+
+- `/healthz`
+- `/api/health/ready`
+
+Docker Compose services were healthy on both:
+
+- `genuine-scan-backend`
+- `genuine-scan-frontend`
+- `genuine-scan-worker`
+- `genuine-scan-redis`
+- `genuine-scan-minio`
+
+Redis and MinIO were intentionally untouched.
+
+## Inventory Setup
 
 Copy the committed sample and fill the local-only inventory:
 
@@ -47,37 +72,47 @@ Replace:
 - `YOUR_CAPETOWN_SERVER_IP`
 - SSH private key paths
 
-The important inventory groups are:
-
-- `primary`
-- `mumbai`
-- `capetown`
-- `standby_regions`, with `mumbai` and `capetown` as children
-
 The real `ops/deploy/inventory.ini` stays ignored by Git.
 
-## Region env setup
+Required group shape:
 
-Create ignored local env files on the operator workstation or pre-seed them on each standby server. The recommended operator-workstation path is:
+```ini
+[primary]
+primary ansible_host=YOUR_PRIMARY_SERVER_IP ansible_user=ubuntu
 
-```bash
-cp .env.production.mumbai.example .env.production.mumbai
-cp .env.production.capetown.example .env.production.capetown
+[mumbai]
+mumbai ansible_host=YOUR_MUMBAI_SERVER_IP ansible_user=ubuntu region_name=mumbai
+
+[capetown]
+capetown ansible_host=YOUR_CAPETOWN_SERVER_IP ansible_user=ubuntu region_name=capetown
+
+[standby:children]
+mumbai
+capetown
+
+[standby_regions:children]
+mumbai
+capetown
 ```
 
-Fill only the files you are deploying. Do not commit real env files.
+`standby` is the preferred operator limit because it matches the known-good deployment runbook. `standby_regions` is kept as a compatibility alias.
 
-The standby deploy playbook uses:
+## Region Env Setup
 
-- `.env.production.mumbai` for the Mumbai group.
-- `.env.production.capetown` for the Cape Town group.
-- `backend/.env.production.<region>` if you intentionally keep a backend-only env file.
+Keep real env files local-only or pre-seeded on the server. Do not commit real env files.
 
-When a local ignored env file exists on the operator workstation, the playbook uploads it to the target server with mode `0600`. If no local env file exists, the playbook uses an already-present remote env file at `/home/ubuntu/genuine-scan-main/.env.production.<region>`.
+Safe examples:
 
-If `backend/.env.production.<region>` is not present, the region root env is copied to `backend/.env` as well. This matches the current Docker Compose requirement that backend runtime values exist at `backend/.env`.
+```bash
+.env.production.mumbai.example
+.env.production.capetown.example
+```
 
-## Bootstrap commands
+The current proven standby deployment command uses the env files already present on the remote app servers. Do not overwrite real `.env` or `backend/.env` files during Phase 2 rough-edge fixes.
+
+## Bootstrap Commands
+
+Bootstrap is only for new or freshly rebuilt standby servers. Skip bootstrap on already-provisioned servers when Docker, Docker Compose, Nginx, UFW, and health checks are already good.
 
 Bootstrap Mumbai:
 
@@ -94,67 +129,59 @@ ansible-playbook -i ops/deploy/inventory.ini ops/deploy/bootstrap-standby.yml --
 Bootstrap both standby regions:
 
 ```bash
-ansible-playbook -i ops/deploy/inventory.ini ops/deploy/bootstrap-standby.yml --limit standby_regions
+ansible-playbook -i ops/deploy/inventory.ini ops/deploy/bootstrap-standby.yml --limit standby
 ```
 
-Bootstrap installs Git, curl, UFW, Nginx, Docker, the Docker Compose plugin, and `python3-pip`. It starts Docker, adds the `ubuntu` user to the Docker group, allows ports `22/tcp` and `80/tcp`, and leaves host Nginx stopped so the existing Docker frontend can bind port 80.
+Known bootstrap warning: on existing servers, package managers may report `containerd.io conflicts with containerd`. Do not rerun bootstrap unnecessarily on already-working servers; use deploy and health-check commands instead.
 
-## Deploy commands
+## Deploy Commands
 
-Deploy Mumbai:
+Known-good tested command:
 
 ```bash
-ansible-playbook -i ops/deploy/inventory.ini ops/deploy/deploy-standby.yml --limit mumbai
+ansible-playbook -i ops/deploy/inventory.ini ops/deploy/deploy.yml --limit standby
 ```
 
-Deploy Cape Town:
+Preferred helper command:
 
 ```bash
-ansible-playbook -i ops/deploy/inventory.ini ops/deploy/deploy-standby.yml --limit capetown
+scripts/deploy-standby.sh standby
 ```
 
-Deploy both standby regions:
+Compatibility helper command:
 
 ```bash
-ansible-playbook -i ops/deploy/inventory.ini ops/deploy/deploy-standby.yml --limit standby_regions
+scripts/deploy-standby.sh standby_regions
 ```
 
-Or use the helper:
+Deploy one standby region:
 
 ```bash
 scripts/deploy-standby.sh mumbai
 scripts/deploy-standby.sh capetown
-scripts/deploy-standby.sh standby_regions
 ```
 
-The deploy playbook clones or updates the repo, checks out `main`, refuses to deploy over uncommitted remote changes, applies a region env file when present, runs `docker compose pull`, and then runs `docker compose up -d --build`. It restarts host Nginx only when a project-specific host Nginx config exists.
+The helper now calls `ops/deploy/deploy.yml` directly. That keeps standby deployment aligned with the proven production path: existing app directory, existing git ownership behavior, `git fetch --prune`, `git reset --hard`, npm checks, production guardrails, and `docker compose up -d --build`.
 
-## Health check commands
+## Health Check Commands
 
-Check Mumbai:
+Preferred helper command:
 
 ```bash
-ansible-playbook -i ops/deploy/inventory.ini ops/deploy/health-check-standby.yml --limit mumbai
+scripts/health-check-regions.sh standby
 ```
 
-Check Cape Town:
+Compatibility helper command:
 
 ```bash
-ansible-playbook -i ops/deploy/inventory.ini ops/deploy/health-check-standby.yml --limit capetown
+scripts/health-check-regions.sh standby_regions
 ```
 
-Check both standby regions:
-
-```bash
-ansible-playbook -i ops/deploy/inventory.ini ops/deploy/health-check-standby.yml --limit standby_regions
-```
-
-Or use the helper:
+Check one standby region:
 
 ```bash
 scripts/health-check-regions.sh mumbai
 scripts/health-check-regions.sh capetown
-scripts/health-check-regions.sh standby_regions
 ```
 
 Checks use HTTP by server IP:
@@ -162,23 +189,24 @@ Checks use HTTP by server IP:
 - `/healthz`
 - `/api/health/ready`
 
-## Rollback and manual recovery notes
+They also print the target commit and Docker Compose service state.
+
+## Rollback And Manual Recovery Notes
 
 - Roll back by redeploying a known-good commit or branch through the same playbook with an explicit `-e branch=<branch-or-tag>` override.
 - Keep database recovery manual. Do not point a standby service at the primary write database unless incident command has approved the recovery path.
-- Keep DNS movement manual and out of this Phase 2 automation.
+- Keep DNS movement manual and out of Phase 2 automation.
 - Do not run certbot or configure public HTTPS for Mumbai or Cape Town in this phase.
-- Do not delete MinIO volumes, buckets, data, or containers as part of standby deployment.
+- Do not delete, prune, decommission, or clean up MinIO volumes, buckets, data, or containers.
 - If Docker Compose fails, inspect `docker compose ps` and `docker compose logs backend worker frontend --tail=120` on the target host.
 
-## Completion checklist
+## Completion Checklist
 
 - [ ] `ops/deploy/inventory.ini` has real local-only values.
-- [ ] `ansible-playbook ... bootstrap-standby.yml --limit mumbai` succeeds.
-- [ ] `ansible-playbook ... bootstrap-standby.yml --limit capetown` succeeds.
-- [ ] Mumbai has a real `.env.production.mumbai`.
-- [ ] Cape Town has a real `.env.production.capetown`.
-- [ ] `ansible-playbook ... deploy-standby.yml --limit mumbai` succeeds.
-- [ ] `ansible-playbook ... deploy-standby.yml --limit capetown` succeeds.
-- [ ] `ansible-playbook ... health-check-standby.yml --limit standby_regions` succeeds.
-- [ ] No automatic failover, Route 53 failover, standby certbot, active-active DB writes, or MinIO cleanup was introduced.
+- [ ] Bootstrap was run only for new or rebuilt standby servers.
+- [ ] Mumbai deploy succeeds through `ops/deploy/deploy.yml --limit mumbai` or `scripts/deploy-standby.sh mumbai`.
+- [ ] Cape Town deploy succeeds through `ops/deploy/deploy.yml --limit capetown` or `scripts/deploy-standby.sh capetown`.
+- [ ] `scripts/deploy-standby.sh standby` succeeds for both standby regions.
+- [ ] `scripts/health-check-regions.sh standby` succeeds for both standby regions.
+- [ ] Redis and MinIO remain untouched unless a separately approved task says otherwise.
+- [ ] No automatic failover, Route 53 failover, standby certbot, active-active DB writes, destructive Docker cleanup, or MinIO cleanup was introduced.

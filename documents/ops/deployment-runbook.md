@@ -95,7 +95,25 @@ Deploy standby only after London is healthy:
 ansible-playbook -i ops/deploy/inventory.ini ops/deploy/deploy.yml --limit standby
 ```
 
-For AWS Multi-Region Setup Phase 2 standby-only operations, use the dedicated bootstrap, deploy, and health-check playbooks documented in:
+The Phase 2 helper is a safe wrapper around the same known-good deploy playbook:
+
+```bash
+scripts/deploy-standby.sh standby
+scripts/health-check-regions.sh standby
+```
+
+`standby_regions` is also accepted when the inventory defines that alias:
+
+```bash
+scripts/deploy-standby.sh standby_regions
+scripts/health-check-regions.sh standby_regions
+```
+
+Bootstrap is only for new or rebuilt standby servers. Do not rerun bootstrap unnecessarily on already-provisioned Mumbai or Cape Town servers; existing hosts can hit the package conflict `containerd.io conflicts with containerd`. If Docker Compose services are healthy and `/healthz` plus `/api/health/ready` pass, use deploy and health-check commands instead.
+
+Verified Phase 2 state: Mumbai and Cape Town previously deployed to commit `bd73ba9`, health checks passed, and Redis plus MinIO were intentionally untouched.
+
+For AWS Multi-Region Setup Phase 2 standby-only operations, use the commands documented in:
 
 ```text
 documents/ops/aws-multi-region-phase-2.md
