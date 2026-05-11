@@ -137,6 +137,41 @@ Approved DB restore requires an approved DB subnet group and, when appropriate, 
 
 These are examples from the current drill. Re-validate them before production incident use.
 
+## Standby Recovered DB Connection Test
+
+After a recovery DB is available, validate one standby app against it before any traffic movement is considered. Use only `mumbai` or `capetown`; do not target London, primary, `standby`, `standby_regions`, or all hosts.
+
+GitHub workflow:
+
+```text
+GitHub repo -> Actions -> AWS DR Standby DB Test -> Run workflow
+```
+
+For the current Mumbai drill:
+
+```text
+operation: test-standby-recovered-db
+target_region: mumbai
+recovered_db_host: mscqr-dr-restore-test-20260511.c3ewey6o6mq5.eu-west-2.rds.amazonaws.com
+recovered_db_port: 5432
+recovered_db_name: postgres
+recovered_db_user: postgres
+confirmation: I_APPROVE_STANDBY_RECOVERED_DB_TEST
+```
+
+The workflow uses the protected `dr-standby-db-test` environment, reads `RECOVERED_DB_PASSWORD` from an Environment secret, backs up `/home/ubuntu/genuine-scan-main/backend/.env`, updates only the selected standby `DATABASE_URL`, restarts only that standby app stack, and runs `/healthz` plus `/api/health/ready`.
+
+Rollback is required after a drill unless incident command explicitly keeps the standby pointed at the recovered DB:
+
+```text
+operation: rollback-standby-db-env
+target_region: mumbai
+backup_path_for_rollback: /home/ubuntu/genuine-scan-main/backend/.env.backup.dr-YYYYMMDDTHHMMSSZ
+confirmation: I_APPROVE_STANDBY_DB_ENV_ROLLBACK
+```
+
+Record the env backup path, health check result, workflow artifact name, and timestamps in the RTO/RPO evidence. This test does not change DNS, Route 53, production DB, object storage, MinIO, or London.
+
 ## RTO/RPO Evidence Links
 
 - [Manual failover RTO/RPO template](manual-failover-drill/rto-rpo-template.md)

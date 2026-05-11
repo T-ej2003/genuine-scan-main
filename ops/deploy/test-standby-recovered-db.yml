@@ -1,0 +1,135 @@
+---
+- name: Test one standby region against an approved recovered DB
+  hosts: mumbai:capetown
+  become: yes
+  gather_facts: false
+
+  vars:
+    app_dir: /home/ubuntu/genuine-scan-main
+    env_file: "{{ app_dir }}/backend/.env"
+    health_base_url: "http://{{ ansible_host }}"
+    allowed_standby_targets:
+      - mumbai
+      - capetown
+    health_paths:
+      - /healthz
+      - /api/health/ready
+
+  pre_tasks:
+    - name: Require explicit single standby limit
+      assert:
+        that:
+          - ansible_limit is defined
+          - ansible_limit in allowed_standby_targets
+          - inventory_hostname in allowed_standby_targets
+        fail_msg: "Run only with --limit mumbai or --limit capetown. This playbook must not target primary, london, all, standby, or standby_regions."
+
+    - name: Require recovered DB connection inputs
+      assert:
+        that:
+          - recovered_db_host is defined
+          - recovered_db_host | length > 0
+          - recovered_db_port is defined
+          - recovered_db_port | string | length > 0
+          - recovered_db_name is defined
+          - recovered_db_name | length > 0
+          - recovered_db_user is defined
+          - recovered_db_user | length > 0
+        fail_msg: "recovered_db_host, recovered_db_port, recovered_db_name, and recovered_db_user are required."
+
+    - name: Resolve recovered DB password from direct var or controller environment
+      set_fact:
+        recovered_db_password_resolved: "{{ recovered_db_password | default(lookup('env', recovered_db_password_env_name), true) }}"
+      vars:
+        recovered_db_password_env_name: "{{ recovered_db_password_env_var_name | default('RECOVERED_DB_PASSWORD', true) }}"
+      no_log: true
+
+    - name: Require recovered DB password without printing it
+      assert:
+        that:
+          - recovered_db_password_resolved | length > 0
+        fail_msg: "Set recovered_db_password or export the environment variable named by recovered_db_password_env_var_name."
+      no_log: true
+
+    - name: Confirm remote app directory exists
+      stat:
+        path: "{{ app_dir }}"
+      register: app_dir_stat
+
+    - name: Stop if app directory is missing
+      fail:
+        msg: "App directory {{ app_dir }} does not exist on {{ inventory_hostname }}."
+      when: not app_dir_stat.stat.exists
+
+    - name: Confirm standby backend env file exists
+      stat:
+        path: "{{ env_file }}"
+      register: env_file_stat
+
+    - name: Stop if standby backend env file is missing
+      fail:
+        msg: "Backend env file {{ env_file }} does not exist on {{ inventory_hostname }}."
+      when: not env_file_stat.stat.exists
+
+  tasks:
+    - name: Create UTC timestamp for recovered DB test backup
+      set_fact:
+        dr_env_backup_timestamp: "{{ lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ') }}"
+
+    - name: Set recovered DB env backup path
+      set_fact:
+        dr_env_backup_path: "{{ env_file }}.backup.dr-{{ dr_env_backup_timestamp }}"
+
+    - name: Back up current standby backend env file
+      command: cp -p {{ env_file }} {{ dr_env_backup_path }}
+      changed_when: true
+
+    - name: Compose recovered DB DATABASE_URL without logging password
+      set_fact:
+        recovered_database_url: "postgresql://{{ recovered_db_user | urlencode }}:{{ recovered_db_password_resolved | urlencode }}@{{ recovered_db_host }}:{{ recovered_db_port }}/{{ recovered_db_name }}?sslmode=require"
+      no_log: true
+
+    - name: Point selected standby backend env to recovered DB
+      lineinfile:
+        path: "{{ env_file }}"
+        regexp: '^DATABASE_URL='
+        line: "DATABASE_URL={{ recovered_database_url }}"
+        create: false
+        backup: false
+      no_log: true
+
+    - name: Restart selected standby app services
+      command: docker compose up -d --build backend worker frontend
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Show selected standby Docker Compose status
+      command: docker compose ps
+      args:
+        chdir: "{{ app_dir }}"
+      register: compose_ps
+      changed_when: false
+
+    - name: Check selected standby health endpoints
+      uri:
+        url: "{{ health_base_url }}{{ item }}"
+        method: GET
+        status_code: 200
+        timeout: 10
+      loop: "{{ health_paths }}"
+      register: standby_http_checks
+      retries: 6
+      delay: 5
+      until: standby_http_checks.status == 200
+
+    - name: Print sanitized recovered DB test summary
+      debug:
+        msg:
+          - "Target standby region: {{ inventory_hostname }}"
+          - "Recovered DB host: {{ recovered_db_host }}"
+          - "Recovered DB port: {{ recovered_db_port }}"
+          - "Recovered DB name: {{ recovered_db_name }}"
+          - "Env backup path: {{ dr_env_backup_path }}"
+          - "Health checks passed for /healthz and /api/health/ready."
+          - "Rollback: scripts/dr/rollback-standby-db-env.sh {{ inventory_hostname }} {{ dr_env_backup_path }}"
+          - "{{ compose_ps.stdout_lines }}"

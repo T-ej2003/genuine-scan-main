@@ -66,3 +66,5 @@ jobs:
           ansible-playbook -i ops/deploy/inventory.example.ini ops/deploy/bootstrap-standby.yml --syntax-check
           ansible-playbook -i ops/deploy/inventory.example.ini ops/deploy/deploy-standby.yml --syntax-check
           ansible-playbook -i ops/deploy/inventory.example.ini ops/deploy/health-check-standby.yml --syntax-check
+          ansible-playbook -i ops/deploy/inventory.example.ini ops/deploy/test-standby-recovered-db.yml --syntax-check
+          ansible-playbook -i ops/deploy/inventory.example.ini ops/deploy/rollback-standby-db-env.yml --syntax-check

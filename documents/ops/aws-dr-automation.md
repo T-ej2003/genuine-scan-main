@@ -141,6 +141,80 @@ scripts/dr/apply-db-restore-approved.sh
 
 The restore script creates only a new recovery target. It refuses identifiers that look like production primary and does not delete, overwrite, modify primary, or fail over. If the AWS restore command fails, the script exits non-zero and the workflow fails.
 
+## Standby Recovered DB Connection Test
+
+Use this only after the approved DB restore has created a recovery DB target and the incident commander has approved a single-standby validation. This test changes the selected standby server only, creates a timestamped backup of `/home/ubuntu/genuine-scan-main/backend/.env`, updates only `DATABASE_URL`, restarts the selected standby Docker Compose app services, runs `/healthz` and `/api/health/ready`, and records evidence under `artifacts/dr/<timestamp>/`.
+
+Targets are intentionally limited to `mumbai` or `capetown`. Do not use this path for London, primary, `standby`, `standby_regions`, or all hosts. This path does not change DNS, Route 53, production DB, buckets, MinIO, or London.
+
+Local test example:
+
+```bash
+RECOVERED_DB_HOST=mscqr-dr-restore-test-20260511.c3ewey6o6mq5.eu-west-2.rds.amazonaws.com \
+RECOVERED_DB_PORT=5432 \
+RECOVERED_DB_NAME=postgres \
+RECOVERED_DB_USER=postgres \
+RECOVERED_DB_PASSWORD='<from approved secret channel>' \
+scripts/dr/test-standby-recovered-db.sh mumbai
+```
+
+The password is passed through the process environment and is not printed. The Ansible playbook marks password-bearing tasks as `no_log`.
+
+Local rollback example:
+
+```bash
+scripts/dr/rollback-standby-db-env.sh mumbai /home/ubuntu/genuine-scan-main/backend/.env.backup.dr-YYYYMMDDTHHMMSSZ
+```
+
+### GitHub Standby DB Test Workflow
+
+Protected environment required:
+
+```text
+dr-standby-db-test
+```
+
+Environment secrets required:
+
+- `RECOVERED_DB_PASSWORD`: password for the approved recovered DB target.
+- `STANDBY_ANSIBLE_INVENTORY`: standby-only Ansible inventory containing `mumbai` and `capetown`.
+- `STANDBY_SSH_PRIVATE_KEY`: SSH private key for the selected standby server.
+- `STANDBY_KNOWN_HOSTS`: pinned known_hosts entries for the standby servers.
+
+Click-by-click setup:
+
+1. GitHub repo -> Settings -> Environments.
+2. New environment -> `dr-standby-db-test`.
+3. Add required reviewers for approval.
+4. Add Environment secrets: `RECOVERED_DB_PASSWORD`, `STANDBY_ANSIBLE_INVENTORY`, `STANDBY_SSH_PRIVATE_KEY`, and `STANDBY_KNOWN_HOSTS`.
+5. Confirm the inventory contains only standby targets needed for this drill and does not include London/primary as the selected limit.
+
+Click-by-click Mumbai test:
+
+1. GitHub repo -> Actions -> AWS DR Standby DB Test -> Run workflow.
+2. Branch: `aws-dr-finish`.
+3. operation: `test-standby-recovered-db`.
+4. target_region: `mumbai`.
+5. recovered_db_host: `mscqr-dr-restore-test-20260511.c3ewey6o6mq5.eu-west-2.rds.amazonaws.com`.
+6. recovered_db_port: `5432`.
+7. recovered_db_name: `postgres`.
+8. recovered_db_user: `postgres`.
+9. backup_path_for_rollback: blank.
+10. confirmation: `I_APPROVE_STANDBY_RECOVERED_DB_TEST`.
+11. Run workflow and approve the `dr-standby-db-test` environment prompt.
+12. Download the evidence artifact and copy the printed env backup path for rollback.
+
+Click-by-click rollback:
+
+1. GitHub repo -> Actions -> AWS DR Standby DB Test -> Run workflow.
+2. Branch: `aws-dr-finish`.
+3. operation: `rollback-standby-db-env`.
+4. target_region: `mumbai`.
+5. backup_path_for_rollback: paste the backup path printed by the test, for example `/home/ubuntu/genuine-scan-main/backend/.env.backup.dr-YYYYMMDDTHHMMSSZ`.
+6. confirmation: `I_APPROVE_STANDBY_DB_ENV_ROLLBACK`.
+7. Run workflow and approve the `dr-standby-db-test` environment prompt.
+8. Download the evidence artifact and confirm health checks passed after rollback.
+
 ## Object Storage Readiness
 
 ```bash
@@ -170,6 +244,7 @@ scripts/dr/object-storage-write-test-approved.sh
 - `AWS DR Validation` validates scripts, guardrails, and Ansible syntax without production secrets, SSH, or deploy.
 - `AWS DR Operations` is `workflow_dispatch` only and exposes read-only smoke tests. It does not include standby deploy, DNS apply, DNS rollback apply, DB restore apply, or object write-test apply.
 - `AWS DR Apply` is `workflow_dispatch` only and exposes mutation-capable operations only behind protected GitHub Environments, OIDC AWS role assumption, and exact confirmation phrases.
+- `AWS DR Standby DB Test` is `workflow_dispatch` only and validates one selected standby app against an already-restored recovery DB behind the protected `dr-standby-db-test` environment.
 - Standby deploy from Actions requires an approved `STANDBY_ANSIBLE_INVENTORY` secret and an intentional `deploy-standby` selection.
 
 Protected environment and IAM setup are documented in:
@@ -316,6 +391,7 @@ These values came from the current London restore drill and should be re-validat
 - No health-check-triggered DNS switching.
 - No unattended production DNS cutover.
 - No unattended production DB restore.
+- No standby recovered DB test without a single `mumbai` or `capetown` target and protected environment approval.
 - No active-active multi-write.
 - No destructive cleanup.
 - No bucket or database deletion.

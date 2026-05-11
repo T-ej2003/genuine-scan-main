@@ -1,0 +1,80 @@
+---
+- name: Roll back one standby region DB env from a DR backup
+  hosts: mumbai:capetown
+  become: yes
+  gather_facts: false
+
+  vars:
+    app_dir: /home/ubuntu/genuine-scan-main
+    env_file: "{{ app_dir }}/backend/.env"
+    health_base_url: "http://{{ ansible_host }}"
+    allowed_standby_targets:
+      - mumbai
+      - capetown
+    health_paths:
+      - /healthz
+      - /api/health/ready
+
+  pre_tasks:
+    - name: Require explicit single standby limit
+      assert:
+        that:
+          - ansible_limit is defined
+          - ansible_limit in allowed_standby_targets
+          - inventory_hostname in allowed_standby_targets
+        fail_msg: "Run only with --limit mumbai or --limit capetown. This rollback must not target primary, london, all, standby, or standby_regions."
+
+    - name: Require backup file path
+      assert:
+        that:
+          - backup_file_path is defined
+          - backup_file_path | length > 0
+          - backup_file_path is match('^/home/ubuntu/genuine-scan-main/backend/\\.env\\.backup\\.dr-[0-9]{8}T[0-9]{6}Z$')
+        fail_msg: "backup_file_path must be a timestamped backend env backup created by the standby recovered DB test."
+
+    - name: Confirm standby backend env backup exists
+      stat:
+        path: "{{ backup_file_path }}"
+      register: backup_file_stat
+
+    - name: Stop if standby backend env backup is missing
+      fail:
+        msg: "Backup file {{ backup_file_path }} does not exist on {{ inventory_hostname }}."
+      when: not backup_file_stat.stat.exists
+
+  tasks:
+    - name: Restore standby backend env from DR backup
+      command: cp -p {{ backup_file_path }} {{ env_file }}
+      changed_when: true
+
+    - name: Restart selected standby app services
+      command: docker compose up -d --build backend worker frontend
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Show selected standby Docker Compose status
+      command: docker compose ps
+      args:
+        chdir: "{{ app_dir }}"
+      register: compose_ps
+      changed_when: false
+
+    - name: Check selected standby health endpoints after rollback
+      uri:
+        url: "{{ health_base_url }}{{ item }}"
+        method: GET
+        status_code: 200
+        timeout: 10
+      loop: "{{ health_paths }}"
+      register: standby_http_checks
+      retries: 6
+      delay: 5
+      until: standby_http_checks.status == 200
+
+    - name: Print sanitized rollback summary
+      debug:
+        msg:
+          - "Target standby region: {{ inventory_hostname }}"
+          - "Restored env backup: {{ backup_file_path }}"
+          - "Health checks passed for /healthz and /api/health/ready."
+          - "{{ compose_ps.stdout_lines }}"

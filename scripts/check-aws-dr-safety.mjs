@@ -8,6 +8,13 @@ const allowedRoute53Apply = new Set([
   "scripts/dr/apply-route53-rollback.sh",
 ]);
 const allowedApplyWorkflow = ".github/workflows/aws-dr-apply.yml";
+const standbyRecoveredDbTestFiles = new Set([
+  ".github/workflows/aws-dr-standby-db-test.yml",
+  "ops/deploy/test-standby-recovered-db.yml",
+  "ops/deploy/rollback-standby-db-env.yml",
+  "scripts/dr/test-standby-recovered-db.sh",
+  "scripts/dr/rollback-standby-db-env.sh",
+]);
 const gatedApplyScripts = new Map([
   [
     "scripts/dr/apply-route53-change.sh",
@@ -184,6 +191,20 @@ for (const scanRoot of scanRoots) {
           line: rdsRestoreReferences[0].lineNumber,
           message: "RDS restore commands are only allowed in the approved gated DB restore script.",
         });
+      }
+
+      if (standbyRecoveredDbTestFiles.has(repoPath)) {
+        const passwordEchoReferences = executableLineReferences(
+          source,
+          /\becho\b[^\n]*(RECOVERED_DB_PASSWORD|recovered_db_password|recovered_database_url|DATABASE_URL)/i,
+        );
+        if (passwordEchoReferences.length > 0) {
+          findings.push({
+            repoPath,
+            line: passwordEchoReferences[0].lineNumber,
+            message: "Standby recovered DB test automation must not print recovered DB passwords or DATABASE_URL values.",
+          });
+        }
       }
     }
 
