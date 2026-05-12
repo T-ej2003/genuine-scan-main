@@ -30,6 +30,9 @@ const allowedRdsSnapshotCopyScripts = new Set([
 const allowedRdsDeleteScripts = new Set([
   "scripts/dr/cleanup-recovery-db-approved.sh",
 ]);
+const allowedRdsSnapshotDeleteScripts = new Set([
+  "scripts/dr/cleanup-dr-snapshot-approved.sh",
+]);
 const standbyRecoveredDbTestFiles = new Set([
   ".github/workflows/aws-dr-standby-db-test.yml",
   "ops/deploy/test-standby-recovered-db.yml",
@@ -104,6 +107,7 @@ const mutationOperationNames = [
   "apply-cross-region-snapshot-copy-approved",
   "apply-region-local-db-restore-approved",
   "cleanup-recovery-db-approved",
+  "cleanup-dr-snapshot-approved",
 ];
 
 const dangerousPatterns = [
@@ -365,6 +369,57 @@ for (const scanRoot of scanRoots) {
             repoPath,
             line: rdsDeleteReferences[0].lineNumber,
             message: "Recovery DB cleanup must require cleanup and final-snapshot/skip confirmations.",
+          });
+        }
+      }
+
+      const rdsDeleteSnapshotReferences = executableLineReferences(
+        source,
+        /\baws\s+rds\s+delete-db-snapshot\b/i,
+      );
+      if (rdsDeleteSnapshotReferences.length > 0) {
+        if (!allowedRdsSnapshotDeleteScripts.has(repoPath)) {
+          findings.push({
+            repoPath,
+            line: rdsDeleteSnapshotReferences[0].lineNumber,
+            message: "RDS delete-db-snapshot is only allowed in the approved gated DR snapshot cleanup script.",
+          });
+        } else if (!source.includes("I_APPROVE_DR_SNAPSHOT_CLEANUP")) {
+          findings.push({
+            repoPath,
+            line: rdsDeleteSnapshotReferences[0].lineNumber,
+            message: "DR snapshot cleanup must require I_APPROVE_DR_SNAPSHOT_CLEANUP.",
+          });
+        }
+      }
+
+      if (repoPath === cleanupApplyWorkflow) {
+        if (!source.includes("dr-recovery-cleanup")) {
+          findings.push({
+            repoPath,
+            line: 1,
+            message: "Cleanup workflow must use the dr-recovery-cleanup protected environment.",
+          });
+        }
+        if (!source.includes("I_APPROVE_RECOVERY_DB_CLEANUP") || !source.includes("I_APPROVE_DR_SNAPSHOT_CLEANUP")) {
+          findings.push({
+            repoPath,
+            line: 1,
+            message: "Cleanup workflow must include both DB and snapshot cleanup confirmation phrases.",
+          });
+        }
+      }
+
+      if (repoPath === cleanupApplyWorkflow || repoPath.includes("cleanup-recovery") || repoPath.includes("cleanup-dr-snapshot")) {
+        const productionTargetExample = executableLineReferences(
+          source,
+          /target_(db|snapshot)_identifier:\s*mscqr-prod-db|TARGET_(DB|SNAPSHOT)_IDENTIFIER=mscqr-prod-db/i,
+        );
+        if (productionTargetExample.length > 0) {
+          findings.push({
+            repoPath,
+            line: productionTargetExample[0].lineNumber,
+            message: "Cleanup automation must not use mscqr-prod-db as a cleanup target example.",
           });
         }
       }

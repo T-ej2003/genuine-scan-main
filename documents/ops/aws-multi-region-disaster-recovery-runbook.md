@@ -157,6 +157,8 @@ Run sequence:
 
 This sequence still does not change DNS, Route 53, London, primary DB, MinIO, or production object storage.
 
+After rollback and evidence capture, use `AWS DR Cleanup Apply` only with incident commander approval to delete recovery test DB instances and copied manual DR snapshots. Cleanup must target only identifiers that clearly include DR/recovery/test markers, such as `mscqr-dr-mumbai-restore-test-20260511` or `mscqr-dr-mumbai-copy-20260511`.
+
 ## Standby Recovered DB Connection Test
 
 After a recovery DB is available, validate one standby app against it before any traffic movement is considered. Use only `mumbai` or `capetown`; do not target London, primary, `standby`, `standby_regions`, or all hosts.

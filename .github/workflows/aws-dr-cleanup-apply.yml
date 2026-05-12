@@ -3,25 +3,51 @@ name: AWS DR Cleanup Apply
 on:
   workflow_dispatch:
     inputs:
-      target_region:
-        description: "Target AWS region for recovery DB cleanup"
+      operation:
+        description: "Cleanup operation"
+        type: choice
+        options:
+          - cleanup-recovery-db-approved
+          - cleanup-dr-snapshot-approved
+        required: true
+      aws_region:
+        description: "AWS region containing recovery resource"
         required: true
         type: string
       target_db_identifier:
         description: "Recovery DB identifier to clean up"
-        required: true
+        required: false
+        default: ""
+        type: string
+      target_snapshot_identifier:
+        description: "DR copied/manual snapshot identifier to delete"
+        required: false
+        default: ""
         type: string
       final_snapshot_identifier:
         description: "Optional final snapshot identifier for recovery DB cleanup"
         required: false
+        default: ""
         type: string
+      skip_final_snapshot:
+        description: "Skip final snapshot when deleting recovery DB"
+        type: boolean
+        required: false
+        default: false
       confirm_recovery_db_cleanup:
         description: "Must equal I_APPROVE_RECOVERY_DB_CLEANUP"
-        required: true
+        required: false
+        default: ""
         type: string
       confirm_skip_final_snapshot:
         description: "Must equal I_APPROVE_SKIP_FINAL_SNAPSHOT when no final snapshot is requested"
         required: false
+        default: ""
+        type: string
+      confirm_dr_snapshot_cleanup:
+        description: "Must equal I_APPROVE_DR_SNAPSHOT_CLEANUP for copied snapshot cleanup"
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -34,39 +60,88 @@ jobs:
     timeout-minutes: 30
     environment: dr-recovery-cleanup
     env:
-      TARGET_REGION: ${{ inputs.target_region }}
+      OPERATION: ${{ inputs.operation }}
+      AWS_REGION: ${{ inputs.aws_region }}
+      TARGET_REGION: ${{ inputs.aws_region }}
       TARGET_DB_IDENTIFIER: ${{ inputs.target_db_identifier }}
+      TARGET_SNAPSHOT_IDENTIFIER: ${{ inputs.target_snapshot_identifier }}
       FINAL_SNAPSHOT_IDENTIFIER: ${{ inputs.final_snapshot_identifier }}
+      SKIP_FINAL_SNAPSHOT: ${{ inputs.skip_final_snapshot && 'true' || 'false' }}
       CONFIRM_RECOVERY_DB_CLEANUP: ${{ inputs.confirm_recovery_db_cleanup }}
-      CONFIRM_SKIP_FINAL_SNAPSHOT: ${{ inputs.confirm_skip_final_snapshot }}
-      AWS_ROLE_TO_ASSUME: ${{ vars.DR_RECOVERY_CLEANUP_ROLE_TO_ASSUME }}
+      CONFIRM_SKIP_FINAL_SNAPSHOT: ${{ inputs.skip_final_snapshot && inputs.confirm_skip_final_snapshot || '' }}
+      CONFIRM_DR_SNAPSHOT_CLEANUP: ${{ inputs.confirm_dr_snapshot_cleanup }}
+      AWS_DR_RECOVERY_CLEANUP_ROLE_ARN: ${{ vars.AWS_DR_RECOVERY_CLEANUP_ROLE_ARN }}
+      DR_RECOVERY_CLEANUP_ROLE_TO_ASSUME: ${{ vars.DR_RECOVERY_CLEANUP_ROLE_TO_ASSUME }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve recovery cleanup OIDC role
+        id: resolve_cleanup_role
+        run: |
+          set -euo pipefail
+          role_arn="$AWS_DR_RECOVERY_CLEANUP_ROLE_ARN"
+          if [ -z "$role_arn" ]; then
+            role_arn="$DR_RECOVERY_CLEANUP_ROLE_TO_ASSUME"
+          fi
+          if [ -z "$role_arn" ]; then
+            echo "::error::Set AWS_DR_RECOVERY_CLEANUP_ROLE_ARN or DR_RECOVERY_CLEANUP_ROLE_TO_ASSUME on the dr-recovery-cleanup environment."
+            exit 2
+          fi
+          echo "::add-mask::$role_arn"
+          echo "role_arn=$role_arn" >> "$GITHUB_OUTPUT"
+          echo "Recovery cleanup OIDC role variable is present."
 
       - name: Validate recovery cleanup approval inputs
         run: |
           set -euo pipefail
-          [ "$CONFIRM_RECOVERY_DB_CLEANUP" = "I_APPROVE_RECOVERY_DB_CLEANUP" ] || {
-            echo "::error::confirm_recovery_db_cleanup must equal I_APPROVE_RECOVERY_DB_CLEANUP."
-            exit 2
-          }
-          [ -n "$TARGET_REGION" ] || { echo "::error::target_region is required."; exit 2; }
-          [ -n "$TARGET_DB_IDENTIFIER" ] || { echo "::error::target_db_identifier is required."; exit 2; }
-          if [ -z "$FINAL_SNAPSHOT_IDENTIFIER" ] && [ "$CONFIRM_SKIP_FINAL_SNAPSHOT" != "I_APPROVE_SKIP_FINAL_SNAPSHOT" ]; then
-            echo "::error::final_snapshot_identifier or confirm_skip_final_snapshot is required."
-            exit 2
-          fi
-          [ -n "$AWS_ROLE_TO_ASSUME" ] || { echo "::error::Set DR_RECOVERY_CLEANUP_ROLE_TO_ASSUME on the dr-recovery-cleanup environment."; exit 2; }
-          echo "::add-mask::$AWS_ROLE_TO_ASSUME"
+          [ -n "$AWS_REGION" ] || { echo "::error::aws_region is required."; exit 2; }
+          case "$OPERATION" in
+            cleanup-recovery-db-approved)
+              [ "$CONFIRM_RECOVERY_DB_CLEANUP" = "I_APPROVE_RECOVERY_DB_CLEANUP" ] || {
+                echo "::error::confirm_recovery_db_cleanup must equal I_APPROVE_RECOVERY_DB_CLEANUP."
+                exit 2
+              }
+              [ -n "$TARGET_DB_IDENTIFIER" ] || { echo "::error::target_db_identifier is required for DB cleanup."; exit 2; }
+              if [ "$SKIP_FINAL_SNAPSHOT" = "true" ]; then
+                [ "$CONFIRM_SKIP_FINAL_SNAPSHOT" = "I_APPROVE_SKIP_FINAL_SNAPSHOT" ] || {
+                  echo "::error::confirm_skip_final_snapshot must equal I_APPROVE_SKIP_FINAL_SNAPSHOT when skip_final_snapshot is true."
+                  exit 2
+                }
+              elif [ -z "$FINAL_SNAPSHOT_IDENTIFIER" ]; then
+                echo "::error::final_snapshot_identifier is required unless skip_final_snapshot is true."
+                exit 2
+              fi
+              ;;
+            cleanup-dr-snapshot-approved)
+              [ "$CONFIRM_DR_SNAPSHOT_CLEANUP" = "I_APPROVE_DR_SNAPSHOT_CLEANUP" ] || {
+                echo "::error::confirm_dr_snapshot_cleanup must equal I_APPROVE_DR_SNAPSHOT_CLEANUP."
+                exit 2
+              }
+              [ -n "$TARGET_SNAPSHOT_IDENTIFIER" ] || { echo "::error::target_snapshot_identifier is required for snapshot cleanup."; exit 2; }
+              ;;
+            *)
+              echo "::error::Unsupported cleanup operation: $OPERATION"
+              exit 2
+              ;;
+          esac
 
       - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-region: ${{ inputs.target_region }}
-          role-to-assume: ${{ vars.DR_RECOVERY_CLEANUP_ROLE_TO_ASSUME }}
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ steps.resolve_cleanup_role.outputs.role_arn }}
 
-      - name: Delete approved recovery DB target
-        run: scripts/dr/cleanup-recovery-db-approved.sh
+      - name: Run approved cleanup operation
+        run: |
+          set -euo pipefail
+          case "$OPERATION" in
+            cleanup-recovery-db-approved)
+              scripts/dr/cleanup-recovery-db-approved.sh
+              ;;
+            cleanup-dr-snapshot-approved)
+              scripts/dr/cleanup-dr-snapshot-approved.sh
+              ;;
+          esac
 
       - name: Write immutable evidence manifest
         if: always()

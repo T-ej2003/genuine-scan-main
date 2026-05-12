@@ -33,6 +33,7 @@ This guide covers the MSCQR operator-controlled AWS multi-region DR automation f
 - Object storage write test requires `CONFIRM_OBJECT_WRITE_TEST=I_APPROVE_OBJECT_STORAGE_WRITE_TEST`.
 - Optional deletion of the generated write-test object requires `CONFIRM_DELETE_TEST_OBJECT=I_APPROVE_DELETE_DR_TEST_OBJECT`.
 - Recovery DB cleanup requires `CONFIRM_RECOVERY_DB_CLEANUP=I_APPROVE_RECOVERY_DB_CLEANUP` and either a final snapshot identifier or `CONFIRM_SKIP_FINAL_SNAPSHOT=I_APPROVE_SKIP_FINAL_SNAPSHOT`.
+- Copied DR snapshot cleanup requires `CONFIRM_DR_SNAPSHOT_CLEANUP=I_APPROVE_DR_SNAPSHOT_CLEANUP`.
 
 Do not run apply commands without incident commander approval.
 
@@ -181,6 +182,76 @@ Cleanup is separate and dangerous:
 
 ```bash
 CONFIRM_RECOVERY_DB_CLEANUP=I_APPROVE_RECOVERY_DB_CLEANUP TARGET_REGION=ap-south-1 TARGET_DB_IDENTIFIER=mscqr-dr-mumbai-restore-test-YYYYMMDD FINAL_SNAPSHOT_IDENTIFIER=mscqr-dr-mumbai-final-YYYYMMDD scripts/dr/cleanup-recovery-db-approved.sh
+```
+
+## Approved Recovery Cleanup
+
+Cleanup is destructive to test recovery resources. Run it only after evidence artifacts are captured and the incident commander approves cleanup. Never target production DBs, production snapshots, automated `rds:` snapshots, S3, MinIO, DNS, or London/primary resources.
+
+GitHub path:
+
+```text
+GitHub repo -> Actions -> AWS DR Cleanup Apply -> Run workflow
+```
+
+Mumbai recovery DB cleanup:
+
+```text
+Branch: main
+operation: cleanup-recovery-db-approved
+aws_region: ap-south-1
+target_db_identifier: mscqr-dr-mumbai-restore-test-20260511
+target_snapshot_identifier: blank
+final_snapshot_identifier: blank
+skip_final_snapshot: true
+confirm_recovery_db_cleanup: I_APPROVE_RECOVERY_DB_CLEANUP
+confirm_skip_final_snapshot: I_APPROVE_SKIP_FINAL_SNAPSHOT
+confirm_dr_snapshot_cleanup: blank
+```
+
+Mumbai copied snapshot cleanup:
+
+```text
+Branch: main
+operation: cleanup-dr-snapshot-approved
+aws_region: ap-south-1
+target_db_identifier: blank
+target_snapshot_identifier: mscqr-dr-mumbai-copy-20260511
+final_snapshot_identifier: blank
+skip_final_snapshot: false
+confirm_recovery_db_cleanup: blank
+confirm_skip_final_snapshot: blank
+confirm_dr_snapshot_cleanup: I_APPROVE_DR_SNAPSHOT_CLEANUP
+```
+
+Cape Town recovery DB cleanup:
+
+```text
+Branch: main
+operation: cleanup-recovery-db-approved
+aws_region: af-south-1
+target_db_identifier: mscqr-dr-capetown-restore-test-20260512
+target_snapshot_identifier: blank
+final_snapshot_identifier: blank
+skip_final_snapshot: true
+confirm_recovery_db_cleanup: I_APPROVE_RECOVERY_DB_CLEANUP
+confirm_skip_final_snapshot: I_APPROVE_SKIP_FINAL_SNAPSHOT
+confirm_dr_snapshot_cleanup: blank
+```
+
+Cape Town copied snapshot cleanup:
+
+```text
+Branch: main
+operation: cleanup-dr-snapshot-approved
+aws_region: af-south-1
+target_db_identifier: blank
+target_snapshot_identifier: mscqr-dr-capetown-copy-20260512
+final_snapshot_identifier: blank
+skip_final_snapshot: false
+confirm_recovery_db_cleanup: blank
+confirm_skip_final_snapshot: blank
+confirm_dr_snapshot_cleanup: I_APPROVE_DR_SNAPSHOT_CLEANUP
 ```
 
 ## Standby Recovered DB Connection Test

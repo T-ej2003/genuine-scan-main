@@ -30,7 +30,8 @@ Set these environment-scoped variables:
 - `DR_DNS_ROLLBACK_ROLE_TO_ASSUME` on `dr-dns-rollback`.
 - `DR_DB_RESTORE_ROLE_TO_ASSUME` on `dr-db-restore`.
 - `DR_OBJECT_STORAGE_WRITE_TEST_ROLE_TO_ASSUME` on `dr-object-storage-write-test`.
-- `DR_RECOVERY_CLEANUP_ROLE_TO_ASSUME` on `dr-recovery-cleanup`.
+- Preferred: `AWS_DR_RECOVERY_CLEANUP_ROLE_ARN` on `dr-recovery-cleanup`.
+- Backward-compatible: `DR_RECOVERY_CLEANUP_ROLE_TO_ASSUME` on `dr-recovery-cleanup`.
 
 The workflow uses GitHub OIDC through `aws-actions/configure-aws-credentials@v4`. Long-lived AWS access keys are not required.
 
@@ -72,6 +73,7 @@ Each operation requires both:
 - Delete generated object storage test object: `I_APPROVE_DELETE_DR_TEST_OBJECT`
 - Recovery DB cleanup: `I_APPROVE_RECOVERY_DB_CLEANUP`
 - Skip final recovery DB cleanup snapshot: `I_APPROVE_SKIP_FINAL_SNAPSHOT`
+- Copied DR snapshot cleanup: `I_APPROVE_DR_SNAPSHOT_CLEANUP`
 
 ## Immutable Evidence
 
@@ -107,6 +109,6 @@ Replace placeholders such as `<AWS_ACCOUNT_ID>`, `<GITHUB_ORG>`, `<GITHUB_REPO>`
 - DNS cutover and rollback call the local gated scripts.
 - DB restore creates only a new recovery target and does not modify the primary DB.
 - Snapshot copy and region-local restore are manual-only and protected by `dr-db-restore`.
-- Recovery DB cleanup is isolated behind `dr-recovery-cleanup` and must never target production identifiers.
+- Recovery DB and copied snapshot cleanup are isolated behind `dr-recovery-cleanup`, require a reviewer, should be restricted to `main`, and must never target production identifiers.
 - Object storage write testing writes only under `dr-tests/<timestamp>/`.
 - Bucket deletion, DB deletion, DB failover, recursive object deletion, Docker prune, and MinIO decommission remain out of scope.

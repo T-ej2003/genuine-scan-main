@@ -38,3 +38,4 @@ The current recovery direction is region-local: Mumbai standby should use an `ap
 7. Cut over one standby app with `scripts/dr/test-standby-recovered-db.sh`.
 8. Roll back the standby env with `scripts/dr/rollback-standby-db-env.sh`.
 9. Cleanup recovery DB only through `AWS DR Cleanup Apply` with `I_APPROVE_RECOVERY_DB_CLEANUP`.
+10. Cleanup copied manual DR snapshot only through `AWS DR Cleanup Apply` with `I_APPROVE_DR_SNAPSHOT_CLEANUP`.

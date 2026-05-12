@@ -6,7 +6,8 @@
       "Effect": "Allow",
       "Action": [
         "rds:DescribeDBInstances",
-        "rds:DescribeDBSnapshots"
+        "rds:DescribeDBSnapshots",
+        "rds:ListTagsForResource"
       ],
       "Resource": "*"
     },
@@ -15,6 +16,7 @@
       "Effect": "Allow",
       "Action": [
         "rds:DeleteDBInstance",
+        "rds:DeleteDBSnapshot",
         "rds:AddTagsToResource"
       ],
       "Resource": [

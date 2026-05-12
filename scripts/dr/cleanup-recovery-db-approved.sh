@@ -8,9 +8,10 @@ require_repo_root
 require_command aws
 
 confirm="${CONFIRM_RECOVERY_DB_CLEANUP:-}"
-target_region="${TARGET_REGION:-}"
+target_region="${TARGET_REGION:-${AWS_REGION:-}}"
 target_db="${TARGET_DB_IDENTIFIER:-}"
 final_snapshot="${FINAL_SNAPSHOT_IDENTIFIER:-}"
+skip_final_snapshot="${SKIP_FINAL_SNAPSHOT:-false}"
 confirm_skip_final="${CONFIRM_SKIP_FINAL_SNAPSHOT:-}"
 
 if [ "$confirm" != "I_APPROVE_RECOVERY_DB_CLEANUP" ]; then
@@ -28,6 +29,7 @@ if [ "$target_db_lc" = "mscqr-prod-db" ]; then
   echo "Refusing cleanup for production DB identifier: $target_db" >&2
   exit 2
 fi
+
 case "$target_db_lc" in
   *dr*|*restore*|*test*|*recovery*) ;;
   *)
@@ -36,8 +38,38 @@ case "$target_db_lc" in
     ;;
 esac
 
-if [ -z "$final_snapshot" ] && [ "$confirm_skip_final" != "I_APPROVE_SKIP_FINAL_SNAPSHOT" ]; then
-  echo "Set FINAL_SNAPSHOT_IDENTIFIER or CONFIRM_SKIP_FINAL_SNAPSHOT=I_APPROVE_SKIP_FINAL_SNAPSHOT." >&2
+case "$target_db_lc" in
+  *prod*|*production*|*primary*|*london*|*live*)
+    case "$target_db_lc" in
+      *dr*|*restore*|*test*|*recovery*) ;;
+      *)
+        echo "Refusing production-looking DB identifier without clear recovery/test marker: $target_db" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+esac
+
+case "$skip_final_snapshot" in
+  true|false) ;;
+  *)
+    echo "SKIP_FINAL_SNAPSHOT must be true or false." >&2
+    exit 2
+    ;;
+esac
+
+if [ -n "$final_snapshot" ] && [ "$skip_final_snapshot" = "true" ]; then
+  echo "Set either FINAL_SNAPSHOT_IDENTIFIER or SKIP_FINAL_SNAPSHOT=true, not both." >&2
+  exit 2
+fi
+
+if [ "$skip_final_snapshot" = "true" ] && [ "$confirm_skip_final" != "I_APPROVE_SKIP_FINAL_SNAPSHOT" ]; then
+  echo "SKIP_FINAL_SNAPSHOT=true requires CONFIRM_SKIP_FINAL_SNAPSHOT=I_APPROVE_SKIP_FINAL_SNAPSHOT." >&2
+  exit 2
+fi
+
+if [ -z "$final_snapshot" ] && [ "$skip_final_snapshot" != "true" ]; then
+  echo "Set FINAL_SNAPSHOT_IDENTIFIER or SKIP_FINAL_SNAPSHOT=true with explicit skip confirmation." >&2
   exit 2
 fi
 
@@ -55,7 +87,9 @@ run_cleanup() {
   fi
   echo
   echo "=== describing target recovery DB before cleanup ==="
-  aws rds describe-db-instances --region "$target_region" --db-instance-identifier "$target_db"
+  aws rds describe-db-instances --region "$target_region" --db-instance-identifier "$target_db" > "$DR_ARTIFACT_DIR/recovery-db-before-delete.json"
+  db_status="$(aws rds describe-db-instances --region "$target_region" --db-instance-identifier "$target_db" --query 'DBInstances[0].DBInstanceStatus' --output text)"
+  echo "Recovery DB status: $db_status"
   echo
   echo "=== deleting approved recovery DB target ==="
   if [ -n "$final_snapshot" ]; then
