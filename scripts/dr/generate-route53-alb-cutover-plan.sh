@@ -134,12 +134,12 @@ fi
 
 {
   printf '# Route 53 ALB cutover plan\n\n'
-  printf '- Hosted zone: `%s`\n' "$HOSTED_ZONE_ID"
-  printf '- Cutover target: `%s`\n' "$TARGET_REGION_GROUP"
-  printf '- ALB DNS name: `%s`\n' "$ALB_DNS_NAME"
-  printf '- ALB hosted zone ID: `%s`\n' "$ALB_HOSTED_ZONE_ID"
-  printf '- Cutover JSON: `%s`\n' "$cutover_file"
-  printf '- Rollback JSON: `%s`\n\n' "$rollback_file"
+  printf '%s\n' "- Hosted zone: \`$HOSTED_ZONE_ID\`"
+  printf '%s\n' "- Cutover target: \`$TARGET_REGION_GROUP\`"
+  printf '%s\n' "- ALB DNS name: \`$ALB_DNS_NAME\`"
+  printf '%s\n' "- ALB hosted zone ID: \`$ALB_HOSTED_ZONE_ID\`"
+  printf '%s\n' "- Cutover JSON: \`$cutover_file\`"
+  printf '%s\n\n' "- Rollback JSON: \`$rollback_file\`"
   printf 'This generator does not apply DNS. Use the approved DNS apply workflow only after incident commander approval.\n'
 } > "$summary_file"
 

@@ -131,25 +131,25 @@ fi
 summary="$DR_ARTIFACT_DIR/alb-inventory/$TARGET_REGION_GROUP-summary.md"
 {
   printf '# %s\n\n' "$SOURCE_LABEL"
-  printf '- Target region group: `%s`\n' "$TARGET_REGION_GROUP"
-  printf '- AWS region: `%s`\n' "$AWS_REGION"
-  printf '- Domain: `%s`\n' "$DOMAIN_NAME"
-  printf '- WWW domain: `%s`\n' "$WWW_DOMAIN_NAME"
-  printf '- EC2 public IP: `%s`\n' "$EC2_PUBLIC_IP"
+  printf '%s\n' "- Target region group: \`$TARGET_REGION_GROUP\`"
+  printf '%s\n' "- AWS region: \`$AWS_REGION\`"
+  printf '%s\n' "- Domain: \`$DOMAIN_NAME\`"
+  printf '%s\n' "- WWW domain: \`$WWW_DOMAIN_NAME\`"
+  printf '%s\n' "- EC2 public IP: \`$EC2_PUBLIC_IP\`"
   if [ -n "$instance_id" ]; then
-    printf '- Discovered instance: `%s`\n' "$instance_id"
+    printf '%s\n' "- Discovered instance: \`$instance_id\`"
   else
-    printf '- Discovered instance: not found from public IP\n'
+    printf '%s\n' '- Discovered instance: not found from public IP'
   fi
   if [ -n "$vpc_id" ]; then
-    printf '- Discovered VPC: `%s`\n' "$vpc_id"
+    printf '%s\n' "- Discovered VPC: \`$vpc_id\`"
   else
-    printf '- Discovered VPC: not found from public IP\n'
+    printf '%s\n' '- Discovered VPC: not found from public IP'
   fi
   if [ "$latest_cert_arn" != "None" ] && [ -n "$latest_cert_arn" ]; then
-    printf '- Existing ACM certificate candidate: `%s`\n' "$latest_cert_arn"
+    printf '%s\n' "- Existing ACM certificate candidate: \`$latest_cert_arn\`"
   else
-    printf '- Existing ACM certificate candidate: not found\n'
+    printf '%s\n' '- Existing ACM certificate candidate: not found'
   fi
   printf '\nEvidence directory: `%s`\n' "$inventory_dir"
   printf '\nThis script is read-only and does not mutate AWS resources.\n'

@@ -56,11 +56,11 @@ JSON
 
 {
   printf '# Regional ALB test record plan\n\n'
-  printf '- Hosted zone: `%s`\n' "$HOSTED_ZONE_ID"
-  printf '- Test record: `%s`\n' "$record_name"
-  printf '- ALB DNS name: `%s`\n' "$ALB_DNS_NAME"
-  printf '- ALB hosted zone ID: `%s`\n' "$ALB_HOSTED_ZONE_ID"
-  printf '- Change batch: `%s`\n\n' "$change_file"
+  printf '%s\n' "- Hosted zone: \`$HOSTED_ZONE_ID\`"
+  printf '%s\n' "- Test record: \`$record_name\`"
+  printf '%s\n' "- ALB DNS name: \`$ALB_DNS_NAME\`"
+  printf '%s\n' "- ALB hosted zone ID: \`$ALB_HOSTED_ZONE_ID\`"
+  printf '%s\n\n' "- Change batch: \`$change_file\`"
   printf 'This generator does not apply DNS. Use the approved DNS apply workflow to create the test record.\n'
 } > "$summary_file"
 
