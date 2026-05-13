@@ -19,6 +19,9 @@ This guide covers the MSCQR operator-controlled AWS multi-region DR automation f
 - Cross-region snapshot copy plan generation.
 - Target-region DB readiness inspection.
 - Standby-to-DB network diagnostics.
+- Read-only regional ALB/ACM inventory.
+- Regional ALB/ACM implementation plan generation.
+- Route 53 ALB cutover and regional test-record change batch generation.
 - Object storage read-path inspection.
 - Evidence capture under `artifacts/dr/<timestamp>/`.
 - CI validation and AWS DR safety scanning.
@@ -34,6 +37,7 @@ This guide covers the MSCQR operator-controlled AWS multi-region DR automation f
 - Optional deletion of the generated write-test object requires `CONFIRM_DELETE_TEST_OBJECT=I_APPROVE_DELETE_DR_TEST_OBJECT`.
 - Recovery DB cleanup requires `CONFIRM_RECOVERY_DB_CLEANUP=I_APPROVE_RECOVERY_DB_CLEANUP` and either a final snapshot identifier or `CONFIRM_SKIP_FINAL_SNAPSHOT=I_APPROVE_SKIP_FINAL_SNAPSHOT`.
 - Copied DR snapshot cleanup requires `CONFIRM_DR_SNAPSHOT_CLEANUP=I_APPROVE_DR_SNAPSHOT_CLEANUP`.
+- Regional ALB/ACM entrypoint apply requires `CONFIRM_REGIONAL_ALB_APPLY=I_APPROVE_REGIONAL_ALB_ENTRYPOINT_APPLY`.
 
 Do not run apply commands without incident commander approval.
 
@@ -183,6 +187,85 @@ Cleanup is separate and dangerous:
 ```bash
 CONFIRM_RECOVERY_DB_CLEANUP=I_APPROVE_RECOVERY_DB_CLEANUP TARGET_REGION=ap-south-1 TARGET_DB_IDENTIFIER=mscqr-dr-mumbai-restore-test-YYYYMMDD FINAL_SNAPSHOT_IDENTIFIER=mscqr-dr-mumbai-final-YYYYMMDD scripts/dr/cleanup-recovery-db-approved.sh
 ```
+
+## Regional ALB/ACM Entrypoint
+
+Route 53 is now authoritative for `mscqr.com`. Raw EC2 DNS cutover is not the professional standby path because Mumbai and Cape Town do not have region-local TLS certificates inside the frontend container. The approved entrypoint model is:
+
+```text
+Route 53 -> regional ALB HTTPS 443 with ACM -> EC2 frontend HTTP 80
+```
+
+London currently keeps its local Let's Encrypt/Nginx HTTPS path, but ALB/ACM should become the common entrypoint pattern for London, Mumbai, and Cape Town. Do not copy Let's Encrypt private keys into standby containers.
+
+GitHub workflow:
+
+```text
+GitHub repo -> Actions -> AWS DR ALB Apply -> Run workflow
+```
+
+Required protected environment:
+
+- `dr-alb-entrypoint-apply`
+
+Required environment variable on that environment:
+
+- Preferred: `AWS_DR_ALB_APPLY_ROLE_ARN`
+- Backward-compatible: `DR_ALB_APPLY_ROLE_TO_ASSUME`
+
+Mumbai first-run values:
+
+```text
+Branch: main
+operation: aws-regional-alb-inventory
+target_region_group: mumbai
+aws_region: ap-south-1
+ec2_public_ip: 15.206.45.108
+domain_name: mscqr.com
+www_domain_name: www.mscqr.com
+hosted_zone_id: Z0569586VLFIGGVI7HAZ
+```
+
+Then run the same values with:
+
+```text
+operation: generate-regional-alb-plan
+```
+
+After review and protected-environment approval, run:
+
+```text
+operation: apply-regional-alb-entrypoint-approved
+confirm_regional_alb_apply: I_APPROVE_REGIONAL_ALB_ENTRYPOINT_APPLY
+```
+
+The ALB apply workflow may create or reuse the regional ALB security group, target group, ALB, ACM certificate, ACM DNS validation records, HTTP redirect listener, and HTTPS listener. It does not cut over `mscqr.com` or `www.mscqr.com`.
+
+After the apply artifact contains `ALB_DNS_NAME` and `ALB_HOSTED_ZONE_ID`, generate a DNS review plan:
+
+```text
+operation: generate-route53-alb-cutover-plan
+alb_dns_name: <ALB_DNS_NAME>
+alb_hosted_zone_id: <ALB_HOSTED_ZONE_ID>
+rollback_ip: 13.135.108.69
+```
+
+For validation before production cutover, generate a regional test record plan locally or in a reviewed operator session:
+
+```bash
+TARGET_REGION_GROUP=mumbai \
+ALB_DNS_NAME=<ALB_DNS_NAME> \
+ALB_HOSTED_ZONE_ID=<ALB_HOSTED_ZONE_ID> \
+scripts/dr/generate-route53-regional-test-records.sh
+```
+
+Apply the generated test-record JSON only through `AWS DR DNS Apply` after approval, then test:
+
+```bash
+curl -fsS https://mumbai-test.mscqr.com/healthz
+```
+
+Production cutover must use ALB alias records, not raw EC2 IPs, and must still go through the existing approved DNS workflow.
 
 ## Approved Recovery Cleanup
 

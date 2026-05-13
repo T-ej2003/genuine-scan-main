@@ -6,12 +6,14 @@ const scanRoots = [".github/workflows", "scripts", "ops/deploy", "documents/ops"
 const allowedRoute53Apply = new Set([
   "scripts/dr/apply-route53-change.sh",
   "scripts/dr/apply-route53-rollback.sh",
+  "scripts/dr/apply-regional-alb-entrypoint-approved.sh",
 ]);
 const dnsApplyWorkflow = ".github/workflows/aws-dr-dns-apply.yml";
 const snapshotApplyWorkflow = ".github/workflows/aws-dr-snapshot-apply.yml";
 const dbApplyWorkflow = ".github/workflows/aws-dr-db-apply.yml";
 const cleanupApplyWorkflow = ".github/workflows/aws-dr-cleanup-apply.yml";
 const objectStorageApplyWorkflow = ".github/workflows/aws-dr-object-storage-apply.yml";
+const albApplyWorkflow = ".github/workflows/aws-dr-alb-apply.yml";
 const operationsWorkflow = ".github/workflows/aws-dr-operations.yml";
 const applyWorkflowPaths = new Set([
   dnsApplyWorkflow,
@@ -19,6 +21,7 @@ const applyWorkflowPaths = new Set([
   dbApplyWorkflow,
   cleanupApplyWorkflow,
   objectStorageApplyWorkflow,
+  albApplyWorkflow,
 ]);
 const allowedRdsRestoreScripts = new Set([
   "scripts/dr/apply-db-restore-approved.sh",
@@ -97,6 +100,14 @@ const gatedApplyScripts = new Map([
       workflow: cleanupApplyWorkflow,
     },
   ],
+  [
+    "scripts/dr/apply-regional-alb-entrypoint-approved.sh",
+    {
+      confirmation: "I_APPROVE_REGIONAL_ALB_ENTRYPOINT_APPLY",
+      environment: "dr-alb-entrypoint-apply",
+      workflow: albApplyWorkflow,
+    },
+  ],
 ]);
 const selfPath = "scripts/check-aws-dr-safety.mjs";
 const mutationOperationNames = [
@@ -108,6 +119,7 @@ const mutationOperationNames = [
   "apply-region-local-db-restore-approved",
   "cleanup-recovery-db-approved",
   "cleanup-dr-snapshot-approved",
+  "apply-regional-alb-entrypoint-approved",
 ];
 
 const dangerousPatterns = [
@@ -124,6 +136,11 @@ const dangerousPatterns = [
   { id: "truncate-table", pattern: /\bTRUNCATE\s+TABLE\b/i },
   { id: "mc-rm-recursive", pattern: /\bmc\s+rm\b[^\n]*--recursive/i },
   { id: "minio-decommission", pattern: /\bminio\s+decommission\b/i },
+  { id: "elbv2-delete-load-balancer", pattern: /\baws\s+elbv2\s+delete-load-balancer\b/i },
+  { id: "elbv2-delete-target-group", pattern: /\baws\s+elbv2\s+delete-target-group\b/i },
+  { id: "elbv2-delete-listener", pattern: /\baws\s+elbv2\s+delete-listener\b/i },
+  { id: "acm-delete-certificate", pattern: /\baws\s+acm\s+delete-certificate\b/i },
+  { id: "route53-delete-hosted-zone", pattern: /\baws\s+route53\s+delete-hosted-zone\b/i },
 ];
 
 function walk(dir) {
@@ -162,7 +179,7 @@ function applyScriptReferences(source, scriptPath) {
     .filter(({ line }) => line.includes(scriptPath))
     .filter(({ line }) => {
       const trimmed = line.trim();
-      return !trimmed.startsWith("#") && !trimmed.startsWith("echo ");
+      return !trimmed.startsWith("#") && !trimmed.startsWith("echo ") && !trimmed.startsWith("printf ");
     });
 }
 
@@ -285,7 +302,9 @@ for (const scanRoot of scanRoots) {
 
         const requiredConfirmation = repoPath.endsWith("apply-route53-change.sh")
           ? "CONFIRM_DNS_CUTOVER"
-          : "CONFIRM_DNS_ROLLBACK";
+          : repoPath.endsWith("apply-route53-rollback.sh")
+            ? "CONFIRM_DNS_ROLLBACK"
+            : "CONFIRM_REGIONAL_ALB_APPLY";
         if (!source.includes(requiredConfirmation)) {
           findings.push({
             repoPath,
@@ -408,6 +427,32 @@ for (const scanRoot of scanRoots) {
             message: "Cleanup workflow must include both DB and snapshot cleanup confirmation phrases.",
           });
         }
+      }
+
+      if (repoPath === albApplyWorkflow) {
+        if (!source.includes("dr-alb-entrypoint-apply")) {
+          findings.push({
+            repoPath,
+            line: 1,
+            message: "ALB apply workflow must use the dr-alb-entrypoint-apply protected environment.",
+          });
+        }
+        if (!source.includes("I_APPROVE_REGIONAL_ALB_ENTRYPOINT_APPLY")) {
+          findings.push({
+            repoPath,
+            line: 1,
+            message: "ALB apply workflow must include I_APPROVE_REGIONAL_ALB_ENTRYPOINT_APPLY.",
+          });
+        }
+      }
+
+      if (repoPath === "scripts/dr/apply-regional-alb-entrypoint-approved.sh" &&
+        !source.includes("I_APPROVE_REGIONAL_ALB_ENTRYPOINT_APPLY")) {
+        findings.push({
+          repoPath,
+          line: 1,
+          message: "Regional ALB apply script must require I_APPROVE_REGIONAL_ALB_ENTRYPOINT_APPLY.",
+        });
       }
 
       if (repoPath === cleanupApplyWorkflow || repoPath.includes("cleanup-recovery") || repoPath.includes("cleanup-dr-snapshot")) {

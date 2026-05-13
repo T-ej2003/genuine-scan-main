@@ -1,0 +1,195 @@
+name: AWS DR ALB Apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Regional ALB/ACM operation"
+        required: true
+        type: choice
+        options:
+          - aws-regional-alb-inventory
+          - generate-regional-alb-plan
+          - apply-regional-alb-entrypoint-approved
+          - generate-route53-alb-cutover-plan
+      target_region_group:
+        description: "MSCQR region group"
+        required: true
+        type: choice
+        options:
+          - london
+          - mumbai
+          - capetown
+      aws_region:
+        description: "AWS region for the selected region group"
+        required: true
+        type: string
+      ec2_public_ip:
+        description: "Existing regional EC2 public IP"
+        required: false
+        type: string
+      domain_name:
+        description: "Apex domain name"
+        required: false
+        type: string
+        default: mscqr.com
+      www_domain_name:
+        description: "WWW domain name"
+        required: false
+        type: string
+        default: www.mscqr.com
+      hosted_zone_id:
+        description: "Route 53 hosted zone ID"
+        required: false
+        type: string
+        default: Z0569586VLFIGGVI7HAZ
+      alb_name:
+        description: "Optional ALB name override"
+        required: false
+        type: string
+      target_group_name:
+        description: "Optional target group name override"
+        required: false
+        type: string
+      alb_security_group_name:
+        description: "Optional ALB security group name override"
+        required: false
+        type: string
+      alb_dns_name:
+        description: "ALB DNS name for cutover plan generation"
+        required: false
+        type: string
+      alb_hosted_zone_id:
+        description: "ALB hosted zone ID for cutover plan generation"
+        required: false
+        type: string
+      rollback_alb_dns_name:
+        description: "Optional rollback ALB DNS name"
+        required: false
+        type: string
+      rollback_alb_hosted_zone_id:
+        description: "Optional rollback ALB hosted zone ID"
+        required: false
+        type: string
+      rollback_ip:
+        description: "Fallback rollback IP when no rollback ALB is provided"
+        required: false
+        type: string
+        default: 13.135.108.69
+      confirm_regional_alb_apply:
+        description: "Must equal I_APPROVE_REGIONAL_ALB_ENTRYPOINT_APPLY for apply"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  alb-entrypoint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: dr-alb-entrypoint-apply
+    env:
+      OPERATION: ${{ inputs.operation }}
+      TARGET_REGION_GROUP: ${{ inputs.target_region_group }}
+      AWS_REGION: ${{ inputs.aws_region }}
+      EC2_PUBLIC_IP: ${{ inputs.ec2_public_ip }}
+      DOMAIN_NAME: ${{ inputs.domain_name }}
+      WWW_DOMAIN_NAME: ${{ inputs.www_domain_name }}
+      HOSTED_ZONE_ID: ${{ inputs.hosted_zone_id }}
+      ALB_NAME: ${{ inputs.alb_name }}
+      TARGET_GROUP_NAME: ${{ inputs.target_group_name }}
+      ALB_SECURITY_GROUP_NAME: ${{ inputs.alb_security_group_name }}
+      ALB_DNS_NAME: ${{ inputs.alb_dns_name }}
+      ALB_HOSTED_ZONE_ID: ${{ inputs.alb_hosted_zone_id }}
+      ROLLBACK_ALB_DNS_NAME: ${{ inputs.rollback_alb_dns_name }}
+      ROLLBACK_ALB_HOSTED_ZONE_ID: ${{ inputs.rollback_alb_hosted_zone_id }}
+      ROLLBACK_IP: ${{ inputs.rollback_ip }}
+      CONFIRM_REGIONAL_ALB_APPLY: ${{ inputs.confirm_regional_alb_apply }}
+      AWS_DR_ALB_APPLY_ROLE_ARN: ${{ vars.AWS_DR_ALB_APPLY_ROLE_ARN }}
+      DR_ALB_APPLY_ROLE_TO_ASSUME: ${{ vars.DR_ALB_APPLY_ROLE_TO_ASSUME }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve ALB OIDC role
+        id: resolve_alb_role
+        run: |
+          set -euo pipefail
+          role_arn="${AWS_DR_ALB_APPLY_ROLE_ARN:-}"
+          if [ -z "$role_arn" ]; then
+            role_arn="${DR_ALB_APPLY_ROLE_TO_ASSUME:-}"
+          fi
+          if [ -z "$role_arn" ]; then
+            echo "::error::Set AWS_DR_ALB_APPLY_ROLE_ARN or DR_ALB_APPLY_ROLE_TO_ASSUME on the dr-alb-entrypoint-apply environment."
+            exit 2
+          fi
+          echo "::add-mask::$role_arn"
+          printf 'role_arn=%s\n' "$role_arn" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ steps.resolve_alb_role.outputs.role_arn }}
+
+      - name: Validate ALB operation inputs
+        run: |
+          set -euo pipefail
+          case "$TARGET_REGION_GROUP:$AWS_REGION" in
+            london:eu-west-2|mumbai:ap-south-1|capetown:af-south-1) ;;
+            *) echo "::error::aws_region does not match target_region_group."; exit 2 ;;
+          esac
+          if [ "$OPERATION" = "apply-regional-alb-entrypoint-approved" ]; then
+            [ "$CONFIRM_REGIONAL_ALB_APPLY" = "I_APPROVE_REGIONAL_ALB_ENTRYPOINT_APPLY" ] || {
+              echo "::error::confirm_regional_alb_apply must equal I_APPROVE_REGIONAL_ALB_ENTRYPOINT_APPLY."
+              exit 2
+            }
+          fi
+          if [ "$OPERATION" = "generate-route53-alb-cutover-plan" ]; then
+            [ -n "$ALB_DNS_NAME" ] || { echo "::error::alb_dns_name is required for cutover plan generation."; exit 2; }
+            [ -n "$ALB_HOSTED_ZONE_ID" ] || { echo "::error::alb_hosted_zone_id is required for cutover plan generation."; exit 2; }
+          fi
+          /bin/sh -n scripts/dr/aws-regional-alb-inventory.sh
+          /bin/sh -n scripts/dr/generate-regional-alb-plan.sh
+          /bin/sh -n scripts/dr/apply-regional-alb-entrypoint-approved.sh
+          /bin/sh -n scripts/dr/generate-route53-alb-cutover-plan.sh
+
+      - name: Run selected ALB operation
+        run: |
+          set -euo pipefail
+          case "$OPERATION" in
+            aws-regional-alb-inventory)
+              scripts/dr/aws-regional-alb-inventory.sh
+              ;;
+            generate-regional-alb-plan)
+              scripts/dr/generate-regional-alb-plan.sh
+              ;;
+            apply-regional-alb-entrypoint-approved)
+              scripts/dr/apply-regional-alb-entrypoint-approved.sh
+              ;;
+            generate-route53-alb-cutover-plan)
+              scripts/dr/generate-route53-alb-cutover-plan.sh
+              ;;
+            *)
+              echo "::error::Unsupported operation: $OPERATION"
+              exit 2
+              ;;
+          esac
+
+      - name: Write immutable evidence manifest
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dr
+          find artifacts/dr -type f -print0 | sort -z | xargs -0 shasum -a 256 > artifacts/dr/sha256-manifest.txt
+
+      - name: Upload immutable DR evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-alb-entrypoint-evidence-${{ inputs.operation }}-${{ github.run_id }}
+          path: artifacts/dr
+          if-no-files-found: error
+          retention-days: 90

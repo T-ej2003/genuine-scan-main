@@ -14,6 +14,7 @@ Create these GitHub Environments and require reviewers for each:
 - `dr-object-storage-write-test`
 - `dr-standby-db-test`
 - `dr-recovery-cleanup`
+- `dr-alb-entrypoint-apply`
 
 Recommended environment controls:
 
@@ -32,6 +33,8 @@ Set these environment-scoped variables:
 - `DR_OBJECT_STORAGE_WRITE_TEST_ROLE_TO_ASSUME` on `dr-object-storage-write-test`.
 - Preferred: `AWS_DR_RECOVERY_CLEANUP_ROLE_ARN` on `dr-recovery-cleanup`.
 - Backward-compatible: `DR_RECOVERY_CLEANUP_ROLE_TO_ASSUME` on `dr-recovery-cleanup`.
+- Preferred: `AWS_DR_ALB_APPLY_ROLE_ARN` on `dr-alb-entrypoint-apply`.
+- Backward-compatible: `DR_ALB_APPLY_ROLE_TO_ASSUME` on `dr-alb-entrypoint-apply`.
 
 The workflow uses GitHub OIDC through `aws-actions/configure-aws-credentials@v4`. Long-lived AWS access keys are not required.
 
@@ -45,6 +48,7 @@ Use focused manual workflows instead of the old combined apply workflow:
 .github/workflows/aws-dr-db-apply.yml
 .github/workflows/aws-dr-cleanup-apply.yml
 .github/workflows/aws-dr-object-storage-apply.yml
+.github/workflows/aws-dr-alb-apply.yml
 ```
 
 Supported operations:
@@ -56,6 +60,10 @@ Supported operations:
 - `apply-region-local-db-restore-approved`
 - `object-storage-write-test-approved`
 - `cleanup-recovery-db-approved`
+- `aws-regional-alb-inventory`
+- `generate-regional-alb-plan`
+- `apply-regional-alb-entrypoint-approved`
+- `generate-route53-alb-cutover-plan`
 
 Each operation requires both:
 
@@ -74,6 +82,7 @@ Each operation requires both:
 - Recovery DB cleanup: `I_APPROVE_RECOVERY_DB_CLEANUP`
 - Skip final recovery DB cleanup snapshot: `I_APPROVE_SKIP_FINAL_SNAPSHOT`
 - Copied DR snapshot cleanup: `I_APPROVE_DR_SNAPSHOT_CLEANUP`
+- Regional ALB entrypoint apply: `I_APPROVE_REGIONAL_ALB_ENTRYPOINT_APPLY`
 
 ## Immutable Evidence
 
@@ -97,6 +106,7 @@ Templates:
 - `rds-restore-recovery-target-policy.template.json`
 - `recovery-cleanup-policy.template.json`
 - `object-storage-write-test-policy.template.json`
+- `alb-entrypoint-apply-policy.template.json`
 - `dr-explicit-deny-guardrail-policy.template.json`
 
 Replace placeholders such as `<AWS_ACCOUNT_ID>`, `<GITHUB_ORG>`, `<GITHUB_REPO>`, `<HOSTED_ZONE_ID>`, `<NORMALIZED_RECORD_NAME>`, `<TARGET_REGION>`, and `<BUCKET_NAME>` before applying in AWS.
@@ -111,4 +121,5 @@ Replace placeholders such as `<AWS_ACCOUNT_ID>`, `<GITHUB_ORG>`, `<GITHUB_REPO>`
 - Snapshot copy and region-local restore are manual-only and protected by `dr-db-restore`.
 - Recovery DB and copied snapshot cleanup are isolated behind `dr-recovery-cleanup`, require a reviewer, should be restricted to `main`, and must never target production identifiers.
 - Object storage write testing writes only under `dr-tests/<timestamp>/`.
+- Regional ALB entrypoint apply creates or reuses ALB/ACM/target group resources, may UPSERT ACM validation CNAMEs, and does not cut over public DNS.
 - Bucket deletion, DB deletion, DB failover, recursive object deletion, Docker prune, and MinIO decommission remain out of scope.

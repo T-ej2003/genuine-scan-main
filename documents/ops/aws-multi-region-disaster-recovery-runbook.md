@@ -37,6 +37,29 @@ Do not move DNS until app, DB, object storage, TLS, rollback, and write gate are
 
 Do not run apply commands without incident commander approval.
 
+## Regional HTTPS Entrypoint
+
+Route 53 is authoritative for `mscqr.com`. The professional public HTTPS path for all regions is regional ALB plus ACM:
+
+```text
+Route 53 -> regional ALB HTTPS 443 with ACM -> EC2 frontend HTTP 80
+```
+
+This avoids copying Let's Encrypt private keys into standby containers. London currently still has working local TLS; Mumbai and Cape Town should receive public HTTPS through regional ALBs before any production DNS cutover is considered.
+
+Use `AWS DR ALB Apply` for inventory, plan generation, and protected ALB/ACM apply. This workflow does not cut over `mscqr.com` or `www.mscqr.com`. DNS cutover remains in `AWS DR DNS Apply`.
+
+Recommended Mumbai entrypoint sequence:
+
+1. `AWS DR ALB Apply` -> `aws-regional-alb-inventory`.
+2. `AWS DR ALB Apply` -> `generate-regional-alb-plan`.
+3. `AWS DR ALB Apply` -> `apply-regional-alb-entrypoint-approved`.
+4. Generate a regional test record plan for `mumbai-test.mscqr.com`.
+5. Apply the test record only through `AWS DR DNS Apply` after approval.
+6. Verify `https://mumbai-test.mscqr.com/healthz`.
+7. Generate the production ALB cutover plan.
+8. Use `AWS DR DNS Apply` only after final incident commander approval.
+
 ## Operator Sequence
 
 1. Confirm outage.
