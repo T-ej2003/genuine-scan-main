@@ -199,7 +199,8 @@ cert_arn="$(aws acm list-certificates \
   --query "CertificateSummaryList[?DomainName=='$DOMAIN_NAME'].CertificateArn | [0]" \
   --output text)"
 if [ "$cert_arn" = "None" ] || [ -z "$cert_arn" ]; then
-  token="$(printf '%s-%s' "$TARGET_REGION_GROUP" "$DOMAIN_NAME" | /usr/bin/tr -cd '[:alnum:]-' | /usr/bin/cut -c1-32)"
+  token="$(printf '%s_%s_%s' "$TARGET_REGION_GROUP" "$AWS_REGION" "$DOMAIN_NAME" | /usr/bin/tr -c 'A-Za-z0-9_' '_' | /usr/bin/cut -c1-32)"
+  echo "Using ACM idempotency token: $token"
   cert_arn="$(aws acm request-certificate \
     --region "$AWS_REGION" \
     --domain-name "$DOMAIN_NAME" \
