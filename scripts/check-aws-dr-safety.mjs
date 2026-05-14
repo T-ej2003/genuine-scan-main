@@ -14,6 +14,7 @@ const dbApplyWorkflow = ".github/workflows/aws-dr-db-apply.yml";
 const cleanupApplyWorkflow = ".github/workflows/aws-dr-cleanup-apply.yml";
 const objectStorageApplyWorkflow = ".github/workflows/aws-dr-object-storage-apply.yml";
 const albApplyWorkflow = ".github/workflows/aws-dr-alb-apply.yml";
+const hardeningApplyWorkflow = ".github/workflows/aws-dr-hardening-apply.yml";
 const operationsWorkflow = ".github/workflows/aws-dr-operations.yml";
 const applyWorkflowPaths = new Set([
   dnsApplyWorkflow,
@@ -22,6 +23,7 @@ const applyWorkflowPaths = new Set([
   cleanupApplyWorkflow,
   objectStorageApplyWorkflow,
   albApplyWorkflow,
+  hardeningApplyWorkflow,
 ]);
 const allowedRdsRestoreScripts = new Set([
   "scripts/dr/apply-db-restore-approved.sh",
@@ -108,6 +110,38 @@ const gatedApplyScripts = new Map([
       workflow: albApplyWorkflow,
     },
   ],
+  [
+    "scripts/dr/apply-regional-cloudwatch-alarms-approved.sh",
+    {
+      confirmation: "I_APPROVE_CLOUDWATCH_ALARM_APPLY",
+      environment: "dr-hardening-apply",
+      workflow: hardeningApplyWorkflow,
+    },
+  ],
+  [
+    "scripts/dr/apply-alb-access-logs-approved.sh",
+    {
+      confirmation: "I_APPROVE_ALB_ACCESS_LOGS_APPLY",
+      environment: "dr-hardening-apply",
+      workflow: hardeningApplyWorkflow,
+    },
+  ],
+  [
+    "scripts/dr/apply-waf-count-mode-approved.sh",
+    {
+      confirmation: "I_APPROVE_WAF_COUNT_MODE_APPLY",
+      environment: "dr-hardening-apply",
+      workflow: hardeningApplyWorkflow,
+    },
+  ],
+  [
+    "scripts/dr/apply-asg-launch-template-approved.sh",
+    {
+      confirmation: "I_APPROVE_REGIONAL_ASG_CREATE_AND_ATTACH",
+      environment: "dr-hardening-apply",
+      workflow: hardeningApplyWorkflow,
+    },
+  ],
 ]);
 const selfPath = "scripts/check-aws-dr-safety.mjs";
 const mutationOperationNames = [
@@ -120,6 +154,10 @@ const mutationOperationNames = [
   "cleanup-recovery-db-approved",
   "cleanup-dr-snapshot-approved",
   "apply-regional-alb-entrypoint-approved",
+  "apply-cloudwatch-alarms",
+  "apply-alb-access-logs",
+  "apply-waf-count-mode",
+  "apply-asg-launch-template-approved",
 ];
 
 const dangerousPatterns = [
@@ -141,6 +179,13 @@ const dangerousPatterns = [
   { id: "elbv2-delete-listener", pattern: /\baws\s+elbv2\s+delete-listener\b/i },
   { id: "acm-delete-certificate", pattern: /\baws\s+acm\s+delete-certificate\b/i },
   { id: "route53-delete-hosted-zone", pattern: /\baws\s+route53\s+delete-hosted-zone\b/i },
+  { id: "cloudwatch-delete-alarms", pattern: /\baws\s+cloudwatch\s+delete-alarms\b/i },
+  { id: "wafv2-delete-web-acl", pattern: /\baws\s+wafv2\s+delete-web-acl\b/i },
+  { id: "wafv2-disassociate-web-acl", pattern: /\baws\s+wafv2\s+disassociate-web-acl\b/i },
+  { id: "autoscaling-delete-auto-scaling-group", pattern: /\baws\s+autoscaling\s+delete-auto-scaling-group\b/i },
+  { id: "autoscaling-terminate-instance", pattern: /\baws\s+autoscaling\s+terminate-instance-in-auto-scaling-group\b/i },
+  { id: "ec2-terminate-instances", pattern: /\baws\s+ec2\s+terminate-instances\b/i },
+  { id: "ec2-delete-launch-template", pattern: /\baws\s+ec2\s+delete-launch-template\b/i },
 ];
 
 function walk(dir) {
@@ -443,6 +488,25 @@ for (const scanRoot of scanRoots) {
             line: 1,
             message: "ALB apply workflow must include I_APPROVE_REGIONAL_ALB_ENTRYPOINT_APPLY.",
           });
+        }
+      }
+
+      if (repoPath === hardeningApplyWorkflow) {
+        const requiredHardeningTokens = [
+          "dr-hardening-apply",
+          "I_APPROVE_CLOUDWATCH_ALARM_APPLY",
+          "I_APPROVE_ALB_ACCESS_LOGS_APPLY",
+          "I_APPROVE_WAF_COUNT_MODE_APPLY",
+          "I_APPROVE_REGIONAL_ASG_CREATE_AND_ATTACH",
+        ];
+        for (const token of requiredHardeningTokens) {
+          if (!source.includes(token)) {
+            findings.push({
+              repoPath,
+              line: 1,
+              message: `Hardening apply workflow must include ${token}.`,
+            });
+          }
         }
       }
 

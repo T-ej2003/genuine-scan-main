@@ -87,6 +87,24 @@ Recommended operations per region:
 5. `generate-waf-plan`.
 6. `generate-asg-launch-template-plan`.
 
+## Staged Hardening Apply
+
+Use `AWS DR Hardening Apply` only after readiness artifacts are reviewed. It is protected by `dr-hardening-apply` and exact confirmation tokens.
+
+Apply order:
+
+1. `verify-hardening-state` baseline.
+2. `apply-cloudwatch-alarms`.
+3. `apply-alb-access-logs`.
+4. `apply-waf-count-mode`.
+5. `verify-hardening-state`.
+6. `generate-asg-apply-plan`.
+7. `apply-asg-launch-template-approved` only after app state risks are resolved.
+
+Hardening does not perform production DNS cutover, delete AWS resources, mutate RDS, mutate application S3 buckets, copy Let's Encrypt keys, or move WAF rules to BLOCK mode. WAF remains COUNT mode only in this phase.
+
+ASG apply is intentionally last because current single-node assumptions may include node-local Redis, MinIO, secrets, sessions, migrations, worker behavior, and filesystem state. Do not use final production DNS cutover until at least the selected region has healthy multi-target evidence and a reviewed rollback plan.
+
 ## Operator Sequence
 
 1. Confirm outage.

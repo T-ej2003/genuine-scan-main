@@ -16,6 +16,7 @@ Create these GitHub Environments and require reviewers for each:
 - `dr-recovery-cleanup`
 - `dr-alb-entrypoint-apply`
 - `dr-regional-readiness`
+- `dr-hardening-apply`
 
 Recommended environment controls:
 
@@ -38,6 +39,8 @@ Set these environment-scoped variables:
 - Backward-compatible: `DR_ALB_APPLY_ROLE_TO_ASSUME` on `dr-alb-entrypoint-apply`.
 - Preferred: `AWS_DR_REGIONAL_READINESS_ROLE_ARN` on `dr-regional-readiness`.
 - Backward-compatible: `DR_REGIONAL_READINESS_ROLE_TO_ASSUME` on `dr-regional-readiness`.
+- Preferred: `AWS_DR_HARDENING_APPLY_ROLE_ARN` on `dr-hardening-apply`.
+- Backward-compatible: `DR_HARDENING_APPLY_ROLE_TO_ASSUME` on `dr-hardening-apply`.
 
 The workflow uses GitHub OIDC through `aws-actions/configure-aws-credentials@v4`. Long-lived AWS access keys are not required.
 
@@ -52,6 +55,7 @@ Use focused manual workflows instead of the old combined apply workflow:
 .github/workflows/aws-dr-cleanup-apply.yml
 .github/workflows/aws-dr-object-storage-apply.yml
 .github/workflows/aws-dr-alb-apply.yml
+.github/workflows/aws-dr-hardening-apply.yml
 ```
 
 Read-only scaling and reliability evidence uses:
@@ -74,6 +78,12 @@ Supported operations:
 - `apply-regional-alb-entrypoint-approved`
 - `generate-route53-regional-test-records`
 - `generate-route53-alb-cutover-plan`
+- `apply-cloudwatch-alarms`
+- `apply-alb-access-logs`
+- `apply-waf-count-mode`
+- `generate-asg-apply-plan`
+- `apply-asg-launch-template-approved`
+- `verify-hardening-state`
 
 Readiness-only operations:
 
@@ -102,6 +112,10 @@ Each operation requires both:
 - Skip final recovery DB cleanup snapshot: `I_APPROVE_SKIP_FINAL_SNAPSHOT`
 - Copied DR snapshot cleanup: `I_APPROVE_DR_SNAPSHOT_CLEANUP`
 - Regional ALB entrypoint apply: `I_APPROVE_REGIONAL_ALB_ENTRYPOINT_APPLY`
+- CloudWatch alarm apply: `I_APPROVE_CLOUDWATCH_ALARM_APPLY`
+- ALB access log apply: `I_APPROVE_ALB_ACCESS_LOGS_APPLY`
+- WAF COUNT-mode apply: `I_APPROVE_WAF_COUNT_MODE_APPLY`
+- Regional ASG create and attach: `I_APPROVE_REGIONAL_ASG_CREATE_AND_ATTACH`
 
 ## Immutable Evidence
 
@@ -127,6 +141,7 @@ Templates:
 - `object-storage-write-test-policy.template.json`
 - `alb-entrypoint-apply-policy.template.json`
 - `regional-readiness-policy.template.json`
+- `hardening-apply-policy.template.json`
 - `dr-explicit-deny-guardrail-policy.template.json`
 
 Replace placeholders such as `<AWS_ACCOUNT_ID>`, `<GITHUB_ORG>`, `<GITHUB_REPO>`, `<HOSTED_ZONE_ID>`, `<NORMALIZED_RECORD_NAME>`, `<TARGET_REGION>`, and `<BUCKET_NAME>` before applying in AWS.
@@ -143,4 +158,5 @@ Replace placeholders such as `<AWS_ACCOUNT_ID>`, `<GITHUB_ORG>`, `<GITHUB_REPO>`
 - Object storage write testing writes only under `dr-tests/<timestamp>/`.
 - Regional ALB entrypoint apply creates or reuses ALB/ACM/target group resources, selects one public IGW-routed ALB subnet per Availability Zone, may call `set-subnets` to correct an existing ALB subnet set, may UPSERT ACM validation CNAMEs, and does not cut over public DNS.
 - Regional readiness is read/plan-only. It gathers ALB/target/EC2/CloudWatch evidence and generates alarm, access-log, WAF, and ASG plans without enabling those services.
+- Hardening apply is manual-only and protected by `dr-hardening-apply`. CloudWatch alarms, ALB access logs, and WAF COUNT mode are staged before any ASG apply. ASG apply is the highest-risk hardening step and must not be run until app state, secrets, Redis, MinIO, sessions, and filesystem behavior are reviewed.
 - Bucket deletion, DB deletion, DB failover, recursive object deletion, Docker prune, and MinIO decommission remain out of scope.

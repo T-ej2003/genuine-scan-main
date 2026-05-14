@@ -359,6 +359,90 @@ Recommended readiness sequence per region:
 
 Do not proceed to final production DNS cutover until test-record validation, scaling readiness, observability readiness, and rollback evidence are all captured for both Mumbai and Cape Town.
 
+## Approved Regional Hardening Apply
+
+After readiness plans are reviewed, use the hardening workflow for staged, approval-gated changes:
+
+```text
+GitHub repo -> Actions -> AWS DR Hardening Apply -> Run workflow
+```
+
+Required protected environment:
+
+- `dr-hardening-apply`
+
+Required environment variable on that environment:
+
+- Preferred: `AWS_DR_HARDENING_APPLY_ROLE_ARN`
+- Backward-compatible: `DR_HARDENING_APPLY_ROLE_TO_ASSUME`
+
+Confirmation tokens:
+
+- CloudWatch alarms: `I_APPROVE_CLOUDWATCH_ALARM_APPLY`
+- ALB access logs: `I_APPROVE_ALB_ACCESS_LOGS_APPLY`
+- WAF COUNT mode: `I_APPROVE_WAF_COUNT_MODE_APPLY`
+- ASG create and attach: `I_APPROVE_REGIONAL_ASG_CREATE_AND_ATTACH`
+
+Safe hardening order per region:
+
+1. `verify-hardening-state` baseline.
+2. `apply-cloudwatch-alarms`.
+3. `apply-alb-access-logs`.
+4. `apply-waf-count-mode`.
+5. `verify-hardening-state`.
+6. `generate-asg-apply-plan`.
+7. Run `apply-asg-launch-template-approved` only after reviewing node-local Redis, MinIO, secrets, migrations, sessions, filesystem state, background workers, and sticky behavior.
+8. Consider production DNS cutover only after ASG health and app state risks are solved.
+
+Rollback notes:
+
+- CloudWatch alarm changes are non-traffic-impacting.
+- ALB access logs are non-traffic-impacting, but require an approved logging bucket.
+- WAF COUNT mode is non-blocking; do not move rules to BLOCK in this phase.
+- ASG apply creates extra capacity and attaches it to the target group. It does not detach or delete the source instance, terminate instances, or change DNS.
+
+Mumbai hardening values:
+
+```text
+target_region_group: mumbai
+aws_region: ap-south-1
+ec2_public_ip: 15.206.45.108
+alb_arn: arn:aws:elasticloadbalancing:ap-south-1:368992683803:loadbalancer/app/mscqr-mumbai-alb/025ad0cb77546ee0
+alb_dns_name: mscqr-mumbai-alb-1249752376.ap-south-1.elb.amazonaws.com
+target_group_arn: arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgroup/mscqr-mumbai-frontend-tg/68982ccd4d8c26c1
+source_instance_id: i-04ae3b689ab72a68a
+source_ami: ami-07216ac99dc46a187
+source_instance_type: t3.medium
+source_security_group: sg-0771ea7e59f7a49d4
+test_hostname: dr-mumbai.mscqr.com
+alb_access_logs_prefix: mscqr/alb/mumbai
+waf_web_acl_name: mscqr-mumbai-regional-waf
+min_size: 2
+desired_capacity: 2
+max_size: 4
+```
+
+Cape Town hardening values:
+
+```text
+target_region_group: capetown
+aws_region: af-south-1
+ec2_public_ip: 15.240.28.113
+alb_arn: arn:aws:elasticloadbalancing:af-south-1:368992683803:loadbalancer/app/mscqr-capetown-alb/b7defd5707ad181c
+alb_dns_name: mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com
+target_group_arn: arn:aws:elasticloadbalancing:af-south-1:368992683803:targetgroup/mscqr-capetown-frontend-tg/a9b43fd2d346e26d
+source_instance_id: i-064223a25caf64770
+source_ami: ami-0026d53e1887d8949
+source_instance_type: t3.medium
+source_security_group: sg-0d8f560e4f6452aa5
+test_hostname: dr-capetown.mscqr.com
+alb_access_logs_prefix: mscqr/alb/capetown
+waf_web_acl_name: mscqr-capetown-regional-waf
+min_size: 2
+desired_capacity: 2
+max_size: 4
+```
+
 ## Approved Recovery Cleanup
 
 Cleanup is destructive to test recovery resources. Run it only after evidence artifacts are captured and the incident commander approves cleanup. Never target production DBs, production snapshots, automated `rds:` snapshots, S3, MinIO, DNS, or London/primary resources.

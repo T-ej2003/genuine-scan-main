@@ -1,0 +1,241 @@
+name: AWS DR Hardening Apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Approval-gated DR hardening operation"
+        required: true
+        type: choice
+        options:
+          - apply-cloudwatch-alarms
+          - apply-alb-access-logs
+          - apply-waf-count-mode
+          - generate-asg-apply-plan
+          - apply-asg-launch-template-approved
+          - verify-hardening-state
+      target_region_group:
+        description: "MSCQR standby region group"
+        required: true
+        type: choice
+        options:
+          - mumbai
+          - capetown
+      aws_region:
+        description: "AWS region"
+        required: true
+        type: string
+      ec2_public_ip:
+        description: "Regional EC2 public IP"
+        required: false
+        type: string
+      alb_arn:
+        description: "Regional ALB ARN"
+        required: false
+        type: string
+      alb_dns_name:
+        description: "Regional ALB DNS name"
+        required: false
+        type: string
+      target_group_arn:
+        description: "Regional target group ARN"
+        required: false
+        type: string
+      source_instance_id:
+        description: "Existing source EC2 instance ID"
+        required: false
+        type: string
+      source_ami:
+        description: "Approved source AMI for launch template"
+        required: false
+        type: string
+      source_instance_type:
+        description: "Approved instance type for launch template"
+        required: false
+        type: string
+        default: t3.medium
+      source_security_group:
+        description: "Approved app security group for launch template"
+        required: false
+        type: string
+      test_hostname:
+        description: "Regional test hostname"
+        required: false
+        type: string
+      sns_topic_arn:
+        description: "Optional SNS topic ARN for alarms"
+        required: false
+        type: string
+      alb_access_logs_bucket:
+        description: "Approved existing S3 bucket for ALB access logs"
+        required: false
+        type: string
+      alb_access_logs_prefix:
+        description: "S3 prefix for ALB access logs"
+        required: false
+        type: string
+      waf_web_acl_name:
+        description: "Regional WAF WebACL name"
+        required: false
+        type: string
+      min_size:
+        description: "ASG minimum size"
+        required: false
+        type: string
+        default: "2"
+      desired_capacity:
+        description: "ASG desired capacity"
+        required: false
+        type: string
+        default: "2"
+      max_size:
+        description: "ASG maximum size"
+        required: false
+        type: string
+        default: "4"
+      confirm_cloudwatch_alarm_apply:
+        description: "Must equal I_APPROVE_CLOUDWATCH_ALARM_APPLY"
+        required: false
+        type: string
+      confirm_alb_access_logs_apply:
+        description: "Must equal I_APPROVE_ALB_ACCESS_LOGS_APPLY"
+        required: false
+        type: string
+      confirm_waf_count_mode_apply:
+        description: "Must equal I_APPROVE_WAF_COUNT_MODE_APPLY"
+        required: false
+        type: string
+      confirm_asg_apply:
+        description: "Must equal I_APPROVE_REGIONAL_ASG_CREATE_AND_ATTACH"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  hardening-apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: dr-hardening-apply
+    env:
+      OPERATION: ${{ inputs.operation }}
+      TARGET_REGION_GROUP: ${{ inputs.target_region_group }}
+      AWS_REGION: ${{ inputs.aws_region }}
+      EC2_PUBLIC_IP: ${{ inputs.ec2_public_ip }}
+      ALB_ARN: ${{ inputs.alb_arn }}
+      ALB_DNS_NAME: ${{ inputs.alb_dns_name }}
+      TARGET_GROUP_ARN: ${{ inputs.target_group_arn }}
+      SOURCE_INSTANCE_ID: ${{ inputs.source_instance_id }}
+      SOURCE_AMI: ${{ inputs.source_ami }}
+      SOURCE_INSTANCE_TYPE: ${{ inputs.source_instance_type }}
+      SOURCE_SECURITY_GROUP: ${{ inputs.source_security_group }}
+      TEST_HOSTNAME: ${{ inputs.test_hostname }}
+      SNS_TOPIC_ARN: ${{ inputs.sns_topic_arn }}
+      ALB_ACCESS_LOGS_BUCKET: ${{ inputs.alb_access_logs_bucket }}
+      ALB_ACCESS_LOGS_PREFIX: ${{ inputs.alb_access_logs_prefix }}
+      WAF_WEB_ACL_NAME: ${{ inputs.waf_web_acl_name }}
+      MIN_SIZE: ${{ inputs.min_size }}
+      DESIRED_CAPACITY: ${{ inputs.desired_capacity }}
+      MAX_SIZE: ${{ inputs.max_size }}
+      CONFIRM_CLOUDWATCH_ALARM_APPLY: ${{ inputs.confirm_cloudwatch_alarm_apply }}
+      CONFIRM_ALB_ACCESS_LOGS_APPLY: ${{ inputs.confirm_alb_access_logs_apply }}
+      CONFIRM_WAF_COUNT_MODE_APPLY: ${{ inputs.confirm_waf_count_mode_apply }}
+      CONFIRM_ASG_APPLY: ${{ inputs.confirm_asg_apply }}
+      AWS_DR_HARDENING_APPLY_ROLE_ARN: ${{ vars.AWS_DR_HARDENING_APPLY_ROLE_ARN }}
+      DR_HARDENING_APPLY_ROLE_TO_ASSUME: ${{ vars.DR_HARDENING_APPLY_ROLE_TO_ASSUME }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve hardening OIDC role
+        id: resolve_role
+        run: |
+          set -euo pipefail
+          role_arn="${AWS_DR_HARDENING_APPLY_ROLE_ARN:-}"
+          if [ -z "$role_arn" ]; then role_arn="${DR_HARDENING_APPLY_ROLE_TO_ASSUME:-}"; fi
+          if [ -z "$role_arn" ]; then
+            echo "::error::Set AWS_DR_HARDENING_APPLY_ROLE_ARN or DR_HARDENING_APPLY_ROLE_TO_ASSUME on dr-hardening-apply."
+            exit 2
+          fi
+          echo "::add-mask::$role_arn"
+          printf 'role_arn=%s\n' "$role_arn" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ steps.resolve_role.outputs.role_arn }}
+
+      - name: Validate hardening inputs
+        run: |
+          set -euo pipefail
+          case "$TARGET_REGION_GROUP:$AWS_REGION" in
+            mumbai:ap-south-1|capetown:af-south-1) ;;
+            *) echo "::error::aws_region does not match target_region_group."; exit 2 ;;
+          esac
+          case "$OPERATION" in
+            apply-cloudwatch-alarms)
+              [ "$CONFIRM_CLOUDWATCH_ALARM_APPLY" = "I_APPROVE_CLOUDWATCH_ALARM_APPLY" ] || { echo "::error::Missing CloudWatch alarm confirmation."; exit 2; }
+              ;;
+            apply-alb-access-logs)
+              [ "$CONFIRM_ALB_ACCESS_LOGS_APPLY" = "I_APPROVE_ALB_ACCESS_LOGS_APPLY" ] || { echo "::error::Missing ALB access log confirmation."; exit 2; }
+              ;;
+            apply-waf-count-mode)
+              [ "$CONFIRM_WAF_COUNT_MODE_APPLY" = "I_APPROVE_WAF_COUNT_MODE_APPLY" ] || { echo "::error::Missing WAF COUNT-mode confirmation."; exit 2; }
+              ;;
+            apply-asg-launch-template-approved)
+              [ "$CONFIRM_ASG_APPLY" = "I_APPROVE_REGIONAL_ASG_CREATE_AND_ATTACH" ] || { echo "::error::Missing ASG confirmation."; exit 2; }
+              ;;
+          esac
+          /bin/sh -n scripts/dr/apply-regional-cloudwatch-alarms-approved.sh
+          /bin/sh -n scripts/dr/apply-alb-access-logs-approved.sh
+          /bin/sh -n scripts/dr/apply-waf-count-mode-approved.sh
+          /bin/sh -n scripts/dr/generate-asg-apply-plan.sh
+          /bin/sh -n scripts/dr/apply-asg-launch-template-approved.sh
+          /bin/sh -n scripts/dr/verify-hardening-state.sh
+
+      - name: Run selected hardening operation
+        run: |
+          set -euo pipefail
+          case "$OPERATION" in
+            apply-cloudwatch-alarms)
+              scripts/dr/apply-regional-cloudwatch-alarms-approved.sh
+              ;;
+            apply-alb-access-logs)
+              scripts/dr/apply-alb-access-logs-approved.sh
+              ;;
+            apply-waf-count-mode)
+              scripts/dr/apply-waf-count-mode-approved.sh
+              ;;
+            generate-asg-apply-plan)
+              scripts/dr/generate-asg-apply-plan.sh
+              ;;
+            apply-asg-launch-template-approved)
+              scripts/dr/apply-asg-launch-template-approved.sh
+              ;;
+            verify-hardening-state)
+              scripts/dr/verify-hardening-state.sh
+              ;;
+            *)
+              echo "::error::Unsupported operation: $OPERATION"
+              exit 2
+              ;;
+          esac
+
+      - name: Write immutable evidence manifest
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dr
+          find artifacts/dr -type f -print0 | sort -z | xargs -0 shasum -a 256 > artifacts/dr/sha256-manifest.txt
+
+      - name: Upload immutable DR evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-hardening-apply-evidence-${{ inputs.operation }}-${{ github.run_id }}
+          path: artifacts/dr
+          if-no-files-found: error
+          retention-days: 90

@@ -1,0 +1,186 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/dr/common.sh
+. "$SCRIPT_DIR/common.sh"
+
+require_repo_root
+require_command aws
+require_command node
+
+TARGET_REGION_GROUP="${TARGET_REGION_GROUP:-${1:-}}"
+AWS_REGION="${AWS_REGION:-}"
+SOURCE_INSTANCE_ID="${SOURCE_INSTANCE_ID:-${INSTANCE_ID:-}}"
+SOURCE_AMI="${SOURCE_AMI:-}"
+SOURCE_INSTANCE_TYPE="${SOURCE_INSTANCE_TYPE:-}"
+SOURCE_SECURITY_GROUP="${SOURCE_SECURITY_GROUP:-}"
+TARGET_GROUP_ARN="${TARGET_GROUP_ARN:-}"
+MIN_SIZE="${MIN_SIZE:-2}"
+DESIRED_CAPACITY="${DESIRED_CAPACITY:-2}"
+MAX_SIZE="${MAX_SIZE:-4}"
+CONFIRM_ASG_APPLY="${CONFIRM_ASG_APPLY:-}"
+
+case "$TARGET_REGION_GROUP" in
+  mumbai|capetown) ;;
+  *) echo "TARGET_REGION_GROUP must be mumbai or capetown." >&2; exit 2 ;;
+esac
+
+case "$TARGET_REGION_GROUP:$AWS_REGION" in
+  mumbai:ap-south-1|capetown:af-south-1) ;;
+  *) echo "AWS_REGION does not match TARGET_REGION_GROUP." >&2; exit 2 ;;
+esac
+
+if [ "$CONFIRM_ASG_APPLY" != "I_APPROVE_REGIONAL_ASG_CREATE_AND_ATTACH" ]; then
+  echo "Refusing ASG apply without CONFIRM_ASG_APPLY=I_APPROVE_REGIONAL_ASG_CREATE_AND_ATTACH." >&2
+  exit 2
+fi
+
+if [ -z "$SOURCE_INSTANCE_ID" ] || [ -z "$TARGET_GROUP_ARN" ]; then
+  echo "SOURCE_INSTANCE_ID and TARGET_GROUP_ARN are required." >&2
+  exit 2
+fi
+
+create_artifact_dir
+out_dir="$DR_ARTIFACT_DIR/hardening-asg-apply/$TARGET_REGION_GROUP"
+/bin/mkdir -p "$out_dir"
+
+aws ec2 describe-instances --region "$AWS_REGION" --instance-ids "$SOURCE_INSTANCE_ID" --output json > "$out_dir/source-instance.json"
+
+if [ -z "$SOURCE_AMI" ]; then SOURCE_AMI="$(aws ec2 describe-instances --region "$AWS_REGION" --instance-ids "$SOURCE_INSTANCE_ID" --query 'Reservations[0].Instances[0].ImageId' --output text)"; fi
+if [ -z "$SOURCE_INSTANCE_TYPE" ]; then SOURCE_INSTANCE_TYPE="$(aws ec2 describe-instances --region "$AWS_REGION" --instance-ids "$SOURCE_INSTANCE_ID" --query 'Reservations[0].Instances[0].InstanceType' --output text)"; fi
+if [ -z "$SOURCE_SECURITY_GROUP" ]; then SOURCE_SECURITY_GROUP="$(aws ec2 describe-instances --region "$AWS_REGION" --instance-ids "$SOURCE_INSTANCE_ID" --query 'Reservations[0].Instances[0].SecurityGroups[0].GroupId' --output text)"; fi
+
+vpc_id="$(aws ec2 describe-instances --region "$AWS_REGION" --instance-ids "$SOURCE_INSTANCE_ID" --query 'Reservations[0].Instances[0].VpcId' --output text)"
+iam_profile_arn="$(aws ec2 describe-instances --region "$AWS_REGION" --instance-ids "$SOURCE_INSTANCE_ID" --query 'Reservations[0].Instances[0].IamInstanceProfile.Arn' --output text)"
+subnets_json="$out_dir/candidate-subnets.json"
+route_tables_json="$out_dir/route-tables.json"
+selected_json="$out_dir/selected-app-subnets.json"
+selected_tsv="$out_dir/selected-app-subnets.tsv"
+aws ec2 describe-subnets --region "$AWS_REGION" --filters "Name=vpc-id,Values=$vpc_id" --output json > "$subnets_json"
+aws ec2 describe-route-tables --region "$AWS_REGION" --filters "Name=vpc-id,Values=$vpc_id" --output json > "$route_tables_json"
+selected_subnet_ids="$(select_unique_az_alb_subnets "$subnets_json" "$route_tables_json" "$selected_json" "$selected_tsv")"
+selected_subnet_csv="$(printf '%s\n' "$selected_subnet_ids" | /usr/bin/tr ' ' ',')"
+
+launch_template_name="mscqr-$TARGET_REGION_GROUP-dr-lt"
+asg_name="mscqr-$TARGET_REGION_GROUP-dr-asg"
+launch_template_data="$out_dir/launch-template-data.json"
+
+node --input-type=module - "$launch_template_data" "$SOURCE_AMI" "$SOURCE_INSTANCE_TYPE" "$SOURCE_SECURITY_GROUP" "$iam_profile_arn" "$TARGET_REGION_GROUP" <<'NODE'
+import fs from "node:fs";
+const [path, imageId, instanceType, securityGroup, iamProfileArn, regionGroup] = process.argv.slice(2);
+const data = {
+  ImageId: imageId,
+  InstanceType: instanceType,
+  SecurityGroupIds: [securityGroup],
+  MetadataOptions: {
+    HttpTokens: "required",
+    HttpEndpoint: "enabled",
+  },
+  TagSpecifications: [
+    {
+      ResourceType: "instance",
+      Tags: [
+        { Key: "Project", Value: "MSCQR" },
+        { Key: "Purpose", Value: "DR" },
+        { Key: "RegionGroup", Value: regionGroup },
+      ],
+    },
+  ],
+};
+if (iamProfileArn && iamProfileArn !== "None") {
+  data.IamInstanceProfile = { Arn: iamProfileArn };
+}
+fs.writeFileSync(path, JSON.stringify(data, null, 2));
+NODE
+
+launch_template_id="$(aws ec2 describe-launch-templates \
+  --region "$AWS_REGION" \
+  --launch-template-names "$launch_template_name" \
+  --query 'LaunchTemplates[0].LaunchTemplateId' \
+  --output text 2>/dev/null || true)"
+
+if [ "$launch_template_id" = "None" ] || [ -z "$launch_template_id" ]; then
+  aws ec2 create-launch-template \
+    --region "$AWS_REGION" \
+    --launch-template-name "$launch_template_name" \
+    --launch-template-data "file://$launch_template_data" \
+    --tag-specifications "ResourceType=launch-template,Tags=[{Key=Project,Value=MSCQR},{Key=Purpose,Value=DR},{Key=RegionGroup,Value=$TARGET_REGION_GROUP}]" \
+    --output json > "$out_dir/create-launch-template.json"
+  launch_template_id="$(node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); console.log(p.LaunchTemplate.LaunchTemplateId)' "$out_dir/create-launch-template.json")"
+  launch_template_version="$(node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); console.log(p.LaunchTemplate.LatestVersionNumber)' "$out_dir/create-launch-template.json")"
+else
+  aws ec2 describe-launch-templates --region "$AWS_REGION" --launch-template-ids "$launch_template_id" --output json > "$out_dir/existing-launch-template.json"
+  launch_template_version="$(aws ec2 describe-launch-templates --region "$AWS_REGION" --launch-template-ids "$launch_template_id" --query 'LaunchTemplates[0].LatestVersionNumber' --output text)"
+fi
+
+asg_exists="$(aws autoscaling describe-auto-scaling-groups \
+  --region "$AWS_REGION" \
+  --auto-scaling-group-names "$asg_name" \
+  --query 'length(AutoScalingGroups)' \
+  --output text)"
+
+if [ "$asg_exists" = "0" ]; then
+  aws autoscaling create-auto-scaling-group \
+    --region "$AWS_REGION" \
+    --auto-scaling-group-name "$asg_name" \
+    --launch-template "LaunchTemplateId=$launch_template_id,Version=$launch_template_version" \
+    --min-size "$MIN_SIZE" \
+    --desired-capacity "$DESIRED_CAPACITY" \
+    --max-size "$MAX_SIZE" \
+    --vpc-zone-identifier "$selected_subnet_csv" \
+    --target-group-arns "$TARGET_GROUP_ARN" \
+    --health-check-type ELB \
+    --health-check-grace-period 300 \
+    --tags ResourceId="$asg_name",ResourceType=auto-scaling-group,Key=Project,Value=MSCQR,PropagateAtLaunch=true ResourceId="$asg_name",ResourceType=auto-scaling-group,Key=Purpose,Value=DR,PropagateAtLaunch=true ResourceId="$asg_name",ResourceType=auto-scaling-group,Key=RegionGroup,Value="$TARGET_REGION_GROUP",PropagateAtLaunch=true \
+    > "$out_dir/create-asg.log" 2>&1
+else
+  aws autoscaling describe-auto-scaling-groups --region "$AWS_REGION" --auto-scaling-group-names "$asg_name" --output json > "$out_dir/existing-asg-before.json"
+  aws autoscaling update-auto-scaling-group \
+    --region "$AWS_REGION" \
+    --auto-scaling-group-name "$asg_name" \
+    --min-size "$MIN_SIZE" \
+    --desired-capacity "$DESIRED_CAPACITY" \
+    --max-size "$MAX_SIZE" \
+    > "$out_dir/update-asg.log" 2>&1
+  if node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const tg=process.argv[2]; process.exit(((p.AutoScalingGroups?.[0]?.TargetGroupARNs)||[]).includes(tg) ? 0 : 1)' "$out_dir/existing-asg-before.json" "$TARGET_GROUP_ARN"; then
+    printf '%s\n' "Target group already attached to ASG." > "$out_dir/attach-target-group.log"
+  else
+    aws autoscaling attach-load-balancer-target-groups \
+      --region "$AWS_REGION" \
+      --auto-scaling-group-name "$asg_name" \
+      --target-group-arns "$TARGET_GROUP_ARN" \
+      > "$out_dir/attach-target-group.log" 2>&1
+  fi
+fi
+
+attempts=0
+healthy_count=0
+while [ "$attempts" -lt 30 ]; do
+  attempts=$((attempts + 1))
+  aws elbv2 describe-target-health --region "$AWS_REGION" --target-group-arn "$TARGET_GROUP_ARN" --output json > "$out_dir/target-health.json"
+  healthy_count="$(node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); console.log((p.TargetHealthDescriptions || []).filter((d) => d.TargetHealth && d.TargetHealth.State === "healthy").length)' "$out_dir/target-health.json")"
+  if [ "$healthy_count" -ge "$DESIRED_CAPACITY" ]; then
+    break
+  fi
+  /bin/sleep 20
+done
+
+if [ "$healthy_count" -lt "$DESIRED_CAPACITY" ]; then
+  echo "ASG apply completed, but healthy target count $healthy_count is below desired capacity $DESIRED_CAPACITY." >&2
+  exit 3
+fi
+
+aws autoscaling describe-auto-scaling-groups --region "$AWS_REGION" --auto-scaling-group-names "$asg_name" --output json > "$out_dir/asg-after.json"
+
+{
+  printf 'TARGET_REGION_GROUP=%s\n' "$TARGET_REGION_GROUP"
+  printf 'AWS_REGION=%s\n' "$AWS_REGION"
+  printf 'ASG_NAME=%s\n' "$asg_name"
+  printf 'LAUNCH_TEMPLATE_ID=%s\n' "$launch_template_id"
+  printf 'LAUNCH_TEMPLATE_VERSION=%s\n' "$launch_template_version"
+  printf 'TARGET_GROUP_ARN=%s\n' "$TARGET_GROUP_ARN"
+  printf 'HEALTHY_TARGET_COUNT=%s\n' "$healthy_count"
+} > "$out_dir/outputs.env"
+
+/bin/cat "$out_dir/outputs.env"
