@@ -14,10 +14,11 @@
       "Sid": "AlbAccessLogHardening",
       "Effect": "Allow",
       "Action": [
-        "elasticloadbalancing:DescribeLoadBalancers",
         "elasticloadbalancing:DescribeLoadBalancerAttributes",
+        "elasticloadbalancing:DescribeLoadBalancers",
+        "elasticloadbalancing:DescribeTargetHealth",
         "elasticloadbalancing:ModifyLoadBalancerAttributes",
-        "elasticloadbalancing:DescribeTargetHealth"
+        "elasticloadbalancing:SetWebACL"
       ],
       "Resource": "*"
     },
