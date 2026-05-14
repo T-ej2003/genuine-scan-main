@@ -60,7 +60,9 @@ Recommended Mumbai entrypoint sequence:
 7. Generate the production ALB cutover plan.
 8. Use `AWS DR DNS Apply` only after final incident commander approval.
 
-ALB subnet selection is intentionally constrained to one subnet per Availability Zone, preferring public subnets. The ALB apply script fails before `CreateLoadBalancer` if fewer than two distinct Availability Zones are available. ACM validation CNAMEs are the only Route 53 records that ALB apply may UPSERT; production cutover JSON is generated separately for later approval.
+ALB subnet selection is intentionally constrained to one subnet per Availability Zone and only chooses subnets whose effective route table has `0.0.0.0/0 -> igw-*`. `MapPublicIpOnLaunch=true` is only a tie-breaker inside the same AZ. The ALB apply script fails before `CreateLoadBalancer` if fewer than two distinct Availability Zones have public IGW-routed subnets, and it calls `set-subnets` when an existing ALB is attached to stale/private subnets. ACM validation CNAMEs are the only Route 53 records that ALB apply may UPSERT; production cutover JSON is generated separately for later approval.
+
+The raw `*.elb.amazonaws.com` ALB hostname is not on the MSCQR ACM certificate, so direct HTTPS checks against that hostname without `-k` are expected to fail certificate hostname verification. Use `curl --resolve www.mscqr.com:443:<ALB_IP> https://www.mscqr.com/healthz` or a regional alias with matching certificate coverage for cert-valid smoke tests.
 
 ## Operator Sequence
 

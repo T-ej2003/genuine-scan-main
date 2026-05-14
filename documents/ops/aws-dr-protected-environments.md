@@ -122,5 +122,5 @@ Replace placeholders such as `<AWS_ACCOUNT_ID>`, `<GITHUB_ORG>`, `<GITHUB_REPO>`
 - Snapshot copy and region-local restore are manual-only and protected by `dr-db-restore`.
 - Recovery DB and copied snapshot cleanup are isolated behind `dr-recovery-cleanup`, require a reviewer, should be restricted to `main`, and must never target production identifiers.
 - Object storage write testing writes only under `dr-tests/<timestamp>/`.
-- Regional ALB entrypoint apply creates or reuses ALB/ACM/target group resources, selects one ALB subnet per Availability Zone, may UPSERT ACM validation CNAMEs, and does not cut over public DNS.
+- Regional ALB entrypoint apply creates or reuses ALB/ACM/target group resources, selects one public IGW-routed ALB subnet per Availability Zone, may call `set-subnets` to correct an existing ALB subnet set, may UPSERT ACM validation CNAMEs, and does not cut over public DNS.
 - Bucket deletion, DB deletion, DB failover, recursive object deletion, Docker prune, and MinIO decommission remain out of scope.

@@ -98,13 +98,15 @@ aws_json "$inventory_dir/vpcs.json" aws ec2 describe-vpcs --region "$AWS_REGION"
 
 if [ -n "$vpc_id" ]; then
   aws_json "$inventory_dir/subnets.json" aws ec2 describe-subnets --region "$AWS_REGION" --filters "Name=vpc-id,Values=$vpc_id"
+  aws_json "$inventory_dir/route-tables.json" aws ec2 describe-route-tables --region "$AWS_REGION" --filters "Name=vpc-id,Values=$vpc_id"
   aws_json "$inventory_dir/security-groups.json" aws ec2 describe-security-groups --region "$AWS_REGION" --filters "Name=vpc-id,Values=$vpc_id"
   selected_subnets_json="$inventory_dir/selected-alb-subnets.json"
   selected_subnets_tsv="$inventory_dir/selected-alb-subnets.tsv"
-  selected_subnet_ids="$(select_unique_az_alb_subnets "$inventory_dir/subnets.json" "$selected_subnets_json" "$selected_subnets_tsv")"
-  selected_subnet_summary="$(/usr/bin/awk -F '\t' '{ printf "%s(%s public=%s) ", $1, $2, $3 }' "$selected_subnets_tsv")"
+  selected_subnet_ids="$(select_unique_az_alb_subnets "$inventory_dir/subnets.json" "$inventory_dir/route-tables.json" "$selected_subnets_json" "$selected_subnets_tsv")"
+  selected_subnet_summary="$(/usr/bin/awk -F '\t' '{ printf "%s(%s route-table=%s igw-public=%s map-public-ip=%s) ", $1, $2, $4, $5, $3 }' "$selected_subnets_tsv")"
 else
   aws_json "$inventory_dir/subnets.json" aws ec2 describe-subnets --region "$AWS_REGION"
+  aws_json "$inventory_dir/route-tables.json" aws ec2 describe-route-tables --region "$AWS_REGION"
   aws_json "$inventory_dir/security-groups.json" aws ec2 describe-security-groups --region "$AWS_REGION"
   selected_subnet_ids=""
   selected_subnet_summary="not selected because VPC was not discovered"
@@ -151,6 +153,7 @@ summary="$DR_ARTIFACT_DIR/alb-inventory/$TARGET_REGION_GROUP-summary.md"
   if [ -n "$vpc_id" ]; then
     printf '%s\n' "- Discovered VPC: \`$vpc_id\`"
     printf '%s\n' "- Candidate subnets: \`$inventory_dir/subnets.json\`"
+    printf '%s\n' "- Route tables: \`$inventory_dir/route-tables.json\`"
     printf '%s\n' "- Selected unique-AZ ALB subnets: \`$selected_subnet_summary\`"
     printf '%s\n' "- Selected subnet IDs for ALB: \`$selected_subnet_ids\`"
   else

@@ -103,6 +103,7 @@ if [ "$instance_id" = "None" ] || [ -z "$instance_id" ] || [ "$vpc_id" = "None" 
 fi
 
 candidate_subnets_json="$apply_dir/candidate-subnets.json"
+route_tables_json="$apply_dir/route-tables.json"
 selected_subnets_json="$apply_dir/selected-alb-subnets.json"
 selected_subnets_tsv="$apply_dir/selected-alb-subnets.tsv"
 
@@ -110,9 +111,13 @@ aws ec2 describe-subnets \
   --region "$AWS_REGION" \
   --filters "Name=vpc-id,Values=$vpc_id" \
   --output json > "$candidate_subnets_json"
+aws ec2 describe-route-tables \
+  --region "$AWS_REGION" \
+  --filters "Name=vpc-id,Values=$vpc_id" \
+  --output json > "$route_tables_json"
 
-selected_subnet_ids="$(select_unique_az_alb_subnets "$candidate_subnets_json" "$selected_subnets_json" "$selected_subnets_tsv")"
-echo "Selected ALB subnets, one per Availability Zone:"
+selected_subnet_ids="$(select_unique_az_alb_subnets "$candidate_subnets_json" "$route_tables_json" "$selected_subnets_json" "$selected_subnets_tsv")"
+echo "Selected public ALB subnets, one per Availability Zone:"
 /bin/cat "$selected_subnets_tsv"
 
 alb_sg_id="$(aws ec2 describe-security-groups \
@@ -158,6 +163,12 @@ authorize_alb_ingress() {
 for port in 80 443; do
   authorize_alb_ingress "$port"
 done
+
+sorted_words() {
+  for word in $*; do
+    printf '%s\n' "$word"
+  done | /usr/bin/sort | /usr/bin/tr '\n' ' '
+}
 
 target_group_arn="$(aws elbv2 describe-target-groups \
   --region "$AWS_REGION" \
@@ -299,6 +310,22 @@ if [ "$alb_arn" = "None" ] || [ -z "$alb_arn" ]; then
   echo "Created ALB: $alb_arn"
 else
   echo "Reusing ALB: $alb_arn"
+  current_subnet_ids="$(aws elbv2 describe-load-balancers \
+    --region "$AWS_REGION" \
+    --load-balancer-arns "$alb_arn" \
+    --query 'LoadBalancers[0].AvailabilityZones[].SubnetId' \
+    --output text)"
+  printf '%s\n' "$current_subnet_ids" > "$apply_dir/current-alb-subnets.txt"
+  if [ "$(sorted_words $current_subnet_ids)" != "$(sorted_words $selected_subnet_ids)" ]; then
+    echo "Existing ALB subnet set differs from selected public unique-AZ subnet set; applying set-subnets."
+    aws elbv2 set-subnets \
+      --region "$AWS_REGION" \
+      --load-balancer-arn "$alb_arn" \
+      --subnets $selected_subnet_ids \
+      --output json > "$apply_dir/set-subnets.json"
+  else
+    echo "Existing ALB subnet set already matches selected public unique-AZ subnets."
+  fi
 fi
 
 alb_dns_name="$(aws elbv2 describe-load-balancers --region "$AWS_REGION" --load-balancer-arns "$alb_arn" --query 'LoadBalancers[0].DNSName' --output text)"

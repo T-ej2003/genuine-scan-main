@@ -241,7 +241,9 @@ confirm_regional_alb_apply: I_APPROVE_REGIONAL_ALB_ENTRYPOINT_APPLY
 
 The ALB apply workflow may create or reuse the regional ALB security group, target group, ALB, ACM certificate, ACM DNS validation records, HTTP redirect listener, and HTTPS listener. It does not cut over `mscqr.com` or `www.mscqr.com`.
 
-Inventory, plan, and apply artifacts list candidate subnets separately from selected ALB subnets. The selected ALB subnet list is one subnet per Availability Zone, prefers `MapPublicIpOnLaunch=true`, and fails clearly if fewer than two distinct Availability Zones are available.
+Inventory, plan, and apply artifacts list candidate subnets separately from selected ALB subnets. The selected ALB subnet list is one subnet per Availability Zone and only includes subnets whose effective route table has `0.0.0.0/0 -> igw-*`. `MapPublicIpOnLaunch=true` is only a tie-breaker when more than one public subnet exists in the same AZ. The scripts fail clearly if fewer than two distinct Availability Zones have public IGW-routed subnets.
+
+When an ALB already exists, the approved apply script compares its current subnet set to the selected public unique-AZ subnet set and runs `set-subnets` only when they differ. This keeps the workflow rerunnable and fixes stale private-subnet ALB attachments without deleting the ALB.
 
 ACM DNS validation is resilient to AWS timing delays: the apply script waits for `ResourceRecord` values before UPSERTing validation CNAMEs, skips that wait when a reused certificate is already `ISSUED`, and never writes production cutover records.
 
@@ -268,6 +270,13 @@ Apply the generated test-record JSON only through `AWS DR DNS Apply` after appro
 
 ```bash
 curl -fsS https://dr-mumbai.mscqr.com/healthz
+```
+
+The raw AWS ALB DNS hostname is not covered by the MSCQR ACM certificate, so `curl https://<alb>.elb.amazonaws.com/healthz` without `-k` is expected to fail hostname verification. For a certificate-valid smoke test before DNS cutover, either use a regional alias that is covered by the certificate, or resolve the production hostname to an ALB IP:
+
+```bash
+dig +short <ALB_DNS_NAME>
+curl -fsS --resolve www.mscqr.com:443:<ALB_IP> https://www.mscqr.com/healthz
 ```
 
 Production cutover must use ALB alias records, not raw EC2 IPs, and must still go through the existing approved DNS workflow.

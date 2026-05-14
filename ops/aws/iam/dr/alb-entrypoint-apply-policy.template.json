@@ -8,6 +8,7 @@
         "ec2:DescribeInstances",
         "ec2:DescribeVpcs",
         "ec2:DescribeSubnets",
+        "ec2:DescribeRouteTables",
         "ec2:DescribeSecurityGroups",
         "ec2:CreateSecurityGroup",
         "ec2:AuthorizeSecurityGroupIngress",
@@ -21,6 +22,7 @@
       "Action": [
         "elasticloadbalancing:DescribeLoadBalancers",
         "elasticloadbalancing:CreateLoadBalancer",
+        "elasticloadbalancing:SetSubnets",
         "elasticloadbalancing:DescribeTargetGroups",
         "elasticloadbalancing:CreateTargetGroup",
         "elasticloadbalancing:RegisterTargets",

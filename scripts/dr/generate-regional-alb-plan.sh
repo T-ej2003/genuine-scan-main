@@ -80,6 +80,7 @@ if [ "$instance_id" = "None" ] || [ -z "$instance_id" ] || [ "$vpc_id" = "None" 
 fi
 
 candidate_subnets_json="$plan_dir/candidate-subnets.json"
+route_tables_json="$plan_dir/route-tables.json"
 selected_subnets_json="$plan_dir/selected-alb-subnets.json"
 selected_subnets_tsv="$plan_dir/selected-alb-subnets.tsv"
 
@@ -87,9 +88,13 @@ aws ec2 describe-subnets \
   --region "$AWS_REGION" \
   --filters "Name=vpc-id,Values=$vpc_id" \
   --output json > "$candidate_subnets_json"
+aws ec2 describe-route-tables \
+  --region "$AWS_REGION" \
+  --filters "Name=vpc-id,Values=$vpc_id" \
+  --output json > "$route_tables_json"
 
-selected_subnet_ids="$(select_unique_az_alb_subnets "$candidate_subnets_json" "$selected_subnets_json" "$selected_subnets_tsv")"
-selected_subnet_summary="$(/usr/bin/awk -F '\t' '{ printf "%s(%s public=%s) ", $1, $2, $3 }' "$selected_subnets_tsv")"
+selected_subnet_ids="$(select_unique_az_alb_subnets "$candidate_subnets_json" "$route_tables_json" "$selected_subnets_json" "$selected_subnets_tsv")"
+selected_subnet_summary="$(/usr/bin/awk -F '\t' '{ printf "%s(%s route-table=%s igw-public=%s map-public-ip=%s) ", $1, $2, $4, $5, $3 }' "$selected_subnets_tsv")"
 
 security_groups="$(aws ec2 describe-instances \
   --region "$AWS_REGION" \
@@ -111,6 +116,7 @@ plan_md="$plan_dir/plan.md"
   printf '  "instanceId": "%s",\n' "$(json_escape "$instance_id")"
   printf '  "vpcId": "%s",\n' "$(json_escape "$vpc_id")"
   printf '  "candidateSubnetsFile": "%s",\n' "$(json_escape "$candidate_subnets_json")"
+  printf '  "routeTablesFile": "%s",\n' "$(json_escape "$route_tables_json")"
   printf '  "selectedSubnetIds": "%s",\n' "$(json_escape "$selected_subnet_ids")"
   printf '  "selectedSubnetsFile": "%s",\n' "$(json_escape "$selected_subnets_json")"
   printf '  "instanceSecurityGroupIds": "%s",\n' "$(json_escape "$security_groups")"
@@ -129,6 +135,7 @@ plan_md="$plan_dir/plan.md"
   printf '%s\n' "- Instance target: \`$instance_id\` on HTTP port 80"
   printf '%s\n' "- VPC: \`$vpc_id\`"
   printf '%s\n' "- Candidate subnet inventory: \`$candidate_subnets_json\`"
+  printf '%s\n' "- Route table inventory: \`$route_tables_json\`"
   printf '%s\n' "- Selected unique-AZ ALB subnets: \`$selected_subnet_summary\`"
   printf '%s\n' "- Selected subnet evidence: \`$selected_subnets_json\`"
   printf '%s\n' "- Existing instance security groups: \`$security_groups\`"

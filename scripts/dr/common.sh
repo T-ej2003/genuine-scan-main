@@ -72,29 +72,75 @@ print_missing() {
 
 select_unique_az_alb_subnets() {
   subnets_json="$1"
-  selected_json="$2"
-  selected_tsv="$3"
-  node --input-type=module - "$subnets_json" "$selected_json" "$selected_tsv" <<'NODE'
+  route_tables_json="$2"
+  selected_json="$3"
+  selected_tsv="$4"
+  node --input-type=module - "$subnets_json" "$route_tables_json" "$selected_json" "$selected_tsv" <<'NODE'
 import fs from "node:fs";
 
-const [inputPath, selectedJsonPath, selectedTsvPath] = process.argv.slice(2);
-const payload = JSON.parse(fs.readFileSync(inputPath, "utf8"));
-const subnets = Array.isArray(payload.Subnets) ? payload.Subnets : [];
+const [subnetsPath, routeTablesPath, selectedJsonPath, selectedTsvPath] = process.argv.slice(2);
+const subnetPayload = JSON.parse(fs.readFileSync(subnetsPath, "utf8"));
+const routeTablePayload = JSON.parse(fs.readFileSync(routeTablesPath, "utf8"));
+const subnets = Array.isArray(subnetPayload.Subnets) ? subnetPayload.Subnets : [];
+const routeTables = Array.isArray(routeTablePayload.RouteTables) ? routeTablePayload.RouteTables : [];
+const routeTableById = new Map(routeTables.map((routeTable) => [routeTable.RouteTableId, routeTable]));
+const subnetRouteTableBySubnetId = new Map();
+let mainRouteTable = null;
+
+for (const routeTable of routeTables) {
+  for (const association of routeTable.Associations || []) {
+    if (association.SubnetId) {
+      subnetRouteTableBySubnetId.set(association.SubnetId, routeTable);
+    }
+    if (association.Main) {
+      mainRouteTable = routeTable;
+    }
+  }
+}
+
+function effectiveRouteTable(subnetId) {
+  return subnetRouteTableBySubnetId.get(subnetId) || mainRouteTable || null;
+}
+
+function publicIgwRoute(routeTable) {
+  for (const route of routeTable?.Routes || []) {
+    if (
+      route.DestinationCidrBlock === "0.0.0.0/0" &&
+      typeof route.GatewayId === "string" &&
+      route.GatewayId.startsWith("igw-") &&
+      route.State !== "blackhole"
+    ) {
+      return route;
+    }
+  }
+  return null;
+}
+
 const candidates = subnets
   .filter((subnet) => subnet.SubnetId && subnet.AvailabilityZone)
-  .map((subnet) => ({
-    SubnetId: subnet.SubnetId,
-    AvailabilityZone: subnet.AvailabilityZone,
-    AvailabilityZoneId: subnet.AvailabilityZoneId || "",
-    VpcId: subnet.VpcId || "",
-    CidrBlock: subnet.CidrBlock || "",
-    MapPublicIpOnLaunch: Boolean(subnet.MapPublicIpOnLaunch),
-    AvailableIpAddressCount: subnet.AvailableIpAddressCount ?? null,
-    State: subnet.State || "",
-  }))
+  .map((subnet) => {
+    const routeTable = effectiveRouteTable(subnet.SubnetId);
+    const route = publicIgwRoute(routeTable);
+    return {
+      SubnetId: subnet.SubnetId,
+      AvailabilityZone: subnet.AvailabilityZone,
+      AvailabilityZoneId: subnet.AvailabilityZoneId || "",
+      VpcId: subnet.VpcId || "",
+      CidrBlock: subnet.CidrBlock || "",
+      MapPublicIpOnLaunch: Boolean(subnet.MapPublicIpOnLaunch),
+      AvailableIpAddressCount: subnet.AvailableIpAddressCount ?? null,
+      State: subnet.State || "",
+      EffectiveRouteTableId: routeTable?.RouteTableId || "",
+      HasPublicIgwRoute: Boolean(route),
+      PublicIgwRouteGatewayId: route?.GatewayId || "",
+    };
+  })
   .sort((left, right) => {
     if (left.AvailabilityZone !== right.AvailabilityZone) {
       return left.AvailabilityZone.localeCompare(right.AvailabilityZone);
+    }
+    if (left.HasPublicIgwRoute !== right.HasPublicIgwRoute) {
+      return left.HasPublicIgwRoute ? -1 : 1;
     }
     if (left.MapPublicIpOnLaunch !== right.MapPublicIpOnLaunch) {
       return left.MapPublicIpOnLaunch ? -1 : 1;
@@ -104,6 +150,7 @@ const candidates = subnets
 
 const selectedByAz = new Map();
 for (const subnet of candidates) {
+  if (!subnet.HasPublicIgwRoute) continue;
   if (!selectedByAz.has(subnet.AvailabilityZone)) {
     selectedByAz.set(subnet.AvailabilityZone, subnet);
   }
@@ -117,13 +164,13 @@ fs.writeFileSync(
 fs.writeFileSync(
   selectedTsvPath,
   selected
-    .map((subnet) => `${subnet.SubnetId}\t${subnet.AvailabilityZone}\t${subnet.MapPublicIpOnLaunch}`)
+    .map((subnet) => `${subnet.SubnetId}\t${subnet.AvailabilityZone}\t${subnet.MapPublicIpOnLaunch}\t${subnet.EffectiveRouteTableId}\t${subnet.HasPublicIgwRoute}`)
     .join("\n") + (selected.length > 0 ? "\n" : ""),
 );
 
 if (selected.length < 2) {
   console.error(
-    `ALB requires at least two distinct Availability Zones; found ${selected.length}. Review ${selectedJsonPath}.`,
+    `Internet-facing ALB requires at least two distinct Availability Zones with 0.0.0.0/0 routes to igw-*; found ${selected.length}. Review ${selectedJsonPath}.`,
   );
   process.exit(2);
 }
