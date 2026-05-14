@@ -26,6 +26,9 @@ const checklistRaw = requireFile("documents/ops/aws-asg-multi-instance-readiness
 const packageJsonRaw = requireFile("package.json");
 const compose = requireFile("docker-compose.yml");
 const asgWebCompose = requireFile("docker-compose.asg-web.yml");
+const asgBootstrap = requireFile("scripts/dr/bootstrap-asg-web-node.sh");
+const asgSsmManifestRaw = requireFile("documents/ops/aws-asg-web-ssm-parameter-manifest.json");
+const asgInstancePolicyRaw = requireFile("ops/aws/iam/dr/asg-web-instance-profile-policy.template.json");
 const backendDockerfile = requireFile("backend/Dockerfile");
 const backendStartup = requireFile("backend/docker/start-runtime.sh");
 const backendIndex = requireFile("backend/src/index.ts");
@@ -45,10 +48,22 @@ const mumbaiEnvExample = requireFile(".env.production.mumbai.example");
 const capetownEnvExample = requireFile(".env.production.capetown.example");
 
 let checklist = null;
+let asgSsmManifest = null;
+let asgInstancePolicy = null;
 try {
   checklist = JSON.parse(checklistRaw);
 } catch (error) {
   failures.push(`Checklist JSON is invalid: ${error.message}`);
+}
+try {
+  asgSsmManifest = JSON.parse(asgSsmManifestRaw);
+} catch (error) {
+  failures.push(`ASG SSM manifest JSON is invalid: ${error.message}`);
+}
+try {
+  asgInstancePolicy = JSON.parse(asgInstancePolicyRaw);
+} catch (error) {
+  failures.push(`ASG instance-profile IAM template JSON is invalid: ${error.message}`);
 }
 
 if (checklist) {
@@ -58,7 +73,6 @@ if (checklist) {
 
   const blockerIds = new Set((checklist.blockers || []).map((item) => item.id));
   for (const id of [
-    "ASG_SECRET_BOOTSTRAP_INJECTION_NOT_PROVEN",
     "ROLLING_DEPLOY_POLICY_NOT_APPLIED",
   ]) {
     if (!blockerIds.has(id)) failures.push(`Checklist is missing blocker id ${id}`);
@@ -68,6 +82,8 @@ if (checklist) {
     "REDIS_SHARED_ENDPOINT_NOT_PROVEN",
     "LOCAL_MINIO_IN_COMPOSE",
     "WORKER_SINGLETON_TOPOLOGY_NOT_PROVEN",
+    "ASG_SECRET_BOOTSTRAP_INJECTION_NOT_PROVEN",
+    "ASG_SECRET_INJECTION_NOT_PROVEN",
   ]) {
     if (blockerIds.has(retiredBlocker)) failures.push(`Checklist should move ${retiredBlocker} to proofs instead of blockers.`);
   }
@@ -77,6 +93,7 @@ if (checklist) {
     "REDIS_SHARED_ENDPOINT_PROVEN",
     "OBJECT_STORAGE_SHARED_PROVEN",
     "WORKER_TOPOLOGY_CONDITIONALLY_PROVEN",
+    "ASG_SECRET_BOOTSTRAP_CONDITIONALLY_PROVEN",
   ]) {
     if (!proofIds.has(id)) failures.push(`Checklist is missing proof id ${id}`);
   }
@@ -97,6 +114,12 @@ requireMatch("readiness doc", doc, /docker-compose\.asg-web\.yml/, "must documen
 requireMatch("readiness doc", doc, /docker compose --profile worker up -d --build backend worker frontend/, "must document intentional singleton worker profile command.");
 requireMatch("readiness doc", doc, /COMPLIANCE_PACK_SCHEDULER_ENABLED=false/, "must document compliance scheduler disabled condition.");
 requireMatch("readiness doc", doc, /Worker topology is conditionally proven/, "must mark worker topology conditionally proven.");
+requireMatch("readiness doc", doc, /scripts\/dr\/bootstrap-asg-web-node\.sh/, "must document ASG web bootstrap script.");
+requireMatch("readiness doc", doc, /documents\/ops\/aws-asg-web-ssm-parameter-manifest\.json/, "must document ASG SSM parameter manifest.");
+requireMatch("readiness doc", doc, /\/mscqr\/prod\/ap-south-1\/asg-web\//, "must document Mumbai SSM prefix.");
+requireMatch("readiness doc", doc, /\/mscqr\/prod\/af-south-1\/asg-web\//, "must document Cape Town SSM prefix.");
+requireMatch("readiness doc", doc, /asg-web-instance-profile-policy\.template\.json/, "must document ASG instance-profile IAM template.");
+requireMatch("readiness doc", doc, /Secrets\/bootstrap is conditionally proven/, "must mark secrets/bootstrap conditionally proven.");
 requireMatch("readiness doc", doc, /\/healthz/, "must document shallow liveness health semantics.");
 requireMatch("readiness doc", doc, /\/api\/health\/ready/, "must document dependency readiness health semantics.");
 requireMatch("readiness doc", doc, /deregistration delay/i, "must document rolling deploy drain behavior.");
@@ -125,6 +148,28 @@ requireMatch("asg web compose", asgWebCompose, /OBJECT_STORAGE_BUCKET:\s+\$\{OBJ
 if (/\n\s+worker:/.test(asgWebCompose)) failures.push("ASG web compose must not define a worker service.");
 if (/\n\s+redis:/.test(asgWebCompose)) failures.push("ASG web compose must not define a local Redis service.");
 if (/\n\s+minio:/.test(asgWebCompose)) failures.push("ASG web compose must not define a local MinIO service.");
+requireMatch("ASG bootstrap", asgBootstrap, /aws ssm get-parameters-by-path/, "bootstrap must fetch parameters from SSM by path.");
+requireMatch("ASG bootstrap", asgBootstrap, /--with-decryption/, "bootstrap must decrypt SecureString parameters.");
+requireMatch("ASG bootstrap", asgBootstrap, /root_env_path=.*\/\.env/, "bootstrap must write project .env.");
+requireMatch("ASG bootstrap", asgBootstrap, /backend_env_path=.*backend\/\.env/, "bootstrap must write backend/.env.");
+requireMatch("ASG bootstrap", asgBootstrap, /fs\.chmodSync\(filePath, 0o600\)/, "bootstrap must chmod generated env files to 0600.");
+requireMatch("ASG bootstrap", asgBootstrap, /Forbidden ASG web-node parameter is present in SSM/, "bootstrap must reject forbidden parameters such as MinIO secrets.");
+requireMatch("ASG bootstrap", asgBootstrap, /RUN_BACKGROUND_WORKERS: "false"/, "bootstrap must force workers off.");
+requireMatch("ASG bootstrap", asgBootstrap, /RUN_DB_MIGRATIONS_ON_START: "false"/, "bootstrap must force startup migrations off.");
+requireMatch("ASG bootstrap", asgBootstrap, /COMPLIANCE_PACK_SCHEDULER_ENABLED: "false"/, "bootstrap must force compliance scheduler off.");
+requireMatch("ASG bootstrap", asgBootstrap, /REDIS_TLS: "true"/, "bootstrap must force Redis TLS on.");
+requireMatch("ASG bootstrap", asgBootstrap, /OBJECT_STORAGE_ENDPOINT: ""/, "bootstrap must force object endpoint empty.");
+requireMatch("ASG bootstrap", asgBootstrap, /OBJECT_STORAGE_ACCESS_KEY: ""/, "bootstrap must force static object access key empty.");
+requireMatch("ASG bootstrap", asgBootstrap, /OBJECT_STORAGE_SECRET_KEY: ""/, "bootstrap must force static object secret key empty.");
+requireMatch("ASG bootstrap", asgBootstrap, /OBJECT_STORAGE_FORCE_PATH_STYLE: "false"/, "bootstrap must force path-style false.");
+requireMatch("ASG bootstrap", asgBootstrap, /docker compose -f docker-compose\.asg-web\.yml up -d --build --remove-orphans backend frontend/, "bootstrap must start ASG web compose only.");
+requireMatch("ASG bootstrap", asgBootstrap, /http:\/\/127\.0\.0\.1\/healthz/, "bootstrap must check frontend health through localhost.");
+requireMatch("ASG bootstrap", asgBootstrap, /http:\/\/127\.0\.0\.1\/api\/health\/ready/, "bootstrap must check backend readiness through frontend/Nginx path.");
+requireMatch("ASG bootstrap", asgBootstrap, /deps\.database\?\.ready === true/, "bootstrap must require database readiness.");
+requireMatch("ASG bootstrap", asgBootstrap, /deps\.redis\?\.configured === true/, "bootstrap must require Redis configured.");
+requireMatch("ASG bootstrap", asgBootstrap, /deps\.redis\?\.ready === true/, "bootstrap must require Redis readiness.");
+requireMatch("ASG bootstrap", asgBootstrap, /deps\.objectStorage\?\.configured === true/, "bootstrap must require object storage configured.");
+requireMatch("ASG bootstrap", asgBootstrap, /deps\.objectStorage\?\.ready === true/, "bootstrap must require object storage readiness.");
 requireMatch("backend Dockerfile", backendDockerfile, /ENV RUN_DB_MIGRATIONS_ON_START=false/, "runtime image must default startup migrations off.");
 requireMatch("backend startup", backendStartup, /RUN_DB_MIGRATIONS_ON_START:-false/, "startup migration gate must be explicit.");
 
@@ -174,6 +219,76 @@ if (/ASG_STATUS=READY/.test(`${doc}\n${drAutomation}\n${drRunbook}\n${protectedE
 
 if (/OBJECT_STORAGE_ENDPOINT=http:\/\/minio:9000/.test(`${mumbaiEnvExample}\n${capetownEnvExample}`)) {
   failures.push("Regional production env examples must not point object storage at node-local MinIO.");
+}
+
+if (asgSsmManifest) {
+  const rootRequired = new Set(asgSsmManifest.rootEnv?.requiredFromSsm || []);
+  for (const key of ["AWS_REGION", "OBJECT_STORAGE_BUCKET", "OBJECT_STORAGE_REGION", "REDIS_URL"]) {
+    if (!rootRequired.has(key)) failures.push(`ASG SSM manifest rootEnv.requiredFromSsm is missing ${key}.`);
+  }
+  const backendRequired = new Set(asgSsmManifest.backendEnv?.requiredFromSsm || []);
+  for (const key of [
+    "DATABASE_URL",
+    "JWT_SECRET_CURRENT",
+    "COOKIE_SECURE",
+    "QR_SIGN_PRIVATE_KEY",
+    "QR_SIGN_PUBLIC_KEY",
+    "TOKEN_HASH_SECRET_CURRENT",
+    "IP_HASH_SALT_CURRENT",
+    "CUSTOMER_VERIFY_OTP_SECRET",
+    "CUSTOMER_VERIFY_TOKEN_SECRET",
+    "SCAN_FINGERPRINT_SECRET",
+    "PRINTER_SSE_SIGN_SECRET_CURRENT",
+    "INCIDENT_HASH_SALT_CURRENT",
+    "AUTH_MFA_ENCRYPTION_KEY",
+  ]) {
+    if (!backendRequired.has(key)) failures.push(`ASG SSM manifest backendEnv.requiredFromSsm is missing ${key}.`);
+  }
+  for (const [sectionName, forced] of [
+    ["rootEnv", asgSsmManifest.rootEnv?.forced || {}],
+    ["backendEnv", asgSsmManifest.backendEnv?.forced || {}],
+  ]) {
+    for (const [key, expected] of Object.entries({
+      REDIS_TLS: "true",
+      OBJECT_STORAGE_ENDPOINT: "",
+      OBJECT_STORAGE_ACCESS_KEY: "",
+      OBJECT_STORAGE_SECRET_KEY: "",
+      OBJECT_STORAGE_FORCE_PATH_STYLE: "false",
+    })) {
+      if (forced[key] !== expected) failures.push(`ASG SSM manifest ${sectionName}.forced.${key} must be ${JSON.stringify(expected)}.`);
+    }
+  }
+  const backendForced = asgSsmManifest.backendEnv?.forced || {};
+  for (const [key, expected] of Object.entries({
+    RUN_BACKGROUND_WORKERS: "false",
+    RUN_DB_MIGRATIONS_ON_START: "false",
+    COMPLIANCE_PACK_SCHEDULER_ENABLED: "false",
+  })) {
+    if (backendForced[key] !== expected) failures.push(`ASG SSM manifest backendEnv.forced.${key} must be ${JSON.stringify(expected)}.`);
+  }
+}
+
+if (asgInstancePolicy) {
+  const actions = JSON.stringify(asgInstancePolicy.Statement || []);
+  for (const action of [
+    "ssm:GetParameter",
+    "ssm:GetParameters",
+    "ssm:GetParametersByPath",
+    "kms:Decrypt",
+    "s3:GetObject",
+    "s3:PutObject",
+    "ecr:GetAuthorizationToken",
+    "ecr:BatchGetImage",
+    "ecr:GetDownloadUrlForLayer",
+  ]) {
+    if (!actions.includes(action)) failures.push(`ASG instance-profile IAM template is missing ${action}.`);
+  }
+  if (!actions.includes("/mscqr/prod/<TARGET_REGION>/asg-web/*")) {
+    failures.push("ASG instance-profile IAM template must scope SSM access to /mscqr/prod/<TARGET_REGION>/asg-web/*.");
+  }
+  if (!actions.includes("<REGIONAL_ARTIFACT_BUCKET>")) {
+    failures.push("ASG instance-profile IAM template must scope S3 access to <REGIONAL_ARTIFACT_BUCKET>.");
+  }
 }
 
 if (failures.length > 0) {

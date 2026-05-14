@@ -1,0 +1,68 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadAsgWebParameters",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetParameter",
+        "ssm:GetParameters",
+        "ssm:GetParametersByPath"
+      ],
+      "Resource": "arn:aws:ssm:<TARGET_REGION>:<AWS_ACCOUNT_ID>:parameter/mscqr/prod/<TARGET_REGION>/asg-web/*"
+    },
+    {
+      "Sid": "DecryptAsgWebSecureStringsWhenCustomerManagedKeyIsUsed",
+      "Effect": "Allow",
+      "Action": "kms:Decrypt",
+      "Resource": "arn:aws:kms:<TARGET_REGION>:<AWS_ACCOUNT_ID>:key/<ASG_WEB_PARAMETER_KMS_KEY_ID>",
+      "Condition": {
+        "StringEquals": {
+          "kms:ViaService": "ssm.<TARGET_REGION>.amazonaws.com"
+        },
+        "ForAnyValue:StringLike": {
+          "kms:EncryptionContext:PARAMETER_ARN": "arn:aws:ssm:<TARGET_REGION>:<AWS_ACCOUNT_ID>:parameter/mscqr/prod/<TARGET_REGION>/asg-web/*"
+        }
+      }
+    },
+    {
+      "Sid": "UseRegionalArtifactBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketLocation",
+        "s3:ListBucket"
+      ],
+      "Resource": "arn:aws:s3:::<REGIONAL_ARTIFACT_BUCKET>"
+    },
+    {
+      "Sid": "ReadWriteRegionalArtifactObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts"
+      ],
+      "Resource": "arn:aws:s3:::<REGIONAL_ARTIFACT_BUCKET>/*"
+    },
+    {
+      "Sid": "AuthorizeEcrPull",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "PullApprovedEcrImages",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer"
+      ],
+      "Resource": [
+        "arn:aws:ecr:<TARGET_REGION>:<AWS_ACCOUNT_ID>:repository/mscqr-backend",
+        "arn:aws:ecr:<TARGET_REGION>:<AWS_ACCOUNT_ID>:repository/mscqr-frontend"
+      ]
+    }
+  ]
+}

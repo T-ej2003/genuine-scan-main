@@ -20,11 +20,12 @@ The app has several good production controls already:
 - Docker Compose disables background workers in the HTTP backend with `RUN_BACKGROUND_WORKERS=false`.
 - Docker Compose now keeps the worker behind the explicit `worker` profile.
 - `docker-compose.asg-web.yml` is the ASG web-node mode and contains only `backend` and `frontend`.
+- `scripts/dr/bootstrap-asg-web-node.sh` is the committed ASG web-node bootstrap path using AWS SSM Parameter Store.
+- `documents/ops/aws-asg-web-ssm-parameter-manifest.json` records required root/backend env parameter names without values.
 - `/healthz` exists for shallow app liveness and `/api/health/ready` reaches backend dependency readiness through Nginx.
 
 The remaining blockers are operational and state-topology blockers:
 
-- The ASG launch path for secrets/bootstrap is not proven. New instances must receive the same required secrets through IAM-backed SSM or Secrets Manager, not manual terminal edits.
 - Rolling deployment policy is not applied or tested.
 - Some upload flows stage files on local disk before object-storage upload. That is acceptable only as short-lived temp/staging, not as persistent state.
 
@@ -182,13 +183,35 @@ ASG requirement:
 - Keep persistent artifacts in object storage and persistent metadata in Postgres.
 - Do not mount per-instance MinIO as the production artifact source.
 
-## F. Secrets Injection
+## F. Secrets Injection And Bootstrap
 
 Evidence:
 
 - Backend loads `.env` via dotenv and Compose uses `env_file: ./backend/.env`.
 - Production startup validates many required secret and URL values without printing secret values.
-- No committed ASG bootstrap path proves that a fresh EC2 instance can fetch the same secrets automatically.
+- `scripts/dr/bootstrap-asg-web-node.sh` fetches env values from SSM Parameter Store with `--with-decryption`, writes project `.env` and `backend/.env` with `0600` permissions, and does not print secret values.
+- The bootstrap script validates required manifest keys, rejects MinIO secrets, and forces ASG-safe values before starting containers.
+- The bootstrap script starts only ASG web mode:
+
+```bash
+docker compose -f docker-compose.asg-web.yml up -d --build --remove-orphans backend frontend
+```
+
+- Health validation is through the frontend/Nginx path: `http://127.0.0.1/healthz` and `http://127.0.0.1/api/health/ready`.
+- Readiness must report `database.ready=true`, `redis.configured=true`, `redis.ready=true`, `objectStorage.configured=true`, and `objectStorage.ready=true`.
+- `ops/aws/iam/dr/asg-web-instance-profile-policy.template.json` defines the instance-profile permissions for SSM, scoped KMS decrypt, regional S3 artifact access, and ECR image pull.
+
+SSM Parameter Store prefixes:
+
+- Mumbai: `/mscqr/prod/ap-south-1/asg-web/`
+- Cape Town: `/mscqr/prod/af-south-1/asg-web/`
+
+Bootstrap commands:
+
+```bash
+scripts/dr/bootstrap-asg-web-node.sh mumbai ap-south-1
+scripts/dr/bootstrap-asg-web-node.sh capetown af-south-1
+```
 
 Required production env categories:
 
@@ -202,10 +225,12 @@ Required production env categories:
 
 ASG requirement:
 
-- Use an IAM instance profile with least-privilege read access to SSM Parameter Store or Secrets Manager paths.
+- Use an IAM instance profile with least-privilege read access to the region-specific SSM Parameter Store path.
 - Render container environment at boot without logging values.
 - Fail boot if any required value is missing.
 - Do not rely on SSH/manual edits to `backend/.env` for new ASG instances.
+- Keep `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_ACCESS_KEY`, and `OBJECT_STORAGE_SECRET_KEY` empty.
+- Keep `OBJECT_STORAGE_FORCE_PATH_STYLE=false`, `REDIS_TLS=true`, `RUN_BACKGROUND_WORKERS=false`, `RUN_DB_MIGRATIONS_ON_START=false`, and `COMPLIANCE_PACK_SCHEDULER_ENABLED=false`.
 
 ## G. Docker Startup And Bootstrap Repeatability
 
@@ -221,7 +246,7 @@ ASG bootstrap checklist:
 
 - Install Docker and the Compose plugin from a pinned or approved source.
 - Pull or build the approved image for the exact commit SHA.
-- Fetch environment from SSM/Secrets Manager through instance profile.
+- Fetch environment from SSM Parameter Store through instance profile using `scripts/dr/bootstrap-asg-web-node.sh`.
 - Set `RUN_DB_MIGRATIONS_ON_START=false`.
 - Set backend `RUN_BACKGROUND_WORKERS=false` on web nodes.
 - Point `REDIS_URL` to shared regional Redis.
@@ -273,7 +298,9 @@ No-go for ASG create/attach.
 
 Worker topology is conditionally proven for ASG web nodes: web nodes have an explicit worker-free Compose file, the HTTP backend is worker-disabled, the standalone worker is an intentional one-per-region profile, compliance scheduling is disabled, and worker horizontal scaling is not assumed safe.
 
-ASG remains blocked because secret/bootstrap injection and rolling deployment policy are not yet proven in the launch-template path. Re-audit only after those remaining blockers have concrete evidence.
+Secrets/bootstrap is conditionally proven at repository level: the SSM manifest, bootstrap script, forced safety settings, SSM prefixes, health validation, and instance-profile IAM template are committed. This still needs launch-template user-data wiring and a real replacement-instance drill before production use.
+
+ASG remains blocked because rolling deployment policy is not yet proven in the launch-template path. Re-audit only after that remaining blocker has concrete evidence.
 
 ## Validation
 
@@ -281,6 +308,7 @@ Run:
 
 ```bash
 node scripts/dr/check-asg-multi-instance-readiness.mjs
+/bin/sh -n scripts/dr/*.sh
 npm run check:aws-dr-safety
 npm run verify:guardrails
 npm run check:documents

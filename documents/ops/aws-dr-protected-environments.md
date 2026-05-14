@@ -142,6 +142,7 @@ Templates:
 - `alb-entrypoint-apply-policy.template.json`
 - `regional-readiness-policy.template.json`
 - `hardening-apply-policy.template.json`
+- `asg-web-instance-profile-policy.template.json`
 - `dr-explicit-deny-guardrail-policy.template.json`
 
 Replace placeholders such as `<AWS_ACCOUNT_ID>`, `<GITHUB_ORG>`, `<GITHUB_REPO>`, `<HOSTED_ZONE_ID>`, `<NORMALIZED_RECORD_NAME>`, `<TARGET_REGION>`, and `<BUCKET_NAME>` before applying in AWS.
