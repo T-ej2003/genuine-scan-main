@@ -291,6 +291,74 @@ ec2_public_ip: 15.240.28.113
 
 Only after Mumbai and Cape Town inventory, plan, apply, and regional test-record validation pass should operators move into the protected DNS cutover phase.
 
+## Regional Scaling And Reliability Readiness
+
+Current stable state before final DNS cutover:
+
+- Production DNS points to London EC2 `13.135.108.69`.
+- Mumbai ALB is healthy and available through `dr-mumbai.mscqr.com`.
+- Cape Town ALB is healthy and available through `dr-capetown.mscqr.com`.
+- Production cutover/rollback plans exist, but production DNS must not be changed by readiness work.
+
+Use this workflow for read-only evidence and plan generation:
+
+```text
+GitHub repo -> Actions -> AWS DR Regional Readiness -> Run workflow
+```
+
+Required protected environment:
+
+- `dr-regional-readiness`
+
+Required environment variable on that environment:
+
+- Preferred: `AWS_DR_REGIONAL_READINESS_ROLE_ARN`
+- Backward-compatible: `DR_REGIONAL_READINESS_ROLE_TO_ASSUME`
+
+Supported operations:
+
+- `verify-regional-alb-health`: captures ALB, listener, target-health, and HTTPS smoke evidence.
+- `regional-capacity-inventory`: captures EC2 instance type, status, EBS volumes, and CloudWatch CPU evidence. Optional memory/disk/Docker host checks require `ENABLE_REMOTE_HOST_CHECKS=I_APPROVE_READ_ONLY_REMOTE_HOST_CHECKS` and operator-supplied SSH context locally.
+- `generate-regional-cloudwatch-alarm-plan`: creates an alarm plan for ALB 5XX, target 5XX, unhealthy hosts, latency, EC2 CPU, and disk if `CWAgent` metrics exist.
+- `generate-alb-access-log-plan`: creates a plan for ALB access logs to an approved S3 logging bucket. It does not enable logging.
+- `generate-waf-plan`: creates a WAF managed-rule and rate-limit plan. It does not create or attach WAF.
+- `generate-asg-launch-template-plan`: creates an ASG/launch-template migration plan from the current instance evidence. It does not create launch templates, ASGs, AMIs, or EC2 instances.
+
+Mumbai readiness values:
+
+```text
+target_region_group: mumbai
+aws_region: ap-south-1
+ec2_public_ip: 15.206.45.108
+alb_arn: arn:aws:elasticloadbalancing:ap-south-1:368992683803:loadbalancer/app/mscqr-mumbai-alb/025ad0cb77546ee0
+alb_dns_name: mscqr-mumbai-alb-1249752376.ap-south-1.elb.amazonaws.com
+target_group_arn: arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgroup/mscqr-mumbai-frontend-tg/68982ccd4d8c26c1
+test_hostname: dr-mumbai.mscqr.com
+```
+
+Cape Town readiness values:
+
+```text
+target_region_group: capetown
+aws_region: af-south-1
+ec2_public_ip: 15.240.28.113
+alb_arn: arn:aws:elasticloadbalancing:af-south-1:368992683803:loadbalancer/app/mscqr-capetown-alb/b7defd5707ad181c
+alb_dns_name: mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com
+target_group_arn: arn:aws:elasticloadbalancing:af-south-1:368992683803:targetgroup/mscqr-capetown-frontend-tg/a9b43fd2d346e26d
+test_hostname: dr-capetown.mscqr.com
+```
+
+Recommended readiness sequence per region:
+
+1. `verify-regional-alb-health`.
+2. `regional-capacity-inventory`.
+3. `generate-regional-cloudwatch-alarm-plan`.
+4. `generate-alb-access-log-plan`.
+5. `generate-waf-plan`.
+6. `generate-asg-launch-template-plan`.
+
+Do not proceed to final production DNS cutover until test-record validation, scaling readiness, observability readiness, and rollback evidence are all captured for both Mumbai and Cape Town.
+
 ## Approved Recovery Cleanup
 
 Cleanup is destructive to test recovery resources. Run it only after evidence artifacts are captured and the incident commander approves cleanup. Never target production DBs, production snapshots, automated `rds:` snapshots, S3, MinIO, DNS, or London/primary resources.

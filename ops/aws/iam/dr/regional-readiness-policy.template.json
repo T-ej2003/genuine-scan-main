@@ -1,0 +1,56 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RegionalReadinessEc2Inventory",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeInstances",
+        "ec2:DescribeInstanceStatus",
+        "ec2:DescribeInstanceTypes",
+        "ec2:DescribeVolumes",
+        "ec2:DescribeVpcs",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeRouteTables",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeImages",
+        "ec2:DescribeLaunchTemplates",
+        "ec2:DescribeLaunchTemplateVersions"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "RegionalReadinessAlbInventory",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:DescribeLoadBalancers",
+        "elasticloadbalancing:DescribeLoadBalancerAttributes",
+        "elasticloadbalancing:DescribeTargetGroups",
+        "elasticloadbalancing:DescribeTargetHealth",
+        "elasticloadbalancing:DescribeListeners",
+        "elasticloadbalancing:DescribeRules"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "RegionalReadinessMetricsAndPlans",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:GetMetricStatistics",
+        "cloudwatch:GetMetricData",
+        "cloudwatch:ListMetrics",
+        "autoscaling:DescribeAutoScalingGroups",
+        "autoscaling:DescribeLaunchConfigurations",
+        "autoscaling:DescribeScalingActivities",
+        "wafv2:ListWebACLs",
+        "wafv2:GetWebACL",
+        "wafv2:ListResourcesForWebACL",
+        "s3:GetBucketLocation",
+        "s3:GetBucketPolicy",
+        "s3:GetBucketLogging",
+        "s3:GetBucketLifecycleConfiguration"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

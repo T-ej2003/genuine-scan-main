@@ -13,6 +13,7 @@ This is the top-level MSCQR operator runbook for multi-region disaster recovery.
 - Phase 4: manual DNS cutover tabletop recorded.
 - Phase 5: database recovery documentation added.
 - Phase 6: object storage recovery documentation added.
+- Regional ALB test records: Mumbai and Cape Town are available through `dr-mumbai.mscqr.com` and `dr-capetown.mscqr.com`; production DNS is currently rolled back to London EC2 `13.135.108.69`.
 
 ## Phase Links
 
@@ -63,6 +64,28 @@ Recommended Mumbai entrypoint sequence:
 ALB subnet selection is intentionally constrained to one subnet per Availability Zone and only chooses subnets whose effective route table has `0.0.0.0/0 -> igw-*`. `MapPublicIpOnLaunch=true` is only a tie-breaker inside the same AZ. The ALB apply script fails before `CreateLoadBalancer` if fewer than two distinct Availability Zones have public IGW-routed subnets, and it calls `set-subnets` when an existing ALB is attached to stale/private subnets. ACM validation CNAMEs are the only Route 53 records that ALB apply may UPSERT; production cutover JSON is generated separately for later approval.
 
 The raw `*.elb.amazonaws.com` ALB hostname is not on the MSCQR ACM certificate, so direct HTTPS checks against that hostname without `-k` are expected to fail certificate hostname verification. Use `curl --resolve www.mscqr.com:443:<ALB_IP> https://www.mscqr.com/healthz` or a regional alias with matching certificate coverage for cert-valid smoke tests.
+
+## Scaling And Observability Readiness
+
+Before final DNS cutover, run `AWS DR Regional Readiness` for Mumbai and Cape Town. This workflow is read/plan-only and does not change DNS, enable access logs, attach WAF, create ASGs, mutate RDS/S3, or delete resources.
+
+Phases before final cutover:
+
+1. Current stable state: London EC2 remains production DNS.
+2. Test-record validation: `dr-mumbai.mscqr.com` and `dr-capetown.mscqr.com` pass HTTPS health checks.
+3. Scaling readiness: capacity inventory and ASG/launch-template plan artifacts exist for both regions.
+4. Observability readiness: CloudWatch alarm plan, ALB access log plan, and WAF plan artifacts exist for both regions.
+5. Final production DNS cutover: use only the protected DNS workflow after incident commander approval.
+6. Rollback: restore London ALB or London EC2 DNS rollback JSON if validation fails.
+
+Recommended operations per region:
+
+1. `verify-regional-alb-health`.
+2. `regional-capacity-inventory`.
+3. `generate-regional-cloudwatch-alarm-plan`.
+4. `generate-alb-access-log-plan`.
+5. `generate-waf-plan`.
+6. `generate-asg-launch-template-plan`.
 
 ## Operator Sequence
 

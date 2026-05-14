@@ -1,0 +1,190 @@
+name: AWS DR Regional Readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Regional scaling/reliability readiness operation"
+        required: true
+        type: choice
+        options:
+          - verify-regional-alb-health
+          - regional-capacity-inventory
+          - generate-regional-cloudwatch-alarm-plan
+          - generate-alb-access-log-plan
+          - generate-waf-plan
+          - generate-asg-launch-template-plan
+      target_region_group:
+        description: "MSCQR region group"
+        required: true
+        type: choice
+        options:
+          - london
+          - mumbai
+          - capetown
+      aws_region:
+        description: "AWS region for selected region group"
+        required: true
+        type: string
+      ec2_public_ip:
+        description: "Regional EC2 public IP for inventory/planning"
+        required: false
+        type: string
+      alb_arn:
+        description: "Regional ALB ARN"
+        required: false
+        type: string
+      alb_dns_name:
+        description: "Regional ALB DNS name"
+        required: false
+        type: string
+      target_group_arn:
+        description: "Regional target group ARN"
+        required: false
+        type: string
+      domain_name:
+        description: "Certificate hostname for --resolve smoke tests"
+        required: false
+        type: string
+        default: www.mscqr.com
+      test_hostname:
+        description: "Regional test hostname such as dr-mumbai.mscqr.com"
+        required: false
+        type: string
+      sns_topic_arn:
+        description: "Optional SNS topic ARN for alarm plan examples"
+        required: false
+        type: string
+      access_logs_bucket:
+        description: "Optional approved S3 bucket name for ALB access-log plan"
+        required: false
+        type: string
+      waf_name:
+        description: "Optional proposed regional WAF name"
+        required: false
+        type: string
+      asg_min_size:
+        description: "ASG plan min size"
+        required: false
+        type: string
+        default: "2"
+      asg_desired_capacity:
+        description: "ASG plan desired capacity"
+        required: false
+        type: string
+        default: "2"
+      asg_max_size:
+        description: "ASG plan max size"
+        required: false
+        type: string
+        default: "4"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  regional-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: dr-regional-readiness
+    env:
+      OPERATION: ${{ inputs.operation }}
+      TARGET_REGION_GROUP: ${{ inputs.target_region_group }}
+      AWS_REGION: ${{ inputs.aws_region }}
+      EC2_PUBLIC_IP: ${{ inputs.ec2_public_ip }}
+      ALB_ARN: ${{ inputs.alb_arn }}
+      ALB_DNS_NAME: ${{ inputs.alb_dns_name }}
+      TARGET_GROUP_ARN: ${{ inputs.target_group_arn }}
+      DOMAIN_NAME: ${{ inputs.domain_name }}
+      TEST_HOSTNAME: ${{ inputs.test_hostname }}
+      SNS_TOPIC_ARN: ${{ inputs.sns_topic_arn }}
+      ACCESS_LOGS_BUCKET: ${{ inputs.access_logs_bucket }}
+      WAF_NAME: ${{ inputs.waf_name }}
+      ASG_MIN_SIZE: ${{ inputs.asg_min_size }}
+      ASG_DESIRED_CAPACITY: ${{ inputs.asg_desired_capacity }}
+      ASG_MAX_SIZE: ${{ inputs.asg_max_size }}
+      AWS_DR_REGIONAL_READINESS_ROLE_ARN: ${{ vars.AWS_DR_REGIONAL_READINESS_ROLE_ARN }}
+      DR_REGIONAL_READINESS_ROLE_TO_ASSUME: ${{ vars.DR_REGIONAL_READINESS_ROLE_TO_ASSUME }}
+      AWS_DR_ALB_APPLY_ROLE_ARN: ${{ vars.AWS_DR_ALB_APPLY_ROLE_ARN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve read-only OIDC role
+        id: resolve_role
+        run: |
+          set -euo pipefail
+          role_arn="${AWS_DR_REGIONAL_READINESS_ROLE_ARN:-}"
+          if [ -z "$role_arn" ]; then role_arn="${DR_REGIONAL_READINESS_ROLE_TO_ASSUME:-}"; fi
+          if [ -z "$role_arn" ]; then role_arn="${AWS_DR_ALB_APPLY_ROLE_ARN:-}"; fi
+          if [ -z "$role_arn" ]; then
+            echo "::error::Set AWS_DR_REGIONAL_READINESS_ROLE_ARN or DR_REGIONAL_READINESS_ROLE_TO_ASSUME on dr-regional-readiness."
+            exit 2
+          fi
+          echo "::add-mask::$role_arn"
+          printf 'role_arn=%s\n' "$role_arn" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ steps.resolve_role.outputs.role_arn }}
+
+      - name: Validate regional readiness inputs
+        run: |
+          set -euo pipefail
+          case "$TARGET_REGION_GROUP:$AWS_REGION" in
+            london:eu-west-2|mumbai:ap-south-1|capetown:af-south-1) ;;
+            *) echo "::error::aws_region does not match target_region_group."; exit 2 ;;
+          esac
+          /bin/sh -n scripts/dr/verify-regional-alb-health.sh
+          /bin/sh -n scripts/dr/regional-capacity-inventory.sh
+          /bin/sh -n scripts/dr/generate-regional-cloudwatch-alarm-plan.sh
+          /bin/sh -n scripts/dr/generate-alb-access-log-plan.sh
+          /bin/sh -n scripts/dr/generate-waf-plan.sh
+          /bin/sh -n scripts/dr/generate-asg-launch-template-plan.sh
+
+      - name: Run selected readiness operation
+        run: |
+          set -euo pipefail
+          case "$OPERATION" in
+            verify-regional-alb-health)
+              scripts/dr/verify-regional-alb-health.sh
+              ;;
+            regional-capacity-inventory)
+              scripts/dr/regional-capacity-inventory.sh
+              ;;
+            generate-regional-cloudwatch-alarm-plan)
+              scripts/dr/generate-regional-cloudwatch-alarm-plan.sh
+              ;;
+            generate-alb-access-log-plan)
+              scripts/dr/generate-alb-access-log-plan.sh
+              ;;
+            generate-waf-plan)
+              scripts/dr/generate-waf-plan.sh
+              ;;
+            generate-asg-launch-template-plan)
+              scripts/dr/generate-asg-launch-template-plan.sh
+              ;;
+            *)
+              echo "::error::Unsupported operation: $OPERATION"
+              exit 2
+              ;;
+          esac
+
+      - name: Write immutable evidence manifest
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dr
+          find artifacts/dr -type f -print0 | sort -z | xargs -0 shasum -a 256 > artifacts/dr/sha256-manifest.txt
+
+      - name: Upload immutable DR evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-regional-readiness-evidence-${{ inputs.operation }}-${{ github.run_id }}
+          path: artifacts/dr
+          if-no-files-found: error
+          retention-days: 90

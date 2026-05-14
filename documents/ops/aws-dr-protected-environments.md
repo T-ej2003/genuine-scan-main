@@ -15,6 +15,7 @@ Create these GitHub Environments and require reviewers for each:
 - `dr-standby-db-test`
 - `dr-recovery-cleanup`
 - `dr-alb-entrypoint-apply`
+- `dr-regional-readiness`
 
 Recommended environment controls:
 
@@ -35,6 +36,8 @@ Set these environment-scoped variables:
 - Backward-compatible: `DR_RECOVERY_CLEANUP_ROLE_TO_ASSUME` on `dr-recovery-cleanup`.
 - Preferred: `AWS_DR_ALB_APPLY_ROLE_ARN` on `dr-alb-entrypoint-apply`.
 - Backward-compatible: `DR_ALB_APPLY_ROLE_TO_ASSUME` on `dr-alb-entrypoint-apply`.
+- Preferred: `AWS_DR_REGIONAL_READINESS_ROLE_ARN` on `dr-regional-readiness`.
+- Backward-compatible: `DR_REGIONAL_READINESS_ROLE_TO_ASSUME` on `dr-regional-readiness`.
 
 The workflow uses GitHub OIDC through `aws-actions/configure-aws-credentials@v4`. Long-lived AWS access keys are not required.
 
@@ -51,6 +54,12 @@ Use focused manual workflows instead of the old combined apply workflow:
 .github/workflows/aws-dr-alb-apply.yml
 ```
 
+Read-only scaling and reliability evidence uses:
+
+```text
+.github/workflows/aws-dr-regional-readiness.yml
+```
+
 Supported operations:
 
 - `apply-route53-change`
@@ -65,6 +74,15 @@ Supported operations:
 - `apply-regional-alb-entrypoint-approved`
 - `generate-route53-regional-test-records`
 - `generate-route53-alb-cutover-plan`
+
+Readiness-only operations:
+
+- `verify-regional-alb-health`
+- `regional-capacity-inventory`
+- `generate-regional-cloudwatch-alarm-plan`
+- `generate-alb-access-log-plan`
+- `generate-waf-plan`
+- `generate-asg-launch-template-plan`
 
 Each operation requires both:
 
@@ -108,6 +126,7 @@ Templates:
 - `recovery-cleanup-policy.template.json`
 - `object-storage-write-test-policy.template.json`
 - `alb-entrypoint-apply-policy.template.json`
+- `regional-readiness-policy.template.json`
 - `dr-explicit-deny-guardrail-policy.template.json`
 
 Replace placeholders such as `<AWS_ACCOUNT_ID>`, `<GITHUB_ORG>`, `<GITHUB_REPO>`, `<HOSTED_ZONE_ID>`, `<NORMALIZED_RECORD_NAME>`, `<TARGET_REGION>`, and `<BUCKET_NAME>` before applying in AWS.
@@ -123,4 +142,5 @@ Replace placeholders such as `<AWS_ACCOUNT_ID>`, `<GITHUB_ORG>`, `<GITHUB_REPO>`
 - Recovery DB and copied snapshot cleanup are isolated behind `dr-recovery-cleanup`, require a reviewer, should be restricted to `main`, and must never target production identifiers.
 - Object storage write testing writes only under `dr-tests/<timestamp>/`.
 - Regional ALB entrypoint apply creates or reuses ALB/ACM/target group resources, selects one public IGW-routed ALB subnet per Availability Zone, may call `set-subnets` to correct an existing ALB subnet set, may UPSERT ACM validation CNAMEs, and does not cut over public DNS.
+- Regional readiness is read/plan-only. It gathers ALB/target/EC2/CloudWatch evidence and generates alarm, access-log, WAF, and ASG plans without enabling those services.
 - Bucket deletion, DB deletion, DB failover, recursive object deletion, Docker prune, and MinIO decommission remain out of scope.
