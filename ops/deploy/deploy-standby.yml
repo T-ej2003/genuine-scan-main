@@ -84,8 +84,8 @@
       args:
         chdir: "{{ app_dir }}"
 
-    - name: Restart Docker Compose stack
-      command: docker compose up -d --build
+    - name: Restart Docker Compose stack with singleton worker profile
+      command: docker compose --profile worker up -d --build
       args:
         chdir: "{{ app_dir }}"
 

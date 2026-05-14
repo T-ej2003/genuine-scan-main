@@ -111,6 +111,8 @@ services:
   worker:
     image: genuine-scan-backend:${GIT_SHA:-unknown}
     container_name: genuine-scan-worker
+    profiles:
+      - worker
     restart: unless-stopped
     init: true
     env_file:

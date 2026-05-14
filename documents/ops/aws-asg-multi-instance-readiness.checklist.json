@@ -1,53 +1,63 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "service": "MSCQR",
   "lastAudited": "2026-05-14",
   "asgStatus": "BLOCKED",
-  "statusReason": "The codebase has production Redis and object-storage startup requirements and web worker gating, but the current EC2/Compose topology still includes node-local Redis and MinIO defaults, and ASG secret/bootstrap/rolling-deploy evidence is not proven.",
+  "statusReason": "Regional Redis, regional S3 object storage, and ASG web-node worker exclusion now have proof fields. ASG create/attach remains blocked until secret/bootstrap injection and rolling deployment policy are proven.",
   "safeToCreateAsg": false,
   "safeToModifyProductionDns": false,
   "safeToMutateRdsData": false,
-  "blockers": [
+  "proofs": [
     {
-      "id": "REDIS_SHARED_ENDPOINT_NOT_PROVEN",
-      "severity": "critical",
+      "id": "REDIS_SHARED_ENDPOINT_PROVEN",
+      "status": "proven",
       "area": "redis-sessions-rate-limits-cache-leases",
       "evidence": [
-        "docker-compose.yml defines a local redis service and defaults REDIS_URL to redis://redis:6379/0.",
-        "backend/src/index.ts requires Redis in production.",
-        "backend/src/middleware/publicRateLimit.ts uses RedisStore only when Redis is configured; otherwise in-process fallback is per node."
+        "Operator evidence: Mumbai and Cape Town have regional ElastiCache/Valkey.",
+        "Operator evidence: EC2 instances can reach regional Redis.",
+        "Operator evidence: backend and worker use REDIS_URL=rediss://regional-elasticache:6379/0 and REDIS_TLS=true.",
+        "Operator evidence: /api/health/ready reports redis configured=true ready=true in both regions.",
+        ".env.production.mumbai.example and .env.production.capetown.example now document rediss:// regional Redis and REDIS_TLS=true."
       ],
-      "requiredResolution": "Use one shared Redis endpoint per region, such as ElastiCache or a hardened shared Redis node, and inject the same REDIS_URL into every web and worker instance."
+      "condition": "ASG web nodes must use the same regional REDIS_URL and REDIS_TLS=true. The local Redis service in docker-compose.yml is retained only for legacy/local-state Compose paths."
     },
     {
-      "id": "LOCAL_MINIO_IN_COMPOSE",
-      "severity": "critical",
+      "id": "OBJECT_STORAGE_SHARED_PROVEN",
+      "status": "proven",
       "area": "object-storage",
       "evidence": [
-        "docker-compose.yml defines a local minio service and minio_data volume.",
-        ".env.production.mumbai.example currently documents OBJECT_STORAGE_ENDPOINT=http://minio:9000."
+        "Operator evidence: regional object storage uses S3/default credentials with endpoint=null and mode=default-credentials.",
+        "Operator evidence: OBJECT_STORAGE_ENDPOINT, OBJECT_STORAGE_ACCESS_KEY, and OBJECT_STORAGE_SECRET_KEY are empty in both regional env files.",
+        ".env.production.mumbai.example and .env.production.capetown.example now keep static object storage endpoint and credentials empty.",
+        "docker-compose.asg-web.yml has no MinIO service."
       ],
-      "requiredResolution": "Move regional production artifacts to shared S3 or another managed S3-compatible endpoint reachable by all instances. Do not approve ASG while each node owns its own MinIO data volume."
+      "condition": "ASG web nodes must use regional S3/default credentials. The local MinIO service in docker-compose.yml is retained only for legacy/local-state Compose paths."
     },
     {
-      "id": "ASG_SECRET_INJECTION_NOT_PROVEN",
-      "severity": "critical",
-      "area": "secrets",
-      "evidence": [
-        "docker-compose.yml still consumes ./backend/.env.",
-        "No ASG user-data, SSM, or Secrets Manager bootstrap path is committed and validated for fresh replacement instances."
-      ],
-      "requiredResolution": "Define and validate instance-profile access to SSM Parameter Store or Secrets Manager, render backend/.env or container env without printing secrets, and fail boot when required values are missing."
-    },
-    {
-      "id": "WORKER_SINGLETON_TOPOLOGY_NOT_PROVEN",
-      "severity": "high",
+      "id": "WORKER_TOPOLOGY_CONDITIONALLY_PROVEN",
+      "status": "conditional",
       "area": "background-workers",
       "evidence": [
-        "docker-compose.yml disables RUN_BACKGROUND_WORKERS on backend and enables workers on a separate worker service.",
-        "worker.ts starts schedulers and maintenance loops; many use Redis leases, but the compliance pack scheduler itself is not lease-wrapped."
+        "docker-compose.yml keeps the worker behind profiles: [\"worker\"].",
+        "docker-compose.asg-web.yml contains backend and frontend only, with no worker service.",
+        "Both backend Compose modes force RUN_BACKGROUND_WORKERS=false for HTTP backend processes.",
+        "Existing standalone regional EC2 worker ownership is explicit: docker compose --profile worker up -d --build backend worker frontend.",
+        "Operator evidence: current worker containers run with RUN_BACKGROUND_WORKERS=true.",
+        "Operator evidence: COMPLIANCE_PACK_SCHEDULER_ENABLED=false in both regions."
       ],
-      "requiredResolution": "Keep web ASG nodes at RUN_BACKGROUND_WORKERS=false. Run one separate worker service per region for singleton jobs, or add a Redis/database distributed lock around every scheduler before scaling workers."
+      "condition": "Exactly one worker container per region. ASG web nodes must not start worker containers. COMPLIANCE_PACK_SCHEDULER_ENABLED must stay false unless separately approved. Worker horizontal scaling is not assumed safe."
+    }
+  ],
+  "blockers": [
+    {
+      "id": "ASG_SECRET_BOOTSTRAP_INJECTION_NOT_PROVEN",
+      "severity": "critical",
+      "area": "secrets-bootstrap",
+      "evidence": [
+        "docker-compose.yml and docker-compose.asg-web.yml still consume ./backend/.env.",
+        "No committed ASG user-data, SSM, or Secrets Manager bootstrap path is validated for fresh replacement instances."
+      ],
+      "requiredResolution": "Define and validate instance-profile access to SSM Parameter Store or Secrets Manager, render backend/.env or container env without printing secrets, and fail boot when required values are missing."
     },
     {
       "id": "ROLLING_DEPLOY_POLICY_NOT_APPLIED",
@@ -62,10 +72,13 @@
   ],
   "conditionsBeforeReaudit": [
     "Production DNS remains rolled back to London EC2 until a separate approved DNS cutover.",
+    "ASG web nodes use docker-compose.asg-web.yml, not the legacy local-state Compose path.",
     "Redis is external/shared per region and not container-local per EC2 node.",
-    "Object storage is shared per region and not container-local MinIO per EC2 node.",
+    "Object storage is shared regional S3/default credentials and not container-local MinIO per EC2 node.",
     "Migrations are run as an explicit one-shot release step, not by every booting instance.",
     "Web nodes run RUN_BACKGROUND_WORKERS=false.",
+    "One singleton worker container runs per region outside the ASG web node path.",
+    "COMPLIANCE_PACK_SCHEDULER_ENABLED remains false unless separately approved.",
     "Secrets are injected through IAM-authenticated SSM or Secrets Manager bootstrap with no secret values in logs.",
     "Fresh instance bootstrap is repeatable from image, user data, env, and repository scripts.",
     "ALB health checks use /healthz for shallow liveness or /api/health/ready for dependency readiness according to the rollout phase.",
@@ -79,11 +92,8 @@
     "git diff --check"
   ],
   "operatorInputsRequiredForConditionalReady": [
-    "Per-region REDIS_URL for shared Redis.",
-    "Per-region OBJECT_STORAGE_BUCKET and OBJECT_STORAGE_REGION/AWS_REGION, plus either IAM instance-profile access or static custom endpoint credentials.",
     "Documented SSM Parameter Store or Secrets Manager paths for all backend production secrets.",
     "Launch-template user data or bootstrap script that installs/runs the same Docker image and env on a clean instance.",
-    "Worker topology decision: one singleton worker, lease-protected workers, or no workers on web ASG nodes.",
     "Approved ASG health check grace period, target warmup, deregistration delay, and instance refresh policy."
   ]
 }

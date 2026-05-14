@@ -8,22 +8,23 @@ Do not create ASGs. Do not attach instances to ASGs. Do not perform production D
 
 ## Executive Verdict
 
-MSCQR is not yet safe to scale to two or more EC2 instances per region.
+MSCQR is closer, but not yet safe to create and attach ASGs.
 
 The app has several good production controls already:
 
 - Production startup refuses to run without Redis coordination.
 - Production startup refuses to run without object storage.
+- Mumbai and Cape Town have operator-proven regional ElastiCache/Valkey reachable from EC2 with `REDIS_URL=rediss://regional-elasticache:6379/0` and `REDIS_TLS=true`.
+- Mumbai and Cape Town have operator-proven regional S3/default credential object storage with `endpoint=null`, `mode=default-credentials`, and empty static object storage credential fields.
 - Backend container startup defaults `RUN_DB_MIGRATIONS_ON_START=false`.
 - Docker Compose disables background workers in the HTTP backend with `RUN_BACKGROUND_WORKERS=false`.
-- A separate worker process exists for schedulers, outbox flushing, reconciliation, analytics rollups, and hot event maintenance.
+- Docker Compose now keeps the worker behind the explicit `worker` profile.
+- `docker-compose.asg-web.yml` is the ASG web-node mode and contains only `backend` and `frontend`.
 - `/healthz` exists for shallow app liveness and `/api/health/ready` reaches backend dependency readiness through Nginx.
 
 The remaining blockers are operational and state-topology blockers:
 
-- Compose still provisions local Redis and local MinIO. If copied into an ASG node-per-instance model, each node would have isolated coordination and object data.
-- The ASG launch path for secrets is not proven. New instances must receive the same required secrets through IAM-backed SSM or Secrets Manager, not manual terminal edits.
-- Worker singleton behavior is not fully proven for every scheduled job. Web ASG nodes must not run background workers.
+- The ASG launch path for secrets/bootstrap is not proven. New instances must receive the same required secrets through IAM-backed SSM or Secrets Manager, not manual terminal edits.
 - Rolling deployment policy is not applied or tested.
 - Some upload flows stage files on local disk before object-storage upload. That is acceptable only as short-lived temp/staging, not as persistent state.
 
@@ -34,7 +35,8 @@ Repository shape:
 - Frontend: Vite/React static bundle served by Nginx.
 - Backend: Express/Prisma service in `backend/src/index.ts`.
 - Worker: `backend/src/worker.ts` using the same backend image with a worker entrypoint.
-- Local orchestration: `docker-compose.yml` with `frontend`, `backend`, `worker`, `redis`, `minio`, and `minio-init`.
+- Legacy/local orchestration: `docker-compose.yml` with `frontend`, `backend`, profiled `worker`, `redis`, `minio`, and `minio-init`.
+- ASG web-node orchestration: `docker-compose.asg-web.yml` with `frontend` and `backend` only.
 - Database: Prisma/PostgreSQL through `DATABASE_URL`.
 - Object storage: S3-compatible client in `backend/src/services/objectStorageService.ts`.
 
@@ -43,7 +45,8 @@ Runtime defaults that matter for ASG:
 - `backend/Dockerfile` sets `RUN_DB_MIGRATIONS_ON_START=false`.
 - `backend/docker/start-runtime.sh` runs `npx prisma migrate deploy` only when `RUN_DB_MIGRATIONS_ON_START=true`.
 - `docker-compose.yml` sets backend `RUN_BACKGROUND_WORKERS: "false"`.
-- `docker-compose.yml` sets worker `RUN_BACKGROUND_WORKERS: "true"`.
+- `docker-compose.yml` puts the `worker` service behind `profiles: ["worker"]` and sets worker `RUN_BACKGROUND_WORKERS: "true"`.
+- `docker-compose.asg-web.yml` has no `worker`, `redis`, `minio`, or `minio-init` service.
 - `docker-compose.yml` defaults `REDIS_URL` to `redis://redis:6379/0`.
 - `docker-compose.yml` includes local `minio_data` and `redis_data` volumes.
 
@@ -56,10 +59,12 @@ Evidence:
 - Public rate limits use `rate-limit-redis` when Redis is configured.
 - Incident report rate limits, versioned cache invalidation, audit/notification pub-sub, and distributed leases use Redis when configured.
 - Auth sessions are JWT/cookie-backed, not Express in-memory sessions. No `express-session` MemoryStore was found in backend source.
+- Operator evidence confirms both Mumbai and Cape Town regional EC2 instances are using regional ElastiCache/Valkey via `rediss://regional-elasticache:6379/0`, `REDIS_TLS=true`.
+- `/api/health/ready` in both regions reports Redis `configured=true` and `ready=true`.
 
-Risk:
+Residual risk:
 
-- Local Redis per EC2 node would split rate limits, leases, cache invalidation, notifications, and pub-sub.
+- Local Redis per EC2 node would split rate limits, leases, cache invalidation, notifications, and pub-sub if the legacy Compose file is copied directly into ASG web nodes.
 - Any in-process fallback is for local/non-production behavior only.
 
 ASG requirement:
@@ -70,7 +75,7 @@ ASG requirement:
 
 Guardrail:
 
-- `scripts/dr/check-asg-multi-instance-readiness.mjs` keeps ASG blocked while local Redis defaults remain and shared `REDIS_URL` evidence is not committed.
+- `scripts/dr/check-asg-multi-instance-readiness.mjs` requires ASG web-node mode to use required shared `REDIS_URL` and `REDIS_TLS=true`.
 
 ## B. MinIO And Object Storage
 
@@ -81,11 +86,13 @@ Evidence:
 - Incident and support uploads stage through Multer local disk, then upload to object storage and remove local files when object storage is configured.
 - Compliance packs now upload generated zip buffers to object storage when configured and record `storageMode` in job summary. Local disk remains only as fallback for non-production/degraded recovery.
 - `docker-compose.yml` still defines a local MinIO service and `minio_data` volume.
-- `.env.production.mumbai.example` currently documents `OBJECT_STORAGE_ENDPOINT=http://minio:9000`.
+- Regional env examples now keep `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_ACCESS_KEY`, and `OBJECT_STORAGE_SECRET_KEY` empty for S3/default credentials.
+- Operator evidence confirms Mumbai and Cape Town use regional S3/default credentials with `endpoint=null` and `mode=default-credentials`.
 
-Risk:
+Residual risk:
 
 - MinIO per ASG node is unsafe because uploads and generated artifacts would be visible only on the node that received the request.
+- `docker-compose.asg-web.yml` avoids local MinIO entirely; the legacy MinIO service remains only for local/legacy Compose paths.
 
 ASG requirement:
 
@@ -93,9 +100,10 @@ ASG requirement:
 - Prefer IAM instance-profile access with no static object-storage credentials on EC2.
 - If a custom endpoint is used, it must be external/shared and HA enough for the region.
 
-ASG blocker:
+ASG requirement:
 
-- `LOCAL_MINIO_IN_COMPOSE` remains open until regional production config proves shared object storage.
+- ASG launch templates must use `docker-compose.asg-web.yml` and regional S3/default credentials.
+- Do not use the legacy local MinIO service in ASG web nodes.
 
 ## C. Database Migrations
 
@@ -121,21 +129,37 @@ ASG requirement:
 Evidence:
 
 - Web backend starts background workers only when `RUN_BACKGROUND_WORKERS` parses true.
-- Compose explicitly disables background workers on backend and runs a separate `worker` service.
+- Compose explicitly disables background workers on backend and keeps the separate `worker` service behind the `worker` profile.
+- `docker-compose.asg-web.yml` contains no worker service.
 - Worker starts security event outbox, audit outbox, compliance pack scheduler, print reconcilers, analytics rollups, and hot event partition maintenance.
 - Several recurring workers use Redis leases through `withDistributedLease`.
-- Compliance pack scheduling has a process-local `lastRunStamp` and is not fully lease-wrapped.
+- Compliance pack scheduling has a process-local `lastRunStamp` and is not fully lease-wrapped, so it must stay disabled unless separately approved.
+- Operator evidence confirms current regional worker containers run with `RUN_BACKGROUND_WORKERS=true` and `COMPLIANCE_PACK_SCHEDULER_ENABLED=false`.
 - Legacy EC2 docs include local certbot cron for the single-node Nginx path.
 
 Risk:
 
-- If every ASG web node starts workers, singleton jobs may duplicate.
+- If ASG web nodes start workers, singleton jobs may duplicate.
 - If multiple worker containers run without full distributed locks, scheduled compliance packs and maintenance may duplicate.
 
 ASG requirement:
 
 - Web ASG nodes must run `RUN_BACKGROUND_WORKERS=false`.
-- Run workers as one separate singleton per region until every scheduler is lease-protected.
+- ASG web nodes must use `docker-compose.asg-web.yml`:
+
+```bash
+docker compose -f docker-compose.asg-web.yml up -d --build backend frontend
+```
+
+- Existing standalone regional EC2 hosts that intentionally own the singleton worker must opt in to the worker profile:
+
+```bash
+docker compose --profile worker up -d --build backend worker frontend
+```
+
+- Run exactly one worker container per region for now.
+- Keep `COMPLIANCE_PACK_SCHEDULER_ENABLED=false` unless a separate approval adds a distributed lock or other singleton control for that scheduler.
+- Do not assume worker horizontal scaling is safe.
 - CTO recommendation: split workers into named process roles: `outbox`, `print-reconcile`, `analytics`, `maintenance`, and `compliance-scheduler`, each with Redis/database locking and independent concurrency.
 
 ## E. Filesystem Writes
@@ -189,7 +213,8 @@ Evidence:
 
 - Frontend and backend Dockerfiles build deterministic images.
 - Backend startup is simple and repeatable when env exists.
-- Current Compose topology includes local Redis/MinIO and local certbot volumes.
+- Legacy Compose topology includes local Redis/MinIO and local certbot volumes.
+- ASG web-node Compose topology excludes local Redis, MinIO, and worker services.
 - Regional ASG launch-template scripts exist as plan/apply scaffolding, but ASG creation is out of scope and not run by this audit.
 
 ASG bootstrap checklist:
@@ -201,7 +226,7 @@ ASG bootstrap checklist:
 - Set backend `RUN_BACKGROUND_WORKERS=false` on web nodes.
 - Point `REDIS_URL` to shared regional Redis.
 - Point object storage to shared S3/managed endpoint.
-- Start only frontend/backend containers on web ASG nodes.
+- Start only frontend/backend containers on web ASG nodes with `docker-compose.asg-web.yml`.
 - Register only after `/api/health/ready` is healthy.
 - Ship logs to CloudWatch; do not depend on instance-local log retention.
 
@@ -246,7 +271,9 @@ Required policy before ASG apply:
 
 No-go for ASG create/attach.
 
-The app is conditionally close from a code perspective after the compliance pack object-storage hardening, but operations evidence is not enough to run multiple EC2 instances safely. Re-audit only after shared Redis, shared object storage, secret injection, worker topology, bootstrap, health grace, and rolling deploy policy are all proven in a regional test path.
+Worker topology is conditionally proven for ASG web nodes: web nodes have an explicit worker-free Compose file, the HTTP backend is worker-disabled, the standalone worker is an intentional one-per-region profile, compliance scheduling is disabled, and worker horizontal scaling is not assumed safe.
+
+ASG remains blocked because secret/bootstrap injection and rolling deployment policy are not yet proven in the launch-template path. Re-audit only after those remaining blockers have concrete evidence.
 
 ## Validation
 

@@ -79,7 +79,7 @@ export GIT_SHA=$(/usr/bin/git rev-parse HEAD)
 export VITE_APP_ENV=production
 export SENTRY_ENVIRONMENT=production
 docker compose build --pull --no-cache backend frontend
-docker compose up -d --force-recreate
+docker compose --profile worker up -d --force-recreate
 docker compose ps
 docker compose logs backend --tail 160
 docker compose logs frontend --tail 160

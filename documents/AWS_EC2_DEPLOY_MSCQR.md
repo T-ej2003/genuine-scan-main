@@ -70,7 +70,7 @@ Update runtime values before first boot:
 Start app before TLS cert exists. Frontend container will use HTTP config automatically.
 
 ```bash
-docker compose up -d --build
+docker compose --profile worker up -d --build
 docker compose ps
 ```
 
@@ -172,7 +172,7 @@ MSCQR_CERTBOT_DRY_RUN=true sh deploy/certbot/renew-letsencrypt.sh
 ```bash
 cd /home/ubuntu/genuine-scan-main
 git pull
-docker compose up -d --build
+docker compose --profile worker up -d --build
 ```
 
 ## 10. Production checks

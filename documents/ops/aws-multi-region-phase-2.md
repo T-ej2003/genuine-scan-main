@@ -161,7 +161,7 @@ scripts/deploy-standby.sh mumbai
 scripts/deploy-standby.sh capetown
 ```
 
-The helper now calls `ops/deploy/deploy.yml` directly. That keeps standby deployment aligned with the proven production path: existing app directory, existing git ownership behavior, `git fetch --prune`, `git reset --hard`, npm checks, production guardrails, and `docker compose up -d --build`.
+The helper now calls `ops/deploy/deploy.yml` directly. That keeps standby deployment aligned with the proven production path: existing app directory, existing git ownership behavior, `git fetch --prune`, `git reset --hard`, npm checks, production guardrails, and `docker compose --profile worker up -d --build` for standalone EC2 hosts that intentionally own the singleton worker.
 
 ## Health Check Commands
 

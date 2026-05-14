@@ -98,8 +98,8 @@
         backup: false
       no_log: true
 
-    - name: Restart selected standby app services
-      command: docker compose up -d --build backend worker frontend
+    - name: Restart selected standby app services with singleton worker profile
+      command: docker compose --profile worker up -d --build backend worker frontend
       args:
         chdir: "{{ app_dir }}"
 
