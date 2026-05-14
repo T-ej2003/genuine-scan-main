@@ -10,6 +10,7 @@ import { createAuditLog } from "./auditService";
 import { generateComplianceReport } from "./governanceService";
 import { logger } from "../utils/logger";
 import { getQrSigningHmacSecret } from "../utils/secretConfig";
+import { downloadObjectBuffer, isObjectStorageConfigured, uploadObjectBuffer } from "./objectStorageService";
 
 const ensureDir = (dir: string) => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -54,6 +55,25 @@ const signPayload = (payload: string) => {
 };
 
 const compliancePackDir = () => path.resolve(__dirname, "../../uploads/compliance-packs");
+const compliancePackObjectKey = (storageKey: string) => `compliance-packs/${path.basename(storageKey)}`;
+
+const persistCompliancePackBuffer = async (storageKey: string, buffer: Buffer) => {
+  if (isObjectStorageConfigured()) {
+    const result = await uploadObjectBuffer({
+      objectKey: compliancePackObjectKey(storageKey),
+      body: buffer,
+      contentType: "application/zip",
+    });
+    if (result.uploaded) {
+      return { storageKey: result.key, filePath: null as string | null, storageMode: "object-storage" as const };
+    }
+  }
+
+  ensureDir(compliancePackDir());
+  const fullPath = path.join(compliancePackDir(), path.basename(storageKey));
+  fs.writeFileSync(fullPath, buffer);
+  return { storageKey: path.basename(storageKey), filePath: fullPath, storageMode: "local-disk" as const };
+};
 
 export const buildSignedComplianceEvidencePack = async (params: {
   actor: { userId: string; role: UserRole; licenseeId?: string | null };
@@ -167,22 +187,21 @@ export const runCompliancePackJob = async (params: {
       to: params.to,
     });
 
-    ensureDir(compliancePackDir());
     const storageKey = `${job.id}-${pack.fileName}`;
-    const fullPath = path.join(compliancePackDir(), storageKey);
-    fs.writeFileSync(fullPath, pack.buffer);
+    const persisted = await persistCompliancePackBuffer(storageKey, pack.buffer);
 
     const updated = await prisma.compliancePackJob.update({
       where: { id: job.id },
       data: {
         status: "COMPLETED",
         fileName: pack.fileName,
-        storageKey,
+        storageKey: persisted.storageKey,
         integrityHash: pack.metadata.integrityHash,
         signatureAlgorithm: pack.metadata.signatureAlgorithm,
         summary: {
           controls: pack.metadata.controls,
           generatedAt: pack.metadata.generatedAt,
+          storageMode: persisted.storageMode,
         },
         finishedAt: new Date(),
       },
@@ -203,7 +222,7 @@ export const runCompliancePackJob = async (params: {
 
     return {
       job: updated,
-      filePath: fullPath,
+      filePath: persisted.filePath,
     };
   } catch (error) {
     const updated = await prisma.compliancePackJob.update({
@@ -239,8 +258,11 @@ export const listCompliancePackJobs = async (params: {
   return { jobs, total };
 };
 
-export const loadCompliancePackJobBuffer = (storageKey: string) => {
-  const fullPath = path.join(compliancePackDir(), storageKey);
+export const loadCompliancePackJobBuffer = async (storageKey: string) => {
+  const objectBuffer = await downloadObjectBuffer(storageKey);
+  if (objectBuffer) return objectBuffer;
+
+  const fullPath = path.join(compliancePackDir(), path.basename(storageKey));
   if (!fs.existsSync(fullPath)) return null;
   return fs.readFileSync(fullPath);
 };
@@ -269,23 +291,22 @@ export const rebuildCompliancePackArtifactForJob = async (params: {
     to: job.periodTo || null,
   });
 
-  ensureDir(compliancePackDir());
   const storageKey = `${job.id}-rebuild-${Date.now()}-${pack.fileName}`;
-  const fullPath = path.join(compliancePackDir(), storageKey);
-  fs.writeFileSync(fullPath, pack.buffer);
+  const persisted = await persistCompliancePackBuffer(storageKey, pack.buffer);
 
   const updated = await prisma.compliancePackJob.update({
     where: { id: job.id },
     data: {
       status: "COMPLETED",
       fileName: pack.fileName,
-      storageKey,
+      storageKey: persisted.storageKey,
       integrityHash: pack.metadata.integrityHash,
       signatureAlgorithm: pack.metadata.signatureAlgorithm,
       summary: {
         controls: pack.metadata.controls,
         generatedAt: pack.metadata.generatedAt,
         rebuiltFromMissingArtifact: true,
+        storageMode: persisted.storageMode,
       },
       errorMessage: null,
       finishedAt: new Date(),
@@ -306,7 +327,7 @@ export const rebuildCompliancePackArtifactForJob = async (params: {
 
   return {
     job: updated,
-    filePath: fullPath,
+    filePath: persisted.filePath,
   };
 };
 

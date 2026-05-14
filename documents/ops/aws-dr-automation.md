@@ -299,6 +299,7 @@ Current stable state before final DNS cutover:
 - Mumbai ALB is healthy and available through `dr-mumbai.mscqr.com`.
 - Cape Town ALB is healthy and available through `dr-capetown.mscqr.com`.
 - Production cutover/rollback plans exist, but production DNS must not be changed by readiness work.
+- ASG_STATUS=BLOCKED in `documents/ops/aws-asg-multi-instance-readiness.md`.
 
 Use this workflow for read-only evidence and plan generation:
 
@@ -359,6 +360,14 @@ Recommended readiness sequence per region:
 
 Do not proceed to final production DNS cutover until test-record validation, scaling readiness, observability readiness, and rollback evidence are all captured for both Mumbai and Cape Town.
 
+Before any ASG create/attach approval, run and review:
+
+```bash
+node scripts/dr/check-asg-multi-instance-readiness.mjs
+```
+
+The current ASG gate is intentionally blocked until shared Redis, shared object storage, ASG secret injection, worker singleton behavior, bootstrap repeatability, health grace, and rolling deployment policy are proven. The source of truth for this gate is `documents/ops/aws-asg-multi-instance-readiness.md` and `documents/ops/aws-asg-multi-instance-readiness.checklist.json`.
+
 ## Approved Regional Hardening Apply
 
 After readiness plans are reviewed, use the hardening workflow for staged, approval-gated changes:
@@ -391,7 +400,7 @@ Safe hardening order per region:
 4. `apply-waf-count-mode`.
 5. `verify-hardening-state`.
 6. `generate-asg-apply-plan`.
-7. Run `apply-asg-launch-template-approved` only after reviewing node-local Redis, MinIO, secrets, migrations, sessions, filesystem state, background workers, and sticky behavior.
+7. Run `apply-asg-launch-template-approved` only after `ASG_STATUS=BLOCKED` has been replaced by a reviewed `CONDITIONALLY_READY` or `READY` finding in `documents/ops/aws-asg-multi-instance-readiness.md`.
 8. Consider production DNS cutover only after ASG health and app state risks are solved.
 
 Rollback notes:

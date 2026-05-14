@@ -69,6 +69,8 @@ The raw `*.elb.amazonaws.com` ALB hostname is not on the MSCQR ACM certificate, 
 
 Before final DNS cutover, run `AWS DR Regional Readiness` for Mumbai and Cape Town. This workflow is read/plan-only and does not change DNS, enable access logs, attach WAF, create ASGs, mutate RDS/S3, or delete resources.
 
+Current app scaling gate: ASG_STATUS=BLOCKED. Review `documents/ops/aws-asg-multi-instance-readiness.md` and run `node scripts/dr/check-asg-multi-instance-readiness.mjs` before any ASG create/attach discussion.
+
 Phases before final cutover:
 
 1. Current stable state: London EC2 remains production DNS.
@@ -103,7 +105,7 @@ Apply order:
 
 Hardening does not perform production DNS cutover, delete AWS resources, mutate RDS, mutate application S3 buckets, copy Let's Encrypt keys, or move WAF rules to BLOCK mode. WAF remains COUNT mode only in this phase.
 
-ASG apply is intentionally last because current single-node assumptions may include node-local Redis, MinIO, secrets, sessions, migrations, worker behavior, and filesystem state. Do not use final production DNS cutover until at least the selected region has healthy multi-target evidence and a reviewed rollback plan.
+ASG apply is intentionally last because current single-node assumptions may include node-local Redis, MinIO, secrets, sessions, migrations, worker behavior, and filesystem state. ASG_STATUS=BLOCKED remains the official position until `documents/ops/aws-asg-multi-instance-readiness.md` is updated from evidence. Do not use final production DNS cutover until at least the selected region has healthy multi-target evidence and a reviewed rollback plan.
 
 ## Operator Sequence
 
@@ -317,3 +319,5 @@ Record the env backup path, health check result, workflow artifact name, and tim
 - [ ] Manual DNS rollback path confirmed.
 - [ ] RTO/RPO targets defined.
 - [ ] Incident roles assigned.
+- [ ] `documents/ops/aws-asg-multi-instance-readiness.md` is no longer `ASG_STATUS=BLOCKED` before any ASG create/attach.
+- [ ] `node scripts/dr/check-asg-multi-instance-readiness.mjs` passes in the release branch.

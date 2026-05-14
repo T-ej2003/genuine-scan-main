@@ -498,7 +498,7 @@ export const downloadCompliancePackJobController = async (req: AuthRequest, res:
       return res.status(409).json({ success: false, error: "Compliance pack is not ready" });
     }
 
-    let buffer = loadCompliancePackJobBuffer(row.storageKey);
+    let buffer = await loadCompliancePackJobBuffer(row.storageKey);
     if (!buffer) {
       try {
         const rebuilt = await rebuildCompliancePackArtifactForJob({
@@ -509,7 +509,7 @@ export const downloadCompliancePackJobController = async (req: AuthRequest, res:
             licenseeId: req.user.licenseeId || null,
           },
         });
-        buffer = loadCompliancePackJobBuffer(rebuilt.job.storageKey || "");
+        buffer = await loadCompliancePackJobBuffer(rebuilt.job.storageKey || "");
       } catch (rebuildError) {
         console.error("downloadCompliancePackJobController rebuild error:", rebuildError);
       }

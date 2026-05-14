@@ -182,6 +182,26 @@ export const uploadObjectFromFile = async (params: {
   return { uploaded: true as const, key: params.objectKey };
 };
 
+export const uploadObjectBuffer = async (params: {
+  objectKey: string;
+  body: Buffer;
+  contentType?: string | null;
+}) => {
+  const s3 = getClient();
+  if (!s3) return { uploaded: false as const, key: params.objectKey };
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: configuredBucket(),
+      Key: params.objectKey,
+      Body: params.body,
+      ContentType: params.contentType || "application/octet-stream",
+    })
+  );
+
+  return { uploaded: true as const, key: params.objectKey };
+};
+
 export const downloadObjectBuffer = async (objectKey: string) => {
   const s3 = getClient();
   if (!s3) return null;

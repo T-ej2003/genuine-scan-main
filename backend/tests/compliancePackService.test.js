@@ -80,7 +80,7 @@ const run = async () => {
 
     assert(createPayload && createPayload.status === "RUNNING", "Job should be created in RUNNING state");
     assert(updatePayload && updatePayload.status === "COMPLETED", "Job should transition to COMPLETED state");
-    assert(fs.existsSync(result.filePath), "Generated compliance pack file should be written to disk");
+    assert(result.filePath && fs.existsSync(result.filePath), "Generated compliance pack file should be written to disk without object storage");
 
     fs.unlinkSync(result.filePath);
 
