@@ -25,12 +25,13 @@
       "Sid": "WafCountModeHardening",
       "Effect": "Allow",
       "Action": [
-        "wafv2:GetWebACL",
-        "wafv2:CreateWebACL",
-        "wafv2:UpdateWebACL",
-        "wafv2:ListWebACLs",
         "wafv2:AssociateWebACL",
-        "wafv2:GetWebACLForResource"
+        "wafv2:CreateWebACL",
+        "wafv2:GetWebACL",
+        "wafv2:GetWebACLForResource",
+        "wafv2:ListWebACLs",
+        "wafv2:TagResource",
+        "wafv2:UpdateWebACL"
       ],
       "Resource": "*"
     },
