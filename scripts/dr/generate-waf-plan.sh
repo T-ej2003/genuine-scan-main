@@ -30,10 +30,10 @@ plan="$out_dir/waf-plan.md"
   printf '%s\n\n' "- Proposed WebACL name: \`$WAF_NAME\`"
   printf 'This is a plan only. It does not create or attach WAF resources.\n\n'
   printf '## Recommended managed rules\n\n'
-  printf '- AWSManagedRulesCommonRuleSet\n'
-  printf '- AWSManagedRulesKnownBadInputsRuleSet\n'
-  printf '- AWSManagedRulesAmazonIpReputationList\n'
-  printf '- Rate-based rule scoped to `/api/` after baseline traffic is measured.\n\n'
+  printf '%s\n' '- AWSManagedRulesCommonRuleSet'
+  printf '%s\n' '- AWSManagedRulesKnownBadInputsRuleSet'
+  printf '%s\n' '- AWSManagedRulesAmazonIpReputationList'
+  printf '%s\n\n' '- Rate-based rule scoped to `/api/` after baseline traffic is measured.'
   printf '## Example apply steps, for a separate approved WAF change\n\n'
   printf '1. Create WebACL in `%s` with count mode first.\n' "${AWS_REGION:-<region>}"
   printf '2. Associate WebACL to `%s`.\n' "${ALB_ARN:-<alb-arn>}"

@@ -32,10 +32,10 @@ plan="$out_dir/alb-access-log-plan.md"
   printf '%s\n\n' "- S3 prefix: \`$ACCESS_LOGS_PREFIX\`"
   printf 'This is a plan only. It does not enable access logs or write S3 objects.\n\n'
   printf '## Approval checks\n\n'
-  printf '- Bucket exists in the approved logging account/region.\n'
-  printf '- Bucket policy allows the regional ALB log delivery principal.\n'
-  printf '- Lifecycle retention is approved.\n'
-  printf '- No production application bucket is reused for ALB logs.\n\n'
+  printf '%s\n' '- Bucket exists in the approved logging account/region.'
+  printf '%s\n' '- Bucket policy allows the regional ALB log delivery principal.'
+  printf '%s\n' '- Lifecycle retention is approved.'
+  printf '%s\n\n' '- No production application bucket is reused for ALB logs.'
   printf '## Example apply command, for a separate approved logging change\n\n'
   printf '```sh\n'
   printf '# aws elbv2 modify-load-balancer-attributes --region %s --load-balancer-arn %s --attributes Key=access_logs.s3.enabled,Value=true Key=access_logs.s3.bucket,Value=%s Key=access_logs.s3.prefix,Value=%s\n' "${AWS_REGION:-<region>}" "${ALB_ARN:-<alb-arn>}" "$ACCESS_LOGS_BUCKET" "$ACCESS_LOGS_PREFIX"

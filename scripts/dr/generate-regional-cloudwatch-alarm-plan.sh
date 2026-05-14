@@ -36,12 +36,12 @@ plan="$out_dir/cloudwatch-alarm-plan.md"
   printf '%s\n' "- EC2 instance ID: \`${INSTANCE_ID:-provide-instance-id}\`"
   printf '%s\n\n' "- SNS topic ARN: \`$SNS_TOPIC_ARN\`"
   printf '## Recommended alarms\n\n'
-  printf '- ALB `HTTPCode_ELB_5XX_Count` > 0 for 2 periods.\n'
-  printf '- Target `HTTPCode_Target_5XX_Count` > 0 for 2 periods.\n'
-  printf '- `UnHealthyHostCount` >= 1 for 2 periods.\n'
-  printf '- `TargetResponseTime` p95 >= 1 second for 3 periods.\n'
-  printf '- EC2 `CPUUtilization` >= 70%% for 3 periods.\n'
-  printf '- Disk `disk_used_percent` >= 80%% if CloudWatch Agent publishes `CWAgent` metrics.\n\n'
+  printf '%s\n' '- ALB `HTTPCode_ELB_5XX_Count` > 0 for 2 periods.'
+  printf '%s\n' '- Target `HTTPCode_Target_5XX_Count` > 0 for 2 periods.'
+  printf '%s\n' '- `UnHealthyHostCount` >= 1 for 2 periods.'
+  printf '%s\n' '- `TargetResponseTime` p95 >= 1 second for 3 periods.'
+  printf '%s\n' '- EC2 `CPUUtilization` >= 70% for 3 periods.'
+  printf '%s\n\n' '- Disk `disk_used_percent` >= 80% if CloudWatch Agent publishes `CWAgent` metrics.'
   printf '## Example apply commands, for a separately approved monitoring apply change\n\n'
   printf '```sh\n'
   printf '# aws cloudwatch put-metric-alarm --region %s --alarm-name MSCQR-%s-ALB-5XX --namespace AWS/ApplicationELB --metric-name HTTPCode_ELB_5XX_Count --dimensions Name=LoadBalancer,Value=%s --statistic Sum --period 60 --evaluation-periods 2 --threshold 0 --comparison-operator GreaterThanThreshold --alarm-actions %s\n' "${AWS_REGION:-<region>}" "$TARGET_REGION_GROUP" "${lb_dimension:-<load-balancer-dimension>}" "$SNS_TOPIC_ARN"
