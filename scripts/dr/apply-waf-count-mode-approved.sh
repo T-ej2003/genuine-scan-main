@@ -101,6 +101,7 @@ web_acl_id="$(aws wafv2 list-web-acls \
 if [ "$web_acl_id" = "None" ] || [ -z "$web_acl_id" ]; then
   aws wafv2 create-web-acl \
     --region "$AWS_REGION" \
+    --cli-binary-format raw-in-base64-out \
     --name "$WAF_WEB_ACL_NAME" \
     --scope REGIONAL \
     --default-action Allow={} \
@@ -119,6 +120,7 @@ else
     --output text)"
   aws wafv2 update-web-acl \
     --region "$AWS_REGION" \
+    --cli-binary-format raw-in-base64-out \
     --scope REGIONAL \
     --name "$WAF_WEB_ACL_NAME" \
     --id "$web_acl_id" \

@@ -510,6 +510,23 @@ for (const scanRoot of scanRoots) {
         }
       }
 
+      if (repoPath === "scripts/dr/apply-waf-count-mode-approved.sh") {
+        if (/\bBlock\s*:\s*\{\s*\}/.test(source) || /"Block"\s*:/.test(source)) {
+          findings.push({
+            repoPath,
+            line: 1,
+            message: "WAF hardening apply must remain COUNT mode only; Block actions are not allowed.",
+          });
+        }
+        if (!source.includes("--cli-binary-format raw-in-base64-out")) {
+          findings.push({
+            repoPath,
+            line: 1,
+            message: "WAF hardening apply must pass --cli-binary-format raw-in-base64-out for ByteMatchStatement SearchString JSON.",
+          });
+        }
+      }
+
       if (repoPath === "scripts/dr/apply-regional-alb-entrypoint-approved.sh" &&
         !source.includes("I_APPROVE_REGIONAL_ALB_ENTRYPOINT_APPLY")) {
         findings.push({
