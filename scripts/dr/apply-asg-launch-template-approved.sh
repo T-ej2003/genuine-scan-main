@@ -16,9 +16,8 @@ SOURCE_AMI="${SOURCE_AMI:-}"
 SOURCE_INSTANCE_TYPE="${SOURCE_INSTANCE_TYPE:-}"
 SOURCE_SECURITY_GROUP="${SOURCE_SECURITY_GROUP:-}"
 TARGET_GROUP_ARN="${TARGET_GROUP_ARN:-}"
-MIN_SIZE="${MIN_SIZE:-2}"
-DESIRED_CAPACITY="${DESIRED_CAPACITY:-2}"
-MAX_SIZE="${MAX_SIZE:-4}"
+ROLLING_POLICY_CHECKLIST_PATH="${ROLLING_POLICY_CHECKLIST_PATH:-documents/ops/aws-asg-rolling-deploy-policy.checklist.json}"
+ROLLBACK_ALARM_NAMES_CSV="${ROLLBACK_ALARM_NAMES_CSV:-}"
 CONFIRM_ASG_APPLY="${CONFIRM_ASG_APPLY:-}"
 
 case "$TARGET_REGION_GROUP" in
@@ -29,6 +28,36 @@ esac
 case "$TARGET_REGION_GROUP:$AWS_REGION" in
   mumbai:ap-south-1|capetown:af-south-1) ;;
   *) echo "AWS_REGION does not match TARGET_REGION_GROUP." >&2; exit 2 ;;
+esac
+
+policy_env_file="$(mktemp "${TMPDIR:-/tmp}/mscqr-asg-rolling-policy.XXXXXX")"
+trap 'rm -f "$policy_env_file"' EXIT HUP INT TERM
+render_asg_rolling_policy_env "$ROLLING_POLICY_CHECKLIST_PATH" "$TARGET_REGION_GROUP" "$policy_env_file"
+# shellcheck disable=SC1090
+. "$policy_env_file"
+
+MIN_SIZE="${MIN_SIZE:-$ASG_POLICY_MIN_SIZE_INITIAL}"
+DESIRED_CAPACITY="${DESIRED_CAPACITY:-$ASG_POLICY_DESIRED_CAPACITY_INITIAL}"
+MAX_SIZE="${MAX_SIZE:-$ASG_POLICY_MAX_SIZE_INITIAL}"
+
+[ "$ASG_POLICY_STATUS" = "CONDITIONALLY_READY" ] || [ "$ASG_POLICY_STATUS" = "READY" ] || {
+  echo "ASG rolling policy status must be CONDITIONALLY_READY or READY." >&2
+  exit 2
+}
+[ "$MIN_SIZE" = "$ASG_POLICY_MIN_SIZE_INITIAL" ] || { echo "MIN_SIZE must match ASG policy value $ASG_POLICY_MIN_SIZE_INITIAL for the first rollout." >&2; exit 2; }
+[ "$DESIRED_CAPACITY" = "$ASG_POLICY_DESIRED_CAPACITY_INITIAL" ] || { echo "DESIRED_CAPACITY must match ASG policy value $ASG_POLICY_DESIRED_CAPACITY_INITIAL for the first rollout." >&2; exit 2; }
+[ "$MAX_SIZE" = "$ASG_POLICY_MAX_SIZE_INITIAL" ] || { echo "MAX_SIZE must match ASG policy value $ASG_POLICY_MAX_SIZE_INITIAL for the first rollout." >&2; exit 2; }
+[ "$ASG_POLICY_NO_PRODUCTION_DNS_CUTOVER_DURING_VALIDATION" = "true" ] || { echo "ASG policy must forbid production DNS cutover during rollout validation." >&2; exit 2; }
+
+if [ -z "$ROLLBACK_ALARM_NAMES_CSV" ]; then
+  ROLLBACK_ALARM_NAMES_CSV="$ASG_POLICY_ROLLBACK_ALARM_NAMES_CSV"
+fi
+
+case "$ROLLBACK_ALARM_NAMES_CSV" in
+  *"<"*|*">"*|"")
+    echo "Refusing ASG apply without concrete rollback alarm names. Set ROLLBACK_ALARM_NAMES_CSV to reviewed CloudWatch alarm names for $TARGET_REGION_GROUP." >&2
+    exit 2
+    ;;
 esac
 
 if [ "$CONFIRM_ASG_APPLY" != "I_APPROVE_REGIONAL_ASG_CREATE_AND_ATTACH" ]; then
@@ -44,6 +73,18 @@ fi
 create_artifact_dir
 out_dir="$DR_ARTIFACT_DIR/hardening-asg-apply/$TARGET_REGION_GROUP"
 /bin/mkdir -p "$out_dir"
+
+target_group_attributes_json="$out_dir/target-group-attributes.json"
+aws elbv2 describe-target-group-attributes \
+  --region "$AWS_REGION" \
+  --target-group-arn "$TARGET_GROUP_ARN" \
+  --output json > "$target_group_attributes_json"
+
+deregistration_delay_seconds="$(node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const attrs=Object.fromEntries((p.Attributes || []).map((item) => [item.Key, item.Value])); console.log(attrs["deregistration_delay.timeout_seconds"] || "");' "$target_group_attributes_json")"
+[ "$deregistration_delay_seconds" = "$ASG_POLICY_DEREGISTRATION_DELAY_SECONDS" ] || {
+  echo "Target group deregistration delay must already be $ASG_POLICY_DEREGISTRATION_DELAY_SECONDS seconds before ASG apply. Found ${deregistration_delay_seconds:-unset}." >&2
+  exit 2
+}
 
 aws ec2 describe-instances --region "$AWS_REGION" --instance-ids "$SOURCE_INSTANCE_ID" --output json > "$out_dir/source-instance.json"
 
@@ -130,8 +171,9 @@ if [ "$asg_exists" = "0" ]; then
     --max-size "$MAX_SIZE" \
     --vpc-zone-identifier "$selected_subnet_csv" \
     --target-group-arns "$TARGET_GROUP_ARN" \
-    --health-check-type ELB \
-    --health-check-grace-period 300 \
+    --health-check-type "$ASG_POLICY_HEALTH_CHECK_TYPE" \
+    --health-check-grace-period "$ASG_POLICY_HEALTH_CHECK_GRACE_PERIOD_SECONDS" \
+    --default-instance-warmup "$ASG_POLICY_DEFAULT_INSTANCE_WARMUP_SECONDS" \
     --tags ResourceId="$asg_name",ResourceType=auto-scaling-group,Key=Project,Value=MSCQR,PropagateAtLaunch=true ResourceId="$asg_name",ResourceType=auto-scaling-group,Key=Purpose,Value=DR,PropagateAtLaunch=true ResourceId="$asg_name",ResourceType=auto-scaling-group,Key=RegionGroup,Value="$TARGET_REGION_GROUP",PropagateAtLaunch=true \
     > "$out_dir/create-asg.log" 2>&1
 else
@@ -142,6 +184,9 @@ else
     --min-size "$MIN_SIZE" \
     --desired-capacity "$DESIRED_CAPACITY" \
     --max-size "$MAX_SIZE" \
+    --health-check-type "$ASG_POLICY_HEALTH_CHECK_TYPE" \
+    --health-check-grace-period "$ASG_POLICY_HEALTH_CHECK_GRACE_PERIOD_SECONDS" \
+    --default-instance-warmup "$ASG_POLICY_DEFAULT_INSTANCE_WARMUP_SECONDS" \
     > "$out_dir/update-asg.log" 2>&1
   if node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const tg=process.argv[2]; process.exit(((p.AutoScalingGroups?.[0]?.TargetGroupARNs)||[]).includes(tg) ? 0 : 1)' "$out_dir/existing-asg-before.json" "$TARGET_GROUP_ARN"; then
     printf '%s\n' "Target group already attached to ASG." > "$out_dir/attach-target-group.log"
@@ -171,6 +216,11 @@ if [ "$healthy_count" -lt "$DESIRED_CAPACITY" ]; then
   exit 3
 fi
 
+[ "$healthy_count" -ge "$ASG_POLICY_TARGET_GROUP_HEALTH_REQUIRED" ] || {
+  echo "ASG apply completed, but healthy target count $healthy_count is below policy requirement $ASG_POLICY_TARGET_GROUP_HEALTH_REQUIRED." >&2
+  exit 3
+}
+
 aws autoscaling describe-auto-scaling-groups --region "$AWS_REGION" --auto-scaling-group-names "$asg_name" --output json > "$out_dir/asg-after.json"
 
 {
@@ -181,6 +231,8 @@ aws autoscaling describe-auto-scaling-groups --region "$AWS_REGION" --auto-scali
   printf 'LAUNCH_TEMPLATE_VERSION=%s\n' "$launch_template_version"
   printf 'TARGET_GROUP_ARN=%s\n' "$TARGET_GROUP_ARN"
   printf 'HEALTHY_TARGET_COUNT=%s\n' "$healthy_count"
+  printf 'ROLLING_POLICY_CHECKLIST_PATH=%s\n' "$ROLLING_POLICY_CHECKLIST_PATH"
+  printf 'ROLLBACK_ALARM_NAMES_CSV=%s\n' "$ROLLBACK_ALARM_NAMES_CSV"
 } > "$out_dir/outputs.env"
 
 /bin/cat "$out_dir/outputs.env"

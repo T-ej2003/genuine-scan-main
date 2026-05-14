@@ -69,7 +69,7 @@ The raw `*.elb.amazonaws.com` ALB hostname is not on the MSCQR ACM certificate, 
 
 Before final DNS cutover, run `AWS DR Regional Readiness` for Mumbai and Cape Town. This workflow is read/plan-only and does not change DNS, enable access logs, attach WAF, create ASGs, mutate RDS/S3, or delete resources.
 
-Current app scaling gate: ASG_STATUS=BLOCKED. Review `documents/ops/aws-asg-multi-instance-readiness.md` and run `node scripts/dr/check-asg-multi-instance-readiness.mjs` before any ASG create/attach discussion.
+Current app scaling gate: ASG_STATUS=CONDITIONALLY_READY. Review `documents/ops/aws-asg-multi-instance-readiness.md`, `documents/ops/aws-asg-rolling-deploy-policy.md`, and run `node scripts/dr/check-asg-multi-instance-readiness.mjs` before any ASG create/attach discussion.
 
 Phases before final cutover:
 
@@ -101,11 +101,11 @@ Apply order:
 4. `apply-waf-count-mode`.
 5. `verify-hardening-state`.
 6. `generate-asg-apply-plan`.
-7. `apply-asg-launch-template-approved` only after app state risks are resolved.
+7. `apply-asg-launch-template-approved` only after app state risks are resolved and the rollout is explicitly treated as a no-production-DNS validation drill.
 
 Hardening does not perform production DNS cutover, delete AWS resources, mutate RDS, mutate application S3 buckets, copy Let's Encrypt keys, or move WAF rules to BLOCK mode. WAF remains COUNT mode only in this phase.
 
-ASG apply is intentionally last because current single-node assumptions may include node-local Redis, MinIO, secrets, sessions, migrations, worker behavior, and filesystem state. ASG_STATUS=BLOCKED remains the official position until `documents/ops/aws-asg-multi-instance-readiness.md` is updated from evidence. Do not use final production DNS cutover until at least the selected region has healthy multi-target evidence and a reviewed rollback plan.
+ASG apply is intentionally last because current single-node assumptions may include node-local Redis, MinIO, secrets, sessions, migrations, worker behavior, and filesystem state. ASG_STATUS=CONDITIONALLY_READY means the repo-side blockers are closed, but the first live create/attach plus replacement-instance drill still needs evidence. Do not use final production DNS cutover until at least the selected region has healthy multi-target evidence and a reviewed rollback plan.
 
 ## Operator Sequence
 

@@ -1,14 +1,14 @@
 # AWS ASG Multi-Instance Readiness
 
-Last updated: 2026-05-14
+Last updated: 2026-05-15
 
-ASG_STATUS=BLOCKED
+ASG_STATUS=CONDITIONALLY_READY
 
 Do not create ASGs. Do not attach instances to ASGs. Do not perform production DNS cutover. Do not mutate RDS data. Do not delete AWS resources. This document is a code, configuration, and runbook audit for preparing MSCQR to run safely behind regional ALBs with two or more EC2 instances.
 
 ## Executive Verdict
 
-MSCQR is closer, but not yet safe to create and attach ASGs.
+MSCQR is conditionally ready for a first controlled ASG rollout rehearsal, but it is not yet live-proven.
 
 The app has several good production controls already:
 
@@ -22,11 +22,13 @@ The app has several good production controls already:
 - `docker-compose.asg-web.yml` is the ASG web-node mode and contains only `backend` and `frontend`.
 - `scripts/dr/bootstrap-asg-web-node.sh` is the committed ASG web-node bootstrap path using AWS SSM Parameter Store.
 - `documents/ops/aws-asg-web-ssm-parameter-manifest.json` records required root/backend env parameter names without values.
+- `documents/ops/aws-asg-rolling-deploy-policy.md` and `documents/ops/aws-asg-rolling-deploy-policy.checklist.json` define the rolling deploy contract, rollback criteria, and replacement-instance drill.
 - `/healthz` exists for shallow app liveness and `/api/health/ready` reaches backend dependency readiness through Nginx.
 
-The remaining blockers are operational and state-topology blockers:
+The remaining go/no-go is live validation, not a missing repo artifact:
 
-- Rolling deployment policy is not applied or tested.
+- First regional ASG create/attach must be run as a no-production-DNS rehearsal.
+- One replacement-instance drill must prove target replacement, alarms, and rollback behavior with evidence.
 - Some upload flows stage files on local disk before object-storage upload. That is acceptable only as short-lived temp/staging, not as persistent state.
 
 ## Architecture Evidence
@@ -281,26 +283,46 @@ Recommended ALB/ASG settings before apply:
 
 ## I. Rolling Deploy Behavior
 
-Required policy before ASG apply:
+Committed policy:
 
-- Use ALB target deregistration delay of at least 60 seconds.
-- Instance refresh should keep minimum healthy capacity at 100 percent for desired capacity 2.
-- Maximum unavailable should be 1 instance.
+- `documents/ops/aws-asg-rolling-deploy-policy.md`
+- `documents/ops/aws-asg-rolling-deploy-policy.checklist.json`
+- `scripts/dr/generate-asg-apply-plan.sh`
+- `scripts/dr/apply-asg-launch-template-approved.sh`
+
+Approved first-rollout values:
+
+- Use ALB target deregistration delay of 60 seconds.
+- Use `ELB` health checks with 180 second ASG grace period.
+- Use 180 second default instance warmup.
+- Use instance refresh minimum healthy capacity at 100 percent for desired capacity 2.
+- Use maximum healthy percentage 150 if supported by the selected rollout path.
+- Use checkpoints at 50 percent and 100 percent with 300 second wait per checkpoint.
 - Do not run migrations during instance boot.
 - Roll out web first with `RUN_BACKGROUND_WORKERS=false`.
 - Promote or restart singleton worker only after web readiness is green.
-- Roll back by canceling instance refresh and keeping the previous launch template version available.
+- Roll back by canceling instance refresh, keeping the previous launch template version available, and restoring healthy target count before removing any new unhealthy instance.
 - Capture `/healthz`, `/api/health/ready`, ALB target health, and app version evidence per batch.
+- Keep production DNS on London EC2 during the first ASG rollout and replacement-instance drill.
 
 ## Current Go/No-Go
 
-No-go for ASG create/attach.
+Conditionally ready for a first controlled ASG rollout with no production DNS cutover.
 
 Worker topology is conditionally proven for ASG web nodes: web nodes have an explicit worker-free Compose file, the HTTP backend is worker-disabled, the standalone worker is an intentional one-per-region profile, compliance scheduling is disabled, and worker horizontal scaling is not assumed safe.
 
 Secrets/bootstrap is conditionally proven at repository level: the SSM manifest, bootstrap script, forced safety settings, SSM prefixes, health validation, and instance-profile IAM template are committed. This still needs launch-template user-data wiring and a real replacement-instance drill before production use.
 
-ASG remains blocked because rolling deployment policy is not yet proven in the launch-template path. Re-audit only after that remaining blocker has concrete evidence.
+Rolling deploy policy is conditionally proven at repository level: the contract document, machine-readable checklist, plan/apply script gates, rollback criteria, and replacement-instance drill procedure are committed.
+
+Exact remaining live test:
+
+- Create and attach the regional ASG with `min=2 desired=2 max=4`.
+- Keep production DNS on London EC2.
+- Verify at least 2 healthy targets on the regional ALB.
+- Run the documented replacement-instance drill and record CloudWatch plus target-health evidence.
+
+No-go for production DNS cutover until that live drill passes and the regional rollback path is practiced cleanly.
 
 ## Validation
 

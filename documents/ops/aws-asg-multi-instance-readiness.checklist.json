@@ -1,9 +1,9 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "service": "MSCQR",
-  "lastAudited": "2026-05-14",
-  "asgStatus": "BLOCKED",
-  "statusReason": "Regional Redis, regional S3 object storage, ASG web-node worker exclusion, and SSM-backed ASG web bootstrap now have proof fields. ASG create/attach remains blocked until rolling deployment policy is proven.",
+  "lastAudited": "2026-05-15",
+  "asgStatus": "CONDITIONALLY_READY",
+  "statusReason": "Regional Redis, regional S3 object storage, ASG web-node worker exclusion, SSM-backed bootstrap, and the rolling deploy contract are committed. The remaining go/no-go is a first live ASG create/attach plus replacement-instance drill with no production DNS cutover.",
   "safeToCreateAsg": false,
   "safeToModifyProductionDns": false,
   "safeToMutateRdsData": false,
@@ -60,20 +60,21 @@
         "ops/aws/iam/dr/asg-web-instance-profile-policy.template.json defines least-privilege SSM read, scoped KMS decrypt, regional S3 artifact access, and ECR image pull permissions."
       ],
       "condition": "ASG launch templates must call scripts/dr/bootstrap-asg-web-node.sh with the approved region group and AWS region. The instance profile must be scoped to the documented SSM prefix and artifact bucket."
-    }
-  ],
-  "blockers": [
+    },
     {
-      "id": "ROLLING_DEPLOY_POLICY_NOT_APPLIED",
-      "severity": "high",
+      "id": "ROLLING_DEPLOY_POLICY_CONDITIONALLY_PROVEN",
+      "status": "conditional",
       "area": "rolling-deploy",
       "evidence": [
-        "ALBs are healthy, but no ASG instance refresh policy, deregistration delay, warmup, or rollback automation has been applied.",
-        "ASG creation and attachment are explicitly out of scope for this audit."
+        "documents/ops/aws-asg-rolling-deploy-policy.md defines the ASG rolling deploy contract, smoke tests, rollback rules, and replacement-instance drill.",
+        "documents/ops/aws-asg-rolling-deploy-policy.checklist.json commits concrete values for deregistration delay, health grace, warmup, min healthy percentage, initial capacity, target healthy count, and rollback alarm placeholders.",
+        "scripts/dr/generate-asg-apply-plan.sh reads the rolling policy checklist and includes those values in the generated ASG apply plan.",
+        "scripts/dr/apply-asg-launch-template-approved.sh reads the rolling policy checklist, refuses non-policy first-rollout capacity, and refuses apply when deregistration delay or rollback alarm names are unsafe."
       ],
-      "requiredResolution": "Before ASG apply, approve a rolling policy with max unavailable 1, min healthy capacity 100 percent, ALB target deregistration delay, warmup/grace values, and a rollback path."
+      "condition": "Before a real regional apply, operators must supply the reviewed CloudWatch rollback alarm names and complete one no-DNS ASG create/attach plus replacement-instance drill with evidence."
     }
   ],
+  "blockers": [],
   "conditionsBeforeReaudit": [
     "Production DNS remains rolled back to London EC2 until a separate approved DNS cutover.",
     "ASG web nodes use docker-compose.asg-web.yml, not the legacy local-state Compose path.",
@@ -86,7 +87,7 @@
     "Secrets are injected through IAM-authenticated SSM Parameter Store bootstrap with no secret values in logs.",
     "Fresh instance bootstrap is repeatable from image, user data, env, and repository scripts.",
     "ALB health checks use /healthz for shallow liveness or /api/health/ready for dependency readiness according to the rollout phase.",
-    "Rolling deploy and rollback behavior are documented and tested against regional test records."
+    "Rolling deploy and rollback behavior are documented in-repo and must be validated through the first no-DNS regional replacement-instance drill."
   ],
   "requiredValidationCommands": [
     "node scripts/dr/check-asg-multi-instance-readiness.mjs",
@@ -96,6 +97,7 @@
     "git diff --check"
   ],
   "operatorInputsRequiredForConditionalReady": [
-    "Approved ASG health check grace period, target warmup, deregistration delay, and instance refresh policy."
+    "Provide the reviewed CloudWatch rollback alarm names for the selected region before running apply-asg-launch-template-approved.",
+    "Run one controlled regional ASG create/attach and replacement-instance drill with no production DNS cutover, then capture target-health and CloudWatch evidence."
   ]
 }

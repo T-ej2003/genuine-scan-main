@@ -299,7 +299,7 @@ Current stable state before final DNS cutover:
 - Mumbai ALB is healthy and available through `dr-mumbai.mscqr.com`.
 - Cape Town ALB is healthy and available through `dr-capetown.mscqr.com`.
 - Production cutover/rollback plans exist, but production DNS must not be changed by readiness work.
-- ASG_STATUS=BLOCKED in `documents/ops/aws-asg-multi-instance-readiness.md`.
+- ASG_STATUS=CONDITIONALLY_READY in `documents/ops/aws-asg-multi-instance-readiness.md`, with a required no-DNS live replacement-instance drill still pending.
 
 Use this workflow for read-only evidence and plan generation:
 
@@ -366,7 +366,7 @@ Before any ASG create/attach approval, run and review:
 node scripts/dr/check-asg-multi-instance-readiness.mjs
 ```
 
-The current ASG gate is intentionally blocked until shared Redis, shared object storage, ASG secret injection, worker singleton behavior, bootstrap repeatability, health grace, and rolling deployment policy are proven. The source of truth for this gate is `documents/ops/aws-asg-multi-instance-readiness.md` and `documents/ops/aws-asg-multi-instance-readiness.checklist.json`.
+The current ASG gate is conditionally ready at repo level: shared Redis, shared object storage, ASG secret injection, worker singleton behavior, bootstrap repeatability, health grace, and rolling deployment policy are documented and gated in-repo. The source of truth is `documents/ops/aws-asg-multi-instance-readiness.md`, `documents/ops/aws-asg-multi-instance-readiness.checklist.json`, and `documents/ops/aws-asg-rolling-deploy-policy.md`.
 
 ## Approved Regional Hardening Apply
 
@@ -400,7 +400,7 @@ Safe hardening order per region:
 4. `apply-waf-count-mode`.
 5. `verify-hardening-state`.
 6. `generate-asg-apply-plan`.
-7. Run `apply-asg-launch-template-approved` only after `ASG_STATUS=BLOCKED` has been replaced by a reviewed `CONDITIONALLY_READY` or `READY` finding in `documents/ops/aws-asg-multi-instance-readiness.md`.
+7. Run `apply-asg-launch-template-approved` only after `ASG_STATUS=CONDITIONALLY_READY` or `READY` is present in `documents/ops/aws-asg-multi-instance-readiness.md`, the rolling policy checklist is reviewed, and the rollout is explicitly treated as a no-production-DNS validation drill.
 8. Consider production DNS cutover only after ASG health and app state risks are solved.
 
 Rollback notes:
@@ -409,6 +409,7 @@ Rollback notes:
 - ALB access logs are non-traffic-impacting, but require an approved logging bucket.
 - WAF COUNT mode is non-blocking; do not move rules to BLOCK in this phase.
 - ASG apply creates extra capacity and attaches it to the target group. It does not detach or delete the source instance, terminate instances, or change DNS.
+- The first ASG rollout must keep production DNS on London EC2 and must include the replacement-instance drill from `documents/ops/aws-asg-rolling-deploy-policy.md`.
 
 Mumbai hardening values:
 

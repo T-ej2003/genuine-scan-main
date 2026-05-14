@@ -16,9 +16,7 @@ SOURCE_AMI="${SOURCE_AMI:-}"
 SOURCE_INSTANCE_TYPE="${SOURCE_INSTANCE_TYPE:-}"
 SOURCE_SECURITY_GROUP="${SOURCE_SECURITY_GROUP:-}"
 TARGET_GROUP_ARN="${TARGET_GROUP_ARN:-}"
-MIN_SIZE="${MIN_SIZE:-2}"
-DESIRED_CAPACITY="${DESIRED_CAPACITY:-2}"
-MAX_SIZE="${MAX_SIZE:-4}"
+ROLLING_POLICY_CHECKLIST_PATH="${ROLLING_POLICY_CHECKLIST_PATH:-documents/ops/aws-asg-rolling-deploy-policy.checklist.json}"
 
 case "$TARGET_REGION_GROUP" in
   mumbai|capetown) ;;
@@ -29,6 +27,20 @@ case "$TARGET_REGION_GROUP:$AWS_REGION" in
   mumbai:ap-south-1|capetown:af-south-1) ;;
   *) echo "AWS_REGION does not match TARGET_REGION_GROUP." >&2; exit 2 ;;
 esac
+
+policy_env_file="$(mktemp "${TMPDIR:-/tmp}/mscqr-asg-rolling-policy.XXXXXX")"
+trap 'rm -f "$policy_env_file"' EXIT HUP INT TERM
+render_asg_rolling_policy_env "$ROLLING_POLICY_CHECKLIST_PATH" "$TARGET_REGION_GROUP" "$policy_env_file"
+# shellcheck disable=SC1090
+. "$policy_env_file"
+
+MIN_SIZE="${MIN_SIZE:-$ASG_POLICY_MIN_SIZE_INITIAL}"
+DESIRED_CAPACITY="${DESIRED_CAPACITY:-$ASG_POLICY_DESIRED_CAPACITY_INITIAL}"
+MAX_SIZE="${MAX_SIZE:-$ASG_POLICY_MAX_SIZE_INITIAL}"
+
+[ "$MIN_SIZE" = "$ASG_POLICY_MIN_SIZE_INITIAL" ] || { echo "MIN_SIZE must match ASG policy value $ASG_POLICY_MIN_SIZE_INITIAL for the first rollout." >&2; exit 2; }
+[ "$DESIRED_CAPACITY" = "$ASG_POLICY_DESIRED_CAPACITY_INITIAL" ] || { echo "DESIRED_CAPACITY must match ASG policy value $ASG_POLICY_DESIRED_CAPACITY_INITIAL for the first rollout." >&2; exit 2; }
+[ "$MAX_SIZE" = "$ASG_POLICY_MAX_SIZE_INITIAL" ] || { echo "MAX_SIZE must match ASG policy value $ASG_POLICY_MAX_SIZE_INITIAL for the first rollout." >&2; exit 2; }
 
 create_artifact_dir
 out_dir="$DR_ARTIFACT_DIR/asg-apply-plan/$TARGET_REGION_GROUP"
@@ -86,6 +98,9 @@ JSON
   "MinSize": $MIN_SIZE,
   "DesiredCapacity": $DESIRED_CAPACITY,
   "MaxSize": $MAX_SIZE,
+  "HealthCheckType": "$ASG_POLICY_HEALTH_CHECK_TYPE",
+  "HealthCheckGracePeriod": $ASG_POLICY_HEALTH_CHECK_GRACE_PERIOD_SECONDS,
+  "DefaultInstanceWarmup": $ASG_POLICY_DEFAULT_INSTANCE_WARMUP_SECONDS,
   "VPCZoneIdentifier": "$selected_subnet_csv",
   "TargetGroupARNs": ["$TARGET_GROUP_ARN"]
 }
@@ -101,7 +116,17 @@ JSON
   printf '%s\n' "- Source security group: \`$SOURCE_SECURITY_GROUP\`"
   printf '%s\n' "- Selected app subnets: \`$selected_subnet_ids\`"
   printf '%s\n' "- Proposed ASG capacity: \`min=$MIN_SIZE desired=$DESIRED_CAPACITY max=$MAX_SIZE\`"
-  printf '\nRisks to review before ASG apply: node-local Redis, MinIO, app secrets, migrations, sessions, filesystem state, background workers, and sticky behavior.\n'
+  printf '%s\n' "- Health check type: \`$ASG_POLICY_HEALTH_CHECK_TYPE\`"
+  printf '%s\n' "- Health check grace period: \`$ASG_POLICY_HEALTH_CHECK_GRACE_PERIOD_SECONDS\` seconds"
+  printf '%s\n' "- Default instance warmup: \`$ASG_POLICY_DEFAULT_INSTANCE_WARMUP_SECONDS\` seconds"
+  printf '%s\n' "- Target deregistration delay required on target group: \`$ASG_POLICY_DEREGISTRATION_DELAY_SECONDS\` seconds"
+  printf '%s\n' "- Instance refresh min healthy percentage: \`$ASG_POLICY_INSTANCE_REFRESH_MIN_HEALTHY_PERCENTAGE\`"
+  printf '%s\n' "- Instance refresh max healthy percentage: \`$ASG_POLICY_INSTANCE_REFRESH_MAX_HEALTHY_PERCENTAGE\`"
+  printf '%s\n' "- Instance refresh checkpoints: \`$ASG_POLICY_INSTANCE_REFRESH_CHECKPOINT_PERCENTAGES_CSV\` with \`$ASG_POLICY_INSTANCE_REFRESH_CHECKPOINT_DELAY_SECONDS\` second wait"
+  printf '%s\n' "- Required healthy targets after apply and replacement: \`$ASG_POLICY_TARGET_GROUP_HEALTH_REQUIRED\`"
+  printf '%s\n' "- Rolling policy checklist: \`$ROLLING_POLICY_CHECKLIST_PATH\`"
+  printf '%s\n' "- Remaining live go/no-go: create and attach the ASG, then run a no-DNS replacement-instance drill with CloudWatch and target-health evidence."
+  printf '\nRisks to review before ASG apply: node-local Redis, MinIO, app secrets, migrations, sessions, filesystem state, background workers, sticky behavior, and unproven replacement-instance behavior.\n'
 } > "$out_dir/asg-apply-plan.md"
 
 /bin/cat "$out_dir/asg-apply-plan.md"

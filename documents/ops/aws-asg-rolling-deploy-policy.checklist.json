@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "service": "MSCQR",
+  "asgStatus": "CONDITIONALLY_READY",
+  "statusReason": "Repository guardrails, bootstrap, and rollout policy are committed. The remaining go/no-go is a no-DNS live ASG create/attach plus replacement-instance drill with captured evidence.",
+  "no_production_dns_cutover_during_validation": true,
+  "health_check_type": "ELB",
+  "deregistration_delay_seconds": 60,
+  "health_check_grace_period_seconds": 180,
+  "default_instance_warmup_seconds": 180,
+  "instance_refresh_min_healthy_percentage": 100,
+  "instance_refresh_max_healthy_percentage": 150,
+  "instance_refresh_checkpoint_percentages": [
+    50,
+    100
+  ],
+  "instance_refresh_checkpoint_delay_seconds": 300,
+  "desired_capacity_initial": 2,
+  "min_size_initial": 2,
+  "max_size_initial": 4,
+  "target_group_health_required": 2,
+  "smoke_tests": [
+    "/healthz",
+    "/api/health/ready",
+    "target_group_healthy_count",
+    "alb_5xx",
+    "target_5xx",
+    "target_response_time"
+  ],
+  "cloudwatch_alarms_must_be_green": [
+    "alb_5xx",
+    "target_5xx",
+    "target_response_time",
+    "unhealthy_hosts"
+  ],
+  "rollback_alarm_names": {
+    "mumbai": [
+      "<MUMBAI_ALB_5XX_ALARM_NAME>",
+      "<MUMBAI_TARGET_5XX_ALARM_NAME>",
+      "<MUMBAI_TARGET_RESPONSE_TIME_ALARM_NAME>",
+      "<MUMBAI_UNHEALTHY_HOSTS_ALARM_NAME>"
+    ],
+    "capetown": [
+      "<CAPETOWN_ALB_5XX_ALARM_NAME>",
+      "<CAPETOWN_TARGET_5XX_ALARM_NAME>",
+      "<CAPETOWN_TARGET_RESPONSE_TIME_ALARM_NAME>",
+      "<CAPETOWN_UNHEALTHY_HOSTS_ALARM_NAME>"
+    ]
+  },
+  "go_no_go_checklist": [
+    "Production DNS remains on London EC2 during ASG rollout validation.",
+    "Regional ALB target group already serves healthy test-record traffic.",
+    "Regional Redis readiness is green through /api/health/ready.",
+    "Regional S3 object storage readiness is green through /api/health/ready.",
+    "ASG web nodes use docker-compose.asg-web.yml only.",
+    "RUN_BACKGROUND_WORKERS=false, RUN_DB_MIGRATIONS_ON_START=false, and COMPLIANCE_PACK_SCHEDULER_ENABLED=false remain forced.",
+    "CloudWatch alarms for ALB 5XX, target 5XX, target response time, and unhealthy hosts are green before refresh.",
+    "At least two healthy targets are present after ASG apply and after every replacement step."
+  ],
+  "rollback_criteria": [
+    "Any /healthz failure on a newly attached target.",
+    "Any /api/health/ready failure where database, redis, or objectStorage is not ready.",
+    "Target group healthy count drops below 2 after the first successful attach.",
+    "ALB 5XX or target 5XX alarms enter ALARM during rollout.",
+    "Target response time alarm enters ALARM or latency regresses beyond the approved threshold.",
+    "Operator smoke tests fail on the regional test hostname."
+  ],
+  "manual_rollback_summary": [
+    "Cancel any in-progress instance refresh.",
+    "Keep the previous launch template version available and set ASG to that version if the new version is implicated.",
+    "Deregister or terminate only the newly added unhealthy instances after healthy capacity is restored.",
+    "Do not cut over production DNS during rollback.",
+    "Capture target-health, alarm-state, and smoke-test evidence before closing the incident."
+  ],
+  "replacement_instance_drill_required": true,
+  "replacement_instance_drill_summary": [
+    "Create and attach the ASG with desired capacity 2 and no production DNS cutover.",
+    "Verify two healthy targets on the regional ALB.",
+    "Run a one-instance replacement drill or instance refresh checkpoint while min healthy stays at 100 percent.",
+    "Confirm the replacement instance reaches /healthz and /api/health/ready through the test hostname path.",
+    "Confirm alarm states remain green and target response time is stable.",
+    "Record evidence under artifacts/dr/ and the incident record."
+  ],
+  "remaining_live_test": "Run the first controlled regional ASG create/attach and replacement-instance drill without production DNS cutover, then capture target-health and CloudWatch evidence."
+}

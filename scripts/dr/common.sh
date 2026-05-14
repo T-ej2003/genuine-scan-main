@@ -178,3 +178,129 @@ if (selected.length < 2) {
 console.log(selected.map((subnet) => subnet.SubnetId).join(" "));
 NODE
 }
+
+render_asg_rolling_policy_env() {
+  policy_path="$1"
+  target_region_group="$2"
+  output_path="$3"
+
+  if [ ! -f "$policy_path" ]; then
+    echo "ASG rolling policy checklist not found: $policy_path" >&2
+    exit 2
+  fi
+
+  node --input-type=module - "$policy_path" "$target_region_group" "$output_path" <<'NODE'
+import fs from "node:fs";
+
+const [policyPath, regionGroup, outputPath] = process.argv.slice(2);
+const policy = JSON.parse(fs.readFileSync(policyPath, "utf8"));
+
+const fail = (message) => {
+  console.error(message);
+  process.exit(2);
+};
+
+const asInt = (value, field) => {
+  if (!Number.isInteger(value)) fail(`ASG rolling policy field ${field} must be an integer.`);
+  return value;
+};
+
+if (!["mumbai", "capetown"].includes(regionGroup)) {
+  fail(`Unsupported ASG rolling policy region group: ${regionGroup}`);
+}
+
+if (!["CONDITIONALLY_READY", "READY"].includes(String(policy.asgStatus || ""))) {
+  fail(`ASG rolling policy checklist must be CONDITIONALLY_READY or READY; found ${policy.asgStatus || "unset"}.`);
+}
+
+const healthCheckType = String(policy.health_check_type || "");
+if (healthCheckType !== "ELB") fail("ASG rolling policy must use ELB health checks.");
+
+const deregistrationDelaySeconds = asInt(policy.deregistration_delay_seconds, "deregistration_delay_seconds");
+if (deregistrationDelaySeconds < 60) fail("ASG rolling policy must keep deregistration_delay_seconds >= 60.");
+
+const healthCheckGracePeriodSeconds = asInt(policy.health_check_grace_period_seconds, "health_check_grace_period_seconds");
+if (healthCheckGracePeriodSeconds < 180) fail("ASG rolling policy must keep health_check_grace_period_seconds >= 180.");
+
+const defaultInstanceWarmupSeconds = asInt(policy.default_instance_warmup_seconds, "default_instance_warmup_seconds");
+if (defaultInstanceWarmupSeconds < 180) fail("ASG rolling policy must keep default_instance_warmup_seconds >= 180.");
+
+const minHealthyPercentage = asInt(policy.instance_refresh_min_healthy_percentage, "instance_refresh_min_healthy_percentage");
+if (minHealthyPercentage < 100) fail("ASG rolling policy must keep instance_refresh_min_healthy_percentage >= 100 for the first rollout.");
+
+const maxHealthyPercentage = asInt(policy.instance_refresh_max_healthy_percentage, "instance_refresh_max_healthy_percentage");
+if (maxHealthyPercentage < minHealthyPercentage) fail("ASG rolling policy max healthy percentage must be >= min healthy percentage.");
+
+const checkpointDelaySeconds = asInt(policy.instance_refresh_checkpoint_delay_seconds, "instance_refresh_checkpoint_delay_seconds");
+const desiredCapacityInitial = asInt(policy.desired_capacity_initial, "desired_capacity_initial");
+const minSizeInitial = asInt(policy.min_size_initial, "min_size_initial");
+const maxSizeInitial = asInt(policy.max_size_initial, "max_size_initial");
+const targetGroupHealthRequired = asInt(policy.target_group_health_required, "target_group_health_required");
+
+if (minSizeInitial < 2 || desiredCapacityInitial < 2) {
+  fail("ASG rolling policy must keep min_size_initial and desired_capacity_initial >= 2.");
+}
+if (maxSizeInitial < desiredCapacityInitial) {
+  fail("ASG rolling policy max_size_initial must be >= desired_capacity_initial.");
+}
+if (targetGroupHealthRequired < 2) {
+  fail("ASG rolling policy target_group_health_required must be >= 2.");
+}
+if (policy.no_production_dns_cutover_during_validation !== true) {
+  fail("ASG rolling policy must keep no_production_dns_cutover_during_validation=true.");
+}
+if (policy.replacement_instance_drill_required !== true) {
+  fail("ASG rolling policy must keep replacement_instance_drill_required=true.");
+}
+
+const checkpointPercentages = Array.isArray(policy.instance_refresh_checkpoint_percentages)
+  ? policy.instance_refresh_checkpoint_percentages.map((value) => asInt(value, "instance_refresh_checkpoint_percentages"))
+  : [];
+if (checkpointPercentages.length === 0) {
+  fail("ASG rolling policy must define instance_refresh_checkpoint_percentages.");
+}
+
+const smokeTests = Array.isArray(policy.smoke_tests) ? policy.smoke_tests : [];
+const smokeTestNames = new Set(smokeTests.map((item) => String(item)));
+for (const required of [
+  "/healthz",
+  "/api/health/ready",
+  "target_group_healthy_count",
+  "alb_5xx",
+  "target_5xx",
+  "target_response_time",
+]) {
+  if (!smokeTestNames.has(required)) fail(`ASG rolling policy smoke_tests must include ${required}.`);
+}
+
+const rollbackAlarmNames = policy.rollback_alarm_names?.[regionGroup];
+if (!Array.isArray(rollbackAlarmNames) || rollbackAlarmNames.length === 0) {
+  fail(`ASG rolling policy must define rollback_alarm_names for ${regionGroup}.`);
+}
+
+const shellEscape = (value) => `'${String(value).replace(/'/g, `'\"'\"'`)}'`;
+
+const lines = [
+  `ASG_POLICY_STATUS=${shellEscape(String(policy.asgStatus))}`,
+  `ASG_POLICY_HEALTH_CHECK_TYPE=${shellEscape(healthCheckType)}`,
+  `ASG_POLICY_DEREGISTRATION_DELAY_SECONDS=${shellEscape(String(deregistrationDelaySeconds))}`,
+  `ASG_POLICY_HEALTH_CHECK_GRACE_PERIOD_SECONDS=${shellEscape(String(healthCheckGracePeriodSeconds))}`,
+  `ASG_POLICY_DEFAULT_INSTANCE_WARMUP_SECONDS=${shellEscape(String(defaultInstanceWarmupSeconds))}`,
+  `ASG_POLICY_INSTANCE_REFRESH_MIN_HEALTHY_PERCENTAGE=${shellEscape(String(minHealthyPercentage))}`,
+  `ASG_POLICY_INSTANCE_REFRESH_MAX_HEALTHY_PERCENTAGE=${shellEscape(String(maxHealthyPercentage))}`,
+  `ASG_POLICY_INSTANCE_REFRESH_CHECKPOINT_DELAY_SECONDS=${shellEscape(String(checkpointDelaySeconds))}`,
+  `ASG_POLICY_INSTANCE_REFRESH_CHECKPOINT_PERCENTAGES_CSV=${shellEscape(checkpointPercentages.join(","))}`,
+  `ASG_POLICY_DESIRED_CAPACITY_INITIAL=${shellEscape(String(desiredCapacityInitial))}`,
+  `ASG_POLICY_MIN_SIZE_INITIAL=${shellEscape(String(minSizeInitial))}`,
+  `ASG_POLICY_MAX_SIZE_INITIAL=${shellEscape(String(maxSizeInitial))}`,
+  `ASG_POLICY_TARGET_GROUP_HEALTH_REQUIRED=${shellEscape(String(targetGroupHealthRequired))}`,
+  `ASG_POLICY_NO_PRODUCTION_DNS_CUTOVER_DURING_VALIDATION=${shellEscape("true")}`,
+  `ASG_POLICY_REPLACEMENT_INSTANCE_DRILL_REQUIRED=${shellEscape("true")}`,
+  `ASG_POLICY_ROLLBACK_ALARM_NAMES_CSV=${shellEscape(rollbackAlarmNames.join(","))}`,
+  `ASG_POLICY_ROLLBACK_ALARM_PLACEHOLDERS_PRESENT=${shellEscape(rollbackAlarmNames.some((name) => /<[^>]+>/.test(String(name))) ? "true" : "false")}`,
+  `ASG_POLICY_PATH=${shellEscape(policyPath)}`,
+];
+
+  fs.writeFileSync(outputPath, `${lines.join("\n")}\n`);
+NODE
+}

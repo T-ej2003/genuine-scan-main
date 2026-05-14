@@ -362,6 +362,7 @@ for (const scanRoot of scanRoots) {
       for (const [scriptPath, gate] of gatedApplyScripts.entries()) {
         const references = applyScriptReferences(source, scriptPath);
         if (references.length === 0) continue;
+        if (repoPath === selfPath || repoPath === "scripts/dr/check-asg-multi-instance-readiness.mjs") continue;
         if (repoPath !== gate.workflow) {
           findings.push({
             repoPath,

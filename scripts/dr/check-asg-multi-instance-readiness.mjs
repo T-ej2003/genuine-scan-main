@@ -29,6 +29,10 @@ const asgWebCompose = requireFile("docker-compose.asg-web.yml");
 const asgBootstrap = requireFile("scripts/dr/bootstrap-asg-web-node.sh");
 const asgSsmManifestRaw = requireFile("documents/ops/aws-asg-web-ssm-parameter-manifest.json");
 const asgInstancePolicyRaw = requireFile("ops/aws/iam/dr/asg-web-instance-profile-policy.template.json");
+const asgRollingPolicyDoc = requireFile("documents/ops/aws-asg-rolling-deploy-policy.md");
+const asgRollingPolicyChecklistRaw = requireFile("documents/ops/aws-asg-rolling-deploy-policy.checklist.json");
+const asgApplyPlanScript = requireFile("scripts/dr/generate-asg-apply-plan.sh");
+const asgApplyScript = requireFile("scripts/dr/apply-asg-launch-template-approved.sh");
 const backendDockerfile = requireFile("backend/Dockerfile");
 const backendStartup = requireFile("backend/docker/start-runtime.sh");
 const backendIndex = requireFile("backend/src/index.ts");
@@ -50,6 +54,7 @@ const capetownEnvExample = requireFile(".env.production.capetown.example");
 let checklist = null;
 let asgSsmManifest = null;
 let asgInstancePolicy = null;
+let asgRollingPolicyChecklist = null;
 try {
   checklist = JSON.parse(checklistRaw);
 } catch (error) {
@@ -65,17 +70,20 @@ try {
 } catch (error) {
   failures.push(`ASG instance-profile IAM template JSON is invalid: ${error.message}`);
 }
+try {
+  asgRollingPolicyChecklist = JSON.parse(asgRollingPolicyChecklistRaw);
+} catch (error) {
+  failures.push(`ASG rolling policy checklist JSON is invalid: ${error.message}`);
+}
 
 if (checklist) {
-  if (checklist.asgStatus !== "BLOCKED") {
-    failures.push(`Checklist asgStatus must stay BLOCKED until secret/bootstrap and rolling deploy evidence are proven; found ${checklist.asgStatus}`);
+  if (checklist.asgStatus !== "CONDITIONALLY_READY") {
+    failures.push(`Checklist asgStatus must be CONDITIONALLY_READY once repo-side rollout evidence is committed; found ${checklist.asgStatus}`);
   }
 
   const blockerIds = new Set((checklist.blockers || []).map((item) => item.id));
-  for (const id of [
-    "ROLLING_DEPLOY_POLICY_NOT_APPLIED",
-  ]) {
-    if (!blockerIds.has(id)) failures.push(`Checklist is missing blocker id ${id}`);
+  if (blockerIds.size > 0) {
+    failures.push(`Checklist blockers must be empty once repo-side ASG rollout policy is committed; found ${[...blockerIds].join(", ")}`);
   }
 
   for (const retiredBlocker of [
@@ -84,6 +92,7 @@ if (checklist) {
     "WORKER_SINGLETON_TOPOLOGY_NOT_PROVEN",
     "ASG_SECRET_BOOTSTRAP_INJECTION_NOT_PROVEN",
     "ASG_SECRET_INJECTION_NOT_PROVEN",
+    "ROLLING_DEPLOY_POLICY_NOT_APPLIED",
   ]) {
     if (blockerIds.has(retiredBlocker)) failures.push(`Checklist should move ${retiredBlocker} to proofs instead of blockers.`);
   }
@@ -94,6 +103,7 @@ if (checklist) {
     "OBJECT_STORAGE_SHARED_PROVEN",
     "WORKER_TOPOLOGY_CONDITIONALLY_PROVEN",
     "ASG_SECRET_BOOTSTRAP_CONDITIONALLY_PROVEN",
+    "ROLLING_DEPLOY_POLICY_CONDITIONALLY_PROVEN",
   ]) {
     if (!proofIds.has(id)) failures.push(`Checklist is missing proof id ${id}`);
   }
@@ -101,9 +111,12 @@ if (checklist) {
   if (!Array.isArray(checklist.requiredValidationCommands) || !checklist.requiredValidationCommands.includes("node scripts/dr/check-asg-multi-instance-readiness.mjs")) {
     failures.push("Checklist must include this validation script in requiredValidationCommands.");
   }
+  if (!Array.isArray(checklist.operatorInputsRequiredForConditionalReady) || !checklist.operatorInputsRequiredForConditionalReady.some((item) => /replacement-instance drill/i.test(item))) {
+    failures.push("Checklist must keep the replacement-instance drill as the remaining live operator input.");
+  }
 }
 
-requireMatch("readiness doc", doc, /ASG_STATUS=BLOCKED/, "must clearly mark ASG_STATUS=BLOCKED.");
+requireMatch("readiness doc", doc, /ASG_STATUS=CONDITIONALLY_READY/, "must clearly mark ASG_STATUS=CONDITIONALLY_READY.");
 requireMatch("readiness doc", doc, /Do not create ASGs/i, "must retain the no-ASG-creation safety rule.");
 requireMatch("readiness doc", doc, /Do not perform production DNS cutover/i, "must retain the no-DNS-cutover safety rule.");
 requireMatch("readiness doc", doc, /Redis/i, "must cover Redis/session behavior.");
@@ -120,10 +133,26 @@ requireMatch("readiness doc", doc, /\/mscqr\/prod\/ap-south-1\/asg-web\//, "must
 requireMatch("readiness doc", doc, /\/mscqr\/prod\/af-south-1\/asg-web\//, "must document Cape Town SSM prefix.");
 requireMatch("readiness doc", doc, /asg-web-instance-profile-policy\.template\.json/, "must document ASG instance-profile IAM template.");
 requireMatch("readiness doc", doc, /Secrets\/bootstrap is conditionally proven/, "must mark secrets/bootstrap conditionally proven.");
+requireMatch("readiness doc", doc, /aws-asg-rolling-deploy-policy/, "must document the committed rolling deploy policy.");
+requireMatch("readiness doc", doc, /Rolling deploy policy is conditionally proven/, "must mark rolling deploy policy conditionally proven.");
 requireMatch("readiness doc", doc, /\/healthz/, "must document shallow liveness health semantics.");
 requireMatch("readiness doc", doc, /\/api\/health\/ready/, "must document dependency readiness health semantics.");
 requireMatch("readiness doc", doc, /deregistration delay/i, "must document rolling deploy drain behavior.");
 requireMatch("readiness doc", doc, /Secrets Manager|SSM/i, "must document safe secret injection expectations.");
+requireMatch("readiness doc", doc, /replacement-instance drill/i, "must document the remaining live replacement-instance drill.");
+requireMatch("readiness doc", doc, /Keep production DNS on London EC2/i, "must document no DNS cutover during rollout validation.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_STATUS=CONDITIONALLY_READY/, "must mark the rolling policy document conditionally ready.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /deregistration delay/i, "must define the target group deregistration delay.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /health check grace period: 180 seconds/i, "must define 180 second health grace.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /default instance warmup: 180 seconds/i, "must define 180 second default instance warmup.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /minimum healthy percentage: 100/i, "must define 100 percent min healthy.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /checkpoint/i, "must define refresh checkpoints.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /CloudWatch alarms/i, "must define rollback alarm expectations.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /\/healthz/, "must require /healthz smoke tests.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /\/api\/health\/ready/, "must require /api/health/ready smoke tests.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /manual rollback/i, "must document manual rollback.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /replacement-instance drill/i, "must document the replacement-instance drill.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /Do not perform production DNS cutover during ASG rollout validation/i, "must forbid DNS cutover during validation.");
 
 const packageJson = packageJsonRaw ? JSON.parse(packageJsonRaw) : { scripts: {} };
 if (!packageJson.scripts?.["check:asg-multi-instance-readiness"]) {
@@ -170,6 +199,21 @@ requireMatch("ASG bootstrap", asgBootstrap, /deps\.redis\?\.configured === true/
 requireMatch("ASG bootstrap", asgBootstrap, /deps\.redis\?\.ready === true/, "bootstrap must require Redis readiness.");
 requireMatch("ASG bootstrap", asgBootstrap, /deps\.objectStorage\?\.configured === true/, "bootstrap must require object storage configured.");
 requireMatch("ASG bootstrap", asgBootstrap, /deps\.objectStorage\?\.ready === true/, "bootstrap must require object storage readiness.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /aws-asg-rolling-deploy-policy\.checklist\.json/, "apply plan must read the rolling policy checklist.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /render_asg_rolling_policy_env/, "apply plan must validate the rolling policy through common helpers.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /HealthCheckGracePeriod/, "apply plan must include health check grace period in the plan artifact.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /DefaultInstanceWarmup/, "apply plan must include default instance warmup in the plan artifact.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /Target deregistration delay required on target group/, "apply plan must include deregistration delay.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /Remaining live go\/no-go/, "apply plan must call out the remaining live drill.");
+requireMatch("ASG apply", asgApplyScript, /aws-asg-rolling-deploy-policy\.checklist\.json/, "apply script must read the rolling policy checklist.");
+requireMatch("ASG apply", asgApplyScript, /render_asg_rolling_policy_env/, "apply script must validate the rolling policy through common helpers.");
+requireMatch("ASG apply", asgApplyScript, /Refusing ASG apply without concrete rollback alarm names/, "apply script must refuse placeholder rollback alarm names.");
+requireMatch("ASG apply", asgApplyScript, /describe-target-group-attributes/, "apply script must verify target group attributes before apply.");
+requireMatch("ASG apply", asgApplyScript, /deregistration_delay\.timeout_seconds/, "apply script must check target group deregistration delay.");
+requireMatch("ASG apply", asgApplyScript, /default-instance-warmup/, "apply script must enforce default instance warmup.");
+requireMatch("ASG apply", asgApplyScript, /health-check-grace-period/, "apply script must enforce health check grace period.");
+requireMatch("ASG apply", asgApplyScript, /health-check-type/, "apply script must enforce ASG health check type.");
+requireMatch("ASG apply", asgApplyScript, /target count .* below policy requirement|below policy requirement/, "apply script must enforce healthy target count policy.");
 requireMatch("backend Dockerfile", backendDockerfile, /ENV RUN_DB_MIGRATIONS_ON_START=false/, "runtime image must default startup migrations off.");
 requireMatch("backend startup", backendStartup, /RUN_DB_MIGRATIONS_ON_START:-false/, "startup migration gate must be explicit.");
 
@@ -210,10 +254,10 @@ for (const [label, source] of [
   ["protected environments", protectedEnv],
 ]) {
   requireMatch(label, source, /aws-asg-multi-instance-readiness/, "must link to the ASG readiness document.");
-  requireMatch(label, source, /ASG_STATUS=BLOCKED/, "must state the current blocked ASG status.");
+  requireMatch(label, source, /CONDITIONALLY_READY/, "must state the current conditional ASG status.");
 }
 
-if (/ASG_STATUS=READY/.test(`${doc}\n${drAutomation}\n${drRunbook}\n${protectedEnv}`)) {
+if (/(^|\n)ASG_STATUS=READY(\n|$)/m.test(`${doc}\n${drAutomation}\n${drRunbook}\n${protectedEnv}\n${asgRollingPolicyDoc}`)) {
   failures.push("Docs must not claim ASG_STATUS=READY while local Redis/MinIO and operator input blockers remain.");
 }
 
@@ -288,6 +332,53 @@ if (asgInstancePolicy) {
   }
   if (!actions.includes("<REGIONAL_ARTIFACT_BUCKET>")) {
     failures.push("ASG instance-profile IAM template must scope S3 access to <REGIONAL_ARTIFACT_BUCKET>.");
+  }
+}
+
+if (asgRollingPolicyChecklist) {
+  if (asgRollingPolicyChecklist.asgStatus !== "CONDITIONALLY_READY") {
+    failures.push(`ASG rolling policy checklist asgStatus must be CONDITIONALLY_READY; found ${asgRollingPolicyChecklist.asgStatus}`);
+  }
+  for (const [field, expected] of Object.entries({
+    health_check_type: "ELB",
+    deregistration_delay_seconds: 60,
+    health_check_grace_period_seconds: 180,
+    default_instance_warmup_seconds: 180,
+    instance_refresh_min_healthy_percentage: 100,
+    desired_capacity_initial: 2,
+    min_size_initial: 2,
+    max_size_initial: 4,
+    target_group_health_required: 2,
+  })) {
+    if (asgRollingPolicyChecklist[field] !== expected) {
+      failures.push(`ASG rolling policy checklist ${field} must be ${JSON.stringify(expected)}.`);
+    }
+  }
+  if (asgRollingPolicyChecklist.instance_refresh_max_healthy_percentage !== 150) {
+    failures.push("ASG rolling policy checklist instance_refresh_max_healthy_percentage must be 150.");
+  }
+  if (asgRollingPolicyChecklist.instance_refresh_checkpoint_delay_seconds !== 300) {
+    failures.push("ASG rolling policy checklist instance_refresh_checkpoint_delay_seconds must be 300.");
+  }
+  const checkpoints = JSON.stringify(asgRollingPolicyChecklist.instance_refresh_checkpoint_percentages || []);
+  if (checkpoints !== JSON.stringify([50, 100])) {
+    failures.push("ASG rolling policy checklist instance_refresh_checkpoint_percentages must be [50,100].");
+  }
+  if (asgRollingPolicyChecklist.no_production_dns_cutover_during_validation !== true) {
+    failures.push("ASG rolling policy checklist must keep no_production_dns_cutover_during_validation=true.");
+  }
+  if (asgRollingPolicyChecklist.replacement_instance_drill_required !== true) {
+    failures.push("ASG rolling policy checklist must keep replacement_instance_drill_required=true.");
+  }
+  const smokeTests = new Set(asgRollingPolicyChecklist.smoke_tests || []);
+  for (const name of ["/healthz", "/api/health/ready", "target_group_healthy_count", "alb_5xx", "target_5xx", "target_response_time"]) {
+    if (!smokeTests.has(name)) failures.push(`ASG rolling policy checklist smoke_tests must include ${name}.`);
+  }
+  for (const region of ["mumbai", "capetown"]) {
+    const names = asgRollingPolicyChecklist.rollback_alarm_names?.[region];
+    if (!Array.isArray(names) || names.length < 4) {
+      failures.push(`ASG rolling policy checklist rollback_alarm_names.${region} must define at least four placeholder alarm names.`);
+    }
   }
 }
 
