@@ -7,6 +7,7 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 require_repo_root
 require_command aws
+require_command node
 
 TARGET_REGION_GROUP="${TARGET_REGION_GROUP:-${1:-}}"
 AWS_REGION="${AWS_REGION:-}"
@@ -78,24 +79,17 @@ if [ "$instance_id" = "None" ] || [ -z "$instance_id" ] || [ "$vpc_id" = "None" 
   exit 2
 fi
 
-subnet_ids="$(aws ec2 describe-subnets \
+candidate_subnets_json="$plan_dir/candidate-subnets.json"
+selected_subnets_json="$plan_dir/selected-alb-subnets.json"
+selected_subnets_tsv="$plan_dir/selected-alb-subnets.tsv"
+
+aws ec2 describe-subnets \
   --region "$AWS_REGION" \
   --filters "Name=vpc-id,Values=$vpc_id" \
-  --query 'Subnets[?MapPublicIpOnLaunch==`true`].SubnetId' \
-  --output text)"
-if [ -z "$subnet_ids" ] || [ "$subnet_ids" = "None" ]; then
-  subnet_ids="$(aws ec2 describe-subnets \
-    --region "$AWS_REGION" \
-    --filters "Name=vpc-id,Values=$vpc_id" \
-    --query 'Subnets[].SubnetId' \
-    --output text)"
-fi
+  --output json > "$candidate_subnets_json"
 
-set -- $subnet_ids
-if [ "$#" -lt 2 ]; then
-  echo "ALB requires at least two subnets in $vpc_id; discovered: $subnet_ids" >&2
-  exit 2
-fi
+selected_subnet_ids="$(select_unique_az_alb_subnets "$candidate_subnets_json" "$selected_subnets_json" "$selected_subnets_tsv")"
+selected_subnet_summary="$(/usr/bin/awk -F '\t' '{ printf "%s(%s public=%s) ", $1, $2, $3 }' "$selected_subnets_tsv")"
 
 security_groups="$(aws ec2 describe-instances \
   --region "$AWS_REGION" \
@@ -116,7 +110,9 @@ plan_md="$plan_dir/plan.md"
   printf '  "ec2PublicIp": "%s",\n' "$(json_escape "$EC2_PUBLIC_IP")"
   printf '  "instanceId": "%s",\n' "$(json_escape "$instance_id")"
   printf '  "vpcId": "%s",\n' "$(json_escape "$vpc_id")"
-  printf '  "subnetIds": "%s",\n' "$(json_escape "$subnet_ids")"
+  printf '  "candidateSubnetsFile": "%s",\n' "$(json_escape "$candidate_subnets_json")"
+  printf '  "selectedSubnetIds": "%s",\n' "$(json_escape "$selected_subnet_ids")"
+  printf '  "selectedSubnetsFile": "%s",\n' "$(json_escape "$selected_subnets_json")"
   printf '  "instanceSecurityGroupIds": "%s",\n' "$(json_escape "$security_groups")"
   printf '  "albName": "%s",\n' "$(json_escape "$ALB_NAME")"
   printf '  "targetGroupName": "%s",\n' "$(json_escape "$TARGET_GROUP_NAME")"
@@ -132,7 +128,9 @@ plan_md="$plan_dir/plan.md"
   printf '%s\n' "- EC2 public IP: \`$EC2_PUBLIC_IP\`"
   printf '%s\n' "- Instance target: \`$instance_id\` on HTTP port 80"
   printf '%s\n' "- VPC: \`$vpc_id\`"
-  printf '%s\n' "- Candidate ALB subnets: \`$subnet_ids\`"
+  printf '%s\n' "- Candidate subnet inventory: \`$candidate_subnets_json\`"
+  printf '%s\n' "- Selected unique-AZ ALB subnets: \`$selected_subnet_summary\`"
+  printf '%s\n' "- Selected subnet evidence: \`$selected_subnets_json\`"
   printf '%s\n' "- Existing instance security groups: \`$security_groups\`"
   printf '%s\n' "- ALB name: \`$ALB_NAME\`"
   printf '%s\n' "- Target group: \`$TARGET_GROUP_NAME\`"

@@ -241,6 +241,10 @@ confirm_regional_alb_apply: I_APPROVE_REGIONAL_ALB_ENTRYPOINT_APPLY
 
 The ALB apply workflow may create or reuse the regional ALB security group, target group, ALB, ACM certificate, ACM DNS validation records, HTTP redirect listener, and HTTPS listener. It does not cut over `mscqr.com` or `www.mscqr.com`.
 
+Inventory, plan, and apply artifacts list candidate subnets separately from selected ALB subnets. The selected ALB subnet list is one subnet per Availability Zone, prefers `MapPublicIpOnLaunch=true`, and fails clearly if fewer than two distinct Availability Zones are available.
+
+ACM DNS validation is resilient to AWS timing delays: the apply script waits for `ResourceRecord` values before UPSERTing validation CNAMEs, skips that wait when a reused certificate is already `ISSUED`, and never writes production cutover records.
+
 After the apply artifact contains `ALB_DNS_NAME` and `ALB_HOSTED_ZONE_ID`, generate a DNS review plan:
 
 ```text
@@ -252,20 +256,31 @@ rollback_ip: 13.135.108.69
 
 For validation before production cutover, generate a regional test record plan locally or in a reviewed operator session:
 
-```bash
-TARGET_REGION_GROUP=mumbai \
-ALB_DNS_NAME=<ALB_DNS_NAME> \
-ALB_HOSTED_ZONE_ID=<ALB_HOSTED_ZONE_ID> \
-scripts/dr/generate-route53-regional-test-records.sh
+```text
+operation: generate-route53-regional-test-records
+target_region_group: mumbai
+aws_region: ap-south-1
+alb_dns_name: <ALB_DNS_NAME>
+alb_hosted_zone_id: <ALB_HOSTED_ZONE_ID>
 ```
 
 Apply the generated test-record JSON only through `AWS DR DNS Apply` after approval, then test:
 
 ```bash
-curl -fsS https://mumbai-test.mscqr.com/healthz
+curl -fsS https://dr-mumbai.mscqr.com/healthz
 ```
 
 Production cutover must use ALB alias records, not raw EC2 IPs, and must still go through the existing approved DNS workflow.
+
+Cape Town uses the same sequence with:
+
+```text
+target_region_group: capetown
+aws_region: af-south-1
+ec2_public_ip: 15.240.28.113
+```
+
+Only after Mumbai and Cape Town inventory, plan, apply, and regional test-record validation pass should operators move into the protected DNS cutover phase.
 
 ## Approved Recovery Cleanup
 

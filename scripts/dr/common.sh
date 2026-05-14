@@ -69,3 +69,65 @@ print_missing() {
   name="$1"
   echo "Missing required value: $name" >&2
 }
+
+select_unique_az_alb_subnets() {
+  subnets_json="$1"
+  selected_json="$2"
+  selected_tsv="$3"
+  node --input-type=module - "$subnets_json" "$selected_json" "$selected_tsv" <<'NODE'
+import fs from "node:fs";
+
+const [inputPath, selectedJsonPath, selectedTsvPath] = process.argv.slice(2);
+const payload = JSON.parse(fs.readFileSync(inputPath, "utf8"));
+const subnets = Array.isArray(payload.Subnets) ? payload.Subnets : [];
+const candidates = subnets
+  .filter((subnet) => subnet.SubnetId && subnet.AvailabilityZone)
+  .map((subnet) => ({
+    SubnetId: subnet.SubnetId,
+    AvailabilityZone: subnet.AvailabilityZone,
+    AvailabilityZoneId: subnet.AvailabilityZoneId || "",
+    VpcId: subnet.VpcId || "",
+    CidrBlock: subnet.CidrBlock || "",
+    MapPublicIpOnLaunch: Boolean(subnet.MapPublicIpOnLaunch),
+    AvailableIpAddressCount: subnet.AvailableIpAddressCount ?? null,
+    State: subnet.State || "",
+  }))
+  .sort((left, right) => {
+    if (left.AvailabilityZone !== right.AvailabilityZone) {
+      return left.AvailabilityZone.localeCompare(right.AvailabilityZone);
+    }
+    if (left.MapPublicIpOnLaunch !== right.MapPublicIpOnLaunch) {
+      return left.MapPublicIpOnLaunch ? -1 : 1;
+    }
+    return left.SubnetId.localeCompare(right.SubnetId);
+  });
+
+const selectedByAz = new Map();
+for (const subnet of candidates) {
+  if (!selectedByAz.has(subnet.AvailabilityZone)) {
+    selectedByAz.set(subnet.AvailabilityZone, subnet);
+  }
+}
+
+const selected = [...selectedByAz.values()];
+fs.writeFileSync(
+  selectedJsonPath,
+  JSON.stringify({ Candidates: candidates, SelectedSubnets: selected }, null, 2),
+);
+fs.writeFileSync(
+  selectedTsvPath,
+  selected
+    .map((subnet) => `${subnet.SubnetId}\t${subnet.AvailabilityZone}\t${subnet.MapPublicIpOnLaunch}`)
+    .join("\n") + (selected.length > 0 ? "\n" : ""),
+);
+
+if (selected.length < 2) {
+  console.error(
+    `ALB requires at least two distinct Availability Zones; found ${selected.length}. Review ${selectedJsonPath}.`,
+  );
+  process.exit(2);
+}
+
+console.log(selected.map((subnet) => subnet.SubnetId).join(" "));
+NODE
+}

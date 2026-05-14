@@ -11,6 +11,7 @@ on:
           - aws-regional-alb-inventory
           - generate-regional-alb-plan
           - apply-regional-alb-entrypoint-approved
+          - generate-route53-regional-test-records
           - generate-route53-alb-cutover-plan
       target_region_group:
         description: "MSCQR region group"
@@ -151,9 +152,14 @@ jobs:
             [ -n "$ALB_DNS_NAME" ] || { echo "::error::alb_dns_name is required for cutover plan generation."; exit 2; }
             [ -n "$ALB_HOSTED_ZONE_ID" ] || { echo "::error::alb_hosted_zone_id is required for cutover plan generation."; exit 2; }
           fi
+          if [ "$OPERATION" = "generate-route53-regional-test-records" ]; then
+            [ -n "$ALB_DNS_NAME" ] || { echo "::error::alb_dns_name is required for regional test-record generation."; exit 2; }
+            [ -n "$ALB_HOSTED_ZONE_ID" ] || { echo "::error::alb_hosted_zone_id is required for regional test-record generation."; exit 2; }
+          fi
           /bin/sh -n scripts/dr/aws-regional-alb-inventory.sh
           /bin/sh -n scripts/dr/generate-regional-alb-plan.sh
           /bin/sh -n scripts/dr/apply-regional-alb-entrypoint-approved.sh
+          /bin/sh -n scripts/dr/generate-route53-regional-test-records.sh
           /bin/sh -n scripts/dr/generate-route53-alb-cutover-plan.sh
 
       - name: Run selected ALB operation
@@ -168,6 +174,9 @@ jobs:
               ;;
             apply-regional-alb-entrypoint-approved)
               scripts/dr/apply-regional-alb-entrypoint-approved.sh
+              ;;
+            generate-route53-regional-test-records)
+              scripts/dr/generate-route53-regional-test-records.sh
               ;;
             generate-route53-alb-cutover-plan)
               scripts/dr/generate-route53-alb-cutover-plan.sh

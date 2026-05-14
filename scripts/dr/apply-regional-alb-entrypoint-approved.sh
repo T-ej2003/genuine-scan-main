@@ -7,6 +7,7 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 require_repo_root
 require_command aws
+require_command node
 
 TARGET_REGION_GROUP="${TARGET_REGION_GROUP:-${1:-}}"
 AWS_REGION="${AWS_REGION:-}"
@@ -101,24 +102,18 @@ if [ "$instance_id" = "None" ] || [ -z "$instance_id" ] || [ "$vpc_id" = "None" 
   exit 2
 fi
 
-subnet_ids="$(aws ec2 describe-subnets \
+candidate_subnets_json="$apply_dir/candidate-subnets.json"
+selected_subnets_json="$apply_dir/selected-alb-subnets.json"
+selected_subnets_tsv="$apply_dir/selected-alb-subnets.tsv"
+
+aws ec2 describe-subnets \
   --region "$AWS_REGION" \
   --filters "Name=vpc-id,Values=$vpc_id" \
-  --query 'Subnets[?MapPublicIpOnLaunch==`true`].SubnetId' \
-  --output text)"
-if [ -z "$subnet_ids" ] || [ "$subnet_ids" = "None" ]; then
-  subnet_ids="$(aws ec2 describe-subnets \
-    --region "$AWS_REGION" \
-    --filters "Name=vpc-id,Values=$vpc_id" \
-    --query 'Subnets[].SubnetId' \
-    --output text)"
-fi
+  --output json > "$candidate_subnets_json"
 
-set -- $subnet_ids
-if [ "$#" -lt 2 ]; then
-  echo "ALB requires at least two subnets in $vpc_id; discovered: $subnet_ids" >&2
-  exit 2
-fi
+selected_subnet_ids="$(select_unique_az_alb_subnets "$candidate_subnets_json" "$selected_subnets_json" "$selected_subnets_tsv")"
+echo "Selected ALB subnets, one per Availability Zone:"
+/bin/cat "$selected_subnets_tsv"
 
 alb_sg_id="$(aws ec2 describe-security-groups \
   --region "$AWS_REGION" \
@@ -215,9 +210,9 @@ else
   echo "Reusing ACM certificate: $cert_arn"
 fi
 
-aws acm describe-certificate --region "$AWS_REGION" --certificate-arn "$cert_arn" --output json > "$apply_dir/certificate.json"
-
-node --input-type=module - "$apply_dir/certificate.json" "$apply_dir/acm-validation-change-batch.json" <<'NODE'
+write_acm_validation_change_batch() {
+  aws acm describe-certificate --region "$AWS_REGION" --certificate-arn "$cert_arn" --output json > "$apply_dir/certificate.json"
+  node --input-type=module - "$apply_dir/certificate.json" "$apply_dir/acm-validation-change-batch.json" <<'NODE'
 import fs from "node:fs";
 const [input, output] = process.argv.slice(2);
 const certificate = JSON.parse(fs.readFileSync(input, "utf8")).Certificate;
@@ -236,25 +231,41 @@ for (const option of certificate.DomainValidationOptions || []) {
   });
 }
 fs.writeFileSync(output, JSON.stringify({ Comment: "MSCQR DR regional ALB ACM DNS validation", Changes: changes }, null, 2));
+console.log(changes.length);
 NODE
+}
 
-validation_count="$(node --input-type=module - "$apply_dir/acm-validation-change-batch.json" <<'NODE'
-import fs from "node:fs";
-const batch = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-console.log(batch.Changes.length);
-NODE
-)"
-if [ "$validation_count" -gt 0 ]; then
+cert_status="$(aws acm describe-certificate --region "$AWS_REGION" --certificate-arn "$cert_arn" --query 'Certificate.Status' --output text)"
+validation_count=0
+
+if [ "$cert_status" = "ISSUED" ]; then
+  validation_count="$(write_acm_validation_change_batch)"
+  echo "ACM certificate is already ISSUED; skipping validation-record wait."
+else
+  record_attempts=0
+  while [ "$validation_count" -eq 0 ] && [ "$record_attempts" -lt 30 ]; do
+    record_attempts=$((record_attempts + 1))
+    validation_count="$(write_acm_validation_change_batch)"
+    if [ "$validation_count" -gt 0 ]; then
+      break
+    fi
+    echo "Waiting for ACM DNS validation ResourceRecord values: attempt $record_attempts/30"
+    /bin/sleep 10
+  done
+
+  if [ "$validation_count" -eq 0 ]; then
+    echo "ACM did not return DNS validation ResourceRecord values after timeout." >&2
+    echo "Review $apply_dir/certificate.json and re-run after ACM populates validation options." >&2
+    exit 3
+  fi
+
   aws route53 change-resource-record-sets \
     --hosted-zone-id "$HOSTED_ZONE_ID" \
     --change-batch "file://$apply_dir/acm-validation-change-batch.json" \
     --output json > "$apply_dir/acm-validation-change.json"
   echo "UPSERTED ACM DNS validation records in hosted zone $HOSTED_ZONE_ID."
-else
-  echo "No ACM validation records found to UPSERT."
 fi
 
-cert_status="$(aws acm describe-certificate --region "$AWS_REGION" --certificate-arn "$cert_arn" --query 'Certificate.Status' --output text)"
 attempts=0
 while [ "$cert_status" != "ISSUED" ] && [ "$attempts" -lt 30 ]; do
   attempts=$((attempts + 1))
@@ -277,7 +288,7 @@ if [ "$alb_arn" = "None" ] || [ -z "$alb_arn" ]; then
   alb_arn="$(aws elbv2 create-load-balancer \
     --region "$AWS_REGION" \
     --name "$ALB_NAME" \
-    --subnets $subnet_ids \
+    --subnets $selected_subnet_ids \
     --security-groups "$alb_sg_id" \
     --scheme internet-facing \
     --type application \

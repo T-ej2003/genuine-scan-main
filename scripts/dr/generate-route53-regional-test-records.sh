@@ -30,7 +30,7 @@ create_artifact_dir
 plan_dir="$DR_ARTIFACT_DIR/route53-regional-test-records/$TARGET_REGION_GROUP"
 /bin/mkdir -p "$plan_dir"
 
-record_name="$TARGET_REGION_GROUP-test.$DOMAIN_NAME"
+record_name="dr-$TARGET_REGION_GROUP.$DOMAIN_NAME"
 change_file="$plan_dir/$record_name-change-batch.json"
 summary_file="$plan_dir/summary.md"
 

@@ -54,11 +54,13 @@ Recommended Mumbai entrypoint sequence:
 1. `AWS DR ALB Apply` -> `aws-regional-alb-inventory`.
 2. `AWS DR ALB Apply` -> `generate-regional-alb-plan`.
 3. `AWS DR ALB Apply` -> `apply-regional-alb-entrypoint-approved`.
-4. Generate a regional test record plan for `mumbai-test.mscqr.com`.
+4. `AWS DR ALB Apply` -> `generate-route53-regional-test-records` for `dr-mumbai.mscqr.com`.
 5. Apply the test record only through `AWS DR DNS Apply` after approval.
-6. Verify `https://mumbai-test.mscqr.com/healthz`.
+6. Verify `https://dr-mumbai.mscqr.com/healthz`.
 7. Generate the production ALB cutover plan.
 8. Use `AWS DR DNS Apply` only after final incident commander approval.
+
+ALB subnet selection is intentionally constrained to one subnet per Availability Zone, preferring public subnets. The ALB apply script fails before `CreateLoadBalancer` if fewer than two distinct Availability Zones are available. ACM validation CNAMEs are the only Route 53 records that ALB apply may UPSERT; production cutover JSON is generated separately for later approval.
 
 ## Operator Sequence
 

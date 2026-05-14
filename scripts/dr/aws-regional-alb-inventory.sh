@@ -7,6 +7,7 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 require_repo_root
 require_command aws
+require_command node
 
 TARGET_REGION_GROUP="${TARGET_REGION_GROUP:-${1:-}}"
 AWS_REGION="${AWS_REGION:-}"
@@ -98,9 +99,15 @@ aws_json "$inventory_dir/vpcs.json" aws ec2 describe-vpcs --region "$AWS_REGION"
 if [ -n "$vpc_id" ]; then
   aws_json "$inventory_dir/subnets.json" aws ec2 describe-subnets --region "$AWS_REGION" --filters "Name=vpc-id,Values=$vpc_id"
   aws_json "$inventory_dir/security-groups.json" aws ec2 describe-security-groups --region "$AWS_REGION" --filters "Name=vpc-id,Values=$vpc_id"
+  selected_subnets_json="$inventory_dir/selected-alb-subnets.json"
+  selected_subnets_tsv="$inventory_dir/selected-alb-subnets.tsv"
+  selected_subnet_ids="$(select_unique_az_alb_subnets "$inventory_dir/subnets.json" "$selected_subnets_json" "$selected_subnets_tsv")"
+  selected_subnet_summary="$(/usr/bin/awk -F '\t' '{ printf "%s(%s public=%s) ", $1, $2, $3 }' "$selected_subnets_tsv")"
 else
   aws_json "$inventory_dir/subnets.json" aws ec2 describe-subnets --region "$AWS_REGION"
   aws_json "$inventory_dir/security-groups.json" aws ec2 describe-security-groups --region "$AWS_REGION"
+  selected_subnet_ids=""
+  selected_subnet_summary="not selected because VPC was not discovered"
 fi
 
 aws_json "$inventory_dir/load-balancers.json" aws elbv2 describe-load-balancers --region "$AWS_REGION"
@@ -143,6 +150,9 @@ summary="$DR_ARTIFACT_DIR/alb-inventory/$TARGET_REGION_GROUP-summary.md"
   fi
   if [ -n "$vpc_id" ]; then
     printf '%s\n' "- Discovered VPC: \`$vpc_id\`"
+    printf '%s\n' "- Candidate subnets: \`$inventory_dir/subnets.json\`"
+    printf '%s\n' "- Selected unique-AZ ALB subnets: \`$selected_subnet_summary\`"
+    printf '%s\n' "- Selected subnet IDs for ALB: \`$selected_subnet_ids\`"
   else
     printf '%s\n' '- Discovered VPC: not found from public IP'
   fi
