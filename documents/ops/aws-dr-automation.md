@@ -413,6 +413,8 @@ Rollback notes:
 - ASG launch templates must use explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`. Do not reuse the source instance profile automatically.
 - ASG launch templates must set `ASG_ASSOCIATE_PUBLIC_IP=true` or `ASG_ASSOCIATE_PUBLIC_IP=false` explicitly. Mumbai first retry should use `true` because the selected public subnets currently have `MapPublicIpOnLaunch=false`.
 - Mumbai debug retry should set `ASG_KEY_NAME=mscqr-prod-mumbai` so failed ASG nodes can be inspected with the approved SSH key.
+- Mumbai debug retry should set `ASG_REPO_URL=https://github.com/T-ej2003/genuine-scan-main.git`, `ASG_REPO_BRANCH=main`, and `ASG_REPO_DIR=/home/ubuntu/genuine-scan-main`. The UserData path now installs/checks Git, Docker, and Docker Compose on a plain Ubuntu 22.04 host before cloning or updating the repo.
+- If `ASG_REPO_DIR` exists but is not a git checkout, UserData fails clearly and does not delete the directory automatically.
 - Preferred production design is private ASG subnets with NAT Gateway or VPC endpoints for SSM, EC2Messages, SSMMessages, S3, ECR, CloudWatch Logs, and Git access, then `ASG_ASSOCIATE_PUBLIC_IP=false`.
 
 Mumbai hardening values:
@@ -451,6 +453,9 @@ ASG_WEB_INSTANCE_PROFILE_ARN=<approved-asg-web-instance-profile-arn>
 # ASG_WEB_INSTANCE_PROFILE_NAME=<approved-asg-web-instance-profile-name>
 ASG_ASSOCIATE_PUBLIC_IP=true
 ASG_KEY_NAME=mscqr-prod-mumbai
+ASG_REPO_URL=https://github.com/T-ej2003/genuine-scan-main.git
+ASG_REPO_BRANCH=main
+ASG_REPO_DIR=/home/ubuntu/genuine-scan-main
 ROLLBACK_ALARM_NAMES_CSV=MSCQR-mumbai-ALB-5XX,MSCQR-mumbai-Target-5XX,MSCQR-mumbai-TargetResponseTime-p95,MSCQR-mumbai-UnhealthyHosts
 MIN_SIZE=2
 DESIRED_CAPACITY=2
@@ -476,6 +481,9 @@ TARGET_GROUP_ARN=arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgrou
 ASG_WEB_INSTANCE_PROFILE_ARN=arn:aws:iam::368992683803:instance-profile/mscqr-asg-web-instance-profile-aps1
 ASG_ASSOCIATE_PUBLIC_IP=true
 ASG_KEY_NAME=mscqr-prod-mumbai
+ASG_REPO_URL=https://github.com/T-ej2003/genuine-scan-main.git
+ASG_REPO_BRANCH=main
+ASG_REPO_DIR=/home/ubuntu/genuine-scan-main
 ROLLBACK_ALARM_NAMES_CSV=MSCQR-mumbai-ALB-5XX,MSCQR-mumbai-Target-5XX,MSCQR-mumbai-TargetResponseTime-p95,MSCQR-mumbai-UnhealthyHosts
 MIN_SIZE=2
 DESIRED_CAPACITY=2

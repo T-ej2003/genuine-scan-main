@@ -101,11 +101,11 @@ Apply order:
 4. `apply-waf-count-mode`.
 5. `verify-hardening-state`.
 6. `generate-asg-apply-plan`.
-7. `apply-asg-launch-template-approved` only after app state risks are resolved, `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME` is explicitly supplied, `ASG_ASSOCIATE_PUBLIC_IP` is intentionally set for the selected subnet design, `ASG_KEY_NAME` is supplied for debug retries, and the rollout is treated as a no-production-DNS validation drill.
+7. `apply-asg-launch-template-approved` only after app state risks are resolved, `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME` is explicitly supplied, `ASG_ASSOCIATE_PUBLIC_IP` is intentionally set for the selected subnet design, `ASG_KEY_NAME` is supplied for debug retries, `ASG_REPO_URL`/`ASG_REPO_BRANCH`/`ASG_REPO_DIR` identify the checkout to clone or refresh, and the rollout is treated as a no-production-DNS validation drill.
 
 Hardening does not perform production DNS cutover, delete AWS resources, mutate RDS, mutate application S3 buckets, copy Let's Encrypt keys, or move WAF rules to BLOCK mode. WAF remains COUNT mode only in this phase.
 
-ASG apply is intentionally last because current single-node assumptions may include node-local Redis, MinIO, secrets, sessions, migrations, worker behavior, and filesystem state. ASG_STATUS=CONDITIONALLY_READY means the repo-side blockers are closed, but the first live create/attach plus replacement-instance drill still needs evidence. The launch template must include explicit ASG web instance profile input, deterministic UserData bootstrap, optional debug `ASG_KEY_NAME`, and the expected `ASG_ASSOCIATE_PUBLIC_IP` networking shape. For Mumbai's first retry, use `ASG_ASSOCIATE_PUBLIC_IP=true` because the selected public subnets have `MapPublicIpOnLaunch=false`, and use `ASG_KEY_NAME=mscqr-prod-mumbai` so failed nodes can be inspected. The preferred production design is private ASG subnets with NAT Gateway or VPC endpoints, then `ASG_ASSOCIATE_PUBLIC_IP=false`. Do not use final production DNS cutover until at least the selected region has healthy multi-target evidence and a reviewed rollback plan.
+ASG apply is intentionally last because current single-node assumptions may include node-local Redis, MinIO, secrets, sessions, migrations, worker behavior, and filesystem state. ASG_STATUS=CONDITIONALLY_READY means the repo-side blockers are closed, but the first live create/attach plus replacement-instance drill still needs evidence. The launch template must include explicit ASG web instance profile input, deterministic UserData bootstrap, optional debug `ASG_KEY_NAME`, and the expected `ASG_ASSOCIATE_PUBLIC_IP` networking shape. For Mumbai's first retry, use `ASG_ASSOCIATE_PUBLIC_IP=true` because the selected public subnets have `MapPublicIpOnLaunch=false`, and use `ASG_KEY_NAME=mscqr-prod-mumbai` so failed nodes can be inspected. Because the selected AMI is not app-baked, UserData must also install/check Git, Docker, and Docker Compose, then clone or refresh the repo through `ASG_REPO_URL`, `ASG_REPO_BRANCH`, and `ASG_REPO_DIR`. The preferred production design is private ASG subnets with NAT Gateway or VPC endpoints, then `ASG_ASSOCIATE_PUBLIC_IP=false`. Do not use final production DNS cutover until at least the selected region has healthy multi-target evidence and a reviewed rollback plan.
 
 Mumbai no-DNS ASG debug retry inputs:
 
@@ -120,6 +120,9 @@ TARGET_GROUP_ARN=arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgrou
 ASG_WEB_INSTANCE_PROFILE_ARN=arn:aws:iam::368992683803:instance-profile/mscqr-asg-web-instance-profile-aps1
 ASG_ASSOCIATE_PUBLIC_IP=true
 ASG_KEY_NAME=mscqr-prod-mumbai
+ASG_REPO_URL=https://github.com/T-ej2003/genuine-scan-main.git
+ASG_REPO_BRANCH=main
+ASG_REPO_DIR=/home/ubuntu/genuine-scan-main
 ROLLBACK_ALARM_NAMES_CSV=MSCQR-mumbai-ALB-5XX,MSCQR-mumbai-Target-5XX,MSCQR-mumbai-TargetResponseTime-p95,MSCQR-mumbai-UnhealthyHosts
 MIN_SIZE=2
 DESIRED_CAPACITY=2

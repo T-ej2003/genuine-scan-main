@@ -137,6 +137,10 @@ requireMatch("readiness doc", doc, /ASG_WEB_INSTANCE_PROFILE_ARN/, "must documen
 requireMatch("readiness doc", doc, /ASG_WEB_INSTANCE_PROFILE_NAME/, "must document explicit ASG web instance profile name input.");
 requireMatch("readiness doc", doc, /ASG_ASSOCIATE_PUBLIC_IP/, "must document explicit ASG public IP association input.");
 requireMatch("readiness doc", doc, /ASG_KEY_NAME/, "must document optional ASG SSH KeyName input.");
+requireMatch("readiness doc", doc, /ASG_REPO_URL/, "must document ASG repository URL input.");
+requireMatch("readiness doc", doc, /ASG_REPO_BRANCH/, "must document ASG repository branch input.");
+requireMatch("readiness doc", doc, /ASG_REPO_DIR/, "must document ASG repository directory input.");
+requireMatch("readiness doc", doc, /plain Ubuntu 22\.04|blank Ubuntu/i, "must document plain Ubuntu host bootstrap support.");
 requireMatch("readiness doc", doc, /mscqr-prod-mumbai/, "must document Mumbai debug retry KeyName.");
 requireMatch("readiness doc", doc, /NetworkInterfaces\[0\]\.AssociatePublicIpAddress=true/, "must document public-IP launch template networking shape.");
 requireMatch("readiness doc", doc, /SecurityGroupIds=\[SOURCE_SECURITY_GROUP\]/, "must document non-public-IP launch template networking shape.");
@@ -156,6 +160,9 @@ requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_WEB_INSTANCE_PROFIL
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_WEB_INSTANCE_PROFILE_NAME/, "must define explicit ASG web instance profile name input.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_ASSOCIATE_PUBLIC_IP/, "must define explicit ASG public IP association input.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_KEY_NAME/, "must define optional ASG SSH KeyName input.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_REPO_URL/, "must define ASG repository URL input.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_REPO_BRANCH/, "must define ASG repository branch input.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_REPO_DIR/, "must define ASG repository directory input.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /mscqr-prod-mumbai/, "must recommend Mumbai debug retry KeyName.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /NetworkInterfaces\[0\]\.AssociatePublicIpAddress=true/, "must define public-IP launch template networking shape.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /SecurityGroupIds=\[SOURCE_SECURITY_GROUP\]/, "must define non-public-IP launch template networking shape.");
@@ -222,6 +229,10 @@ requireMatch("DR common", requireFile("scripts/dr/common.sh"), /validate_asg_lau
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /ASG_WEB_INSTANCE_PROFILE_ARN or ASG_WEB_INSTANCE_PROFILE_NAME is required/, "common helpers must require explicit ASG web instance profile input.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /ASG_ASSOCIATE_PUBLIC_IP must be true or false/, "common helpers must validate ASG_ASSOCIATE_PUBLIC_IP.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /ASG_KEY_NAME must not contain whitespace/, "common helpers must validate ASG_KEY_NAME.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /ASG_REPO_URL is required for self-sufficient ASG web-node bootstrap/, "common helpers must require ASG_REPO_URL.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /ASG_REPO_URL must be a non-secret URL without whitespace or embedded credentials/, "common helpers must reject secret-looking repo URLs.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /ASG_REPO_BRANCH must be non-empty and must not contain whitespace/, "common helpers must validate ASG_REPO_BRANCH.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /ASG_REPO_DIR must be non-empty and must not contain whitespace/, "common helpers must validate ASG_REPO_DIR.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /data\.KeyName = keyName/, "common helpers must emit KeyName when ASG_KEY_NAME is set.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /Launch template data must omit KeyName when ASG_KEY_NAME is not set/, "launch template validation must reject unexpected KeyName.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /UserData: Buffer\.from\(userData, "utf8"\)\.toString\("base64"\)/, "common helpers must base64 encode launch template UserData.");
@@ -231,10 +242,20 @@ requireMatch("DR common", requireFile("scripts/dr/common.sh"), /trap on_exit EXI
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /current_step=/, "UserData failure trap must report the current step.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /safe_diagnostics/, "UserData must include safe diagnostics on failure.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /cloud-init-output\.log/, "UserData failure message must point operators to cloud-init output.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /export DEBIAN_FRONTEND=noninteractive/, "UserData must use noninteractive package installation.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /apt-get install -y git ca-certificates curl/, "UserData must install git prerequisites when missing.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /apt-get install -y docker\.io docker-compose-plugin/, "UserData must install Docker and Compose plugin when missing.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /systemctl enable --now docker/, "UserData must enable and start Docker.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /docker compose version/, "UserData must verify Docker Compose plugin.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /git clone --branch "\$ASG_REPO_BRANCH" --depth 1 "\$ASG_REPO_URL" "\$ASG_REPO_DIR"/, "UserData must clone the repo when missing.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /repo directory exists but is not a git checkout/, "UserData must fail clearly when ASG_REPO_DIR exists but is not a git checkout.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /docker --version/, "UserData safe diagnostics must include docker version when available.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /systemctl is-active docker/, "UserData safe diagnostics must include docker service state when available.");
-requireMatch("DR common", requireFile("scripts/dr/common.sh"), /git fetch origin main/, "UserData must fetch main.");
-requireMatch("DR common", requireFile("scripts/dr/common.sh"), /git reset --hard origin\/main/, "UserData must reset to origin/main.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /git --version/, "UserData safe diagnostics must include git version when available.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /\/bin\/ls -ld \/home\/ubuntu/, "UserData safe diagnostics must list /home/ubuntu only.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /\/bin\/ls -ld "\$ASG_REPO_DIR"/, "UserData safe diagnostics must list only ASG_REPO_DIR.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /git fetch origin "\$ASG_REPO_BRANCH"/, "UserData must fetch configured branch.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /git reset --hard "origin\/\$ASG_REPO_BRANCH"/, "UserData must reset to configured branch.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /scripts\/dr\/bootstrap-asg-web-node\.sh "\$TARGET_REGION_GROUP" "\$AWS_REGION"/, "UserData must run the ASG bootstrap script with region inputs.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /MetadataOptions\?\.HttpTokens !== "required"/, "launch template validation must require IMDSv2 token enforcement.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /data\.IamInstanceProfile/, "launch template validation must require IamInstanceProfile.");
@@ -252,8 +273,14 @@ requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_WEB_INSTANCE_PROFILE_ARN
 requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_WEB_INSTANCE_PROFILE_NAME/, "apply plan must accept explicit ASG web instance profile name.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_ASSOCIATE_PUBLIC_IP/, "apply plan must accept ASG_ASSOCIATE_PUBLIC_IP.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_KEY_NAME/, "apply plan must accept ASG_KEY_NAME.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_REPO_URL/, "apply plan must accept ASG_REPO_URL.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_REPO_BRANCH/, "apply plan must accept ASG_REPO_BRANCH.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_REPO_DIR/, "apply plan must accept ASG_REPO_DIR.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /Package bootstrap: enabled/, "apply plan must show package bootstrap is enabled.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /Repository URL/, "apply plan must show repository URL.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /KeyName: provided|KeyName: not provided/, "apply plan must show KeyName state.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_KEY_NAME=mscqr-prod-mumbai/, "apply plan must warn about Mumbai debug retry KeyName.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_REPO_URL=https:\/\/github\.com\/T-ej2003\/genuine-scan-main\.git/, "apply plan must warn about Mumbai debug retry repo URL.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /Associate public IP/, "apply plan must include public IP association state in the markdown plan.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /write_asg_web_launch_template_json/, "apply plan must generate launch template through shared helper.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /validate_asg_launch_template_json/, "apply plan must validate proposed launch template JSON.");
@@ -269,6 +296,10 @@ requireMatch("ASG apply", asgApplyScript, /ASG_ASSOCIATE_PUBLIC_IP/, "apply scri
 requireMatch("ASG apply", asgApplyScript, /ASG_ASSOCIATE_PUBLIC_IP must be true or false/, "apply script must validate ASG_ASSOCIATE_PUBLIC_IP.");
 requireMatch("ASG apply", asgApplyScript, /ASG_KEY_NAME/, "apply script must accept ASG_KEY_NAME.");
 requireMatch("ASG apply", asgApplyScript, /ASG_KEY_NAME must not contain whitespace/, "apply script must validate ASG_KEY_NAME.");
+requireMatch("ASG apply", asgApplyScript, /ASG_REPO_URL/, "apply script must accept ASG_REPO_URL.");
+requireMatch("ASG apply", asgApplyScript, /ASG_REPO_URL is required for self-sufficient ASG web-node bootstrap/, "apply script must require ASG_REPO_URL.");
+requireMatch("ASG apply", asgApplyScript, /ASG_REPO_BRANCH/, "apply script must accept ASG_REPO_BRANCH.");
+requireMatch("ASG apply", asgApplyScript, /ASG_REPO_DIR/, "apply script must accept ASG_REPO_DIR.");
 requireMatch("ASG apply", asgApplyScript, /source instance profile is not reused automatically/, "apply script must refuse implicit source instance profile reuse.");
 requireMatch("ASG apply", asgApplyScript, /write_asg_web_launch_template_json/, "apply script must generate launch template through shared helper.");
 requireMatch("ASG apply", asgApplyScript, /validate_asg_launch_template_json/, "apply script must validate launch template JSON.");
@@ -449,7 +480,7 @@ if (asgRollingPolicyChecklist) {
     failures.push("ASG rolling policy checklist must keep replacement_instance_drill_required=true.");
   }
   const requiredInputs = new Set(asgRollingPolicyChecklist.launch_template_required_inputs || []);
-  for (const input of ["ASG_WEB_INSTANCE_PROFILE_ARN", "ASG_WEB_INSTANCE_PROFILE_NAME", "ASG_ASSOCIATE_PUBLIC_IP", "ASG_KEY_NAME"]) {
+  for (const input of ["ASG_WEB_INSTANCE_PROFILE_ARN", "ASG_WEB_INSTANCE_PROFILE_NAME", "ASG_ASSOCIATE_PUBLIC_IP", "ASG_KEY_NAME", "ASG_REPO_URL", "ASG_REPO_BRANCH", "ASG_REPO_DIR"]) {
     if (!requiredInputs.has(input)) failures.push(`ASG rolling policy checklist launch_template_required_inputs must include ${input}.`);
   }
   if (asgRollingPolicyChecklist.key_name_optional !== true) {
@@ -484,8 +515,12 @@ if (asgRollingPolicyChecklist) {
     "/var/log/mscqr-asg-bootstrap.log",
     "mirror non-secret status and failure lines to cloud-init console output",
     "install failure trap with current step",
-    "git fetch origin main",
-    "git reset --hard origin/main",
+    "install/check git",
+    "install/check docker",
+    "install/check docker compose",
+    "clone ASG_REPO_URL into ASG_REPO_DIR when missing",
+    "git fetch origin ASG_REPO_BRANCH",
+    "git reset --hard origin/ASG_REPO_BRANCH",
     "scripts/dr/bootstrap-asg-web-node.sh",
     "print safe diagnostics after failure only",
   ]) {

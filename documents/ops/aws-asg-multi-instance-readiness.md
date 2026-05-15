@@ -23,9 +23,10 @@ The app has several good production controls already:
 - `scripts/dr/bootstrap-asg-web-node.sh` is the committed ASG web-node bootstrap path using AWS SSM Parameter Store.
 - `documents/ops/aws-asg-web-ssm-parameter-manifest.json` records required root/backend env parameter names without values.
 - ASG launch-template plan/apply now requires explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`.
-- ASG launch-template plan/apply now emits base64 `UserData` that runs the ASG web bootstrap script from `/home/ubuntu/genuine-scan-main`.
+- ASG launch-template plan/apply now emits base64 `UserData` that can boot a plain Ubuntu 22.04 host by installing/checking Git, Docker, and Docker Compose, cloning/updating the repository, and then running the ASG web bootstrap script from `ASG_REPO_DIR`.
 - ASG launch-template plan/apply now supports explicit `ASG_ASSOCIATE_PUBLIC_IP=true|false` networking, with `false` as the default.
 - ASG launch-template plan/apply now supports optional `ASG_KEY_NAME`; Mumbai debug retry should use `ASG_KEY_NAME=mscqr-prod-mumbai`.
+- ASG launch-template plan/apply now supports `ASG_REPO_URL`, `ASG_REPO_BRANCH`, and `ASG_REPO_DIR`; Mumbai debug retry should use `ASG_REPO_URL=https://github.com/T-ej2003/genuine-scan-main.git`, `ASG_REPO_BRANCH=main`, and `ASG_REPO_DIR=/home/ubuntu/genuine-scan-main`.
 - `documents/ops/aws-asg-rolling-deploy-policy.md` and `documents/ops/aws-asg-rolling-deploy-policy.checklist.json` define the rolling deploy contract, rollback criteria, and replacement-instance drill.
 - `/healthz` exists for shallow app liveness and `/api/health/ready` reaches backend dependency readiness through Nginx.
 
@@ -249,16 +250,21 @@ Evidence:
 - Legacy Compose topology includes local Redis/MinIO and local certbot volumes.
 - ASG web-node Compose topology excludes local Redis, MinIO, and worker services.
 - Regional ASG launch-template scripts exist as plan/apply scaffolding, but ASG creation is out of scope and not run by this audit.
+- ASG UserData no longer assumes a pre-baked application host. For the no-DNS validation path it can start from a plain Ubuntu 22.04 AMI, install/check required packages, clone or refresh the repo, and invoke the SSM-backed ASG web bootstrap.
 
 ASG bootstrap checklist:
 
-- Install Docker and the Compose plugin from a pinned or approved source.
+- Install/check `git`, `ca-certificates`, `curl`, `docker.io`, and the Docker Compose plugin before repository bootstrap.
+- Use `ASG_REPO_URL` to clone the repository if `ASG_REPO_DIR` is missing.
+- Use `ASG_REPO_BRANCH` to fetch/reset the checkout if `ASG_REPO_DIR` already contains a git checkout.
+- Fail clearly without deleting anything if `ASG_REPO_DIR` exists but is not a git checkout.
 - Pull or build the approved image for the exact commit SHA.
 - Fetch environment from SSM Parameter Store through instance profile using `scripts/dr/bootstrap-asg-web-node.sh`.
 - Include launch-template `UserData` that logs only non-secret bootstrap status to `/var/log/mscqr-asg-bootstrap.log`.
 - Keep launch-template `IamInstanceProfile` explicit and supplied by `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`.
 - Set launch-template public IP behavior explicitly with `ASG_ASSOCIATE_PUBLIC_IP=true` or `ASG_ASSOCIATE_PUBLIC_IP=false`.
 - Use `ASG_KEY_NAME=mscqr-prod-mumbai` for the Mumbai no-DNS debug retry so failed nodes can be inspected over SSH.
+- Use `ASG_REPO_URL=https://github.com/T-ej2003/genuine-scan-main.git`, `ASG_REPO_BRANCH=main`, and `ASG_REPO_DIR=/home/ubuntu/genuine-scan-main` for the Mumbai no-DNS debug retry.
 - Set `RUN_DB_MIGRATIONS_ON_START=false`.
 - Set backend `RUN_BACKGROUND_WORKERS=false` on web nodes.
 - Point `REDIS_URL` to shared regional Redis.
@@ -303,21 +309,55 @@ Committed policy:
 Launch-template requirements:
 
 - `IamInstanceProfile` must come from explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`.
-- `UserData` must be base64 encoded and must run `scripts/dr/bootstrap-asg-web-node.sh "$TARGET_REGION_GROUP" "$AWS_REGION"` from `/home/ubuntu/genuine-scan-main`.
-- `UserData` must log to `/var/log/mscqr-asg-bootstrap.log`, fetch/reset `origin/main`, avoid printing secret values, and never touch Route 53 or production DNS.
+- `UserData` must be base64 encoded and must run `scripts/dr/bootstrap-asg-web-node.sh "$TARGET_REGION_GROUP" "$AWS_REGION"` from `ASG_REPO_DIR`.
+- `UserData` must install/check Git, Docker, and Docker Compose before app bootstrap.
+- `UserData` must clone `ASG_REPO_URL` into `ASG_REPO_DIR` when missing; if `ASG_REPO_DIR` already contains a git checkout, it must fetch/reset `ASG_REPO_BRANCH`; if the path exists but is not a git checkout, it must fail clearly and must not delete it automatically.
+- `UserData` must log to `/var/log/mscqr-asg-bootstrap.log`, avoid printing secret values, and never touch Route 53 or production DNS.
 - `UserData` must mirror non-secret status/failure lines to cloud-init console output and include a failure trap with safe diagnostics only.
 - `MetadataOptions.HttpTokens` must be `required`.
 - `ImageId` and `InstanceType` must be present.
 - `ASG_KEY_NAME` is optional generally; when set it must become `KeyName`, and when omitted `KeyName` must be absent.
+- `ASG_REPO_URL` is required for self-sufficient ASG web-node bootstrap and must not contain whitespace or embedded credentials.
+- `ASG_REPO_BRANCH` defaults to `main`; `ASG_REPO_DIR` defaults to `/home/ubuntu/genuine-scan-main`.
 - `ASG_ASSOCIATE_PUBLIC_IP=false` must use top-level `SecurityGroupIds=[SOURCE_SECURITY_GROUP]` and no `NetworkInterfaces`.
 - `ASG_ASSOCIATE_PUBLIC_IP=true` must use `NetworkInterfaces[0].AssociatePublicIpAddress=true` with `Groups=[SOURCE_SECURITY_GROUP]` and no top-level `SecurityGroupIds`.
 
 Mumbai retry note:
 
 - The first failed Mumbai ASG attempt produced instances that failed ALB health checks, and console output showed bootstrap/network credential failures.
+- The later Mumbai no-DNS attempt launched instances, but the selected AMI was not app-baked: `/home/ubuntu/genuine-scan-main` was missing, Docker was not installed/running, and UserData failed at repo-directory preflight. The next retry must use the self-sufficient package and repo bootstrap path.
 - Mumbai selected public subnets currently have `MapPublicIpOnLaunch=false`, so the next no-DNS Mumbai retry should use `ASG_ASSOCIATE_PUBLIC_IP=true`.
 - The next no-DNS Mumbai retry should also use `ASG_KEY_NAME=mscqr-prod-mumbai` to make failed nodes inspectable.
+- The next no-DNS Mumbai retry should set `ASG_REPO_URL=https://github.com/T-ej2003/genuine-scan-main.git`, `ASG_REPO_BRANCH=main`, and `ASG_REPO_DIR=/home/ubuntu/genuine-scan-main`.
 - Preferred production design: move ASG web nodes to private app subnets with NAT Gateway or VPC endpoints for SSM, EC2Messages, SSMMessages, S3, ECR, CloudWatch Logs, and Git access, then use `ASG_ASSOCIATE_PUBLIC_IP=false`.
+
+Exact Mumbai no-DNS retry inputs:
+
+```bash
+TARGET_REGION_GROUP=mumbai
+AWS_REGION=ap-south-1
+SOURCE_INSTANCE_ID=i-04ae3b689ab72a68a
+SOURCE_AMI=ami-07216ac99dc46a187
+SOURCE_INSTANCE_TYPE=t3.medium
+SOURCE_SECURITY_GROUP=sg-0771ea7e59f7a49d4
+TARGET_GROUP_ARN=arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgroup/mscqr-mumbai-frontend-tg/68982ccd4d8c26c1
+ASG_WEB_INSTANCE_PROFILE_ARN=arn:aws:iam::368992683803:instance-profile/mscqr-asg-web-instance-profile-aps1
+ASG_ASSOCIATE_PUBLIC_IP=true
+ASG_KEY_NAME=mscqr-prod-mumbai
+ASG_REPO_URL=https://github.com/T-ej2003/genuine-scan-main.git
+ASG_REPO_BRANCH=main
+ASG_REPO_DIR=/home/ubuntu/genuine-scan-main
+ROLLBACK_ALARM_NAMES_CSV=MSCQR-mumbai-ALB-5XX,MSCQR-mumbai-Target-5XX,MSCQR-mumbai-TargetResponseTime-p95,MSCQR-mumbai-UnhealthyHosts
+MIN_SIZE=2
+DESIRED_CAPACITY=2
+MAX_SIZE=4
+```
+
+Add only for protected apply, not plan generation:
+
+```bash
+CONFIRM_ASG_APPLY=I_APPROVE_REGIONAL_ASG_CREATE_AND_ATTACH
+```
 
 Approved first-rollout values:
 

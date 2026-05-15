@@ -3,7 +3,7 @@
   "service": "MSCQR",
   "lastAudited": "2026-05-15",
   "asgStatus": "CONDITIONALLY_READY",
-  "statusReason": "Regional Redis, regional S3 object storage, ASG web-node worker exclusion, SSM-backed bootstrap, deterministic launch-template UserData, optional ASG SSH KeyName support, explicit ASG web instance profile input, explicit ASG public-IP networking mode, and the rolling deploy contract are committed. The remaining go/no-go is a first live ASG create/attach plus replacement-instance drill with no production DNS cutover.",
+  "statusReason": "Regional Redis, regional S3 object storage, ASG web-node worker exclusion, SSM-backed bootstrap, self-sufficient launch-template UserData for plain Ubuntu hosts, optional ASG SSH KeyName support, explicit ASG web instance profile input, explicit ASG public-IP networking mode, and the rolling deploy contract are committed. The remaining go/no-go is a first live ASG create/attach plus replacement-instance drill with no production DNS cutover.",
   "safeToCreateAsg": false,
   "safeToModifyProductionDns": false,
   "safeToMutateRdsData": false,
@@ -61,8 +61,11 @@
         "Generated launch template data includes base64 UserData that runs scripts/dr/bootstrap-asg-web-node.sh with the target region group and AWS region.",
         "scripts/dr/generate-asg-apply-plan.sh and scripts/dr/apply-asg-launch-template-approved.sh support ASG_ASSOCIATE_PUBLIC_IP=true or false only.",
         "scripts/dr/generate-asg-apply-plan.sh and scripts/dr/apply-asg-launch-template-approved.sh support optional ASG_KEY_NAME and omit KeyName when it is not set.",
+        "scripts/dr/generate-asg-apply-plan.sh and scripts/dr/apply-asg-launch-template-approved.sh support ASG_REPO_URL, ASG_REPO_BRANCH, and ASG_REPO_DIR.",
         "When ASG_ASSOCIATE_PUBLIC_IP=true, launch template data uses NetworkInterfaces[0].AssociatePublicIpAddress=true with Groups and no top-level SecurityGroupIds.",
         "When ASG_ASSOCIATE_PUBLIC_IP=false, launch template data uses top-level SecurityGroupIds and no NetworkInterfaces.",
+        "UserData installs/checks git, Docker, and docker compose before repository checkout.",
+        "UserData clones ASG_REPO_URL into ASG_REPO_DIR when the checkout is missing, or fetches/resets ASG_REPO_BRANCH when the checkout already exists.",
         "UserData writes /var/log/mscqr-asg-bootstrap.log and mirrors non-secret status/failure lines to cloud-init console output.",
         "ops/aws/iam/dr/asg-web-instance-profile-policy.template.json defines least-privilege SSM read, scoped KMS decrypt, regional S3 artifact access, and ECR image pull permissions."
       ],
@@ -100,6 +103,7 @@
     "Launch template plan and apply include deterministic base64 UserData for ASG web-node bootstrap.",
     "Launch template plan and apply use ASG_ASSOCIATE_PUBLIC_IP=true only as a temporary retry bridge for public subnets without MapPublicIpOnLaunch; the preferred steady-state design is private ASG subnets with NAT Gateway or VPC endpoints and ASG_ASSOCIATE_PUBLIC_IP=false.",
     "Launch template plan and apply support optional ASG_KEY_NAME for debug retries; Mumbai no-DNS debug retry should use ASG_KEY_NAME=mscqr-prod-mumbai.",
+    "Launch template plan and apply require ASG_REPO_URL and support ASG_REPO_BRANCH=main and ASG_REPO_DIR=/home/ubuntu/genuine-scan-main so a plain Ubuntu 22.04 host can install prerequisites and clone the app before SSM env bootstrap.",
     "ALB health checks use /healthz for shallow liveness or /api/health/ready for dependency readiness according to the rollout phase.",
     "Rolling deploy and rollback behavior are documented in-repo and must be validated through the first no-DNS regional replacement-instance drill."
   ],

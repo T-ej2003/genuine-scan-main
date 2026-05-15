@@ -20,6 +20,9 @@ ASG_WEB_INSTANCE_PROFILE_ARN="${ASG_WEB_INSTANCE_PROFILE_ARN:-}"
 ASG_WEB_INSTANCE_PROFILE_NAME="${ASG_WEB_INSTANCE_PROFILE_NAME:-}"
 ASG_ASSOCIATE_PUBLIC_IP="${ASG_ASSOCIATE_PUBLIC_IP:-false}"
 ASG_KEY_NAME="${ASG_KEY_NAME:-}"
+ASG_REPO_URL="${ASG_REPO_URL:-}"
+ASG_REPO_BRANCH="${ASG_REPO_BRANCH:-main}"
+ASG_REPO_DIR="${ASG_REPO_DIR:-/home/ubuntu/genuine-scan-main}"
 ROLLING_POLICY_CHECKLIST_PATH="${ROLLING_POLICY_CHECKLIST_PATH:-documents/ops/aws-asg-rolling-deploy-policy.checklist.json}"
 ROLLBACK_ALARM_NAMES_CSV="${ROLLBACK_ALARM_NAMES_CSV:-}"
 CONFIRM_ASG_APPLY="${CONFIRM_ASG_APPLY:-}"
@@ -46,6 +49,19 @@ esac
 
 case "$ASG_KEY_NAME" in
   *[[:space:]]*) echo "ASG_KEY_NAME must not contain whitespace." >&2; exit 2 ;;
+esac
+if [ -z "$ASG_REPO_URL" ]; then
+  echo "ASG_REPO_URL is required for self-sufficient ASG web-node bootstrap." >&2
+  exit 2
+fi
+case "$ASG_REPO_URL" in
+  *[[:space:]]*|*@*) echo "ASG_REPO_URL must be a non-secret URL without whitespace or embedded credentials." >&2; exit 2 ;;
+esac
+case "$ASG_REPO_BRANCH" in
+  ""|*[[:space:]]*) echo "ASG_REPO_BRANCH must be non-empty and must not contain whitespace." >&2; exit 2 ;;
+esac
+case "$ASG_REPO_DIR" in
+  ""|*[[:space:]]*) echo "ASG_REPO_DIR must be non-empty and must not contain whitespace." >&2; exit 2 ;;
 esac
 
 policy_env_file="$(mktemp "${TMPDIR:-/tmp}/mscqr-asg-rolling-policy.XXXXXX")"
@@ -136,8 +152,11 @@ write_asg_web_launch_template_json \
   "$ASG_WEB_INSTANCE_PROFILE_NAME" \
   "$ASG_ASSOCIATE_PUBLIC_IP" \
   "$ASG_KEY_NAME" \
+  "$ASG_REPO_URL" \
+  "$ASG_REPO_BRANCH" \
+  "$ASG_REPO_DIR" \
   data
-validate_asg_launch_template_json "$launch_template_data" data "$ASG_ASSOCIATE_PUBLIC_IP" "$SOURCE_SECURITY_GROUP" "$ASG_KEY_NAME"
+validate_asg_launch_template_json "$launch_template_data" data "$ASG_ASSOCIATE_PUBLIC_IP" "$SOURCE_SECURITY_GROUP" "$ASG_KEY_NAME" "$ASG_REPO_URL" "$ASG_REPO_BRANCH" "$ASG_REPO_DIR"
 
 launch_template_id="$(aws ec2 describe-launch-templates \
   --region "$AWS_REGION" \
@@ -185,7 +204,7 @@ aws ec2 describe-launch-template-versions \
 node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); fs.writeFileSync(process.argv[2], JSON.stringify(p.LaunchTemplateVersions[0].LaunchTemplateData, null, 2) + "\n");' \
   "$out_dir/live-launch-template-version-intended.json" \
   "$out_dir/live-launch-template-data.json"
-validate_asg_launch_template_json "$out_dir/live-launch-template-data.json" data "$ASG_ASSOCIATE_PUBLIC_IP" "$SOURCE_SECURITY_GROUP" "$ASG_KEY_NAME"
+validate_asg_launch_template_json "$out_dir/live-launch-template-data.json" data "$ASG_ASSOCIATE_PUBLIC_IP" "$SOURCE_SECURITY_GROUP" "$ASG_KEY_NAME" "$ASG_REPO_URL" "$ASG_REPO_BRANCH" "$ASG_REPO_DIR"
 
 aws ec2 modify-launch-template \
   --region "$AWS_REGION" \
@@ -288,6 +307,9 @@ aws autoscaling describe-auto-scaling-groups --region "$AWS_REGION" --auto-scali
   printf 'ROLLING_POLICY_CHECKLIST_PATH=%s\n' "$ROLLING_POLICY_CHECKLIST_PATH"
   printf 'ROLLBACK_ALARM_NAMES_CSV=%s\n' "$ROLLBACK_ALARM_NAMES_CSV"
   printf 'ASG_ASSOCIATE_PUBLIC_IP=%s\n' "$ASG_ASSOCIATE_PUBLIC_IP"
+  printf 'ASG_REPO_URL=%s\n' "$ASG_REPO_URL"
+  printf 'ASG_REPO_BRANCH=%s\n' "$ASG_REPO_BRANCH"
+  printf 'ASG_REPO_DIR=%s\n' "$ASG_REPO_DIR"
 } > "$out_dir/outputs.env"
 
 /bin/cat "$out_dir/outputs.env"

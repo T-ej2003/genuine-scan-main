@@ -317,7 +317,10 @@ write_asg_web_launch_template_json() {
   asg_web_instance_profile_name="$9"
   asg_associate_public_ip="${10:-false}"
   asg_key_name="${11:-}"
-  wrapper_mode="${12:-data}"
+  asg_repo_url="${12:-}"
+  asg_repo_branch="${13:-main}"
+  asg_repo_dir="${14:-/home/ubuntu/genuine-scan-main}"
+  wrapper_mode="${15:-data}"
 
   if [ -z "$asg_web_instance_profile_arn" ] && [ -z "$asg_web_instance_profile_name" ]; then
     echo "ASG_WEB_INSTANCE_PROFILE_ARN or ASG_WEB_INSTANCE_PROFILE_NAME is required. Do not reuse the source instance profile implicitly." >&2
@@ -333,7 +336,22 @@ write_asg_web_launch_template_json() {
     *[[:space:]]*) echo "ASG_KEY_NAME must not contain whitespace." >&2; exit 2 ;;
   esac
 
-  node --input-type=module - "$output_path" "$launch_template_name" "$source_ami" "$source_instance_type" "$source_security_group" "$target_region_group" "$aws_region" "$asg_web_instance_profile_arn" "$asg_web_instance_profile_name" "$asg_associate_public_ip" "$asg_key_name" "$wrapper_mode" <<'NODE'
+  if [ -z "$asg_repo_url" ]; then
+    echo "ASG_REPO_URL is required for self-sufficient ASG web-node bootstrap." >&2
+    exit 2
+  fi
+
+  case "$asg_repo_url" in
+    *[[:space:]]*|*@*) echo "ASG_REPO_URL must be a non-secret URL without whitespace or embedded credentials." >&2; exit 2 ;;
+  esac
+  case "$asg_repo_branch" in
+    ""|*[[:space:]]*) echo "ASG_REPO_BRANCH must be non-empty and must not contain whitespace." >&2; exit 2 ;;
+  esac
+  case "$asg_repo_dir" in
+    ""|*[[:space:]]*) echo "ASG_REPO_DIR must be non-empty and must not contain whitespace." >&2; exit 2 ;;
+  esac
+
+  node --input-type=module - "$output_path" "$launch_template_name" "$source_ami" "$source_instance_type" "$source_security_group" "$target_region_group" "$aws_region" "$asg_web_instance_profile_arn" "$asg_web_instance_profile_name" "$asg_associate_public_ip" "$asg_key_name" "$asg_repo_url" "$asg_repo_branch" "$asg_repo_dir" "$wrapper_mode" <<'NODE'
 import fs from "node:fs";
 
 const [
@@ -348,6 +366,9 @@ const [
   profileName,
   associatePublicIp,
   keyName,
+  repoUrl,
+  repoBranch,
+  repoDir,
   wrapperMode,
 ] = process.argv.slice(2);
 
@@ -363,15 +384,30 @@ for (const [name, value] of Object.entries({
   securityGroup,
   regionGroup,
   awsRegion,
+  repoUrl,
+  repoBranch,
+  repoDir,
 })) {
   if (!value) fail(`Missing required launch template value: ${name}`);
 }
+
+if (/\s/.test(repoUrl) || repoUrl.includes("@")) {
+  fail("ASG_REPO_URL must be a non-secret URL without whitespace or embedded credentials.");
+}
+if (/\s/.test(repoBranch)) fail("ASG_REPO_BRANCH must not contain whitespace.");
+if (/\s/.test(repoDir)) fail("ASG_REPO_DIR must not contain whitespace.");
 
 const userData = `#!/bin/sh
 set -eu
 
 log_file="/var/log/mscqr-asg-bootstrap.log"
 current_step="initializing"
+TARGET_REGION_GROUP="${regionGroup}"
+AWS_REGION="${awsRegion}"
+ASG_REPO_URL="${repoUrl}"
+ASG_REPO_BRANCH="${repoBranch}"
+ASG_REPO_DIR="${repoDir}"
+export TARGET_REGION_GROUP AWS_REGION ASG_REPO_URL ASG_REPO_BRANCH ASG_REPO_DIR
 
 log() {
   /usr/bin/printf "%s %s\\n" "$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | /usr/bin/tee -a "$log_file"
@@ -387,8 +423,20 @@ safe_diag_cmd() {
 safe_diagnostics() {
   log "running non-secret diagnostics"
   safe_diag_cmd "pwd" /bin/pwd
-  if [ -d /home/ubuntu/genuine-scan-main/.git ]; then
-    (cd /home/ubuntu/genuine-scan-main && safe_diag_cmd "git short HEAD" git rev-parse --short HEAD)
+  if [ -e /home/ubuntu ]; then
+    safe_diag_cmd "home directory listing" /bin/ls -ld /home/ubuntu
+  fi
+  if [ -n "$ASG_REPO_DIR" ] && [ -e "$ASG_REPO_DIR" ]; then
+    log "diagnostic: repo dir exists: yes"
+    safe_diag_cmd "repo directory listing" /bin/ls -ld "$ASG_REPO_DIR"
+  else
+    log "diagnostic: repo dir exists: no"
+  fi
+  if command -v git >/dev/null 2>&1; then
+    safe_diag_cmd "git version" git --version
+  fi
+  if [ -d "$ASG_REPO_DIR/.git" ]; then
+    (cd "$ASG_REPO_DIR" && safe_diag_cmd "git short HEAD" git rev-parse --short HEAD)
   fi
   if command -v docker >/dev/null 2>&1; then
     safe_diag_cmd "docker version" docker --version
@@ -412,26 +460,68 @@ trap on_exit EXIT
 
 log "MSCQR ASG bootstrap starting"
 log "writing log path: $log_file"
-TARGET_REGION_GROUP="${regionGroup}"
-AWS_REGION="${awsRegion}"
-export TARGET_REGION_GROUP AWS_REGION
 
-repo_dir="/home/ubuntu/genuine-scan-main"
-current_step="checking repo directory"
-log "checking repo directory: $repo_dir"
-if [ ! -d "$repo_dir/.git" ]; then
-  log "repo directory is missing or is not a git checkout: $repo_dir"
-  exit 2
+current_step="checking packages"
+log "checking packages"
+export DEBIAN_FRONTEND=noninteractive
+if ! command -v git >/dev/null 2>&1; then
+  current_step="installing git"
+  log "installing git"
+  apt-get update >> "$log_file" 2>&1
+  apt-get install -y git ca-certificates curl >> "$log_file" 2>&1
+else
+  log "git already installed"
 fi
-cd "$repo_dir"
 
-current_step="fetching origin main"
-log "fetching origin main"
-git fetch origin main >> "$log_file" 2>&1
+if ! command -v docker >/dev/null 2>&1; then
+  current_step="installing docker"
+  log "installing docker"
+  apt-get update >> "$log_file" 2>&1
+  if ! apt-get install -y docker.io docker-compose-plugin >> "$log_file" 2>&1; then
+    log "docker-compose-plugin was not available from apt; installing docker.io and will verify compose plugin"
+    apt-get install -y docker.io >> "$log_file" 2>&1
+  fi
+else
+  log "docker already installed"
+fi
 
-current_step="resetting to origin/main"
-log "resetting to origin/main"
-git reset --hard origin/main >> "$log_file" 2>&1
+current_step="starting docker"
+log "starting docker"
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl enable --now docker >> "$log_file" 2>&1
+else
+  service docker start >> "$log_file" 2>&1 || true
+fi
+if id ubuntu >/dev/null 2>&1 && getent group docker >/dev/null 2>&1; then
+  usermod -aG docker ubuntu >> "$log_file" 2>&1 || true
+fi
+
+current_step="checking docker compose"
+log "checking docker compose"
+docker --version >> "$log_file" 2>&1
+docker compose version >> "$log_file" 2>&1
+
+current_step="checking repo directory"
+log "checking repo directory: $ASG_REPO_DIR"
+if [ -d "$ASG_REPO_DIR/.git" ]; then
+  cd "$ASG_REPO_DIR"
+  current_step="fetching origin branch"
+  log "fetching origin $ASG_REPO_BRANCH from repo path $ASG_REPO_DIR"
+  git fetch origin "$ASG_REPO_BRANCH" >> "$log_file" 2>&1
+
+  current_step="resetting to origin branch"
+  log "resetting to origin/$ASG_REPO_BRANCH"
+  git reset --hard "origin/$ASG_REPO_BRANCH" >> "$log_file" 2>&1
+elif [ -e "$ASG_REPO_DIR" ]; then
+  log "repo directory exists but is not a git checkout: $ASG_REPO_DIR"
+  exit 2
+else
+  current_step="cloning repo"
+  log "cloning repo branch $ASG_REPO_BRANCH into $ASG_REPO_DIR"
+  /bin/mkdir -p "$(/usr/bin/dirname "$ASG_REPO_DIR")"
+  git clone --branch "$ASG_REPO_BRANCH" --depth 1 "$ASG_REPO_URL" "$ASG_REPO_DIR" >> "$log_file" 2>&1
+  cd "$ASG_REPO_DIR"
+fi
 
 current_step="checking bootstrap script exists"
 log "checking bootstrap script exists"
@@ -511,6 +601,9 @@ validate_asg_launch_template_json() {
   expected_associate_public_ip="${3:-false}"
   expected_security_group="${4:-}"
   expected_key_name="${5:-}"
+  expected_repo_url="${6:-}"
+  expected_repo_branch="${7:-main}"
+  expected_repo_dir="${8:-/home/ubuntu/genuine-scan-main}"
 
   case "$expected_associate_public_ip" in
     true|false) ;;
@@ -521,10 +614,10 @@ validate_asg_launch_template_json() {
     *[[:space:]]*) echo "ASG_KEY_NAME must not contain whitespace." >&2; exit 2 ;;
   esac
 
-  node --input-type=module - "$launch_template_path" "$wrapper_mode" "$expected_associate_public_ip" "$expected_security_group" "$expected_key_name" <<'NODE'
+  node --input-type=module - "$launch_template_path" "$wrapper_mode" "$expected_associate_public_ip" "$expected_security_group" "$expected_key_name" "$expected_repo_url" "$expected_repo_branch" "$expected_repo_dir" <<'NODE'
 import fs from "node:fs";
 
-const [launchTemplatePath, wrapperMode, expectedAssociatePublicIp, expectedSecurityGroup, expectedKeyName] = process.argv.slice(2);
+const [launchTemplatePath, wrapperMode, expectedAssociatePublicIp, expectedSecurityGroup, expectedKeyName, expectedRepoUrl, expectedRepoBranch, expectedRepoDir] = process.argv.slice(2);
 const payload = JSON.parse(fs.readFileSync(launchTemplatePath, "utf8"));
 const data = wrapperMode === "wrapper" ? payload.LaunchTemplateData : payload;
 
@@ -589,12 +682,35 @@ for (const required of [
   "/var/log/mscqr-asg-bootstrap.log",
   "TARGET_REGION_GROUP=",
   "AWS_REGION=",
-  "cd /home/ubuntu/genuine-scan-main",
-  "git fetch origin main",
-  "git reset --hard origin/main",
+  "ASG_REPO_URL=",
+  "ASG_REPO_BRANCH=",
+  "ASG_REPO_DIR=",
+  "export DEBIAN_FRONTEND=noninteractive",
+  "checking packages",
+  "installing git",
+  "apt-get install -y git ca-certificates curl",
+  "installing docker",
+  "docker.io",
+  "starting docker",
+  "checking docker compose",
+  "docker compose version",
+  "git clone --branch \"$ASG_REPO_BRANCH\" --depth 1 \"$ASG_REPO_URL\" \"$ASG_REPO_DIR\"",
+  "git fetch origin \"$ASG_REPO_BRANCH\"",
+  "git reset --hard \"origin/$ASG_REPO_BRANCH\"",
+  "repo directory exists but is not a git checkout",
+  "cd \"$ASG_REPO_DIR\"",
   "scripts/dr/bootstrap-asg-web-node.sh \"$TARGET_REGION_GROUP\" \"$AWS_REGION\"",
 ]) {
   if (!decoded.includes(required)) fail(`Launch template UserData is missing ${required}.`);
+}
+if (expectedRepoUrl && !decoded.includes(`ASG_REPO_URL="${expectedRepoUrl}"`)) {
+  fail("Launch template UserData does not include the expected ASG_REPO_URL.");
+}
+if (expectedRepoBranch && !decoded.includes(`ASG_REPO_BRANCH="${expectedRepoBranch}"`)) {
+  fail("Launch template UserData does not include the expected ASG_REPO_BRANCH.");
+}
+if (expectedRepoDir && !decoded.includes(`ASG_REPO_DIR="${expectedRepoDir}"`)) {
+  fail("Launch template UserData does not include the expected ASG_REPO_DIR.");
 }
 if (/route53|change-resource-record-sets|DATABASE_URL|JWT_SECRET|OBJECT_STORAGE_SECRET_KEY/.test(decoded)) {
   fail("Launch template UserData contains forbidden DNS or secret-looking text.");

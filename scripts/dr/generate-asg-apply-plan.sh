@@ -20,6 +20,9 @@ ASG_WEB_INSTANCE_PROFILE_ARN="${ASG_WEB_INSTANCE_PROFILE_ARN:-}"
 ASG_WEB_INSTANCE_PROFILE_NAME="${ASG_WEB_INSTANCE_PROFILE_NAME:-}"
 ASG_ASSOCIATE_PUBLIC_IP="${ASG_ASSOCIATE_PUBLIC_IP:-false}"
 ASG_KEY_NAME="${ASG_KEY_NAME:-}"
+ASG_REPO_URL="${ASG_REPO_URL:-}"
+ASG_REPO_BRANCH="${ASG_REPO_BRANCH:-main}"
+ASG_REPO_DIR="${ASG_REPO_DIR:-/home/ubuntu/genuine-scan-main}"
 ROLLING_POLICY_CHECKLIST_PATH="${ROLLING_POLICY_CHECKLIST_PATH:-documents/ops/aws-asg-rolling-deploy-policy.checklist.json}"
 
 case "$TARGET_REGION_GROUP" in
@@ -44,6 +47,19 @@ esac
 
 case "$ASG_KEY_NAME" in
   *[[:space:]]*) echo "ASG_KEY_NAME must not contain whitespace." >&2; exit 2 ;;
+esac
+if [ -z "$ASG_REPO_URL" ]; then
+  echo "ASG_REPO_URL is required for self-sufficient ASG web-node bootstrap." >&2
+  exit 2
+fi
+case "$ASG_REPO_URL" in
+  *[[:space:]]*|*@*) echo "ASG_REPO_URL must be a non-secret URL without whitespace or embedded credentials." >&2; exit 2 ;;
+esac
+case "$ASG_REPO_BRANCH" in
+  ""|*[[:space:]]*) echo "ASG_REPO_BRANCH must be non-empty and must not contain whitespace." >&2; exit 2 ;;
+esac
+case "$ASG_REPO_DIR" in
+  ""|*[[:space:]]*) echo "ASG_REPO_DIR must be non-empty and must not contain whitespace." >&2; exit 2 ;;
 esac
 
 policy_env_file="$(mktemp "${TMPDIR:-/tmp}/mscqr-asg-rolling-policy.XXXXXX")"
@@ -96,8 +112,11 @@ write_asg_web_launch_template_json \
   "$ASG_WEB_INSTANCE_PROFILE_NAME" \
   "$ASG_ASSOCIATE_PUBLIC_IP" \
   "$ASG_KEY_NAME" \
+  "$ASG_REPO_URL" \
+  "$ASG_REPO_BRANCH" \
+  "$ASG_REPO_DIR" \
   wrapper
-validate_asg_launch_template_json "$out_dir/proposed-launch-template.json" wrapper "$ASG_ASSOCIATE_PUBLIC_IP" "$SOURCE_SECURITY_GROUP" "$ASG_KEY_NAME"
+validate_asg_launch_template_json "$out_dir/proposed-launch-template.json" wrapper "$ASG_ASSOCIATE_PUBLIC_IP" "$SOURCE_SECURITY_GROUP" "$ASG_KEY_NAME" "$ASG_REPO_URL" "$ASG_REPO_BRANCH" "$ASG_REPO_DIR"
 
 /bin/cat > "$out_dir/proposed-asg.json" <<JSON
 {
@@ -138,8 +157,12 @@ JSON
   else
     printf '%s\n' "- KeyName: not provided"
   fi
-  printf '%s\n' "- Launch template UserData: base64 bootstrap that runs \`scripts/dr/bootstrap-asg-web-node.sh \"$TARGET_REGION_GROUP\" \"$AWS_REGION\"\`"
-  printf '%s\n' "- Mumbai debug retry: use \`ASG_ASSOCIATE_PUBLIC_IP=true\` and \`ASG_KEY_NAME=mscqr-prod-mumbai\` only for the no-DNS validation/debug pass."
+  printf '%s\n' "- Repository URL: \`$ASG_REPO_URL\`"
+  printf '%s\n' "- Repository branch: \`$ASG_REPO_BRANCH\`"
+  printf '%s\n' "- Repository directory: \`$ASG_REPO_DIR\`"
+  printf '%s\n' "- Package bootstrap: enabled; UserData installs/checks git, Docker, and docker compose before cloning/updating the repo."
+  printf '%s\n' "- Launch template UserData: base64 bootstrap that installs prerequisites, clones or refreshes \`$ASG_REPO_DIR\`, then runs \`scripts/dr/bootstrap-asg-web-node.sh \"$TARGET_REGION_GROUP\" \"$AWS_REGION\"\`"
+  printf '%s\n' "- Mumbai debug retry: use \`ASG_ASSOCIATE_PUBLIC_IP=true\`, \`ASG_KEY_NAME=mscqr-prod-mumbai\`, \`ASG_REPO_URL=https://github.com/T-ej2003/genuine-scan-main.git\`, \`ASG_REPO_BRANCH=main\`, and \`ASG_REPO_DIR=/home/ubuntu/genuine-scan-main\` only for the no-DNS validation/debug pass."
   printf '%s\n' "- Selected app subnets: \`$selected_subnet_ids\`"
   printf '%s\n' "- Proposed ASG capacity: \`min=$MIN_SIZE desired=$DESIRED_CAPACITY max=$MAX_SIZE\`"
   printf '%s\n' "- Health check type: \`$ASG_POLICY_HEALTH_CHECK_TYPE\`"
