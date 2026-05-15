@@ -316,7 +316,8 @@ write_asg_web_launch_template_json() {
   asg_web_instance_profile_arn="$8"
   asg_web_instance_profile_name="$9"
   asg_associate_public_ip="${10:-false}"
-  wrapper_mode="${11:-data}"
+  asg_key_name="${11:-}"
+  wrapper_mode="${12:-data}"
 
   if [ -z "$asg_web_instance_profile_arn" ] && [ -z "$asg_web_instance_profile_name" ]; then
     echo "ASG_WEB_INSTANCE_PROFILE_ARN or ASG_WEB_INSTANCE_PROFILE_NAME is required. Do not reuse the source instance profile implicitly." >&2
@@ -328,7 +329,11 @@ write_asg_web_launch_template_json() {
     *) echo "ASG_ASSOCIATE_PUBLIC_IP must be true or false." >&2; exit 2 ;;
   esac
 
-  node --input-type=module - "$output_path" "$launch_template_name" "$source_ami" "$source_instance_type" "$source_security_group" "$target_region_group" "$aws_region" "$asg_web_instance_profile_arn" "$asg_web_instance_profile_name" "$asg_associate_public_ip" "$wrapper_mode" <<'NODE'
+  case "$asg_key_name" in
+    *[[:space:]]*) echo "ASG_KEY_NAME must not contain whitespace." >&2; exit 2 ;;
+  esac
+
+  node --input-type=module - "$output_path" "$launch_template_name" "$source_ami" "$source_instance_type" "$source_security_group" "$target_region_group" "$aws_region" "$asg_web_instance_profile_arn" "$asg_web_instance_profile_name" "$asg_associate_public_ip" "$asg_key_name" "$wrapper_mode" <<'NODE'
 import fs from "node:fs";
 
 const [
@@ -342,6 +347,7 @@ const [
   profileArn,
   profileName,
   associatePublicIp,
+  keyName,
   wrapperMode,
 ] = process.argv.slice(2);
 
@@ -365,34 +371,93 @@ const userData = `#!/bin/sh
 set -eu
 
 log_file="/var/log/mscqr-asg-bootstrap.log"
-exec >> "$log_file" 2>&1
+current_step="initializing"
 
-echo "MSCQR ASG web-node bootstrap starting."
+log() {
+  /usr/bin/printf "%s %s\\n" "$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | /usr/bin/tee -a "$log_file"
+}
+
+safe_diag_cmd() {
+  label="$1"
+  shift
+  log "diagnostic: $label"
+  "$@" 2>&1 | /usr/bin/sed 's/^/  /' | /usr/bin/tee -a "$log_file" || true
+}
+
+safe_diagnostics() {
+  log "running non-secret diagnostics"
+  safe_diag_cmd "pwd" /bin/pwd
+  if [ -d /home/ubuntu/genuine-scan-main/.git ]; then
+    (cd /home/ubuntu/genuine-scan-main && safe_diag_cmd "git short HEAD" git rev-parse --short HEAD)
+  fi
+  if command -v docker >/dev/null 2>&1; then
+    safe_diag_cmd "docker version" docker --version
+    safe_diag_cmd "docker compose version" docker compose version
+  fi
+  if command -v systemctl >/dev/null 2>&1; then
+    safe_diag_cmd "docker service state" systemctl is-active docker
+  fi
+}
+
+on_exit() {
+  status="$?"
+  if [ "$status" -ne 0 ]; then
+    log "MSCQR ASG bootstrap failed during step: $current_step"
+    log "MSCQR ASG bootstrap failed; inspect /var/log/mscqr-asg-bootstrap.log and cloud-init-output.log"
+    safe_diagnostics
+  fi
+  exit "$status"
+}
+trap on_exit EXIT
+
+log "MSCQR ASG bootstrap starting"
+log "writing log path: $log_file"
 TARGET_REGION_GROUP="${regionGroup}"
 AWS_REGION="${awsRegion}"
 export TARGET_REGION_GROUP AWS_REGION
 
-cd /home/ubuntu/genuine-scan-main
+repo_dir="/home/ubuntu/genuine-scan-main"
+current_step="checking repo directory"
+log "checking repo directory: $repo_dir"
+if [ ! -d "$repo_dir/.git" ]; then
+  log "repo directory is missing or is not a git checkout: $repo_dir"
+  exit 2
+fi
+cd "$repo_dir"
 
-echo "Fetching approved main branch."
-git fetch origin main
-git reset --hard origin/main
+current_step="fetching origin main"
+log "fetching origin main"
+git fetch origin main >> "$log_file" 2>&1
 
+current_step="resetting to origin/main"
+log "resetting to origin/main"
+git reset --hard origin/main >> "$log_file" 2>&1
+
+current_step="checking bootstrap script exists"
+log "checking bootstrap script exists"
 if [ ! -f scripts/dr/bootstrap-asg-web-node.sh ]; then
-  echo "Missing scripts/dr/bootstrap-asg-web-node.sh after git refresh."
+  log "missing scripts/dr/bootstrap-asg-web-node.sh after git refresh"
   exit 2
 fi
 
+current_step="making bootstrap script executable"
 /bin/chmod +x scripts/dr/bootstrap-asg-web-node.sh
 
-echo "Running MSCQR ASG web-node bootstrap."
-scripts/dr/bootstrap-asg-web-node.sh "$TARGET_REGION_GROUP" "$AWS_REGION"
+current_step="running bootstrap script"
+log "running bootstrap script"
+scripts/dr/bootstrap-asg-web-node.sh "$TARGET_REGION_GROUP" "$AWS_REGION" >> "$log_file" 2>&1
 
-echo "MSCQR ASG web-node bootstrap completed."
+current_step="bootstrap complete"
+log "bootstrap complete"
+trap - EXIT
+exit 0
 `;
 
 if (!["true", "false"].includes(associatePublicIp)) {
   fail("ASG_ASSOCIATE_PUBLIC_IP must be true or false.");
+}
+if (/\s/.test(keyName || "")) {
+  fail("ASG_KEY_NAME must not contain whitespace.");
 }
 
 const data = {
@@ -415,6 +480,10 @@ const data = {
     },
   ],
 };
+
+if (keyName) {
+  data.KeyName = keyName;
+}
 
 if (associatePublicIp === "true") {
   data.NetworkInterfaces = [
@@ -441,16 +510,21 @@ validate_asg_launch_template_json() {
   wrapper_mode="${2:-data}"
   expected_associate_public_ip="${3:-false}"
   expected_security_group="${4:-}"
+  expected_key_name="${5:-}"
 
   case "$expected_associate_public_ip" in
     true|false) ;;
     *) echo "ASG_ASSOCIATE_PUBLIC_IP must be true or false." >&2; exit 2 ;;
   esac
 
-  node --input-type=module - "$launch_template_path" "$wrapper_mode" "$expected_associate_public_ip" "$expected_security_group" <<'NODE'
+  case "$expected_key_name" in
+    *[[:space:]]*) echo "ASG_KEY_NAME must not contain whitespace." >&2; exit 2 ;;
+  esac
+
+  node --input-type=module - "$launch_template_path" "$wrapper_mode" "$expected_associate_public_ip" "$expected_security_group" "$expected_key_name" <<'NODE'
 import fs from "node:fs";
 
-const [launchTemplatePath, wrapperMode, expectedAssociatePublicIp, expectedSecurityGroup] = process.argv.slice(2);
+const [launchTemplatePath, wrapperMode, expectedAssociatePublicIp, expectedSecurityGroup, expectedKeyName] = process.argv.slice(2);
 const payload = JSON.parse(fs.readFileSync(launchTemplatePath, "utf8"));
 const data = wrapperMode === "wrapper" ? payload.LaunchTemplateData : payload;
 
@@ -491,6 +565,11 @@ if (expectedAssociatePublicIp === "true") {
 }
 if (!data.IamInstanceProfile || (!data.IamInstanceProfile.Arn && !data.IamInstanceProfile.Name)) {
   fail("Launch template data is missing explicit IamInstanceProfile.");
+}
+if (expectedKeyName) {
+  if (data.KeyName !== expectedKeyName) fail("Launch template KeyName must equal ASG_KEY_NAME.");
+} else if (Object.hasOwn(data, "KeyName")) {
+  fail("Launch template data must omit KeyName when ASG_KEY_NAME is not set.");
 }
 if (!data.UserData) fail("Launch template data is missing UserData.");
 if (data.MetadataOptions?.HttpTokens !== "required") {

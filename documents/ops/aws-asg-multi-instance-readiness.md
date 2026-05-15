@@ -25,6 +25,7 @@ The app has several good production controls already:
 - ASG launch-template plan/apply now requires explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`.
 - ASG launch-template plan/apply now emits base64 `UserData` that runs the ASG web bootstrap script from `/home/ubuntu/genuine-scan-main`.
 - ASG launch-template plan/apply now supports explicit `ASG_ASSOCIATE_PUBLIC_IP=true|false` networking, with `false` as the default.
+- ASG launch-template plan/apply now supports optional `ASG_KEY_NAME`; Mumbai debug retry should use `ASG_KEY_NAME=mscqr-prod-mumbai`.
 - `documents/ops/aws-asg-rolling-deploy-policy.md` and `documents/ops/aws-asg-rolling-deploy-policy.checklist.json` define the rolling deploy contract, rollback criteria, and replacement-instance drill.
 - `/healthz` exists for shallow app liveness and `/api/health/ready` reaches backend dependency readiness through Nginx.
 
@@ -257,6 +258,7 @@ ASG bootstrap checklist:
 - Include launch-template `UserData` that logs only non-secret bootstrap status to `/var/log/mscqr-asg-bootstrap.log`.
 - Keep launch-template `IamInstanceProfile` explicit and supplied by `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`.
 - Set launch-template public IP behavior explicitly with `ASG_ASSOCIATE_PUBLIC_IP=true` or `ASG_ASSOCIATE_PUBLIC_IP=false`.
+- Use `ASG_KEY_NAME=mscqr-prod-mumbai` for the Mumbai no-DNS debug retry so failed nodes can be inspected over SSH.
 - Set `RUN_DB_MIGRATIONS_ON_START=false`.
 - Set backend `RUN_BACKGROUND_WORKERS=false` on web nodes.
 - Point `REDIS_URL` to shared regional Redis.
@@ -303,8 +305,10 @@ Launch-template requirements:
 - `IamInstanceProfile` must come from explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`.
 - `UserData` must be base64 encoded and must run `scripts/dr/bootstrap-asg-web-node.sh "$TARGET_REGION_GROUP" "$AWS_REGION"` from `/home/ubuntu/genuine-scan-main`.
 - `UserData` must log to `/var/log/mscqr-asg-bootstrap.log`, fetch/reset `origin/main`, avoid printing secret values, and never touch Route 53 or production DNS.
+- `UserData` must mirror non-secret status/failure lines to cloud-init console output and include a failure trap with safe diagnostics only.
 - `MetadataOptions.HttpTokens` must be `required`.
 - `ImageId` and `InstanceType` must be present.
+- `ASG_KEY_NAME` is optional generally; when set it must become `KeyName`, and when omitted `KeyName` must be absent.
 - `ASG_ASSOCIATE_PUBLIC_IP=false` must use top-level `SecurityGroupIds=[SOURCE_SECURITY_GROUP]` and no `NetworkInterfaces`.
 - `ASG_ASSOCIATE_PUBLIC_IP=true` must use `NetworkInterfaces[0].AssociatePublicIpAddress=true` with `Groups=[SOURCE_SECURITY_GROUP]` and no top-level `SecurityGroupIds`.
 
@@ -312,6 +316,7 @@ Mumbai retry note:
 
 - The first failed Mumbai ASG attempt produced instances that failed ALB health checks, and console output showed bootstrap/network credential failures.
 - Mumbai selected public subnets currently have `MapPublicIpOnLaunch=false`, so the next no-DNS Mumbai retry should use `ASG_ASSOCIATE_PUBLIC_IP=true`.
+- The next no-DNS Mumbai retry should also use `ASG_KEY_NAME=mscqr-prod-mumbai` to make failed nodes inspectable.
 - Preferred production design: move ASG web nodes to private app subnets with NAT Gateway or VPC endpoints for SSM, EC2Messages, SSMMessages, S3, ECR, CloudWatch Logs, and Git access, then use `ASG_ASSOCIATE_PUBLIC_IP=false`.
 
 Approved first-rollout values:
@@ -335,7 +340,7 @@ Conditionally ready for a first controlled ASG rollout with no production DNS cu
 
 Worker topology is conditionally proven for ASG web nodes: web nodes have an explicit worker-free Compose file, the HTTP backend is worker-disabled, the standalone worker is an intentional one-per-region profile, compliance scheduling is disabled, and worker horizontal scaling is not assumed safe.
 
-Secrets/bootstrap is conditionally proven at repository level: the SSM manifest, bootstrap script, forced safety settings, SSM prefixes, launch-template `UserData`, explicit instance-profile input, health validation, and instance-profile IAM template are committed. This still needs a real replacement-instance drill before production use.
+Secrets/bootstrap is conditionally proven at repository level: the SSM manifest, bootstrap script, forced safety settings, SSM prefixes, launch-template `UserData`, optional debug `KeyName`, explicit instance-profile input, health validation, and instance-profile IAM template are committed. This still needs a real replacement-instance drill before production use.
 
 Rolling deploy policy is conditionally proven at repository level: the contract document, machine-readable checklist, plan/apply script gates, launch-template validation, rollback criteria, and replacement-instance drill procedure are committed.
 

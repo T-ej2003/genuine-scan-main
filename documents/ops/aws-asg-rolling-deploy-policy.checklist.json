@@ -22,8 +22,11 @@
   "launch_template_required_inputs": [
     "ASG_WEB_INSTANCE_PROFILE_ARN",
     "ASG_WEB_INSTANCE_PROFILE_NAME",
-    "ASG_ASSOCIATE_PUBLIC_IP"
+    "ASG_ASSOCIATE_PUBLIC_IP",
+    "ASG_KEY_NAME"
   ],
+  "key_name_optional": true,
+  "key_name_recommended_for_mumbai_debug_retry": "mscqr-prod-mumbai",
   "associate_public_ip_default": false,
   "associate_public_ip_allowed_values": [
     true,
@@ -42,11 +45,14 @@
     "#!/bin/sh",
     "set -eu",
     "log stdout/stderr to /var/log/mscqr-asg-bootstrap.log",
+    "mirror non-secret status and failure lines to cloud-init console output",
+    "install failure trap with current step",
     "set TARGET_REGION_GROUP and AWS_REGION",
     "cd /home/ubuntu/genuine-scan-main",
     "git fetch origin main",
     "git reset --hard origin/main",
     "run scripts/dr/bootstrap-asg-web-node.sh \"$TARGET_REGION_GROUP\" \"$AWS_REGION\"",
+    "print safe diagnostics after failure only",
     "print non-secret status messages only"
   ],
   "smoke_tests": [

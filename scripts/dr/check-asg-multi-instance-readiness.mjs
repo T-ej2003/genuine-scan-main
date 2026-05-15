@@ -136,6 +136,8 @@ requireMatch("readiness doc", doc, /Secrets\/bootstrap is conditionally proven/,
 requireMatch("readiness doc", doc, /ASG_WEB_INSTANCE_PROFILE_ARN/, "must document explicit ASG web instance profile ARN input.");
 requireMatch("readiness doc", doc, /ASG_WEB_INSTANCE_PROFILE_NAME/, "must document explicit ASG web instance profile name input.");
 requireMatch("readiness doc", doc, /ASG_ASSOCIATE_PUBLIC_IP/, "must document explicit ASG public IP association input.");
+requireMatch("readiness doc", doc, /ASG_KEY_NAME/, "must document optional ASG SSH KeyName input.");
+requireMatch("readiness doc", doc, /mscqr-prod-mumbai/, "must document Mumbai debug retry KeyName.");
 requireMatch("readiness doc", doc, /NetworkInterfaces\[0\]\.AssociatePublicIpAddress=true/, "must document public-IP launch template networking shape.");
 requireMatch("readiness doc", doc, /SecurityGroupIds=\[SOURCE_SECURITY_GROUP\]/, "must document non-public-IP launch template networking shape.");
 requireMatch("readiness doc", doc, /MapPublicIpOnLaunch=false/, "must document the Mumbai retry subnet public-IP reason.");
@@ -153,6 +155,8 @@ requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_STATUS=CONDITIONALL
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_WEB_INSTANCE_PROFILE_ARN/, "must define explicit ASG web instance profile ARN input.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_WEB_INSTANCE_PROFILE_NAME/, "must define explicit ASG web instance profile name input.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_ASSOCIATE_PUBLIC_IP/, "must define explicit ASG public IP association input.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_KEY_NAME/, "must define optional ASG SSH KeyName input.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /mscqr-prod-mumbai/, "must recommend Mumbai debug retry KeyName.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /NetworkInterfaces\[0\]\.AssociatePublicIpAddress=true/, "must define public-IP launch template networking shape.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /SecurityGroupIds=\[SOURCE_SECURITY_GROUP\]/, "must define non-public-IP launch template networking shape.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /UserData/, "must define UserData bootstrap.");
@@ -217,8 +221,18 @@ requireMatch("DR common", requireFile("scripts/dr/common.sh"), /write_asg_web_la
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /validate_asg_launch_template_json/, "common helpers must validate ASG web launch template JSON.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /ASG_WEB_INSTANCE_PROFILE_ARN or ASG_WEB_INSTANCE_PROFILE_NAME is required/, "common helpers must require explicit ASG web instance profile input.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /ASG_ASSOCIATE_PUBLIC_IP must be true or false/, "common helpers must validate ASG_ASSOCIATE_PUBLIC_IP.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /ASG_KEY_NAME must not contain whitespace/, "common helpers must validate ASG_KEY_NAME.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /data\.KeyName = keyName/, "common helpers must emit KeyName when ASG_KEY_NAME is set.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /Launch template data must omit KeyName when ASG_KEY_NAME is not set/, "launch template validation must reject unexpected KeyName.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /UserData: Buffer\.from\(userData, "utf8"\)\.toString\("base64"\)/, "common helpers must base64 encode launch template UserData.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /\/var\/log\/mscqr-asg-bootstrap\.log/, "UserData must log to the ASG bootstrap log file.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /tee -a "\$log_file"/, "UserData must mirror non-secret status lines to console and log file.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /trap on_exit EXIT/, "UserData must install a failure trap.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /current_step=/, "UserData failure trap must report the current step.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /safe_diagnostics/, "UserData must include safe diagnostics on failure.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /cloud-init-output\.log/, "UserData failure message must point operators to cloud-init output.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /docker --version/, "UserData safe diagnostics must include docker version when available.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /systemctl is-active docker/, "UserData safe diagnostics must include docker service state when available.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /git fetch origin main/, "UserData must fetch main.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /git reset --hard origin\/main/, "UserData must reset to origin/main.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /scripts\/dr\/bootstrap-asg-web-node\.sh "\$TARGET_REGION_GROUP" "\$AWS_REGION"/, "UserData must run the ASG bootstrap script with region inputs.");
@@ -237,6 +251,9 @@ requireMatch("ASG apply plan", asgApplyPlanScript, /render_asg_rolling_policy_en
 requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_WEB_INSTANCE_PROFILE_ARN/, "apply plan must accept explicit ASG web instance profile ARN.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_WEB_INSTANCE_PROFILE_NAME/, "apply plan must accept explicit ASG web instance profile name.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_ASSOCIATE_PUBLIC_IP/, "apply plan must accept ASG_ASSOCIATE_PUBLIC_IP.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_KEY_NAME/, "apply plan must accept ASG_KEY_NAME.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /KeyName: provided|KeyName: not provided/, "apply plan must show KeyName state.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_KEY_NAME=mscqr-prod-mumbai/, "apply plan must warn about Mumbai debug retry KeyName.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /Associate public IP/, "apply plan must include public IP association state in the markdown plan.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /write_asg_web_launch_template_json/, "apply plan must generate launch template through shared helper.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /validate_asg_launch_template_json/, "apply plan must validate proposed launch template JSON.");
@@ -250,10 +267,20 @@ requireMatch("ASG apply", asgApplyScript, /ASG_WEB_INSTANCE_PROFILE_ARN/, "apply
 requireMatch("ASG apply", asgApplyScript, /ASG_WEB_INSTANCE_PROFILE_NAME/, "apply script must accept explicit ASG web instance profile name.");
 requireMatch("ASG apply", asgApplyScript, /ASG_ASSOCIATE_PUBLIC_IP/, "apply script must accept ASG_ASSOCIATE_PUBLIC_IP.");
 requireMatch("ASG apply", asgApplyScript, /ASG_ASSOCIATE_PUBLIC_IP must be true or false/, "apply script must validate ASG_ASSOCIATE_PUBLIC_IP.");
+requireMatch("ASG apply", asgApplyScript, /ASG_KEY_NAME/, "apply script must accept ASG_KEY_NAME.");
+requireMatch("ASG apply", asgApplyScript, /ASG_KEY_NAME must not contain whitespace/, "apply script must validate ASG_KEY_NAME.");
 requireMatch("ASG apply", asgApplyScript, /source instance profile is not reused automatically/, "apply script must refuse implicit source instance profile reuse.");
 requireMatch("ASG apply", asgApplyScript, /write_asg_web_launch_template_json/, "apply script must generate launch template through shared helper.");
 requireMatch("ASG apply", asgApplyScript, /validate_asg_launch_template_json/, "apply script must validate launch template JSON.");
 requireMatch("ASG apply", asgApplyScript, /create-launch-template-version/, "apply script must create a new launch template version when a template already exists.");
+if (/--source-version/.test(asgApplyScript)) {
+  failures.push("ASG apply script must not use --source-version when creating replacement launch template versions.");
+}
+requireMatch("ASG apply", asgApplyScript, /live-launch-template-data-latest\.json/, "apply script must write latest live launch template data for comparison.");
+requireMatch("ASG apply", asgApplyScript, /live-launch-template-data\.json/, "apply script must write intended live launch template data after selecting the version.");
+requireMatch("ASG apply", asgApplyScript, /modify-launch-template/, "apply script must set the intended launch template version as default.");
+requireMatch("ASG apply", asgApplyScript, /ASG launch template mismatch before capacity update/, "apply script must refuse capacity changes when ASG is not on intended launch template version.");
+requireMatch("ASG apply", asgApplyScript, /update-asg-capacity\.log/, "apply script must update ASG capacity only after version verification.");
 requireMatch("ASG apply", asgApplyScript, /--launch-template "LaunchTemplateId=\$launch_template_id,Version=\$launch_template_version"/, "apply script must update ASG to the validated launch template version.");
 requireMatch("ASG apply", asgApplyScript, /Refusing ASG apply without concrete rollback alarm names/, "apply script must refuse placeholder rollback alarm names.");
 requireMatch("ASG apply", asgApplyScript, /describe-target-group-attributes/, "apply script must verify target group attributes before apply.");
@@ -422,8 +449,14 @@ if (asgRollingPolicyChecklist) {
     failures.push("ASG rolling policy checklist must keep replacement_instance_drill_required=true.");
   }
   const requiredInputs = new Set(asgRollingPolicyChecklist.launch_template_required_inputs || []);
-  for (const input of ["ASG_WEB_INSTANCE_PROFILE_ARN", "ASG_WEB_INSTANCE_PROFILE_NAME", "ASG_ASSOCIATE_PUBLIC_IP"]) {
+  for (const input of ["ASG_WEB_INSTANCE_PROFILE_ARN", "ASG_WEB_INSTANCE_PROFILE_NAME", "ASG_ASSOCIATE_PUBLIC_IP", "ASG_KEY_NAME"]) {
     if (!requiredInputs.has(input)) failures.push(`ASG rolling policy checklist launch_template_required_inputs must include ${input}.`);
+  }
+  if (asgRollingPolicyChecklist.key_name_optional !== true) {
+    failures.push("ASG rolling policy checklist key_name_optional must be true.");
+  }
+  if (asgRollingPolicyChecklist.key_name_recommended_for_mumbai_debug_retry !== "mscqr-prod-mumbai") {
+    failures.push("ASG rolling policy checklist must recommend mscqr-prod-mumbai for Mumbai debug retry KeyName.");
   }
   if (asgRollingPolicyChecklist.associate_public_ip_default !== false) {
     failures.push("ASG rolling policy checklist associate_public_ip_default must be false.");
@@ -449,9 +482,12 @@ if (asgRollingPolicyChecklist) {
     "#!/bin/sh",
     "set -eu",
     "/var/log/mscqr-asg-bootstrap.log",
+    "mirror non-secret status and failure lines to cloud-init console output",
+    "install failure trap with current step",
     "git fetch origin main",
     "git reset --hard origin/main",
     "scripts/dr/bootstrap-asg-web-node.sh",
+    "print safe diagnostics after failure only",
   ]) {
     if (!userDataBehaviors.includes(behavior)) failures.push(`ASG rolling policy checklist userdata_required_behaviors must include ${behavior}.`);
   }

@@ -19,6 +19,7 @@ TARGET_GROUP_ARN="${TARGET_GROUP_ARN:-}"
 ASG_WEB_INSTANCE_PROFILE_ARN="${ASG_WEB_INSTANCE_PROFILE_ARN:-}"
 ASG_WEB_INSTANCE_PROFILE_NAME="${ASG_WEB_INSTANCE_PROFILE_NAME:-}"
 ASG_ASSOCIATE_PUBLIC_IP="${ASG_ASSOCIATE_PUBLIC_IP:-false}"
+ASG_KEY_NAME="${ASG_KEY_NAME:-}"
 ROLLING_POLICY_CHECKLIST_PATH="${ROLLING_POLICY_CHECKLIST_PATH:-documents/ops/aws-asg-rolling-deploy-policy.checklist.json}"
 ROLLBACK_ALARM_NAMES_CSV="${ROLLBACK_ALARM_NAMES_CSV:-}"
 CONFIRM_ASG_APPLY="${CONFIRM_ASG_APPLY:-}"
@@ -41,6 +42,10 @@ fi
 case "$ASG_ASSOCIATE_PUBLIC_IP" in
   true|false) ;;
   *) echo "ASG_ASSOCIATE_PUBLIC_IP must be true or false." >&2; exit 2 ;;
+esac
+
+case "$ASG_KEY_NAME" in
+  *[[:space:]]*) echo "ASG_KEY_NAME must not contain whitespace." >&2; exit 2 ;;
 esac
 
 policy_env_file="$(mktemp "${TMPDIR:-/tmp}/mscqr-asg-rolling-policy.XXXXXX")"
@@ -130,8 +135,9 @@ write_asg_web_launch_template_json \
   "$ASG_WEB_INSTANCE_PROFILE_ARN" \
   "$ASG_WEB_INSTANCE_PROFILE_NAME" \
   "$ASG_ASSOCIATE_PUBLIC_IP" \
+  "$ASG_KEY_NAME" \
   data
-validate_asg_launch_template_json "$launch_template_data" data "$ASG_ASSOCIATE_PUBLIC_IP" "$SOURCE_SECURITY_GROUP"
+validate_asg_launch_template_json "$launch_template_data" data "$ASG_ASSOCIATE_PUBLIC_IP" "$SOURCE_SECURITY_GROUP" "$ASG_KEY_NAME"
 
 launch_template_id="$(aws ec2 describe-launch-templates \
   --region "$AWS_REGION" \
@@ -150,15 +156,42 @@ if [ "$launch_template_id" = "None" ] || [ -z "$launch_template_id" ]; then
   launch_template_version="$(node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); console.log(p.LaunchTemplate.LatestVersionNumber)' "$out_dir/create-launch-template.json")"
 else
   aws ec2 describe-launch-templates --region "$AWS_REGION" --launch-template-ids "$launch_template_id" --output json > "$out_dir/existing-launch-template.json"
-  source_launch_template_version="$(aws ec2 describe-launch-templates --region "$AWS_REGION" --launch-template-ids "$launch_template_id" --query 'LaunchTemplates[0].LatestVersionNumber' --output text)"
-  aws ec2 create-launch-template-version \
+  latest_launch_template_version="$(aws ec2 describe-launch-templates --region "$AWS_REGION" --launch-template-ids "$launch_template_id" --query 'LaunchTemplates[0].LatestVersionNumber' --output text)"
+  aws ec2 describe-launch-template-versions \
     --region "$AWS_REGION" \
     --launch-template-id "$launch_template_id" \
-    --source-version "$source_launch_template_version" \
-    --launch-template-data "file://$launch_template_data" \
-    --output json > "$out_dir/create-launch-template-version.json"
-  launch_template_version="$(node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); console.log(p.LaunchTemplateVersion.VersionNumber)' "$out_dir/create-launch-template-version.json")"
+    --versions "$latest_launch_template_version" \
+    --output json > "$out_dir/live-launch-template-version-latest.json"
+  node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); fs.writeFileSync(process.argv[2], JSON.stringify(p.LaunchTemplateVersions[0].LaunchTemplateData, null, 2) + "\n");' \
+    "$out_dir/live-launch-template-version-latest.json" \
+    "$out_dir/live-launch-template-data-latest.json"
+  if node -e 'const fs=require("fs"); const normalize=(file)=>JSON.stringify(JSON.parse(fs.readFileSync(file,"utf8"))); process.exit(normalize(process.argv[1]) === normalize(process.argv[2]) ? 0 : 1);' "$launch_template_data" "$out_dir/live-launch-template-data-latest.json"; then
+    launch_template_version="$latest_launch_template_version"
+  else
+    aws ec2 create-launch-template-version \
+      --region "$AWS_REGION" \
+      --launch-template-id "$launch_template_id" \
+      --launch-template-data "file://$launch_template_data" \
+      --output json > "$out_dir/create-launch-template-version.json"
+    launch_template_version="$(node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); console.log(p.LaunchTemplateVersion.VersionNumber)' "$out_dir/create-launch-template-version.json")"
+  fi
 fi
+
+aws ec2 describe-launch-template-versions \
+  --region "$AWS_REGION" \
+  --launch-template-id "$launch_template_id" \
+  --versions "$launch_template_version" \
+  --output json > "$out_dir/live-launch-template-version-intended.json"
+node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); fs.writeFileSync(process.argv[2], JSON.stringify(p.LaunchTemplateVersions[0].LaunchTemplateData, null, 2) + "\n");' \
+  "$out_dir/live-launch-template-version-intended.json" \
+  "$out_dir/live-launch-template-data.json"
+validate_asg_launch_template_json "$out_dir/live-launch-template-data.json" data "$ASG_ASSOCIATE_PUBLIC_IP" "$SOURCE_SECURITY_GROUP" "$ASG_KEY_NAME"
+
+aws ec2 modify-launch-template \
+  --region "$AWS_REGION" \
+  --launch-template-id "$launch_template_id" \
+  --default-version "$launch_template_version" \
+  > "$out_dir/modify-launch-template-default-version.log" 2>&1
 
 asg_exists="$(aws autoscaling describe-auto-scaling-groups \
   --region "$AWS_REGION" \
@@ -171,8 +204,8 @@ if [ "$asg_exists" = "0" ]; then
     --region "$AWS_REGION" \
     --auto-scaling-group-name "$asg_name" \
     --launch-template "LaunchTemplateId=$launch_template_id,Version=$launch_template_version" \
-    --min-size "$MIN_SIZE" \
-    --desired-capacity "$DESIRED_CAPACITY" \
+    --min-size 0 \
+    --desired-capacity 0 \
     --max-size "$MAX_SIZE" \
     --vpc-zone-identifier "$selected_subnet_csv" \
     --target-group-arns "$TARGET_GROUP_ARN" \
@@ -186,9 +219,6 @@ else
   aws autoscaling update-auto-scaling-group \
     --region "$AWS_REGION" \
     --auto-scaling-group-name "$asg_name" \
-    --min-size "$MIN_SIZE" \
-    --desired-capacity "$DESIRED_CAPACITY" \
-    --max-size "$MAX_SIZE" \
     --launch-template "LaunchTemplateId=$launch_template_id,Version=$launch_template_version" \
     --health-check-type "$ASG_POLICY_HEALTH_CHECK_TYPE" \
     --health-check-grace-period "$ASG_POLICY_HEALTH_CHECK_GRACE_PERIOD_SECONDS" \
@@ -204,6 +234,24 @@ else
       > "$out_dir/attach-target-group.log" 2>&1
   fi
 fi
+
+aws autoscaling describe-auto-scaling-groups --region "$AWS_REGION" --auto-scaling-group-names "$asg_name" --output json > "$out_dir/asg-before-capacity.json"
+node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const expectedId=process.argv[2]; const expectedVersion=process.argv[3]; const asg=p.AutoScalingGroups?.[0]; const lt=asg?.LaunchTemplate; if (!asg || lt?.LaunchTemplateId !== expectedId || String(lt?.Version) !== String(expectedVersion)) { console.error(`ASG launch template mismatch before capacity update. expected ${expectedId}:${expectedVersion}, found ${lt?.LaunchTemplateId || "unset"}:${lt?.Version || "unset"}`); process.exit(2); }' \
+  "$out_dir/asg-before-capacity.json" \
+  "$launch_template_id" \
+  "$launch_template_version"
+
+aws autoscaling update-auto-scaling-group \
+  --region "$AWS_REGION" \
+  --auto-scaling-group-name "$asg_name" \
+  --launch-template "LaunchTemplateId=$launch_template_id,Version=$launch_template_version" \
+  --min-size "$MIN_SIZE" \
+  --desired-capacity "$DESIRED_CAPACITY" \
+  --max-size "$MAX_SIZE" \
+  --health-check-type "$ASG_POLICY_HEALTH_CHECK_TYPE" \
+  --health-check-grace-period "$ASG_POLICY_HEALTH_CHECK_GRACE_PERIOD_SECONDS" \
+  --default-instance-warmup "$ASG_POLICY_DEFAULT_INSTANCE_WARMUP_SECONDS" \
+  > "$out_dir/update-asg-capacity.log" 2>&1
 
 attempts=0
 healthy_count=0

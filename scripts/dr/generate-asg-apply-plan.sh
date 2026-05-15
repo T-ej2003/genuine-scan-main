@@ -19,6 +19,7 @@ TARGET_GROUP_ARN="${TARGET_GROUP_ARN:-}"
 ASG_WEB_INSTANCE_PROFILE_ARN="${ASG_WEB_INSTANCE_PROFILE_ARN:-}"
 ASG_WEB_INSTANCE_PROFILE_NAME="${ASG_WEB_INSTANCE_PROFILE_NAME:-}"
 ASG_ASSOCIATE_PUBLIC_IP="${ASG_ASSOCIATE_PUBLIC_IP:-false}"
+ASG_KEY_NAME="${ASG_KEY_NAME:-}"
 ROLLING_POLICY_CHECKLIST_PATH="${ROLLING_POLICY_CHECKLIST_PATH:-documents/ops/aws-asg-rolling-deploy-policy.checklist.json}"
 
 case "$TARGET_REGION_GROUP" in
@@ -39,6 +40,10 @@ fi
 case "$ASG_ASSOCIATE_PUBLIC_IP" in
   true|false) ;;
   *) echo "ASG_ASSOCIATE_PUBLIC_IP must be true or false." >&2; exit 2 ;;
+esac
+
+case "$ASG_KEY_NAME" in
+  *[[:space:]]*) echo "ASG_KEY_NAME must not contain whitespace." >&2; exit 2 ;;
 esac
 
 policy_env_file="$(mktemp "${TMPDIR:-/tmp}/mscqr-asg-rolling-policy.XXXXXX")"
@@ -90,8 +95,9 @@ write_asg_web_launch_template_json \
   "$ASG_WEB_INSTANCE_PROFILE_ARN" \
   "$ASG_WEB_INSTANCE_PROFILE_NAME" \
   "$ASG_ASSOCIATE_PUBLIC_IP" \
+  "$ASG_KEY_NAME" \
   wrapper
-validate_asg_launch_template_json "$out_dir/proposed-launch-template.json" wrapper "$ASG_ASSOCIATE_PUBLIC_IP" "$SOURCE_SECURITY_GROUP"
+validate_asg_launch_template_json "$out_dir/proposed-launch-template.json" wrapper "$ASG_ASSOCIATE_PUBLIC_IP" "$SOURCE_SECURITY_GROUP" "$ASG_KEY_NAME"
 
 /bin/cat > "$out_dir/proposed-asg.json" <<JSON
 {
@@ -127,7 +133,13 @@ JSON
   else
     printf '%s\n' "- Launch template networking: top-level \`SecurityGroupIds=[$SOURCE_SECURITY_GROUP]\` and no \`NetworkInterfaces\`"
   fi
+  if [ -n "$ASG_KEY_NAME" ]; then
+    printf '%s\n' "- KeyName: provided (\`$ASG_KEY_NAME\`)"
+  else
+    printf '%s\n' "- KeyName: not provided"
+  fi
   printf '%s\n' "- Launch template UserData: base64 bootstrap that runs \`scripts/dr/bootstrap-asg-web-node.sh \"$TARGET_REGION_GROUP\" \"$AWS_REGION\"\`"
+  printf '%s\n' "- Mumbai debug retry: use \`ASG_ASSOCIATE_PUBLIC_IP=true\` and \`ASG_KEY_NAME=mscqr-prod-mumbai\` only for the no-DNS validation/debug pass."
   printf '%s\n' "- Selected app subnets: \`$selected_subnet_ids\`"
   printf '%s\n' "- Proposed ASG capacity: \`min=$MIN_SIZE desired=$DESIRED_CAPACITY max=$MAX_SIZE\`"
   printf '%s\n' "- Health check type: \`$ASG_POLICY_HEALTH_CHECK_TYPE\`"
@@ -140,6 +152,7 @@ JSON
   printf '%s\n' "- Required healthy targets after apply and replacement: \`$ASG_POLICY_TARGET_GROUP_HEALTH_REQUIRED\`"
   printf '%s\n' "- Rolling policy checklist: \`$ROLLING_POLICY_CHECKLIST_PATH\`"
   printf '%s\n' "- Remaining live go/no-go: create and attach the ASG, then run a no-DNS replacement-instance drill with CloudWatch and target-health evidence."
+  printf '%s\n' "- Production DNS cutover: not allowed during ASG validation."
   printf '\nRisks to review before ASG apply: node-local Redis, MinIO, app secrets, migrations, sessions, filesystem state, background workers, sticky behavior, and unproven replacement-instance behavior.\n'
 } > "$out_dir/asg-apply-plan.md"
 

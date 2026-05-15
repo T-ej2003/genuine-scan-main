@@ -19,6 +19,7 @@ Source of truth: `documents/ops/aws-asg-rolling-deploy-policy.checklist.json`
 
 - Launch template instance profile: explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`; ARN wins when both are set.
 - Launch template bootstrap: base64 `UserData` that runs `scripts/dr/bootstrap-asg-web-node.sh "$TARGET_REGION_GROUP" "$AWS_REGION"` from `/home/ubuntu/genuine-scan-main`.
+- Launch template SSH key: optional `ASG_KEY_NAME`; when set it must become `KeyName` in `LaunchTemplateData`, and Mumbai debug retry should use `ASG_KEY_NAME=mscqr-prod-mumbai`.
 - Launch template public IP association: `ASG_ASSOCIATE_PUBLIC_IP=false` by default; accepted values are only `true` and `false`.
 - When `ASG_ASSOCIATE_PUBLIC_IP=true`, launch template data must use `NetworkInterfaces[0].AssociatePublicIpAddress=true` with `Groups=[SOURCE_SECURITY_GROUP]` and no top-level `SecurityGroupIds`.
 - When `ASG_ASSOCIATE_PUBLIC_IP=false`, launch template data must use top-level `SecurityGroupIds=[SOURCE_SECURITY_GROUP]` and no `NetworkInterfaces`.
@@ -64,6 +65,8 @@ Every rollout batch and replacement step must pass:
 - `node scripts/dr/check-asg-multi-instance-readiness.mjs` passes.
 - The ASG web instance profile has been tested from an EC2 role against the target region SSM prefix before apply.
 - Generated launch template data contains `IamInstanceProfile`, `UserData`, `MetadataOptions.HttpTokens=required`, `ImageId`, `InstanceType`, and the expected networking shape for `ASG_ASSOCIATE_PUBLIC_IP`.
+- For debug retries, generated launch template data contains `KeyName=mscqr-prod-mumbai` so failed nodes can be inspected without relying on console output alone.
+- UserData mirrors non-secret status and failure lines to cloud-init console output and writes the full bootstrap log to `/var/log/mscqr-asg-bootstrap.log`.
 - `scripts/dr/bootstrap-asg-web-node.sh` is the launch-template bootstrap path.
 - `RUN_BACKGROUND_WORKERS=false`, `RUN_DB_MIGRATIONS_ON_START=false`, and `COMPLIANCE_PACK_SCHEDULER_ENABLED=false` remain forced.
 - Regional Redis and regional S3/default-credential object storage are green through readiness.

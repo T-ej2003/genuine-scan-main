@@ -101,11 +101,42 @@ Apply order:
 4. `apply-waf-count-mode`.
 5. `verify-hardening-state`.
 6. `generate-asg-apply-plan`.
-7. `apply-asg-launch-template-approved` only after app state risks are resolved, `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME` is explicitly supplied, `ASG_ASSOCIATE_PUBLIC_IP` is intentionally set for the selected subnet design, and the rollout is treated as a no-production-DNS validation drill.
+7. `apply-asg-launch-template-approved` only after app state risks are resolved, `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME` is explicitly supplied, `ASG_ASSOCIATE_PUBLIC_IP` is intentionally set for the selected subnet design, `ASG_KEY_NAME` is supplied for debug retries, and the rollout is treated as a no-production-DNS validation drill.
 
 Hardening does not perform production DNS cutover, delete AWS resources, mutate RDS, mutate application S3 buckets, copy Let's Encrypt keys, or move WAF rules to BLOCK mode. WAF remains COUNT mode only in this phase.
 
-ASG apply is intentionally last because current single-node assumptions may include node-local Redis, MinIO, secrets, sessions, migrations, worker behavior, and filesystem state. ASG_STATUS=CONDITIONALLY_READY means the repo-side blockers are closed, but the first live create/attach plus replacement-instance drill still needs evidence. The launch template must include explicit ASG web instance profile input, deterministic UserData bootstrap, and the expected `ASG_ASSOCIATE_PUBLIC_IP` networking shape. For Mumbai's first retry, use `ASG_ASSOCIATE_PUBLIC_IP=true` because the selected public subnets have `MapPublicIpOnLaunch=false`; the preferred production design is private ASG subnets with NAT Gateway or VPC endpoints, then `ASG_ASSOCIATE_PUBLIC_IP=false`. Do not use final production DNS cutover until at least the selected region has healthy multi-target evidence and a reviewed rollback plan.
+ASG apply is intentionally last because current single-node assumptions may include node-local Redis, MinIO, secrets, sessions, migrations, worker behavior, and filesystem state. ASG_STATUS=CONDITIONALLY_READY means the repo-side blockers are closed, but the first live create/attach plus replacement-instance drill still needs evidence. The launch template must include explicit ASG web instance profile input, deterministic UserData bootstrap, optional debug `ASG_KEY_NAME`, and the expected `ASG_ASSOCIATE_PUBLIC_IP` networking shape. For Mumbai's first retry, use `ASG_ASSOCIATE_PUBLIC_IP=true` because the selected public subnets have `MapPublicIpOnLaunch=false`, and use `ASG_KEY_NAME=mscqr-prod-mumbai` so failed nodes can be inspected. The preferred production design is private ASG subnets with NAT Gateway or VPC endpoints, then `ASG_ASSOCIATE_PUBLIC_IP=false`. Do not use final production DNS cutover until at least the selected region has healthy multi-target evidence and a reviewed rollback plan.
+
+Mumbai no-DNS ASG debug retry inputs:
+
+```bash
+TARGET_REGION_GROUP=mumbai
+AWS_REGION=ap-south-1
+SOURCE_INSTANCE_ID=i-04ae3b689ab72a68a
+SOURCE_AMI=ami-07216ac99dc46a187
+SOURCE_INSTANCE_TYPE=t3.medium
+SOURCE_SECURITY_GROUP=sg-0771ea7e59f7a49d4
+TARGET_GROUP_ARN=arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgroup/mscqr-mumbai-frontend-tg/68982ccd4d8c26c1
+ASG_WEB_INSTANCE_PROFILE_ARN=arn:aws:iam::368992683803:instance-profile/mscqr-asg-web-instance-profile-aps1
+ASG_ASSOCIATE_PUBLIC_IP=true
+ASG_KEY_NAME=mscqr-prod-mumbai
+ROLLBACK_ALARM_NAMES_CSV=MSCQR-mumbai-ALB-5XX,MSCQR-mumbai-Target-5XX,MSCQR-mumbai-TargetResponseTime-p95,MSCQR-mumbai-UnhealthyHosts
+MIN_SIZE=2
+DESIRED_CAPACITY=2
+MAX_SIZE=4
+```
+
+For apply only:
+
+```bash
+CONFIRM_ASG_APPLY=I_APPROVE_REGIONAL_ASG_CREATE_AND_ATTACH
+```
+
+If targets fail, get console output, SSH with `/Users/abhiramteja/Desktop/keys/mscqr-prod-mumbai.pem`, inspect `/var/log/mscqr-asg-bootstrap.log`, `/var/log/cloud-init-output.log`, `docker ps`, and backend/frontend container logs. Immediate rollback remains:
+
+```bash
+aws autoscaling update-auto-scaling-group --region ap-south-1 --auto-scaling-group-name mscqr-mumbai-dr-asg --min-size 0 --desired-capacity 0 --max-size 4
+```
 
 ## Operator Sequence
 

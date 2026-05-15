@@ -412,6 +412,7 @@ Rollback notes:
 - The first ASG rollout must keep production DNS on London EC2 and must include the replacement-instance drill from `documents/ops/aws-asg-rolling-deploy-policy.md`.
 - ASG launch templates must use explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`. Do not reuse the source instance profile automatically.
 - ASG launch templates must set `ASG_ASSOCIATE_PUBLIC_IP=true` or `ASG_ASSOCIATE_PUBLIC_IP=false` explicitly. Mumbai first retry should use `true` because the selected public subnets currently have `MapPublicIpOnLaunch=false`.
+- Mumbai debug retry should set `ASG_KEY_NAME=mscqr-prod-mumbai` so failed ASG nodes can be inspected with the approved SSH key.
 - Preferred production design is private ASG subnets with NAT Gateway or VPC endpoints for SSM, EC2Messages, SSMMessages, S3, ECR, CloudWatch Logs, and Git access, then `ASG_ASSOCIATE_PUBLIC_IP=false`.
 
 Mumbai hardening values:
@@ -449,6 +450,7 @@ ASG_WEB_INSTANCE_PROFILE_ARN=<approved-asg-web-instance-profile-arn>
 # Or, if using a profile name instead of ARN:
 # ASG_WEB_INSTANCE_PROFILE_NAME=<approved-asg-web-instance-profile-name>
 ASG_ASSOCIATE_PUBLIC_IP=true
+ASG_KEY_NAME=mscqr-prod-mumbai
 ROLLBACK_ALARM_NAMES_CSV=MSCQR-mumbai-ALB-5XX,MSCQR-mumbai-Target-5XX,MSCQR-mumbai-TargetResponseTime-p95,MSCQR-mumbai-UnhealthyHosts
 MIN_SIZE=2
 DESIRED_CAPACITY=2
@@ -459,6 +461,52 @@ Add this only for the protected apply operation, never for plan generation:
 
 ```bash
 CONFIRM_ASG_APPLY=I_APPROVE_REGIONAL_ASG_CREATE_AND_ATTACH
+```
+
+Exact Mumbai retry values:
+
+```bash
+TARGET_REGION_GROUP=mumbai
+AWS_REGION=ap-south-1
+SOURCE_INSTANCE_ID=i-04ae3b689ab72a68a
+SOURCE_AMI=ami-07216ac99dc46a187
+SOURCE_INSTANCE_TYPE=t3.medium
+SOURCE_SECURITY_GROUP=sg-0771ea7e59f7a49d4
+TARGET_GROUP_ARN=arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgroup/mscqr-mumbai-frontend-tg/68982ccd4d8c26c1
+ASG_WEB_INSTANCE_PROFILE_ARN=arn:aws:iam::368992683803:instance-profile/mscqr-asg-web-instance-profile-aps1
+ASG_ASSOCIATE_PUBLIC_IP=true
+ASG_KEY_NAME=mscqr-prod-mumbai
+ROLLBACK_ALARM_NAMES_CSV=MSCQR-mumbai-ALB-5XX,MSCQR-mumbai-Target-5XX,MSCQR-mumbai-TargetResponseTime-p95,MSCQR-mumbai-UnhealthyHosts
+MIN_SIZE=2
+DESIRED_CAPACITY=2
+MAX_SIZE=4
+```
+
+Add only for protected apply:
+
+```bash
+CONFIRM_ASG_APPLY=I_APPROVE_REGIONAL_ASG_CREATE_AND_ATTACH
+```
+
+If ASG targets fail, capture debug evidence before rollback cleanup removes the instances:
+
+```bash
+mapfile -t ASG_INSTANCE_IDS < <(aws autoscaling describe-auto-scaling-groups --region ap-south-1 --auto-scaling-group-names mscqr-mumbai-dr-asg --query 'AutoScalingGroups[0].Instances[].InstanceId' --output text | tr '\t' '\n')
+for instance_id in "${ASG_INSTANCE_IDS[@]}"; do
+  aws ec2 get-console-output --region ap-south-1 --instance-id "$instance_id" --latest --output text > "artifacts/dr/mumbai-asg-console-$instance_id.txt"
+done
+ssh -i /Users/abhiramteja/Desktop/keys/mscqr-prod-mumbai.pem ubuntu@<asg-instance-public-ip>
+sudo tail -n 240 /var/log/mscqr-asg-bootstrap.log
+sudo tail -n 240 /var/log/cloud-init-output.log
+docker ps
+docker logs genuine-scan-backend --tail 160
+docker logs genuine-scan-frontend --tail 160
+```
+
+Immediate rollback if target health fails:
+
+```bash
+aws autoscaling update-auto-scaling-group --region ap-south-1 --auto-scaling-group-name mscqr-mumbai-dr-asg --min-size 0 --desired-capacity 0 --max-size 4
 ```
 
 Cape Town hardening values:
