@@ -63,7 +63,9 @@ Update runtime values before first boot:
   - `SUPER_ADMIN_BOOTSTRAP_ENABLED=true` for first production boot only
   - `SUPER_ADMIN_BOOTSTRAP_PASSWORD=<long unique first-login password>`
   - `SUPER_ADMIN_BOOTSTRAP_AUTO_VERIFY=true` so the initial configured super admin can sign in before SMTP verification is proven
-  - `SMTP_*` values (especially `SMTP_PASS`)
+  - `SMTP_HOST=mail.privateemail.com`
+  - `SMTP_PORT=465` with `SMTP_SECURE=true` for Namecheap Private Email, or `SMTP_PORT=587` with STARTTLS troubleshooting
+  - `SMTP_USER=<full mailbox>`, `SMTP_PASS=<mailbox password or app password>`, and `SMTP_FROM=<authorized mscqr.com sender>`
 
 ## 5. First boot (HTTP mode)
 
@@ -179,7 +181,9 @@ docker compose --profile worker up -d --build
 
 - Frontend loads over HTTPS
 - Login works for `administration@mscqr.com`
-- Incident customer email sends successfully (check live delivery info in UI)
+- SMTP provider accepts the diagnostic recipient:
+  `SMTP_TEST_TO=admin@example.com npm --prefix backend run check:smtp`
+- Incident/customer/invite email sends show provider acceptance only when the intended recipient appears in the accepted list
 - Backend can connect to RDS
 - `/api` routes work through Nginx
 

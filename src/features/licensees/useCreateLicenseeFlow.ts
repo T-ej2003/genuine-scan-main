@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 
 import apiClient from "@/lib/api-client";
-import { classifyApiError, getInviteDeliveryState } from "@/lib/api/friendly-errors";
+import { classifyApiError, friendlyEmailDeliveryMessage, getInviteDeliveryState } from "@/lib/api/friendly-errors";
 import { useOperationProgress } from "@/hooks/useOperationProgress";
 import {
   createDefaultLicenseeForm,
@@ -306,10 +306,10 @@ export function useCreateLicenseeFlow({
       toast({
         title: inviteState.emailSent
           ? "Brand created and invite email sent."
-          : "Brand created, but invite email could not be sent.",
+          : "Brand created, but invite email delivery could not be confirmed.",
         description: inviteState.emailSent
           ? `${name} is ready. Invite sent to ${adminEmail}.${warningText}`
-          : `Copy the invite link or retry sending.${warningText}`,
+          : `${friendlyEmailDeliveryMessage(inviteState.emailErrorCode)} Copy the invite link or check SMTP settings.${warningText}`,
         variant: !inviteState.emailSent || provisioningWarnings.length ? "destructive" : undefined,
       });
 

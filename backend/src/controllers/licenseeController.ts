@@ -128,20 +128,16 @@ const licenseeConflictMessage = (target?: unknown) => {
   return "A brand or admin with these details already exists.";
 };
 
-const buildLicenseeCreateResponse = (params: {
-  created: boolean;
-  licensee: any;
-  adminUser: any;
-  adminInvite: any;
-  warning?: string | null;
-}) => {
+const buildLicenseeCreateResponse = (params: { created: boolean; licensee: any; adminUser: any; adminInvite: any; warning?: string | null }) => {
   const inviteCreated = Boolean(params.adminInvite?.inviteId || params.adminInvite?.inviteLink);
-  const emailSent = Boolean(params.adminInvite?.emailSent ?? params.adminInvite?.emailDelivered);
+  const emailSent = params.adminInvite?.emailSent === true || params.adminInvite?.emailDelivered === true;
   const emailErrorCode = params.adminInvite?.emailErrorCode || params.adminInvite?.deliveryError || null;
+  const emailDiagnostic = params.adminInvite?.emailDiagnostic || null;
+  const emailAttempted = Boolean(params.adminInvite?.emailAttempted ?? params.adminInvite?.attempted ?? emailErrorCode ?? emailSent);
   const message = inviteCreated
     ? emailSent
       ? "Brand created and invite email sent."
-      : "Brand created, but invite email could not be sent."
+      : "Brand created, but invite email delivery could not be confirmed."
     : params.warning
       ? "Brand created, but invite could not be generated."
       : "Brand created.";
@@ -158,16 +154,20 @@ const buildLicenseeCreateResponse = (params: {
       invite: params.adminInvite
         ? {
             created: inviteCreated,
+            emailAttempted,
             emailSent,
             emailErrorCode,
+            emailDiagnostic,
             inviteLink: params.adminInvite.inviteLink || null,
             inviteId: params.adminInvite.inviteId || null,
             expiresAt: params.adminInvite.expiresAt || null,
           }
         : {
             created: false,
+            emailAttempted: false,
             emailSent: false,
             emailErrorCode: params.warning ? "UNKNOWN_EMAIL_ERROR" : null,
+            emailDiagnostic: params.warning || null,
             inviteLink: null,
           },
       message,

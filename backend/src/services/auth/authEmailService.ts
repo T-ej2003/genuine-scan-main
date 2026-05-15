@@ -45,15 +45,20 @@ export const sendAuthEmail = async (input: {
   userAgent?: string | null;
 }): Promise<{
   delivered: boolean;
+  sent: boolean;
+  attempted: boolean;
   error?: EmailErrorCode | null;
   errorCode?: EmailErrorCode | null;
+  diagnostic?: string | null;
   attemptedFrom?: string | null;
   usedFrom?: string | null;
   replyTo?: string | null;
   providerMessageId?: string | null;
+  providerResponseCode?: number | null;
   providerResponse?: string | null;
   acceptedRecipients?: string[];
   rejectedRecipients?: string[];
+  pendingRecipients?: string[];
 }> => {
   const primarySuperadminEmail = await getPrimarySuperadminEmail();
   const configuredFrom = getConfiguredMailFrom();
@@ -90,9 +95,12 @@ export const sendAuthEmail = async (input: {
         replyTo: maskEmailForLog(delivery.replyTo || replyTo),
         delivered: delivery.delivered,
         providerMessageId: delivery.providerMessageId || null,
+        providerResponseCode: delivery.providerResponseCode || null,
         acceptedRecipients: (delivery.acceptedRecipients || []).map(maskEmailForLog).filter(Boolean),
         rejectedRecipients: (delivery.rejectedRecipients || []).map(maskEmailForLog).filter(Boolean),
+        pendingRecipients: (delivery.pending || []).map(maskEmailForLog).filter(Boolean),
         emailErrorCode: delivery.errorCode || null,
+        emailDiagnostic: delivery.diagnostic || null,
         fallbackUsed: Boolean(delivery.fallbackUsed),
       },
       ipHash: input.ipHash || undefined,
@@ -108,15 +116,20 @@ export const sendAuthEmail = async (input: {
 
   return {
     delivered: delivery.delivered,
+    sent: delivery.sent,
+    attempted: delivery.attempted,
     error: delivery.errorCode || null,
     errorCode: delivery.errorCode || null,
+    diagnostic: delivery.diagnostic || null,
     attemptedFrom: delivery.attemptedFrom || attemptedFrom,
     usedFrom: delivery.usedFrom || usedFrom,
     replyTo: delivery.replyTo || replyTo,
     providerMessageId: delivery.providerMessageId || null,
+    providerResponseCode: delivery.providerResponseCode || null,
     providerResponse: null,
     acceptedRecipients: delivery.acceptedRecipients || [],
     rejectedRecipients: delivery.rejectedRecipients || [],
+    pendingRecipients: delivery.pending || [],
   };
 };
 

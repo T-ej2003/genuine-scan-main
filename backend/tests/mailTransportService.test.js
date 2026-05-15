@@ -46,6 +46,7 @@ const resetEnv = () => {
       template: "unit-test",
     });
     assert.strictEqual(result.delivered, false);
+    assert.strictEqual(result.sent, false);
     assert.strictEqual(result.errorCode, "EMAIL_DISABLED");
 
     for (const key of SMTP_ENV_KEYS) delete process.env[key];
@@ -56,6 +57,7 @@ const resetEnv = () => {
       template: "unit-test",
     });
     assert.strictEqual(result.delivered, false);
+    assert.strictEqual(result.sent, false);
     assert.strictEqual(result.errorCode, "SMTP_CONFIG_MISSING");
 
     for (const key of SMTP_ENV_KEYS) delete process.env[key];
@@ -68,8 +70,9 @@ const resetEnv = () => {
       fromAddress: "mailer@example.test",
       template: "unit-test",
     });
-    assert.strictEqual(result.delivered, true);
-    assert.strictEqual(result.errorCode, null);
+    assert.strictEqual(result.delivered, false);
+    assert.strictEqual(result.sent, false);
+    assert.strictEqual(result.errorCode, "EMAIL_DRY_RUN");
     assert.strictEqual(maskEmailForLog("administrator@example.test"), "ad***@example.test");
   } finally {
     resetEnv();

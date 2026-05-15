@@ -5,12 +5,24 @@ export type EmailErrorCode =
   | "SMTP_CONFIG_MISSING"
   | "SMTP_AUTH_FAILED"
   | "SMTP_CONNECTION_FAILED"
+  | "SMTP_TLS_FAILED"
   | "SMTP_TIMEOUT"
+  | "SMTP_RECIPIENT_REJECTED"
+  | "SMTP_NO_ACCEPTED_RECIPIENTS"
   | "SMTP_SEND_FAILED"
   | "EMAIL_DISABLED"
+  | "EMAIL_DRY_RUN"
   | "UNKNOWN_EMAIL_ERROR";
 
 export type MailDeliveryResult = {
+  attempted: boolean;
+  sent: boolean;
+  accepted: string[];
+  rejected: string[];
+  pending: string[];
+  messageId: string | null;
+  providerResponseCode: number | null;
+  diagnostic: string;
   delivered: boolean;
   errorCode?: EmailErrorCode | null;
   attemptedFrom?: string | null;
@@ -36,6 +48,9 @@ type TransportState = {
   smtpUser: string | null;
   configErrorCode: EmailErrorCode | null;
   configSource: "env" | "inferred" | "json" | null;
+  host?: string | null;
+  port?: number | null;
+  secure?: boolean | null;
 };
 
 const parseBool = (value: unknown, fallback = false) => {
@@ -127,13 +142,11 @@ export const getMailTransportState = (): TransportState => {
     return { transporter: null, smtpUser: null, configErrorCode: "EMAIL_DISABLED", configSource: null };
   }
 
-  if (parseBool(process.env.EMAIL_USE_JSON_TRANSPORT, false)) {
-    transporterKey = "jsonTransport";
-    transporter = nodemailer.createTransport({ jsonTransport: true });
+  if (parseBool(process.env.EMAIL_DRY_RUN, false) || parseBool(process.env.EMAIL_USE_JSON_TRANSPORT, false)) {
     return {
-      transporter,
+      transporter: null,
       smtpUser: normalizeEmail(getFirstEnv("SMTP_USER", "SMTP_USERNAME", "EMAIL_USER", "MAIL_USER")),
-      configErrorCode: null,
+      configErrorCode: "EMAIL_DRY_RUN",
       configSource: "json",
     };
   }
@@ -143,7 +156,15 @@ export const getMailTransportState = (): TransportState => {
 
   const nextKey = `${config.host}|${config.port}|${config.secure}|${config.user}`;
   if (transporter && transporterKey === nextKey) {
-    return { transporter, smtpUser: normalizeEmail(config.user), configErrorCode: null, configSource: config.source };
+    return {
+      transporter,
+      smtpUser: normalizeEmail(config.user),
+      configErrorCode: null,
+      configSource: config.source,
+      host: config.host,
+      port: config.port,
+      secure: config.secure,
+    };
   }
 
   transporterKey = nextKey;
@@ -157,7 +178,30 @@ export const getMailTransportState = (): TransportState => {
     socketTimeout: parsePositiveInt(process.env.SMTP_SOCKET_TIMEOUT_MS, 10_000),
   });
 
-  return { transporter, smtpUser: normalizeEmail(config.user), configErrorCode: null, configSource: config.source };
+  return {
+    transporter,
+    smtpUser: normalizeEmail(config.user),
+    configErrorCode: null,
+    configSource: config.source,
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+  };
+};
+
+export const getMailTransportDiagnostics = () => {
+  const { config } = resolveSmtpConfig();
+  const state = getMailTransportState();
+  return {
+    configured: Boolean(config && !state.configErrorCode),
+    configSource: state.configSource,
+    errorCode: state.configErrorCode,
+    host: state.host || config?.host || null,
+    port: state.port || config?.port || null,
+    secure: state.secure ?? config?.secure ?? null,
+    user: maskEmailForLog(state.smtpUser || config?.user || null),
+    from: maskEmailForLog(getConfiguredMailFrom() || state.smtpUser || config?.user || null),
+  };
 };
 
 export const formatFromAddress = (email: string) => `"${getMailFromDisplayName()}" <${email}>`;
@@ -171,6 +215,14 @@ const classifyMailError = (error: any): EmailErrorCode => {
   const haystack = `${message} ${response}`;
 
   if (code === "EAUTH" || responseCode === 535 || haystack.includes("authentication")) return "SMTP_AUTH_FAILED";
+  if (haystack.includes("tls") || haystack.includes("ssl") || haystack.includes("certificate")) return "SMTP_TLS_FAILED";
+  if (
+    code === "EADDRESS" ||
+    ([550, 551, 553].includes(responseCode) &&
+      (haystack.includes("recipient") || haystack.includes("rcpt") || haystack.includes("mailbox") || haystack.includes("user unknown")))
+  ) {
+    return "SMTP_RECIPIENT_REJECTED";
+  }
   if (["ECONNECTION", "ECONNREFUSED", "ETIMEDOUT", "ESOCKET", "EDNS"].includes(code)) return "SMTP_CONNECTION_FAILED";
   if (code === "ETIMEDOUT" || haystack.includes("timeout") || haystack.includes("timed out")) return "SMTP_TIMEOUT";
   if (code || responseCode) return "SMTP_SEND_FAILED";
@@ -228,19 +280,43 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T
   }
 };
 
-const summarizeInfo = (info: any) => {
+const normalizeAddressList = (value: any) =>
+  Array.isArray(value) ? value.map((item) => normalizeEmail(item)).filter((item): item is string => Boolean(item)) : [];
+
+const hasAddress = (addresses: string[], intendedRecipient: string) =>
+  addresses.some((address) => normalizeEmail(address) === intendedRecipient);
+
+const summarizeInfo = (info: any, intendedRecipient: string) => {
   const acceptedRecipients = Array.isArray(info?.accepted)
     ? info.accepted.map((value: any) => String(value || "").trim()).filter(Boolean)
     : [];
   const rejectedRecipients = Array.isArray(info?.rejected)
     ? info.rejected.map((value: any) => String(value || "").trim()).filter(Boolean)
     : [];
-  const delivered = acceptedRecipients.length > 0 || rejectedRecipients.length === 0;
+  const pendingRecipients = normalizeAddressList(info?.pending);
+  const normalizedAccepted = normalizeAddressList(acceptedRecipients);
+  const normalizedRejected = normalizeAddressList(rejectedRecipients);
+  const intendedAccepted = hasAddress(normalizedAccepted, intendedRecipient);
+  const intendedRejected = hasAddress(normalizedRejected, intendedRecipient);
+  const errorCode: EmailErrorCode | null = intendedRejected
+    ? "SMTP_RECIPIENT_REJECTED"
+    : intendedAccepted
+      ? null
+      : "SMTP_NO_ACCEPTED_RECIPIENTS";
+  const delivered = intendedAccepted && !intendedRejected;
   return {
     delivered,
     providerMessageId: info?.messageId ? String(info.messageId) : null,
+    providerResponseCode: Number(info?.responseCode || 0) || null,
     acceptedRecipients,
     rejectedRecipients,
+    pendingRecipients,
+    errorCode,
+    diagnostic: delivered
+      ? "SMTP provider accepted the intended recipient."
+      : intendedRejected
+        ? "SMTP provider rejected the intended recipient."
+        : "SMTP provider did not confirm acceptance for the intended recipient.",
   };
 };
 
@@ -262,6 +338,15 @@ export const sendMailSafely = async (input: {
   const timeoutMs = parsePositiveInt(process.env.EMAIL_SEND_TIMEOUT_MS || process.env.SMTP_SEND_TIMEOUT_MS, 10_000);
 
   const baseResult = {
+    attempted: false,
+    sent: false,
+    accepted: [] as string[],
+    rejected: [] as string[],
+    pending: [] as string[],
+    messageId: null,
+    providerResponseCode: null,
+    diagnostic: "Email delivery was not attempted.",
+    delivered: false,
     attemptedFrom: fromAddress,
     usedFrom: fromAddress,
     replyTo,
@@ -278,10 +363,19 @@ export const sendMailSafely = async (input: {
     usedFrom: maskEmailForLog(result.usedFrom),
     replyTo: maskEmailForLog(result.replyTo),
     providerMessageId: result.providerMessageId || null,
+    providerResponseCode: result.providerResponseCode || null,
     acceptedRecipients: (result.acceptedRecipients || []).map(maskEmailForLog).filter(Boolean),
     rejectedRecipients: (result.rejectedRecipients || []).map(maskEmailForLog).filter(Boolean),
+    pendingRecipients: (result.pending || []).map(maskEmailForLog).filter(Boolean),
+    acceptedCount: result.accepted.length,
+    rejectedCount: result.rejected.length,
+    pendingCount: result.pending.length,
     emailErrorCode: result.errorCode || null,
+    diagnostic: result.diagnostic,
     fallbackUsed: Boolean(result.fallbackUsed),
+    smtpHost: transportState.host || null,
+    smtpPort: transportState.port || null,
+    smtpSecure: transportState.secure ?? null,
   });
 
   try {
@@ -289,14 +383,24 @@ export const sendMailSafely = async (input: {
     if (!transportState.transporter) {
       const result: MailDeliveryResult = {
         ...baseResult,
-        delivered: false,
+        attempted: false,
         errorCode: transportState.configErrorCode || "SMTP_CONFIG_MISSING",
+        diagnostic:
+          transportState.configErrorCode === "EMAIL_DRY_RUN"
+            ? "Email delivery is in dry-run mode; no SMTP message was sent."
+            : transportState.configErrorCode === "EMAIL_DISABLED"
+              ? "Email delivery is disabled for this environment."
+            : "SMTP transport is not configured.",
       };
       console.error("MAIL delivery skipped", logMeta(result));
       return result;
     }
     if (!fromAddress) {
-      const result: MailDeliveryResult = { ...baseResult, delivered: false, errorCode: "SMTP_CONFIG_MISSING" };
+      const result: MailDeliveryResult = {
+        ...baseResult,
+        errorCode: "SMTP_CONFIG_MISSING",
+        diagnostic: "SMTP sender address is not configured.",
+      };
       console.error("MAIL delivery skipped", logMeta(result));
       return result;
     }
@@ -311,11 +415,19 @@ export const sendMailSafely = async (input: {
     if (replyTo) options.replyTo = replyTo;
 
     const info = await withTimeout(transportState.transporter.sendMail(options), timeoutMs);
-    const summary = summarizeInfo(info);
+    const summary = summarizeInfo(info, toAddress);
     const result: MailDeliveryResult = {
       ...baseResult,
+      attempted: true,
+      sent: summary.delivered,
+      accepted: summary.acceptedRecipients,
+      rejected: summary.rejectedRecipients,
+      pending: summary.pendingRecipients,
+      messageId: summary.providerMessageId,
+      providerResponseCode: summary.providerResponseCode,
+      diagnostic: summary.diagnostic,
       delivered: summary.delivered,
-      errorCode: summary.delivered ? null : "SMTP_SEND_FAILED",
+      errorCode: summary.errorCode,
       providerMessageId: summary.providerMessageId,
       acceptedRecipients: summary.acceptedRecipients,
       rejectedRecipients: summary.rejectedRecipients,
@@ -323,7 +435,7 @@ export const sendMailSafely = async (input: {
     console[summary.delivered ? "info" : "error"]("MAIL delivery completed", logMeta(result));
     return result;
   } catch (error: any) {
-    if (fallbackFromAddress && fromAddress && fallbackFromAddress !== fromAddress && isFromRejectedMailError(error)) {
+    if (toAddress && fallbackFromAddress && fromAddress && fallbackFromAddress !== fromAddress && isFromRejectedMailError(error)) {
       try {
         const retryOptions: SendMailOptions = {
           from: formatFromAddress(fallbackFromAddress),
@@ -334,11 +446,19 @@ export const sendMailSafely = async (input: {
         };
         if (replyTo) retryOptions.replyTo = replyTo;
         const retryInfo = await withTimeout(transportState.transporter!.sendMail(retryOptions), timeoutMs);
-        const summary = summarizeInfo(retryInfo);
+        const summary = summarizeInfo(retryInfo, toAddress);
         const result: MailDeliveryResult = {
           ...baseResult,
+          attempted: true,
+          sent: summary.delivered,
+          accepted: summary.acceptedRecipients,
+          rejected: summary.rejectedRecipients,
+          pending: summary.pendingRecipients,
+          messageId: summary.providerMessageId,
+          providerResponseCode: summary.providerResponseCode,
+          diagnostic: summary.diagnostic,
           delivered: summary.delivered,
-          errorCode: summary.delivered ? null : "SMTP_SEND_FAILED",
+          errorCode: summary.errorCode,
           usedFrom: fallbackFromAddress,
           providerMessageId: summary.providerMessageId,
           acceptedRecipients: summary.acceptedRecipients,
@@ -350,9 +470,10 @@ export const sendMailSafely = async (input: {
       } catch (retryError: any) {
         const result: MailDeliveryResult = {
           ...baseResult,
-          delivered: false,
+          attempted: true,
           errorCode: classifyMailError(retryError || error),
           usedFrom: fallbackFromAddress,
+          diagnostic: "SMTP send failed after retry with the authenticated mailbox.",
           fallbackUsed: true,
         };
         console.error("MAIL delivery failed", logMeta(result));
@@ -362,8 +483,9 @@ export const sendMailSafely = async (input: {
 
     const result: MailDeliveryResult = {
       ...baseResult,
-      delivered: false,
+      attempted: true,
       errorCode: classifyMailError(error),
+      diagnostic: "SMTP send failed before the provider accepted the intended recipient.",
     };
     console.error("MAIL delivery failed", logMeta(result));
     return result;

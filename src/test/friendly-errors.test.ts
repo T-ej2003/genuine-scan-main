@@ -37,8 +37,10 @@ describe("friendly API errors", () => {
       })
     ).toEqual({
       created: true,
+      emailAttempted: false,
       emailSent: false,
       emailErrorCode: "SMTP_CONFIG_MISSING",
+      emailDiagnostic: null,
       inviteLink: "https://example.test/invite",
     });
 

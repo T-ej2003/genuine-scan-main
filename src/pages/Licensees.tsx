@@ -115,18 +115,16 @@ export default function Licensees() {
 
     toast({
       title:
-        inviteState.emailSent === false
-          ? opts?.copyOnly
-            ? "Invite link generated"
-            : "Invite created, email not delivered"
-          : opts?.copyOnly
-            ? "Invite link generated"
-            : "Invite resent",
+        opts?.copyOnly
+          ? "Invite link generated"
+          : inviteState.emailSent
+            ? "Invite resent"
+            : "Invite link ready, email not confirmed",
       description:
-        inviteState.emailSent === false
-          ? `${friendlyEmailDeliveryMessage(inviteState.emailErrorCode)} Use the invite link to onboard manually.`
-          : `Invite sent to ${adminEmail}.`,
-      variant: inviteState.emailSent === false ? "destructive" : undefined,
+        inviteState.emailSent
+          ? `Invite sent to ${adminEmail}.`
+          : `${friendlyEmailDeliveryMessage(inviteState.emailErrorCode)} Copy the invite link or check SMTP settings.`,
+      variant: inviteState.emailSent ? undefined : "destructive",
     });
 
     await load();
@@ -316,12 +314,12 @@ export default function Licensees() {
     const inviteState = getInviteDeliveryState(resultData);
     if (inviteState.inviteLink) setLatestInviteLink(inviteState.inviteLink);
     toast({
-      title: inviteState.emailSent ? "Invite email sent" : "Invite link created, email not sent",
+      title: inviteState.emailSent ? "Invite email sent" : "Invite link ready, email not confirmed",
       description: inviteState.emailSent
         ? userForm.role === "LICENSEE_ADMIN"
           ? "Invite sent for Licensee Admin."
           : "Invite sent for Manufacturer Admin."
-        : "Copy the invite link or retry sending later.",
+        : `${friendlyEmailDeliveryMessage(inviteState.emailErrorCode)} Copy the invite link or retry sending later.`,
       variant: inviteState.emailSent ? undefined : "destructive",
     });
     setCreatingUser(false);

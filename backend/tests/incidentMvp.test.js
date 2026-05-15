@@ -167,7 +167,7 @@ const run = async () => {
           err.responseCode = 553;
           throw err;
         }
-        return { messageId: "msg-123" };
+        return { messageId: "msg-123", accepted: ["customer@example.com"], rejected: [] };
       },
     };
   });

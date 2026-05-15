@@ -133,15 +133,17 @@ export const resendLicenseeAdminInvite = async (req: AuthRequest, res: Response)
         created: Boolean(invite.inviteId || invite.inviteLink),
         invite: {
           created: Boolean(invite.inviteId || invite.inviteLink),
-          emailSent: Boolean(invite.emailSent ?? invite.emailDelivered),
+          emailAttempted: Boolean((invite as any).emailAttempted ?? (invite as any).attempted ?? invite.emailErrorCode ?? invite.deliveryError ?? invite.emailSent ?? invite.emailDelivered),
+          emailSent: invite.emailSent === true || invite.emailDelivered === true,
           emailErrorCode: invite.emailErrorCode || invite.deliveryError || null,
+          emailDiagnostic: (invite as any).emailDiagnostic || null,
           inviteLink: invite.inviteLink || null,
           inviteId: invite.inviteId || null,
           expiresAt: invite.expiresAt || null,
         },
-        message: invite.emailSent ?? invite.emailDelivered
+        message: invite.emailSent === true || invite.emailDelivered === true
           ? "Invite email sent."
-          : "Invite link created, but email could not be sent.",
+          : "Invite link is ready, but email delivery could not be confirmed.",
       },
     });
   } catch (e: any) {

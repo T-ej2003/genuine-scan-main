@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "prisma generate && tsx watch src/index.ts",
     "auth:mfa:break-glass": "tsx scripts/break-glass-mfa-reset.ts",
+    "check:smtp": "node scripts/check-smtp-delivery.js",
     "analytics:refresh-rollups": "tsx scripts/refresh-analytics-rollups.ts",
     "data:backfill-batch-lineage": "tsx scripts/backfill-batch-lineage.ts",
     "data:backfill-qr-provenance": "tsx scripts/backfill-qr-provenance.ts",

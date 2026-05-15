@@ -26,9 +26,13 @@ const EMAIL_ERROR_MESSAGES: Record<string, string> = {
   SMTP_CONFIG_MISSING: "Email is not configured for this environment.",
   SMTP_AUTH_FAILED: "The mail provider rejected the configured mailbox credentials.",
   SMTP_CONNECTION_FAILED: "The mail provider could not be reached.",
+  SMTP_TLS_FAILED: "The mail provider rejected the secure connection.",
   SMTP_TIMEOUT: "The mail provider did not respond in time.",
+  SMTP_RECIPIENT_REJECTED: "The mail provider rejected the recipient.",
+  SMTP_NO_ACCEPTED_RECIPIENTS: "Email delivery could not be confirmed by the mail provider.",
   SMTP_SEND_FAILED: "The mail provider could not deliver the message.",
   EMAIL_DISABLED: "Email delivery is disabled for this environment.",
+  EMAIL_DRY_RUN: "Email delivery is in test mode and no message was sent.",
   UNKNOWN_EMAIL_ERROR: "Email delivery could not be confirmed.",
 };
 
@@ -39,11 +43,13 @@ export function friendlyEmailDeliveryMessage(code?: string | null) {
 
 export function getInviteDeliveryState(data: any) {
   const invite = data?.invite || data?.adminInvite || data || {};
-  const emailSent = Boolean(invite.emailSent ?? invite.emailDelivered);
+  const emailSent = invite.emailSent === true || invite.emailDelivered === true;
+  const emailAttempted = invite.emailAttempted === true || invite.attempted === true;
   const emailErrorCode = String(invite.emailErrorCode || invite.deliveryError || "").trim() || null;
+  const emailDiagnostic = String(invite.emailDiagnostic || invite.diagnostic || "").trim() || null;
   const inviteLink = String(invite.inviteLink || data?.inviteLink || "").trim();
   const created = Boolean(invite.created ?? invite.inviteId ?? inviteLink);
-  return { created, emailSent, emailErrorCode, inviteLink };
+  return { created, emailAttempted, emailSent, emailErrorCode, emailDiagnostic, inviteLink };
 }
 
 export function classifyApiError(response: Partial<ApiResponse> & { status?: number; unknownOutcome?: boolean } = {}): FriendlyError {

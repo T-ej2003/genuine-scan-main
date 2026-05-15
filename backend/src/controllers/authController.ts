@@ -239,7 +239,7 @@ export const invite = async (req: Request, res: Response) => {
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
     });
-    const emailSent = Boolean((out as any).emailSent ?? (out as any).emailDelivered);
+    const emailSent = (out as any).emailSent === true || (out as any).emailDelivered === true;
     const inviteCreated = Boolean((out as any).inviteId || (out as any).inviteLink);
     return res.status(201).json({
       success: true,
@@ -249,8 +249,10 @@ export const invite = async (req: Request, res: Response) => {
         created: inviteCreated,
         invite: {
           created: inviteCreated,
+          emailAttempted: Boolean((out as any).emailAttempted ?? (out as any).attempted ?? (out as any).emailErrorCode ?? (out as any).deliveryError ?? emailSent),
           emailSent,
           emailErrorCode: (out as any).emailErrorCode || (out as any).deliveryError || null,
+          emailDiagnostic: (out as any).emailDiagnostic || null,
           inviteLink: (out as any).inviteLink || null,
           inviteId: (out as any).inviteId || null,
           expiresAt: (out as any).expiresAt || null,
@@ -258,7 +260,7 @@ export const invite = async (req: Request, res: Response) => {
         message: emailSent
           ? "Invite email sent."
           : inviteCreated
-            ? "Invite link created, but email could not be sent."
+            ? "Invite link is ready, but email delivery could not be confirmed."
             : "Invite processed.",
       },
     });
