@@ -135,6 +135,11 @@ requireMatch("readiness doc", doc, /asg-web-instance-profile-policy\.template\.j
 requireMatch("readiness doc", doc, /Secrets\/bootstrap is conditionally proven/, "must mark secrets/bootstrap conditionally proven.");
 requireMatch("readiness doc", doc, /ASG_WEB_INSTANCE_PROFILE_ARN/, "must document explicit ASG web instance profile ARN input.");
 requireMatch("readiness doc", doc, /ASG_WEB_INSTANCE_PROFILE_NAME/, "must document explicit ASG web instance profile name input.");
+requireMatch("readiness doc", doc, /ASG_ASSOCIATE_PUBLIC_IP/, "must document explicit ASG public IP association input.");
+requireMatch("readiness doc", doc, /NetworkInterfaces\[0\]\.AssociatePublicIpAddress=true/, "must document public-IP launch template networking shape.");
+requireMatch("readiness doc", doc, /SecurityGroupIds=\[SOURCE_SECURITY_GROUP\]/, "must document non-public-IP launch template networking shape.");
+requireMatch("readiness doc", doc, /MapPublicIpOnLaunch=false/, "must document the Mumbai retry subnet public-IP reason.");
+requireMatch("readiness doc", doc, /NAT Gateway or VPC endpoints/, "must document the preferred private subnet production design.");
 requireMatch("readiness doc", doc, /UserData/, "must document launch-template UserData bootstrap.");
 requireMatch("readiness doc", doc, /aws-asg-rolling-deploy-policy/, "must document the committed rolling deploy policy.");
 requireMatch("readiness doc", doc, /Rolling deploy policy is conditionally proven/, "must mark rolling deploy policy conditionally proven.");
@@ -147,6 +152,9 @@ requireMatch("readiness doc", doc, /Keep production DNS on London EC2/i, "must d
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_STATUS=CONDITIONALLY_READY/, "must mark the rolling policy document conditionally ready.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_WEB_INSTANCE_PROFILE_ARN/, "must define explicit ASG web instance profile ARN input.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_WEB_INSTANCE_PROFILE_NAME/, "must define explicit ASG web instance profile name input.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_ASSOCIATE_PUBLIC_IP/, "must define explicit ASG public IP association input.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /NetworkInterfaces\[0\]\.AssociatePublicIpAddress=true/, "must define public-IP launch template networking shape.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /SecurityGroupIds=\[SOURCE_SECURITY_GROUP\]/, "must define non-public-IP launch template networking shape.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /UserData/, "must define UserData bootstrap.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /deregistration delay/i, "must define the target group deregistration delay.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /health check grace period: 180 seconds/i, "must define 180 second health grace.");
@@ -208,6 +216,7 @@ requireMatch("ASG bootstrap", asgBootstrap, /deps\.objectStorage\?\.ready === tr
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /write_asg_web_launch_template_json/, "common helpers must generate ASG web launch template JSON.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /validate_asg_launch_template_json/, "common helpers must validate ASG web launch template JSON.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /ASG_WEB_INSTANCE_PROFILE_ARN or ASG_WEB_INSTANCE_PROFILE_NAME is required/, "common helpers must require explicit ASG web instance profile input.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /ASG_ASSOCIATE_PUBLIC_IP must be true or false/, "common helpers must validate ASG_ASSOCIATE_PUBLIC_IP.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /UserData: Buffer\.from\(userData, "utf8"\)\.toString\("base64"\)/, "common helpers must base64 encode launch template UserData.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /\/var\/log\/mscqr-asg-bootstrap\.log/, "UserData must log to the ASG bootstrap log file.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /git fetch origin main/, "UserData must fetch main.");
@@ -216,10 +225,19 @@ requireMatch("DR common", requireFile("scripts/dr/common.sh"), /scripts\/dr\/boo
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /MetadataOptions\?\.HttpTokens !== "required"/, "launch template validation must require IMDSv2 token enforcement.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /data\.IamInstanceProfile/, "launch template validation must require IamInstanceProfile.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /data\.UserData/, "launch template validation must require UserData.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /NetworkInterfaces = \[/, "common helpers must emit NetworkInterfaces when ASG_ASSOCIATE_PUBLIC_IP=true.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /AssociatePublicIpAddress: true/, "common helpers must support public IP association.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /data\.SecurityGroupIds = \[securityGroup\]/, "common helpers must keep SecurityGroupIds when ASG_ASSOCIATE_PUBLIC_IP=false.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /must not set top-level SecurityGroupIds when ASG_ASSOCIATE_PUBLIC_IP=true/, "launch template validation must reject mixed public-IP networking shape.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /must not set NetworkInterfaces when ASG_ASSOCIATE_PUBLIC_IP=false/, "launch template validation must reject NetworkInterfaces when public IP association is false.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /Groups must include SOURCE_SECURITY_GROUP/, "launch template validation must require SOURCE_SECURITY_GROUP in NetworkInterfaces groups.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /SecurityGroupIds must include SOURCE_SECURITY_GROUP/, "launch template validation must require SOURCE_SECURITY_GROUP in SecurityGroupIds.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /aws-asg-rolling-deploy-policy\.checklist\.json/, "apply plan must read the rolling policy checklist.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /render_asg_rolling_policy_env/, "apply plan must validate the rolling policy through common helpers.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_WEB_INSTANCE_PROFILE_ARN/, "apply plan must accept explicit ASG web instance profile ARN.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_WEB_INSTANCE_PROFILE_NAME/, "apply plan must accept explicit ASG web instance profile name.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_ASSOCIATE_PUBLIC_IP/, "apply plan must accept ASG_ASSOCIATE_PUBLIC_IP.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /Associate public IP/, "apply plan must include public IP association state in the markdown plan.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /write_asg_web_launch_template_json/, "apply plan must generate launch template through shared helper.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /validate_asg_launch_template_json/, "apply plan must validate proposed launch template JSON.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /HealthCheckGracePeriod/, "apply plan must include health check grace period in the plan artifact.");
@@ -230,6 +248,8 @@ requireMatch("ASG apply", asgApplyScript, /aws-asg-rolling-deploy-policy\.checkl
 requireMatch("ASG apply", asgApplyScript, /render_asg_rolling_policy_env/, "apply script must validate the rolling policy through common helpers.");
 requireMatch("ASG apply", asgApplyScript, /ASG_WEB_INSTANCE_PROFILE_ARN/, "apply script must accept explicit ASG web instance profile ARN.");
 requireMatch("ASG apply", asgApplyScript, /ASG_WEB_INSTANCE_PROFILE_NAME/, "apply script must accept explicit ASG web instance profile name.");
+requireMatch("ASG apply", asgApplyScript, /ASG_ASSOCIATE_PUBLIC_IP/, "apply script must accept ASG_ASSOCIATE_PUBLIC_IP.");
+requireMatch("ASG apply", asgApplyScript, /ASG_ASSOCIATE_PUBLIC_IP must be true or false/, "apply script must validate ASG_ASSOCIATE_PUBLIC_IP.");
 requireMatch("ASG apply", asgApplyScript, /source instance profile is not reused automatically/, "apply script must refuse implicit source instance profile reuse.");
 requireMatch("ASG apply", asgApplyScript, /write_asg_web_launch_template_json/, "apply script must generate launch template through shared helper.");
 requireMatch("ASG apply", asgApplyScript, /validate_asg_launch_template_json/, "apply script must validate launch template JSON.");
@@ -402,11 +422,26 @@ if (asgRollingPolicyChecklist) {
     failures.push("ASG rolling policy checklist must keep replacement_instance_drill_required=true.");
   }
   const requiredInputs = new Set(asgRollingPolicyChecklist.launch_template_required_inputs || []);
-  for (const input of ["ASG_WEB_INSTANCE_PROFILE_ARN", "ASG_WEB_INSTANCE_PROFILE_NAME"]) {
+  for (const input of ["ASG_WEB_INSTANCE_PROFILE_ARN", "ASG_WEB_INSTANCE_PROFILE_NAME", "ASG_ASSOCIATE_PUBLIC_IP"]) {
     if (!requiredInputs.has(input)) failures.push(`ASG rolling policy checklist launch_template_required_inputs must include ${input}.`);
   }
+  if (asgRollingPolicyChecklist.associate_public_ip_default !== false) {
+    failures.push("ASG rolling policy checklist associate_public_ip_default must be false.");
+  }
+  const publicIpAllowed = JSON.stringify(asgRollingPolicyChecklist.associate_public_ip_allowed_values || []);
+  if (publicIpAllowed !== JSON.stringify([true, false])) {
+    failures.push("ASG rolling policy checklist associate_public_ip_allowed_values must be [true,false].");
+  }
   const requiredFields = new Set(asgRollingPolicyChecklist.launch_template_required_fields || []);
-  for (const field of ["IamInstanceProfile", "UserData", "MetadataOptions.HttpTokens=required", "SecurityGroupIds", "ImageId", "InstanceType"]) {
+  for (const field of [
+    "IamInstanceProfile",
+    "UserData",
+    "MetadataOptions.HttpTokens=required",
+    "SecurityGroupIds when ASG_ASSOCIATE_PUBLIC_IP=false",
+    "NetworkInterfaces[0].AssociatePublicIpAddress=true and Groups when ASG_ASSOCIATE_PUBLIC_IP=true",
+    "ImageId",
+    "InstanceType",
+  ]) {
     if (!requiredFields.has(field)) failures.push(`ASG rolling policy checklist launch_template_required_fields must include ${field}.`);
   }
   const userDataBehaviors = JSON.stringify(asgRollingPolicyChecklist.userdata_required_behaviors || []);

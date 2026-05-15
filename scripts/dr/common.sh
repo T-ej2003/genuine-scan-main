@@ -315,14 +315,20 @@ write_asg_web_launch_template_json() {
   aws_region="$7"
   asg_web_instance_profile_arn="$8"
   asg_web_instance_profile_name="$9"
-  wrapper_mode="${10:-data}"
+  asg_associate_public_ip="${10:-false}"
+  wrapper_mode="${11:-data}"
 
   if [ -z "$asg_web_instance_profile_arn" ] && [ -z "$asg_web_instance_profile_name" ]; then
     echo "ASG_WEB_INSTANCE_PROFILE_ARN or ASG_WEB_INSTANCE_PROFILE_NAME is required. Do not reuse the source instance profile implicitly." >&2
     exit 2
   fi
 
-  node --input-type=module - "$output_path" "$launch_template_name" "$source_ami" "$source_instance_type" "$source_security_group" "$target_region_group" "$aws_region" "$asg_web_instance_profile_arn" "$asg_web_instance_profile_name" "$wrapper_mode" <<'NODE'
+  case "$asg_associate_public_ip" in
+    true|false) ;;
+    *) echo "ASG_ASSOCIATE_PUBLIC_IP must be true or false." >&2; exit 2 ;;
+  esac
+
+  node --input-type=module - "$output_path" "$launch_template_name" "$source_ami" "$source_instance_type" "$source_security_group" "$target_region_group" "$aws_region" "$asg_web_instance_profile_arn" "$asg_web_instance_profile_name" "$asg_associate_public_ip" "$wrapper_mode" <<'NODE'
 import fs from "node:fs";
 
 const [
@@ -335,6 +341,7 @@ const [
   awsRegion,
   profileArn,
   profileName,
+  associatePublicIp,
   wrapperMode,
 ] = process.argv.slice(2);
 
@@ -384,10 +391,13 @@ scripts/dr/bootstrap-asg-web-node.sh "$TARGET_REGION_GROUP" "$AWS_REGION"
 echo "MSCQR ASG web-node bootstrap completed."
 `;
 
+if (!["true", "false"].includes(associatePublicIp)) {
+  fail("ASG_ASSOCIATE_PUBLIC_IP must be true or false.");
+}
+
 const data = {
   ImageId: imageId,
   InstanceType: instanceType,
-  SecurityGroupIds: [securityGroup],
   IamInstanceProfile: profileArn ? { Arn: profileArn } : { Name: profileName },
   UserData: Buffer.from(userData, "utf8").toString("base64"),
   MetadataOptions: {
@@ -406,6 +416,18 @@ const data = {
   ],
 };
 
+if (associatePublicIp === "true") {
+  data.NetworkInterfaces = [
+    {
+      DeviceIndex: 0,
+      AssociatePublicIpAddress: true,
+      Groups: [securityGroup],
+    },
+  ];
+} else {
+  data.SecurityGroupIds = [securityGroup];
+}
+
 const payload = wrapperMode === "wrapper"
   ? { LaunchTemplateName: launchTemplateName, LaunchTemplateData: data }
   : data;
@@ -417,11 +439,18 @@ NODE
 validate_asg_launch_template_json() {
   launch_template_path="$1"
   wrapper_mode="${2:-data}"
+  expected_associate_public_ip="${3:-false}"
+  expected_security_group="${4:-}"
 
-  node --input-type=module - "$launch_template_path" "$wrapper_mode" <<'NODE'
+  case "$expected_associate_public_ip" in
+    true|false) ;;
+    *) echo "ASG_ASSOCIATE_PUBLIC_IP must be true or false." >&2; exit 2 ;;
+  esac
+
+  node --input-type=module - "$launch_template_path" "$wrapper_mode" "$expected_associate_public_ip" "$expected_security_group" <<'NODE'
 import fs from "node:fs";
 
-const [launchTemplatePath, wrapperMode] = process.argv.slice(2);
+const [launchTemplatePath, wrapperMode, expectedAssociatePublicIp, expectedSecurityGroup] = process.argv.slice(2);
 const payload = JSON.parse(fs.readFileSync(launchTemplatePath, "utf8"));
 const data = wrapperMode === "wrapper" ? payload.LaunchTemplateData : payload;
 
@@ -433,8 +462,32 @@ const fail = (message) => {
 if (!data || typeof data !== "object") fail("Launch template data is missing.");
 if (!data.ImageId) fail("Launch template data is missing ImageId.");
 if (!data.InstanceType) fail("Launch template data is missing InstanceType.");
-if (!Array.isArray(data.SecurityGroupIds) || data.SecurityGroupIds.length === 0) {
-  fail("Launch template data is missing SecurityGroupIds.");
+if (expectedAssociatePublicIp === "true") {
+  if (Array.isArray(data.SecurityGroupIds)) {
+    fail("Launch template data must not set top-level SecurityGroupIds when ASG_ASSOCIATE_PUBLIC_IP=true.");
+  }
+  const primaryInterface = Array.isArray(data.NetworkInterfaces) ? data.NetworkInterfaces[0] : null;
+  if (!primaryInterface) fail("Launch template data is missing NetworkInterfaces[0].");
+  if (primaryInterface.DeviceIndex !== 0) fail("NetworkInterfaces[0].DeviceIndex must be 0.");
+  if (primaryInterface.AssociatePublicIpAddress !== true) {
+    fail("NetworkInterfaces[0].AssociatePublicIpAddress must be true when ASG_ASSOCIATE_PUBLIC_IP=true.");
+  }
+  if (!Array.isArray(primaryInterface.Groups) || primaryInterface.Groups.length === 0) {
+    fail("NetworkInterfaces[0].Groups must include the source security group.");
+  }
+  if (expectedSecurityGroup && !primaryInterface.Groups.includes(expectedSecurityGroup)) {
+    fail("NetworkInterfaces[0].Groups must include SOURCE_SECURITY_GROUP.");
+  }
+} else {
+  if (Array.isArray(data.NetworkInterfaces)) {
+    fail("Launch template data must not set NetworkInterfaces when ASG_ASSOCIATE_PUBLIC_IP=false.");
+  }
+  if (!Array.isArray(data.SecurityGroupIds) || data.SecurityGroupIds.length === 0) {
+    fail("Launch template data is missing SecurityGroupIds.");
+  }
+  if (expectedSecurityGroup && !data.SecurityGroupIds.includes(expectedSecurityGroup)) {
+    fail("SecurityGroupIds must include SOURCE_SECURITY_GROUP.");
+  }
 }
 if (!data.IamInstanceProfile || (!data.IamInstanceProfile.Arn && !data.IamInstanceProfile.Name)) {
   fail("Launch template data is missing explicit IamInstanceProfile.");

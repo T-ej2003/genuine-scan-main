@@ -24,6 +24,7 @@ The app has several good production controls already:
 - `documents/ops/aws-asg-web-ssm-parameter-manifest.json` records required root/backend env parameter names without values.
 - ASG launch-template plan/apply now requires explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`.
 - ASG launch-template plan/apply now emits base64 `UserData` that runs the ASG web bootstrap script from `/home/ubuntu/genuine-scan-main`.
+- ASG launch-template plan/apply now supports explicit `ASG_ASSOCIATE_PUBLIC_IP=true|false` networking, with `false` as the default.
 - `documents/ops/aws-asg-rolling-deploy-policy.md` and `documents/ops/aws-asg-rolling-deploy-policy.checklist.json` define the rolling deploy contract, rollback criteria, and replacement-instance drill.
 - `/healthz` exists for shallow app liveness and `/api/health/ready` reaches backend dependency readiness through Nginx.
 
@@ -255,6 +256,7 @@ ASG bootstrap checklist:
 - Fetch environment from SSM Parameter Store through instance profile using `scripts/dr/bootstrap-asg-web-node.sh`.
 - Include launch-template `UserData` that logs only non-secret bootstrap status to `/var/log/mscqr-asg-bootstrap.log`.
 - Keep launch-template `IamInstanceProfile` explicit and supplied by `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`.
+- Set launch-template public IP behavior explicitly with `ASG_ASSOCIATE_PUBLIC_IP=true` or `ASG_ASSOCIATE_PUBLIC_IP=false`.
 - Set `RUN_DB_MIGRATIONS_ON_START=false`.
 - Set backend `RUN_BACKGROUND_WORKERS=false` on web nodes.
 - Point `REDIS_URL` to shared regional Redis.
@@ -302,7 +304,15 @@ Launch-template requirements:
 - `UserData` must be base64 encoded and must run `scripts/dr/bootstrap-asg-web-node.sh "$TARGET_REGION_GROUP" "$AWS_REGION"` from `/home/ubuntu/genuine-scan-main`.
 - `UserData` must log to `/var/log/mscqr-asg-bootstrap.log`, fetch/reset `origin/main`, avoid printing secret values, and never touch Route 53 or production DNS.
 - `MetadataOptions.HttpTokens` must be `required`.
-- `ImageId`, `InstanceType`, and `SecurityGroupIds` must be present.
+- `ImageId` and `InstanceType` must be present.
+- `ASG_ASSOCIATE_PUBLIC_IP=false` must use top-level `SecurityGroupIds=[SOURCE_SECURITY_GROUP]` and no `NetworkInterfaces`.
+- `ASG_ASSOCIATE_PUBLIC_IP=true` must use `NetworkInterfaces[0].AssociatePublicIpAddress=true` with `Groups=[SOURCE_SECURITY_GROUP]` and no top-level `SecurityGroupIds`.
+
+Mumbai retry note:
+
+- The first failed Mumbai ASG attempt produced instances that failed ALB health checks, and console output showed bootstrap/network credential failures.
+- Mumbai selected public subnets currently have `MapPublicIpOnLaunch=false`, so the next no-DNS Mumbai retry should use `ASG_ASSOCIATE_PUBLIC_IP=true`.
+- Preferred production design: move ASG web nodes to private app subnets with NAT Gateway or VPC endpoints for SSM, EC2Messages, SSMMessages, S3, ECR, CloudWatch Logs, and Git access, then use `ASG_ASSOCIATE_PUBLIC_IP=false`.
 
 Approved first-rollout values:
 

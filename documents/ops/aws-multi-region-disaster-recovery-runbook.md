@@ -101,11 +101,11 @@ Apply order:
 4. `apply-waf-count-mode`.
 5. `verify-hardening-state`.
 6. `generate-asg-apply-plan`.
-7. `apply-asg-launch-template-approved` only after app state risks are resolved, `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME` is explicitly supplied, and the rollout is treated as a no-production-DNS validation drill.
+7. `apply-asg-launch-template-approved` only after app state risks are resolved, `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME` is explicitly supplied, `ASG_ASSOCIATE_PUBLIC_IP` is intentionally set for the selected subnet design, and the rollout is treated as a no-production-DNS validation drill.
 
 Hardening does not perform production DNS cutover, delete AWS resources, mutate RDS, mutate application S3 buckets, copy Let's Encrypt keys, or move WAF rules to BLOCK mode. WAF remains COUNT mode only in this phase.
 
-ASG apply is intentionally last because current single-node assumptions may include node-local Redis, MinIO, secrets, sessions, migrations, worker behavior, and filesystem state. ASG_STATUS=CONDITIONALLY_READY means the repo-side blockers are closed, but the first live create/attach plus replacement-instance drill still needs evidence. The launch template must include explicit ASG web instance profile input and deterministic UserData bootstrap. Do not use final production DNS cutover until at least the selected region has healthy multi-target evidence and a reviewed rollback plan.
+ASG apply is intentionally last because current single-node assumptions may include node-local Redis, MinIO, secrets, sessions, migrations, worker behavior, and filesystem state. ASG_STATUS=CONDITIONALLY_READY means the repo-side blockers are closed, but the first live create/attach plus replacement-instance drill still needs evidence. The launch template must include explicit ASG web instance profile input, deterministic UserData bootstrap, and the expected `ASG_ASSOCIATE_PUBLIC_IP` networking shape. For Mumbai's first retry, use `ASG_ASSOCIATE_PUBLIC_IP=true` because the selected public subnets have `MapPublicIpOnLaunch=false`; the preferred production design is private ASG subnets with NAT Gateway or VPC endpoints, then `ASG_ASSOCIATE_PUBLIC_IP=false`. Do not use final production DNS cutover until at least the selected region has healthy multi-target evidence and a reviewed rollback plan.
 
 ## Operator Sequence
 

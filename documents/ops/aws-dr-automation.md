@@ -411,6 +411,8 @@ Rollback notes:
 - ASG apply creates extra capacity and attaches it to the target group. It does not detach or delete the source instance, terminate instances, or change DNS.
 - The first ASG rollout must keep production DNS on London EC2 and must include the replacement-instance drill from `documents/ops/aws-asg-rolling-deploy-policy.md`.
 - ASG launch templates must use explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`. Do not reuse the source instance profile automatically.
+- ASG launch templates must set `ASG_ASSOCIATE_PUBLIC_IP=true` or `ASG_ASSOCIATE_PUBLIC_IP=false` explicitly. Mumbai first retry should use `true` because the selected public subnets currently have `MapPublicIpOnLaunch=false`.
+- Preferred production design is private ASG subnets with NAT Gateway or VPC endpoints for SSM, EC2Messages, SSMMessages, S3, ECR, CloudWatch Logs, and Git access, then `ASG_ASSOCIATE_PUBLIC_IP=false`.
 
 Mumbai hardening values:
 
@@ -446,6 +448,7 @@ TARGET_GROUP_ARN=arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgrou
 ASG_WEB_INSTANCE_PROFILE_ARN=<approved-asg-web-instance-profile-arn>
 # Or, if using a profile name instead of ARN:
 # ASG_WEB_INSTANCE_PROFILE_NAME=<approved-asg-web-instance-profile-name>
+ASG_ASSOCIATE_PUBLIC_IP=true
 ROLLBACK_ALARM_NAMES_CSV=MSCQR-mumbai-ALB-5XX,MSCQR-mumbai-Target-5XX,MSCQR-mumbai-TargetResponseTime-p95,MSCQR-mumbai-UnhealthyHosts
 MIN_SIZE=2
 DESIRED_CAPACITY=2

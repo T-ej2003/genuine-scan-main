@@ -21,13 +21,20 @@
   "target_group_health_required": 2,
   "launch_template_required_inputs": [
     "ASG_WEB_INSTANCE_PROFILE_ARN",
-    "ASG_WEB_INSTANCE_PROFILE_NAME"
+    "ASG_WEB_INSTANCE_PROFILE_NAME",
+    "ASG_ASSOCIATE_PUBLIC_IP"
+  ],
+  "associate_public_ip_default": false,
+  "associate_public_ip_allowed_values": [
+    true,
+    false
   ],
   "launch_template_required_fields": [
     "IamInstanceProfile",
     "UserData",
     "MetadataOptions.HttpTokens=required",
-    "SecurityGroupIds",
+    "SecurityGroupIds when ASG_ASSOCIATE_PUBLIC_IP=false",
+    "NetworkInterfaces[0].AssociatePublicIpAddress=true and Groups when ASG_ASSOCIATE_PUBLIC_IP=true",
     "ImageId",
     "InstanceType"
   ],

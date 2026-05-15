@@ -18,6 +18,7 @@ SOURCE_SECURITY_GROUP="${SOURCE_SECURITY_GROUP:-}"
 TARGET_GROUP_ARN="${TARGET_GROUP_ARN:-}"
 ASG_WEB_INSTANCE_PROFILE_ARN="${ASG_WEB_INSTANCE_PROFILE_ARN:-}"
 ASG_WEB_INSTANCE_PROFILE_NAME="${ASG_WEB_INSTANCE_PROFILE_NAME:-}"
+ASG_ASSOCIATE_PUBLIC_IP="${ASG_ASSOCIATE_PUBLIC_IP:-false}"
 ROLLING_POLICY_CHECKLIST_PATH="${ROLLING_POLICY_CHECKLIST_PATH:-documents/ops/aws-asg-rolling-deploy-policy.checklist.json}"
 
 case "$TARGET_REGION_GROUP" in
@@ -34,6 +35,11 @@ if [ -z "$ASG_WEB_INSTANCE_PROFILE_ARN" ] && [ -z "$ASG_WEB_INSTANCE_PROFILE_NAM
   echo "ASG_WEB_INSTANCE_PROFILE_ARN or ASG_WEB_INSTANCE_PROFILE_NAME is required for ASG web launch-template planning." >&2
   exit 2
 fi
+
+case "$ASG_ASSOCIATE_PUBLIC_IP" in
+  true|false) ;;
+  *) echo "ASG_ASSOCIATE_PUBLIC_IP must be true or false." >&2; exit 2 ;;
+esac
 
 policy_env_file="$(mktemp "${TMPDIR:-/tmp}/mscqr-asg-rolling-policy.XXXXXX")"
 trap 'rm -f "$policy_env_file"' EXIT HUP INT TERM
@@ -83,8 +89,9 @@ write_asg_web_launch_template_json \
   "$AWS_REGION" \
   "$ASG_WEB_INSTANCE_PROFILE_ARN" \
   "$ASG_WEB_INSTANCE_PROFILE_NAME" \
+  "$ASG_ASSOCIATE_PUBLIC_IP" \
   wrapper
-validate_asg_launch_template_json "$out_dir/proposed-launch-template.json" wrapper
+validate_asg_launch_template_json "$out_dir/proposed-launch-template.json" wrapper "$ASG_ASSOCIATE_PUBLIC_IP" "$SOURCE_SECURITY_GROUP"
 
 /bin/cat > "$out_dir/proposed-asg.json" <<JSON
 {
@@ -113,6 +120,12 @@ JSON
     printf '%s\n' "- ASG web instance profile: explicit ARN provided"
   else
     printf '%s\n' "- ASG web instance profile name: \`$ASG_WEB_INSTANCE_PROFILE_NAME\`"
+  fi
+  printf '%s\n' "- Associate public IP: \`$ASG_ASSOCIATE_PUBLIC_IP\`"
+  if [ "$ASG_ASSOCIATE_PUBLIC_IP" = "true" ]; then
+    printf '%s\n' "- Launch template networking: \`NetworkInterfaces[0].AssociatePublicIpAddress=true\` with \`Groups=[$SOURCE_SECURITY_GROUP]\` and no top-level \`SecurityGroupIds\`"
+  else
+    printf '%s\n' "- Launch template networking: top-level \`SecurityGroupIds=[$SOURCE_SECURITY_GROUP]\` and no \`NetworkInterfaces\`"
   fi
   printf '%s\n' "- Launch template UserData: base64 bootstrap that runs \`scripts/dr/bootstrap-asg-web-node.sh \"$TARGET_REGION_GROUP\" \"$AWS_REGION\"\`"
   printf '%s\n' "- Selected app subnets: \`$selected_subnet_ids\`"

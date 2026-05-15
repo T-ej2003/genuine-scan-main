@@ -18,6 +18,7 @@ SOURCE_SECURITY_GROUP="${SOURCE_SECURITY_GROUP:-}"
 TARGET_GROUP_ARN="${TARGET_GROUP_ARN:-}"
 ASG_WEB_INSTANCE_PROFILE_ARN="${ASG_WEB_INSTANCE_PROFILE_ARN:-}"
 ASG_WEB_INSTANCE_PROFILE_NAME="${ASG_WEB_INSTANCE_PROFILE_NAME:-}"
+ASG_ASSOCIATE_PUBLIC_IP="${ASG_ASSOCIATE_PUBLIC_IP:-false}"
 ROLLING_POLICY_CHECKLIST_PATH="${ROLLING_POLICY_CHECKLIST_PATH:-documents/ops/aws-asg-rolling-deploy-policy.checklist.json}"
 ROLLBACK_ALARM_NAMES_CSV="${ROLLBACK_ALARM_NAMES_CSV:-}"
 CONFIRM_ASG_APPLY="${CONFIRM_ASG_APPLY:-}"
@@ -36,6 +37,11 @@ if [ -z "$ASG_WEB_INSTANCE_PROFILE_ARN" ] && [ -z "$ASG_WEB_INSTANCE_PROFILE_NAM
   echo "ASG_WEB_INSTANCE_PROFILE_ARN or ASG_WEB_INSTANCE_PROFILE_NAME is required for ASG web launch-template apply. The source instance profile is not reused automatically." >&2
   exit 2
 fi
+
+case "$ASG_ASSOCIATE_PUBLIC_IP" in
+  true|false) ;;
+  *) echo "ASG_ASSOCIATE_PUBLIC_IP must be true or false." >&2; exit 2 ;;
+esac
 
 policy_env_file="$(mktemp "${TMPDIR:-/tmp}/mscqr-asg-rolling-policy.XXXXXX")"
 trap 'rm -f "$policy_env_file"' EXIT HUP INT TERM
@@ -123,8 +129,9 @@ write_asg_web_launch_template_json \
   "$AWS_REGION" \
   "$ASG_WEB_INSTANCE_PROFILE_ARN" \
   "$ASG_WEB_INSTANCE_PROFILE_NAME" \
+  "$ASG_ASSOCIATE_PUBLIC_IP" \
   data
-validate_asg_launch_template_json "$launch_template_data" data
+validate_asg_launch_template_json "$launch_template_data" data "$ASG_ASSOCIATE_PUBLIC_IP" "$SOURCE_SECURITY_GROUP"
 
 launch_template_id="$(aws ec2 describe-launch-templates \
   --region "$AWS_REGION" \
@@ -232,6 +239,7 @@ aws autoscaling describe-auto-scaling-groups --region "$AWS_REGION" --auto-scali
   printf 'HEALTHY_TARGET_COUNT=%s\n' "$healthy_count"
   printf 'ROLLING_POLICY_CHECKLIST_PATH=%s\n' "$ROLLING_POLICY_CHECKLIST_PATH"
   printf 'ROLLBACK_ALARM_NAMES_CSV=%s\n' "$ROLLBACK_ALARM_NAMES_CSV"
+  printf 'ASG_ASSOCIATE_PUBLIC_IP=%s\n' "$ASG_ASSOCIATE_PUBLIC_IP"
 } > "$out_dir/outputs.env"
 
 /bin/cat "$out_dir/outputs.env"

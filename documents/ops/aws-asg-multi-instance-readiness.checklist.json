@@ -3,7 +3,7 @@
   "service": "MSCQR",
   "lastAudited": "2026-05-15",
   "asgStatus": "CONDITIONALLY_READY",
-  "statusReason": "Regional Redis, regional S3 object storage, ASG web-node worker exclusion, SSM-backed bootstrap, deterministic launch-template UserData, explicit ASG web instance profile input, and the rolling deploy contract are committed. The remaining go/no-go is a first live ASG create/attach plus replacement-instance drill with no production DNS cutover.",
+  "statusReason": "Regional Redis, regional S3 object storage, ASG web-node worker exclusion, SSM-backed bootstrap, deterministic launch-template UserData, explicit ASG web instance profile input, explicit ASG public-IP networking mode, and the rolling deploy contract are committed. The remaining go/no-go is a first live ASG create/attach plus replacement-instance drill with no production DNS cutover.",
   "safeToCreateAsg": false,
   "safeToModifyProductionDns": false,
   "safeToMutateRdsData": false,
@@ -59,6 +59,9 @@
         "The bootstrap script starts docker-compose.asg-web.yml backend and frontend only, then verifies /healthz and /api/health/ready through Nginx.",
         "scripts/dr/generate-asg-apply-plan.sh and scripts/dr/apply-asg-launch-template-approved.sh require ASG_WEB_INSTANCE_PROFILE_ARN or ASG_WEB_INSTANCE_PROFILE_NAME and do not reuse the source instance profile automatically.",
         "Generated launch template data includes base64 UserData that runs scripts/dr/bootstrap-asg-web-node.sh with the target region group and AWS region.",
+        "scripts/dr/generate-asg-apply-plan.sh and scripts/dr/apply-asg-launch-template-approved.sh support ASG_ASSOCIATE_PUBLIC_IP=true or false only.",
+        "When ASG_ASSOCIATE_PUBLIC_IP=true, launch template data uses NetworkInterfaces[0].AssociatePublicIpAddress=true with Groups and no top-level SecurityGroupIds.",
+        "When ASG_ASSOCIATE_PUBLIC_IP=false, launch template data uses top-level SecurityGroupIds and no NetworkInterfaces.",
         "ops/aws/iam/dr/asg-web-instance-profile-policy.template.json defines least-privilege SSM read, scoped KMS decrypt, regional S3 artifact access, and ECR image pull permissions."
       ],
       "condition": "ASG launch templates must call scripts/dr/bootstrap-asg-web-node.sh with the approved region group and AWS region through UserData. The explicit ASG web instance profile must be scoped to the documented SSM prefix and artifact bucket."
@@ -73,7 +76,7 @@
         "scripts/dr/generate-asg-apply-plan.sh reads the rolling policy checklist and includes those values in the generated ASG apply plan.",
         "scripts/dr/generate-asg-apply-plan.sh validates proposed launch template data for IamInstanceProfile, UserData, required IMDSv2, security group, AMI, and instance type.",
         "scripts/dr/apply-asg-launch-template-approved.sh reads the rolling policy checklist, refuses non-policy first-rollout capacity, and refuses apply when deregistration delay or rollback alarm names are unsafe.",
-        "scripts/dr/apply-asg-launch-template-approved.sh validates launch-template-data.json for IamInstanceProfile, UserData, required IMDSv2, security group, AMI, and instance type before any create/update path."
+        "scripts/dr/apply-asg-launch-template-approved.sh validates launch-template-data.json for IamInstanceProfile, UserData, required IMDSv2, AMI, instance type, and the expected public-IP networking shape before any create/update path."
       ],
       "condition": "Before a real regional apply, operators must supply the reviewed CloudWatch rollback alarm names and complete one no-DNS ASG create/attach plus replacement-instance drill with evidence."
     }
@@ -92,6 +95,7 @@
     "Fresh instance bootstrap is repeatable from image, user data, env, and repository scripts.",
     "Launch template plan and apply require ASG_WEB_INSTANCE_PROFILE_ARN or ASG_WEB_INSTANCE_PROFILE_NAME.",
     "Launch template plan and apply include deterministic base64 UserData for ASG web-node bootstrap.",
+    "Launch template plan and apply use ASG_ASSOCIATE_PUBLIC_IP=true only as a temporary retry bridge for public subnets without MapPublicIpOnLaunch; the preferred steady-state design is private ASG subnets with NAT Gateway or VPC endpoints and ASG_ASSOCIATE_PUBLIC_IP=false.",
     "ALB health checks use /healthz for shallow liveness or /api/health/ready for dependency readiness according to the rollout phase.",
     "Rolling deploy and rollback behavior are documented in-repo and must be validated through the first no-DNS regional replacement-instance drill."
   ],
