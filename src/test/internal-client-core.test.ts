@@ -63,4 +63,20 @@ describe("internal client core HTML error handling", () => {
     expect(response.code).toBe("RATE_LIMITED");
     expect(response.retryAfterSec).toBe(42);
   });
+
+  it("marks state-changing timeouts as unknown outcome", async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(Object.assign(new Error("aborted"), { name: "AbortError" }));
+
+    const client = createApiClientCore();
+    const response = await client.request("/licensees", {
+      method: "POST",
+      body: JSON.stringify({ name: "Acme" }),
+      skipAuthRefresh: true,
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.code).toBe("REQUEST_TIMEOUT");
+    expect(response.status).toBe(0);
+    expect(response.unknownOutcome).toBe(true);
+  });
 });

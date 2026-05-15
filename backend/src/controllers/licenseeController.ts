@@ -1,15 +1,17 @@
 //backend/src/controllers/licenseeController.ts
 import { Response } from "express";
 import { z } from "zod";
+import { Prisma, UserRole } from "@prisma/client";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
-import { UserRole } from "@prisma/client";
 import { createAuditLog } from "../services/auditService";
 import { randomUUID } from "crypto";
 import { hashPassword } from "../services/auth/passwordService";
 import { createInvite } from "../services/auth/inviteService";
 import { hashIp, normalizeUserAgent } from "../utils/security";
 import { isValidEmailAddress, normalizeEmailAddress } from "../utils/email";
+import { beginIdempotentAction, completeIdempotentAction, extractIdempotencyKey } from "../services/idempotencyService";
+import { maskEmailForLog } from "../services/mailTransportService";
 
 const prefixSchema = z
   .string()
@@ -105,7 +107,87 @@ const escapeCsv = (v: any) => {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
+const mapIdempotencyError = (error: unknown) => {
+  const msg = String((error as any)?.message || "");
+  if (msg === "IDEMPOTENCY_KEY_IN_PROGRESS") {
+    return { status: 409, error: "A matching create request is already in progress. Please wait a moment and refresh." };
+  }
+  if (msg === "IDEMPOTENCY_KEY_PAYLOAD_MISMATCH") {
+    return { status: 409, error: "This request was already used for different details. Please retry from the form." };
+  }
+  if (msg === "IDEMPOTENCY_KEY_REQUIRED") {
+    return { status: 400, error: "A request idempotency key is required." };
+  }
+  return null;
+};
+
+const licenseeConflictMessage = (target?: unknown) => {
+  const fields = Array.isArray(target) ? target.map(String) : [String(target || "")];
+  if (fields.some((field) => field.includes("prefix"))) return "A brand with this prefix already exists.";
+  if (fields.some((field) => field.includes("email"))) return "An admin with this email already exists.";
+  return "A brand or admin with these details already exists.";
+};
+
+const buildLicenseeCreateResponse = (params: {
+  created: boolean;
+  licensee: any;
+  adminUser: any;
+  adminInvite: any;
+  warning?: string | null;
+}) => {
+  const inviteCreated = Boolean(params.adminInvite?.inviteId || params.adminInvite?.inviteLink);
+  const emailSent = Boolean(params.adminInvite?.emailSent ?? params.adminInvite?.emailDelivered);
+  const emailErrorCode = params.adminInvite?.emailErrorCode || params.adminInvite?.deliveryError || null;
+  const message = inviteCreated
+    ? emailSent
+      ? "Brand created and invite email sent."
+      : "Brand created, but invite email could not be sent."
+    : params.warning
+      ? "Brand created, but invite could not be generated."
+      : "Brand created.";
+
+  return {
+    success: true,
+    data: {
+      ok: true,
+      created: params.created,
+      entity: params.licensee,
+      licensee: params.licensee,
+      adminUser: params.adminUser,
+      adminInvite: params.adminInvite,
+      invite: params.adminInvite
+        ? {
+            created: inviteCreated,
+            emailSent,
+            emailErrorCode,
+            inviteLink: params.adminInvite.inviteLink || null,
+            inviteId: params.adminInvite.inviteId || null,
+            expiresAt: params.adminInvite.expiresAt || null,
+          }
+        : {
+            created: false,
+            emailSent: false,
+            emailErrorCode: params.warning ? "UNKNOWN_EMAIL_ERROR" : null,
+            inviteLink: null,
+          },
+      message,
+      warning: params.warning || null,
+    },
+  };
+};
+
 export const createLicensee = async (req: AuthRequest, res: Response) => {
+  let idempotency: any;
+
+  const completeAndSend = async (statusCode: number, payload: any) => {
+    await completeIdempotentAction({
+      keyHash: idempotency?.keyHash,
+      statusCode,
+      responsePayload: payload,
+    });
+    return res.status(statusCode).json(payload);
+  };
+
   try {
     if (req.user?.role !== UserRole.SUPER_ADMIN && req.user?.role !== UserRole.PLATFORM_SUPER_ADMIN) {
       return res.status(403).json({ success: false, error: "Insufficient permissions" });
@@ -123,12 +205,29 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
     }
 
     const payload = parsed.data;
+    try {
+      idempotency = await beginIdempotentAction({
+        action: "licensee.create",
+        scope: req.user?.userId || "platform",
+        idempotencyKey: extractIdempotencyKey(req.headers as any, req.body as any),
+        requestPayload: payload,
+        required: false,
+        ttlSeconds: 1_800,
+      });
+    } catch (error) {
+      const mapped = mapIdempotencyError(error);
+      if (mapped) return res.status(mapped.status).json({ success: false, error: mapped.error, code: "IDEMPOTENCY_CONFLICT" });
+      throw error;
+    }
+    if (idempotency?.replayed) {
+      return res.status(idempotency.statusCode || 200).json(idempotency.responsePayload || { success: true });
+    }
 
     const licenseePayload = isNewFormat(payload) ? payload.licensee : payload;
     const adminPayload = isNewFormat(payload) ? payload.admin : payload.admin;
 
     if (!adminPayload) {
-      return res.status(400).json({
+      return completeAndSend(400, {
         success: false,
         error: "Admin credentials are required when creating a licensee.",
       });
@@ -138,7 +237,11 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
 
     const exists = await prisma.licensee.findUnique({ where: { prefix } });
     if (exists) {
-      return res.status(409).json({ success: false, error: "Prefix already in use" });
+      return completeAndSend(409, {
+        success: false,
+        error: "A brand with this prefix already exists.",
+        code: "DUPLICATE_LICENSEE_OR_ADMIN",
+      });
     }
 
     const email = adminPayload.email.toLowerCase();
@@ -146,7 +249,7 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
     const adminPassword = String(adminPayload.password || "").trim();
 
     if (!sendInvite && adminPassword.length < 6) {
-      return res.status(400).json({
+      return completeAndSend(400, {
         success: false,
         error: "Admin password must be at least 6 characters when invite mode is disabled.",
       });
@@ -154,7 +257,11 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
-      return res.status(409).json({ success: false, error: "Admin email already in use" });
+      return completeAndSend(409, {
+        success: false,
+        error: "An admin with this email already exists.",
+        code: "DUPLICATE_LICENSEE_OR_ADMIN",
+      });
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -226,7 +333,7 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
       details: {
         licenseeName: result.licensee.name,
         prefix: result.licensee.prefix,
-        adminEmail: email,
+        adminEmail: maskEmailForLog(email),
         sendInvite,
       },
       ipAddress: req.ip,
@@ -248,7 +355,8 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
           userAgent: normalizeUserAgent(req.get("user-agent")),
         });
       } catch (inviteError: any) {
-        warning = inviteError?.message || "Licensee created, but invite generation failed.";
+        console.error("createLicensee invite creation failed:", { name: inviteError?.name, code: inviteError?.code });
+        warning = "INVITE_CREATE_FAILED";
       }
     }
 
@@ -257,11 +365,20 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
       adminInvite,
       warning,
     };
-
-    return res.status(201).json({ success: true, data: out });
+    const responsePayload = buildLicenseeCreateResponse({
+      created: true,
+      licensee: out.licensee,
+      adminUser: out.adminUser,
+      adminInvite: out.adminInvite,
+      warning: out.warning,
+    });
+    return completeAndSend(201, responsePayload);
   } catch (e: any) {
-    console.error("createLicensee error:", e);
-    return res.status(500).json({ success: false, error: e?.message || "Internal server error" });
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      return completeAndSend(409, { success: false, error: licenseeConflictMessage(e.meta?.target), code: "DUPLICATE_LICENSEE_OR_ADMIN" });
+    }
+    console.error("createLicensee error:", { name: e?.name, code: e?.code });
+    return res.status(500).json({ success: false, error: "Brand could not be created. Please retry or contact support." });
   }
 };
 
@@ -569,7 +686,7 @@ export const resendLicenseeAdminInvite = async (req: AuthRequest, res: Response)
       entityId: invite.inviteId,
       details: {
         licenseeName: licensee.name,
-        adminEmail: existingAdmin.email,
+        adminEmail: maskEmailForLog(existingAdmin.email),
       },
       ipAddress: req.ip,
       userAgent: req.get("user-agent"),
@@ -577,12 +694,31 @@ export const resendLicenseeAdminInvite = async (req: AuthRequest, res: Response)
 
     return res.json({
       success: true,
-      data: invite,
+      data: {
+        ...invite,
+        ok: true,
+        created: Boolean(invite.inviteId || invite.inviteLink),
+        invite: {
+          created: Boolean(invite.inviteId || invite.inviteLink),
+          emailSent: Boolean(invite.emailSent ?? invite.emailDelivered),
+          emailErrorCode: invite.emailErrorCode || invite.deliveryError || null,
+          inviteLink: invite.inviteLink || null,
+          inviteId: invite.inviteId || null,
+          expiresAt: invite.expiresAt || null,
+        },
+        message: invite.emailSent ?? invite.emailDelivered
+          ? "Invite email sent."
+          : "Invite link created, but email could not be sent.",
+      },
     });
   } catch (e: any) {
     const msg = String(e?.message || "Failed to resend invite");
     const isConflict = /already active|different|disabled|not required/i.test(msg);
-    return res.status(isConflict ? 409 : 500).json({ success: false, error: msg });
+    return res.status(isConflict ? 409 : 500).json({
+      success: false,
+      error: isConflict ? msg : "Invite could not be sent. Please retry or copy the invite link.",
+      code: isConflict ? "INVITE_CONFLICT" : "INVITE_SEND_FAILED",
+    });
   }
 };
 

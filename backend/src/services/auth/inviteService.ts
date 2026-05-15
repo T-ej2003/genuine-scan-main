@@ -5,6 +5,7 @@ import { newCsrfToken } from "./tokenService";
 import { buildTokenHashCandidates, hashToken, randomOpaqueToken } from "../../utils/security";
 import { sendAuthEmail } from "./authEmailService";
 import { createAuditLog } from "../auditService";
+import { maskEmailForLog } from "../mailTransportService";
 import { normalizeEmailAddress } from "../../utils/email";
 import { isManufacturerRole, listManufacturerLicenseeLinks, upsertManufacturerLicenseeLink } from "../manufacturerScopeService";
 import { buildConnectorDownloadUrls } from "../connectorReleaseService";
@@ -350,10 +351,12 @@ export const createInvite = async (input: {
     return {
       inviteId: null,
       expiresAt: null,
-      email,
+      email: maskEmailForLog(email),
       role,
       inviteLink: null,
+      emailSent: false,
       emailDelivered: false,
+      emailErrorCode: null,
       deliveryError: null,
       providerMessageId: null,
       providerResponse: null,
@@ -440,11 +443,10 @@ export const createInvite = async (input: {
       manufacturerId,
       linkAction: result.linkAction,
       emailDelivered: delivery.delivered,
-      emailError: delivery.error || null,
+      emailErrorCode: delivery.errorCode || delivery.error || null,
       emailProviderMessageId: delivery.providerMessageId || null,
-      emailProviderResponse: delivery.providerResponse || null,
-      emailAcceptedRecipients: delivery.acceptedRecipients || [],
-      emailRejectedRecipients: delivery.rejectedRecipients || [],
+      emailAcceptedRecipients: (delivery.acceptedRecipients || []).map(maskEmailForLog).filter(Boolean),
+      emailRejectedRecipients: (delivery.rejectedRecipients || []).map(maskEmailForLog).filter(Boolean),
     },
     ipHash: input.ipHash || undefined,
     userAgent: input.userAgent || undefined,
@@ -458,10 +460,12 @@ export const createInvite = async (input: {
     inviteLink: acceptUrl,
     connectorDownloadUrl: connectorLandingUrl,
     connectorDownloads: connectorDistribution?.downloads || null,
+    emailSent: delivery.delivered,
     emailDelivered: delivery.delivered,
-    deliveryError: delivery.error || null,
+    emailErrorCode: delivery.errorCode || delivery.error || null,
+    deliveryError: delivery.errorCode || delivery.error || null,
     providerMessageId: delivery.providerMessageId || null,
-    providerResponse: delivery.providerResponse || null,
+    providerResponse: null,
     acceptedRecipients: delivery.acceptedRecipients || [],
     rejectedRecipients: delivery.rejectedRecipients || [],
     linkAction: result.linkAction,

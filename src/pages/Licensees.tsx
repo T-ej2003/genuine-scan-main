@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import apiClient from "@/lib/api-client";
+import { classifyApiError, friendlyEmailDeliveryMessage, getInviteDeliveryState } from "@/lib/api/friendly-errors";
 import { useOperationProgress } from "@/hooks/useOperationProgress";
 import { useToast } from "@/hooks/use-toast";
 import { LicenseeDialogs } from "@/features/licensees/components/LicenseeDialogs";
@@ -104,16 +105,18 @@ export default function Licensees() {
     setInviteActionLoadingId("");
 
     if (!res.success) {
+      const friendly = classifyApiError(res);
       toast({
-        title: "Invite action failed",
-        description: res.error || "Could not generate invite link.",
-        variant: "destructive",
+        title: friendly.title,
+        description: friendly.description,
+        variant: friendly.destructive ? "destructive" : undefined,
       });
       return;
     }
 
     const data: any = res.data || {};
-    const inviteLink = String(data.inviteLink || "").trim();
+    const inviteState = getInviteDeliveryState(data);
+    const inviteLink = inviteState.inviteLink;
     if (inviteLink) {
       setLatestInviteLink(inviteLink);
       if (opts?.copyOnly) {
@@ -123,7 +126,7 @@ export default function Licensees() {
 
     toast({
       title:
-        data.emailDelivered === false
+        inviteState.emailSent === false
           ? opts?.copyOnly
             ? "Invite link generated"
             : "Invite created, email not delivered"
@@ -131,12 +134,10 @@ export default function Licensees() {
             ? "Invite link generated"
             : "Invite resent",
       description:
-        data.emailDelivered === false
-          ? data.deliveryError
-            ? `Invite link is ready, but email delivery failed: ${String(data.deliveryError)}`
-            : "Invite link is ready, but email delivery failed. Use the copied invite link to onboard manually."
+        inviteState.emailSent === false
+          ? `${friendlyEmailDeliveryMessage(inviteState.emailErrorCode)} Use the invite link to onboard manually.`
           : `Invite sent to ${adminEmail}.`,
-      variant: data.emailDelivered === false ? "destructive" : undefined,
+      variant: inviteState.emailSent === false ? "destructive" : undefined,
     });
 
     await load();
@@ -145,7 +146,28 @@ export default function Licensees() {
   /* ===================== CREATE LICENSEE FLOW ===================== */
 
   const resetCreateForm = () => {
+    setLatestInviteLink("");
     setCreateForm(createDefaultLicenseeForm());
+  };
+
+  const refreshAndFindCreatedLicensee = async (criteria: { name: string; prefix: string; adminEmail: string }) => {
+    const response = await apiClient.getLicensees();
+    if (!response.success || !Array.isArray(response.data)) return null;
+    const rows = response.data as LicenseeRow[];
+    setLicensees(rows);
+    const normalizedName = criteria.name.trim().toLowerCase();
+    const normalizedPrefix = criteria.prefix.trim().toUpperCase();
+    const normalizedAdminEmail = criteria.adminEmail.trim().toLowerCase();
+    return (
+      rows.find((row) => String(row.prefix || "").toUpperCase() === normalizedPrefix) ||
+      rows.find((row) => String(row.name || "").trim().toLowerCase() === normalizedName) ||
+      rows.find((row) => {
+        const pending = String(row.adminOnboarding?.pendingInvite?.email || "").toLowerCase();
+        const active = String(row.adminOnboarding?.adminUser?.email || "").toLowerCase();
+        return Boolean(normalizedAdminEmail && (pending === normalizedAdminEmail || active === normalizedAdminEmail));
+      }) ||
+      null
+    );
   };
 
   const handleCreateDialogOpenChange = (open: boolean) => {
@@ -266,16 +288,41 @@ export default function Licensees() {
         },
       });
 
-      if (!createRes.success) throw new Error(createRes.error || "Could not create licensee");
+      if (!createRes.success) {
+        const friendly = classifyApiError(createRes);
+        if (friendly.kind === "timeout_unknown") {
+          const found = await refreshAndFindCreatedLicensee({ name, prefix, adminEmail });
+          if (found) {
+            if (showProvisioningProgress) progress.close();
+            toast({
+              title: "Brand created",
+              description:
+                "The server created the brand, but invite email status could not be confirmed. Review the brand row to copy or retry the invite.",
+            });
+            setIsCreateOpen(false);
+            resetCreateForm();
+            return;
+          }
+        }
+        if (showProvisioningProgress) progress.close();
+        toast({
+          title: friendly.title,
+          description: friendly.description,
+          variant: friendly.destructive ? "destructive" : undefined,
+        });
+        return;
+      }
 
-      const adminInvite = (createRes.data as any)?.adminInvite;
-      const inviteLink = String(adminInvite?.inviteLink || "").trim();
-      const inviteDeliveryError = String(adminInvite?.deliveryError || (createRes.data as any)?.warning || "").trim();
-      const inviteDelivered = Boolean(adminInvite && adminInvite.emailDelivered !== false);
+      const createData = (createRes.data as any) || {};
+      const inviteState = getInviteDeliveryState(createData);
+      const inviteLink = inviteState.inviteLink;
+      const inviteDelivered = inviteState.emailSent;
       if (inviteLink) setLatestInviteLink(inviteLink);
 
-      const licenseeId = (createRes.data as any)?.licensee?.id as string;
+      const licenseeId = createData?.licensee?.id as string;
       if (!licenseeId) throw new Error("Licensee created, but licenseeId was not returned.");
+
+      const provisioningWarnings: string[] = [];
 
       // 2) Optional: create manufacturer user
       if (wantMfg) {
@@ -293,7 +340,19 @@ export default function Licensees() {
           role: "MANUFACTURER",
           licenseeId,
         });
-        if (!uRes.success) throw new Error(uRes.error || "Manufacturer create failed");
+        if (!uRes.success) {
+          const friendly = classifyApiError(uRes);
+          provisioningWarnings.push(
+            friendly.kind === "timeout_unknown"
+              ? "Manufacturer invite status could not be confirmed. Open Manufacturers to review or retry."
+              : "Manufacturer invite could not be completed. Open Manufacturers to retry."
+          );
+        } else {
+          const manufacturerInvite = getInviteDeliveryState(uRes.data);
+          if (manufacturerInvite.created && !manufacturerInvite.emailSent) {
+            provisioningWarnings.push("Manufacturer invite link was created, but its email could not be sent.");
+          }
+        }
       }
 
       // 3) Allocate QR range (creates QRCode rows as DORMANT)
@@ -310,20 +369,33 @@ export default function Licensees() {
         startNumber: rangeStart,
         endNumber: rangeEnd,
       });
-      if (!allocRes.success) throw new Error(allocRes.error || "QR range allocation failed");
+      if (!allocRes.success) {
+        const friendly = classifyApiError(allocRes);
+        if (showProvisioningProgress) progress.close();
+        toast({
+          title: "Brand created, QR allocation needs retry",
+          description:
+            friendly.kind === "timeout_unknown"
+              ? "Brand setup completed, but QR allocation status could not be confirmed. Refresh and retry allocation if the range is not present."
+              : "Brand setup completed, but the initial QR range was not allocated. Allocate the range from the brand row.",
+          variant: "destructive",
+        });
+        setIsCreateOpen(false);
+        resetCreateForm();
+        await load();
+        return;
+      }
 
       if (showProvisioningProgress) {
         await progress.complete(`Provisioning complete. ${requestedRangeCount.toLocaleString()} QR codes are ready.`);
       }
 
       toast({
-        title: inviteDelivered ? "Licensee created + invite sent" : "Licensee created + invite link ready",
+        title: inviteDelivered ? "Brand created and invite email sent." : "Brand created, but invite email could not be sent.",
         description: inviteDelivered
-          ? `Licensee ${name} created. Invite sent to ${adminEmail}.`
-          : inviteDeliveryError
-            ? `Licensee ${name} created. Invite link generated, but email delivery failed: ${inviteDeliveryError}`
-            : `Licensee ${name} created. Invite link generated for manual onboarding.`,
-        variant: !inviteDelivered ? "destructive" : undefined,
+          ? `${name} is ready. Invite sent to ${adminEmail}.${provisioningWarnings.length ? ` ${provisioningWarnings.join(" ")}` : ""}`
+          : `Copy the invite link or retry sending.${provisioningWarnings.length ? ` ${provisioningWarnings.join(" ")}` : ""}`,
+        variant: !inviteDelivered || provisioningWarnings.length ? "destructive" : undefined,
       });
 
       setIsCreateOpen(false);
@@ -334,8 +406,8 @@ export default function Licensees() {
       const msg = e?.message || "Error";
       const busy = isBusyErrorMessage(msg);
       toast({
-        title: busy ? "Batch busy" : "Create failed",
-        description: busy ? "Please retry — batch busy." : msg,
+        title: busy ? "Batch busy" : "Create needs review",
+        description: busy ? "Please retry when the current batch operation finishes." : "Refresh the brand list to confirm the latest state before retrying.",
         variant: "destructive",
       });
       await load();
@@ -387,10 +459,11 @@ export default function Licensees() {
     });
 
     if (!res.success) {
+      const friendly = classifyApiError(res);
       toast({
-        title: "Update failed",
-        description: res.error || "Could not update licensee",
-        variant: "destructive",
+        title: friendly.title,
+        description: friendly.description,
+        variant: friendly.destructive ? "destructive" : undefined,
       });
       setSavingEdit(false);
       return;
@@ -407,10 +480,11 @@ export default function Licensees() {
     const next = !l.isActive;
     const res = await apiClient.updateLicensee(l.id, { isActive: next });
     if (!res.success) {
+      const friendly = classifyApiError(res);
       toast({
-        title: "Update failed",
-        description: res.error || "Could not update status",
-        variant: "destructive",
+        title: friendly.title,
+        description: friendly.description,
+        variant: friendly.destructive ? "destructive" : undefined,
       });
       return;
     }
@@ -447,10 +521,11 @@ export default function Licensees() {
 
     const res = await apiClient.deleteLicensee(l.id);
     if (!res.success) {
+      const friendly = classifyApiError(res);
       toast({
-        title: "Delete failed",
-        description: res.error || "Error",
-        variant: "destructive",
+        title: friendly.title,
+        description: friendly.description,
+        variant: friendly.destructive ? "destructive" : undefined,
       });
       await load();
       return;
@@ -496,18 +571,42 @@ export default function Licensees() {
     });
 
     if (!res.success) {
+      const friendly = classifyApiError(res);
       toast({
-        title: "Invite failed",
-        description: res.error || "Could not create user",
-        variant: "destructive",
+        title: friendly.title,
+        description: friendly.description,
+        variant: friendly.destructive ? "destructive" : undefined,
       });
       setCreatingUser(false);
       return;
     }
 
+    const resultData: any = res.data || {};
+    if (resultData.linkAction === "LINKED_EXISTING" || resultData.linkAction === "ALREADY_LINKED") {
+      toast({
+        title: resultData.linkAction === "ALREADY_LINKED" ? "Manufacturer already linked" : "Manufacturer linked",
+        description:
+          resultData.linkAction === "ALREADY_LINKED"
+            ? "This manufacturer is already available under the brand."
+            : "Existing manufacturer access was linked to this brand.",
+      });
+      setCreatingUser(false);
+      setIsUserOpen(false);
+      setUserForm(null);
+      await load();
+      return;
+    }
+
+    const inviteState = getInviteDeliveryState(resultData);
+    if (inviteState.inviteLink) setLatestInviteLink(inviteState.inviteLink);
     toast({
-      title: "Invite sent",
-      description: userForm.role === "LICENSEE_ADMIN" ? "Invite sent for Licensee Admin." : "Invite sent for Manufacturer Admin.",
+      title: inviteState.emailSent ? "Invite email sent" : "Invite link created, email not sent",
+      description: inviteState.emailSent
+        ? userForm.role === "LICENSEE_ADMIN"
+          ? "Invite sent for Licensee Admin."
+          : "Invite sent for Manufacturer Admin."
+        : "Copy the invite link or retry sending later.",
+      variant: inviteState.emailSent ? undefined : "destructive",
     });
     setCreatingUser(false);
     setIsUserOpen(false);
@@ -598,7 +697,8 @@ export default function Licensees() {
       const res = await apiClient.allocateLicenseeQrRange(rangeForm.licenseeId, requestPayload);
 
       if (!res.success) {
-        throw new Error(res.error || "Allocation failed");
+        const friendly = classifyApiError(res);
+        throw Object.assign(new Error(friendly.description), { friendly });
       }
 
       const data: any = res.data || {};
@@ -629,10 +729,11 @@ export default function Licensees() {
     } catch (e: any) {
       if (showAllocationProgress) progress.close();
       const msg = e?.message || "Error";
+      const friendly = e?.friendly;
       const busy = isBusyErrorMessage(msg);
       toast({
-        title: busy ? "Batch busy" : "Allocation failed",
-        description: busy ? "Please retry — batch busy." : msg,
+        title: busy ? "Batch busy" : friendly?.title || "Allocation failed",
+        description: busy ? "Please retry when the current batch operation finishes." : friendly?.description || "Please retry the allocation.",
         variant: "destructive",
       });
     } finally {
@@ -651,7 +752,10 @@ export default function Licensees() {
         onRefresh={load}
         loading={loading}
         onExportCsv={exportCsv}
-        onOpenCreateDialog={() => setIsCreateOpen(true)}
+        onOpenCreateDialog={() => {
+          setLatestInviteLink("");
+          setIsCreateOpen(true);
+        }}
         search={search}
         onSearchChange={setSearch}
         statusFilter={statusFilter}
@@ -672,7 +776,10 @@ export default function Licensees() {
         latestInviteLink={latestInviteLink}
         onCopyInviteLink={() => copyInviteLink(latestInviteLink, "Invite link copied")}
         createForm={createForm}
-        onCreateFormChange={setCreateForm}
+        onCreateFormChange={(next) => {
+          setLatestInviteLink("");
+          setCreateForm(next);
+        }}
         onCreateSubmit={onCreateSubmit}
         isEditOpen={isEditOpen}
         onEditDialogOpenChange={setIsEditOpen}

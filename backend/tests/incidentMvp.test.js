@@ -210,8 +210,8 @@ const run = async () => {
     "Incident timeline should persist EMAIL_SENT event"
   );
   assert(
-    incidentEventRow.eventPayload && incidentEventRow.eventPayload.used_from === "smtp-user@gmail.com",
-    "Incident event payload should include used_from"
+    incidentEventRow.eventPayload && incidentEventRow.eventPayload.used_from === "sm***@gmail.com",
+    "Incident event payload should include redacted used_from"
   );
 
   // restore patches

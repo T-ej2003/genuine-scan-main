@@ -1,4 +1,3 @@
-import nodemailer, { SendMailOptions, Transporter } from "nodemailer";
 import {
   IncidentActorType,
   IncidentCommChannel,
@@ -10,6 +9,15 @@ import {
 
 import prisma from "../config/database";
 import { createAuditLog } from "./auditService";
+import {
+  __resetMailTransporterForTests,
+  getConfiguredMailFrom,
+  getMailTransportState,
+  getPreferredSuperadminEmailFromEnv,
+  maskEmailForLog,
+  sendMailSafely,
+  type EmailErrorCode,
+} from "./mailTransportService";
 
 type IncidentEmailActorUser = {
   id?: string | null;
@@ -33,20 +41,10 @@ type SendIncidentEmailInput = {
 type SendIncidentEmailResult = {
   delivered: boolean;
   providerMessageId?: string | null;
-  error?: string | null;
+  error?: EmailErrorCode | null;
   attemptedFrom?: string | null;
   usedFrom?: string | null;
   replyTo?: string | null;
-};
-
-let transporter: Transporter | null = null;
-let transporterKey: string | null = null;
-
-const parseBool = (value: unknown, fallback = false) => {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  if (["1", "true", "yes", "on"].includes(normalized)) return true;
-  if (["0", "false", "no", "off"].includes(normalized)) return false;
-  return fallback;
 };
 
 const normalizeEmail = (value: unknown) => {
@@ -54,157 +52,7 @@ const normalizeEmail = (value: unknown) => {
   return email || null;
 };
 
-const getFirstEnv = (...keys: string[]) => {
-  for (const key of keys) {
-    const value = String(process.env[key] || "").trim();
-    if (value) return value;
-  }
-  return "";
-};
-
-const getMailFromDisplayName = () =>
-  String(getFirstEnv("MAIL_FROM_NAME", "EMAIL_FROM_NAME", "APP_NAME") || "MSCQR").trim() || "MSCQR";
-
-const getPreferredSuperadminEmailFromEnv = () =>
-  normalizeEmail(
-    getFirstEnv(
-      "SUPER_ADMIN_EMAIL",
-      "PLATFORM_SUPERADMIN_EMAIL",
-      "SUPERADMIN_FROM_EMAIL",
-      "EMAIL_FROM",
-      "MAIL_FROM"
-    )
-  );
-
-type ResolvedSmtpConfig = {
-  host: string;
-  user: string;
-  pass: string;
-  port: number;
-  secure: boolean;
-  source: "env" | "inferred";
-};
-
-const inferHostFromUserEmail = (userEmail: string) => {
-  const domain = String(userEmail.split("@")[1] || "").toLowerCase().trim();
-  if (!domain) return null;
-
-  if (domain === "gmail.com" || domain === "googlemail.com") {
-    return { host: "smtp.gmail.com", port: 465, secure: true };
-  }
-  if (["outlook.com", "hotmail.com", "live.com", "msn.com", "office365.com"].includes(domain)) {
-    return { host: "smtp.office365.com", port: 587, secure: false };
-  }
-  if (domain.includes("yahoo.")) {
-    return { host: "smtp.mail.yahoo.com", port: 465, secure: true };
-  }
-  if (["icloud.com", "me.com", "mac.com"].includes(domain)) {
-    return { host: "smtp.mail.me.com", port: 587, secure: false };
-  }
-  if (domain === "zoho.com" || domain.endsWith(".zoho.com")) {
-    return { host: "smtp.zoho.com", port: 465, secure: true };
-  }
-
-  return null;
-};
-
-const resolveSmtpConfig = (): { config: ResolvedSmtpConfig | null; error?: string } => {
-  const user = getFirstEnv("SMTP_USER", "SMTP_USERNAME", "EMAIL_USER", "MAIL_USER");
-  const pass = getFirstEnv("SMTP_PASS", "SMTP_PASSWORD", "EMAIL_PASS", "MAIL_PASS", "MAIL_PASSWORD");
-  const explicitHost = getFirstEnv("SMTP_HOST", "EMAIL_HOST", "MAIL_HOST");
-
-  if (!user || !pass) {
-    return {
-      config: null,
-      error: "SMTP transport is not configured (missing SMTP_USER/SMTP_PASS)",
-    };
-  }
-
-  const inferred = explicitHost ? null : inferHostFromUserEmail(user);
-  const host = explicitHost || inferred?.host || "";
-  if (!host) {
-    return {
-      config: null,
-      error:
-        "SMTP transport is not configured (missing SMTP_HOST and could not infer provider from SMTP_USER)",
-    };
-  }
-
-  const defaultPort = inferred?.port || 587;
-  const parsedPort = Number(getFirstEnv("SMTP_PORT", "EMAIL_PORT", "MAIL_PORT") || defaultPort);
-  const port = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : defaultPort;
-  const secure = parseBool(
-    getFirstEnv("SMTP_SECURE", "EMAIL_SECURE", "MAIL_SECURE"),
-    inferred ? inferred.secure : port === 465
-  );
-
-  return {
-    config: {
-      host,
-      user,
-      pass,
-      port,
-      secure,
-      source: explicitHost ? "env" : "inferred",
-    },
-  };
-};
-
-const getTransporter = () => {
-  const { config, error } = resolveSmtpConfig();
-
-  if (parseBool(process.env.EMAIL_USE_JSON_TRANSPORT, false)) {
-    transporterKey = "jsonTransport";
-    transporter = nodemailer.createTransport({ jsonTransport: true });
-    return {
-      transporter,
-      configError: null as string | null,
-      configSource: "json" as const,
-      smtpUser: normalizeEmail(getFirstEnv("SMTP_USER", "SMTP_USERNAME", "EMAIL_USER", "MAIL_USER")),
-    };
-  }
-
-  if (!config) {
-    return {
-      transporter: null,
-      configError: error || "SMTP transport is not configured",
-      configSource: null as string | null,
-      smtpUser: null as string | null,
-    };
-  }
-
-  const nextKey = `${config.host}|${config.port}|${config.secure}|${config.user}`;
-  if (transporter && transporterKey === nextKey) {
-    return {
-      transporter,
-      configError: null as string | null,
-      configSource: config.source,
-      smtpUser: normalizeEmail(config.user),
-    };
-  }
-
-  transporterKey = nextKey;
-  transporter = nodemailer.createTransport({
-    host: config.host,
-    port: config.port,
-    secure: config.secure,
-    auth: {
-      user: config.user,
-      pass: config.pass,
-    },
-  });
-
-  return {
-    transporter,
-    configError: null as string | null,
-    configSource: config.source,
-    smtpUser: normalizeEmail(config.user),
-  };
-};
-
 const preview = (body: string) => body.slice(0, 500);
-
-const formatFromAddress = (email: string) => `"${getMailFromDisplayName()}" <${email}>`;
 
 const isAdminRole = (role?: UserRole | string | null) => {
   const normalized = String(role || "").toUpperCase();
@@ -216,58 +64,14 @@ const isAdminRole = (role?: UserRole | string | null) => {
   );
 };
 
-const isFromRejectedError = (error: any) => {
-  const message = String(error?.message || "").toLowerCase();
-  const response = String(error?.response || "").toLowerCase();
-  const code = String(error?.code || "").toUpperCase();
-  const responseCode = Number(error?.responseCode || 0);
-
-  const haystack = `${message} ${response}`;
-
-  if (["EENVELOPE", "EADDRESS", "EAUTH"].includes(code)) {
-    if (
-      haystack.includes("sender") ||
-      haystack.includes("from") ||
-      haystack.includes("not allowed") ||
-      haystack.includes("unauthorized")
-    ) {
-      return true;
-    }
-  }
-
-  if ([550, 552, 553, 554].includes(responseCode)) {
-    if (
-      haystack.includes("sender") ||
-      haystack.includes("from") ||
-      haystack.includes("not allowed") ||
-      haystack.includes("unauthorized") ||
-      haystack.includes("rejected") ||
-      haystack.includes("not owned")
-    ) {
-      return true;
-    }
-  }
-
-  return (
-    haystack.includes("sender address rejected") ||
-    haystack.includes("sender rejected") ||
-    haystack.includes("from address") ||
-    haystack.includes("from header") ||
-    haystack.includes("not permitted") ||
-    haystack.includes("not owned") ||
-    haystack.includes("unauthorized")
-  );
-};
-
 const resolveActorUser = async (actorUser?: IncidentEmailActorUser | null) => {
   if (!actorUser) return null;
 
   const actorUserId = String(actorUser.id || "").trim();
   if (!actorUserId) {
-    const email = normalizeEmail(actorUser.email);
     return {
       id: null,
-      email,
+      email: normalizeEmail(actorUser.email),
       name: String(actorUser.name || "").trim() || null,
       role: actorUser.role || null,
     };
@@ -275,14 +79,7 @@ const resolveActorUser = async (actorUser?: IncidentEmailActorUser | null) => {
 
   const dbUser = await prisma.user.findUnique({
     where: { id: actorUserId },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      role: true,
-      isActive: true,
-      deletedAt: true,
-    },
+    select: { id: true, email: true, name: true, role: true, isActive: true, deletedAt: true },
   });
 
   if (!dbUser || dbUser.deletedAt || dbUser.isActive === false) {
@@ -312,9 +109,7 @@ const getPrimarySuperadminEmail = async () => {
       isActive: true,
       deletedAt: null,
     },
-    orderBy: {
-      createdAt: "asc",
-    },
+    orderBy: { createdAt: "asc" },
     select: { email: true },
   });
   return normalizeEmail(primary?.email);
@@ -328,30 +123,10 @@ const withSenderSignature = (text: string, senderEmail?: string | null, senderNa
   return `${cleanText}\n\n---\nSender: ${name} <${senderEmail}>`;
 };
 
-const buildMailOptions = (input: {
-  toAddress: string;
-  subject: string;
-  text: string;
-  html?: string;
-  usedFrom: string;
-  replyTo?: string | null;
-}) => {
-  const options: SendMailOptions = {
-    from: formatFromAddress(input.usedFrom),
-    to: input.toAddress,
-    subject: input.subject,
-    text: input.text,
-    html: input.html,
-  };
-  if (input.replyTo) options.replyTo = input.replyTo;
-  return options;
-};
-
 export const sendIncidentEmail = async (input: SendIncidentEmailInput): Promise<SendIncidentEmailResult> => {
-  const trState = getTransporter();
-  const tr = trState.transporter;
-  const smtpConfigSource = trState.configSource;
-  const smtpUser = trState.smtpUser;
+  const transportState = getMailTransportState();
+  const smtpUser = transportState.smtpUser;
+  const configuredFrom = getConfiguredMailFrom();
   const toAddress = normalizeEmail(input.toAddress);
   const actorUser = await resolveActorUser(input.actorUser);
   const senderMode = input.senderMode || (actorUser?.email ? "actor" : "system");
@@ -361,88 +136,50 @@ export const sendIncidentEmail = async (input: SendIncidentEmailInput): Promise<
   let replyTo: string | null = null;
   let status: IncidentCommStatus = IncidentCommStatus.QUEUED;
   let providerMessageId: string | null = null;
-  let errMessage: string | null = null;
-  let fallbackUsed = false;
+  let errCode: EmailErrorCode | null = null;
 
   if (senderMode === "actor") {
     if (actorUser?.role && !isAdminRole(actorUser.role)) {
-      errMessage = "Only admin/superadmin can send incident emails";
+      errCode = "UNKNOWN_EMAIL_ERROR";
     } else {
       attemptedFrom = actorUser?.email || null;
-      usedFrom = attemptedFrom;
+      usedFrom = attemptedFrom || smtpUser || configuredFrom;
       replyTo = attemptedFrom;
     }
   } else {
     const primarySuperadminEmail = await getPrimarySuperadminEmail();
-    attemptedFrom = actorUser?.email || primarySuperadminEmail || smtpUser;
-    usedFrom = smtpUser || attemptedFrom;
-    replyTo = actorUser?.email || primarySuperadminEmail || null;
+    attemptedFrom = actorUser?.email || primarySuperadminEmail || configuredFrom || smtpUser;
+    usedFrom = smtpUser || configuredFrom || attemptedFrom;
+    replyTo = actorUser?.email || primarySuperadminEmail || configuredFrom || null;
   }
 
   const sendTextBase = String(input.text || "").trim();
 
-  try {
-    if (errMessage) throw new Error(errMessage);
-    if (!toAddress) throw new Error("Missing recipient address");
-    if (!tr) throw new Error(trState.configError || "SMTP transport is not configured");
-    if (!usedFrom) throw new Error("SMTP sender account is not configured");
-
-    if (senderMode === "actor" && !attemptedFrom) {
-      throw new Error("Sender profile email is required in Account Settings");
-    }
-
-    const textForFirstAttempt = withSenderSignature(
+  if (errCode) {
+    status = IncidentCommStatus.FAILED;
+  } else {
+    const textForSend = withSenderSignature(
       sendTextBase,
       replyTo && replyTo !== usedFrom ? replyTo : null,
       actorUser?.name || null
     );
+    const delivery = await sendMailSafely({
+      toAddress: toAddress || input.toAddress,
+      subject: input.subject,
+      text: textForSend,
+      html: input.html,
+      fromAddress: usedFrom,
+      fallbackFromAddress: smtpUser,
+      replyTo,
+      template: input.template || "incident",
+    });
 
-    const firstInfo = await tr.sendMail(
-      buildMailOptions({
-        toAddress,
-        subject: input.subject,
-        text: textForFirstAttempt,
-        html: input.html,
-        usedFrom,
-        replyTo,
-      })
-    );
-
-    status = IncidentCommStatus.SENT;
-    providerMessageId = firstInfo?.messageId ? String(firstInfo.messageId) : null;
-  } catch (error: any) {
-    const shouldRetryWithSmtpSender =
-      Boolean(smtpUser) &&
-      Boolean(usedFrom) &&
-      normalizeEmail(usedFrom) !== smtpUser &&
-      isFromRejectedError(error);
-
-    if (shouldRetryWithSmtpSender) {
-      fallbackUsed = true;
-      usedFrom = smtpUser;
-      replyTo = attemptedFrom || replyTo;
-      try {
-        const textForRetry = withSenderSignature(sendTextBase, replyTo, actorUser?.name || null);
-        const retryInfo = await tr!.sendMail(
-          buildMailOptions({
-            toAddress: toAddress!,
-            subject: input.subject,
-            text: textForRetry,
-            html: input.html,
-            usedFrom: usedFrom as string,
-            replyTo,
-          })
-        );
-        status = IncidentCommStatus.SENT;
-        providerMessageId = retryInfo?.messageId ? String(retryInfo.messageId) : null;
-      } catch (retryError: any) {
-        status = IncidentCommStatus.FAILED;
-        errMessage = retryError?.message || error?.message || "Email delivery failed";
-      }
-    } else {
-      status = IncidentCommStatus.FAILED;
-      errMessage = error?.message || "Email delivery failed";
-    }
+    status = delivery.delivered ? IncidentCommStatus.SENT : IncidentCommStatus.FAILED;
+    providerMessageId = delivery.providerMessageId || null;
+    errCode = delivery.errorCode || null;
+    attemptedFrom = delivery.attemptedFrom || attemptedFrom;
+    usedFrom = delivery.usedFrom || usedFrom;
+    replyTo = delivery.replyTo || replyTo;
   }
 
   await prisma.incidentCommunication.create({
@@ -457,7 +194,7 @@ export const sendIncidentEmail = async (input: SendIncidentEmailInput): Promise<
       usedFrom,
       replyTo,
       providerMessageId,
-      errorMessage: errMessage,
+      errorMessage: errCode,
       status,
     } as any,
   });
@@ -472,17 +209,16 @@ export const sendIncidentEmail = async (input: SendIncidentEmailInput): Promise<
       eventType: IncidentEventType.EMAIL_SENT,
       eventPayload: {
         template: input.template || null,
-        to_address: toAddress || String(input.toAddress || "").trim(),
+        to_address: maskEmailForLog(toAddress || input.toAddress),
         subject: input.subject,
-        attempted_from: attemptedFrom,
-        used_from: usedFrom,
-        reply_to: replyTo,
+        attempted_from: maskEmailForLog(attemptedFrom),
+        used_from: maskEmailForLog(usedFrom),
+        reply_to: maskEmailForLog(replyTo),
         delivered: status === IncidentCommStatus.SENT,
         provider_message_id: providerMessageId,
-        error: errMessage,
-        fallback_used: fallbackUsed,
+        email_error_code: errCode,
         sender_mode: senderMode,
-        smtp_config_source: smtpConfigSource,
+        smtp_config_source: transportState.configSource,
       },
     },
   });
@@ -495,25 +231,24 @@ export const sendIncidentEmail = async (input: SendIncidentEmailInput): Promise<
     entityId: input.incidentId,
     details: {
       template: input.template || null,
-      toAddress: toAddress || String(input.toAddress || "").trim(),
+      toAddress: maskEmailForLog(toAddress || input.toAddress),
       subject: input.subject,
-      attemptedFrom,
-      usedFrom,
-      replyTo,
+      attemptedFrom: maskEmailForLog(attemptedFrom),
+      usedFrom: maskEmailForLog(usedFrom),
+      replyTo: maskEmailForLog(replyTo),
       status,
       delivered: status === IncidentCommStatus.SENT,
       providerMessageId,
-      error: errMessage,
-      fallbackUsed,
+      emailErrorCode: errCode,
       senderMode,
-      smtpConfigSource,
+      smtpConfigSource: transportState.configSource,
     },
   });
 
   return {
     delivered: status === IncidentCommStatus.SENT,
     providerMessageId,
-    error: errMessage,
+    error: errCode,
     attemptedFrom,
     usedFrom,
     replyTo,
@@ -546,7 +281,4 @@ export const getSuperadminAlertEmails = async (): Promise<string[]> => {
   return Array.from(new Set(users.map((u) => normalizeEmail(u.email)).filter(Boolean) as string[]));
 };
 
-export const __resetIncidentEmailTransporterForTests = () => {
-  transporter = null;
-  transporterKey = null;
-};
+export const __resetIncidentEmailTransporterForTests = __resetMailTransporterForTests;

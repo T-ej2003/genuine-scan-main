@@ -11,6 +11,9 @@ backend/.connector-build
 backend/.connector-build/
 backend/.pkg-cache
 backend/.pkg-cache/
+artifacts/*
+!artifacts/dr/
+!artifacts/dr/.gitignore
 playwright-report
 test-results
 coverage

@@ -10,7 +10,9 @@ export interface ApiResponse<T = any> {
   message?: string;
   degraded?: boolean;
   code?: string;
+  status?: number;
   retryAfterSec?: number;
+  unknownOutcome?: boolean;
 }
 
 type RequestOptions = RequestInit & {
@@ -384,7 +386,7 @@ export function createApiClientCore(): ApiClientCore {
 
         if (!getToken() && !hasCookieBackedSession()) {
           pushNetworkLog({ status: response.status, ok: false, error: message });
-          return { success: false, error: message };
+          return { success: false, error: message, status: response.status, code: "UNAUTHENTICATED" };
         }
 
         const refreshed = await refreshOnce();
@@ -395,7 +397,7 @@ export function createApiClientCore(): ApiClientCore {
         logout();
         emitLogout();
         pushNetworkLog({ status: response.status, ok: false, error: message });
-        return { success: false, error: message };
+        return { success: false, error: message, status: response.status, code: "UNAUTHENTICATED" };
       }
 
       if (!response.ok) {
@@ -439,6 +441,7 @@ export function createApiClientCore(): ApiClientCore {
           success: false,
           error: message,
           code: responseCode,
+          status: response.status,
           retryAfterSec,
           data: responseData,
         };
@@ -453,7 +456,7 @@ export function createApiClientCore(): ApiClientCore {
         if (method !== "GET" && method !== "HEAD" && payload.success && !options.suppressMutationEvent) {
           emitMutationEvent({ endpoint, method });
         }
-        return payload as ApiResponse<T>;
+        return { ...(payload as ApiResponse<T>), status: response.status };
       }
 
       if (method === "GET") {
@@ -463,7 +466,7 @@ export function createApiClientCore(): ApiClientCore {
       if (method !== "GET" && method !== "HEAD" && !options.suppressMutationEvent) {
         emitMutationEvent({ endpoint, method });
       }
-      return { success: true, data: payload as T };
+      return { success: true, data: payload as T, status: response.status };
     } catch (error: any) {
       const isAbort = error?.name === "AbortError";
       const message = isAbort ? "Request timed out" : "Network error - is the backend running?";
@@ -472,7 +475,13 @@ export function createApiClientCore(): ApiClientCore {
         source: "network",
         message: `${method} ${endpoint}: ${message}`,
       });
-      return { success: false, error: message };
+      return {
+        success: false,
+        error: message,
+        status: 0,
+        code: isAbort ? "REQUEST_TIMEOUT" : "NETWORK_ERROR",
+        unknownOutcome: isAbort && isStateChanging,
+      };
     } finally {
       window.clearTimeout(timeout);
     }

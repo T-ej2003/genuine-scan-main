@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { saveAs } from "file-saver";
 
 import apiClient from "@/lib/api-client";
+import { classifyApiError } from "@/lib/api/friendly-errors";
 import { onMutationEvent } from "@/lib/mutation-events";
 import type { LicenseeRow } from "@/features/licensees/types";
 
@@ -21,10 +22,11 @@ export function useLicenseeDirectory(toast: ToastLike) {
     setLoading(true);
     const response = await apiClient.getLicensees();
     if (!response.success) {
+      const friendly = classifyApiError(response);
       toast({
-        title: "Failed to load",
-        description: response.error || "Could not load licensees",
-        variant: "destructive",
+        title: friendly.kind === "step_up_required" ? "Verification required" : "Could not load brands",
+        description: friendly.kind === "step_up_required" ? friendly.description : "Refresh once your session is ready.",
+        variant: friendly.destructive ? "destructive" : undefined,
       });
       setLicensees([]);
       setLoading(false);

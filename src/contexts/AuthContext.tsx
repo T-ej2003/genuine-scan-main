@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 
 import { shouldBootstrapCurrentUser } from "@/contexts/auth-bootstrap";
@@ -73,6 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [pendingAuth, setPendingAuth] = useState<PendingAuthSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const refreshInFlightRef = useRef<Promise<void> | null>(null);
 
   const clearSession = () => {
     setUser(null);
@@ -110,6 +111,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const refresh = async () => {
+    if (refreshInFlightRef.current) return refreshInFlightRef.current;
+    refreshInFlightRef.current = (async () => {
     const res = await apiClient.getCurrentUser();
     if (!res.success || !res.data) {
       clearSession();
@@ -117,6 +120,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setAuthStateFromPayload({ user: res.data, auth: (res.data as any)?.auth ?? null });
+    })().finally(() => {
+      refreshInFlightRef.current = null;
+    });
+    return refreshInFlightRef.current;
   };
 
   useEffect(() => {

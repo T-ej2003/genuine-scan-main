@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
+import { classifyApiError, friendlyEmailDeliveryMessage, getInviteDeliveryState } from "@/lib/api/friendly-errors";
 import {
   ManufacturerDetailsDialog,
 } from "@/features/manufacturers/components/ManufacturerDetailsDialog";
@@ -59,6 +60,8 @@ export default function ManufacturersPage() {
   const [showInactive, setShowInactive] = useState(true);
   const [licenseeFilter, setLicenseeFilter] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [latestInviteLink, setLatestInviteLink] = useState("");
+  const [latestInviteTarget, setLatestInviteTarget] = useState<ManufacturerInviteFormValues | null>(null);
   const [detailsManufacturer, setDetailsManufacturer] = useState<ManufacturerRow | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
 
@@ -154,6 +157,8 @@ export default function ManufacturersPage() {
 
   const handleInvite = async (values: ManufacturerInviteFormValues) => {
     try {
+      setLatestInviteLink("");
+      setLatestInviteTarget(values);
       const result = await inviteMutation.mutateAsync({
         email: values.email,
         name: values.name,
@@ -169,17 +174,43 @@ export default function ManufacturersPage() {
               : `${values.email} was linked without creating a new invite.`,
         });
       } else {
+        const inviteState = getInviteDeliveryState(result);
+        if (inviteState.inviteLink) setLatestInviteLink(inviteState.inviteLink);
         toast({
-          title: "Invite sent",
-          description: `Activation and printer setup links were emailed to ${values.email}.`,
+          title: inviteState.emailSent ? "Invite email sent" : "Invite link created, email not sent",
+          description: inviteState.emailSent
+            ? `Activation and printer setup links were emailed to ${values.email}.`
+            : `${friendlyEmailDeliveryMessage(inviteState.emailErrorCode)} Copy the invite link or retry later.`,
+          variant: inviteState.emailSent ? undefined : "destructive",
         });
       }
 
       setCreateOpen(false);
-    } catch (error) {
+    } catch (error: any) {
+      const friendly = classifyApiError({
+        success: false,
+        error: error instanceof Error ? error.message : undefined,
+        code: error?.code,
+        status: error?.status,
+        unknownOutcome: error?.unknownOutcome,
+      });
       toast({
-        title: "Invite failed",
-        description: error instanceof Error ? error.message : "Could not invite this manufacturer.",
+        title: friendly.title,
+        description: friendly.description,
+        variant: friendly.destructive ? "destructive" : undefined,
+      });
+    }
+  };
+
+  const copyLatestInviteLink = async () => {
+    if (!latestInviteLink) return;
+    try {
+      await navigator.clipboard.writeText(latestInviteLink);
+      toast({ title: "Invite link copied", description: "Manufacturer invite link copied to clipboard." });
+    } catch {
+      toast({
+        title: "Copy failed",
+        description: "Could not access clipboard. Copy the link manually from the notice.",
         variant: "destructive",
       });
     }
@@ -291,6 +322,32 @@ export default function ManufacturersPage() {
             title="Choose a brand"
             description="Pick a brand above to load its manufacturer directory."
           />
+        ) : null}
+
+        {latestInviteLink ? (
+          <div className="space-y-3">
+            <PageInlineNotice
+              title="Manufacturer invite link ready"
+              description={latestInviteLink}
+            />
+            <div>
+              <Button variant="outline" onClick={() => void copyLatestInviteLink()}>
+                <Copy className="mr-2 h-4 w-4" />
+                Copy invite link
+              </Button>
+              {latestInviteTarget ? (
+                <Button
+                  className="ml-2"
+                  variant="outline"
+                  onClick={() => void handleInvite(latestInviteTarget)}
+                  disabled={inviteMutation.isPending}
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Retry email
+                </Button>
+              ) : null}
+            </div>
+          </div>
         ) : null}
 
         {directoryQuery.error ? (

@@ -226,7 +226,7 @@ export function LicenseeDialogs({
                 </div>
 
                 <div className="col-span-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
-                  Access setup: invite link only. We will email a one-time invite link so the admin can set a password securely.
+                  Access setup: invite link only. We'll create a secure invite link and attempt to email it to the admin.
                 </div>
               </div>
 
@@ -309,7 +309,7 @@ export function LicenseeDialogs({
                   </div>
 
                   <div className="col-span-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
-                    Access setup: invite link only (expires in 24 hours).
+                    Access setup: invite link only. We'll create a secure invite link and attempt to email it to the manufacturer admin.
                   </div>
                 </div>
               ) : null}

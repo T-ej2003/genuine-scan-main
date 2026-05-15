@@ -431,7 +431,7 @@ source_ami: ami-07216ac99dc46a187
 source_instance_type: t3.medium
 source_security_group: sg-0771ea7e59f7a49d4
 test_hostname: dr-mumbai.mscqr.com
-alb access logs prefix: mscqr/alb/mumbai
+ALB access logs are written under the non-secret S3 object folder `mscqr/alb/mumbai`.
 waf_web_acl_name: mscqr-mumbai-regional-waf
 min_size: 2
 desired_capacity: 2
@@ -531,7 +531,7 @@ source_ami: ami-0026d53e1887d8949
 source_instance_type: t3.medium
 source_security_group: sg-0d8f560e4f6452aa5
 test_hostname: dr-capetown.mscqr.com
-alb access logs prefix: mscqr/alb/capetown
+ALB access logs are written under the non-secret S3 object folder `mscqr/alb/capetown`.
 waf_web_acl_name: mscqr-capetown-regional-waf
 min_size: 2
 desired_capacity: 2

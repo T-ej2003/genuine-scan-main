@@ -239,10 +239,43 @@ export const invite = async (req: Request, res: Response) => {
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
     });
-    return res.status(201).json({ success: true, data: out });
+    const emailSent = Boolean((out as any).emailSent ?? (out as any).emailDelivered);
+    const inviteCreated = Boolean((out as any).inviteId || (out as any).inviteLink);
+    return res.status(201).json({
+      success: true,
+      data: {
+        ...out,
+        ok: true,
+        created: inviteCreated,
+        invite: {
+          created: inviteCreated,
+          emailSent,
+          emailErrorCode: (out as any).emailErrorCode || (out as any).deliveryError || null,
+          inviteLink: (out as any).inviteLink || null,
+          inviteId: (out as any).inviteId || null,
+          expiresAt: (out as any).expiresAt || null,
+        },
+        message: emailSent
+          ? "Invite email sent."
+          : inviteCreated
+            ? "Invite link created, but email could not be sent."
+            : "Invite processed.",
+      },
+    });
   } catch (error: any) {
-    console.error("Invite error:", error);
-    return res.status(400).json({ success: false, error: error?.message || "Invite failed" });
+    const msg = String(error?.message || "Invite failed");
+    const isConflict = /already active|different|disabled|not required|existing/i.test(msg);
+    const isNotFound = /not found/i.test(msg);
+    console.error("Invite error:", { name: error?.name, code: error?.code });
+    return res.status(isConflict ? 409 : isNotFound ? 404 : 400).json({
+      success: false,
+      error: isConflict
+        ? "An invite cannot be created for this account in its current state."
+        : isNotFound
+          ? "The requested invite target was not found."
+          : "Invite could not be created. Please review the details and retry.",
+      code: isConflict ? "INVITE_CONFLICT" : isNotFound ? "INVITE_TARGET_NOT_FOUND" : "INVITE_CREATE_FAILED",
+    });
   }
 };
 

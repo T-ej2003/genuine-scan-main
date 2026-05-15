@@ -21,6 +21,17 @@ export type InviteManufacturerInput = {
 
 export type InviteManufacturerResult = {
   linkAction?: "LINKED_EXISTING" | "ALREADY_LINKED" | string;
+  inviteLink?: string;
+  emailDelivered?: boolean;
+  emailSent?: boolean;
+  deliveryError?: string | null;
+  emailErrorCode?: string | null;
+  invite?: {
+    created?: boolean;
+    emailSent?: boolean;
+    emailErrorCode?: string | null;
+    inviteLink?: string | null;
+  };
 };
 
 async function invalidateManufacturerQueries(
@@ -137,7 +148,11 @@ export function useInviteManufacturerMutation() {
       });
 
       if (!response.success) {
-        throw new Error(response.error || "Failed to invite manufacturer");
+        throw Object.assign(new Error(response.error || "Failed to invite manufacturer"), {
+          code: response.code,
+          status: response.status,
+          unknownOutcome: response.unknownOutcome,
+        });
       }
 
       return ((response.data || {}) as InviteManufacturerResult) || {};
