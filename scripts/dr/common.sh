@@ -304,3 +304,168 @@ const lines = [
   fs.writeFileSync(outputPath, `${lines.join("\n")}\n`);
 NODE
 }
+
+write_asg_web_launch_template_json() {
+  output_path="$1"
+  launch_template_name="$2"
+  source_ami="$3"
+  source_instance_type="$4"
+  source_security_group="$5"
+  target_region_group="$6"
+  aws_region="$7"
+  asg_web_instance_profile_arn="$8"
+  asg_web_instance_profile_name="$9"
+  wrapper_mode="${10:-data}"
+
+  if [ -z "$asg_web_instance_profile_arn" ] && [ -z "$asg_web_instance_profile_name" ]; then
+    echo "ASG_WEB_INSTANCE_PROFILE_ARN or ASG_WEB_INSTANCE_PROFILE_NAME is required. Do not reuse the source instance profile implicitly." >&2
+    exit 2
+  fi
+
+  node --input-type=module - "$output_path" "$launch_template_name" "$source_ami" "$source_instance_type" "$source_security_group" "$target_region_group" "$aws_region" "$asg_web_instance_profile_arn" "$asg_web_instance_profile_name" "$wrapper_mode" <<'NODE'
+import fs from "node:fs";
+
+const [
+  outputPath,
+  launchTemplateName,
+  imageId,
+  instanceType,
+  securityGroup,
+  regionGroup,
+  awsRegion,
+  profileArn,
+  profileName,
+  wrapperMode,
+] = process.argv.slice(2);
+
+const fail = (message) => {
+  console.error(message);
+  process.exit(2);
+};
+
+for (const [name, value] of Object.entries({
+  outputPath,
+  imageId,
+  instanceType,
+  securityGroup,
+  regionGroup,
+  awsRegion,
+})) {
+  if (!value) fail(`Missing required launch template value: ${name}`);
+}
+
+const userData = `#!/bin/sh
+set -eu
+
+log_file="/var/log/mscqr-asg-bootstrap.log"
+exec >> "$log_file" 2>&1
+
+echo "MSCQR ASG web-node bootstrap starting."
+TARGET_REGION_GROUP="${regionGroup}"
+AWS_REGION="${awsRegion}"
+export TARGET_REGION_GROUP AWS_REGION
+
+cd /home/ubuntu/genuine-scan-main
+
+echo "Fetching approved main branch."
+git fetch origin main
+git reset --hard origin/main
+
+if [ ! -f scripts/dr/bootstrap-asg-web-node.sh ]; then
+  echo "Missing scripts/dr/bootstrap-asg-web-node.sh after git refresh."
+  exit 2
+fi
+
+/bin/chmod +x scripts/dr/bootstrap-asg-web-node.sh
+
+echo "Running MSCQR ASG web-node bootstrap."
+scripts/dr/bootstrap-asg-web-node.sh "$TARGET_REGION_GROUP" "$AWS_REGION"
+
+echo "MSCQR ASG web-node bootstrap completed."
+`;
+
+const data = {
+  ImageId: imageId,
+  InstanceType: instanceType,
+  SecurityGroupIds: [securityGroup],
+  IamInstanceProfile: profileArn ? { Arn: profileArn } : { Name: profileName },
+  UserData: Buffer.from(userData, "utf8").toString("base64"),
+  MetadataOptions: {
+    HttpTokens: "required",
+    HttpEndpoint: "enabled",
+  },
+  TagSpecifications: [
+    {
+      ResourceType: "instance",
+      Tags: [
+        { Key: "Project", Value: "MSCQR" },
+        { Key: "Purpose", Value: "DR" },
+        { Key: "RegionGroup", Value: regionGroup },
+      ],
+    },
+  ],
+};
+
+const payload = wrapperMode === "wrapper"
+  ? { LaunchTemplateName: launchTemplateName, LaunchTemplateData: data }
+  : data;
+
+fs.writeFileSync(outputPath, `${JSON.stringify(payload, null, 2)}\n`);
+NODE
+}
+
+validate_asg_launch_template_json() {
+  launch_template_path="$1"
+  wrapper_mode="${2:-data}"
+
+  node --input-type=module - "$launch_template_path" "$wrapper_mode" <<'NODE'
+import fs from "node:fs";
+
+const [launchTemplatePath, wrapperMode] = process.argv.slice(2);
+const payload = JSON.parse(fs.readFileSync(launchTemplatePath, "utf8"));
+const data = wrapperMode === "wrapper" ? payload.LaunchTemplateData : payload;
+
+const fail = (message) => {
+  console.error(message);
+  process.exit(2);
+};
+
+if (!data || typeof data !== "object") fail("Launch template data is missing.");
+if (!data.ImageId) fail("Launch template data is missing ImageId.");
+if (!data.InstanceType) fail("Launch template data is missing InstanceType.");
+if (!Array.isArray(data.SecurityGroupIds) || data.SecurityGroupIds.length === 0) {
+  fail("Launch template data is missing SecurityGroupIds.");
+}
+if (!data.IamInstanceProfile || (!data.IamInstanceProfile.Arn && !data.IamInstanceProfile.Name)) {
+  fail("Launch template data is missing explicit IamInstanceProfile.");
+}
+if (!data.UserData) fail("Launch template data is missing UserData.");
+if (data.MetadataOptions?.HttpTokens !== "required") {
+  fail("Launch template data must set MetadataOptions.HttpTokens to required.");
+}
+
+let decoded = "";
+try {
+  decoded = Buffer.from(String(data.UserData), "base64").toString("utf8");
+} catch {
+  fail("Launch template UserData is not valid base64.");
+}
+
+if (!decoded.startsWith("#!/bin/sh\n")) fail("Launch template UserData must start with #!/bin/sh.");
+for (const required of [
+  "set -eu",
+  "/var/log/mscqr-asg-bootstrap.log",
+  "TARGET_REGION_GROUP=",
+  "AWS_REGION=",
+  "cd /home/ubuntu/genuine-scan-main",
+  "git fetch origin main",
+  "git reset --hard origin/main",
+  "scripts/dr/bootstrap-asg-web-node.sh \"$TARGET_REGION_GROUP\" \"$AWS_REGION\"",
+]) {
+  if (!decoded.includes(required)) fail(`Launch template UserData is missing ${required}.`);
+}
+if (/route53|change-resource-record-sets|DATABASE_URL|JWT_SECRET|OBJECT_STORAGE_SECRET_KEY/.test(decoded)) {
+  fail("Launch template UserData contains forbidden DNS or secret-looking text.");
+}
+NODE
+}

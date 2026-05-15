@@ -133,6 +133,9 @@ requireMatch("readiness doc", doc, /\/mscqr\/prod\/ap-south-1\/asg-web\//, "must
 requireMatch("readiness doc", doc, /\/mscqr\/prod\/af-south-1\/asg-web\//, "must document Cape Town SSM prefix.");
 requireMatch("readiness doc", doc, /asg-web-instance-profile-policy\.template\.json/, "must document ASG instance-profile IAM template.");
 requireMatch("readiness doc", doc, /Secrets\/bootstrap is conditionally proven/, "must mark secrets/bootstrap conditionally proven.");
+requireMatch("readiness doc", doc, /ASG_WEB_INSTANCE_PROFILE_ARN/, "must document explicit ASG web instance profile ARN input.");
+requireMatch("readiness doc", doc, /ASG_WEB_INSTANCE_PROFILE_NAME/, "must document explicit ASG web instance profile name input.");
+requireMatch("readiness doc", doc, /UserData/, "must document launch-template UserData bootstrap.");
 requireMatch("readiness doc", doc, /aws-asg-rolling-deploy-policy/, "must document the committed rolling deploy policy.");
 requireMatch("readiness doc", doc, /Rolling deploy policy is conditionally proven/, "must mark rolling deploy policy conditionally proven.");
 requireMatch("readiness doc", doc, /\/healthz/, "must document shallow liveness health semantics.");
@@ -142,6 +145,9 @@ requireMatch("readiness doc", doc, /Secrets Manager|SSM/i, "must document safe s
 requireMatch("readiness doc", doc, /replacement-instance drill/i, "must document the remaining live replacement-instance drill.");
 requireMatch("readiness doc", doc, /Keep production DNS on London EC2/i, "must document no DNS cutover during rollout validation.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_STATUS=CONDITIONALLY_READY/, "must mark the rolling policy document conditionally ready.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_WEB_INSTANCE_PROFILE_ARN/, "must define explicit ASG web instance profile ARN input.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_WEB_INSTANCE_PROFILE_NAME/, "must define explicit ASG web instance profile name input.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /UserData/, "must define UserData bootstrap.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /deregistration delay/i, "must define the target group deregistration delay.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /health check grace period: 180 seconds/i, "must define 180 second health grace.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /default instance warmup: 180 seconds/i, "must define 180 second default instance warmup.");
@@ -199,14 +205,36 @@ requireMatch("ASG bootstrap", asgBootstrap, /deps\.redis\?\.configured === true/
 requireMatch("ASG bootstrap", asgBootstrap, /deps\.redis\?\.ready === true/, "bootstrap must require Redis readiness.");
 requireMatch("ASG bootstrap", asgBootstrap, /deps\.objectStorage\?\.configured === true/, "bootstrap must require object storage configured.");
 requireMatch("ASG bootstrap", asgBootstrap, /deps\.objectStorage\?\.ready === true/, "bootstrap must require object storage readiness.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /write_asg_web_launch_template_json/, "common helpers must generate ASG web launch template JSON.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /validate_asg_launch_template_json/, "common helpers must validate ASG web launch template JSON.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /ASG_WEB_INSTANCE_PROFILE_ARN or ASG_WEB_INSTANCE_PROFILE_NAME is required/, "common helpers must require explicit ASG web instance profile input.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /UserData: Buffer\.from\(userData, "utf8"\)\.toString\("base64"\)/, "common helpers must base64 encode launch template UserData.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /\/var\/log\/mscqr-asg-bootstrap\.log/, "UserData must log to the ASG bootstrap log file.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /git fetch origin main/, "UserData must fetch main.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /git reset --hard origin\/main/, "UserData must reset to origin/main.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /scripts\/dr\/bootstrap-asg-web-node\.sh "\$TARGET_REGION_GROUP" "\$AWS_REGION"/, "UserData must run the ASG bootstrap script with region inputs.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /MetadataOptions\?\.HttpTokens !== "required"/, "launch template validation must require IMDSv2 token enforcement.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /data\.IamInstanceProfile/, "launch template validation must require IamInstanceProfile.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /data\.UserData/, "launch template validation must require UserData.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /aws-asg-rolling-deploy-policy\.checklist\.json/, "apply plan must read the rolling policy checklist.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /render_asg_rolling_policy_env/, "apply plan must validate the rolling policy through common helpers.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_WEB_INSTANCE_PROFILE_ARN/, "apply plan must accept explicit ASG web instance profile ARN.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /ASG_WEB_INSTANCE_PROFILE_NAME/, "apply plan must accept explicit ASG web instance profile name.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /write_asg_web_launch_template_json/, "apply plan must generate launch template through shared helper.");
+requireMatch("ASG apply plan", asgApplyPlanScript, /validate_asg_launch_template_json/, "apply plan must validate proposed launch template JSON.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /HealthCheckGracePeriod/, "apply plan must include health check grace period in the plan artifact.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /DefaultInstanceWarmup/, "apply plan must include default instance warmup in the plan artifact.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /Target deregistration delay required on target group/, "apply plan must include deregistration delay.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /Remaining live go\/no-go/, "apply plan must call out the remaining live drill.");
 requireMatch("ASG apply", asgApplyScript, /aws-asg-rolling-deploy-policy\.checklist\.json/, "apply script must read the rolling policy checklist.");
 requireMatch("ASG apply", asgApplyScript, /render_asg_rolling_policy_env/, "apply script must validate the rolling policy through common helpers.");
+requireMatch("ASG apply", asgApplyScript, /ASG_WEB_INSTANCE_PROFILE_ARN/, "apply script must accept explicit ASG web instance profile ARN.");
+requireMatch("ASG apply", asgApplyScript, /ASG_WEB_INSTANCE_PROFILE_NAME/, "apply script must accept explicit ASG web instance profile name.");
+requireMatch("ASG apply", asgApplyScript, /source instance profile is not reused automatically/, "apply script must refuse implicit source instance profile reuse.");
+requireMatch("ASG apply", asgApplyScript, /write_asg_web_launch_template_json/, "apply script must generate launch template through shared helper.");
+requireMatch("ASG apply", asgApplyScript, /validate_asg_launch_template_json/, "apply script must validate launch template JSON.");
+requireMatch("ASG apply", asgApplyScript, /create-launch-template-version/, "apply script must create a new launch template version when a template already exists.");
+requireMatch("ASG apply", asgApplyScript, /--launch-template "LaunchTemplateId=\$launch_template_id,Version=\$launch_template_version"/, "apply script must update ASG to the validated launch template version.");
 requireMatch("ASG apply", asgApplyScript, /Refusing ASG apply without concrete rollback alarm names/, "apply script must refuse placeholder rollback alarm names.");
 requireMatch("ASG apply", asgApplyScript, /describe-target-group-attributes/, "apply script must verify target group attributes before apply.");
 requireMatch("ASG apply", asgApplyScript, /deregistration_delay\.timeout_seconds/, "apply script must check target group deregistration delay.");
@@ -214,6 +242,9 @@ requireMatch("ASG apply", asgApplyScript, /default-instance-warmup/, "apply scri
 requireMatch("ASG apply", asgApplyScript, /health-check-grace-period/, "apply script must enforce health check grace period.");
 requireMatch("ASG apply", asgApplyScript, /health-check-type/, "apply script must enforce ASG health check type.");
 requireMatch("ASG apply", asgApplyScript, /target count .* below policy requirement|below policy requirement/, "apply script must enforce healthy target count policy.");
+if (/IamInstanceProfile\.Arn/.test(asgApplyScript)) {
+  failures.push("ASG apply script must not copy IamInstanceProfile from SOURCE_INSTANCE_ID.");
+}
 requireMatch("backend Dockerfile", backendDockerfile, /ENV RUN_DB_MIGRATIONS_ON_START=false/, "runtime image must default startup migrations off.");
 requireMatch("backend startup", backendStartup, /RUN_DB_MIGRATIONS_ON_START:-false/, "startup migration gate must be explicit.");
 
@@ -369,6 +400,25 @@ if (asgRollingPolicyChecklist) {
   }
   if (asgRollingPolicyChecklist.replacement_instance_drill_required !== true) {
     failures.push("ASG rolling policy checklist must keep replacement_instance_drill_required=true.");
+  }
+  const requiredInputs = new Set(asgRollingPolicyChecklist.launch_template_required_inputs || []);
+  for (const input of ["ASG_WEB_INSTANCE_PROFILE_ARN", "ASG_WEB_INSTANCE_PROFILE_NAME"]) {
+    if (!requiredInputs.has(input)) failures.push(`ASG rolling policy checklist launch_template_required_inputs must include ${input}.`);
+  }
+  const requiredFields = new Set(asgRollingPolicyChecklist.launch_template_required_fields || []);
+  for (const field of ["IamInstanceProfile", "UserData", "MetadataOptions.HttpTokens=required", "SecurityGroupIds", "ImageId", "InstanceType"]) {
+    if (!requiredFields.has(field)) failures.push(`ASG rolling policy checklist launch_template_required_fields must include ${field}.`);
+  }
+  const userDataBehaviors = JSON.stringify(asgRollingPolicyChecklist.userdata_required_behaviors || []);
+  for (const behavior of [
+    "#!/bin/sh",
+    "set -eu",
+    "/var/log/mscqr-asg-bootstrap.log",
+    "git fetch origin main",
+    "git reset --hard origin/main",
+    "scripts/dr/bootstrap-asg-web-node.sh",
+  ]) {
+    if (!userDataBehaviors.includes(behavior)) failures.push(`ASG rolling policy checklist userdata_required_behaviors must include ${behavior}.`);
   }
   const smokeTests = new Set(asgRollingPolicyChecklist.smoke_tests || []);
   for (const name of ["/healthz", "/api/health/ready", "target_group_healthy_count", "alb_5xx", "target_5xx", "target_response_time"]) {

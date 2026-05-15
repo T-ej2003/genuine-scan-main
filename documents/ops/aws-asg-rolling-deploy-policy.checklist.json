@@ -19,6 +19,29 @@
   "min_size_initial": 2,
   "max_size_initial": 4,
   "target_group_health_required": 2,
+  "launch_template_required_inputs": [
+    "ASG_WEB_INSTANCE_PROFILE_ARN",
+    "ASG_WEB_INSTANCE_PROFILE_NAME"
+  ],
+  "launch_template_required_fields": [
+    "IamInstanceProfile",
+    "UserData",
+    "MetadataOptions.HttpTokens=required",
+    "SecurityGroupIds",
+    "ImageId",
+    "InstanceType"
+  ],
+  "userdata_required_behaviors": [
+    "#!/bin/sh",
+    "set -eu",
+    "log stdout/stderr to /var/log/mscqr-asg-bootstrap.log",
+    "set TARGET_REGION_GROUP and AWS_REGION",
+    "cd /home/ubuntu/genuine-scan-main",
+    "git fetch origin main",
+    "git reset --hard origin/main",
+    "run scripts/dr/bootstrap-asg-web-node.sh \"$TARGET_REGION_GROUP\" \"$AWS_REGION\"",
+    "print non-secret status messages only"
+  ],
   "smoke_tests": [
     "/healthz",
     "/api/health/ready",

@@ -16,6 +16,8 @@ SOURCE_AMI="${SOURCE_AMI:-}"
 SOURCE_INSTANCE_TYPE="${SOURCE_INSTANCE_TYPE:-}"
 SOURCE_SECURITY_GROUP="${SOURCE_SECURITY_GROUP:-}"
 TARGET_GROUP_ARN="${TARGET_GROUP_ARN:-}"
+ASG_WEB_INSTANCE_PROFILE_ARN="${ASG_WEB_INSTANCE_PROFILE_ARN:-}"
+ASG_WEB_INSTANCE_PROFILE_NAME="${ASG_WEB_INSTANCE_PROFILE_NAME:-}"
 ROLLING_POLICY_CHECKLIST_PATH="${ROLLING_POLICY_CHECKLIST_PATH:-documents/ops/aws-asg-rolling-deploy-policy.checklist.json}"
 
 case "$TARGET_REGION_GROUP" in
@@ -27,6 +29,11 @@ case "$TARGET_REGION_GROUP:$AWS_REGION" in
   mumbai:ap-south-1|capetown:af-south-1) ;;
   *) echo "AWS_REGION does not match TARGET_REGION_GROUP." >&2; exit 2 ;;
 esac
+
+if [ -z "$ASG_WEB_INSTANCE_PROFILE_ARN" ] && [ -z "$ASG_WEB_INSTANCE_PROFILE_NAME" ]; then
+  echo "ASG_WEB_INSTANCE_PROFILE_ARN or ASG_WEB_INSTANCE_PROFILE_NAME is required for ASG web launch-template planning." >&2
+  exit 2
+fi
 
 policy_env_file="$(mktemp "${TMPDIR:-/tmp}/mscqr-asg-rolling-policy.XXXXXX")"
 trap 'rm -f "$policy_env_file"' EXIT HUP INT TERM
@@ -66,30 +73,18 @@ selected_subnet_csv="$(printf '%s\n' "$selected_subnet_ids" | /usr/bin/tr ' ' ',
 launch_template_name="mscqr-$TARGET_REGION_GROUP-dr-lt"
 asg_name="mscqr-$TARGET_REGION_GROUP-dr-asg"
 
-/bin/cat > "$out_dir/proposed-launch-template.json" <<JSON
-{
-  "LaunchTemplateName": "$launch_template_name",
-  "LaunchTemplateData": {
-    "ImageId": "$SOURCE_AMI",
-    "InstanceType": "$SOURCE_INSTANCE_TYPE",
-    "SecurityGroupIds": ["$SOURCE_SECURITY_GROUP"],
-    "MetadataOptions": {
-      "HttpTokens": "required",
-      "HttpEndpoint": "enabled"
-    },
-    "TagSpecifications": [
-      {
-        "ResourceType": "instance",
-        "Tags": [
-          { "Key": "Project", "Value": "MSCQR" },
-          { "Key": "Purpose", "Value": "DR" },
-          { "Key": "RegionGroup", "Value": "$TARGET_REGION_GROUP" }
-        ]
-      }
-    ]
-  }
-}
-JSON
+write_asg_web_launch_template_json \
+  "$out_dir/proposed-launch-template.json" \
+  "$launch_template_name" \
+  "$SOURCE_AMI" \
+  "$SOURCE_INSTANCE_TYPE" \
+  "$SOURCE_SECURITY_GROUP" \
+  "$TARGET_REGION_GROUP" \
+  "$AWS_REGION" \
+  "$ASG_WEB_INSTANCE_PROFILE_ARN" \
+  "$ASG_WEB_INSTANCE_PROFILE_NAME" \
+  wrapper
+validate_asg_launch_template_json "$out_dir/proposed-launch-template.json" wrapper
 
 /bin/cat > "$out_dir/proposed-asg.json" <<JSON
 {
@@ -114,6 +109,12 @@ JSON
   printf '%s\n' "- Source AMI: \`$SOURCE_AMI\`"
   printf '%s\n' "- Source instance type: \`$SOURCE_INSTANCE_TYPE\`"
   printf '%s\n' "- Source security group: \`$SOURCE_SECURITY_GROUP\`"
+  if [ -n "$ASG_WEB_INSTANCE_PROFILE_ARN" ]; then
+    printf '%s\n' "- ASG web instance profile: explicit ARN provided"
+  else
+    printf '%s\n' "- ASG web instance profile name: \`$ASG_WEB_INSTANCE_PROFILE_NAME\`"
+  fi
+  printf '%s\n' "- Launch template UserData: base64 bootstrap that runs \`scripts/dr/bootstrap-asg-web-node.sh \"$TARGET_REGION_GROUP\" \"$AWS_REGION\"\`"
   printf '%s\n' "- Selected app subnets: \`$selected_subnet_ids\`"
   printf '%s\n' "- Proposed ASG capacity: \`min=$MIN_SIZE desired=$DESIRED_CAPACITY max=$MAX_SIZE\`"
   printf '%s\n' "- Health check type: \`$ASG_POLICY_HEALTH_CHECK_TYPE\`"

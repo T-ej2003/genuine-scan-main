@@ -410,6 +410,7 @@ Rollback notes:
 - WAF COUNT mode is non-blocking; do not move rules to BLOCK in this phase.
 - ASG apply creates extra capacity and attaches it to the target group. It does not detach or delete the source instance, terminate instances, or change DNS.
 - The first ASG rollout must keep production DNS on London EC2 and must include the replacement-instance drill from `documents/ops/aws-asg-rolling-deploy-policy.md`.
+- ASG launch templates must use explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`. Do not reuse the source instance profile automatically.
 
 Mumbai hardening values:
 
@@ -430,6 +431,31 @@ waf_web_acl_name: mscqr-mumbai-regional-waf
 min_size: 2
 desired_capacity: 2
 max_size: 4
+```
+
+Mumbai ASG plan/apply environment:
+
+```bash
+TARGET_REGION_GROUP=mumbai
+AWS_REGION=ap-south-1
+SOURCE_INSTANCE_ID=i-04ae3b689ab72a68a
+SOURCE_AMI=ami-07216ac99dc46a187
+SOURCE_INSTANCE_TYPE=t3.medium
+SOURCE_SECURITY_GROUP=sg-0771ea7e59f7a49d4
+TARGET_GROUP_ARN=arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgroup/mscqr-mumbai-frontend-tg/68982ccd4d8c26c1
+ASG_WEB_INSTANCE_PROFILE_ARN=<approved-asg-web-instance-profile-arn>
+# Or, if using a profile name instead of ARN:
+# ASG_WEB_INSTANCE_PROFILE_NAME=<approved-asg-web-instance-profile-name>
+ROLLBACK_ALARM_NAMES_CSV=MSCQR-mumbai-ALB-5XX,MSCQR-mumbai-Target-5XX,MSCQR-mumbai-TargetResponseTime-p95,MSCQR-mumbai-UnhealthyHosts
+MIN_SIZE=2
+DESIRED_CAPACITY=2
+MAX_SIZE=4
+```
+
+Add this only for the protected apply operation, never for plan generation:
+
+```bash
+CONFIRM_ASG_APPLY=I_APPROVE_REGIONAL_ASG_CREATE_AND_ATTACH
 ```
 
 Cape Town hardening values:

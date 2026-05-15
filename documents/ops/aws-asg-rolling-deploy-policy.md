@@ -17,6 +17,8 @@ This document defines the approved rolling deploy and instance refresh contract 
 
 Source of truth: `documents/ops/aws-asg-rolling-deploy-policy.checklist.json`
 
+- Launch template instance profile: explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`; ARN wins when both are set.
+- Launch template bootstrap: base64 `UserData` that runs `scripts/dr/bootstrap-asg-web-node.sh "$TARGET_REGION_GROUP" "$AWS_REGION"` from `/home/ubuntu/genuine-scan-main`.
 - ALB target group deregistration delay: 60 seconds.
 - ASG health check type: `ELB`.
 - ASG health check grace period: 180 seconds.
@@ -57,6 +59,8 @@ Every rollout batch and replacement step must pass:
 - Production DNS still points to London EC2.
 - Regional test hostname is healthy before the rollout starts.
 - `node scripts/dr/check-asg-multi-instance-readiness.mjs` passes.
+- The ASG web instance profile has been tested from an EC2 role against the target region SSM prefix before apply.
+- Generated launch template data contains `IamInstanceProfile`, `UserData`, `MetadataOptions.HttpTokens=required`, `SecurityGroupIds`, `ImageId`, and `InstanceType`.
 - `scripts/dr/bootstrap-asg-web-node.sh` is the launch-template bootstrap path.
 - `RUN_BACKGROUND_WORKERS=false`, `RUN_DB_MIGRATIONS_ON_START=false`, and `COMPLIANCE_PACK_SCHEDULER_ENABLED=false` remain forced.
 - Regional Redis and regional S3/default-credential object storage are green through readiness.

@@ -16,6 +16,8 @@ SOURCE_AMI="${SOURCE_AMI:-}"
 SOURCE_INSTANCE_TYPE="${SOURCE_INSTANCE_TYPE:-}"
 SOURCE_SECURITY_GROUP="${SOURCE_SECURITY_GROUP:-}"
 TARGET_GROUP_ARN="${TARGET_GROUP_ARN:-}"
+ASG_WEB_INSTANCE_PROFILE_ARN="${ASG_WEB_INSTANCE_PROFILE_ARN:-}"
+ASG_WEB_INSTANCE_PROFILE_NAME="${ASG_WEB_INSTANCE_PROFILE_NAME:-}"
 ROLLING_POLICY_CHECKLIST_PATH="${ROLLING_POLICY_CHECKLIST_PATH:-documents/ops/aws-asg-rolling-deploy-policy.checklist.json}"
 ROLLBACK_ALARM_NAMES_CSV="${ROLLBACK_ALARM_NAMES_CSV:-}"
 CONFIRM_ASG_APPLY="${CONFIRM_ASG_APPLY:-}"
@@ -29,6 +31,11 @@ case "$TARGET_REGION_GROUP:$AWS_REGION" in
   mumbai:ap-south-1|capetown:af-south-1) ;;
   *) echo "AWS_REGION does not match TARGET_REGION_GROUP." >&2; exit 2 ;;
 esac
+
+if [ -z "$ASG_WEB_INSTANCE_PROFILE_ARN" ] && [ -z "$ASG_WEB_INSTANCE_PROFILE_NAME" ]; then
+  echo "ASG_WEB_INSTANCE_PROFILE_ARN or ASG_WEB_INSTANCE_PROFILE_NAME is required for ASG web launch-template apply. The source instance profile is not reused automatically." >&2
+  exit 2
+fi
 
 policy_env_file="$(mktemp "${TMPDIR:-/tmp}/mscqr-asg-rolling-policy.XXXXXX")"
 trap 'rm -f "$policy_env_file"' EXIT HUP INT TERM
@@ -93,7 +100,6 @@ if [ -z "$SOURCE_INSTANCE_TYPE" ]; then SOURCE_INSTANCE_TYPE="$(aws ec2 describe
 if [ -z "$SOURCE_SECURITY_GROUP" ]; then SOURCE_SECURITY_GROUP="$(aws ec2 describe-instances --region "$AWS_REGION" --instance-ids "$SOURCE_INSTANCE_ID" --query 'Reservations[0].Instances[0].SecurityGroups[0].GroupId' --output text)"; fi
 
 vpc_id="$(aws ec2 describe-instances --region "$AWS_REGION" --instance-ids "$SOURCE_INSTANCE_ID" --query 'Reservations[0].Instances[0].VpcId' --output text)"
-iam_profile_arn="$(aws ec2 describe-instances --region "$AWS_REGION" --instance-ids "$SOURCE_INSTANCE_ID" --query 'Reservations[0].Instances[0].IamInstanceProfile.Arn' --output text)"
 subnets_json="$out_dir/candidate-subnets.json"
 route_tables_json="$out_dir/route-tables.json"
 selected_json="$out_dir/selected-app-subnets.json"
@@ -107,33 +113,18 @@ launch_template_name="mscqr-$TARGET_REGION_GROUP-dr-lt"
 asg_name="mscqr-$TARGET_REGION_GROUP-dr-asg"
 launch_template_data="$out_dir/launch-template-data.json"
 
-node --input-type=module - "$launch_template_data" "$SOURCE_AMI" "$SOURCE_INSTANCE_TYPE" "$SOURCE_SECURITY_GROUP" "$iam_profile_arn" "$TARGET_REGION_GROUP" <<'NODE'
-import fs from "node:fs";
-const [path, imageId, instanceType, securityGroup, iamProfileArn, regionGroup] = process.argv.slice(2);
-const data = {
-  ImageId: imageId,
-  InstanceType: instanceType,
-  SecurityGroupIds: [securityGroup],
-  MetadataOptions: {
-    HttpTokens: "required",
-    HttpEndpoint: "enabled",
-  },
-  TagSpecifications: [
-    {
-      ResourceType: "instance",
-      Tags: [
-        { Key: "Project", Value: "MSCQR" },
-        { Key: "Purpose", Value: "DR" },
-        { Key: "RegionGroup", Value: regionGroup },
-      ],
-    },
-  ],
-};
-if (iamProfileArn && iamProfileArn !== "None") {
-  data.IamInstanceProfile = { Arn: iamProfileArn };
-}
-fs.writeFileSync(path, JSON.stringify(data, null, 2));
-NODE
+write_asg_web_launch_template_json \
+  "$launch_template_data" \
+  "$launch_template_name" \
+  "$SOURCE_AMI" \
+  "$SOURCE_INSTANCE_TYPE" \
+  "$SOURCE_SECURITY_GROUP" \
+  "$TARGET_REGION_GROUP" \
+  "$AWS_REGION" \
+  "$ASG_WEB_INSTANCE_PROFILE_ARN" \
+  "$ASG_WEB_INSTANCE_PROFILE_NAME" \
+  data
+validate_asg_launch_template_json "$launch_template_data" data
 
 launch_template_id="$(aws ec2 describe-launch-templates \
   --region "$AWS_REGION" \
@@ -152,7 +143,14 @@ if [ "$launch_template_id" = "None" ] || [ -z "$launch_template_id" ]; then
   launch_template_version="$(node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); console.log(p.LaunchTemplate.LatestVersionNumber)' "$out_dir/create-launch-template.json")"
 else
   aws ec2 describe-launch-templates --region "$AWS_REGION" --launch-template-ids "$launch_template_id" --output json > "$out_dir/existing-launch-template.json"
-  launch_template_version="$(aws ec2 describe-launch-templates --region "$AWS_REGION" --launch-template-ids "$launch_template_id" --query 'LaunchTemplates[0].LatestVersionNumber' --output text)"
+  source_launch_template_version="$(aws ec2 describe-launch-templates --region "$AWS_REGION" --launch-template-ids "$launch_template_id" --query 'LaunchTemplates[0].LatestVersionNumber' --output text)"
+  aws ec2 create-launch-template-version \
+    --region "$AWS_REGION" \
+    --launch-template-id "$launch_template_id" \
+    --source-version "$source_launch_template_version" \
+    --launch-template-data "file://$launch_template_data" \
+    --output json > "$out_dir/create-launch-template-version.json"
+  launch_template_version="$(node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); console.log(p.LaunchTemplateVersion.VersionNumber)' "$out_dir/create-launch-template-version.json")"
 fi
 
 asg_exists="$(aws autoscaling describe-auto-scaling-groups \
@@ -184,6 +182,7 @@ else
     --min-size "$MIN_SIZE" \
     --desired-capacity "$DESIRED_CAPACITY" \
     --max-size "$MAX_SIZE" \
+    --launch-template "LaunchTemplateId=$launch_template_id,Version=$launch_template_version" \
     --health-check-type "$ASG_POLICY_HEALTH_CHECK_TYPE" \
     --health-check-grace-period "$ASG_POLICY_HEALTH_CHECK_GRACE_PERIOD_SECONDS" \
     --default-instance-warmup "$ASG_POLICY_DEFAULT_INSTANCE_WARMUP_SECONDS" \

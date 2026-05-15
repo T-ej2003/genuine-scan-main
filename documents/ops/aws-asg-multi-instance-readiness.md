@@ -22,6 +22,8 @@ The app has several good production controls already:
 - `docker-compose.asg-web.yml` is the ASG web-node mode and contains only `backend` and `frontend`.
 - `scripts/dr/bootstrap-asg-web-node.sh` is the committed ASG web-node bootstrap path using AWS SSM Parameter Store.
 - `documents/ops/aws-asg-web-ssm-parameter-manifest.json` records required root/backend env parameter names without values.
+- ASG launch-template plan/apply now requires explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`.
+- ASG launch-template plan/apply now emits base64 `UserData` that runs the ASG web bootstrap script from `/home/ubuntu/genuine-scan-main`.
 - `documents/ops/aws-asg-rolling-deploy-policy.md` and `documents/ops/aws-asg-rolling-deploy-policy.checklist.json` define the rolling deploy contract, rollback criteria, and replacement-instance drill.
 - `/healthz` exists for shallow app liveness and `/api/health/ready` reaches backend dependency readiness through Nginx.
 
@@ -228,6 +230,8 @@ Required production env categories:
 ASG requirement:
 
 - Use an IAM instance profile with least-privilege read access to the region-specific SSM Parameter Store path.
+- Provide that profile explicitly through `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`; do not copy the source EC2 instance profile by default.
+- Test the final ASG web instance profile from an EC2 role before ASG apply by running the bootstrap in render-only mode and confirming it can fetch the approved SSM prefix without printing values.
 - Render container environment at boot without logging values.
 - Fail boot if any required value is missing.
 - Do not rely on SSH/manual edits to `backend/.env` for new ASG instances.
@@ -249,6 +253,8 @@ ASG bootstrap checklist:
 - Install Docker and the Compose plugin from a pinned or approved source.
 - Pull or build the approved image for the exact commit SHA.
 - Fetch environment from SSM Parameter Store through instance profile using `scripts/dr/bootstrap-asg-web-node.sh`.
+- Include launch-template `UserData` that logs only non-secret bootstrap status to `/var/log/mscqr-asg-bootstrap.log`.
+- Keep launch-template `IamInstanceProfile` explicit and supplied by `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`.
 - Set `RUN_DB_MIGRATIONS_ON_START=false`.
 - Set backend `RUN_BACKGROUND_WORKERS=false` on web nodes.
 - Point `REDIS_URL` to shared regional Redis.
@@ -290,6 +296,14 @@ Committed policy:
 - `scripts/dr/generate-asg-apply-plan.sh`
 - `scripts/dr/apply-asg-launch-template-approved.sh`
 
+Launch-template requirements:
+
+- `IamInstanceProfile` must come from explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`.
+- `UserData` must be base64 encoded and must run `scripts/dr/bootstrap-asg-web-node.sh "$TARGET_REGION_GROUP" "$AWS_REGION"` from `/home/ubuntu/genuine-scan-main`.
+- `UserData` must log to `/var/log/mscqr-asg-bootstrap.log`, fetch/reset `origin/main`, avoid printing secret values, and never touch Route 53 or production DNS.
+- `MetadataOptions.HttpTokens` must be `required`.
+- `ImageId`, `InstanceType`, and `SecurityGroupIds` must be present.
+
 Approved first-rollout values:
 
 - Use ALB target deregistration delay of 60 seconds.
@@ -311,9 +325,9 @@ Conditionally ready for a first controlled ASG rollout with no production DNS cu
 
 Worker topology is conditionally proven for ASG web nodes: web nodes have an explicit worker-free Compose file, the HTTP backend is worker-disabled, the standalone worker is an intentional one-per-region profile, compliance scheduling is disabled, and worker horizontal scaling is not assumed safe.
 
-Secrets/bootstrap is conditionally proven at repository level: the SSM manifest, bootstrap script, forced safety settings, SSM prefixes, health validation, and instance-profile IAM template are committed. This still needs launch-template user-data wiring and a real replacement-instance drill before production use.
+Secrets/bootstrap is conditionally proven at repository level: the SSM manifest, bootstrap script, forced safety settings, SSM prefixes, launch-template `UserData`, explicit instance-profile input, health validation, and instance-profile IAM template are committed. This still needs a real replacement-instance drill before production use.
 
-Rolling deploy policy is conditionally proven at repository level: the contract document, machine-readable checklist, plan/apply script gates, rollback criteria, and replacement-instance drill procedure are committed.
+Rolling deploy policy is conditionally proven at repository level: the contract document, machine-readable checklist, plan/apply script gates, launch-template validation, rollback criteria, and replacement-instance drill procedure are committed.
 
 Exact remaining live test:
 
