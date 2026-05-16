@@ -223,11 +223,24 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
 
   if (selectedPrinterProfile.connectionType === "LOCAL_AGENT") {
     const livePrinterStatus = await apiClient.getPrinterConnectionStatus();
+    const refreshRateLimited =
+      livePrinterStatus.status === 429 || String(livePrinterStatus.code || "").toUpperCase() === "RATE_LIMITED";
+    const effectiveLiveStatus = (livePrinterStatus.data || printerStatus) as PrinterConnectionStatus;
     if (
+      refreshRateLimited &&
+      printerStatus.connected &&
+      printerStatus.eligibleForPrinting &&
+      detectedPrinters.some((row) => row.printerId === selectedPrinterId && row.online !== false)
+    ) {
+      toast({
+        title: "Using last ready printer status",
+        description: "Printer status refresh is temporarily paused. Printing can continue.",
+      });
+    } else if (
       !livePrinterStatus.success ||
       !livePrinterStatus.data ||
-      !(livePrinterStatus.data as { connected?: boolean }).connected ||
-      !(livePrinterStatus.data as { eligibleForPrinting?: boolean }).eligibleForPrinting
+      !effectiveLiveStatus.connected ||
+      !effectiveLiveStatus.eligibleForPrinting
     ) {
       setPrinterStatus({
         ...defaultPrinterStatus,
@@ -251,11 +264,11 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
       return;
     }
 
-    setPrinterStatus(livePrinterStatus.data as PrinterConnectionStatus);
+    setPrinterStatus(effectiveLiveStatus);
     const selectedPrinter =
       detectedPrinters.find((row) => row.printerId === selectedPrinterId) ||
       detectedPrinters.find(
-        (row) => row.printerId === (livePrinterStatus.data as { selectedPrinterId?: string }).selectedPrinterId
+        (row) => row.printerId === effectiveLiveStatus.selectedPrinterId
       ) ||
       null;
 

@@ -2,7 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import apiClient from "@/lib/api-client";
 import { getOptionalLocalStorageItem } from "@/lib/consent";
-import { getPrinterDiagnosticSummary, type LocalPrinterAgentSnapshot } from "@/lib/printer-diagnostics";
+import {
+  chooseStablePrinterSelection,
+  getPrinterDiagnosticSummary,
+  type LocalPrinterAgentSnapshot,
+} from "@/lib/printer-diagnostics";
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
 import { buildSupportDiagnosticsPayload, captureSupportScreenshot } from "@/lib/support-diagnostics";
 import {
@@ -119,10 +123,14 @@ export function useBatchPrintWorkflow({
   const selectedDetectedPrinter = useMemo(
     () =>
       detectedPrinters.find((row) => row.printerId === activeLocalPrinterId) ||
-      detectedPrinters.find((row) => row.isDefault) ||
-      detectedPrinters[0] ||
+      chooseStablePrinterSelection(
+        detectedPrinters,
+        selectedPrinterId,
+        printerStatus.selectedPrinterId,
+        printerStatus.printerId
+      ) ||
       null,
-    [activeLocalPrinterId, detectedPrinters]
+    [activeLocalPrinterId, detectedPrinters, printerStatus.printerId, printerStatus.selectedPrinterId, selectedPrinterId]
   );
   const printerDiagnostics = useMemo(
     () =>
@@ -223,7 +231,17 @@ export function useBatchPrintWorkflow({
       printers: snapshot.detectedPrinters as LocalPrinterRow[],
     });
     setDetectedPrinters(snapshot.detectedPrinters as LocalPrinterRow[]);
-    const nextPreferredPrinterId = String(preferredLocalPrinterId || snapshot.preferredPrinterId || "").trim();
+    const nextPreferredPrinterId = String(
+      chooseStablePrinterSelection(
+        snapshot.detectedPrinters as LocalPrinterRow[],
+        selectedPrinterId || preferredLocalPrinterId,
+        snapshot.remoteStatus.selectedPrinterId,
+        snapshot.remoteStatus.printerId
+      )?.printerId ||
+        preferredLocalPrinterId ||
+        snapshot.preferredPrinterId ||
+        ""
+    ).trim();
     if (nextPreferredPrinterId) {
       setSelectedPrinterId((previous) => previous || nextPreferredPrinterId);
     }
@@ -299,6 +317,7 @@ export function useBatchPrintWorkflow({
     if (!isManufacturer) return;
     const response = await printerRuntimeQuery.refetch();
     if (!response.data) {
+      if (printerStatus.connected && printerStatus.eligibleForPrinting) return;
       setRegisteredPrinters([]);
       setDetectedPrinters([]);
       return;

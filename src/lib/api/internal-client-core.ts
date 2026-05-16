@@ -411,6 +411,8 @@ export function createApiClientCore(): ApiClientCore {
         const retryAfterPayload =
           payload && typeof payload === "object" && "retryAfterSec" in payload
             ? Number((payload as any).retryAfterSec)
+            : payload && typeof payload === "object" && "retryAfterSeconds" in payload
+              ? Number((payload as any).retryAfterSeconds)
             : NaN;
         const retryAfterSec =
           Number.isFinite(retryAfterPayload) && retryAfterPayload > 0

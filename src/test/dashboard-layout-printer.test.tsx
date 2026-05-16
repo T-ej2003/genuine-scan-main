@@ -237,7 +237,7 @@ describe("DashboardLayout printer connection dialog", () => {
     expect(screen.queryByRole("button", { name: /install printer helper/i })).not.toBeInTheDocument();
   });
 
-  it("only auto-opens the ready printer dialog once per manufacturer browser session", async () => {
+  it("does not auto-open the helper when the printer is ready", async () => {
     localStorageState.set("manufacturer-printer-onboarding:v1:manufacturer-1", "dismissed");
     vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValue({
       success: true,
@@ -284,22 +284,6 @@ describe("DashboardLayout printer connection dialog", () => {
       },
     } as Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>);
 
-    const firstMount = renderWithQueryClient(
-      <MemoryRouter>
-        <DashboardLayout>
-          <div>Dashboard content</div>
-        </DashboardLayout>
-      </MemoryRouter>
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText("Printing Status")).toBeInTheDocument();
-    });
-
-    expect(sessionStorageState.get("manufacturer-printer-dialog-opened:v1:manufacturer-1")).toBe("shown");
-
-    firstMount.unmount();
-
     renderWithQueryClient(
       <MemoryRouter>
         <DashboardLayout>
@@ -309,14 +293,13 @@ describe("DashboardLayout printer connection dialog", () => {
     );
 
     await waitFor(() => {
-      expect(vi.mocked(apiClient.getPrinterConnectionStatus)).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole("button", { name: /printing ready/i })).toBeInTheDocument();
     });
 
-    expect(screen.getByRole("button", { name: /printing ready/i })).toBeInTheDocument();
     expect(screen.queryByText("Printing Status")).not.toBeInTheDocument();
   });
 
-  it("surfaces recovery mode when heartbeat falls back to recovery mode", async () => {
+  it("shows secure verification pending as a non-blocking ready notice", async () => {
     localStorageState.set("manufacturer-printer-onboarding:v1:manufacturer-1", "dismissed");
     vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
       success: true,
@@ -399,18 +382,241 @@ describe("DashboardLayout printer connection dialog", () => {
       </MemoryRouter>
     );
 
-    expect((await screen.findAllByText("Recovery mode")).length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /printing ready/i })).toBeInTheDocument();
+    });
     expect(vi.mocked(apiClient.getPrinterConnectionStatus)).not.toHaveBeenCalled();
-    expect(
-      screen.getByText(/printing is staying available while secure printer settings catch up/i)
-    ).toBeInTheDocument();
+    expect(screen.queryByText("Recovery mode")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole("button", { name: /^close$/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: /printing ready/i }));
 
     await waitFor(() => {
-      expect(screen.queryByText("Printing Status")).not.toBeInTheDocument();
+      expect(screen.getByText("Printing Status")).toBeInTheDocument();
     });
 
-    expect(screen.getByRole("button", { name: /printing .*recovery mode/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/secure printer verification is still finishing\. printing can continue/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Recovery mode")).not.toBeInTheDocument();
+  });
+
+  it("preserves last-known ready state and keeps helper closed when status refresh is rate-limited", async () => {
+    localStorageState.set("manufacturer-printer-onboarding:v1:manufacturer-1", "dismissed");
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
+      success: true,
+      data: {
+        connected: true,
+        printerName: "ZDesigner ZT410-300dpi ZPL",
+        printerId: "zdesigner-zt410",
+        selectedPrinterId: "zdesigner-zt410",
+        selectedPrinterName: "ZDesigner ZT410-300dpi ZPL",
+        deviceName: "Factory Mac",
+        agentVersion: "2026.3.28",
+        printers: [
+          {
+            printerId: "zdesigner-zt410",
+            printerName: "ZDesigner ZT410-300dpi ZPL",
+            model: "ZT410",
+            connection: "usb",
+            online: true,
+            isDefault: true,
+            protocols: ["raw-9100"],
+            languages: ["ZPL"],
+            mediaSizes: ["Label"],
+            dpi: 300,
+          },
+        ],
+      },
+    } as Awaited<ReturnType<typeof apiClient.getLocalPrintAgentStatus>>);
+    vi.mocked(apiClient.getPrinterConnectionStatus)
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          connected: true,
+          trusted: true,
+          compatibilityMode: false,
+          compatibilityReason: null,
+          eligibleForPrinting: true,
+          connectionClass: "TRUSTED",
+          stale: false,
+          requiredForPrinting: true,
+          trustStatus: "TRUSTED",
+          trustReason: "Trusted printer ready",
+          lastHeartbeatAt: "2026-03-13T19:23:36.000Z",
+          ageSeconds: 0,
+          registrationId: "printer-managed-1",
+          agentId: "agent-1",
+          deviceFingerprint: "device-fingerprint",
+          mtlsFingerprint: "mtls-fingerprint",
+          printerName: "ZDesigner ZT410-300dpi ZPL",
+          printerId: "zdesigner-zt410",
+          selectedPrinterId: "zdesigner-zt410",
+          selectedPrinterName: "ZDesigner ZT410-300dpi ZPL",
+          deviceName: "Factory Mac",
+          agentVersion: "2026.3.13",
+          capabilitySummary: null,
+          printers: [
+            {
+              printerId: "zdesigner-zt410",
+              printerName: "ZDesigner ZT410-300dpi ZPL",
+              model: "ZT410",
+              connection: "usb",
+              online: true,
+              isDefault: true,
+              protocols: ["raw-9100"],
+              languages: ["ZPL"],
+              mediaSizes: ["Label"],
+              dpi: 300,
+            },
+          ],
+          calibrationProfile: null,
+          error: null,
+        },
+      } as Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>)
+      .mockResolvedValue({
+        success: false,
+        status: 429,
+        code: "RATE_LIMITED",
+        retryAfterSec: 60,
+        error: "Too many printer status requests. Please wait before retrying.",
+      } as Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>);
+
+    renderWithQueryClient(
+      <MemoryRouter>
+        <DashboardLayout>
+          <div>Dashboard content</div>
+        </DashboardLayout>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /printing ready/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /printing ready/i }));
+    await waitFor(() => {
+      expect(screen.getByText("Printing Status")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: /refresh status/i })[0]);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/printer status refresh is temporarily paused\. printing can continue/i).length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText("Recovery mode")).not.toBeInTheDocument();
+  });
+
+  it("keeps ZDesigner selected instead of switching to Canon AirPrint", async () => {
+    localStorageState.set("manufacturer-printer-onboarding:v1:manufacturer-1", "dismissed");
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
+      success: true,
+      data: {
+        connected: true,
+        printerName: "ZDesigner ZT410-300dpi ZPL",
+        printerId: "zdesigner-zt410",
+        selectedPrinterId: "zdesigner-zt410",
+        selectedPrinterName: "ZDesigner ZT410-300dpi ZPL",
+        deviceName: "Factory Mac",
+        agentVersion: "2026.3.28",
+        printers: [
+          {
+            printerId: "canon-airprint",
+            printerName: "Canon TS4100i series-AirPrint",
+            model: "TS4100i",
+            connection: "AirPrint",
+            online: true,
+            isDefault: true,
+            protocols: ["ipp"],
+            languages: ["PDF"],
+            mediaSizes: ["A4"],
+            dpi: 300,
+          },
+          {
+            printerId: "zdesigner-zt410",
+            printerName: "ZDesigner ZT410-300dpi ZPL",
+            model: "ZT410",
+            connection: "USB",
+            online: true,
+            isDefault: false,
+            protocols: ["raw-9100"],
+            languages: ["ZPL"],
+            mediaSizes: ["Label"],
+            dpi: 300,
+          },
+        ],
+      },
+    } as Awaited<ReturnType<typeof apiClient.getLocalPrintAgentStatus>>);
+    vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValue({
+      success: true,
+      data: {
+        connected: true,
+        trusted: true,
+        compatibilityMode: false,
+        compatibilityReason: null,
+        eligibleForPrinting: true,
+        connectionClass: "TRUSTED",
+        stale: false,
+        requiredForPrinting: true,
+        trustStatus: "TRUSTED",
+        trustReason: "Trusted printer ready",
+        lastHeartbeatAt: "2026-03-13T19:23:36.000Z",
+        ageSeconds: 0,
+        registrationId: "printer-managed-1",
+        agentId: "agent-1",
+        deviceFingerprint: "device-fingerprint",
+        mtlsFingerprint: "mtls-fingerprint",
+        printerName: "ZDesigner ZT410-300dpi ZPL",
+        printerId: "zdesigner-zt410",
+        selectedPrinterId: "zdesigner-zt410",
+        selectedPrinterName: "ZDesigner ZT410-300dpi ZPL",
+        deviceName: "Factory Mac",
+        agentVersion: "2026.3.13",
+        capabilitySummary: null,
+        printers: [
+          {
+            printerId: "canon-airprint",
+            printerName: "Canon TS4100i series-AirPrint",
+            model: "TS4100i",
+            connection: "AirPrint",
+            online: true,
+            isDefault: true,
+            protocols: ["ipp"],
+            languages: ["PDF"],
+            mediaSizes: ["A4"],
+            dpi: 300,
+          },
+          {
+            printerId: "zdesigner-zt410",
+            printerName: "ZDesigner ZT410-300dpi ZPL",
+            model: "ZT410",
+            connection: "USB",
+            online: true,
+            isDefault: false,
+            protocols: ["raw-9100"],
+            languages: ["ZPL"],
+            mediaSizes: ["Label"],
+            dpi: 300,
+          },
+        ],
+        calibrationProfile: null,
+        error: null,
+      },
+    } as Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>);
+
+    renderWithQueryClient(
+      <MemoryRouter>
+        <DashboardLayout>
+          <div>Dashboard content</div>
+        </DashboardLayout>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /printing ready/i })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /printing ready/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Printing Status")).toBeInTheDocument();
+    });
+    expect(screen.getAllByText("ZDesigner ZT410-300dpi ZPL").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /active printer/i })).toBeInTheDocument();
   });
 });

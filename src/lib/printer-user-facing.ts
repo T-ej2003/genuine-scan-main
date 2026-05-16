@@ -42,6 +42,9 @@ export const sanitizePrinterUiError = (raw?: string | null, fallback = "Printing
   if (hasAny(value, ["busy", "conflict", "please retry"])) {
     return "Another printing action is already using this batch. Please wait a moment and try again.";
   }
+  if (hasAny(value, ["too many printer status requests", "too many print status reads", "too many printer heartbeat requests", "rate_limited", "rate limited", "http 429"])) {
+    return "Printer status refresh is temporarily paused. Printing can continue if the printer was already ready.";
+  }
   if (hasAny(value, ["127.0.0.1", "localhost", "local print agent", "printer switch failed", "calibration failed"])) {
     return "The printer helper is not available on this computer right now.";
   }

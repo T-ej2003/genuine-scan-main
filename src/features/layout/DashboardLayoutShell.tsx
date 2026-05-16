@@ -408,6 +408,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             printerStatusLive={printerConnection.printerStatusLive}
             printerDegraded={printerConnection.printerDegraded}
             printerDegradedMessage={printerConnection.printerDegradedMessage}
+            printerNoticeMessage={printerConnection.printerNoticeMessage}
             selectedPrinter={printerConnection.selectedPrinter}
             shouldUseManagedPrinterSummary={printerConnection.shouldUseManagedPrinterSummary}
             preferredManagedNetworkPrinter={printerConnection.preferredManagedNetworkPrinter}

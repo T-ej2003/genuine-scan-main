@@ -49,6 +49,9 @@ export type PrinterConnectionStatusLike = {
   agentVersion?: string | null;
   printers?: PrinterInventoryRow[];
   error?: string | null;
+  refreshPaused?: boolean;
+  rateLimited?: boolean;
+  notice?: string | null;
 };
 
 export type LocalPrinterAgentSnapshot = {
@@ -100,6 +103,67 @@ const toUpperList = (values: string[] | null | undefined) =>
   Array.isArray(values) ? values.map((value) => String(value || "").trim().toUpperCase()).filter(Boolean) : [];
 const toCleanString = (value: unknown, max = 512) => String(value || "").trim().slice(0, max);
 const SUPPORTED_NETWORK_DIRECT_LANGUAGES = ["ZPL", "TSPL", "EPL", "CPCL"] as const;
+const LABEL_PRINTER_TERMS = ["zdesigner", "zebra", "zt410", "zpl"];
+const NON_LABEL_PRINTER_TERMS = ["canon", "airprint", "fax", "pdf", "onenote", "xps", "microsoft print to pdf"];
+
+const printerSearchText = (printer: PrinterInventoryRow) =>
+  [
+    printer.printerName,
+    printer.model,
+    printer.connection,
+    ...(printer.languages || []),
+    ...(printer.protocols || []),
+    ...(printer.mediaSizes || []),
+  ]
+    .join(" ")
+    .toLowerCase();
+
+export const isPreferredLabelPrinter = (printer?: PrinterInventoryRow | null) =>
+  Boolean(printer && hasAny(printerSearchText(printer), LABEL_PRINTER_TERMS));
+
+export const isLowerPriorityPrinter = (printer?: PrinterInventoryRow | null) =>
+  Boolean(printer && hasAny(printerSearchText(printer), NON_LABEL_PRINTER_TERMS));
+
+export const getPrinterSelectionRank = (printer: PrinterInventoryRow) => {
+  const text = printerSearchText(printer);
+  let score = 0;
+  if (printer.online === false) score -= 100;
+  if (printer.isDefault) score += 2;
+  for (const term of LABEL_PRINTER_TERMS) {
+    if (text.includes(term)) score += 25;
+  }
+  for (const term of NON_LABEL_PRINTER_TERMS) {
+    if (text.includes(term)) score -= 20;
+  }
+  if (toUpperList(printer.languages).includes("ZPL")) score += 30;
+  return score;
+};
+
+export const chooseStablePrinterSelection = (
+  printers: PrinterInventoryRow[],
+  currentPrinterId?: string | null,
+  remoteSelectedPrinterId?: string | null,
+  remotePrinterId?: string | null
+) => {
+  const available = Array.isArray(printers) ? printers : [];
+  const current = available.find((row) => row.printerId === currentPrinterId);
+  if (current && current.online !== false) return current;
+
+  const remoteSelected = available.find((row) => row.printerId === remoteSelectedPrinterId);
+  if (remoteSelected && remoteSelected.online !== false && !isLowerPriorityPrinter(remoteSelected)) return remoteSelected;
+
+  const remotePrinter = available.find((row) => row.printerId === remotePrinterId);
+  if (remotePrinter && remotePrinter.online !== false && !isLowerPriorityPrinter(remotePrinter)) return remotePrinter;
+
+  return (
+    [...available]
+      .filter((row) => row.online !== false)
+      .sort((left, right) => getPrinterSelectionRank(right) - getPrinterSelectionRank(left))[0] ||
+    available.find((row) => row.printerId === remoteSelectedPrinterId) ||
+    available[0] ||
+    null
+  );
+};
 
 const normalizeResourcePath = (value?: string | null) => {
   const trimmed = toCleanString(value, 256);
@@ -291,33 +355,28 @@ export const getPrinterDiagnosticSummary = (params: {
     printers[0] ||
     null;
 
-  if (remote?.connected && remote?.eligibleForPrinting && remote?.trusted) {
+  if (remote?.connected && remote?.eligibleForPrinting) {
+    const pendingSecureVerification =
+      !remote.trusted ||
+      remote.compatibilityMode ||
+      String(remote.trustStatus || "").toUpperCase() === "UNREGISTERED" ||
+      String(remote.trustStatus || "").toUpperCase() === "PENDING";
+    const softNotice = remote.refreshPaused
+      ? "Printer status refresh is temporarily paused. Printing can continue."
+      : pendingSecureVerification
+        ? "Secure printer verification is still finishing. Printing can continue."
+        : "The printer helper and MSCQR are both ready for this printer.";
+
     return {
-      state: "trusted_ready",
+      state: remote.trusted && !remote.compatibilityMode ? "trusted_ready" : "compatibility_ready",
       badgeLabel: "Ready",
       title: "Printer ready",
       summary: `${remote.selectedPrinterName || remote.printerName || selectedPrinter?.printerName || "Selected printer"} is connected and ready to print.`,
-      detail: "The printer helper and MSCQR are both ready for this printer.",
+      detail: softNotice,
       tone: "success",
       nextSteps: [
         "Continue to the batch workflow when you are ready to print.",
         "If output alignment changes, review the printer settings before the next run.",
-      ],
-      selectedPrinter,
-    };
-  }
-
-  if (remote?.connected && remote?.eligibleForPrinting && remote?.compatibilityMode) {
-    return {
-      state: "compatibility_ready",
-      badgeLabel: "Ready",
-      title: "Printer ready",
-      summary: `${remote.selectedPrinterName || remote.printerName || selectedPrinter?.printerName || "Selected printer"} is connected and can be used.`,
-      detail: sanitizePrinterUiError(remote.compatibilityReason || remote.error || remote.trustReason, "The secure setup is still finishing in the background."),
-      tone: "warning",
-      nextSteps: [
-        "You can continue printing if this is the expected setup.",
-        "If this state does not clear, ask your setup team to review the printer connection.",
       ],
       selectedPrinter,
     };

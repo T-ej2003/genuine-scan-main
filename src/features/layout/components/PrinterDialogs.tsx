@@ -198,6 +198,7 @@ type PrinterStatusDialogProps = {
   printerStatusLive: boolean;
   printerDegraded: boolean;
   printerDegradedMessage: string;
+  printerNoticeMessage?: string;
   selectedPrinter?: PrinterInventoryRow | null;
   shouldUseManagedPrinterSummary: boolean;
   preferredManagedNetworkPrinter?: ManagedPrinterProfile | null;
@@ -236,6 +237,7 @@ export function PrinterStatusDialog({
   printerStatusLive,
   printerDegraded,
   printerDegradedMessage,
+  printerNoticeMessage,
   selectedPrinter,
   shouldUseManagedPrinterSummary,
   preferredManagedNetworkPrinter,
@@ -335,6 +337,11 @@ export function PrinterStatusDialog({
                         {printerDegradedMessage}
                       </div>
                     ) : null}
+                    {printerNoticeMessage && !printerDegraded ? (
+                      <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-900">
+                        {printerNoticeMessage}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
@@ -404,6 +411,15 @@ export function PrinterStatusDialog({
                     <div>
                       <div className="font-medium text-amber-950">Recovery mode</div>
                       <div className="text-xs text-amber-800">Printing is staying available while secure printer settings catch up</div>
+                    </div>
+                  </div>
+                ) : null}
+                {printerNoticeMessage && !printerDegraded ? (
+                  <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-700" />
+                    <div>
+                      <div className="font-medium text-emerald-950">Printing available</div>
+                      <div className="text-xs text-emerald-800">{printerNoticeMessage}</div>
                     </div>
                   </div>
                 ) : null}

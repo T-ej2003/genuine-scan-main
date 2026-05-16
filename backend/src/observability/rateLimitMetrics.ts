@@ -195,6 +195,7 @@ export const createRateLimitJsonHandler =
   (req: Request, res: Response) => {
     const retryAfterSec = recordRateLimitMetric(req, scope);
     res.setHeader("Retry-After", String(retryAfterSec));
+    const isPrinterScope = scope.startsWith("printer-agent") || scope.startsWith("print.read");
 
     return res.status(429).json({
       success: false,
@@ -202,6 +203,14 @@ export const createRateLimitJsonHandler =
       error: message,
       scope,
       retryAfterSec,
+      retryAfterSeconds: retryAfterSec,
+      ...(isPrinterScope
+        ? {
+            errorCode: "rate_limited",
+            printingMayContinue: true,
+            message: "Printer status refresh is temporarily paused. Printing can continue if the printer was already ready.",
+          }
+        : {}),
     });
   };
 

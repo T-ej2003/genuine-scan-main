@@ -15,6 +15,10 @@ describe("printer user-facing helpers", () => {
     expect(sanitizePrinterUiError("mTLS client certificate fingerprint header missing")).toBe(
       "Advanced secure printer verification is not set up yet. Printing can stay available while setup finishes."
     );
+
+    expect(sanitizePrinterUiError("Too many printer status requests. Please wait before retrying.")).toBe(
+      "Printer status refresh is temporarily paused. Printing can continue if the printer was already ready."
+    );
   });
 
   it("redacts duplicate printer registration errors", () => {

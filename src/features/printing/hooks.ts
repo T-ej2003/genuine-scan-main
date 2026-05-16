@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import apiClient from "@/lib/api-client";
 import { parseWithSchema, unwrapParsedApiResponse } from "@/lib/api/query-utils";
 import { queryKeys } from "@/lib/query-keys";
-import type { LocalPrinterAgentSnapshot } from "@/lib/printer-diagnostics";
+import { chooseStablePrinterSelection, type LocalPrinterAgentSnapshot } from "@/lib/printer-diagnostics";
 
 import {
   localPrinterArraySchema,
@@ -103,7 +103,9 @@ export function useManufacturerPrinterRuntime(includeInactive = true, enabled = 
   return useQuery({
     queryKey: queryKeys.printing.runtime(includeInactive),
     enabled,
-    refetchInterval: enabled ? 6_000 : false,
+    staleTime: 20_000,
+    refetchInterval: enabled ? 30_000 : false,
+    refetchOnWindowFocus: false,
     queryFn: async (): Promise<ManufacturerPrinterRuntime> => {
       const [remoteResponse, localResponse, registeredPrinterResponse] = await Promise.all([
         apiClient.getPrinterConnectionStatus(),
@@ -128,13 +130,16 @@ export function useManufacturerPrinterRuntime(includeInactive = true, enabled = 
           : buildFallbackPrinterStatus(localPrinters, remoteResponse.error || localResponse.error || "Printer status unavailable");
 
       const detectedPrinters = remoteStatus.printers && remoteStatus.printers.length > 0 ? remoteStatus.printers : localPrinters;
-      const preferredPrinterId = String(
-        remoteStatus.selectedPrinterId ||
-          (localResponse.data as { selectedPrinterId?: string; printerId?: string } | undefined)?.selectedPrinterId ||
-          detectedPrinters.find((row) => row.isDefault)?.printerId ||
-          detectedPrinters[0]?.printerId ||
-          ""
-      ).trim() || null;
+      const preferredPrinterId =
+        String(
+          chooseStablePrinterSelection(
+            detectedPrinters,
+            (localResponse.data as { selectedPrinterId?: string; printerId?: string } | undefined)?.selectedPrinterId ||
+              null,
+            remoteStatus.selectedPrinterId,
+            remoteStatus.printerId
+          )?.printerId || ""
+        ).trim() || null;
 
       return {
         localAgent: {

@@ -4,13 +4,12 @@ import { APP_PATHS } from "@/app/route-metadata";
 import apiClient from "@/lib/api-client";
 import {
   getOptionalLocalStorageItem,
-  getOptionalSessionStorageItem,
   removeOptionalLocalStorageItem,
   removeOptionalSessionStorageItem,
   setOptionalLocalStorageItem,
-  setOptionalSessionStorageItem,
 } from "@/lib/consent";
 import {
+  chooseStablePrinterSelection,
   getManagedPrinterDiagnosticSummary,
   getPrinterDiagnosticSummary,
   selectPreferredManagedPrinter,
@@ -42,6 +41,7 @@ type UseManufacturerPrinterConnectionParams = {
 };
 
 const PRINTER_FAILURE_REPORT_COOLDOWN_MS = 3 * 60 * 1000;
+const PRINTER_BACKGROUND_REFRESH_MS = 30_000;
 const PRINTER_DIALOG_SESSION_STORAGE_VERSION = "v1";
 const PRINTER_ONBOARDING_STORAGE_VERSION = "v1";
 
@@ -81,11 +81,11 @@ export function useManufacturerPrinterConnection({
   navigate,
   toast,
 }: UseManufacturerPrinterConnectionParams) {
-  const printerConnectedRef = useRef(false);
   const detectedPrintersRef = useRef<NonNullable<PrinterConnectionStatusDTO["printers"]>>([]);
   const printerFailureReportRef = useRef<{ signature: string; at: number }>({ signature: "", at: 0 });
   const printerFailureInFlightRef = useRef(false);
   const configuredBackendUrlRef = useRef("");
+  const printerStatusRef = useRef<PrinterConnectionStatusDTO>(defaultPrinterStatus);
 
   const [printerStatus, setPrinterStatus] = useState<PrinterConnectionStatusDTO>(defaultPrinterStatus);
   const [printerDialogOpen, setPrinterDialogOpen] = useState(false);
@@ -113,24 +113,6 @@ export function useManufacturerPrinterConnection({
       ? `manufacturer-printer-onboarding:${PRINTER_ONBOARDING_STORAGE_VERSION}:${user.id}`
       : null;
 
-  const hasSeenPrinterDialogThisSession = () => {
-    if (!printerDialogSessionKey) return false;
-    try {
-      return String(getOptionalSessionStorageItem("functional", printerDialogSessionKey) || "").trim().toLowerCase() === "shown";
-    } catch {
-      return false;
-    }
-  };
-
-  const markPrinterDialogSeenThisSession = () => {
-    if (!printerDialogSessionKey) return;
-    try {
-      setOptionalSessionStorageItem("functional", printerDialogSessionKey, "shown");
-    } catch {
-      // Ignore storage failures.
-    }
-  };
-
   const clearPrinterDialogSession = () => {
     if (!printerDialogSessionKey) return;
     try {
@@ -153,32 +135,30 @@ export function useManufacturerPrinterConnection({
     const remotePrinters = normalizeLocalPrinterRows(nextStatus.printers || []);
     const mergedPrinters = remotePrinters.length > 0 ? remotePrinters : fallbackPrinters;
 
-    setPrinterStatus((previous) => ({
-      ...previous,
-      ...nextStatus,
-      degraded:
-        typeof nextStatus.degraded === "boolean" ? nextStatus.degraded : Boolean(previous.degraded),
-      printers: mergedPrinters,
-    }));
+    setPrinterStatus((previous) => {
+      const ready = Boolean(nextStatus.connected && nextStatus.eligibleForPrinting);
+      const merged = {
+        ...previous,
+        ...nextStatus,
+        degraded: ready ? false : typeof nextStatus.degraded === "boolean" ? nextStatus.degraded : Boolean(previous.degraded),
+        printers: mergedPrinters,
+      };
+      printerStatusRef.current = merged;
+      return merged;
+    });
     setDetectedPrinters(mergedPrinters);
     setPrinterStatusUpdatedAt(options?.updatedAt || nextStatus.lastHeartbeatAt || new Date().toISOString());
 
     setSelectedLocalPrinterId((previous) => {
       if (previous && mergedPrinters.some((row) => row.printerId === previous)) return previous;
-      const fallbackPrinter =
-        mergedPrinters.find((row) => row.printerId === nextStatus.selectedPrinterId) ||
-        mergedPrinters.find((row) => row.printerId === nextStatus.printerId) ||
-        mergedPrinters.find((row) => row.isDefault) ||
-        mergedPrinters[0];
+      const fallbackPrinter = chooseStablePrinterSelection(
+        mergedPrinters,
+        previous,
+        nextStatus.selectedPrinterId,
+        nextStatus.printerId
+      );
       return fallbackPrinter?.printerId || previous;
     });
-
-    const nowConnected = Boolean(nextStatus.connected && nextStatus.eligibleForPrinting);
-    if (nowConnected && !printerConnectedRef.current && !hasSeenPrinterDialogThisSession()) {
-      setPrinterDialogOpen(true);
-      markPrinterDialogSeenThisSession();
-    }
-    printerConnectedRef.current = nowConnected;
   };
 
   const maybeAutoReportPrinterFailure = async (params: {
@@ -272,10 +252,10 @@ export function useManufacturerPrinterConnection({
     }
   };
 
-  const loadManagedPrinterProfiles = async () => {
+  const loadManagedPrinterProfiles = async (options?: { force?: boolean }) => {
     if (!user || user.role !== "manufacturer") return;
 
-    const response = await apiClient.listRegisteredPrinters(false);
+    const response = await apiClient.listRegisteredPrinters(false, { force: Boolean(options?.force) });
     if (!response.success) {
       setManagedPrinterProfiles([]);
       setManagedPrinterProfilesLoaded(true);
@@ -291,10 +271,10 @@ export function useManufacturerPrinterConnection({
     setManagedPrinterProfilesLoaded(true);
   };
 
-  const syncManufacturerPrinterStatus = async (options?: { silent?: boolean }) => {
+  const syncManufacturerPrinterStatus = async (options?: { silent?: boolean; force?: boolean }) => {
     if (!user || user.role !== "manufacturer") return;
 
-    await loadManagedPrinterProfiles();
+    await loadManagedPrinterProfiles({ force: Boolean(options?.force) });
 
     const local = await apiClient.getLocalPrintAgentStatus();
     const browserBackendUrl = window.location.origin;
@@ -359,10 +339,10 @@ export function useManufacturerPrinterConnection({
       heartbeat.success && heartbeat.data ? (heartbeat.data as PrinterConnectionStatusDTO) : null;
     const heartbeatDegraded = Boolean(heartbeat.degraded || heartbeatStatus?.degraded);
 
-    if (heartbeatDegraded && heartbeatStatus) {
+    if (heartbeatStatus) {
       const degradedStatus: PrinterConnectionStatusDTO = {
         ...heartbeatStatus,
-        degraded: true,
+        degraded: heartbeatDegraded && !(heartbeatStatus.connected && heartbeatStatus.eligibleForPrinting),
       };
       applyPrinterStatusSnapshot(degradedStatus, {
         fallbackPrinters: localPrinters,
@@ -379,11 +359,14 @@ export function useManufacturerPrinterConnection({
       return;
     }
 
-    const remote = await apiClient.getPrinterConnectionStatus();
+    const remote = await apiClient.getPrinterConnectionStatus({ force: Boolean(options?.force) });
     if (remote.success && remote.data) {
       const nextStatus = {
         ...(remote.data as PrinterConnectionStatusDTO),
-        degraded: false,
+        degraded: Boolean((remote.data as PrinterConnectionStatusDTO).degraded) && !(
+          (remote.data as PrinterConnectionStatusDTO).connected &&
+          (remote.data as PrinterConnectionStatusDTO).eligibleForPrinting
+        ),
       } satisfies PrinterConnectionStatusDTO;
       applyPrinterStatusSnapshot(nextStatus, {
         fallbackPrinters: localPrinters,
@@ -402,6 +385,26 @@ export function useManufacturerPrinterConnection({
           printers: mergedPrinters.map((item) => ({ printerId: item.printerId, printerName: item.printerName })),
         });
       }
+      return;
+    }
+
+    const previous = printerStatusRef.current;
+    if (previous.connected && previous.eligibleForPrinting) {
+      applyPrinterStatusSnapshot(
+        {
+          ...previous,
+          printers: previous.printers && previous.printers.length > 0 ? previous.printers : localPrinters,
+          error: null,
+          degraded: false,
+          refreshPaused: true,
+          rateLimited: remote.status === 429 || String(remote.code || "").toUpperCase() === "RATE_LIMITED",
+          notice: "Printer status refresh is temporarily paused. Printing can continue.",
+        } as PrinterConnectionStatusDTO,
+        {
+          fallbackPrinters: previous.printers && previous.printers.length > 0 ? previous.printers : localPrinters,
+          updatedAt: previous.lastHeartbeatAt || printerStatusUpdatedAt || new Date().toISOString(),
+        }
+      );
       return;
     }
 
@@ -454,7 +457,7 @@ export function useManufacturerPrinterConnection({
     void syncManufacturerPrinterStatus({ silent: true });
     const timer = window.setInterval(() => {
       void syncManufacturerPrinterStatus({ silent: true });
-    }, 6000);
+    }, PRINTER_BACKGROUND_REFRESH_MS);
 
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -493,11 +496,12 @@ export function useManufacturerPrinterConnection({
     if (!printerStatus) return;
     if (!selectedLocalPrinterId) {
       const next = String(
-        printerStatus.selectedPrinterId ||
-          printerStatus.printerId ||
-          detectedPrinters.find((item) => item.isDefault)?.printerId ||
-          detectedPrinters[0]?.printerId ||
-          ""
+        chooseStablePrinterSelection(
+          detectedPrinters,
+          selectedLocalPrinterId,
+          printerStatus.selectedPrinterId,
+          printerStatus.printerId
+        )?.printerId || ""
       ).trim();
       if (next) setSelectedLocalPrinterId(next);
     }
@@ -575,13 +579,19 @@ export function useManufacturerPrinterConnection({
   });
   const printerFeedLabel = printerStatusLive ? "Live status" : "Checking status";
   const printerUpdatedLabel = formatPrinterTimestamp(printerStatusUpdatedAt || printerStatus.lastHeartbeatAt);
-  const printerDegraded = Boolean(printerStatus.degraded);
+  const printerRefreshPaused = Boolean((printerStatus as PrinterConnectionStatusDTO & { refreshPaused?: boolean }).refreshPaused);
+  const printerDegraded = Boolean(printerStatus.degraded && !effectivePrinterReady);
   const printerDegradedMessage = printerDegraded
     ? sanitizePrinterUiError(
         printerStatus.compatibilityReason || printerStatus.trustReason || printerStatus.error,
         "MSCQR is keeping printing available while secure printer settings catch up."
       )
     : "";
+  const printerNoticeMessage = printerRefreshPaused
+    ? "Printer status refresh is temporarily paused. Printing can continue."
+    : effectivePrinterReady && (!printerStatus.trusted || printerStatus.compatibilityMode)
+      ? "Secure printer verification is still finishing. Printing can continue."
+      : "";
   const printerSummaryMessage = effectivePrinterReady
     ? shouldUseManagedPrinterSummary
       ? effectivePrinterDiagnostics.summary
@@ -598,11 +608,11 @@ export function useManufacturerPrinterConnection({
 
   const openPrinterConnectionDialog = () => {
     setPrinterDialogOpen(true);
-    void syncManufacturerPrinterStatus({ silent: true });
+    void syncManufacturerPrinterStatus({ silent: true, force: true });
   };
 
   const refreshPrinterConnectionStatus = () => {
-    void syncManufacturerPrinterStatus({ silent: true });
+    void syncManufacturerPrinterStatus({ silent: true, force: true });
   };
 
   useEffect(() => {
@@ -650,6 +660,14 @@ export function useManufacturerPrinterConnection({
     setPrinterOnboardingOpen(false);
   };
 
+  const setPrinterOnboardingOpenFromUi = (open: boolean) => {
+    if (!open) {
+      dismissPrinterOnboarding();
+      return;
+    }
+    setPrinterOnboardingOpen(true);
+  };
+
   const reopenPrinterOnboarding = () => {
     if (printerOnboardingStorageKey) {
       try {
@@ -672,7 +690,7 @@ export function useManufacturerPrinterConnection({
     printerDialogOpen,
     setPrinterDialogOpen,
     printerOnboardingOpen,
-    setPrinterOnboardingOpen,
+    setPrinterOnboardingOpen: setPrinterOnboardingOpenFromUi,
     printerSwitching,
     printerStatusLive,
     localPrinterAgent,
@@ -692,6 +710,7 @@ export function useManufacturerPrinterConnection({
     printerModeLabel,
     printerDegraded,
     printerDegradedMessage,
+    printerNoticeMessage,
     managedNetworkPrinters,
     detectedPrinters,
     effectivePrinterReady,
