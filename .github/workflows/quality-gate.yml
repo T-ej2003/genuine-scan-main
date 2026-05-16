@@ -162,6 +162,11 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
       - name: Playwright smoke suite
+        env:
+          NODE_ENV: test
+          EMAIL_USE_JSON_TRANSPORT: "true"
+          E2E_EXPOSE_CUSTOMER_OTP: "true"
+          E2E_START_BACKEND: "true"
         run: npm run verify:ci:frontend:e2e
 
   backend:

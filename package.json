@@ -59,7 +59,7 @@
     "verify:seo": "node scripts/verify-seo-indexing.mjs",
     "verify:ci:security": "npm run verify:guardrails && npm run check:release-evidence-refs",
     "verify:ci:frontend": "npm run typecheck && node scripts/check-architecture-guardrails.mjs && npm run check:budgets && npm test && npm run build",
-    "verify:ci:frontend:e2e": "npm run test:e2e",
+    "verify:ci:frontend:e2e": "node scripts/check-e2e-env.mjs && npm run test:e2e",
     "verify:ci:docker": "npm run verify:ci:docker:frontend && npm run verify:ci:docker:backend",
     "verify:ci:docker:frontend": "docker compose -f .github/ci/docker-compose.frontend-build.yml build frontend",
     "verify:ci:docker:backend": "docker buildx build --platform linux/amd64 --load --file backend/Dockerfile --build-arg GIT_SHA=ci-${GITHUB_SHA:-local} --tag mscqr-backend-ci:${GITHUB_SHA:-local} .",

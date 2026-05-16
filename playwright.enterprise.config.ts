@@ -12,6 +12,12 @@ const webServer = [
           url: backendHealthURL,
           reuseExistingServer: !process.env.CI,
           timeout: 120_000,
+          env: {
+            ...process.env,
+            NODE_ENV: "test",
+            EMAIL_USE_JSON_TRANSPORT: process.env.EMAIL_USE_JSON_TRANSPORT || "true",
+            E2E_EXPOSE_CUSTOMER_OTP: "true",
+          },
         },
       ]
     : []),

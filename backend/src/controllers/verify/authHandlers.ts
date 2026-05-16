@@ -16,6 +16,14 @@ import {
 } from "./shared";
 import { buildAnonymousCustomerVerifyAuthResponse, buildCustomerVerifyAuthResponse } from "./customerAuthResponsePolicy";
 
+const canExposeCustomerOtpForE2e = () =>
+  process.env.NODE_ENV === "test" && process.env.E2E_EXPOSE_CUSTOMER_OTP === "true";
+
+const isAllowedE2eDryRunOtpDelivery = (emailResult: { delivered?: boolean; error?: string | null; errorCode?: string | null }) =>
+  canExposeCustomerOtpForE2e() &&
+  !emailResult.delivered &&
+  String(emailResult.errorCode || emailResult.error || "").toUpperCase() === "EMAIL_DRY_RUN";
+
 export const requestCustomerEmailOtp = async (req: Request, res: Response) => {
   try {
     const parsed = requestOtpSchema.safeParse(req.body || {});
@@ -43,7 +51,8 @@ export const requestCustomerEmailOtp = async (req: Request, res: Response) => {
       userAgent: req.get("user-agent") || undefined,
     });
 
-    if (!emailResult.delivered) {
+    const dryRunOtpHandoff = isAllowedE2eDryRunOtpDelivery(emailResult);
+    if (!emailResult.delivered && !dryRunOtpHandoff) {
       return res.status(500).json({
         success: false,
         error: emailResult.error || "Could not send OTP email",
@@ -57,6 +66,9 @@ export const requestCustomerEmailOtp = async (req: Request, res: Response) => {
       details: {
         maskedEmail: maskEmail(challenge.email),
         expiresAt: challenge.expiresAt,
+        emailDelivered: Boolean(emailResult.delivered),
+        emailErrorCode: emailResult.errorCode || emailResult.error || null,
+        testOtpHandoff: dryRunOtpHandoff,
       },
       ipAddress: req.ip,
       userAgent: req.get("user-agent") || undefined,
@@ -68,7 +80,9 @@ export const requestCustomerEmailOtp = async (req: Request, res: Response) => {
         challengeToken: challenge.challengeToken,
         expiresAt: challenge.expiresAt,
         maskedEmail: maskEmail(challenge.email),
-        ...(process.env.NODE_ENV === "test" && process.env.E2E_EXPOSE_CUSTOMER_OTP === "true"
+        emailSent: Boolean(emailResult.delivered),
+        emailErrorCode: emailResult.errorCode || emailResult.error || null,
+        ...(canExposeCustomerOtpForE2e()
           ? { testOtp: challenge.otp }
           : {}),
       },
