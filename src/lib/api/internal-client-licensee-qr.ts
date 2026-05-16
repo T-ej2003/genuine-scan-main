@@ -1,8 +1,12 @@
 import { BASE_URL, type ApiClientCore } from "@/lib/api/internal-client-core";
+import { controlledDashboardGet } from "@/lib/api/internal-client-dashboard-request-control";
 
 export const createLicenseeQrApi = (core: ApiClientCore) => ({
   async getLicensees() {
-    return core.request<any[]>("/licensees");
+    return controlledDashboardGet("licensees:list", () => core.request<unknown[]>("/licensees"), {
+      ttlMs: 60_000,
+      minRefreshMs: 15_000,
+    });
   },
 
   async getLicensee(id: string) {
@@ -96,12 +100,12 @@ export const createLicenseeQrApi = (core: ApiClientCore) => ({
 
   async getQRStats(licenseeId?: string) {
     const query = licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : "";
-    return core.request(`/qr/stats${query}`);
+    return controlledDashboardGet(`qr:stats:${query}`, () => core.request(`/qr/stats${query}`));
   },
 
   async getDashboardStats(licenseeId?: string) {
     const query = licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : "";
-    return core.request(`/dashboard/stats${query}`);
+    return controlledDashboardGet(`dashboard:stats:${query}`, () => core.request(`/dashboard/stats${query}`));
   },
 
   async deleteQRCodes(payload: { ids?: string[]; codes?: string[] }) {
@@ -252,6 +256,9 @@ export const createLicenseeQrApi = (core: ApiClientCore) => ({
     if (options?.limit != null) params.append("limit", String(options.limit));
     if (options?.offset != null) params.append("offset", String(options.offset));
     const query = params.toString() ? `?${params.toString()}` : "";
-    return core.request(`/admin/qr/analytics${query}`);
+    return controlledDashboardGet(`qr:analytics:${query}`, () => core.request(`/admin/qr/analytics${query}`), {
+      ttlMs: 45_000,
+      minRefreshMs: 15_000,
+    });
   },
 });

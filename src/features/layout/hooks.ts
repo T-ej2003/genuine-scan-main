@@ -3,7 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 
 import apiClient from "@/lib/api-client";
-import { parseWithSchema, unwrapParsedApiResponse } from "@/lib/api/query-utils";
+import { ApiResponseError, parseWithSchema, unwrapParsedApiResponse } from "@/lib/api/query-utils";
+import { clearDashboardReadCache } from "@/lib/api/internal-client-dashboard-request-control";
 import { queryKeys } from "@/lib/query-keys";
 
 import {
@@ -46,6 +47,7 @@ const attentionQueueSchema = z
 export type OperationalAttentionQueue = z.infer<typeof attentionQueueSchema>;
 
 const NOTIFICATION_CLEAR_ANIMATION_MS = 260;
+const NOTIFICATION_MIN_REFRESH_MS = 15_000;
 
 const notificationsResponseSchema = z
   .object({
@@ -84,6 +86,8 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
   const [clearingNotificationIds, setClearingNotificationIds] = useState<string[]>([]);
   const [clearingNotifications, setClearingNotifications] = useState(false);
   const clearNotificationsTimerRef = useRef<number | null>(null);
+  const loadNotificationsInFlightRef = useRef<Promise<void> | null>(null);
+  const lastNotificationsLoadAtRef = useRef(0);
 
   const applyNotificationSnapshot = (rows: DashboardNotificationDTO[], unread: number) => {
     setNotifications(rows);
@@ -93,28 +97,42 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
     setDismissedNotificationIds((prev) => prev.filter((id) => rowIds.has(id)));
   };
 
-  const loadNotifications = async () => {
+  const loadNotifications = async (options?: { force?: boolean }) => {
     if (!userId) return;
+    if (loadNotificationsInFlightRef.current) return loadNotificationsInFlightRef.current;
+    const elapsed = Date.now() - lastNotificationsLoadAtRef.current;
+    if (!options?.force && elapsed < NOTIFICATION_MIN_REFRESH_MS) return;
+
     setNotificationsLoading(true);
-    try {
-      const response = await notificationsQuery.refetch();
-      if (!response.data) {
-        setNotifications([]);
-        setUnreadNotifications(0);
-        return;
+    loadNotificationsInFlightRef.current = (async () => {
+      try {
+        lastNotificationsLoadAtRef.current = Date.now();
+        const response = await notificationsQuery.refetch();
+        if (!response.data) {
+          setNotifications([]);
+          setUnreadNotifications(0);
+          return;
+        }
+        applyNotificationSnapshot(response.data.notifications, Number(response.data.unread || 0));
+      } catch (error) {
+        const rateLimited =
+          error instanceof ApiResponseError && String(error.code || "").toUpperCase() === "RATE_LIMITED";
+        if (!rateLimited) {
+          setNotifications([]);
+          setUnreadNotifications(0);
+        }
+      } finally {
+        setNotificationsLoading(false);
+        loadNotificationsInFlightRef.current = null;
       }
-      applyNotificationSnapshot(response.data.notifications, Number(response.data.unread || 0));
-    } catch {
-      setNotifications([]);
-      setUnreadNotifications(0);
-    } finally {
-      setNotificationsLoading(false);
-    }
+    })();
+
+    return loadNotificationsInFlightRef.current;
   };
 
   useEffect(() => {
     if (!userId) return;
-    void loadNotifications();
+    void loadNotifications({ force: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
@@ -127,6 +145,7 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
   useEffect(() => {
     if (!userId) return;
     const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
       void loadNotifications();
     }, 90_000);
     return () => window.clearInterval(timer);
@@ -184,7 +203,8 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
   const markNotificationRead = async (id: string) => {
     if (!id) return;
     await apiClient.markNotificationRead(id);
-    await loadNotifications();
+    clearDashboardReadCache(["notifications:list", "dashboard:attention-queue"]);
+    await loadNotifications({ force: true });
   };
 
   const markAllNotificationsRead = async () => {
@@ -196,8 +216,9 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
 
     try {
       await apiClient.markAllNotificationsRead();
+      clearDashboardReadCache(["notifications:list", "dashboard:attention-queue"]);
     } catch {
-      await loadNotifications();
+      await loadNotifications({ force: true });
     }
   };
 
@@ -230,6 +251,7 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
 
     try {
       await apiClient.markAllNotificationsRead();
+      clearDashboardReadCache(["notifications:list", "dashboard:attention-queue"]);
     } catch {
       // Keep local panel clear smooth even if sync fails.
     }

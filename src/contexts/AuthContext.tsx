@@ -17,6 +17,7 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const AUTH_BOOTSTRAP_MIN_INTERVAL_MS = 60_000;
 
 const normalizeRole = (role: any): User["role"] => {
   const r = String(role || "").trim().toUpperCase();
@@ -74,6 +75,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [pendingAuth, setPendingAuth] = useState<PendingAuthSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
+  const lastRefreshAttemptAtRef = useRef(0);
+  const lastRefreshSuccessAtRef = useRef(0);
 
   const clearSession = () => {
     setUser(null);
@@ -113,13 +116,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refresh = async () => {
     if (refreshInFlightRef.current) return refreshInFlightRef.current;
     refreshInFlightRef.current = (async () => {
-    const res = await apiClient.getCurrentUser();
-    if (!res.success || !res.data) {
-      clearSession();
-      return;
-    }
+      lastRefreshAttemptAtRef.current = Date.now();
+      const res = await apiClient.getCurrentUser();
+      if (!res.success || !res.data) {
+        clearSession();
+        return;
+      }
 
-    setAuthStateFromPayload({ user: res.data, auth: (res.data as any)?.auth ?? null });
+      lastRefreshSuccessAtRef.current = Date.now();
+      setAuthStateFromPayload({ user: res.data, auth: (res.data as any)?.auth ?? null });
     })().finally(() => {
       refreshInFlightRef.current = null;
     });
@@ -139,6 +144,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    const recentlyLoaded =
+      user &&
+      (Date.now() - lastRefreshSuccessAtRef.current < AUTH_BOOTSTRAP_MIN_INTERVAL_MS ||
+        Date.now() - lastRefreshAttemptAtRef.current < AUTH_BOOTSTRAP_MIN_INTERVAL_MS);
+    if (recentlyLoaded) {
+      setIsLoading(false);
+      return;
+    }
+
     let cancelled = false;
     (async () => {
       setIsLoading(true);
@@ -153,7 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname]);
+  }, [location.pathname, user]);
 
   const login = async (email: string, password: string) => {
     try {

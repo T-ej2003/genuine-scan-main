@@ -34,7 +34,7 @@ vi.mock("@/contexts/AuthContext", () => ({
 }));
 
 vi.mock("@/components/layout/DashboardLayout", () => ({
-  DashboardLayout: ({ children }: any) => <div>{children}</div>,
+  DashboardLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
 vi.mock("@/lib/mutation-events", () => ({
@@ -46,13 +46,14 @@ vi.mock("@/lib/api-client", () => ({
     getDashboardStats: vi.fn(),
     getQRStats: vi.fn(),
     getAuditLogs: vi.fn(),
+    streamDashboardEvents: vi.fn(() => () => undefined),
   },
 }));
 
 class MockEventSource {
   url: string;
-  onerror: ((this: EventSource, ev: Event) => any) | null = null;
-  onopen: ((this: EventSource, ev: Event) => any) | null = null;
+  onerror: ((this: EventSource, ev: Event) => unknown) | null = null;
+  onopen: ((this: EventSource, ev: Event) => unknown) | null = null;
 
   constructor(url: string) {
     this.url = url;
@@ -81,7 +82,7 @@ describe("Dashboard manufacturer multi-licensee scope", () => {
         manufacturers: 1,
         totalBatches: 12,
       },
-    } as any);
+    } as Awaited<ReturnType<typeof apiClient.getDashboardStats>>);
 
     vi.mocked(apiClient.getQRStats).mockResolvedValue({
       success: true,
@@ -96,12 +97,12 @@ describe("Dashboard manufacturer multi-licensee scope", () => {
           BLOCKED: 4,
         },
       },
-    } as any);
+    } as Awaited<ReturnType<typeof apiClient.getQRStats>>);
 
     vi.mocked(apiClient.getAuditLogs).mockResolvedValue({
       success: true,
       data: { logs: [] },
-    } as any);
+    } as Awaited<ReturnType<typeof apiClient.getAuditLogs>>);
   });
 
   it("loads unscoped manufacturer stats and shows linked licensees", async () => {

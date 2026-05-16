@@ -20,11 +20,13 @@ import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { useDashboardAuditLogs, useDashboardStats } from "@/features/dashboard/hooks";
 import { buildOverviewLifecycleSteps } from "@/features/dashboard/presentation";
+import apiClient from "@/lib/api-client";
+import { ApiResponseError } from "@/lib/api/query-utils";
+import { clearDashboardReadCache } from "@/lib/api/internal-client-dashboard-request-control";
 
 import type { AuditLogDTO, DashboardStatsDTO, QrStatsDTO } from "../../shared/contracts/runtime/dashboard.ts";
 
 const STATS_POLL_MS = 30_000;
-const API_BASE = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
 type StatusFocus = "all" | "dormant" | "allocated" | "printed" | "scanned";
 type QrStatsDashboardExtras = QrStatsDTO & {
   suspiciousScans?: number;
@@ -53,17 +55,21 @@ export default function Dashboard() {
   const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
 
   const pollRef = useRef<number | null>(null);
-  const sseRef = useRef<EventSource | null>(null);
+  const stopSseRef = useRef<(() => void) | null>(null);
+  const sseConnectedRef = useRef(false);
   const refreshTimerRef = useRef<number | null>(null);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const latestAuditLogsRef = useRef<AuditLogDTO[]>([]);
 
   useEffect(() => {
-    latestAuditLogsRef.current = (auditLogsQuery.data || []) as AuditLogDTO[];
+    latestAuditLogsRef.current = (auditLogsQuery.data?.logs || []) as AuditLogDTO[];
   }, [auditLogsQuery.data]);
 
-  const refreshDashboard = useCallback(async () => {
+  const refreshDashboard = useCallback(async (options?: { bypassCache?: boolean }) => {
     if (refreshInFlightRef.current) return refreshInFlightRef.current;
+    if (options?.bypassCache) {
+      clearDashboardReadCache(["dashboard:stats", "qr:stats", "audit:logs"]);
+    }
 
     refreshInFlightRef.current = (async () => {
       await dashboardRefetch();
@@ -83,10 +89,11 @@ export default function Dashboard() {
       pollRef.current = null;
       if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current);
       refreshTimerRef.current = null;
-      if (sseRef.current) {
-        sseRef.current.close();
-        sseRef.current = null;
+      if (stopSseRef.current) {
+        stopSseRef.current();
+        stopSseRef.current = null;
       }
+      sseConnectedRef.current = false;
       setSseConnected(false);
     };
 
@@ -104,72 +111,58 @@ export default function Dashboard() {
     closeRealtime();
     pollRef.current = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
-      if (sseRef.current) return;
+      if (sseConnectedRef.current) return;
       void refreshDashboard();
     }, STATS_POLL_MS);
 
-    // setup SSE for realtime (cookie-auth; do not put tokens in URLs)
-    {
-      let es: EventSource;
-      try {
-        es = new EventSource(`${API_BASE}/events/dashboard`, { withCredentials: true });
-      } catch {
-        es = new EventSource(`${API_BASE}/events/dashboard`);
-      }
-      sseRef.current = es;
-      setSseConnected(true);
+    const scheduleSummaryRefresh = () => {
+      if (refreshTimerRef.current) return;
+      refreshTimerRef.current = window.setTimeout(() => {
+        refreshTimerRef.current = null;
+        void refreshDashboard();
+      }, 350);
+    };
 
-      const scheduleSummaryRefresh = () => {
-        if (refreshTimerRef.current) return;
-        refreshTimerRef.current = window.setTimeout(() => {
-          refreshTimerRef.current = null;
-          void refreshDashboard();
-        }, 350);
-      };
-
-      es.addEventListener("realtime", (e: MessageEvent) => {
-        try {
-          const envelope = JSON.parse(e.data || "{}");
-          if (envelope?.channel !== "dashboard") return;
-          if (envelope?.type === "snapshot") {
-            const payload = envelope?.payload || {};
-            setLiveSummary({
-              totalQRCodes: payload?.summary?.totalQRCodes ?? 0,
-              activeLicensees: payload?.summary?.activeLicensees ?? 0,
-              manufacturers: payload?.summary?.manufacturers ?? 0,
-              totalBatches: payload?.summary?.totalBatches ?? 0,
-            });
-            setLiveQrStats(payload?.qrStats || {});
-            setLastUpdated(new Date());
-            return;
-          }
-          if (envelope?.type === "audit.delta") {
-            const log = envelope?.payload?.log;
-            if (log) {
-              setLiveLogs((prev) => [log, ...(prev || latestAuditLogsRef.current)].slice(0, 10));
-            }
-            return;
-          }
-          if (envelope?.type === "summary.refresh") {
-            scheduleSummaryRefresh();
-          }
-        } catch {
-          // ignore
+    stopSseRef.current = apiClient.streamDashboardEvents(
+      (envelope) => {
+        if (envelope?.type === "snapshot") {
+          const payload = envelope?.payload || {};
+          const summary = payload.summary && typeof payload.summary === "object" ? (payload.summary as Record<string, unknown>) : {};
+          setLiveSummary({
+            totalQRCodes: Number(summary.totalQRCodes ?? 0),
+            activeLicensees: Number(summary.activeLicensees ?? 0),
+            manufacturers: Number(summary.manufacturers ?? 0),
+            totalBatches: Number(summary.totalBatches ?? 0),
+          });
+          setLiveQrStats((payload.qrStats || {}) as QrStatsDTO);
+          setLastUpdated(new Date());
+          return;
         }
-      });
-
-      es.onerror = () => {
-        es.close();
-        sseRef.current = null;
+        if (envelope?.type === "audit.delta") {
+          const payload = envelope?.payload || {};
+          const log = payload.log as AuditLogDTO | undefined;
+          if (log) {
+            setLiveLogs((prev) => [log, ...(prev || latestAuditLogsRef.current)].slice(0, 10));
+          }
+          return;
+        }
+        if (envelope?.type === "summary.refresh") {
+          scheduleSummaryRefresh();
+        }
+      },
+      () => {
+        sseConnectedRef.current = false;
         setSseConnected(false);
-      };
-      es.onopen = () => setSseConnected(true);
-    }
+      },
+      () => {
+        sseConnectedRef.current = true;
+        setSseConnected(true);
+      }
+    );
 
     return () => {
       closeRealtime();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canReadAuditFeed, liveUpdates, refreshDashboard, scopedLicenseeId, user?.role]);
 
   useEffect(() => {
@@ -180,15 +173,22 @@ export default function Dashboard() {
 
   const summary = liveSummary ?? dashboardQuery.data?.summary ?? null;
   const qrStats = liveQrStats ?? dashboardQuery.data?.qrStats ?? null;
-  const logs = liveLogs ?? auditLogsQuery.data ?? [];
+  const logs = liveLogs ?? auditLogsQuery.data?.logs ?? [];
   const loading = dashboardQuery.isLoading && !dashboardQuery.data && !liveSummary;
-  const rawError =
-    (dashboardQuery.error instanceof Error ? dashboardQuery.error.message : null) ||
-    (auditLogsQuery.error instanceof Error ? auditLogsQuery.error.message : null);
+  const rawError = dashboardQuery.error instanceof Error ? dashboardQuery.error.message : null;
   const error =
     rawError && /no token provided/i.test(rawError)
       ? "Your secure session could not be refreshed. Please sign in again."
       : rawError;
+  const activityRateLimited =
+    auditLogsQuery.error instanceof ApiResponseError &&
+    String(auditLogsQuery.error.code || "").toUpperCase() === "RATE_LIMITED";
+  const activityRefreshPaused = Boolean(auditLogsQuery.data?.refreshPaused || dashboardQuery.data?.refreshPaused);
+  const activityUnavailableMessage = activityRateLimited
+    ? "Recent activity is temporarily unavailable. We're refreshing activity too often. Try again shortly."
+    : activityRefreshPaused
+      ? "Activity refresh is temporarily paused. Dashboard work can continue."
+      : undefined;
 
   // totals (support multiple backend shapes)
   const activeLicenseesCount = summary?.activeLicensees ?? 0;
@@ -391,7 +391,7 @@ export default function Dashboard() {
               <span className="text-xs text-mscqr-secondary">Live</span>
               <Switch checked={liveUpdates} onCheckedChange={setLiveUpdates} />
             </div>
-            <Button variant="outline" size="sm" onClick={() => void refreshDashboard()} className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => void refreshDashboard({ bypassCache: true })} className="gap-2">
               <RefreshCw className={cn("h-4 w-4", dashboardQuery.isFetching ? "animate-spin" : "")} />
               Refresh
             </Button>
@@ -403,7 +403,7 @@ export default function Dashboard() {
           <ErrorState
             title="Operations overview unavailable"
             description={error}
-            action={{ label: "Retry overview", onClick: () => void refreshDashboard() }}
+            action={{ label: "Retry overview", onClick: () => void refreshDashboard({ bypassCache: true }) }}
           />
         )}
 
@@ -566,10 +566,12 @@ export default function Dashboard() {
               entityId: log.entityId || log.id,
             }))}
             emptyMessage={
-              canViewAudit
+              activityUnavailableMessage ||
+              (canViewAudit
                 ? "No recent activity yet. Actions in batches, users, and requests will appear here."
-                : "Activity feed is available for admin roles. Use Batches for your print operations."
+                : "Activity feed is available for admin roles. Use Batches for your print operations.")
             }
+            notice={logs.length > 0 ? activityUnavailableMessage : undefined}
             onViewAll={canViewAudit ? () => navigate(APP_PATHS.auditHistory) : undefined}
           />
         </div>

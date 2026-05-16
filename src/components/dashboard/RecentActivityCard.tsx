@@ -11,6 +11,7 @@ interface RecentActivityCardProps {
   title?: string;
   emptyMessage?: string;
   onViewAll?: () => void;
+  notice?: string;
 }
 
 const actionIcons: Record<string, React.ElementType> = {
@@ -31,6 +32,7 @@ export function RecentActivityCard({
   title = "Recent Activity",
   emptyMessage = "No recent activity.",
   onViewAll,
+  notice,
 }: RecentActivityCardProps) {
   const safeLogs = Array.isArray(logs) ? logs : [];
   const recent = safeLogs.slice(0, 5);
@@ -47,6 +49,11 @@ export function RecentActivityCard({
       </CardHeader>
 
       <CardContent>
+        {notice ? (
+          <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            {notice}
+          </p>
+        ) : null}
         {recent.length === 0 ? (
           <p className="text-sm text-muted-foreground">{emptyMessage}</p>
         ) : (

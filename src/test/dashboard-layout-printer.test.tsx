@@ -51,6 +51,7 @@ vi.mock("@/lib/api-client", () => ({
   default: {
     configureLocalPrintAgentBackend: vi.fn(),
     getNotifications: vi.fn(),
+    getOperationalAttentionQueue: vi.fn(),
     streamNotifications: vi.fn(),
     listRegisteredPrinters: vi.fn(),
     getLocalPrintAgentStatus: vi.fn(),
@@ -101,6 +102,20 @@ describe("DashboardLayout printer connection dialog", () => {
       success: true,
       data: { notifications: [], unread: 0 },
     } as Awaited<ReturnType<typeof apiClient.getNotifications>>);
+    vi.mocked(apiClient.getOperationalAttentionQueue).mockResolvedValue({
+      success: true,
+      data: {
+        generatedAt: "2026-05-16T00:00:00.000Z",
+        summary: {
+          unreadNotifications: 0,
+          reviewSignals: 0,
+          printOperations: 0,
+          supportEscalations: 0,
+          auditEvents24h: 0,
+        },
+        items: [],
+      },
+    } as Awaited<ReturnType<typeof apiClient.getOperationalAttentionQueue>>);
     vi.mocked(apiClient.configureLocalPrintAgentBackend).mockResolvedValue({
       success: true,
     } as Awaited<ReturnType<typeof apiClient.configureLocalPrintAgentBackend>>);

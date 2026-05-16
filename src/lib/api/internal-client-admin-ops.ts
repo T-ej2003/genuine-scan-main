@@ -1,4 +1,6 @@
 import { BASE_URL, type ApiClientCore, type ApiResponse } from "@/lib/api/internal-client-core";
+import { controlledDashboardGet } from "@/lib/api/internal-client-dashboard-request-control";
+import { subscribeManagedEventSource } from "@/lib/api/managed-event-source";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -109,7 +111,8 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     if (opts?.licenseeId) params.append("licenseeId", opts.licenseeId);
     if (opts?.limit) params.append("limit", String(opts.limit));
     if (opts?.offset) params.append("offset", String(opts.offset));
-    return core.request(`/audit/logs?${params.toString()}`);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return controlledDashboardGet(`audit:logs:${query}`, () => core.request(`/audit/logs${query}`));
   },
 
   async getFraudReports(opts?: {
@@ -143,27 +146,36 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
   streamAuditLogs(onMessage: (log: AuditStreamLog) => void, onError?: () => void) {
     const url = `${BASE_URL}/audit/stream`;
 
-    let eventSource: EventSource;
-    try {
-      eventSource = new EventSource(url, { withCredentials: true });
-    } catch {
-      eventSource = new EventSource(url);
-    }
-
-    eventSource.addEventListener("audit", (event: MessageEvent) => {
+    return subscribeManagedEventSource("audit:stream", url, (event: MessageEvent) => {
       try {
         onMessage(JSON.parse(event.data));
       } catch {
         // Ignore malformed events.
       }
-    });
+    }, { eventName: "audit", onError });
+  },
 
-    eventSource.onerror = () => {
-      onError?.();
-      eventSource.close();
-    };
+  streamDashboardEvents(
+    onEvent: (payload: { channel?: string; type?: string; payload?: JsonRecord }) => void,
+    onError?: () => void,
+    onOpen?: () => void
+  ) {
+    const url = `${BASE_URL}/events/dashboard`;
 
-    return () => eventSource.close();
+    return subscribeManagedEventSource(
+      "dashboard:events",
+      url,
+      (event: MessageEvent) => {
+        try {
+          const envelope = JSON.parse(event.data || "{}");
+          if (envelope?.channel !== "dashboard") return;
+          onEvent(envelope);
+        } catch {
+          // ignore malformed events
+        }
+      },
+      { eventName: "realtime", onError, onOpen }
+    );
   },
 
   streamNotifications(
@@ -177,14 +189,7 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     const query = params.toString() ? `?${params.toString()}` : "";
     const url = `${BASE_URL}/events/notifications${query}`;
 
-    let eventSource: EventSource;
-    try {
-      eventSource = new EventSource(url, { withCredentials: true });
-    } catch {
-      eventSource = new EventSource(url);
-    }
-
-    eventSource.addEventListener("realtime", (event: MessageEvent) => {
+    return subscribeManagedEventSource(`${url}`, url, (event: MessageEvent) => {
       try {
         const envelope = JSON.parse(event.data || "{}");
         if (envelope?.channel !== "notifications") return;
@@ -211,16 +216,7 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
       } catch {
         // ignore malformed events
       }
-    });
-
-    eventSource.onerror = () => {
-      onError?.();
-    };
-    eventSource.onopen = () => {
-      onOpen?.();
-    };
-
-    return () => eventSource.close();
+    }, { eventName: "realtime", onError, onOpen });
   },
 
   streamPrinterConnectionStatus(
@@ -280,14 +276,7 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
   ) {
     const url = `${BASE_URL}/manufacturer/printer-agent/events`;
 
-    let eventSource: EventSource;
-    try {
-      eventSource = new EventSource(url, { withCredentials: true });
-    } catch {
-      eventSource = new EventSource(url);
-    }
-
-    eventSource.addEventListener("realtime", (event: MessageEvent) => {
+    return subscribeManagedEventSource("printer:connection-events", url, (event: MessageEvent) => {
       try {
         const envelope = JSON.parse(event.data || "{}");
         if (envelope?.channel !== "printer" || envelope?.type !== "snapshot") return;
@@ -301,16 +290,7 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
       } catch {
         // ignore malformed snapshots
       }
-    });
-
-    eventSource.onerror = () => {
-      onError?.();
-    };
-    eventSource.onopen = () => {
-      onOpen?.();
-    };
-
-    return () => eventSource.close();
+    }, { eventName: "realtime", onError, onOpen });
   },
 
   async updateMyProfile(payload: { name?: string; email?: string }) {
@@ -348,7 +328,7 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     if (options?.limit != null) params.append("limit", String(options.limit));
     if (options?.offset != null) params.append("offset", String(options.offset));
     const query = params.toString() ? `?${params.toString()}` : "";
-    return core.request(`/trace/timeline${query}`);
+    return controlledDashboardGet(`trace:timeline:${query}`, () => core.request(`/trace/timeline${query}`));
   },
 
   async getBatchSlaAnalytics(options?: { licenseeId?: string; limit?: number; stuckBatchHours?: number }) {
@@ -444,11 +424,16 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     if (options?.limit != null) params.append("limit", String(options.limit));
     if (options?.offset != null) params.append("offset", String(options.offset));
     const query = params.toString() ? `?${params.toString()}` : "";
-    return core.request(`/notifications${query}`);
+    return controlledDashboardGet(`notifications:list:${query}`, () => core.request(`/notifications${query}`), {
+      ttlMs: 45_000,
+      minRefreshMs: 15_000,
+    });
   },
 
   async getOperationalAttentionQueue() {
-    return core.request<OperationalAttentionQueueSnapshot>("/dashboard/attention-queue");
+    return controlledDashboardGet("dashboard:attention-queue", () =>
+      core.request<OperationalAttentionQueueSnapshot>("/dashboard/attention-queue")
+    );
   },
 
   async markNotificationRead(id: string) {
