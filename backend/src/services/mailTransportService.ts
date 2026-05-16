@@ -40,7 +40,9 @@ type ResolvedSmtpConfig = {
   pass: string;
   port: number;
   secure: boolean;
+  requireTLS: boolean;
   source: "env" | "inferred";
+  warnings: string[];
 };
 
 type TransportState = {
@@ -51,6 +53,8 @@ type TransportState = {
   host?: string | null;
   port?: number | null;
   secure?: boolean | null;
+  requireTLS?: boolean | null;
+  warnings?: string[];
 };
 
 const parseBool = (value: unknown, fallback = false) => {
@@ -74,6 +78,13 @@ const getFirstEnv = (...keys: string[]) => {
 };
 
 const normalizeEmail = (value: unknown) => normalizeEmailAddress(value);
+
+const getEmailDomain = (value: unknown) => String(normalizeEmail(value)?.split("@")[1] || "").toLowerCase();
+
+const getExpectedMailDomain = () =>
+  String(getFirstEnv("EMAIL_DOMAIN", "MAIL_DOMAIN") || "mscqr.com")
+    .trim()
+    .toLowerCase();
 
 export const maskEmailForLog = (value: unknown) => {
   const email = normalizeEmail(value);
@@ -120,8 +131,10 @@ const resolveSmtpConfig = (): { config: ResolvedSmtpConfig | null; errorCode?: E
   const user = getFirstEnv("SMTP_USER", "SMTP_USERNAME", "EMAIL_USER", "MAIL_USER");
   const pass = getFirstEnv("SMTP_PASS", "SMTP_PASSWORD", "EMAIL_PASS", "MAIL_PASS", "MAIL_PASSWORD");
   const explicitHost = getFirstEnv("SMTP_HOST", "EMAIL_HOST", "MAIL_HOST");
+  const from = getConfiguredMailFrom();
 
   if (!user || !pass) return { config: null, errorCode: "SMTP_CONFIG_MISSING" };
+  if (!normalizeEmail(user) || !getEmailDomain(user)) return { config: null, errorCode: "SMTP_CONFIG_MISSING" };
 
   const inferred = explicitHost ? null : inferHostFromUserEmail(user);
   const host = explicitHost || inferred?.host || "";
@@ -130,8 +143,27 @@ const resolveSmtpConfig = (): { config: ResolvedSmtpConfig | null; errorCode?: E
   const defaultPort = inferred?.port || 587;
   const port = parsePositiveInt(getFirstEnv("SMTP_PORT", "EMAIL_PORT", "MAIL_PORT"), defaultPort);
   const secure = parseBool(getFirstEnv("SMTP_SECURE", "EMAIL_SECURE", "MAIL_SECURE"), inferred ? inferred.secure : port === 465);
+  const requireTLS = parseBool(getFirstEnv("SMTP_REQUIRE_TLS", "EMAIL_REQUIRE_TLS", "MAIL_REQUIRE_TLS"), port === 587 && !secure);
+  const expectedDomain = getExpectedMailDomain();
+  const userDomain = getEmailDomain(user);
+  const fromDomain = getEmailDomain(from);
+  const warnings: string[] = [];
 
-  return { config: { host, user, pass, port, secure, source: explicitHost ? "env" : "inferred" } };
+  if (!from) warnings.push("SMTP_FROM is not configured; the authenticated SMTP mailbox will be used as the From address.");
+  if (userDomain && expectedDomain && userDomain !== expectedDomain) {
+    warnings.push(`SMTP_USER domain does not match ${expectedDomain}; verify SPF/DKIM/DMARC alignment before production sends.`);
+  }
+  if (fromDomain && expectedDomain && fromDomain !== expectedDomain) {
+    warnings.push(`SMTP_FROM domain does not match ${expectedDomain}; Gmail may treat this as unaligned mail.`);
+  }
+  if (fromDomain && userDomain && fromDomain !== userDomain) {
+    warnings.push("SMTP_FROM domain differs from SMTP_USER domain; confirm the provider authorizes this sender.");
+  }
+  if (port === 587 && !secure && !requireTLS) {
+    warnings.push("SMTP port 587 is configured without secure=true or STARTTLS requirement.");
+  }
+
+  return { config: { host, user, pass, port, secure, requireTLS, source: explicitHost ? "env" : "inferred", warnings } };
 };
 
 let transporter: Transporter | null = null;
@@ -164,6 +196,8 @@ export const getMailTransportState = (): TransportState => {
       host: config.host,
       port: config.port,
       secure: config.secure,
+      requireTLS: config.requireTLS,
+      warnings: config.warnings,
     };
   }
 
@@ -172,6 +206,7 @@ export const getMailTransportState = (): TransportState => {
     host: config.host,
     port: config.port,
     secure: config.secure,
+    requireTLS: config.requireTLS,
     auth: { user: config.user, pass: config.pass },
     connectionTimeout: parsePositiveInt(process.env.SMTP_CONNECTION_TIMEOUT_MS, 8_000),
     greetingTimeout: parsePositiveInt(process.env.SMTP_GREETING_TIMEOUT_MS, 8_000),
@@ -186,6 +221,8 @@ export const getMailTransportState = (): TransportState => {
     host: config.host,
     port: config.port,
     secure: config.secure,
+    requireTLS: config.requireTLS,
+    warnings: config.warnings,
   };
 };
 
@@ -199,8 +236,10 @@ export const getMailTransportDiagnostics = () => {
     host: state.host || config?.host || null,
     port: state.port || config?.port || null,
     secure: state.secure ?? config?.secure ?? null,
+    requireTLS: state.requireTLS ?? config?.requireTLS ?? null,
     user: maskEmailForLog(state.smtpUser || config?.user || null),
     from: maskEmailForLog(getConfiguredMailFrom() || state.smtpUser || config?.user || null),
+    warnings: state.warnings || config?.warnings || [],
   };
 };
 
@@ -376,6 +415,7 @@ export const sendMailSafely = async (input: {
     smtpHost: transportState.host || null,
     smtpPort: transportState.port || null,
     smtpSecure: transportState.secure ?? null,
+    smtpRequireTLS: transportState.requireTLS ?? null,
   });
 
   try {
@@ -496,3 +536,5 @@ export const __resetMailTransporterForTests = () => {
   transporter = null;
   transporterKey = null;
 };
+
+export const __summarizeMailInfoForTests = summarizeInfo;

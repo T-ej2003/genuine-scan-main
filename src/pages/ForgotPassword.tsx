@@ -79,7 +79,7 @@ export default function ForgotPassword() {
               Sending...
             </>
           ) : done ? (
-            "Email sent"
+            "Request submitted"
           ) : (
             "Send reset link"
           )}

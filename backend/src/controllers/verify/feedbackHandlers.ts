@@ -143,7 +143,7 @@ export const reportFraud = async (req: Request, res: Response) => {
     });
 
     const superadminEmails = await getSuperadminAlertEmails();
-    const alertSubject = `[Incident][${incident.severity}] New fraud report ${incident.id}`;
+    const alertSubject = `MSCQR incident report: ${incident.severity.toLowerCase()} severity`;
     const alertBody = incidentSummaryText(incident);
 
     for (const email of superadminEmails) {

@@ -304,11 +304,11 @@ export function useCreateLicenseeFlow({
 
       const warningText = provisioningWarnings.length ? ` ${provisioningWarnings.join(" ")}` : "";
       toast({
-        title: inviteState.emailSent
-          ? "Brand created and invite email sent."
+      title: inviteState.emailSent
+          ? "Brand created and invite email accepted."
           : "Brand created, but invite email delivery could not be confirmed.",
         description: inviteState.emailSent
-          ? `${name} is ready. Invite sent to ${adminEmail}.${warningText}`
+          ? `${name} is ready. The mail provider accepted the invite for ${adminEmail}.${warningText}`
           : `${friendlyEmailDeliveryMessage(inviteState.emailErrorCode)} Copy the invite link or check SMTP settings.${warningText}`,
         variant: !inviteState.emailSent || provisioningWarnings.length ? "destructive" : undefined,
       });

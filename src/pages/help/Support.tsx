@@ -31,7 +31,7 @@ export default function SupportHelp() {
                 <li>Use the public verifier first to confirm the QR code result and capture the exact issue.</li>
                 <li>Authenticated users can submit an in-app support report with diagnostics and screenshots.</li>
                 <li>For onboarding or platform administration queries, contact `administration@mscqr.com`.</li>
-                <li>Super Admin replies are delivered back through system notifications and email.</li>
+                <li>Super Admin replies are returned through system notifications and email.</li>
               </ul>
             </CardContent>
           </Card>

@@ -136,7 +136,7 @@ const buildLicenseeCreateResponse = (params: { created: boolean; licensee: any; 
   const emailAttempted = Boolean(params.adminInvite?.emailAttempted ?? params.adminInvite?.attempted ?? emailErrorCode ?? emailSent);
   const message = inviteCreated
     ? emailSent
-      ? "Brand created and invite email sent."
+      ? "Brand created and invite email was accepted by the mail provider."
       : "Brand created, but invite email delivery could not be confirmed."
     : params.warning
       ? "Brand created, but invite could not be generated."

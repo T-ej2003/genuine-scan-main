@@ -523,7 +523,7 @@ export function IncidentResponseWorkspace({
                         }`}
                       >
                         <p className="font-medium">
-                          {lastCustomerEmailDelivery.delivered ? "Live delivery confirmed" : "Delivery failed"}
+                          {lastCustomerEmailDelivery.delivered ? "Mail provider accepted message" : "Delivery failed"}
                         </p>
                         <p>
                           Message sent from {lastCustomerEmailDelivery.usedFrom || "MSCQR"}.

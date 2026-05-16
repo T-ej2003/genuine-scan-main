@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const path = require("path");
+const crypto = require("crypto");
 const dotenv = require("dotenv");
 
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -23,12 +24,18 @@ const loadMailTransport = () => {
 
 const {
   getMailTransportDiagnostics,
+  getConfiguredMailFrom,
   maskEmailForLog,
   sendMailSafely,
 } = loadMailTransport();
 
+const { renderDiagnosticEmail } = require("../dist/services/emailTemplateService");
+
 const recipient = String(process.env.SMTP_TEST_TO || "").trim();
-const subject = String(process.env.SMTP_TEST_SUBJECT || "MSCQR SMTP delivery diagnostic").trim();
+const traceId = String(process.env.SMTP_TEST_TRACE_ID || "").trim() ||
+  `${new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z")}-${crypto.randomBytes(3).toString("hex")}`;
+const subjectBase = String(process.env.SMTP_TEST_SUBJECT || "MSCQR SMTP diagnostic").trim();
+const subject = subjectBase.includes(traceId) ? subjectBase : `${subjectBase} ${traceId}`;
 
 const print = (payload) => {
   console.log(JSON.stringify(payload, null, 2));
@@ -36,6 +43,7 @@ const print = (payload) => {
 
 (async () => {
   const diagnostics = getMailTransportDiagnostics();
+  const timestamp = new Date().toISOString();
 
   if (!recipient) {
     print({
@@ -50,14 +58,22 @@ const print = (payload) => {
   const result = await sendMailSafely({
     toAddress: recipient,
     subject,
-    text:
-      "MSCQR SMTP diagnostic email.\n\n" +
-      "If you received this, the SMTP provider accepted the recipient for this test message.",
+    ...renderDiagnosticEmail({
+      traceId,
+      timestamp,
+      intendedRecipient: recipient,
+      fromAddress: getConfiguredMailFrom() || "configured SMTP mailbox",
+      smtpHost: diagnostics.host,
+      smtpPort: diagnostics.port,
+      smtpSecure: diagnostics.secure,
+    }),
     template: "smtp-diagnostic",
   });
 
   print({
     ok: result.sent === true,
+    traceId,
+    subject,
     attempted: result.attempted,
     sent: result.sent,
     acceptedCount: result.accepted.length,

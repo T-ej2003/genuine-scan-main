@@ -9,6 +9,7 @@ import {
 
 import prisma from "../config/database";
 import { createAuditLog } from "./auditService";
+import { appendMscqrIdentityToText } from "./emailTemplateService";
 import {
   __resetMailTransporterForTests,
   getConfiguredMailFrom,
@@ -143,13 +144,13 @@ export const sendIncidentEmail = async (input: SendIncidentEmailInput): Promise<
       errCode = "UNKNOWN_EMAIL_ERROR";
     } else {
       attemptedFrom = actorUser?.email || null;
-      usedFrom = attemptedFrom || smtpUser || configuredFrom;
+      usedFrom = attemptedFrom || configuredFrom || smtpUser;
       replyTo = attemptedFrom;
     }
   } else {
     const primarySuperadminEmail = await getPrimarySuperadminEmail();
-    attemptedFrom = actorUser?.email || primarySuperadminEmail || configuredFrom || smtpUser;
-    usedFrom = smtpUser || configuredFrom || attemptedFrom;
+    attemptedFrom = configuredFrom || actorUser?.email || primarySuperadminEmail || smtpUser;
+    usedFrom = configuredFrom || smtpUser || attemptedFrom;
     replyTo = actorUser?.email || primarySuperadminEmail || configuredFrom || null;
   }
 
@@ -158,11 +159,11 @@ export const sendIncidentEmail = async (input: SendIncidentEmailInput): Promise<
   if (errCode) {
     status = IncidentCommStatus.FAILED;
   } else {
-    const textForSend = withSenderSignature(
+    const textForSend = appendMscqrIdentityToText(withSenderSignature(
       sendTextBase,
       replyTo && replyTo !== usedFrom ? replyTo : null,
       actorUser?.name || null
-    );
+    ));
     const delivery = await sendMailSafely({
       toAddress: toAddress || input.toAddress,
       subject: input.subject,

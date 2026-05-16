@@ -64,8 +64,9 @@ Update runtime values before first boot:
   - `SUPER_ADMIN_BOOTSTRAP_PASSWORD=<long unique first-login password>`
   - `SUPER_ADMIN_BOOTSTRAP_AUTO_VERIFY=true` so the initial configured super admin can sign in before SMTP verification is proven
   - `SMTP_HOST=mail.privateemail.com`
-  - `SMTP_PORT=465` with `SMTP_SECURE=true` for Namecheap Private Email, or `SMTP_PORT=587` with STARTTLS troubleshooting
+  - `SMTP_PORT=465` with `SMTP_SECURE=true` for Namecheap Private Email, or `SMTP_PORT=587` with `SMTP_SECURE=false` and `SMTP_REQUIRE_TLS=true` for STARTTLS troubleshooting
   - `SMTP_USER=<full mailbox>`, `SMTP_PASS=<mailbox password or app password>`, and `SMTP_FROM=<authorized mscqr.com sender>`
+  - `EMAIL_DOMAIN=mscqr.com`
 
 ## 5. First boot (HTTP mode)
 
@@ -184,6 +185,8 @@ docker compose --profile worker up -d --build
 - SMTP provider accepts the diagnostic recipient:
   `SMTP_TEST_TO=admin@example.com npm --prefix backend run check:smtp`
 - Incident/customer/invite email sends show provider acceptance only when the intended recipient appears in the accepted list
+- Gmail inbox placement is checked separately with the trace ID from `check:smtp`; see `documents/EMAIL_DELIVERABILITY_RUNBOOK.md`
+- DNS authentication is checked with `EMAIL_DOMAIN=mscqr.com npm --prefix backend run check:email:dns`
 - Backend can connect to RDS
 - `/api` routes work through Nginx
 

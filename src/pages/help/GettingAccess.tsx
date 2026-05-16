@@ -165,7 +165,7 @@ export default function GettingAccess() {
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <ul className="list-disc pl-5">
                   <li>Check spam/junk folders.</li>
-                  <li>Confirm the invite was sent to the correct email address.</li>
+                  <li>Confirm the invite was addressed to the correct email address.</li>
                   <li>Ask the admin to resend the invite if the activation link or connector link has expired.</li>
                 </ul>
               </CardContent>

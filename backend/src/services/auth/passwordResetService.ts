@@ -4,6 +4,7 @@ import { hashPassword } from "./passwordService";
 import { buildTokenHashCandidates, hashToken, randomOpaqueToken } from "../../utils/security";
 import { sendAuthEmail } from "./authEmailService";
 import { createAuditLog } from "../auditService";
+import { renderActionEmail } from "../emailTemplateService";
 
 const addMinutes = (d: Date, minutes: number) => new Date(d.getTime() + minutes * 60 * 1000);
 
@@ -61,16 +62,20 @@ export const requestPasswordReset = async (input: {
   const resetUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(rawToken)}`;
 
   const subject = "Reset your MSCQR password";
-  const text =
-    `We received a request to reset your password.\n\n` +
-    `Open this link to set a new password (expires in ${getResetTtlMinutes()} minutes):\n` +
-    `${resetUrl}\n\n` +
-    `If you did not request this, you can ignore this email.`;
+  const emailBody = renderActionEmail({
+    heading: subject,
+    intro: "We received a request to reset the password for your MSCQR account.",
+    actionLabel: "Reset password",
+    actionUrl: resetUrl,
+    expiryText: `in ${getResetTtlMinutes()} minutes`,
+    reason: "You received this email because a password reset was requested for your MSCQR account.",
+  });
 
   await sendAuthEmail({
     toAddress: user.email,
     subject,
-    text,
+    text: emailBody.text,
+    html: emailBody.html,
     template: "reset_password",
     orgId: user.orgId,
     licenseeId: user.licenseeId,

@@ -235,8 +235,8 @@ export default function IRIncidentDetail() {
         return;
       }
       toast({
-        title: "Email sent",
-        description: `Delivered via ${delivery?.usedFrom || delivery?.attemptedFrom || "configured SMTP sender"}.`,
+        title: "Email accepted",
+        description: `The mail provider accepted the message via ${delivery?.usedFrom || delivery?.attemptedFrom || "configured SMTP sender"}.`,
       });
       await load();
     } finally {

@@ -290,7 +290,7 @@ export default function Incidents() {
       }
 
       const fromLabel = deliveryRaw?.usedFrom || deliveryRaw?.attemptedFrom || "configured SMTP sender";
-      toast({ title: "Customer update sent", description: `Email delivered via ${fromLabel}.` });
+      toast({ title: "Customer update accepted", description: `The mail provider accepted the message via ${fromLabel}.` });
       await loadDetail(detail.id);
     } finally {
       setSendingCustomerEmail(false);

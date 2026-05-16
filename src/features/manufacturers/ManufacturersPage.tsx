@@ -177,9 +177,9 @@ export default function ManufacturersPage() {
         const inviteState = getInviteDeliveryState(result);
         if (inviteState.inviteLink) setLatestInviteLink(inviteState.inviteLink);
         toast({
-          title: inviteState.emailSent ? "Invite email sent" : "Invite link ready, email not confirmed",
+          title: inviteState.emailSent ? "Invite email accepted" : "Invite link ready, email not confirmed",
           description: inviteState.emailSent
-            ? `Activation and printer setup links were emailed to ${values.email}.`
+            ? `The mail provider accepted the activation and printer setup email for ${values.email}.`
             : `${friendlyEmailDeliveryMessage(inviteState.emailErrorCode)} Copy the invite link or check SMTP settings.`,
           variant: inviteState.emailSent ? undefined : "destructive",
         });

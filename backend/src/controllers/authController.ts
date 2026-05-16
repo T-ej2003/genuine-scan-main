@@ -258,7 +258,7 @@ export const invite = async (req: Request, res: Response) => {
           expiresAt: (out as any).expiresAt || null,
         },
         message: emailSent
-          ? "Invite email sent."
+          ? "Invite email was accepted by the mail provider."
           : inviteCreated
             ? "Invite link is ready, but email delivery could not be confirmed."
             : "Invite processed.",

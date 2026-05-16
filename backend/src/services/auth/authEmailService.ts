@@ -63,8 +63,8 @@ export const sendAuthEmail = async (input: {
   const primarySuperadminEmail = await getPrimarySuperadminEmail();
   const configuredFrom = getConfiguredMailFrom();
   const smtpUserEmail = getMailTransportState().smtpUser;
-  const attemptedFrom = primarySuperadminEmail || configuredFrom || smtpUserEmail;
-  const usedFrom = smtpUserEmail || configuredFrom || attemptedFrom;
+  const attemptedFrom = configuredFrom || primarySuperadminEmail || smtpUserEmail;
+  const usedFrom = configuredFrom || smtpUserEmail || attemptedFrom;
   const replyTo = primarySuperadminEmail || configuredFrom || null;
 
   const delivery = await sendMailSafely({

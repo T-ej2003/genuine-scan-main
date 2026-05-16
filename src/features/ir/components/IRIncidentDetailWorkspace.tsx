@@ -557,7 +557,7 @@ export function IRIncidentDetailWorkspace({
 
                   {lastEmailDelivery ? (
                     <div className={`rounded-md border px-3 py-2 text-xs ${lastEmailDelivery.delivered ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`}>
-                      <div className="font-medium">{lastEmailDelivery.delivered ? "Live delivery confirmed" : "Delivery failed"}</div>
+                      <div className="font-medium">{lastEmailDelivery.delivered ? "Mail provider accepted message" : "Delivery failed"}</div>
                       <div>Used from: {lastEmailDelivery.usedFrom || "—"} | Reply-to: {lastEmailDelivery.replyTo || "—"}</div>
                       <details>
                         <summary className="cursor-pointer">Technical details</summary>

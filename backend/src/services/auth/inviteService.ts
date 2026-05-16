@@ -6,6 +6,7 @@ import { buildTokenHashCandidates, hashToken, randomOpaqueToken } from "../../ut
 import { sendAuthEmail } from "./authEmailService";
 import { createAuditLog } from "../auditService";
 import { maskEmailForLog } from "../mailTransportService";
+import { renderActionEmail } from "../emailTemplateService";
 import { normalizeEmailAddress } from "../../utils/email";
 import { isManufacturerRole, listManufacturerLicenseeLinks, upsertManufacturerLicenseeLink } from "../manufacturerScopeService";
 import { buildConnectorDownloadUrls } from "../connectorReleaseService";
@@ -388,43 +389,28 @@ export const createInvite = async (input: {
     : null;
   const connectorDistribution = isManufacturerRole(role) ? buildConnectorDownloadUrls(baseUrl) : null;
 
-  const subject = "You have been invited to MSCQR";
-  const text =
-    `You have been invited to MSCQR.\n\n` +
-    `To set your password and activate your account, open this link (expires in 24 hours):\n` +
-    `${acceptUrl}\n\n` +
-    (isManufacturerRole(role)
-      ? `Before printing, install the MSCQR Connector on the computer connected to the printer:\n${connectorLandingUrl}\n\n`
-      : "") +
-    `If you were not expecting this email, you can ignore it.`;
-  const html = inviteHtmlTemplate({
-    acceptUrl,
-    connectorUrl: connectorLandingUrl,
-    connectorDownloads: connectorDistribution
-      ? {
-          macos: connectorDistribution.downloads.macos
-            ? {
-                label: connectorDistribution.downloads.macos.label,
-                downloadUrl: connectorDistribution.downloads.macos.downloadUrl,
-              }
-            : null,
-          windows: connectorDistribution.downloads.windows
-            ? {
-                label: connectorDistribution.downloads.windows.label,
-                downloadUrl: connectorDistribution.downloads.windows.downloadUrl,
-              }
-            : null,
-        }
+  const isManufacturerInvite = isManufacturerRole(role);
+  const subject = isManufacturerInvite ? "Set up your MSCQR manufacturer account" : "Activate your MSCQR account";
+  const emailBody = renderActionEmail({
+    heading: subject,
+    intro: isManufacturerInvite
+      ? "A brand workspace has invited you to activate a manufacturer account for MSCQR printing and product verification."
+      : "You have been invited to activate an MSCQR account for secure product verification.",
+    actionLabel: "Activate account",
+    actionUrl: acceptUrl,
+    expiryText: "in 24 hours",
+    workspaceName: org.licenseeName,
+    reason: "An MSCQR administrator created this invite for your email address.",
+    extraText: isManufacturerInvite && connectorLandingUrl
+      ? `After activating your account, install MSCQR Connector on the computer connected to the printer: ${connectorLandingUrl}`
       : null,
-    role,
-    expiresLabel: "24 hours",
   });
 
   const delivery = await sendAuthEmail({
     toAddress: email,
     subject,
-    text,
-    html,
+    text: emailBody.text,
+    html: emailBody.html,
     template: "invite",
     orgId: result.createdUser.orgId,
     licenseeId: result.createdUser.licenseeId,

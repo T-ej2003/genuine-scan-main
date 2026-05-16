@@ -301,7 +301,7 @@ export const reportIncident = async (req: Request, res: Response) => {
     });
 
     const superadminEmails = await getSuperadminAlertEmails();
-    const alertSubject = `[Incident][${incident.severity}] New fraud report ${incident.id}`;
+    const alertSubject = `MSCQR incident report: ${incident.severity.toLowerCase()} severity`;
     const alertBody = incidentSummaryText(incident);
 
     for (const email of superadminEmails) {
@@ -317,7 +317,7 @@ export const reportIncident = async (req: Request, res: Response) => {
     }
 
     if (incident.consentToContact && incident.customerEmail) {
-      const subject = `We received your report (${incident.id})`;
+      const subject = "MSCQR support received your report";
       const body =
         `Thanks for contacting MSCQR support.\n\n` +
         `Reference ID: ${incident.id}\n` +

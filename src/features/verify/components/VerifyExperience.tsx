@@ -681,7 +681,7 @@ export default function VerifyExperience() {
       }
       setOtpChallengeToken(response.data.challengeToken);
       setOtpMaskedEmail(response.data.maskedEmail);
-      toast({ title: "Code sent", description: `Verification code sent to ${response.data.maskedEmail}.` });
+      toast({ title: "Code email accepted", description: `The mail provider accepted the verification code for ${response.data.maskedEmail}.` });
     } catch (nextError: unknown) {
       toast({
         title: "Could not send code",
@@ -1389,7 +1389,7 @@ export default function VerifyExperience() {
                       </Button>
                       {otpChallengeToken ? (
                         <Badge className="border-slate-300 bg-white text-slate-700">
-                          Code sent to {otpMaskedEmail || "your inbox"}.
+                          Code email accepted for {otpMaskedEmail || "your address"}.
                         </Badge>
                       ) : null}
                     </div>

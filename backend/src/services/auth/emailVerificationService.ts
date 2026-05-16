@@ -2,6 +2,7 @@ import prisma from "../../config/database";
 import { UserStatus } from "@prisma/client";
 import { createAuditLog } from "../auditService";
 import { sendAuthEmail } from "./authEmailService";
+import { renderActionEmail } from "../emailTemplateService";
 import { buildTokenHashCandidates, hashIp, hashToken, normalizeUserAgent, randomOpaqueToken } from "../../utils/security";
 import { normalizeEmailAddress } from "../../utils/email";
 import { getTokenHashSecretSet } from "../../utils/secretConfig";
@@ -117,16 +118,21 @@ export const requestEmailChangeVerification = async (input: {
 
   const verifyUrl = buildVerificationUrl(rawToken);
   const subject = "Confirm your new MSCQR email address";
-  const text =
-    `A request was made to change the email address on your MSCQR account.\n\n` +
-    `Confirm the new address by opening this secure link within ${getEmailVerificationTtlHours()} hours:\n` +
-    `${verifyUrl}\n\n` +
-    `If you did not request this change, you can ignore this email and keep using ${user.email}.`;
+  const emailBody = renderActionEmail({
+    heading: subject,
+    intro: "A request was made to change the email address on your MSCQR account.",
+    actionLabel: "Confirm email address",
+    actionUrl: verifyUrl,
+    expiryText: `in ${getEmailVerificationTtlHours()} hours`,
+    reason: "You received this email because an authenticated MSCQR account requested an email address change.",
+    extraText: `If you did not request this change, keep using ${user.email} and review your account security settings.`,
+  });
 
   const delivery = await sendAuthEmail({
     toAddress: nextEmail,
     subject,
-    text,
+    text: emailBody.text,
+    html: emailBody.html,
     template: "account_email_change_verification",
     orgId: user.orgId,
     licenseeId: user.licenseeId,

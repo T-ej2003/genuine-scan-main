@@ -118,11 +118,11 @@ export default function Licensees() {
         opts?.copyOnly
           ? "Invite link generated"
           : inviteState.emailSent
-            ? "Invite resent"
+            ? "Invite email accepted"
             : "Invite link ready, email not confirmed",
       description:
         inviteState.emailSent
-          ? `Invite sent to ${adminEmail}.`
+          ? `The mail provider accepted the invite for ${adminEmail}.`
           : `${friendlyEmailDeliveryMessage(inviteState.emailErrorCode)} Copy the invite link or check SMTP settings.`,
       variant: inviteState.emailSent ? undefined : "destructive",
     });
@@ -314,11 +314,11 @@ export default function Licensees() {
     const inviteState = getInviteDeliveryState(resultData);
     if (inviteState.inviteLink) setLatestInviteLink(inviteState.inviteLink);
     toast({
-      title: inviteState.emailSent ? "Invite email sent" : "Invite link ready, email not confirmed",
+      title: inviteState.emailSent ? "Invite email accepted" : "Invite link ready, email not confirmed",
       description: inviteState.emailSent
         ? userForm.role === "LICENSEE_ADMIN"
-          ? "Invite sent for Licensee Admin."
-          : "Invite sent for Manufacturer Admin."
+          ? "The mail provider accepted the Licensee Admin invite."
+          : "The mail provider accepted the Manufacturer Admin invite."
         : `${friendlyEmailDeliveryMessage(inviteState.emailErrorCode)} Copy the invite link or retry sending later.`,
       variant: inviteState.emailSent ? undefined : "destructive",
     });

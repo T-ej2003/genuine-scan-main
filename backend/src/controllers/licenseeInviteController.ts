@@ -142,7 +142,7 @@ export const resendLicenseeAdminInvite = async (req: AuthRequest, res: Response)
           expiresAt: invite.expiresAt || null,
         },
         message: invite.emailSent === true || invite.emailDelivered === true
-          ? "Invite email sent."
+          ? "Invite email was accepted by the mail provider."
           : "Invite link is ready, but email delivery could not be confirmed.",
       },
     });

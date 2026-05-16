@@ -29,16 +29,16 @@ const EMAIL_ERROR_MESSAGES: Record<string, string> = {
   SMTP_TLS_FAILED: "The mail provider rejected the secure connection.",
   SMTP_TIMEOUT: "The mail provider did not respond in time.",
   SMTP_RECIPIENT_REJECTED: "The mail provider rejected the recipient.",
-  SMTP_NO_ACCEPTED_RECIPIENTS: "Email delivery could not be confirmed by the mail provider.",
+  SMTP_NO_ACCEPTED_RECIPIENTS: "Email acceptance could not be confirmed by the mail provider.",
   SMTP_SEND_FAILED: "The mail provider could not deliver the message.",
   EMAIL_DISABLED: "Email delivery is disabled for this environment.",
   EMAIL_DRY_RUN: "Email delivery is in test mode and no message was sent.",
-  UNKNOWN_EMAIL_ERROR: "Email delivery could not be confirmed.",
+  UNKNOWN_EMAIL_ERROR: "Email acceptance could not be confirmed.",
 };
 
 export function friendlyEmailDeliveryMessage(code?: string | null) {
   const normalized = String(code || "").trim().toUpperCase();
-  return EMAIL_ERROR_MESSAGES[normalized] || "Invite email could not be sent. Copy the invite link or retry sending.";
+  return EMAIL_ERROR_MESSAGES[normalized] || "Invite email could not be accepted by the mail provider. Copy the invite link or retry sending.";
 }
 
 export function getInviteDeliveryState(data: any) {

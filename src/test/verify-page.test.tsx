@@ -264,7 +264,7 @@ describe("Verify page", () => {
     fireEvent.change(await screen.findByLabelText("Email"), { target: { value: "abhi@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: "Send code" }));
 
-    await screen.findByText("Code sent to ab***@example.com.");
+    await screen.findByText("Code email accepted for ab***@example.com.");
 
     fireEvent.change(screen.getByLabelText("6-digit code"), { target: { value: "123456" } });
     fireEvent.click(screen.getByRole("button", { name: "Verify and continue" }));
