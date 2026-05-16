@@ -240,10 +240,11 @@ export function BatchPrintJobDialog({
               <div className="text-xs text-muted-foreground">
                 {Number(printBatch.totalCodes || 0).toLocaleString()} QR labels assigned
               </div>
-              <details className="mt-2 text-xs text-muted-foreground">
-                <summary className="cursor-pointer">Technical details</summary>
-                <div className="mt-1 font-mono break-all">{printBatch.startCode} → {printBatch.endCode}</div>
-              </details>
+	              {printBatch.startCode && printBatch.endCode ? (
+	                <div className="mt-2 text-xs text-muted-foreground">
+	                  Label range: <span className="font-mono">{printBatch.startCode} to {printBatch.endCode}</span>
+	                </div>
+	              ) : null}
             </div>
 
             <div className="space-y-2">

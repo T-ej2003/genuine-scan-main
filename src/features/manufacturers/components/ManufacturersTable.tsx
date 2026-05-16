@@ -1,4 +1,4 @@
-import { Activity, Copy, Eye, Factory, MoreHorizontal, PackageCheck, Power, Trash2 } from "lucide-react";
+import { Activity, Eye, Factory, MoreHorizontal, PackageCheck, Power, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,6 @@ type ManufacturersTableProps = {
   statsById: Record<string, ManufacturerStats>;
   onViewDetails: (manufacturer: ManufacturerRow) => void;
   onOpenBatches: (manufacturer: ManufacturerRow, printState?: "pending" | "printed") => void;
-  onCopyId: (id: string) => void;
   onDeactivate: (manufacturer: ManufacturerRow) => void;
   onRestore: (manufacturer: ManufacturerRow) => void;
   onDelete: (manufacturer: ManufacturerRow) => void;
@@ -33,7 +32,6 @@ export function ManufacturersTable({
   statsById,
   onViewDetails,
   onOpenBatches,
-  onCopyId,
   onDeactivate,
   onRestore,
   onDelete,
@@ -146,10 +144,6 @@ export function ManufacturersTable({
                       </DropdownMenuTrigger>
 
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => onCopyId(manufacturer.id)}>
-                          <Copy className="mr-2 h-4 w-4" />
-                          Copy support reference
-                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => onOpenBatches(manufacturer)}>
                           <PackageCheck className="mr-2 h-4 w-4" />
                           Open batches

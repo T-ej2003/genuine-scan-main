@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertTriangle, Ban, CheckCircle2, Copy, RefreshCw, ScanEye, Search, ShieldAlert } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, RefreshCw, ScanEye, Search, ShieldAlert } from "lucide-react";
 
 import { BatchAllocationMapDialog } from "@/components/batches/BatchAllocationMapDialog";
 import { PremiumSectionAccordion } from "@/components/premium/PremiumSectionAccordion";
@@ -17,7 +17,7 @@ import {
   decisionTrustTone,
   titleCaseDecisionValue,
 } from "@/lib/verification-decision";
-import { friendlyReferenceLabel } from "@/lib/friendly-reference";
+import { humanStatusLabel } from "@/lib/audit-display";
 import {
   describeScanContext,
   formatBatchCreatedDate,
@@ -57,7 +57,6 @@ type TrackingWorkspaceProps = {
   logs: ScanLogRow[];
   batchNameById: Map<string, string>;
   onOpenAllocationMap: (batchId: string) => Promise<void> | void;
-  onCopyBatchId: (batchId: string) => Promise<void> | void;
   allocationMapOpen: boolean;
   allocationMapLoading: boolean;
   allocationMap: any | null;
@@ -85,7 +84,6 @@ export function TrackingWorkspace({
   logs,
   batchNameById,
   onOpenAllocationMap,
-  onCopyBatchId,
   allocationMapOpen,
   allocationMapLoading,
   allocationMap,
@@ -128,10 +126,6 @@ export function TrackingWorkspace({
               <ShieldAlert className="h-4 w-4" />
               {friendlyError}
             </div>
-            <details className="mt-2 text-xs text-red-700/80">
-              <summary className="cursor-pointer">Technical details</summary>
-              <p className="mt-1 break-all">{error}</p>
-            </details>
           </div>
         ) : null}
 
@@ -356,9 +350,8 @@ export function TrackingWorkspace({
                       <TableHeader>
                         <TableRow className="bg-slate-50">
                           <TableHead>Batch</TableHead>
-                          <TableHead>Support reference</TableHead>
-                          <TableHead>QR labels</TableHead>
-                          <TableHead>Scanned labels</TableHead>
+	                          <TableHead>QR labels</TableHead>
+	                          <TableHead>Scanned labels</TableHead>
                           <TableHead>Labels in batch</TableHead>
                           <TableHead>Events</TableHead>
                           <TableHead>Latest verifier state</TableHead>
@@ -373,7 +366,7 @@ export function TrackingWorkspace({
                       <TableBody>
                         {summary.length === 0 ? (
                           <TableRow>
-                              <TableCell colSpan={13} className="text-slate-500">
+	                              <TableCell colSpan={12} className="text-slate-500">
                                 No batches found for current filters.
                               </TableCell>
                             </TableRow>
@@ -388,26 +381,12 @@ export function TrackingWorkspace({
                             return (
                               <TableRow key={batch.id}>
                                 <TableCell className="font-medium text-slate-900">{batch.name}</TableCell>
-                                <TableCell className="font-mono text-xs text-slate-600">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <span>{friendlyReferenceLabel(batch.id, "Batch")}</span>
-                                    <Button type="button" variant="outline" size="sm" className="h-9 gap-2 whitespace-nowrap px-3 text-xs font-medium" onClick={() => onCopyBatchId(batch.id)}>
-                                      <Copy className="h-3.5 w-3.5" />
-                                      Copy support reference
-                                    </Button>
-                                  </div>
-                                  <Button type="button" variant="link" className="h-auto px-0 text-xs" onClick={() => onOpenAllocationMap(batch.id)}>
-                                    Open allocation map
-                                  </Button>
-                                </TableCell>
-                                <TableCell className="text-sm text-slate-600">
-                                  <div>{Number(batch.batchInventoryTotal || batch.totalCodes || 0).toLocaleString()} QR labels</div>
-                                  <details className="mt-1 text-xs">
-                                    <summary className="cursor-pointer">Technical details</summary>
-                                    <div className="mt-1 break-all font-mono">{batch.startCode}</div>
-                                    <div className="break-all font-mono">{batch.endCode}</div>
-                                  </details>
-                                </TableCell>
+	                                <TableCell className="text-sm text-slate-600">
+	                                  <div>{Number(batch.batchInventoryTotal || batch.totalCodes || 0).toLocaleString()} QR labels</div>
+	                                  <Button type="button" variant="link" className="h-auto px-0 text-xs" onClick={() => onOpenAllocationMap(batch.id)}>
+	                                    View allocation
+	                                  </Button>
+	                                </TableCell>
                                 <TableCell>{Number(batch.scopeCodeCount || 0).toLocaleString()}</TableCell>
                                 <TableCell>{Number(batch.batchInventoryTotal || batch.totalCodes || 0).toLocaleString()}</TableCell>
                                 <TableCell>{Number(batch.scanEventCount || 0).toLocaleString()}</TableCell>
@@ -476,14 +455,13 @@ export function TrackingWorkspace({
                             <TableHead>Context</TableHead>
                             <TableHead>Scan result</TableHead>
                             <TableHead>Location</TableHead>
-                            <TableHead>Support details</TableHead>
-                            <TableHead>Scanned At</TableHead>
+	                            <TableHead>Scanned At</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {logs.length === 0 ? (
                             <TableRow>
-                              <TableCell colSpan={9} className="text-slate-500">
+	                              <TableCell colSpan={8} className="text-slate-500">
                                 No scan logs found.
                               </TableCell>
                             </TableRow>
@@ -504,8 +482,8 @@ export function TrackingWorkspace({
                                   <TableCell>
                                     <Badge className={tone}>
                                       {isBlocked ? <Ban className="mr-1 h-3 w-3" /> : <CheckCircle2 className="mr-1 h-3 w-3" />}
-                                      {status}
-                                    </Badge>
+	                                      {humanStatusLabel(status)}
+	                                    </Badge>
                                   </TableCell>
                                   <TableCell>
                                     <div className="font-medium text-slate-900">{log.scanCount ?? 0}</div>
@@ -544,17 +522,7 @@ export function TrackingWorkspace({
                                     )}
                                   </TableCell>
                                   <TableCell className="text-xs text-slate-700">{formatLocation(log)}</TableCell>
-                                  <TableCell className="max-w-[240px] text-xs text-slate-600">
-                                    <details>
-                                      <summary className="cursor-pointer">Technical details</summary>
-                                      <div className="mt-1">{log.deviceLabel || "Browser device"}</div>
-                                      <div className="mt-1 break-all">
-                                        {log.userAgent ? "Browser details captured" : "Browser details unavailable"}
-                                      </div>
-                                      <div className="mt-1 break-all">{log.ipAddress || "Network address unavailable"}</div>
-                                    </details>
-                                  </TableCell>
-                                  <TableCell className="text-xs text-slate-600">{formatScanTimestamp(log.scannedAt)}</TableCell>
+	                                  <TableCell className="text-xs text-slate-600">{formatScanTimestamp(log.scannedAt)}</TableCell>
                                 </TableRow>
                               );
                             })

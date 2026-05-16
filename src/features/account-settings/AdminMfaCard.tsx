@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -63,9 +65,32 @@ export function AdminMfaCard({
   webauthnAvailable,
   webauthnLabel,
 }: AdminMfaCardProps) {
+  const [setupCodesVisible, setSetupCodesVisible] = useState(true);
+  const [rotatedCodesVisible, setRotatedCodesVisible] = useState(true);
+
   if (!isAdminUser) {
     return null;
   }
+
+  const copyCodes = async (codes: string[]) => {
+    if (!codes.length) return;
+    await navigator.clipboard.writeText(codes.join("\n"));
+  };
+
+  const downloadCodes = (codes: string[]) => {
+    if (!codes.length) return;
+    const blob = new Blob([
+      "MSCQR backup codes\n\nSave these backup codes. Each code can be used once if you lose access to your authenticator app.\n\n",
+      codes.join("\n"),
+      "\n",
+    ], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "mscqr-backup-codes.txt";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <Card>
@@ -97,24 +122,53 @@ export function AdminMfaCard({
             ) : (
               <form className="space-y-4" onSubmit={confirmMfaSetup}>
                 {mfaQrDataUrl ? <img src={mfaQrDataUrl} alt="Extra sign-in protection QR code" className="h-52 w-52 rounded-xl border p-2" /> : null}
-                <div className="space-y-2">
-                  <Label>Manual setup key</Label>
-                  <Input value={mfaSetup.secret} readOnly className="font-mono text-sm" />
-                </div>
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-                  <div className="font-medium">Backup codes</div>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    {mfaSetup.backupCodes.map((code) => (
-                      <div key={code} className="rounded-lg border border-amber-200 bg-white px-3 py-2 font-mono text-xs">
-                        {code}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Authenticator code</Label>
-                  <Input value={mfaCode} onChange={(event) => onMfaCodeChange(event.target.value)} placeholder="123456" />
-                </div>
+	                <div className="space-y-2">
+	                  <Label htmlFor="account-mfa-manual-key">Manual setup key</Label>
+	                  <Input id="account-mfa-manual-key" value={mfaSetup.secret} readOnly className="font-mono text-sm" />
+	                </div>
+	                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-900">
+	                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+	                    <div>
+	                      <div className="font-medium">Backup codes</div>
+	                      <p className="mt-1 text-sm text-slate-600">
+	                        Save these backup codes. Each code can be used once if you lose access to your authenticator app.
+	                      </p>
+	                    </div>
+	                    <div className="flex flex-wrap gap-2">
+	                      <Button type="button" variant="outline" size="sm" onClick={() => void copyCodes(mfaSetup.backupCodes)}>
+	                        Copy
+	                      </Button>
+	                      <Button type="button" variant="outline" size="sm" onClick={() => downloadCodes(mfaSetup.backupCodes)}>
+	                        Download
+	                      </Button>
+	                    </div>
+	                  </div>
+	                  {setupCodesVisible ? (
+	                    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+	                      {mfaSetup.backupCodes.map((code) => (
+	                        <div key={code} className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-sm text-slate-950 shadow-sm">
+	                          {code}
+	                        </div>
+	                      ))}
+	                    </div>
+	                  ) : (
+	                    <div className="mt-3 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm text-slate-600">
+	                      Backup codes are hidden.
+	                    </div>
+	                  )}
+	                  <div className="mt-3 flex flex-wrap gap-2">
+	                    <Button type="button" variant="secondary" size="sm" onClick={() => setSetupCodesVisible((value) => !value)}>
+	                      {setupCodesVisible ? "Hide backup codes" : "Show backup codes"}
+	                    </Button>
+	                    <Button type="button" variant="outline" size="sm" onClick={() => setSetupCodesVisible(false)}>
+	                      I saved my backup codes
+	                    </Button>
+	                  </div>
+	                </div>
+	                <div className="space-y-2">
+	                  <Label htmlFor="account-mfa-authenticator-code">Authenticator code</Label>
+	                  <Input id="account-mfa-authenticator-code" value={mfaCode} onChange={(event) => onMfaCodeChange(event.target.value)} placeholder="123456" />
+	                </div>
                 <div className="flex justify-end gap-3">
                   <Button type="button" variant="outline" onClick={() => onSetMfaSetup(null)} disabled={mfaLoading}>
                     Cancel
@@ -201,18 +255,34 @@ export function AdminMfaCard({
               <Button onClick={() => void rotateBackupCodes()} disabled={mfaLoading}>
                 {mfaLoading ? "Rotating..." : "Rotate backup codes"}
               </Button>
-              {rotatedBackupCodes?.length ? (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-                  <div className="font-medium text-amber-950">New backup codes</div>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    {rotatedBackupCodes.map((code) => (
-                      <div key={code} className="rounded-lg border border-amber-200 bg-white px-3 py-2 font-mono text-xs">
-                        {code}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
+	              {rotatedBackupCodes?.length ? (
+	                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+	                  <div className="font-medium text-slate-950">New backup codes</div>
+	                  <p className="mt-1 text-sm text-slate-600">
+	                    Save these backup codes. Each code can be used once if you lose access to your authenticator app.
+	                  </p>
+	                  <div className="mt-3 flex flex-wrap gap-2">
+	                    <Button type="button" variant="outline" size="sm" onClick={() => void copyCodes(rotatedBackupCodes)}>
+	                      Copy
+	                    </Button>
+	                    <Button type="button" variant="outline" size="sm" onClick={() => downloadCodes(rotatedBackupCodes)}>
+	                      Download
+	                    </Button>
+	                    <Button type="button" variant="secondary" size="sm" onClick={() => setRotatedCodesVisible((value) => !value)}>
+	                      {rotatedCodesVisible ? "Hide" : "Show"}
+	                    </Button>
+	                  </div>
+	                  {rotatedCodesVisible ? (
+	                    <div className="mt-3 grid grid-cols-2 gap-2">
+	                      {rotatedBackupCodes.map((code) => (
+	                        <div key={code} className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-sm text-slate-950 shadow-sm">
+	                          {code}
+	                        </div>
+	                      ))}
+	                    </div>
+	                  ) : null}
+	                </div>
+	              ) : null}
             </div>
 
             <div className="space-y-3 rounded-xl border border-red-200 p-4">

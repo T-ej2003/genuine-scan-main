@@ -19,7 +19,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { useDashboardAuditLogs, useDashboardStats } from "@/features/dashboard/hooks";
-import { DASHBOARD_GRAPH_OPTIONS, buildOverviewLifecycleSteps, type DashboardGraphView } from "@/features/dashboard/presentation";
+import { buildOverviewLifecycleSteps } from "@/features/dashboard/presentation";
 
 import type { AuditLogDTO, DashboardStatsDTO, QrStatsDTO } from "../../shared/contracts/runtime/dashboard.ts";
 
@@ -50,7 +50,6 @@ export default function Dashboard() {
   const [sseConnected, setSseConnected] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [statusFocus, setStatusFocus] = useState<StatusFocus>("all");
-  const [graphView, setGraphView] = useState<DashboardGraphView>("scans");
   const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
 
   const pollRef = useRef<number | null>(null);
@@ -248,15 +247,9 @@ export default function Dashboard() {
   const fulfilled = qrStatusData.printed + qrStatusData.scanned;
   const fulfillmentPct = totalTracked > 0 ? Math.round((fulfilled / totalTracked) * 100) : 0;
   const redemptionPct = fulfilled > 0 ? Math.round((qrStatusData.scanned / fulfilled) * 100) : 0;
-  const rawStatusCounts = qrStats?.byStatus || qrStats?.statusCounts || {};
   const qrStatsExtras = qrStats as QrStatsDashboardExtras | null;
-  const suspiciousScanCount =
-    qrStatsExtras?.suspiciousScans ??
-    qrStatsExtras?.suspicious ??
-    (rawStatusCounts.SUSPICIOUS ?? 0) + (rawStatusCounts.BLOCKED ?? 0);
   const scansToday = qrStatsExtras?.scansToday ?? qrStatsExtras?.todayScans ?? null;
   const qrLabelsAvailable = qrStatusData.dormant + qrStatusData.allocated;
-  const graphOptions = DASHBOARD_GRAPH_OPTIONS;
 
   const roleLabel = useMemo(() => getRoleDisplayLabel(user?.role), [user?.role]);
 
@@ -302,7 +295,7 @@ export default function Dashboard() {
           }
         : user?.role === "licensee_admin"
           ? {
-              title: "QR labels available",
+              title: "Ready for batches",
               value: qrStatusData.dormant,
               icon: Boxes,
               variant: "info" as const,
@@ -556,46 +549,13 @@ export default function Dashboard() {
         <div className="grid gap-6 md:grid-cols-2 mt-6">
           <Card className="border-mscqr-border bg-mscqr-surface/92">
             <CardHeader>
-              <CardTitle className="text-lg font-semibold text-mscqr-primary">Scan trend graph</CardTitle>
+              <CardTitle className="text-lg font-semibold text-mscqr-primary">Label status distribution</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex flex-wrap gap-2">
-                {graphOptions.map((option) => (
-                  <Button
-                    key={option.id}
-                    type="button"
-                    size="sm"
-                    variant={graphView === option.id ? "default" : "outline"}
-                    onClick={() => setGraphView(option.id)}
-                  >
-                    {option.label}
-                  </Button>
-                ))}
-              </div>
-              {graphView === "scans" ? (
-                <QRStatusChart data={qrStatusData} selectedStatus={statusFocus} onStatusSelect={setStatusFocus} />
-              ) : (
-                <div className="rounded-2xl border border-dashed border-mscqr-border bg-mscqr-surface-muted/40 p-6">
-                  <p className="text-sm font-semibold text-mscqr-primary">
-                    {graphOptions.find((option) => option.id === graphView)?.label}
-                  </p>
-                  <p className="mt-2 text-sm leading-6 text-mscqr-secondary">
-                    {graphOptions.find((option) => option.id === graphView)?.description} This workspace will show the graph here once matching data is available.
-                  </p>
-                  {graphView === "confidence" ? (
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                      <div className="rounded-2xl border bg-white p-4">
-                        <p className="text-sm text-mscqr-secondary">Genuine scans</p>
-                        <p className="mt-2 text-2xl font-semibold text-mscqr-primary">{Math.max(qrStatusData.scanned - suspiciousScanCount, 0).toLocaleString()}</p>
-                      </div>
-                      <div className="rounded-2xl border bg-white p-4">
-                        <p className="text-sm text-mscqr-secondary">Suspicious scans</p>
-                        <p className="mt-2 text-2xl font-semibold text-mscqr-primary">{suspiciousScanCount.toLocaleString()}</p>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              )}
+              <p className="text-sm text-mscqr-secondary">
+                See how QR labels are moving through inventory, production, printing, and customer scans.
+              </p>
+              <QRStatusChart data={qrStatusData} selectedStatus={statusFocus} onStatusSelect={setStatusFocus} />
             </CardContent>
           </Card>
           <RecentActivityCard

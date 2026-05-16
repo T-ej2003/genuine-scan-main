@@ -1,4 +1,4 @@
-import { Copy, PackageCheck } from "lucide-react";
+import { PackageCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10,14 +10,12 @@ import {
   type ManufacturerRow,
   type ManufacturerStats,
 } from "@/features/manufacturers/types";
-import { friendlyReferenceLabel } from "@/lib/friendly-reference";
 
 type ManufacturerDetailsDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   manufacturer: ManufacturerRow | null;
   stats?: ManufacturerStats;
-  onCopyId: (id: string) => void;
   onOpenBatches: (manufacturer: ManufacturerRow) => void;
 };
 
@@ -26,7 +24,6 @@ export function ManufacturerDetailsDialog({
   onOpenChange,
   manufacturer,
   stats,
-  onCopyId,
   onOpenBatches,
 }: ManufacturerDetailsDialogProps) {
   const operationalStatus = manufacturerOperationalStatus(stats);
@@ -53,7 +50,7 @@ export function ManufacturerDetailsDialog({
               <div className="rounded-2xl border bg-muted/20 p-4">
                 <div className="text-sm font-medium text-muted-foreground">Manufacturer</div>
                 <div className="mt-2 text-lg font-semibold">{manufacturer.name}</div>
-                <div className="mt-1 text-sm text-muted-foreground">{friendlyReferenceLabel(manufacturer.id, "Factory")}</div>
+	                <div className="mt-1 text-sm text-muted-foreground">{manufacturer.location || "Location not added yet"}</div>
               </div>
               <div className="rounded-2xl border bg-muted/20 p-4">
                 <div className="text-sm font-medium text-muted-foreground">Current status</div>
@@ -118,10 +115,11 @@ export function ManufacturerDetailsDialog({
                     <div key={batch.id} className="flex flex-col gap-2 rounded-2xl border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <div className="font-medium">{batch.name || "Unnamed batch"}</div>
-                        <details className="mt-1 text-xs text-muted-foreground">
-                          <summary className="cursor-pointer">Technical details</summary>
-                          <div className="mt-1 break-all font-mono">{batch.startCode || "?"} to {batch.endCode || "?"}</div>
-                        </details>
+	                        {batch.startCode && batch.endCode ? (
+	                          <div className="mt-1 text-xs text-muted-foreground">
+	                            Label range: <span className="font-mono">{batch.startCode} to {batch.endCode}</span>
+	                          </div>
+	                        ) : null}
                       </div>
                       <div className="text-sm text-muted-foreground sm:text-right">
                         <div className="font-medium text-foreground">{batch.totalCodes || 0} QR labels</div>
@@ -134,11 +132,7 @@ export function ManufacturerDetailsDialog({
             </div>
 
             <div className="flex flex-wrap justify-end gap-2">
-              <Button variant="outline" onClick={() => onCopyId(manufacturer.id)}>
-                <Copy className="mr-2 h-4 w-4" />
-                Copy support reference
-              </Button>
-              <Button onClick={() => onOpenBatches(manufacturer)}>
+	              <Button onClick={() => onOpenBatches(manufacturer)}>
                 <PackageCheck className="mr-2 h-4 w-4" />
                 Open manufacturer batches
               </Button>

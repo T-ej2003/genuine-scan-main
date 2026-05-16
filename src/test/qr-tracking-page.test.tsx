@@ -172,8 +172,8 @@ describe("QRTracking", () => {
     expect(screen.getByText("GPS 12.346, 78.901 (~42m)")).toBeInTheDocument();
     expect(screen.getByText("Trusted claimed device")).toBeInTheDocument();
     expect(screen.getByText("External / anonymous context")).toBeInTheDocument();
-    expect(screen.getByText("Chrome on Android")).toBeInTheDocument();
-    expect(screen.getAllByText("Browser details captured").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Chrome on Android")).not.toBeInTheDocument();
+    expect(screen.queryByText("Browser details captured")).not.toBeInTheDocument();
     const batchRow = screen.getAllByText("Batch 1")[0]?.closest("tr");
     expect(batchRow).toHaveTextContent("13");
     expect(batchRow).toHaveTextContent("17");

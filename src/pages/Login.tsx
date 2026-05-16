@@ -248,6 +248,28 @@ export default function Login() {
     logout();
   };
 
+  const copyBackupCodes = async () => {
+    const codes = mfaSetup?.backupCodes || [];
+    if (!codes.length) return;
+    await navigator.clipboard.writeText(codes.join("\n"));
+  };
+
+  const downloadBackupCodes = () => {
+    const codes = mfaSetup?.backupCodes || [];
+    if (!codes.length) return;
+    const blob = new Blob([
+      "MSCQR backup codes\n\nSave these backup codes. Each code can be used once if you lose access to your authenticator app.\n\n",
+      codes.join("\n"),
+      "\n",
+    ], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "mscqr-backup-codes.txt";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const shellContent = useMemo(() => {
     if (!pendingAuth || !mfaMode) {
       return {
@@ -284,6 +306,7 @@ export default function Login() {
       description={shellContent.description}
       sideTitle={shellContent.sideTitle}
       sideDescription={shellContent.sideDescription}
+      variant={mfaMode === "setup" ? "light" : "dark"}
     >
       {!pendingAuth || !mfaMode ? (
         <form onSubmit={handleSubmit} className="space-y-5">
@@ -368,12 +391,12 @@ export default function Login() {
             </Alert>
           ) : null}
 
-          <div className="rounded-2xl border border-cyan-200/20 bg-cyan-200/10 p-4 text-sm text-cyan-50">
+          <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-slate-900">
             <div className="flex items-center gap-2 font-medium">
               <ShieldCheck className="h-4 w-4" />
-              Admin MFA is now required for {pendingAuth.user.email}
+              Extra sign-in protection is required for {pendingAuth.user.email}
             </div>
-            <div className="mt-2 text-xs text-cyan-100/80">
+            <div className="mt-2 text-xs text-slate-600">
               Open Google Authenticator, 1Password, Microsoft Authenticator, or any TOTP app and scan this QR code.
             </div>
           </div>
@@ -393,29 +416,44 @@ export default function Login() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-amber-200/25 bg-amber-200/10 p-4 text-sm text-amber-100">
-            <div className="font-medium">Save your backup codes before you continue</div>
-            <div className="mt-1 text-xs text-amber-900/80">
-              Each code can be used once if you lose access to your authenticator app.
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-900">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="font-medium">Save your backup codes before you continue</div>
+                <div className="mt-1 text-sm text-slate-600">
+                  Save these backup codes. Each code can be used once if you lose access to your authenticator app.
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => void copyBackupCodes()}>
+                  Copy
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={downloadBackupCodes}>
+                  Download
+                </Button>
+              </div>
             </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="mt-3 px-0 text-amber-900 hover:bg-transparent"
-              onClick={() => setMfaBackupCodesRevealed((value) => !value)}
-            >
-              {mfaBackupCodesRevealed ? "Hide backup codes" : "Show backup codes"}
-            </Button>
             {mfaBackupCodesRevealed ? (
-              <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {(mfaSetup?.backupCodes || []).map((code) => (
-                  <div key={code} className="rounded-lg border border-amber-200 bg-white px-3 py-2 font-mono text-xs">
+                  <div key={code} className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-sm text-slate-950 shadow-sm">
                     {code}
                   </div>
                 ))}
               </div>
-            ) : null}
+            ) : (
+              <div className="mt-3 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm text-slate-600">
+                Backup codes are hidden.
+              </div>
+            )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setMfaBackupCodesRevealed((value) => !value)}>
+                {mfaBackupCodesRevealed ? "Hide backup codes" : "Show backup codes"}
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => setMfaBackupCodesRevealed(false)}>
+                I saved my backup codes
+              </Button>
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -436,7 +474,7 @@ export default function Login() {
             <Button type="button" variant="outline" className="flex-1" disabled={mfaLoading} onClick={resetMfaFlow}>
               Use different account
             </Button>
-            <Button type="submit" className="flex-1 bg-none bg-cyan-200 text-slate-950 hover:bg-cyan-100" disabled={mfaLoading}>
+            <Button type="submit" className="flex-1" disabled={mfaLoading}>
               {mfaLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

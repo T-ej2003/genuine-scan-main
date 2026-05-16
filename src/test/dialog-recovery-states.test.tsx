@@ -160,7 +160,6 @@ describe("dialog recovery states", () => {
         onOpenChange={onOpenChange}
         manufacturer={null}
         stats={undefined}
-        onCopyId={() => undefined}
         onOpenBatches={() => undefined}
       />,
     );

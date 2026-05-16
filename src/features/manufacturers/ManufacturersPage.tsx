@@ -142,19 +142,6 @@ export default function ManufacturersPage() {
     navigate(`/batches?${params.toString()}`);
   };
 
-  const handleCopyId = async (id: string) => {
-    try {
-      await navigator.clipboard.writeText(id);
-      toast({ title: "Copied", description: "Manufacturer record ID copied to clipboard." });
-    } catch {
-      toast({
-        title: "Copy failed",
-        description: "Could not copy the manufacturer record ID.",
-        variant: "destructive",
-      });
-    }
-  };
-
   const handleInvite = async (values: ManufacturerInviteFormValues) => {
     try {
       setLatestInviteLink("");
@@ -246,7 +233,7 @@ export default function ManufacturersPage() {
     } catch (error) {
       toast({
         title: "Action failed",
-        description: error instanceof Error ? error.message : "Could not update this manufacturer.",
+        description: "Could not update this manufacturer. Please refresh and try again.",
         variant: "destructive",
       });
     }
@@ -354,7 +341,7 @@ export default function ManufacturersPage() {
           <PageInlineNotice
             variant="destructive"
             title="Could not load manufacturers"
-            description={directoryQuery.error instanceof Error ? directoryQuery.error.message : "Please refresh and try again."}
+            description="Please refresh and try again."
           />
         ) : null}
 
@@ -366,7 +353,6 @@ export default function ManufacturersPage() {
           action={
             filteredManufacturers.length > 0 ? (
               <Button variant="outline" onClick={() => filteredManufacturers[0] && setDetailsManufacturer(filteredManufacturers[0])}>
-                <Copy className="mr-2 h-4 w-4" />
                 Review first record
               </Button>
             ) : null
@@ -391,7 +377,6 @@ export default function ManufacturersPage() {
               statsById={statsById}
               onViewDetails={setDetailsManufacturer}
               onOpenBatches={openManufacturerBatches}
-              onCopyId={handleCopyId}
               onDeactivate={(manufacturer) => setPendingAction({ type: "deactivate", manufacturer })}
               onRestore={(manufacturer) => setPendingAction({ type: "restore", manufacturer })}
               onDelete={(manufacturer) => setPendingAction({ type: "delete", manufacturer })}
@@ -416,7 +401,6 @@ export default function ManufacturersPage() {
           }}
           manufacturer={detailsManufacturer}
           stats={detailsManufacturer ? statsById[detailsManufacturer.id] : undefined}
-          onCopyId={handleCopyId}
           onOpenBatches={openManufacturerBatches}
         />
 

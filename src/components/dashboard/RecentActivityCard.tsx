@@ -4,6 +4,7 @@ import { formatDistanceToNow } from "date-fns";
 import { Activity, Building2, FileText, Printer, UserPlus } from "lucide-react";
 import { AuditLog } from "@/types";
 import { Button } from "@/components/ui/button";
+import { auditActionLabel, auditActorLabel, auditChangeSummary } from "@/lib/audit-display";
 
 interface RecentActivityCardProps {
   logs: AuditLog[];
@@ -23,30 +24,6 @@ const actionIcons: Record<string, React.ElementType> = {
   DOWNLOAD_PRINT_PACK: Printer,
   DIRECT_PRINT_TOKEN_ISSUED: Printer,
   PRINTED: Printer,
-};
-
-const actionLabels: Record<string, string> = {
-  CREATE_LICENSEE: "Created licensee",
-  CREATE_LICENSEE_WITH_ADMIN: "Created licensee",
-  CREATE_BATCH: "Created batch",
-  CREATE_PRODUCT_BATCH: "Created product batch",
-  ASSIGN_MANUFACTURER: "Assigned manufacturer",
-  ASSIGN_PRODUCT_BATCH_MANUFACTURER: "Assigned manufacturer",
-  CONFIRM_PRINT: "Confirmed print",
-  DOWNLOAD_PRINT_PACK: "Downloaded print pack",
-  DIRECT_PRINT_TOKEN_ISSUED: "Issued direct-print token",
-  PRINTED: "Printed",
-};
-
-const formatDetails = (details: any) => {
-  if (!details) return "";
-  if (typeof details === "string") return details;
-  try {
-    const str = JSON.stringify(details);
-    return str.length > 120 ? `${str.slice(0, 117)}…` : str;
-  } catch {
-    return "";
-  }
 };
 
 export function RecentActivityCard({
@@ -76,9 +53,9 @@ export function RecentActivityCard({
           <div className="space-y-4">
             {recent.map((log) => {
               const Icon = actionIcons[String(log.action)] || Activity;
-              const label = actionLabels[String(log.action)] || String(log.action || "Activity");
-              const details = formatDetails(log.details);
-              const who = log.userId ? `${log.userId.slice(0, 8)}…` : "System";
+              const label = auditActionLabel(log.action);
+              const details = auditChangeSummary(log);
+              const who = auditActorLabel(log, { maskEmail: true });
               const when = log.createdAt ? new Date(log.createdAt) : new Date();
 
               return (
@@ -88,9 +65,9 @@ export function RecentActivityCard({
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{label}</p>
-                    {details && <p className="text-xs text-muted-foreground truncate">{details}</p>}
-                    <p className="text-xs text-muted-foreground">
+	                    <p className="text-sm font-medium truncate">{label}</p>
+	                    {details && <p className="text-xs text-muted-foreground truncate">{details}</p>}
+	                    <p className="text-xs text-muted-foreground">
                       {who} • {formatDistanceToNow(when, { addSuffix: true })}
                     </p>
                   </div>

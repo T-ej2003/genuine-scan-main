@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { supportReferenceLabel } from "@/lib/audit-display";
 
 type AllocationBatchRow = {
   id: string;
@@ -63,8 +64,8 @@ export function BatchAllocationMapDialog({
   onOpenChange,
   loading,
   payload,
-  title = "Allocation Map",
-  description = "Trace the source batch, the current unassigned remainder, and each allocated manufacturer batch.",
+  title = "Allocation map",
+  description = "Review the source batch, unassigned labels, and each manufacturer allocation.",
   onOpenBatches,
 }: BatchAllocationMapDialogProps) {
   const source = payload?.sourceBatch || null;
@@ -118,7 +119,7 @@ export function BatchAllocationMapDialog({
                     {selected?.id === source.id ? <Badge>Selected</Badge> : null}
                   </div>
                   <p className="mt-1 text-sm text-slate-700">{source.name}</p>
-                  <p className="font-mono text-[11px] text-slate-500">{source.id}</p>
+	                <p className="text-xs text-slate-500">{supportReferenceLabel(source.id, "Batch")}</p>
                 </div>
                 {onOpenBatches ? (
                   <Button type="button" variant="outline" size="sm" onClick={() => handleOpenBatches(source.id)}>
@@ -136,7 +137,7 @@ export function BatchAllocationMapDialog({
                   <p className="text-sm font-semibold text-slate-900">{source.unassignedRemainingCodes.toLocaleString()}</p>
                 </div>
                 <div>
-                  <p className="text-[11px] uppercase tracking-wide text-slate-500">Current Range</p>
+	                  <p className="text-[11px] uppercase tracking-wide text-slate-500">Label range</p>
                   <p className="text-xs font-mono text-slate-700">{rangeLabel(source)}</p>
                 </div>
                 <div>
@@ -174,7 +175,7 @@ export function BatchAllocationMapDialog({
                               <p className="text-sm font-semibold text-slate-900">{row.name}</p>
                               {isSelected ? <Badge>Selected</Badge> : null}
                             </div>
-                            <p className="font-mono text-[11px] text-slate-500">{row.id}</p>
+	                            <p className="text-xs text-slate-500">{supportReferenceLabel(row.id, "Batch")}</p>
                             <p className="mt-1 text-xs text-slate-600">
                               {row.manufacturer?.name || "Manufacturer not set"}
                               {row.manufacturer?.email ? ` · ${row.manufacturer.email}` : ""}
@@ -205,7 +206,7 @@ export function BatchAllocationMapDialog({
                             <p className="text-sm font-semibold text-slate-900">{row.redeemedCodes.toLocaleString()}</p>
                           </div>
                           <div>
-                            <p className="text-[11px] uppercase tracking-wide text-slate-500">Current Range</p>
+	                            <p className="text-[11px] uppercase tracking-wide text-slate-500">Label range</p>
                             <p className="text-xs font-mono text-slate-700">{rangeLabel(row)}</p>
                           </div>
                         </div>

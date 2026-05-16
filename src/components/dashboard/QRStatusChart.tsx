@@ -1,5 +1,4 @@
 import React from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
 import { cn } from '@/lib/utils';
 
@@ -18,19 +17,15 @@ type ChartStatus = "dormant" | "allocated" | "printed" | "scanned";
 
 export function QRStatusChart({ data, selectedStatus = "all", onStatusSelect }: QRStatusChartProps) {
   const chartData = [
-    { key: "dormant" as ChartStatus, name: 'Dormant', value: data.dormant, color: 'hsl(215, 16%, 47%)' },
-    { key: "allocated" as ChartStatus, name: 'Allocated', value: data.allocated, color: 'hsl(199, 89%, 48%)' },
+    { key: "dormant" as ChartStatus, name: 'Ready', value: data.dormant, color: 'hsl(215, 16%, 47%)' },
+    { key: "allocated" as ChartStatus, name: 'Assigned', value: data.allocated, color: 'hsl(199, 89%, 48%)' },
     { key: "printed" as ChartStatus, name: 'Printed', value: data.printed, color: 'hsl(38, 92%, 50%)' },
-    { key: "scanned" as ChartStatus, name: 'Redeemed', value: data.scanned, color: 'hsl(160, 84%, 39%)' },
+    { key: "scanned" as ChartStatus, name: 'Scanned', value: data.scanned, color: 'hsl(160, 84%, 39%)' },
   ];
   const total = chartData.reduce((acc, row) => acc + row.value, 0);
 
   return (
-    <Card className="animate-fade-in">
-      <CardHeader>
-        <CardTitle className="text-lg font-semibold">QR Code Status Distribution</CardTitle>
-      </CardHeader>
-      <CardContent>
+    <div className="animate-fade-in">
         <div className="h-[300px]">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
@@ -100,7 +95,6 @@ export function QRStatusChart({ data, selectedStatus = "all", onStatusSelect }: 
             );
           })}
         </div>
-      </CardContent>
-    </Card>
+    </div>
   );
 }

@@ -598,9 +598,9 @@ export function LicenseeDialogs({
                       onRangeFormChange((previous) => (previous ? { ...previous, quantity: event.target.value } : previous))
                     }
                   />
-                  <p className="text-xs text-muted-foreground">
-                    The backend allocates from the next available index automatically.
-                  </p>
+	                  <p className="text-xs text-muted-foreground">
+	                    MSCQR assigns labels from the next available number automatically.
+	                  </p>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-4">

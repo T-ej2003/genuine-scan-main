@@ -217,12 +217,11 @@ export function LicenseesWorkspace({
                           <div className="text-sm text-muted-foreground">
                             {latest ? "Latest label group ready" : "No labels assigned yet"}
                           </div>
-                          {latest ? (
-                            <details className="mt-1 text-xs text-muted-foreground">
-                              <summary className="cursor-pointer">Technical details</summary>
-                              <div className="mt-1 break-all font-mono">{latestRangeText}</div>
-                            </details>
-                          ) : null}
+	                          {latest ? (
+	                            <div className="mt-1 text-xs text-muted-foreground">
+	                              Latest label range: <span className="font-mono">{latestRangeText}</span>
+	                            </div>
+	                          ) : null}
                         </TableCell>
 
                         <TableCell className="text-right">{usersCount}</TableCell>

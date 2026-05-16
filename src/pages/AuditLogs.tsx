@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { auditActionLabel, auditActorLabel, auditChangeSummary, auditEntityLabel, humanStatusLabel, maskEmail, supportReferenceLabel } from "@/lib/audit-display";
 
 type FraudStatus = "OPEN" | "REVIEWED" | "RESOLVED" | "DISMISSED";
 type FraudResponseStatus = Exclude<FraudStatus, "OPEN">;
@@ -91,7 +92,7 @@ const PRINTER_AUDIT_ACTION_LABELS: Record<string, string> = {
 };
 
 const formatAuditActionLabel = (value?: string | null) =>
-  PRINTER_AUDIT_ACTION_LABELS[String(value || "").trim().toUpperCase()] || String(value || "");
+  auditActionLabel(PRINTER_AUDIT_ACTION_LABELS[String(value || "").trim().toUpperCase()] || value);
 
 const isPrinterAuditEntry = (log: any) =>
   String(log?.entityType || "").trim().toLowerCase() === "printeragent" ||
@@ -155,7 +156,7 @@ export default function AuditLogs() {
 
   const [logs, setLogs] = useState<any[]>([]);
   const [search, setSearch] = useState("");
-  const [action, setAction] = useState("all");
+  const [activityFilter, setActivityFilter] = useState("all");
   const [live, setLive] = useState(true);
   const [licensees, setLicensees] = useState<any[]>([]);
   const [licenseeFilter, setLicenseeFilter] = useState<string>("all");
@@ -176,7 +177,7 @@ export default function AuditLogs() {
 
   const summarizeDetails = (log: any) => {
     const d = asObject(log?.details);
-    if (typeof log?.details === "string") return log.details;
+    if (typeof log?.details === "string") return "Activity recorded.";
     if (!d || Object.keys(d).length === 0) return "—";
 
     const actionCode = String(log?.action || "").toUpperCase();
@@ -202,7 +203,7 @@ export default function AuditLogs() {
       case "CUSTOMER_FRAUD_REPORT":
         return `Fraud report for ${d.code || "—"}${d.reason ? ` (${d.reason})` : ""}.`;
       case "CUSTOMER_FRAUD_REPORT_RESPONSE":
-        return `Fraud report ${d.status || "REVIEWED"}${d.notifyCustomer ? "; customer notified" : "; customer not notified"}.`;
+        return `Customer concern marked ${humanStatusLabel(d.status || "REVIEWED").toLowerCase()}${d.notifyCustomer ? "; customer notified" : "; customer not notified"}.`;
       case "CUSTOMER_PRODUCT_FEEDBACK":
         return `Customer feedback for ${d.code || "—"}: ${d.rating || "—"}★, ${d.satisfaction || "unlabeled"}.`;
       case "INCIDENT_CREATED":
@@ -238,14 +239,8 @@ export default function AuditLogs() {
   };
 
   const userLabel = (log: any) => {
-    const id = log?.user?.id || log?.userId;
-    if (log?.user?.name) {
-      const email = log.user.email ? ` • ${log.user.email}` : "";
-      return `${log.user.name}${email}${id ? ` • ${id}` : ""}`;
-    }
-    if (log?.user?.email) return `${log.user.email}${id ? ` • ${id}` : ""}`;
-    if (id) return id;
-    return "System";
+    if (log?.user?.name && log?.user?.email) return `${log.user.name} • ${maskEmail(log.user.email)}`;
+    return auditActorLabel(log, { maskEmail: true });
   };
 
   const load = async () => {
@@ -339,16 +334,32 @@ export default function AuditLogs() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, licenseeFilter, isSuperAdmin, fraudStatusFilter]);
 
-  const actions = useMemo(() => Array.from(new Set(logs.map((l) => l.action))), [logs]);
+  const activityCategories = [
+    { value: "all", label: "All activity", test: () => true },
+    { value: "security", label: "Sign-in and security", test: (value: string) => value.startsWith("AUTH_") || value.includes("LOGIN") || value.includes("MFA") },
+    { value: "invites", label: "Invites", test: (value: string) => value.includes("INVITE") || value.includes("RESEND") },
+    { value: "labels", label: "QR labels", test: (value: string) => value.includes("QR") || value.includes("VERIFY") },
+    { value: "batches", label: "Batches", test: (value: string) => value.includes("BATCH") || value.includes("PRINT") || value.includes("MANUFACTURER") },
+    { value: "scans", label: "Scans", test: (value: string) => value.includes("SCAN") || value.includes("FRAUD") || value.includes("FEEDBACK") },
+    { value: "account", label: "Account changes", test: (value: string) => value.includes("LICENSEE") || value.includes("USER") || value.includes("INCIDENT") },
+  ];
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return logs.filter((l) => {
-      if (action !== "all" && l.action !== action) return false;
+      const actionCode = String(l.action || "").toUpperCase();
+      const category = activityCategories.find((entry) => entry.value === activityFilter);
+      if (category && !category.test(actionCode)) return false;
       if (isSuperAdmin && licenseeFilter !== "all" && l.licenseeId !== licenseeFilter) return false;
-      return JSON.stringify(l).toLowerCase().includes(q);
+      if (!q) return true;
+      return [
+        auditActionLabel(l.action),
+        auditChangeSummary(l),
+        auditActorLabel(l, { maskEmail: true }),
+        auditEntityLabel(l),
+      ].join(" ").toLowerCase().includes(q);
     });
-  }, [logs, search, action, licenseeFilter, isSuperAdmin]);
+  }, [logs, search, activityFilter, licenseeFilter, isSuperAdmin]);
 
   const openRespondDialog = (report: FraudReportQueueItem, status: FraudResponseStatus) => {
     setSelectedFraudReport(report);
@@ -449,7 +460,7 @@ export default function AuditLogs() {
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="space-y-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <Badge className={FRAUD_STATUS_TONE[status]}>{status}</Badge>
+	                <Badge className={FRAUD_STATUS_TONE[status]}>{humanStatusLabel(status)}</Badge>
                             <span className="font-mono text-sm text-slate-900">{fr.report.code || "Unknown QR label"}</span>
                             {fr.report.reason ? (
                               <Badge className="border-amber-200 bg-amber-50 text-amber-700">{fr.report.reason}</Badge>
@@ -458,11 +469,11 @@ export default function AuditLogs() {
                           <p className="text-sm text-slate-700">{fr.report.notes || "No customer notes provided."}</p>
                           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
                             <span>Reported: {format(new Date(fr.createdAt), "PPp")}</span>
-                            {fr.report.contactEmail ? (
-                              <span className="inline-flex items-center gap-1">
-                                <Mail className="h-3 w-3" />
-                                {fr.report.contactEmail}
-                              </span>
+	                            {fr.report.contactEmail ? (
+	                              <span className="inline-flex items-center gap-1">
+	                                <Mail className="h-3 w-3" />
+	                                {maskEmail(fr.report.contactEmail)}
+	                              </span>
                             ) : (
                               <span>No reply email</span>
                             )}
@@ -499,8 +510,8 @@ export default function AuditLogs() {
           <CardHeader className="flex flex-col gap-4 border-b bg-slate-50/70 sm:flex-row">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
-              <Input
-                placeholder="Search logs..."
+	              <Input
+	                placeholder="Search activity..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="border-slate-200 bg-white pl-9"
@@ -521,18 +532,17 @@ export default function AuditLogs() {
                 </SelectContent>
               </Select>
             )}
-            <Select value={action} onValueChange={setAction}>
-              <SelectTrigger className="w-[220px] bg-white">
-                <SelectValue placeholder="Action" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All actions</SelectItem>
-                {actions.map((a) => (
-                  <SelectItem key={a} value={a}>
-                    {a}
-                  </SelectItem>
-                ))}
-              </SelectContent>
+	            <Select value={activityFilter} onValueChange={setActivityFilter}>
+	              <SelectTrigger className="w-[220px] bg-white">
+	                <SelectValue placeholder="Activity" />
+	              </SelectTrigger>
+	              <SelectContent>
+	                {activityCategories.map((category) => (
+	                  <SelectItem key={category.value} value={category.value}>
+	                    {category.label}
+	                  </SelectItem>
+	                ))}
+	              </SelectContent>
             </Select>
           </CardHeader>
 
@@ -541,17 +551,17 @@ export default function AuditLogs() {
               <Table>
                 <TableHeader>
                   <TableRow className="bg-slate-50">
-                    <TableHead>Action</TableHead>
-                    <TableHead>User</TableHead>
-                    <TableHead>Record</TableHead>
-                    <TableHead>Summary</TableHead>
-                    <TableHead>Time</TableHead>
+	                    <TableHead>Activity</TableHead>
+	                    <TableHead>Who</TableHead>
+	                    <TableHead>What changed</TableHead>
+	                    <TableHead>When</TableHead>
+	                    {isSuperAdmin ? <TableHead>Diagnostics</TableHead> : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filtered.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-slate-500">
+	                      <TableCell colSpan={isSuperAdmin ? 5 : 4} className="text-slate-500">
                         No history found for current filters.
                       </TableCell>
                     </TableRow>
@@ -559,25 +569,32 @@ export default function AuditLogs() {
                     filtered.map((l) => {
                       const tone = actionTone(String(l.action || ""));
                       const details = asObject(l.details);
-                      const detailEntries = readableDetailEntries(l, details);
-                      const expanded = Boolean(expandedRows[l.id]);
-                      return (
+	                      const detailEntries = readableDetailEntries(l, details);
+	                      const expanded = Boolean(expandedRows[l.id]);
+	                      return (
                         <TableRow key={l.id} className={String(l.action || "").includes("FRAUD") ? "bg-red-50/30" : undefined}>
-                          <TableCell>
-                            <Badge className={tone.className}>
-                              {tone.icon}
-                              {formatAuditActionLabel(l.action)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-xs text-slate-600">{userLabel(l)}</TableCell>
-                          <TableCell className="text-sm text-slate-700">{l.entityType}</TableCell>
-                          <TableCell className="max-w-[460px]">
-                            <div className="space-y-2">
-                              <div className="text-xs text-slate-600">{summarizeDetails(l)}</div>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                className="h-auto p-0 text-xs text-slate-700 hover:bg-transparent hover:text-slate-900"
+	                          <TableCell>
+	                            <Badge className={tone.className}>
+	                              {tone.icon}
+	                              {formatAuditActionLabel(l.action)}
+	                            </Badge>
+	                          </TableCell>
+	                          <TableCell className="text-sm text-slate-700">{userLabel(l)}</TableCell>
+	                          <TableCell className="max-w-[520px]">
+	                            <div className="space-y-1">
+	                              <div className="text-sm text-slate-800">{auditChangeSummary(l)}</div>
+		                              <div className="text-xs text-slate-500">{summarizeDetails(l)}</div>
+		                            </div>
+			                            </TableCell>
+	                          <TableCell className="text-xs text-slate-600">
+	                            {l.createdAt ? format(new Date(l.createdAt), "PPp") : "—"}
+	                          </TableCell>
+	                          {isSuperAdmin ? (
+	                            <TableCell className="max-w-[360px]">
+	                              <Button
+	                                type="button"
+	                                variant="ghost"
+	                                className="h-auto p-0 text-xs text-slate-700 hover:bg-transparent hover:text-slate-900"
                                 onClick={() =>
                                   setExpandedRows((prev) => ({
                                     ...prev,
@@ -585,37 +602,37 @@ export default function AuditLogs() {
                                   }))
                                 }
                               >
-                                {expanded ? (
-                                  <>
-                                    <ChevronUp className="mr-1 h-3 w-3" />
-                                    Hide technical details
-                                  </>
-                                ) : (
-                                  <>
-                                    <ChevronDown className="mr-1 h-3 w-3" />
-                                    Technical details
-                                  </>
-                                )}
-                              </Button>
-                              {expanded && (
+	                                {expanded ? (
+	                                  <>
+	                                    <ChevronUp className="mr-1 h-3 w-3" />
+	                                    Hide advanced diagnostics
+	                                  </>
+	                                ) : (
+	                                  <>
+	                                    <ChevronDown className="mr-1 h-3 w-3" />
+	                                    Advanced diagnostics
+	                                  </>
+	                                )}
+	                              </Button>
+	                              {expanded && (
                                 <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
                                   <div className="grid gap-1 text-xs text-slate-700 sm:grid-cols-2">
                                     <div>
-                                      <span className="font-semibold text-slate-900">Record reference:</span>{" "}
-                                      {l.entityId || "—"}
-                                    </div>
-                                    <div>
-                                      <span className="font-semibold text-slate-900">Brand reference:</span>{" "}
-                                      {l.licenseeId || "—"}
-                                    </div>
-                                    <div>
-                                      <span className="font-semibold text-slate-900">Network detail:</span>{" "}
-                                      {l.ipAddress || "—"}
-                                    </div>
-                                    <div>
-                                      <span className="font-semibold text-slate-900">Detail fields:</span>{" "}
-                                      {Object.keys(details).join(", ") || "—"}
-                                    </div>
+	                                      <span className="font-semibold text-slate-900">Record:</span>{" "}
+	                                      {supportReferenceLabel(l.entityId, "Record")}
+	                                    </div>
+	                                    <div>
+	                                      <span className="font-semibold text-slate-900">Brand:</span>{" "}
+	                                      {supportReferenceLabel(l.licenseeId, "Brand")}
+	                                    </div>
+	                                    <div>
+	                                      <span className="font-semibold text-slate-900">Network captured:</span>{" "}
+	                                      {l.ipAddress ? "Yes" : "No"}
+	                                    </div>
+	                                    <div>
+	                                      <span className="font-semibold text-slate-900">Data fields:</span>{" "}
+	                                      {Object.keys(details).length.toLocaleString()}
+	                                    </div>
                                   </div>
                                   <div className="mt-2 max-h-52 space-y-1 overflow-auto rounded border bg-white p-2 text-[11px] leading-5 text-slate-700">
                                     {detailEntries.length === 0 ? (
@@ -630,12 +647,9 @@ export default function AuditLogs() {
                                   </div>
                                 </div>
                               )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-xs text-slate-600">
-                            {l.createdAt ? format(new Date(l.createdAt), "PPp") : "—"}
-                          </TableCell>
-                        </TableRow>
+		                            </TableCell>
+	                          ) : null}
+	                        </TableRow>
                       );
                     })
                   )}

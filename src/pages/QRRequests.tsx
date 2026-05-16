@@ -29,6 +29,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { onMutationEvent } from "@/lib/mutation-events";
 import { format } from "date-fns";
@@ -99,7 +100,7 @@ export default function QRRequests() {
       });
       if (!res.success) {
         setRows([]);
-        toast({ title: "Failed to load requests", description: res.error || "Error", variant: "destructive" });
+        toast({ title: "Could not load requests", description: "Please refresh and try again.", variant: "destructive" });
         return;
       }
       setRows((Array.isArray(res.data) ? res.data : []) as RequestRow[]);
@@ -130,7 +131,7 @@ export default function QRRequests() {
     if (!isLicensee) return;
 
     if (!quantity || quantity <= 0) {
-      toast({ title: "Invalid quantity", variant: "destructive" });
+      toast({ title: "Invalid quantity", description: "Enter the number of QR labels needed.", variant: "destructive" });
       return;
     }
     if (!batchName.trim() || batchName.trim().length < 2) {
@@ -146,7 +147,7 @@ export default function QRRequests() {
         note: note.trim() || undefined,
       });
       if (!res.success) {
-        toast({ title: "Request failed", description: res.error || "Error", variant: "destructive" });
+        toast({ title: "Request failed", description: "Please check the request details and try again.", variant: "destructive" });
         return;
       }
 
@@ -194,11 +195,13 @@ export default function QRRequests() {
       });
       if (!res.success) {
         if (showApprovalProgress) progress.close();
-        const raw = (res.error || "Error").toLowerCase();
+        const raw = (res.error || "").toLowerCase();
         const isBusy = raw.includes("busy") || raw.includes("retry") || raw.includes("conflict");
         toast({
           title: isBusy ? "Batch busy" : "Approve failed",
-          description: isBusy ? "Please retry — batch busy." : res.error || "Error",
+          description: isBusy
+            ? "Another approval is still finishing. Please retry in a moment."
+            : "The request could not be approved. Please retry.",
           variant: "destructive",
         });
         return;
@@ -211,9 +214,9 @@ export default function QRRequests() {
       setApproveOpen(false);
       setActiveReq(null);
       await loadRequests();
-    } catch (e: any) {
+    } catch {
       if (showApprovalProgress) progress.close();
-      toast({ title: "Approve failed", description: e?.message || "Error", variant: "destructive" });
+      toast({ title: "Approve failed", description: "The request could not be approved. Please retry.", variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -227,7 +230,7 @@ export default function QRRequests() {
         decisionNote: decisionNote.trim() || undefined,
       });
       if (!res.success) {
-        toast({ title: "Reject failed", description: res.error || "Error", variant: "destructive" });
+        toast({ title: "Reject failed", description: "The request could not be rejected. Please retry.", variant: "destructive" });
         return;
       }
       toast({ title: "Rejected", description: "Request rejected." });
@@ -260,36 +263,38 @@ export default function QRRequests() {
         }
         filters={
           <div className="flex flex-col gap-3 md:flex-row md:items-center">
-            <div className="flex items-center gap-2">
-              <Label className="text-xs">Status</Label>
-              <select
-                className="rounded-md border bg-background px-2 py-1 text-sm"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-              >
-                <option value="all">All</option>
-                <option value="PENDING">Pending</option>
-                <option value="APPROVED">Approved</option>
-                <option value="REJECTED">Rejected</option>
-              </select>
-            </div>
+	            <div className="space-y-1">
+	              <Label className="text-xs">Status</Label>
+	              <Select value={statusFilter} onValueChange={setStatusFilter}>
+	                <SelectTrigger className="w-full md:w-[180px]">
+	                  <SelectValue placeholder="Status" />
+	                </SelectTrigger>
+	                <SelectContent>
+	                  <SelectItem value="all">All requests</SelectItem>
+	                  <SelectItem value="PENDING">Pending</SelectItem>
+	                  <SelectItem value="APPROVED">Approved</SelectItem>
+	                  <SelectItem value="REJECTED">Rejected</SelectItem>
+	                </SelectContent>
+	              </Select>
+	            </div>
 
             {isSuper && (
-              <div className="flex items-center gap-2">
-                <Label className="text-xs">Brand</Label>
-                <select
-                  className="rounded-md border bg-background px-2 py-1 text-sm"
-                  value={licenseeFilter}
-                  onChange={(e) => setLicenseeFilter(e.target.value)}
-                >
-                  <option value="">All</option>
-                  {licensees.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name} ({l.prefix})
-                    </option>
-                  ))}
-                </select>
-              </div>
+	              <div className="space-y-1">
+	                <Label className="text-xs">Brand</Label>
+	                <Select value={licenseeFilter || "all"} onValueChange={(value) => setLicenseeFilter(value === "all" ? "" : value)}>
+	                  <SelectTrigger className="w-full md:w-[240px]">
+	                    <SelectValue placeholder="Brand" />
+	                  </SelectTrigger>
+	                  <SelectContent>
+	                    <SelectItem value="all">All brands</SelectItem>
+	                    {licensees.map((l) => (
+	                      <SelectItem key={l.id} value={l.id}>
+	                        {l.name} ({l.prefix})
+	                      </SelectItem>
+	                    ))}
+	                  </SelectContent>
+	                </Select>
+	              </div>
             )}
           </div>
         }
@@ -392,7 +397,7 @@ export default function QRRequests() {
                       <TableRow key={r.id}>
                         <TableCell>
                           <div className="space-y-1">
-                            <div className="font-medium">{`${requestQuantity(r)} QR labels`}</div>
+	                            <div className="font-medium">{`${requestQuantity(r).toLocaleString()} QR labels`}</div>
                             {r.batchName && (
                               <div className="text-xs text-muted-foreground">Batch: {r.batchName}</div>
                             )}
@@ -506,8 +511,8 @@ export default function QRRequests() {
               <div className="space-y-4 mt-2">
                 <div className="grid gap-2 sm:grid-cols-2">
                   <div className="text-sm text-muted-foreground">
-                    Request quantity:{" "}
-                    <span className="font-medium text-foreground">{requestQuantity(activeReq)}</span>
+	                    Request quantity:{" "}
+	                    <span className="font-medium text-foreground">{requestQuantity(activeReq).toLocaleString()}</span>
                   </div>
                   <div className="text-sm text-muted-foreground">
                     Batch name:{" "}

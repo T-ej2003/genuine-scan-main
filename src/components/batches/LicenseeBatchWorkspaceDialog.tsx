@@ -32,6 +32,7 @@ import {
   presentPrintTrustState,
   titleCaseDecisionValue,
 } from "@/lib/verification-decision";
+import { humanStatusLabel } from "@/lib/audit-display";
 
 type ManufacturerRow = {
   id: string;
@@ -100,14 +101,13 @@ const historySummary = (log: TraceEventRow) => {
   const eventType = log?.eventType || "";
   if (eventType === "COMMISSIONED") {
     const qty = d.quantity ?? d.created ?? d.totalCodes;
-    const range = d.startCode && d.endCode ? ` (${d.startCode} -> ${d.endCode})` : "";
-    return `Commissioned ${qty ?? "-"} codes${range}.`;
+    return `Added ${qty ?? "-"} labels to this batch.`;
   }
   if (eventType === "ASSIGNED") {
-    return `Assigned ${d.quantity ?? "-"} codes to manufacturer ${d.manufacturerId || "-"}.`;
+    return `Assigned ${d.quantity ?? "-"} labels to ${d.manufacturerName || log.manufacturer?.name || "a manufacturer"}.`;
   }
   if (eventType === "PRINTED") {
-    return `Printed ${d.printedCodes ?? d.codes ?? "-"} codes.`;
+    return `Printed ${d.printedCodes ?? d.codes ?? "-"} labels.`;
   }
   if (eventType === "REDEEMED") {
     return `Redeemed on scan${d.scanCount != null ? ` (scan #${d.scanCount})` : ""}.`;
@@ -116,16 +116,15 @@ const historySummary = (log: TraceEventRow) => {
     return `Blocked${d.reason ? `: ${d.reason}` : ""}${d.blockedCodes ? ` (${d.blockedCodes} codes)` : ""}.`;
   }
   if (d.context === "ASSIGN_MANUFACTURER_QUANTITY_CHILD") {
-    return `Allocated ${d.quantity ?? "-"} to manufacturer ${d.manufacturerId || "-"} (${d.startCode || "?"} -> ${d.endCode || "?"})`;
+    return `Allocated ${d.quantity ?? "-"} labels to ${d.manufacturerName || log.manufacturer?.name || "a manufacturer"}.`;
   }
-  return log?.sourceAction || log?.action || "Activity";
+  return humanStatusLabel(log?.sourceAction || log?.action || "Activity");
 };
 
 const historyActor = (log: TraceEventRow) => {
-  if (log?.user?.name) return `${log.user.name} (${log.user.email || log.user.id || "id"})`;
-  if (log?.manufacturer?.name) return `${log.manufacturer.name} (${log.manufacturer.email || log.manufacturer.id || "id"})`;
+  if (log?.user?.name) return log.user.name;
+  if (log?.manufacturer?.name) return log.manufacturer.name;
   if (log?.user?.email) return log.user.email;
-  if (log?.userId) return log.userId;
   return "System";
 };
 
@@ -178,11 +177,11 @@ const renderManufacturerLine = (allocation: BatchWorkspaceAllocation) => (
       </div>
     </div>
     <div className="mt-3 text-xs text-muted-foreground font-mono break-all">
-      Original allocation: {allocation.batchRangeStart}{" -> "}{allocation.batchRangeEnd}
+      Label range: {allocation.batchRangeStart} to {allocation.batchRangeEnd}
     </div>
     {(allocation.currentRangeStart || allocation.currentRangeEnd) && (
       <div className="mt-1 text-xs text-muted-foreground font-mono break-all">
-        Current printable range: {allocation.currentRangeStart || "-"}{" -> "}{allocation.currentRangeEnd || "-"}
+        Ready-to-print range: {allocation.currentRangeStart || "-"} to {allocation.currentRangeEnd || "-"}
       </div>
     )}
   </div>
@@ -246,7 +245,7 @@ export function LicenseeBatchWorkspaceDialog({
                   </div>
                 </div>
                 <div className="min-w-[16rem] rounded-2xl border bg-muted/20 px-4 py-3 text-sm">
-                  <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">Source range</div>
+	                  <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">Label range</div>
                   <div className="mt-2 font-mono text-xs break-all">
                     {workspace.sourceOriginalRangeStart}{" -> "}{workspace.sourceOriginalRangeEnd}
                   </div>
@@ -286,7 +285,7 @@ export function LicenseeBatchWorkspaceDialog({
                         <div className="mt-3 text-3xl font-semibold">{workspace.remainingUnassignedCodes.toLocaleString()}</div>
                         <div className="mt-2 text-xs text-muted-foreground font-mono break-all">
                           {workspace.remainingRangeStart && workspace.remainingRangeEnd
-                            ? `${workspace.remainingRangeStart} -> ${workspace.remainingRangeEnd}`
+	                            ? `${workspace.remainingRangeStart} to ${workspace.remainingRangeEnd}`
                             : "No unassigned range remains."}
                         </div>
                       </div>
@@ -462,7 +461,7 @@ export function LicenseeBatchWorkspaceDialog({
                           ) : null}
                         </div>
                         <div className="mt-4 rounded-xl border bg-muted/20 p-4 text-xs text-muted-foreground">
-                          If manufacturers have already received allocations, the backend will block deletion and preserve traceability.
+	                          If manufacturers have already received allocations, deletion is blocked to preserve traceability.
                         </div>
                       </div>
                     </div>
@@ -593,7 +592,7 @@ export function LicenseeBatchWorkspaceDialog({
                           <div key={log.id || `${log.createdAt}-${index}`} className="rounded-2xl border p-4">
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div className="space-y-2">
-                                {log.eventType ? <Badge className={eventBadgeClass(log.eventType)}>{log.eventType}</Badge> : null}
+	                                {log.eventType ? <Badge className={eventBadgeClass(log.eventType)}>{humanStatusLabel(log.eventType)}</Badge> : null}
                                 <div className="font-medium">{historySummary(log)}</div>
                               </div>
                               <div className="text-xs text-muted-foreground">

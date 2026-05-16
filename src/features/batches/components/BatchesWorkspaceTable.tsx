@@ -252,11 +252,11 @@ export function BatchesWorkspaceTable({
 
                             <TableCell>
                               <div className="text-sm font-medium">{Number(batch.totalCodes || 0).toLocaleString()} assigned</div>
-                              <details className="mt-1 text-xs text-muted-foreground">
-                                <summary className="cursor-pointer">Technical details</summary>
-                                <div className="mt-1 break-all font-mono">{batch.startCode}</div>
-                                <div className="break-all font-mono">{batch.endCode}</div>
-                              </details>
+	                              {batch.startCode && batch.endCode ? (
+	                                <div className="mt-1 text-xs text-muted-foreground">
+	                                  Label range: <span className="font-mono">{batch.startCode} to {batch.endCode}</span>
+	                                </div>
+	                              ) : null}
                             </TableCell>
 
                             <TableCell>
@@ -269,7 +269,7 @@ export function BatchesWorkspaceTable({
                                 </div>
                                 {batch.remainingStartCode && batch.remainingEndCode ? (
                                   <details className="text-xs text-muted-foreground">
-                                    <summary className="cursor-pointer">Remaining label details</summary>
+	                                    <summary className="cursor-pointer">Label range</summary>
                                     <div className="mt-1 break-all font-mono">{`${batch.remainingStartCode} -> ${batch.remainingEndCode}`}</div>
                                   </details>
                                 ) : null}
@@ -338,7 +338,7 @@ export function BatchesWorkspaceTable({
           ) : (
             <>
               <div className="mb-4 rounded-2xl border bg-muted/10 px-4 py-3 text-sm text-muted-foreground">
-                Each batch appears once here. Open a batch to assign QR labels, review manufacturer work, check print progress, and open technical history when needed.
+	                Each batch appears once here. Open a batch to assign QR labels, review manufacturer work, check print progress, and view activity history when needed.
               </div>
 
               <div className="rounded-md border">
@@ -395,11 +395,9 @@ export function BatchesWorkspaceTable({
 
                             <TableCell>
                               <div className="text-sm font-medium">{row.originalTotalCodes.toLocaleString()} labels</div>
-                              <details className="mt-1 text-xs text-muted-foreground">
-                                <summary className="cursor-pointer">Technical details</summary>
-                                <div className="mt-1 break-all font-mono">{row.sourceOriginalRangeStart}</div>
-                                <div className="break-all font-mono">{row.sourceOriginalRangeEnd}</div>
-                              </details>
+	                              <div className="mt-1 text-xs text-muted-foreground">
+	                                Label range: <span className="font-mono">{row.sourceOriginalRangeStart} to {row.sourceOriginalRangeEnd}</span>
+	                              </div>
                             </TableCell>
 
                             <TableCell>
@@ -417,7 +415,7 @@ export function BatchesWorkspaceTable({
                                 </div>
                                 {row.remainingRangeStart && row.remainingRangeEnd ? (
                                   <details className="text-xs text-muted-foreground">
-                                    <summary className="cursor-pointer">Remaining label details</summary>
+	                                    <summary className="cursor-pointer">Label range</summary>
                                     <div className="mt-1 break-all font-mono">{`${row.remainingRangeStart} -> ${row.remainingRangeEnd}`}</div>
                                   </details>
                                 ) : (

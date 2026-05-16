@@ -11,6 +11,7 @@ const publicAuthOptionalPaths = [
   "/blog",
   "/connector-download",
   "/verify-email",
+  "/scan",
   "/help",
   "/help/auth-overview",
   "/help/getting-access",
@@ -28,7 +29,6 @@ const publicAuthOptionalPrefixes = [
   "/industries/",
   "/how-scanning-works",
   "/verify",
-  "/scan",
 ] as const;
 
 export const shouldBootstrapCurrentUser = (pathname: string) => {

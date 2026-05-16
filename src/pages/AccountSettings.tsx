@@ -23,6 +23,16 @@ import {
   STORAGE_RISK_KEYS,
 } from "@/features/account-settings/types";
 
+const friendlyAccountError = (fallback: string) => (value?: string) => {
+  const text = String(value || "").toLowerCase();
+  if (text.includes("rate") || text.includes("too many")) return "Please wait a moment, then try again.";
+  if (text.includes("network") || text.includes("timeout")) return "Network connection issue. Check connectivity and retry.";
+  if (text.includes("step")) return "Complete verification, then retry this action.";
+  if (text.includes("password")) return "Check your current password and try again.";
+  if (text.includes("code") || text.includes("mfa")) return "Check the authenticator or backup code and try again.";
+  return fallback;
+};
+
 export default function AccountSettings() {
   const { user, refresh } = useAuth();
   const { toast } = useToast();
@@ -82,7 +92,7 @@ export default function AccountSettings() {
     } catch (error: any) {
       toast({
         title: "Could not load sessions",
-        description: error?.message || "Please refresh and try again.",
+        description: friendlyAccountError("Please refresh and try again.")(error?.message),
         variant: "destructive",
       });
     } finally {
@@ -164,7 +174,7 @@ export default function AccountSettings() {
       }
       await refresh();
     } catch (e: any) {
-      toast({ title: "Save failed", description: e?.message || "Error", variant: "destructive" });
+      toast({ title: "Save failed", description: friendlyAccountError("Please check your details and try again.")(e?.message), variant: "destructive" });
     } finally {
       setProfileLoading(false);
     }
@@ -200,7 +210,7 @@ export default function AccountSettings() {
       setNewPassword("");
       setConfirmNewPassword("");
     } catch (e: any) {
-      toast({ title: "Failed", description: e?.message || "Error", variant: "destructive" });
+      toast({ title: "Password update failed", description: friendlyAccountError("Please check your password and try again.")(e?.message), variant: "destructive" });
     } finally {
       setPasswordLoading(false);
     }
@@ -216,7 +226,7 @@ export default function AccountSettings() {
       setMfaSetup(response.data);
       setRotatedBackupCodes(null);
     } catch (e: any) {
-      toast({ title: "Extra protection setup failed", description: e?.message || "Error", variant: "destructive" });
+      toast({ title: "Extra protection setup failed", description: friendlyAccountError("Please refresh and try setup again.")(e?.message), variant: "destructive" });
     } finally {
       setMfaLoading(false);
     }
@@ -236,7 +246,7 @@ export default function AccountSettings() {
       await loadMfaStatus();
       await refresh();
     } catch (e: any) {
-      toast({ title: "Confirmation failed", description: e?.message || "Error", variant: "destructive" });
+      toast({ title: "Confirmation failed", description: friendlyAccountError("Check the authenticator code and try again.")(e?.message), variant: "destructive" });
     } finally {
       setMfaLoading(false);
     }
@@ -254,7 +264,7 @@ export default function AccountSettings() {
       await loadMfaStatus();
       toast({ title: "Backup codes rotated", description: "Store the new backup codes somewhere safe now." });
     } catch (e: any) {
-      toast({ title: "Rotation failed", description: e?.message || "Error", variant: "destructive" });
+      toast({ title: "Rotation failed", description: friendlyAccountError("Check the current protection code and try again.")(e?.message), variant: "destructive" });
     } finally {
       setMfaLoading(false);
     }
@@ -280,7 +290,7 @@ export default function AccountSettings() {
         description: "Extra sign-in protection is off for this account. The next admin sign-in will require setup again.",
       });
     } catch (e: any) {
-      toast({ title: "Disable failed", description: e?.message || "Error", variant: "destructive" });
+      toast({ title: "Could not turn off protection", description: friendlyAccountError("Check the password and protection code, then try again.")(e?.message), variant: "destructive" });
     } finally {
       setMfaLoading(false);
     }
@@ -315,7 +325,7 @@ export default function AccountSettings() {
     } catch (error: any) {
       toast({
         title: "Passkey setup failed",
-        description: error?.message || "Could not add this passkey.",
+        description: friendlyAccountError("Could not add this passkey. Please try again.")(error?.message),
         variant: "destructive",
       });
     } finally {
@@ -346,7 +356,7 @@ export default function AccountSettings() {
     } catch (error: any) {
       toast({
         title: "Verification failed",
-        description: error?.message || "Could not verify the passkey.",
+        description: friendlyAccountError("Could not verify the passkey. Please try again.")(error?.message),
         variant: "destructive",
       });
     } finally {
@@ -371,7 +381,7 @@ export default function AccountSettings() {
     } catch (error: any) {
       toast({
         title: "Removal failed",
-        description: error?.message || "Could not remove the passkey.",
+        description: friendlyAccountError("Could not remove the passkey. Please try again.")(error?.message),
         variant: "destructive",
       });
     } finally {
@@ -403,7 +413,7 @@ export default function AccountSettings() {
     } catch (error: any) {
       toast({
         title: "Session revoke failed",
-        description: error?.message || "Please try again.",
+        description: friendlyAccountError("Please try again.")(error?.message),
         variant: "destructive",
       });
     } finally {
@@ -427,7 +437,7 @@ export default function AccountSettings() {
     } catch (error: any) {
       toast({
         title: "Bulk revoke failed",
-        description: error?.message || "Please try again.",
+        description: friendlyAccountError("Please try again.")(error?.message),
         variant: "destructive",
       });
     } finally {
@@ -484,10 +494,11 @@ export default function AccountSettings() {
 
         <SessionSecurityCard
           currentDeviceTrustLabel={currentDeviceTrustLabel}
-          currentSession={currentSession}
-          currentSessionSecurity={currentSessionSecurity}
-          isAdminUser={isAdminUser}
-          loadSessions={loadSessions}
+        currentSession={currentSession}
+        currentSessionSecurity={currentSessionSecurity}
+        isAdminUser={isAdminUser}
+        isPlatformAdmin={user?.role === "super_admin"}
+        loadSessions={loadSessions}
           revokeAllLoading={revokeAllLoading}
           revokeAllSessions={revokeAllSessions}
           revokeSession={revokeSession}

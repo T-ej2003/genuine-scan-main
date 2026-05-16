@@ -230,14 +230,6 @@ export default function QRTracking() {
     }
   };
 
-  const copyBatchId = async (batchId: string) => {
-    try {
-      await navigator.clipboard.writeText(batchId);
-    } catch {
-      // non-blocking convenience action
-    }
-  };
-
   return (
     <DashboardLayout>
       <TrackingWorkspace
@@ -261,7 +253,6 @@ export default function QRTracking() {
         logs={filteredLogs}
         batchNameById={batchNameById}
         onOpenAllocationMap={openAllocationMap}
-        onCopyBatchId={copyBatchId}
         allocationMapOpen={allocationMapOpen}
         allocationMapLoading={allocationMapLoading}
         allocationMap={allocationMap}
