@@ -15,6 +15,7 @@ import { startNetworkIppDispatch } from "../../services/networkIppPrintService";
 import { completeIdempotentAction } from "../../services/idempotencyService";
 import {
   buildPrintJobErrorPayload,
+  describePrintJobCreateFailure,
   sendPrintJobCreateErrorResponse,
 } from "./errorResponses";
 import {
@@ -31,6 +32,35 @@ import {
   replayIdempotentResponseIfAny,
 } from "./shared";
 
+const getRequestId = (req: AuthRequest) =>
+  String((req as AuthRequest & { requestId?: string }).requestId || req.get("x-request-id") || "").trim() || null;
+
+const logPrintJobCreateFailure = (
+  req: AuthRequest,
+  params: {
+    status: number;
+    errorCode: string;
+    reason: string;
+    missingFields?: string[];
+    batchId?: string | null;
+    printerId?: string | null;
+    quantity?: number | null;
+  }
+) => {
+  console.warn("createPrintJob rejected", {
+    requestId: getRequestId(req),
+    userId: req.user?.userId || null,
+    role: req.user?.role || null,
+    status: params.status,
+    errorCode: params.errorCode,
+    reason: params.reason,
+    missingFields: params.missingFields || [],
+    batchId: params.batchId || null,
+    printerId: params.printerId || null,
+    quantity: params.quantity ?? null,
+  });
+};
+
 export const createPrintJob = async (req: AuthRequest, res: any) => {
   try {
     const user = ensureManufacturerUser(req, res);
@@ -41,9 +71,18 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
       const missingFields = parsed.error.errors
         .map((issue) => String(issue.path[0] || "").trim())
         .filter(Boolean);
+      logPrintJobCreateFailure(req, {
+        status: 400,
+        errorCode: "invalid_payload",
+        reason: "invalid_payload",
+        missingFields,
+        batchId: typeof req.body?.batchId === "string" ? req.body.batchId : null,
+        printerId: typeof req.body?.printerId === "string" ? req.body.printerId : null,
+        quantity: Number.isFinite(Number(req.body?.quantity)) ? Number(req.body.quantity) : null,
+      });
       return res.status(400).json(
         buildPrintJobErrorPayload({
-          code: "INVALID_PRINT_JOB_REQUEST",
+          code: "invalid_payload",
           message: "The print job request is missing required information.",
           details: missingFields.length > 0 ? { missingFields } : undefined,
         })
@@ -73,7 +112,7 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
     if (!batch) {
       return res.status(404).json(
         buildPrintJobErrorPayload({
-          code: "BATCH_NOT_FOUND",
+          code: "batch_not_found",
           message: "Batch not found or not assigned to you.",
         })
       );
@@ -121,7 +160,7 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
     if (activeJob) {
       return res.status(409).json({
         ...buildPrintJobErrorPayload({
-          code: "ACTIVE_PRINT_JOB_EXISTS",
+          code: "active_print_job_exists",
           message: "An active print run already exists for this batch. Resume the current job instead of starting a duplicate run.",
         }),
         data: {
@@ -153,9 +192,8 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
     ) {
       return res.status(409).json(
         buildPrintJobErrorPayload({
-          code: "PRINTER_NETWORK_LANGUAGE_UNSUPPORTED",
-          message:
-            "Network-direct printing currently supports certified industrial printer profiles only when the live language and transport are approved.",
+          code: "invalid_printer",
+          message: "This printer profile needs a compatible setup before it can be used.",
         })
       );
     }
@@ -415,6 +453,16 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
     return res.status(201).json(responsePayload);
   } catch (e: any) {
     console.error("createPrintJob error:", e);
+    const failure = describePrintJobCreateFailure(e);
+    logPrintJobCreateFailure(req, {
+      status: failure.status,
+      errorCode: failure.payload.errorCode,
+      reason: failure.logReason,
+      missingFields: failure.payload.details?.missingFields,
+      batchId: typeof req.body?.batchId === "string" ? req.body.batchId : null,
+      printerId: typeof req.body?.printerId === "string" ? req.body.printerId : null,
+      quantity: Number.isFinite(Number(req.body?.quantity)) ? Number(req.body.quantity) : null,
+    });
     return sendPrintJobCreateErrorResponse(e, res);
   }
 };

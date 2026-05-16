@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { printJobCreateFailureMessage } from "@/features/batches/batch-print-operations";
 import { buildPrinterSupportSummary, sanitizePrinterUiError } from "@/lib/printer-user-facing";
 
 describe("printer user-facing helpers", () => {
@@ -27,6 +28,24 @@ describe("printer user-facing helpers", () => {
         "Invalid `prisma.printer.create()` invocation: Unique constraint failed on the fields: (`licenseeId`, `ipAddress`, `port`)"
       )
     ).toBe("A saved printer profile already uses this connection. Open the existing setup to edit it or remove it first.");
+  });
+
+  it("maps structured print-job creation errors to specific user guidance", () => {
+    expect(printJobCreateFailureMessage({ errorCode: "missing_printer_session" })).toBe(
+      "Refresh the printer connection, then start the print run again."
+    );
+    expect(printJobCreateFailureMessage({ errorCode: "printer_not_verified" })).toBe(
+      "Finish printer verification or choose a verified printer before starting this print run."
+    );
+    expect(printJobCreateFailureMessage({ errorCode: "batch_not_printable" })).toBe(
+      "There are no labels ready to print in this batch."
+    );
+    expect(printJobCreateFailureMessage({ errorCode: "invalid_printer" })).toBe(
+      "Choose the ZDesigner printer again, then start the print run."
+    );
+    expect(printJobCreateFailureMessage({ status: 401 })).toBe(
+      "Your session expired. Refresh or sign in again, then start the print run."
+    );
   });
 
   it("builds a redacted support summary", () => {

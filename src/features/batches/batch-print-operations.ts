@@ -142,6 +142,41 @@ export const syncProgressFromPrintJob = (
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
+export const printJobCreateFailureMessage = (response: {
+  status?: number;
+  code?: string;
+  errorCode?: string;
+  error?: string;
+  message?: string;
+}) => {
+  const errorCode = String(response.errorCode || response.code || "").trim().toLowerCase();
+  if (response.status === 401 || errorCode === "unauthenticated" || errorCode === "session_expired") {
+    return "Your session expired. Refresh or sign in again, then start the print run.";
+  }
+  if (errorCode === "printer_not_verified") {
+    return "Finish printer verification or choose a verified printer before starting this print run.";
+  }
+  if (errorCode === "missing_printer_session") {
+    return "Refresh the printer connection, then start the print run again.";
+  }
+  if (errorCode === "batch_not_printable") {
+    return "There are no labels ready to print in this batch.";
+  }
+  if (errorCode === "invalid_printer") {
+    return "Choose the ZDesigner printer again, then start the print run.";
+  }
+  if (errorCode === "invalid_payload") {
+    return "The print job request is missing required information. Refresh the page and try again.";
+  }
+  if (errorCode === "print_service_unavailable") {
+    return "Printing is temporarily unavailable. Please try again.";
+  }
+  return sanitizePrinterUiError(
+    response.message || response.error,
+    "The print job could not be started right now."
+  );
+};
+
 export const pollPrintJobUntilSettled = async (
   jobId: string,
   progressSetters: PrintProgressSetters,
@@ -384,15 +419,21 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
       return;
     }
 
-    const raw = String(response.error || "Error").toLowerCase();
-    const isBusy = raw.includes("conflict") || raw.includes("busy") || raw.includes("retry");
+    const raw = String(response.errorCode || response.code || response.error || "Error").toLowerCase();
+    const isBusy =
+      raw.includes("conflict") ||
+      raw.includes("busy") ||
+      raw.includes("retry") ||
+      raw.includes("active_print_job_exists") ||
+      raw.includes("print_job_conflict");
     const responseMessage = String(response.message || response.error || "").trim();
-    const safeError = sanitizePrinterUiError(responseMessage, "The print job could not be started right now.");
+    const safeError = printJobCreateFailureMessage(response);
     toast({
-      title: isBusy ? "Batch busy" : "Print job failed",
+      title: isBusy ? "Batch busy" : "Print needs attention",
       description: isBusy ? "These codes were just allocated by another job. Please retry." : safeError,
       variant: "destructive",
     });
+    setPrintProgressPhase("Print needs attention");
     setPrintProgressError(safeError);
     void autoReportPrinterFailure({
       context: "create_print_job",

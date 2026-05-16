@@ -10,14 +10,37 @@ type RequestPayload = {
   selectedPrinterName?: string;
 };
 
-const createCore = (request: (endpoint: string) => Promise<ApiResponse<unknown>>): ApiClientCore => ({
+const createCore = (request: (endpoint: string, options?: RequestInit) => Promise<ApiResponse<unknown>>): ApiClientCore => ({
   setToken: vi.fn(),
   getToken: () => null,
   logout: vi.fn(),
-  request: <T>(endpoint: string) => request(endpoint) as Promise<ApiResponse<T>>,
+  request: <T>(endpoint: string, options?: RequestInit) => request(endpoint, options) as Promise<ApiResponse<T>>,
 });
 
 describe("printing api request control", () => {
+  it("sends the print job creation payload without undefined printer internals", async () => {
+    const request = vi.fn(async () => ({ success: true, data: { printJobId: "job-1" } }));
+    const api = createPrintingApi(createCore(request));
+
+    await api.createPrintJob({
+      batchId: "batch-1",
+      printerId: "printer-1",
+      quantity: 1,
+    });
+
+    expect(request).toHaveBeenCalledWith(
+      "/manufacturer/print-jobs",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          batchId: "batch-1",
+          printerId: "printer-1",
+          quantity: 1,
+        }),
+      })
+    );
+  });
+
   it("deduplicates concurrent printer status requests", async () => {
     let resolveRequest: ((response: ApiResponse<RequestPayload>) => void) | null = null;
     const request = vi.fn(
