@@ -222,7 +222,7 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
   }
 
   if (selectedPrinterProfile.connectionType === "LOCAL_AGENT") {
-    const livePrinterStatus = await apiClient.getPrinterConnectionStatus();
+    const livePrinterStatus = await apiClient.getPrinterConnectionStatus({ force: true, minIntervalMs: 0 });
     const refreshRateLimited =
       livePrinterStatus.status === 429 || String(livePrinterStatus.code || "").toUpperCase() === "RATE_LIMITED";
     const effectiveLiveStatus = (livePrinterStatus.data || printerStatus) as PrinterConnectionStatus;
@@ -386,7 +386,8 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
 
     const raw = String(response.error || "Error").toLowerCase();
     const isBusy = raw.includes("conflict") || raw.includes("busy") || raw.includes("retry");
-    const safeError = sanitizePrinterUiError(response.error, "The print job could not be started right now.");
+    const responseMessage = String(response.message || response.error || "").trim();
+    const safeError = sanitizePrinterUiError(responseMessage, "The print job could not be started right now.");
     toast({
       title: isBusy ? "Batch busy" : "Print job failed",
       description: isBusy ? "These codes were just allocated by another job. Please retry." : safeError,
@@ -395,7 +396,7 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
     setPrintProgressError(safeError);
     void autoReportPrinterFailure({
       context: "create_print_job",
-      reason: response.error || "Print job setup failed",
+      reason: responseMessage || "Print job setup failed",
       diagnostics: { batchId: printBatch.id, quantity },
     });
     return;

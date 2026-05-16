@@ -10,6 +10,7 @@ import {
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
 import { buildSupportDiagnosticsPayload, captureSupportScreenshot } from "@/lib/support-diagnostics";
 import {
+  loadManufacturerPrinterRuntimeSnapshot,
   useManufacturerPrinterRuntime,
   usePrintJobs,
   type ManufacturerPrinterRuntime,
@@ -313,8 +314,18 @@ export function useBatchPrintWorkflow({
     setRecentPrintJobs(Array.isArray(response.data) ? (response.data as PrintJobRow[]) : []);
   };
 
-  const loadPrinterStatus = async () => {
+  const loadPrinterStatus = async (options: { force?: boolean } = {}) => {
     if (!isManufacturer) return;
+    if (options.force) {
+      try {
+        applyPrinterRuntimeSnapshot(await loadManufacturerPrinterRuntimeSnapshot(true, { force: true }));
+      } catch {
+        if (printerStatus.connected && printerStatus.eligibleForPrinting) return;
+        setRegisteredPrinters([]);
+        setDetectedPrinters([]);
+      }
+      return;
+    }
     const response = await printerRuntimeQuery.refetch();
     if (!response.data) {
       if (printerStatus.connected && printerStatus.eligibleForPrinting) return;
@@ -394,7 +405,7 @@ export function useBatchPrintWorkflow({
     setPrintProgressPrinterName(null);
     setPrintProgressDispatchMode(null);
     setPrintOpen(true);
-    void loadPrinterStatus();
+    void loadPrinterStatus({ force: true });
     void loadRecentPrintJobs();
   };
 
@@ -441,7 +452,7 @@ export function useBatchPrintWorkflow({
       }
 
       toast({ title: "Printer updated", description: "The printer on this computer has been updated." });
-      await loadPrinterStatus();
+      await loadPrinterStatus({ force: true });
     } finally {
       setSwitchingPrinter(false);
     }
@@ -578,7 +589,7 @@ export function useBatchPrintWorkflow({
     readyToPrintCount: printBatch ? getAvailableInventory(printBatch) : 0,
     registeredPrinters,
     onRefreshPrinters: () => {
-      void loadPrinterStatus();
+      void loadPrinterStatus({ force: true });
     },
     selectedPrinterProfileId,
     onSelectedPrinterProfileIdChange: setSelectedPrinterProfileId,

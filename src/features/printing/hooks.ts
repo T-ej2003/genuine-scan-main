@@ -24,6 +24,10 @@ export type ManufacturerPrinterRuntime = {
   preferredPrinterId: string | null;
 };
 
+type PrinterRuntimeLoadOptions = {
+  force?: boolean;
+};
+
 export function normalizeLocalPrinterRows(rows: unknown): LocalPrinterDTO[] {
   if (!Array.isArray(rows)) return [];
 
@@ -99,6 +103,67 @@ export function usePrintJobs(batchId?: string, limit = 8, enabled = true) {
   });
 }
 
+export async function loadManufacturerPrinterRuntimeSnapshot(
+  includeInactive = true,
+  options: PrinterRuntimeLoadOptions = {}
+): Promise<ManufacturerPrinterRuntime> {
+  const printerRequestOptions = options.force ? { force: true, minIntervalMs: 0 } : undefined;
+  const [remoteResponse, localResponse, registeredPrinterResponse] = await Promise.all([
+    apiClient.getPrinterConnectionStatus(printerRequestOptions),
+    apiClient.getLocalPrintAgentStatus(),
+    apiClient.listRegisteredPrinters(includeInactive, printerRequestOptions),
+  ]);
+
+  const localPrinters = normalizeLocalPrinterRows((localResponse.data as { printers?: unknown[] } | undefined)?.printers || []);
+  const parsedRemoteStatus =
+    remoteResponse.success && remoteResponse.data
+      ? unwrapParsedApiResponse(remoteResponse, printerConnectionStatusSchema, "Printer status unavailable")
+      : null;
+  const remoteStatus =
+    parsedRemoteStatus
+      ? ({
+          ...parsedRemoteStatus,
+          printers:
+            normalizeLocalPrinterRows(parsedRemoteStatus.printers || []).length > 0
+              ? normalizeLocalPrinterRows(parsedRemoteStatus.printers || [])
+              : localPrinters,
+        } satisfies PrinterConnectionStatusDTO)
+      : buildFallbackPrinterStatus(localPrinters, remoteResponse.error || localResponse.error || "Printer status unavailable");
+
+  const detectedPrinters = remoteStatus.printers && remoteStatus.printers.length > 0 ? remoteStatus.printers : localPrinters;
+  const preferredPrinterId =
+    String(
+      chooseStablePrinterSelection(
+        detectedPrinters,
+        (localResponse.data as { selectedPrinterId?: string; printerId?: string } | undefined)?.selectedPrinterId ||
+          null,
+        remoteStatus.selectedPrinterId,
+        remoteStatus.printerId
+      )?.printerId || ""
+    ).trim() || null;
+
+  return {
+    localAgent: {
+      reachable: Boolean(localResponse.success),
+      connected: Boolean((localResponse.data as { connected?: boolean } | undefined)?.connected),
+      error: localResponse.success
+        ? String((localResponse.data as { error?: string } | undefined)?.error || "").trim() || null
+        : String(localResponse.error || "Local print agent is unavailable"),
+      checkedAt: new Date().toISOString(),
+    },
+    remoteStatus,
+    detectedPrinters,
+    registeredPrinters: registeredPrinterResponse.success
+      ? parseWithSchema(
+          registeredPrinterArraySchema,
+          Array.isArray(registeredPrinterResponse.data) ? registeredPrinterResponse.data : [],
+          "Failed to load printers"
+        )
+      : [],
+    preferredPrinterId,
+  };
+}
+
 export function useManufacturerPrinterRuntime(includeInactive = true, enabled = true) {
   return useQuery({
     queryKey: queryKeys.printing.runtime(includeInactive),
@@ -106,61 +171,6 @@ export function useManufacturerPrinterRuntime(includeInactive = true, enabled = 
     staleTime: 20_000,
     refetchInterval: enabled ? 30_000 : false,
     refetchOnWindowFocus: false,
-    queryFn: async (): Promise<ManufacturerPrinterRuntime> => {
-      const [remoteResponse, localResponse, registeredPrinterResponse] = await Promise.all([
-        apiClient.getPrinterConnectionStatus(),
-        apiClient.getLocalPrintAgentStatus(),
-        apiClient.listRegisteredPrinters(includeInactive),
-      ]);
-
-      const localPrinters = normalizeLocalPrinterRows((localResponse.data as { printers?: unknown[] } | undefined)?.printers || []);
-      const parsedRemoteStatus =
-        remoteResponse.success && remoteResponse.data
-          ? unwrapParsedApiResponse(remoteResponse, printerConnectionStatusSchema, "Printer status unavailable")
-          : null;
-      const remoteStatus =
-        parsedRemoteStatus
-          ? ({
-              ...parsedRemoteStatus,
-              printers:
-                normalizeLocalPrinterRows(parsedRemoteStatus.printers || []).length > 0
-                  ? normalizeLocalPrinterRows(parsedRemoteStatus.printers || [])
-                  : localPrinters,
-            } satisfies PrinterConnectionStatusDTO)
-          : buildFallbackPrinterStatus(localPrinters, remoteResponse.error || localResponse.error || "Printer status unavailable");
-
-      const detectedPrinters = remoteStatus.printers && remoteStatus.printers.length > 0 ? remoteStatus.printers : localPrinters;
-      const preferredPrinterId =
-        String(
-          chooseStablePrinterSelection(
-            detectedPrinters,
-            (localResponse.data as { selectedPrinterId?: string; printerId?: string } | undefined)?.selectedPrinterId ||
-              null,
-            remoteStatus.selectedPrinterId,
-            remoteStatus.printerId
-          )?.printerId || ""
-        ).trim() || null;
-
-      return {
-        localAgent: {
-          reachable: Boolean(localResponse.success),
-          connected: Boolean((localResponse.data as { connected?: boolean } | undefined)?.connected),
-          error: localResponse.success
-            ? String((localResponse.data as { error?: string } | undefined)?.error || "").trim() || null
-            : String(localResponse.error || "Local print agent is unavailable"),
-          checkedAt: new Date().toISOString(),
-        },
-        remoteStatus,
-        detectedPrinters,
-        registeredPrinters: registeredPrinterResponse.success
-          ? parseWithSchema(
-              registeredPrinterArraySchema,
-              Array.isArray(registeredPrinterResponse.data) ? registeredPrinterResponse.data : [],
-              "Failed to load printers"
-            )
-          : [],
-        preferredPrinterId,
-      };
-    },
+    queryFn: () => loadManufacturerPrinterRuntimeSnapshot(includeInactive),
   });
 }

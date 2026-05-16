@@ -10,6 +10,7 @@ export interface ApiResponse<T = any> {
   message?: string;
   degraded?: boolean;
   code?: string;
+  errorCode?: string;
   status?: number;
   retryAfterSec?: number;
   unknownOutcome?: boolean;
@@ -406,6 +407,8 @@ export function createApiClientCore(): ApiClientCore {
         const responseCode =
           payload && typeof payload === "object" && typeof (payload as any).code === "string"
             ? String((payload as any).code)
+            : payload && typeof payload === "object" && typeof (payload as any).errorCode === "string"
+              ? String((payload as any).errorCode)
             : undefined;
         const retryAfterHeader = Number(response.headers.get("retry-after") || "");
         const retryAfterPayload =
@@ -443,6 +446,7 @@ export function createApiClientCore(): ApiClientCore {
           success: false,
           error: message,
           code: responseCode,
+          errorCode: responseCode,
           status: response.status,
           retryAfterSec,
           data: responseData,

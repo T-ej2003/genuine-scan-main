@@ -88,56 +88,111 @@ const closeTransientDialogs = async (page: Page) => {
   await expect(page.locator('[role="dialog"]')).toHaveCount(0, { timeout: 5_000 }).catch(() => undefined);
 };
 
-const installLocalPrintAgentMock = async (page: Page) => {
-  const printerPayload = {
-    connected: true,
-    printerName: env.printerProfileName || "E2E Local Agent Printer",
-    printerId: "e2e-local-printer",
-    selectedPrinterId: "e2e-local-printer",
-    selectedPrinterName: env.printerProfileName || "E2E Local Agent Printer",
-    deviceName: "E2E Print Workstation",
-    agentVersion: "e2e-ci",
-    agentId: "e2e-agent",
-    deviceFingerprint: "e2e-device-fingerprint",
-    printers: [
-      {
-        printerId: "e2e-local-printer",
-        printerName: env.printerProfileName || "E2E Local Agent Printer",
-        model: "E2E Driver Queue",
-        connection: "LOCAL_AGENT",
-        online: true,
-        isDefault: true,
-        protocols: ["DRIVER_QUEUE"],
-        languages: ["PDF"],
-        mediaSizes: ["50x30mm"],
-        dpi: 203,
-      },
-    ],
-    capabilitySummary: {
-      transports: ["LOCAL_AGENT"],
+const buildE2EPrinterPayload = () => ({
+  connected: true,
+  printerName: env.printerProfileName || "E2E Local Agent Printer",
+  printerId: "e2e-local-printer",
+  selectedPrinterId: "e2e-local-printer",
+  selectedPrinterName: env.printerProfileName || "E2E Local Agent Printer",
+  deviceName: "E2E Print Workstation",
+  agentVersion: "e2e-ci",
+  agentId: "e2e-agent",
+  deviceFingerprint: "e2e-device-fingerprint",
+  printers: [
+    {
+      printerId: "e2e-local-printer",
+      printerName: env.printerProfileName || "E2E Local Agent Printer",
+      model: "E2E Driver Queue",
+      connection: "LOCAL_AGENT",
+      online: true,
+      isDefault: true,
       protocols: ["DRIVER_QUEUE"],
       languages: ["PDF"],
-      supportsRaster: true,
-      supportsPdf: true,
-      dpiOptions: [203],
       mediaSizes: ["50x30mm"],
+      dpi: 203,
     },
-  };
+  ],
+  capabilitySummary: {
+    transports: ["LOCAL_AGENT"],
+    protocols: ["DRIVER_QUEUE"],
+    languages: ["PDF"],
+    supportsRaster: true,
+    supportsPdf: true,
+    dpiOptions: [203],
+    mediaSizes: ["50x30mm"],
+  },
+});
 
-  await page.route("http://127.0.0.1:17866/status", (route) =>
+const installLocalPrintAgentMock = async (page: Page) => {
+  const printerPayload = buildE2EPrinterPayload();
+
+  await page.route("http://127.0.0.1:17866/status**", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(printerPayload),
     })
   );
-  await page.route("http://127.0.0.1:17866/backend/config", (route) =>
+  await page.route("http://127.0.0.1:17866/backend/config**", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ success: true }),
     })
   );
+  await page.route(/http:\/\/127\.0\.0\.1:17866\/printers?\/select/, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, selectedPrinterId: "e2e-local-printer" }),
+    })
+  );
+};
+
+const refreshE2EPrinterHeartbeat = async (page: Page) => {
+  const result = await page.evaluate(async (payload) => {
+    const readCookie = (name: string) => {
+      const match = document.cookie
+        .split(";")
+        .map((cookie) => cookie.trim())
+        .find((cookie) => cookie.startsWith(`${name}=`));
+      return match ? decodeURIComponent(match.split("=").slice(1).join("=")) : "";
+    };
+
+    const heartbeat = await fetch("/api/manufacturer/printer-agent/heartbeat", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "content-type": "application/json",
+        "x-csrf-token": readCookie("aq_csrf"),
+      },
+      body: JSON.stringify(payload),
+    });
+    const heartbeatBody = await heartbeat.json().catch(() => null);
+    if (!heartbeat.ok || !heartbeatBody?.success) {
+      return {
+        ok: false,
+        phase: "heartbeat",
+        status: heartbeat.status,
+        body: heartbeatBody,
+      };
+    }
+
+    const status = await fetch("/api/manufacturer/printer-agent/status", {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+    });
+    const statusBody = await status.json().catch(() => null);
+    return {
+      ok: Boolean(status.ok && statusBody?.success && statusBody?.data?.connected && statusBody?.data?.eligibleForPrinting),
+      phase: "status",
+      status: status.status,
+      body: statusBody,
+    };
+  }, buildE2EPrinterPayload());
+
+  expect(result, `E2E printer helper readiness failed during ${result.phase}`).toMatchObject({ ok: true });
 };
 
 test.describe.serial("Enterprise smoke flows", () => {
@@ -191,6 +246,7 @@ test.describe.serial("Enterprise smoke flows", () => {
 
     await installLocalPrintAgentMock(page);
     await login(page, env.manufacturerEmail, env.manufacturerPassword);
+    await refreshE2EPrinterHeartbeat(page);
     await goto(page, "/batches");
 
     await expect(page.getByTestId("batches-search-input")).toBeVisible({ timeout: 30_000 });
@@ -206,6 +262,7 @@ test.describe.serial("Enterprise smoke flows", () => {
     await page.getByTestId("print-job-quantity-input").fill(env.printQuantity);
     await expect(page.getByTestId("print-job-printer-profile")).toBeVisible({ timeout: 30_000 });
     await selectRadixOption(page, "print-job-printer-profile", env.printerProfileName);
+    await expect(page.getByTestId("print-job-start-button")).toBeEnabled({ timeout: 30_000 });
     await page.getByTestId("print-job-start-button").click();
 
     await expect(page.getByTestId("create-print-job-dialog")).toContainText(/Current print job|Printing in progress|Recent print jobs/);

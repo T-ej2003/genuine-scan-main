@@ -13,7 +13,10 @@ import {
 import { startNetworkDirectDispatch } from "../../services/networkDirectPrintService";
 import { startNetworkIppDispatch } from "../../services/networkIppPrintService";
 import { completeIdempotentAction } from "../../services/idempotencyService";
-import { sanitizePrinterActionError } from "../../utils/printerUserFacingErrors";
+import {
+  buildPrintJobErrorPayload,
+  sendPrintJobCreateErrorResponse,
+} from "./errorResponses";
 import {
   beginPrintActionIdempotency,
   createPrintJobSchema,
@@ -35,7 +38,16 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
 
     const parsed = createPrintJobSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      const missingFields = parsed.error.errors
+        .map((issue) => String(issue.path[0] || "").trim())
+        .filter(Boolean);
+      return res.status(400).json(
+        buildPrintJobErrorPayload({
+          code: "INVALID_PRINT_JOB_REQUEST",
+          message: "The print job request is missing required information.",
+          details: missingFields.length > 0 ? { missingFields } : undefined,
+        })
+      );
     }
 
     let idempotency;
@@ -59,7 +71,12 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
       select: { id: true, name: true, licenseeId: true, manufacturerId: true },
     });
     if (!batch) {
-      return res.status(404).json({ success: false, error: "Batch not found or not assigned to you" });
+      return res.status(404).json(
+        buildPrintJobErrorPayload({
+          code: "BATCH_NOT_FOUND",
+          message: "Batch not found or not assigned to you.",
+        })
+      );
     }
 
     const activeJob = await prisma.printJob.findFirst({
@@ -103,8 +120,10 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
     });
     if (activeJob) {
       return res.status(409).json({
-        success: false,
-        error: "An active print run already exists for this batch. Resume the current job instead of starting a duplicate run.",
+        ...buildPrintJobErrorPayload({
+          code: "ACTIVE_PRINT_JOB_EXISTS",
+          message: "An active print run already exists for this batch. Resume the current job instead of starting a duplicate run.",
+        }),
         data: {
           activePrintJobId: activeJob.id,
           activePrintSessionId: activeJob.printSession?.id || null,
@@ -132,10 +151,13 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
       printerSelection.printMode === PrintDispatchMode.NETWORK_DIRECT &&
       !supportsNetworkDirectPayloadType(printerSelection.payloadType)
     ) {
-      return res.status(409).json({
-        success: false,
-        error: "Network-direct printing currently supports certified industrial printer profiles only when the live language and transport are approved.",
-      });
+      return res.status(409).json(
+        buildPrintJobErrorPayload({
+          code: "PRINTER_NETWORK_LANGUAGE_UNSUPPORTED",
+          message:
+            "Network-direct printing currently supports certified industrial printer profiles only when the live language and transport are approved.",
+        })
+      );
     }
 
     const printLockToken =
@@ -393,93 +415,6 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
     return res.status(201).json(responsePayload);
   } catch (e: any) {
     console.error("createPrintJob error:", e);
-    const msg = String(e?.message || "");
-    if (msg.includes("BATCH_BUSY")) {
-      return res.status(409).json({ success: false, error: "Please retry — batch busy." });
-    }
-    if (msg.startsWith("NOT_ENOUGH_CODES:")) {
-      const available = Number(msg.split(":")[1] || "0");
-      return res.status(400).json({
-        success: false,
-        error: `Not enough unprinted codes. Available: ${available}`,
-      });
-    }
-    if (msg.includes("PRINTER_NOT_TRUSTED")) {
-      const printerStatus = (e as any)?.printerStatus || null;
-      return res.status(409).json({
-        success: false,
-        error:
-          "Printer is not ready for secure issuance. Reconnect print agent or switch to compatibility-ready local printer profile.",
-        data: { printerStatus },
-      });
-    }
-    if (msg.includes("PRINTER_NOT_FOUND")) {
-      return res.status(404).json({ success: false, error: "Registered printer not found for this manufacturer scope." });
-    }
-    if (msg.includes("PRINTER_INACTIVE")) {
-      return res.status(409).json({ success: false, error: "Selected printer profile is inactive." });
-    }
-    if (msg.includes("PRINTER_SELECTION_MISMATCH")) {
-      const printerStatus = (e as any)?.printerStatus || null;
-      return res.status(409).json({
-        success: false,
-        error: "Selected local printer does not match the active workstation printer. Switch printer selection and retry.",
-        data: { printerStatus },
-      });
-    }
-    if (msg.includes("PRINTER_NETWORK_CONFIG_INVALID")) {
-      return res.status(409).json({ success: false, error: "Selected network printer is missing IP address or TCP port." });
-    }
-    if (msg.includes("PRINTER_NETWORK_LANGUAGE_UNSUPPORTED")) {
-      return res.status(409).json({
-        success: false,
-        error:
-          "Selected network printer uses a language that is not certified for secure raw-TCP dispatch. Update the printer profile or switch to the MSCQR connector path.",
-      });
-    }
-    if (msg.includes("PRINTER_NETWORK_UNREACHABLE")) {
-      return res.status(409).json({
-        success: false,
-        error: sanitizePrinterActionError((e as any)?.reason, "The saved factory printer could not be reached."),
-      });
-    }
-    if (msg.includes("PRINTER_GATEWAY_CONFIG_INVALID")) {
-      return res.status(409).json({
-        success: false,
-        error: "Selected gateway-backed IPP printer is missing gateway credentials. Re-save the printer profile and provision the site gateway.",
-      });
-    }
-    if (msg.includes("PRINTER_GATEWAY_OFFLINE")) {
-      return res.status(409).json({
-        success: false,
-        error: sanitizePrinterActionError((e as any)?.reason, "The site print connector needs attention before this printer can be used."),
-      });
-    }
-    if (msg.includes("PRINTER_NETWORK_CONFIRMATION_UNSUPPORTED")) {
-      return res.status(409).json({
-        success: false,
-        error:
-          "This saved raw printer route cannot prove terminal label completion safely yet. Use the MSCQR connector or switch to a certified Zebra direct profile.",
-      });
-    }
-    if (msg.includes("PRINTER_IPP_FORMAT_UNSUPPORTED")) {
-      return res.status(409).json({
-        success: false,
-        error: sanitizePrinterActionError(
-          (e as any)?.reason,
-          "This office printer does not support the required MSCQR print format."
-        ),
-      });
-    }
-    if (msg.includes("PRINTER_IPP_UNREACHABLE")) {
-      return res.status(409).json({
-        success: false,
-        error: sanitizePrinterActionError((e as any)?.reason, "The saved office printer could not be reached."),
-      });
-    }
-    return res.status(400).json({
-      success: false,
-      error: sanitizePrinterActionError(e?.message, "This print job could not be created."),
-    });
+    return sendPrintJobCreateErrorResponse(e, res);
   }
 };
