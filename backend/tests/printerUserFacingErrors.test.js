@@ -4,6 +4,7 @@ const {
   describePrintJobCreateFailure,
   describeMissingPrinterReadinessFields,
 } = require("../dist/controllers/print-job/errorResponses");
+const { createPrintJobSchema } = require("../dist/controllers/print-job/shared");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -68,6 +69,35 @@ const run = () => {
   const unsupportedPrinterFailure = describePrintJobCreateFailure(new Error("PRINTER_MODE_UNSUPPORTED"));
   assert(unsupportedPrinterFailure.status === 400, "Unsupported printer modes should be rejected safely");
   assert(unsupportedPrinterFailure.payload.errorCode === "invalid_printer", "Unsupported printer modes should use invalid_printer");
+
+  const validPayload = createPrintJobSchema.safeParse({
+    batchId: "c9dabd08-9393-4be3-bb33-0269b543285d",
+    printerId: "62eea666-5a7f-444a-94fb-8fa040396874",
+    quantity: 2,
+  });
+  assert(validPayload.success, "Numeric print quantities and printer profile UUID payloads should be accepted");
+
+  const invalidPayload = createPrintJobSchema.safeParse({
+    batchId: "c9dabd08-9393-4be3-bb33-0269b543285d",
+    printerId: "62eea666-5a7f-444a-94fb-8fa040396874",
+    quantity: "2",
+  });
+  assert(!invalidPayload.success, "invalid_payload should remain reserved for true schema errors");
+
+  const mappingFailure = describePrintJobCreateFailure(
+    Object.assign(new Error("PRINTER_MAPPING_MISSING"), {
+      printerStatus: {
+        connected: true,
+        eligibleForPrinting: true,
+        selectedPrinterId: "ZDesigner ZT410-300dpi ZPL",
+      },
+    })
+  );
+  assert(mappingFailure.status === 409, "Missing printer mappings should be a conflict");
+  assert(
+    mappingFailure.payload.errorCode === "printer_mapping_missing",
+    "Missing printer mappings should not be collapsed into invalid_payload"
+  );
 
   console.log("printer user-facing error tests passed");
 };

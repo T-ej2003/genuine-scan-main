@@ -29,6 +29,7 @@ import {
   extractIdempotencyKey,
   type IdempotencyBeginResult,
 } from "../../services/idempotencyService";
+import { resolveLocalAgentPrinterMapping } from "../../services/localAgentPrinterMappingService";
 
 const MANUFACTURER_ROLES: UserRole[] = [
   UserRole.MANUFACTURER,
@@ -198,15 +199,16 @@ export const ensureSelectedPrinterReady = async (params: {
 
   if (printer.connectionType === PrinterConnectionType.LOCAL_AGENT) {
     const printerStatus = await ensureTrustedPrinterConnected(params.userId);
+    const resolvedPrinter = await resolveLocalAgentPrinterMapping({ printer, printerStatus });
     const activePrinterId = String(printerStatus.selectedPrinterId || printerStatus.printerId || "").trim();
-    if (printer.nativePrinterId && activePrinterId && printer.nativePrinterId !== activePrinterId) {
+    if (resolvedPrinter.nativePrinterId && activePrinterId && resolvedPrinter.nativePrinterId !== activePrinterId) {
       throw Object.assign(new Error("PRINTER_SELECTION_MISMATCH"), { printerStatus, printer });
     }
     return {
-      printer,
+      printer: resolvedPrinter,
       printerStatus,
       printMode: PrintDispatchMode.LOCAL_AGENT,
-      payloadType: resolvePayloadType(printer as any),
+      payloadType: resolvePayloadType(resolvedPrinter as any),
     };
   }
 

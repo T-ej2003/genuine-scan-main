@@ -13,6 +13,7 @@ import {
 import { startNetworkDirectDispatch } from "../../services/networkDirectPrintService";
 import { startNetworkIppDispatch } from "../../services/networkIppPrintService";
 import { completeIdempotentAction } from "../../services/idempotencyService";
+import { buildPrintJobCreateDiagnostics } from "../../services/printJobCreateDiagnosticsService";
 import {
   buildPrintJobErrorPayload,
   describePrintJobCreateFailure,
@@ -42,23 +43,48 @@ const logPrintJobCreateFailure = (
     errorCode: string;
     reason: string;
     missingFields?: string[];
+    validationIssuePaths?: string[];
     batchId?: string | null;
     printerId?: string | null;
     quantity?: number | null;
+    parsedQuantity?: number | null;
   }
 ) => {
-  console.warn("createPrintJob rejected", {
-    requestId: getRequestId(req),
-    userId: req.user?.userId || null,
-    role: req.user?.role || null,
-    status: params.status,
-    errorCode: params.errorCode,
-    reason: params.reason,
-    missingFields: params.missingFields || [],
-    batchId: params.batchId || null,
-    printerId: params.printerId || null,
-    quantity: params.quantity ?? null,
-  });
+  void buildPrintJobCreateDiagnostics(req, getRequestId(req), params)
+    .then((diagnostics) => {
+      console.warn("createPrintJob rejected", {
+        requestId: getRequestId(req),
+        userId: req.user?.userId || null,
+        role: req.user?.role || null,
+        status: params.status,
+        errorCode: params.errorCode,
+        reason: params.reason,
+        missingFields: params.missingFields || [],
+        validationIssuePaths: params.validationIssuePaths || [],
+        batchId: params.batchId || null,
+        printerId: params.printerId || null,
+        quantity: params.quantity ?? null,
+        parsedQuantity: params.parsedQuantity ?? params.quantity ?? null,
+        diagnostics,
+      });
+    })
+    .catch((diagnosticError) => {
+      console.warn("createPrintJob rejected", {
+        requestId: getRequestId(req),
+        userId: req.user?.userId || null,
+        role: req.user?.role || null,
+        status: params.status,
+        errorCode: params.errorCode,
+        reason: params.reason,
+        missingFields: params.missingFields || [],
+        validationIssuePaths: params.validationIssuePaths || [],
+        batchId: params.batchId || null,
+        printerId: params.printerId || null,
+        quantity: params.quantity ?? null,
+        parsedQuantity: params.parsedQuantity ?? params.quantity ?? null,
+        diagnosticError: String((diagnosticError as any)?.message || diagnosticError || "diagnostics_unavailable"),
+      });
+    });
 };
 
 export const createPrintJob = async (req: AuthRequest, res: any) => {
@@ -71,14 +97,17 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
       const missingFields = parsed.error.errors
         .map((issue) => String(issue.path[0] || "").trim())
         .filter(Boolean);
+      const validationIssuePaths = parsed.error.errors.map((issue) => issue.path.join(".") || "<root>");
       logPrintJobCreateFailure(req, {
         status: 400,
         errorCode: "invalid_payload",
         reason: "invalid_payload",
         missingFields,
+        validationIssuePaths,
         batchId: typeof req.body?.batchId === "string" ? req.body.batchId : null,
         printerId: typeof req.body?.printerId === "string" ? req.body.printerId : null,
         quantity: Number.isFinite(Number(req.body?.quantity)) ? Number(req.body.quantity) : null,
+        parsedQuantity: null,
       });
       return res.status(400).json(
         buildPrintJobErrorPayload({
@@ -462,6 +491,7 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
       batchId: typeof req.body?.batchId === "string" ? req.body.batchId : null,
       printerId: typeof req.body?.printerId === "string" ? req.body.printerId : null,
       quantity: Number.isFinite(Number(req.body?.quantity)) ? Number(req.body.quantity) : null,
+      parsedQuantity: Number.isFinite(Number(req.body?.quantity)) ? Number(req.body.quantity) : null,
     });
     return sendPrintJobCreateErrorResponse(e, res);
   }

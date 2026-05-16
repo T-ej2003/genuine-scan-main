@@ -18,23 +18,28 @@ const createCore = (request: (endpoint: string, options?: RequestInit) => Promis
 });
 
 describe("printing api request control", () => {
-  it("sends the print job creation payload without undefined printer internals", async () => {
+  it("sends the print job creation payload with the saved printer profile UUID only", async () => {
     const request = vi.fn(async () => ({ success: true, data: { printJobId: "job-1" } }));
     const api = createPrintingApi(createCore(request));
 
     await api.createPrintJob({
-      batchId: "batch-1",
-      printerId: "printer-1",
+      batchId: "c9dabd08-9393-4be3-bb33-0269b543285d",
+      printerId: "62eea666-5a7f-444a-94fb-8fa040396874",
       quantity: 1,
     });
 
+    const firstCall = request.mock.calls[0] as unknown as [string, RequestInit | undefined];
+    const body = JSON.parse(String(firstCall[1]?.body || "{}"));
+    expect(body).not.toHaveProperty("selectedPrinterId");
+    expect(body).not.toHaveProperty("deviceFingerprint");
+    expect(body).not.toHaveProperty("agentId");
     expect(request).toHaveBeenCalledWith(
       "/manufacturer/print-jobs",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          batchId: "batch-1",
-          printerId: "printer-1",
+          batchId: "c9dabd08-9393-4be3-bb33-0269b543285d",
+          printerId: "62eea666-5a7f-444a-94fb-8fa040396874",
           quantity: 1,
         }),
       })

@@ -36,7 +36,7 @@ type AutoReportPrinterFailure = (params: {
   context: string;
   reason: string;
   diagnostics?: Record<string, unknown>;
-}) => Promise<void> | void;
+}) => Promise<boolean> | boolean;
 
 type BatchPrintOperationContext = PrintProgressSetters & {
   toast: ToastLike;
@@ -159,11 +159,14 @@ export const printJobCreateFailureMessage = (response: {
   if (errorCode === "missing_printer_session") {
     return "Refresh the printer connection, then start the print run again.";
   }
+  if (errorCode === "printer_mapping_missing") {
+    return "The saved printer is not linked to this computer's Zebra printer. Choose the ZDesigner printer again or refresh printer setup.";
+  }
   if (errorCode === "batch_not_printable") {
     return "There are no labels ready to print in this batch.";
   }
   if (errorCode === "invalid_printer") {
-    return "Choose the ZDesigner printer again, then start the print run.";
+    return "The saved printer is not linked to this computer's Zebra printer. Choose the ZDesigner printer again or refresh printer setup.";
   }
   if (errorCode === "invalid_payload") {
     return "The print job request is missing required information. Refresh the page and try again.";
@@ -435,11 +438,18 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
     });
     setPrintProgressPhase("Print needs attention");
     setPrintProgressError(safeError);
-    void autoReportPrinterFailure({
+    const reportSent = await autoReportPrinterFailure({
       context: "create_print_job",
       reason: responseMessage || "Print job setup failed",
-      diagnostics: { batchId: printBatch.id, quantity },
+      diagnostics: { batchId: printBatch.id, quantity, printJobRequestId: response.requestId || null },
     });
+    if (!reportSent && response.requestId) {
+      toast({
+        title: "Could not send diagnostics automatically",
+        description: `Please copy request ID: ${response.requestId}`,
+        variant: "destructive",
+      });
+    }
     return;
   }
 

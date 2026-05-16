@@ -7,6 +7,7 @@ type PrintJobErrorCode =
   | "invalid_payload"
   | "invalid_printer"
   | "missing_printer_session"
+  | "printer_mapping_missing"
   | "printer_not_verified"
   | "print_job_conflict"
   | "print_service_unavailable"
@@ -127,6 +128,20 @@ export const describePrintJobCreateFailure = (error: any): {
       payload: buildPrintJobErrorPayload({
         code: "invalid_printer",
         message: "Registered printer not found for this manufacturer scope.",
+      }),
+    };
+  }
+  if (msg.includes("PRINTER_MAPPING_MISSING")) {
+    const printerStatus = error?.printerStatus || null;
+    return {
+      status: 409,
+      logReason: "printer_mapping_missing",
+      payload: buildPrintJobErrorPayload({
+        code: "printer_mapping_missing",
+        message:
+          "The saved printer is not linked to this computer's Zebra printer. Choose the ZDesigner printer again or refresh printer setup.",
+        details: { missingFields: ["localPrinterMapping"] },
+        data: { printerStatus },
       }),
     };
   }

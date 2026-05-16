@@ -41,7 +41,10 @@ describe("printer user-facing helpers", () => {
       "There are no labels ready to print in this batch."
     );
     expect(printJobCreateFailureMessage({ errorCode: "invalid_printer" })).toBe(
-      "Choose the ZDesigner printer again, then start the print run."
+      "The saved printer is not linked to this computer's Zebra printer. Choose the ZDesigner printer again or refresh printer setup."
+    );
+    expect(printJobCreateFailureMessage({ errorCode: "printer_mapping_missing" })).toBe(
+      "The saved printer is not linked to this computer's Zebra printer. Choose the ZDesigner printer again or refresh printer setup."
     );
     expect(printJobCreateFailureMessage({ status: 401 })).toBe(
       "Your session expired. Refresh or sign in again, then start the print run."

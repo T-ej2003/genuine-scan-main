@@ -266,9 +266,9 @@ export function useBatchPrintWorkflow({
       printerFailureReportRef.current.signature === signature &&
       now - printerFailureReportRef.current.at < PRINTER_FAILURE_AUTO_REPORT_COOLDOWN_MS
     ) {
-      return;
+      return true;
     }
-    if (printerFailureInFlightRef.current) return;
+    if (printerFailureInFlightRef.current) return true;
 
     printerFailureInFlightRef.current = true;
     printerFailureReportRef.current = { signature, at: now };
@@ -296,9 +296,11 @@ export function useBatchPrintWorkflow({
         })
       );
       if (screenshot) form.append("screenshot", screenshot);
-      await apiClient.createSupportIssueReport(form);
+      const response = await apiClient.createSupportIssueReport(form);
+      return Boolean(response.success);
     } catch {
       // Avoid interrupting print flow when auto-reporting fails.
+      return false;
     } finally {
       printerFailureInFlightRef.current = false;
     }

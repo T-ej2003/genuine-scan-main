@@ -14,6 +14,7 @@ export interface ApiResponse<T = any> {
   status?: number;
   retryAfterSec?: number;
   unknownOutcome?: boolean;
+  requestId?: string;
 }
 
 type RequestOptions = RequestInit & {
@@ -364,12 +365,13 @@ export function createApiClientCore(): ApiClientCore {
         credentials: "include",
         signal: controller.signal,
       });
+      const requestId = response.headers.get("x-request-id") || response.headers.get("x-correlation-id") || undefined;
 
       if (response.status === 304 && method === "GET") {
         pushNetworkLog({ status: response.status, ok: true });
         const cached = getCache.get(cacheKey);
-        if (cached !== undefined) return { success: true, data: cached as T };
-        return { success: false, error: "Stale cache miss (HTTP 304)" };
+        if (cached !== undefined) return { success: true, data: cached as T, requestId };
+        return { success: false, error: "Stale cache miss (HTTP 304)", requestId };
       }
 
       const contentType = response.headers.get("content-type") || "";
@@ -387,7 +389,7 @@ export function createApiClientCore(): ApiClientCore {
 
         if (!getToken() && !hasCookieBackedSession()) {
           pushNetworkLog({ status: response.status, ok: false, error: message });
-          return { success: false, error: message, status: response.status, code: "UNAUTHENTICATED" };
+          return { success: false, error: message, status: response.status, code: "UNAUTHENTICATED", requestId };
         }
 
         const refreshed = await refreshOnce();
@@ -398,7 +400,7 @@ export function createApiClientCore(): ApiClientCore {
         logout();
         emitLogout();
         pushNetworkLog({ status: response.status, ok: false, error: message });
-        return { success: false, error: message, status: response.status, code: "UNAUTHENTICATED" };
+        return { success: false, error: message, status: response.status, code: "UNAUTHENTICATED", requestId };
       }
 
       if (!response.ok) {
@@ -450,6 +452,7 @@ export function createApiClientCore(): ApiClientCore {
           status: response.status,
           retryAfterSec,
           data: responseData,
+          requestId,
         };
       }
 
@@ -462,7 +465,7 @@ export function createApiClientCore(): ApiClientCore {
         if (method !== "GET" && method !== "HEAD" && payload.success && !options.suppressMutationEvent) {
           emitMutationEvent({ endpoint, method });
         }
-        return { ...(payload as ApiResponse<T>), status: response.status };
+        return { ...(payload as ApiResponse<T>), status: response.status, requestId };
       }
 
       if (method === "GET") {
@@ -472,7 +475,7 @@ export function createApiClientCore(): ApiClientCore {
       if (method !== "GET" && method !== "HEAD" && !options.suppressMutationEvent) {
         emitMutationEvent({ endpoint, method });
       }
-      return { success: true, data: payload as T, status: response.status };
+      return { success: true, data: payload as T, status: response.status, requestId };
     } catch (error: any) {
       const isAbort = error?.name === "AbortError";
       const message = isAbort ? "Request timed out" : "Network error - is the backend running?";
