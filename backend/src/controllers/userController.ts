@@ -17,19 +17,6 @@ import {
 } from "../services/manufacturerScopeService";
 import { buildScopedUserWhere, resolveRequestedLicenseeScope } from "../services/accessControlService";
 
-/**
- * Notes:
- * - Manufacturers are Users with role=MANUFACTURER
- * - Soft delete => isActive=false + deletedAt=now()
- * - Restore => isActive=true + deletedAt=null
- * - Hard delete => SUPER_ADMIN only (unassign batches first)
- *
- * IMPORTANT (routes):
- * - If you want LICENSEE_ADMIN to create manufacturers, your route should be:
- *   POST /users -> requireAnyAdmin + enforceTenantIsolation
- * - Your current routes file shows SUPER_ADMIN only; controller still supports safe tenant checks.
- */
-
 const normalizedEmailSchema = z
   .string()
   .trim()
