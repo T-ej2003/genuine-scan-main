@@ -3,7 +3,8 @@ const assert = require("assert");
 process.env.QR_SIGN_PROVIDER = "managed";
 process.env.QR_SIGN_KMS_KEY_REF = "kms://projects/mscqr/locations/global/keyRings/platform/cryptoKeys/qr-sign";
 process.env.QR_SIGN_KMS_VERIFY_KEY_REF = "kms://projects/mscqr/locations/global/keyRings/platform/cryptoKeys/qr-sign/cryptoKeyVersions/1";
-process.env.QR_SIGN_ACTIVE_KEY_VERSION = "kms-key-v1";
+const TEST_KEY_VERSION = "v1";
+process.env.QR_SIGN_ACTIVE_KEY_VERSION = TEST_KEY_VERSION;
 delete process.env.QR_SIGN_PRIVATE_KEY;
 delete process.env.QR_SIGN_PUBLIC_KEY;
 delete process.env.QR_SIGN_HMAC_SECRET;
@@ -26,7 +27,7 @@ assert.throws(
 );
 
 registerManagedQrSignerBridge({
-  keyVersion: "kms-key-v1",
+  keyVersion: TEST_KEY_VERSION,
   keyRef: "kms://projects/mscqr/locations/global/keyRings/platform/cryptoKeys/qr-sign/cryptoKeyVersions/1",
   sign(payloadHash) {
     return Buffer.from(`managed:${payloadHash.toString("hex")}`, "utf8");
@@ -35,7 +36,7 @@ registerManagedQrSignerBridge({
     const expected = Buffer.from(`managed:${payloadHash.toString("hex")}`, "utf8");
     return {
       valid: expected.equals(signature),
-      keyVersion: "kms-key-v1",
+      keyVersion: TEST_KEY_VERSION,
       keyRef: "kms://projects/mscqr/locations/global/keyRings/platform/cryptoKeys/qr-sign/cryptoKeyVersions/1",
     };
   },
@@ -44,7 +45,7 @@ registerManagedQrSignerBridge({
 const profile = getQrSigningProfile();
 assert.strictEqual(profile.mode, "ed25519");
 assert.strictEqual(profile.provider, "kms-bridge");
-assert.strictEqual(profile.keyVersion, "kms-key-v1");
+assert.strictEqual(profile.keyVersion, TEST_KEY_VERSION);
 
 const token = signQrPayload({
   qr_id: "qr-managed-1",
@@ -56,8 +57,8 @@ const token = signQrPayload({
 
 const verified = verifyQrToken(token);
 assert.strictEqual(verified.signing.provider, "kms-bridge");
-assert.strictEqual(verified.signing.keyVersion, "kms-key-v1");
-assert.strictEqual(verified.signing.payloadKeyVersion, "kms-key-v1");
+assert.strictEqual(verified.signing.keyVersion, TEST_KEY_VERSION);
+assert.strictEqual(verified.signing.payloadKeyVersion, TEST_KEY_VERSION);
 
 clearManagedQrSignerBridge();
 

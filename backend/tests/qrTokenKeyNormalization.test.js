@@ -23,11 +23,13 @@ const payload = {
   nonce: "nonce-key-normalization-1",
 };
 
+const TEST_KEY_VERSION = "v1";
+
 const setEd25519Keys = (transform = (value) => value) => {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   process.env.QR_SIGN_PRIVATE_KEY = transform(privateKey.export({ type: "pkcs8", format: "pem" }).toString());
   process.env.QR_SIGN_PUBLIC_KEY = transform(publicKey.export({ type: "spki", format: "pem" }).toString());
-  process.env.QR_SIGN_ACTIVE_KEY_VERSION = "qr-key-normalization-v1";
+  process.env.QR_SIGN_ACTIVE_KEY_VERSION = TEST_KEY_VERSION;
 };
 
 const assertRoundTrip = (message) => {
@@ -36,7 +38,7 @@ const assertRoundTrip = (message) => {
   const verified = verifyQrToken(token);
   assert.strictEqual(profile.mode, "ed25519", message);
   assert.strictEqual(verified.payload.qr_id, payload.qr_id, message);
-  assert.strictEqual(verified.signing.keyVersion, "qr-key-normalization-v1", message);
+  assert.strictEqual(verified.signing.keyVersion, TEST_KEY_VERSION, message);
 };
 
 setEd25519Keys((value) => JSON.stringify(value.replace(/\n/g, "\\n")));
