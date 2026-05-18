@@ -6,6 +6,8 @@ import { z } from "zod";
 import {
   buildCapabilitySummary,
   buildSetupVerification,
+  isPreferredLabelPrinter,
+  isVirtualNonLabelPrinter,
   listLocalPrinters,
   resolveSelectedPrinter,
   type LocalAgentPrinter,
@@ -72,11 +74,15 @@ const resolveDeviceName = () => {
   return process.platform === "darwin" ? "macOS-workstation" : "workstation";
 };
 
+app.use((_req, res, next) => {
+  res.setHeader("Access-Control-Allow-Private-Network", "true");
+  next();
+});
 app.use(
   cors({
     origin: true,
     methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type"],
+    allowedHeaders: ["Content-Type", "Access-Control-Request-Private-Network"],
   })
 );
 app.use(express.json({ limit: "1mb" }));
@@ -189,7 +195,8 @@ const buildSignedHeartbeat = (params: {
 
 const requirePrinter = async (printerId: string | null | undefined) => {
   const { state, snapshot } = await buildSnapshot(true);
-  const resolvedPrinterId = String(printerId || snapshot.selectedPrinterId || "").trim();
+  const explicitPrinterId = String(printerId || "").trim();
+  const resolvedPrinterId = String(explicitPrinterId || snapshot.selectedPrinterId || "").trim();
   const printer =
     snapshot.printers.find((item) => item.printerId === resolvedPrinterId) ||
     snapshot.printers.find((item) => item.isDefault) ||
@@ -202,6 +209,17 @@ const requirePrinter = async (printerId: string | null | undefined) => {
 
   if (!printer.online) {
     throw Object.assign(new Error(`${printer.printerName} is offline.`), { statusCode: 409 });
+  }
+
+  if (
+    explicitPrinterId &&
+    isVirtualNonLabelPrinter(printer) &&
+    snapshot.printers.some((item) => item.online !== false && isPreferredLabelPrinter(item))
+  ) {
+    throw Object.assign(
+      new Error("Fax/PDF printers cannot be used for MSCQR labels. Choose the ZDesigner label printer."),
+      { statusCode: 409 }
+    );
   }
 
   return { state, snapshot, printer };

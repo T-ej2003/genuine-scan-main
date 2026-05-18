@@ -7,6 +7,59 @@ const normalizePrinterIdentity = (value: unknown) => String(value || "").trim();
 const samePrinterText = (left: unknown, right: unknown) =>
   normalizePrinterIdentity(left).toLowerCase() === normalizePrinterIdentity(right).toLowerCase();
 
+const LABEL_PRINTER_TERMS = ["zdesigner", "zebra", "zt410", "zt411", "zpl"];
+const VIRTUAL_PRINTER_TERMS = ["fax", "microsoft print to pdf", "print to pdf", "pdf", "onenote", "xps", "document writer", "airprint"];
+
+const toSearchText = (...values: unknown[]) =>
+  values
+    .flatMap((value) => (Array.isArray(value) ? value : [value]))
+    .map((value) => normalizePrinterIdentity(value).toLowerCase())
+    .filter(Boolean)
+    .join(" ");
+
+const hasAny = (value: string, terms: string[]) => terms.some((term) => value.includes(term));
+
+const hasLanguage = (row: any, language: string) =>
+  Array.isArray(row?.languages) &&
+  row.languages.some((value: unknown) => normalizePrinterIdentity(value).toUpperCase() === language);
+
+const rowSearchText = (row: any) =>
+  toSearchText(row?.printerId, row?.printerName, row?.model, row?.connection, row?.protocols, row?.languages);
+
+const isSafeLabelPrinterRow = (row: any) =>
+  Boolean(row && row.online !== false && (hasLanguage(row, "ZPL") || hasAny(rowSearchText(row), LABEL_PRINTER_TERMS)));
+
+const isVirtualPrinterRow = (row: any) =>
+  Boolean(row && !isSafeLabelPrinterRow(row) && hasAny(rowSearchText(row), VIRTUAL_PRINTER_TERMS));
+
+const savedProfileLooksLikeLabelPrinter = (printer: any) =>
+  hasAny(
+    toSearchText(printer?.name, printer?.model, printer?.nativePrinterId, printer?.commandLanguage),
+    LABEL_PRINTER_TERMS
+  );
+
+export const pickSafeHeartbeatPrinterForProfile = (printer: any, printerStatus: any) => {
+  const rows = Array.isArray(printerStatus?.printers) ? printerStatus.printers : [];
+  const safeRows = rows.filter(isSafeLabelPrinterRow);
+  if (safeRows.length === 0 || !savedProfileLooksLikeLabelPrinter(printer)) return null;
+
+  const expectedNativePrinterId = normalizePrinterIdentity(printer.nativePrinterId);
+  const byNativeId = safeRows.find((row: any) => samePrinterText(row?.printerId, expectedNativePrinterId));
+  if (byNativeId) return byNativeId;
+
+  const byProfileName = safeRows.find((row: any) => samePrinterText(row?.printerName, printer.name));
+  if (byProfileName) return byProfileName;
+
+  const profileText = toSearchText(printer?.name, printer?.nativePrinterId);
+  const byContainedName = safeRows.find((row: any) => {
+    const rowText = rowSearchText(row);
+    return profileText && (rowText.includes(profileText) || profileText.includes(rowText));
+  });
+  if (byContainedName) return byContainedName;
+
+  return safeRows.length === 1 ? safeRows[0] : null;
+};
+
 const throwPrinterMappingMissing = (params: {
   printer: any;
   printerStatus: any;
@@ -23,14 +76,28 @@ export const resolveLocalAgentPrinterMapping = async (params: {
 }) => {
   const { printerStatus } = params;
   let { printer } = params;
-  const activeNativePrinterId = normalizePrinterIdentity(printerStatus.selectedPrinterId || printerStatus.printerId);
-  const activePrinterName = normalizePrinterIdentity(printerStatus.selectedPrinterName || printerStatus.printerName);
-  const selectedInventoryRow = Array.isArray(printerStatus.printers)
+  let activeNativePrinterId = normalizePrinterIdentity(printerStatus.selectedPrinterId || printerStatus.printerId);
+  let activePrinterName = normalizePrinterIdentity(printerStatus.selectedPrinterName || printerStatus.printerName);
+  let selectedInventoryRow = Array.isArray(printerStatus.printers)
     ? printerStatus.printers.find((row: any) => normalizePrinterIdentity(row?.printerId) === activeNativePrinterId)
     : null;
   const expectedNativePrinterId = normalizePrinterIdentity(printer.nativePrinterId);
   const expectedRegistrationId = normalizePrinterIdentity(printer.printerRegistrationId);
   const activeRegistrationId = normalizePrinterIdentity(printerStatus.registrationId);
+  const repairCandidate = pickSafeHeartbeatPrinterForProfile(printer, printerStatus);
+
+  if (
+    repairCandidate &&
+    (!activeNativePrinterId || isVirtualPrinterRow(selectedInventoryRow) || activeNativePrinterId !== expectedNativePrinterId)
+  ) {
+    activeNativePrinterId = normalizePrinterIdentity(repairCandidate.printerId);
+    activePrinterName = normalizePrinterIdentity(repairCandidate.printerName);
+    selectedInventoryRow = repairCandidate;
+    printerStatus.selectedPrinterId = activeNativePrinterId;
+    printerStatus.printerId = activeNativePrinterId;
+    printerStatus.selectedPrinterName = activePrinterName;
+    printerStatus.printerName = activePrinterName;
+  }
 
   if (!activeNativePrinterId || !activeRegistrationId) {
     throw Object.assign(new Error("PRINTER_NOT_TRUSTED"), { printerStatus, printer });
@@ -46,15 +113,29 @@ export const resolveLocalAgentPrinterMapping = async (params: {
     });
   }
 
-  if (expectedNativePrinterId && expectedNativePrinterId !== activeNativePrinterId) {
+  const activeStatusRow =
+    selectedInventoryRow ||
+    (activeNativePrinterId
+      ? { printerId: activeNativePrinterId, printerName: activePrinterName, online: printerStatus.connected }
+      : null);
+  if (isVirtualPrinterRow(activeStatusRow)) {
     throw Object.assign(new Error("PRINTER_SELECTION_MISMATCH"), { printerStatus, printer });
   }
 
-  if (!expectedNativePrinterId || !expectedRegistrationId) {
+  if (
+    expectedNativePrinterId &&
+    expectedNativePrinterId !== activeNativePrinterId &&
+    !(repairCandidate && savedProfileLooksLikeLabelPrinter(printer))
+  ) {
+    throw Object.assign(new Error("PRINTER_SELECTION_MISMATCH"), { printerStatus, printer });
+  }
+
+  if (!expectedNativePrinterId || !expectedRegistrationId || printer.nativePrinterId !== activeNativePrinterId) {
     const nameMatches =
       samePrinterText(printer.name, activePrinterName) ||
       samePrinterText(printer.name, selectedInventoryRow?.printerName) ||
-      samePrinterText(printer.name, activeNativePrinterId);
+      samePrinterText(printer.name, activeNativePrinterId) ||
+      (repairCandidate && savedProfileLooksLikeLabelPrinter(printer));
 
     if (!nameMatches) {
       throwPrinterMappingMissing({

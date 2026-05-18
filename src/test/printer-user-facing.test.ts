@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { printJobCreateFailureMessage } from "@/features/batches/batch-print-operations";
+import { chooseStablePrinterSelection, getPrinterDiagnosticSummary } from "@/lib/printer-diagnostics";
 import { buildPrinterSupportSummary, sanitizePrinterUiError } from "@/lib/printer-user-facing";
 
 describe("printer user-facing helpers", () => {
@@ -41,7 +42,15 @@ describe("printer user-facing helpers", () => {
       "There are no labels ready to print in this batch."
     );
     expect(printJobCreateFailureMessage({ errorCode: "invalid_printer" })).toBe(
-      "The saved printer is not linked to this computer's Zebra printer. Choose the ZDesigner printer again or refresh printer setup."
+      "Choose the ZDesigner printer under Printer on this computer, then refresh printer setup."
+    );
+    expect(
+      printJobCreateFailureMessage({
+        errorCode: "invalid_printer",
+        message: "Fax/PDF printers cannot be used for MSCQR labels. Choose the ZDesigner label printer.",
+      })
+    ).toBe(
+      "Fax/PDF printers cannot be used for MSCQR labels. Choose the ZDesigner label printer."
     );
     expect(printJobCreateFailureMessage({ errorCode: "printer_mapping_missing" })).toBe(
       "The saved printer is not linked to this computer's Zebra printer. Choose the ZDesigner printer again or refresh printer setup."
@@ -49,6 +58,57 @@ describe("printer user-facing helpers", () => {
     expect(printJobCreateFailureMessage({ status: 401 })).toBe(
       "Your session expired. Refresh or sign in again, then start the print run."
     );
+  });
+
+  it("prefers ZDesigner over persisted Fax in printer diagnostics", () => {
+    const printers = [
+      {
+        printerId: "Fax",
+        printerName: "Fax",
+        model: "Microsoft Shared Fax Driver",
+        connection: "spooler",
+        online: true,
+        isDefault: false,
+        languages: [],
+        protocols: [],
+        mediaSizes: [],
+      },
+      {
+        printerId: "ZDesigner ZT410-300dpi ZPL",
+        printerName: "ZDesigner ZT410-300dpi ZPL",
+        model: "ZDesigner ZT410-300dpi ZPL",
+        connection: "usb",
+        online: true,
+        isDefault: true,
+        languages: ["ZPL"],
+        protocols: ["usb"],
+        mediaSizes: [],
+      },
+    ];
+
+    expect(chooseStablePrinterSelection(printers, "Fax")?.printerId).toBe("ZDesigner ZT410-300dpi ZPL");
+
+    const summary = getPrinterDiagnosticSummary({
+      localAgent: { reachable: true, connected: true, checkedAt: "2026-05-18T17:17:40.725Z" },
+      remoteStatus: {
+        connected: true,
+        trusted: false,
+        compatibilityMode: true,
+        eligibleForPrinting: true,
+        stale: false,
+        lastHeartbeatAt: "2026-05-18T17:17:40.725Z",
+        ageSeconds: 15,
+        printerId: "Fax",
+        printerName: "Fax",
+        selectedPrinterId: "Fax",
+        selectedPrinterName: "Fax",
+      },
+      printers,
+      selectedPrinterId: "Fax",
+    });
+
+    expect(summary.summary).toContain("ZDesigner ZT410-300dpi ZPL");
+    expect(summary.summary).not.toContain("Fax");
   });
 
   it("builds a redacted support summary", () => {

@@ -22,6 +22,8 @@ type PrinterStatusLike = {
   compatibilityMode?: boolean | null;
   printerId?: string | null;
   selectedPrinterId?: string | null;
+  printerName?: string | null;
+  selectedPrinterName?: string | null;
 };
 
 export type PrintJobErrorPayload = {
@@ -63,6 +65,20 @@ export const describeMissingPrinterReadinessFields = (printerStatus: PrinterStat
 };
 
 const hasAny = (value: string, fragments: string[]) => fragments.some((fragment) => value.includes(fragment));
+const VIRTUAL_PRINTER_TERMS = ["fax", "microsoft print to pdf", "print to pdf", "pdf", "onenote", "xps", "document writer"];
+
+const hasVirtualSelectedPrinter = (printerStatus: PrinterStatusLike | null | undefined) =>
+  hasAny(
+    [
+      printerStatus?.selectedPrinterId,
+      printerStatus?.selectedPrinterName,
+      printerStatus?.printerId,
+      printerStatus?.printerName,
+    ]
+      .join(" ")
+      .toLowerCase(),
+    VIRTUAL_PRINTER_TERMS
+  );
 
 const classifyPrinterReadinessError = (printerStatus: PrinterStatusLike | null | undefined): PrintJobErrorCode => {
   const missing = describeMissingPrinterReadinessFields(printerStatus);
@@ -157,12 +173,15 @@ export const describePrintJobCreateFailure = (error: any): {
   }
   if (msg.includes("PRINTER_SELECTION_MISMATCH")) {
     const printerStatus = error?.printerStatus || null;
+    const message = hasVirtualSelectedPrinter(printerStatus)
+      ? "Fax/PDF printers cannot be used for MSCQR labels. Choose the ZDesigner label printer."
+      : "Choose the ZDesigner printer under Printer on this computer, then refresh printer setup.";
     return {
       status: 409,
       logReason: "printer_selection_mismatch",
       payload: buildPrintJobErrorPayload({
         code: "invalid_printer",
-        message: "Choose the ZDesigner printer again, then start the print run.",
+        message,
         data: { printerStatus },
       }),
     };

@@ -24,6 +24,11 @@ import {
   formatPrinterTimestamp,
   type ManagedPrinterProfile,
 } from "@/features/layout/components/PrinterDialogs";
+import {
+  buildHeartbeatPayloadFromLocalStatus,
+  resolvePreferredLocalPrinter,
+  type LocalPrinterStatusPayload,
+} from "@/features/layout/printer-heartbeat-payload";
 import type { User } from "@/types";
 import type { PrinterConnectionStatusDTO } from "../../../shared/contracts/runtime/printing.ts";
 
@@ -150,7 +155,6 @@ export function useManufacturerPrinterConnection({
     setPrinterStatusUpdatedAt(options?.updatedAt || nextStatus.lastHeartbeatAt || new Date().toISOString());
 
     setSelectedLocalPrinterId((previous) => {
-      if (previous && mergedPrinters.some((row) => row.printerId === previous)) return previous;
       const fallbackPrinter = chooseStablePrinterSelection(
         mergedPrinters,
         previous,
@@ -276,7 +280,7 @@ export function useManufacturerPrinterConnection({
 
     await loadManagedPrinterProfiles({ force: Boolean(options?.force) });
 
-    const local = await apiClient.getLocalPrintAgentStatus();
+    let local = await apiClient.getLocalPrintAgentStatus();
     const browserBackendUrl = window.location.origin;
     if (local.success && configuredBackendUrlRef.current !== browserBackendUrl) {
       const backendConfiguration = await apiClient.configureLocalPrintAgentBackend(browserBackendUrl);
@@ -286,9 +290,21 @@ export function useManufacturerPrinterConnection({
         configuredBackendUrlRef.current = browserBackendUrl;
       }
     }
-    const localPrinters = normalizeLocalPrinterRows(
+    let localPrinters = normalizeLocalPrinterRows(
       ((local.data as { printers?: unknown[] } | undefined)?.printers) || []
     );
+    const localData = local.data as LocalPrinterStatusPayload | undefined;
+    const preferredLocalPrinter = resolvePreferredLocalPrinter(localPrinters, localData);
+    const localSelectedId = String(localData?.selectedPrinterId || localData?.printerId || "").trim();
+    if (local.success && preferredLocalPrinter?.printerId && preferredLocalPrinter.printerId !== localSelectedId) {
+      const switched = await apiClient.selectLocalPrinter(preferredLocalPrinter.printerId);
+      if (switched.success) {
+        local = await apiClient.getLocalPrintAgentStatus();
+        localPrinters = normalizeLocalPrinterRows(
+          ((local.data as { printers?: unknown[] } | undefined)?.printers) || localPrinters
+        );
+      }
+    }
     setLocalPrinterAgent({
       reachable: Boolean(local.success),
       connected: Boolean((local.data as { connected?: boolean } | undefined)?.connected),
@@ -299,36 +315,7 @@ export function useManufacturerPrinterConnection({
     });
 
     const heartbeatPayload = local.success
-      ? {
-          connected: Boolean((local.data as { connected?: boolean } | undefined)?.connected),
-          printerName: (local.data as { printerName?: string } | undefined)?.printerName || undefined,
-          printerId: (local.data as { printerId?: string } | undefined)?.printerId || undefined,
-          selectedPrinterId:
-            (local.data as { selectedPrinterId?: string } | undefined)?.selectedPrinterId || undefined,
-          selectedPrinterName:
-            (local.data as { selectedPrinterName?: string } | undefined)?.selectedPrinterName || undefined,
-          deviceName: (local.data as { deviceName?: string } | undefined)?.deviceName || undefined,
-          agentVersion: (local.data as { agentVersion?: string } | undefined)?.agentVersion || undefined,
-          error: (local.data as { error?: string } | undefined)?.error || undefined,
-          agentId: (local.data as { agentId?: string } | undefined)?.agentId || undefined,
-          deviceFingerprint:
-            (local.data as { deviceFingerprint?: string } | undefined)?.deviceFingerprint || undefined,
-          publicKeyPem: (local.data as { publicKeyPem?: string } | undefined)?.publicKeyPem || undefined,
-          clientCertFingerprint:
-            (local.data as { clientCertFingerprint?: string } | undefined)?.clientCertFingerprint || undefined,
-          heartbeatNonce: (local.data as { heartbeatNonce?: string } | undefined)?.heartbeatNonce || undefined,
-          heartbeatIssuedAt:
-            (local.data as { heartbeatIssuedAt?: string } | undefined)?.heartbeatIssuedAt || undefined,
-          heartbeatSignature:
-            (local.data as { heartbeatSignature?: string } | undefined)?.heartbeatSignature || undefined,
-          capabilitySummary:
-            (local.data as { capabilitySummary?: Record<string, unknown> } | undefined)?.capabilitySummary ||
-            undefined,
-          printers: localPrinters,
-          calibrationProfile:
-            (local.data as { calibrationProfile?: Record<string, unknown> } | undefined)?.calibrationProfile ||
-            undefined,
-        }
+      ? buildHeartbeatPayloadFromLocalStatus(local.data as LocalPrinterStatusPayload | undefined, localPrinters)
       : {
           connected: false,
           error: String(local.error || "Local print agent unavailable"),
@@ -494,17 +481,15 @@ export function useManufacturerPrinterConnection({
 
   useEffect(() => {
     if (!printerStatus) return;
-    if (!selectedLocalPrinterId) {
-      const next = String(
-        chooseStablePrinterSelection(
-          detectedPrinters,
-          selectedLocalPrinterId,
-          printerStatus.selectedPrinterId,
-          printerStatus.printerId
-        )?.printerId || ""
-      ).trim();
-      if (next) setSelectedLocalPrinterId(next);
-    }
+    const next = String(
+      chooseStablePrinterSelection(
+        detectedPrinters,
+        selectedLocalPrinterId,
+        printerStatus.selectedPrinterId,
+        printerStatus.printerId
+      )?.printerId || ""
+    ).trim();
+    if (next && next !== selectedLocalPrinterId) setSelectedLocalPrinterId(next);
   }, [detectedPrinters, printerStatus, selectedLocalPrinterId]);
 
   const printerReady = printerStatus.connected && printerStatus.eligibleForPrinting;
@@ -562,16 +547,22 @@ export function useManufacturerPrinterConnection({
           : "border-red-300 bg-red-50 text-red-700 hover:bg-red-100";
   const printerTitle = effectivePrinterDiagnostics.summary;
   const selectedPrinter =
-    detectedPrinters.find((row) => row.printerId === selectedLocalPrinterId) ||
-    detectedPrinters.find((row) => row.printerId === printerStatus.selectedPrinterId) ||
+    chooseStablePrinterSelection(
+      detectedPrinters,
+      selectedLocalPrinterId,
+      printerStatus.selectedPrinterId,
+      printerStatus.printerId
+    ) ||
     detectedPrinters[0] ||
     null;
-  const activePrinterId = String(printerStatus.selectedPrinterId || printerStatus.printerId || "").trim();
+  const activePrinterId = String(selectedPrinter?.printerId || printerStatus.selectedPrinterId || printerStatus.printerId || "").trim();
   const printerIdentity = derivePrinterIdentity({
-    printerName: shouldUseManagedPrinterSummary ? preferredManagedNetworkPrinter?.name : printerStatus.printerName,
+    printerName: shouldUseManagedPrinterSummary
+      ? preferredManagedNetworkPrinter?.name
+      : selectedPrinter?.printerName || printerStatus.printerName,
     selectedPrinterName: shouldUseManagedPrinterSummary
       ? preferredManagedNetworkPrinter?.name
-      : printerStatus.selectedPrinterName,
+      : selectedPrinter?.printerName || printerStatus.selectedPrinterName,
     model: shouldUseManagedPrinterSummary
       ? preferredManagedNetworkPrinter?.model || null
       : selectedPrinter?.model || null,

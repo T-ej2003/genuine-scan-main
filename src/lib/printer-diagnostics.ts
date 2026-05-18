@@ -104,7 +104,17 @@ const toUpperList = (values: string[] | null | undefined) =>
 const toCleanString = (value: unknown, max = 512) => String(value || "").trim().slice(0, max);
 const SUPPORTED_NETWORK_DIRECT_LANGUAGES = ["ZPL", "TSPL", "EPL", "CPCL"] as const;
 const LABEL_PRINTER_TERMS = ["zdesigner", "zebra", "zt410", "zpl"];
-const NON_LABEL_PRINTER_TERMS = ["canon", "airprint", "fax", "pdf", "onenote", "xps", "microsoft print to pdf"];
+const NON_LABEL_PRINTER_TERMS = [
+  "canon",
+  "airprint",
+  "fax",
+  "pdf",
+  "onenote",
+  "xps",
+  "microsoft print to pdf",
+  "print to pdf",
+  "document writer",
+];
 
 const printerSearchText = (printer: PrinterInventoryRow) =>
   [
@@ -146,8 +156,22 @@ export const chooseStablePrinterSelection = (
   remotePrinterId?: string | null
 ) => {
   const available = Array.isArray(printers) ? printers : [];
+  const bestOnline =
+    [...available]
+      .filter((row) => row.online !== false)
+      .sort((left, right) => getPrinterSelectionRank(right) - getPrinterSelectionRank(left))[0] || null;
   const current = available.find((row) => row.printerId === currentPrinterId);
-  if (current && current.online !== false) return current;
+  if (current && current.online !== false) {
+    if (
+      bestOnline &&
+      bestOnline.printerId !== current.printerId &&
+      isPreferredLabelPrinter(bestOnline) &&
+      (isLowerPriorityPrinter(current) || getPrinterSelectionRank(bestOnline) - getPrinterSelectionRank(current) >= 35)
+    ) {
+      return bestOnline;
+    }
+    return current;
+  }
 
   const remoteSelected = available.find((row) => row.printerId === remoteSelectedPrinterId);
   if (remoteSelected && remoteSelected.online !== false && !isLowerPriorityPrinter(remoteSelected)) return remoteSelected;
@@ -156,9 +180,7 @@ export const chooseStablePrinterSelection = (
   if (remotePrinter && remotePrinter.online !== false && !isLowerPriorityPrinter(remotePrinter)) return remotePrinter;
 
   return (
-    [...available]
-      .filter((row) => row.online !== false)
-      .sort((left, right) => getPrinterSelectionRank(right) - getPrinterSelectionRank(left))[0] ||
+    bestOnline ||
     available.find((row) => row.printerId === remoteSelectedPrinterId) ||
     available[0] ||
     null
@@ -346,14 +368,12 @@ export const getPrinterDiagnosticSummary = (params: {
 }): PrinterDiagnosticSummary => {
   const remote = params.remoteStatus || null;
   const printers = Array.isArray(params.printers) ? params.printers : [];
-  const selectedPrinterId = String(
-    params.selectedPrinterId || remote?.selectedPrinterId || remote?.printerId || printers.find((row) => row.isDefault)?.printerId || ""
-  ).trim();
   const selectedPrinter =
-    printers.find((row) => row.printerId === selectedPrinterId) ||
+    chooseStablePrinterSelection(printers, params.selectedPrinterId, remote?.selectedPrinterId, remote?.printerId) ||
     printers.find((row) => row.isDefault) ||
     printers[0] ||
     null;
+  const selectedPrinterId = String(selectedPrinter?.printerId || "").trim();
 
   if (remote?.connected && remote?.eligibleForPrinting) {
     const pendingSecureVerification =
@@ -371,7 +391,7 @@ export const getPrinterDiagnosticSummary = (params: {
       state: remote.trusted && !remote.compatibilityMode ? "trusted_ready" : "compatibility_ready",
       badgeLabel: "Ready",
       title: "Printer ready",
-      summary: `${remote.selectedPrinterName || remote.printerName || selectedPrinter?.printerName || "Selected printer"} is connected and ready to print.`,
+      summary: `${selectedPrinter?.printerName || remote.selectedPrinterName || remote.printerName || "Selected printer"} is connected and ready to print.`,
       detail: softNotice,
       tone: "success",
       nextSteps: [

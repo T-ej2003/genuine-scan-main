@@ -119,7 +119,16 @@ export function useBatchPrintWorkflow({
   const printerHasInventory =
     detectedPrinters.length > 0 || Boolean(printerStatus.selectedPrinterId || printerStatus.printerId);
   const activeLocalPrinterId = String(
-    selectedPrinterId || printerStatus.selectedPrinterId || printerStatus.printerId || ""
+    chooseStablePrinterSelection(
+      detectedPrinters,
+      selectedPrinterId,
+      printerStatus.selectedPrinterId,
+      printerStatus.printerId
+    )?.printerId ||
+      selectedPrinterId ||
+      printerStatus.selectedPrinterId ||
+      printerStatus.printerId ||
+      ""
   ).trim();
   const selectedDetectedPrinter = useMemo(
     () =>
@@ -166,7 +175,7 @@ export function useBatchPrintWorkflow({
     return {
       title: printerDiagnostics.title,
       summary: printerReady
-        ? `${printerStatus.selectedPrinterName || printerStatus.printerName || "Printer on this computer"} is ready.`
+        ? `${selectedDetectedPrinter?.printerName || printerStatus.selectedPrinterName || printerStatus.printerName || "Printer on this computer"} is ready.`
         : printerDiagnostics.summary,
       detail: !printerReady
         ? printerDiagnostics.detail
@@ -181,6 +190,7 @@ export function useBatchPrintWorkflow({
     printerReady,
     printerStatus.printerName,
     printerStatus.selectedPrinterName,
+    selectedDetectedPrinter?.printerName,
     selectedPrinterProfile,
   ]);
 
@@ -244,7 +254,15 @@ export function useBatchPrintWorkflow({
         ""
     ).trim();
     if (nextPreferredPrinterId) {
-      setSelectedPrinterId((previous) => previous || nextPreferredPrinterId);
+      setSelectedPrinterId((previous) => {
+        const repaired = chooseStablePrinterSelection(
+          snapshot.detectedPrinters as LocalPrinterRow[],
+          previous || nextPreferredPrinterId,
+          snapshot.remoteStatus.selectedPrinterId,
+          snapshot.remoteStatus.printerId
+        );
+        return repaired?.printerId || previous || nextPreferredPrinterId;
+      });
     }
     applyRegisteredPrintersSnapshot(
       snapshot.registeredPrinters as RegisteredPrinterRow[],

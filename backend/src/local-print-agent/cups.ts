@@ -82,6 +82,17 @@ const COMMAND_TIMEOUT_MS = 1500;
 const MAX_BUFFER = 1024 * 1024 * 2;
 const JOB_POLL_MS = Math.max(500, Number(process.env.PRINT_AGENT_JOB_POLL_MS || 1200) || 1200);
 const JOB_WAIT_TIMEOUT_MS = Math.max(5_000, Number(process.env.PRINT_AGENT_JOB_WAIT_TIMEOUT_MS || 60_000) || 60_000);
+const LABEL_PRINTER_TERMS = ["zdesigner", "zebra", "zt410", "zt411", "zpl"];
+const VIRTUAL_PRINTER_TERMS = [
+  "fax",
+  "microsoft print to pdf",
+  "print to pdf",
+  "pdf",
+  "onenote",
+  "xps",
+  "document writer",
+  "airprint",
+];
 
 const toCleanString = (value: unknown, max = 180) => String(value || "").trim().slice(0, max);
 
@@ -102,6 +113,64 @@ const normalizePrinterKey = (value: string) =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
+
+const printerSearchText = (printer: LocalAgentPrinter) =>
+  [
+    printer.printerId,
+    printer.printerName,
+    printer.model,
+    printer.connection,
+    printer.deviceUri,
+    printer.portName,
+    ...(printer.protocols || []),
+    ...(printer.languages || []),
+    ...(printer.mediaSizes || []),
+  ]
+    .join(" ")
+    .toLowerCase();
+
+const hasAny = (value: string, terms: string[]) => terms.some((term) => value.includes(term));
+
+const hasPrinterLanguage = (printer: LocalAgentPrinter, language: string) =>
+  (printer.languages || []).some((value) => String(value || "").trim().toUpperCase() === language);
+
+export const isPreferredLabelPrinter = (printer?: LocalAgentPrinter | null) =>
+  Boolean(printer && (hasAny(printerSearchText(printer), LABEL_PRINTER_TERMS) || hasPrinterLanguage(printer, "ZPL")));
+
+export const isVirtualNonLabelPrinter = (printer?: LocalAgentPrinter | null) => {
+  if (!printer) return false;
+  if (isPreferredLabelPrinter(printer)) return false;
+  const text = printerSearchText(printer);
+  return hasAny(text, VIRTUAL_PRINTER_TERMS);
+};
+
+export const getPrinterSelectionRank = (printer: LocalAgentPrinter) => {
+  const text = printerSearchText(printer);
+  let score = 0;
+  if (printer.online === false) score -= 100;
+  if (printer.isDefault) score += 10;
+  if (String(printer.connection || "").toLowerCase() === "usb") score += 12;
+  if (hasPrinterLanguage(printer, "ZPL")) score += 40;
+  if (hasAny(text, LABEL_PRINTER_TERMS)) score += 35;
+  if (isVirtualNonLabelPrinter(printer)) score -= 80;
+  return score;
+};
+
+const sortByPrinterPreference = (printers: LocalAgentPrinter[]) =>
+  [...printers].sort((left, right) => {
+    const rankDelta = getPrinterSelectionRank(right) - getPrinterSelectionRank(left);
+    if (rankDelta !== 0) return rankDelta;
+    return left.printerName.localeCompare(right.printerName);
+  });
+
+const selectionSourceForPrinter = (
+  printer: LocalAgentPrinter | null,
+  fallback: Exclude<LocalAgentPrinterSelectionSource, "persisted" | "none">
+): LocalAgentPrinterSelectionSource => {
+  if (!printer) return "none";
+  if (printer.isDefault) return "default";
+  return fallback;
+};
 
 const maybeExecFile = async (file: string, args: string[]) => {
   try {
@@ -310,10 +379,7 @@ export const buildCapabilitySummary = (
   printers: LocalAgentPrinter[],
   selectedPrinterId: string | null
 ): LocalAgentCapabilitySummary | null => {
-  const selected =
-    printers.find((printer) => printer.printerId === selectedPrinterId) ||
-    printers.find((printer) => printer.isDefault) ||
-    printers[0];
+  const selected = resolveSelectedPrinter(printers, selectedPrinterId).printer;
   if (!selected) return null;
 
   return {
@@ -344,7 +410,25 @@ export const resolveSelectedPrinter = (
     persistedSelectedPrinterId
       ? printers.find((printer) => printer.printerId === persistedSelectedPrinterId) || null
       : null;
+  const bestOnline = sortByPrinterPreference(printers.filter((printer) => printer.online !== false))[0] || null;
+  const bestAvailable = sortByPrinterPreference(printers)[0] || null;
+
   if (persisted) {
+    const shouldRepairPersisted =
+      bestOnline &&
+      isPreferredLabelPrinter(bestOnline) &&
+      persisted.printerId !== bestOnline.printerId &&
+      isVirtualNonLabelPrinter(persisted);
+
+    if (shouldRepairPersisted) {
+      return {
+        printer: bestOnline,
+        printerId: bestOnline.printerId,
+        printerName: bestOnline.printerName,
+        selectionSource: selectionSourceForPrinter(bestOnline, "first_online"),
+      };
+    }
+
     return {
       printer: persisted,
       printerId: persisted.printerId,
@@ -353,42 +437,29 @@ export const resolveSelectedPrinter = (
     };
   }
 
-  const defaultPrinter = printers.find((printer) => printer.isDefault) || null;
-  const firstOnline = printers.find((printer) => printer.online) || null;
-
-  if (defaultPrinter?.online) {
+  if (bestOnline) {
     return {
-      printer: defaultPrinter,
-      printerId: defaultPrinter.printerId,
-      printerName: defaultPrinter.printerName,
-      selectionSource: "default",
+      printer: bestOnline,
+      printerId: bestOnline.printerId,
+      printerName: bestOnline.printerName,
+      selectionSource: selectionSourceForPrinter(bestOnline, "first_online"),
     };
   }
 
-  if (firstOnline) {
+  if (bestAvailable) {
     return {
-      printer: firstOnline,
-      printerId: firstOnline.printerId,
-      printerName: firstOnline.printerName,
-      selectionSource: "first_online",
+      printer: bestAvailable,
+      printerId: bestAvailable.printerId,
+      printerName: bestAvailable.printerName,
+      selectionSource: selectionSourceForPrinter(bestAvailable, "first_available"),
     };
   }
 
-  if (defaultPrinter) {
-    return {
-      printer: defaultPrinter,
-      printerId: defaultPrinter.printerId,
-      printerName: defaultPrinter.printerName,
-      selectionSource: "default",
-    };
-  }
-
-  const firstAvailable = printers[0] || null;
   return {
-    printer: firstAvailable,
-    printerId: firstAvailable?.printerId || null,
-    printerName: firstAvailable?.printerName || null,
-    selectionSource: firstAvailable ? "first_available" : "none",
+    printer: null,
+    printerId: null,
+    printerName: null,
+    selectionSource: "none",
   };
 };
 
@@ -414,7 +485,12 @@ export const buildSetupVerification = (params: {
     };
   }
 
-  if (params.selection.printer && params.selection.printer.online && params.connected) {
+  if (
+    params.selection.printer &&
+    params.selection.printer.online &&
+    params.connected &&
+    !isVirtualNonLabelPrinter(params.selection.printer)
+  ) {
     return {
       state: "READY",
       success: true,
@@ -428,7 +504,9 @@ export const buildSetupVerification = (params: {
   }
 
   const message = params.selection.printer
-    ? `${params.selection.printer.printerName} is installed, but Windows is not exposing it as an online printer yet.`
+    ? isVirtualNonLabelPrinter(params.selection.printer)
+      ? "Fax/PDF printers cannot be used for MSCQR labels. Choose the ZDesigner label printer."
+      : `${params.selection.printer.printerName} is installed, but Windows is not exposing it as an online printer yet.`
     : "Printers were detected, but MSCQR could not resolve a usable printer yet.";
 
   return {

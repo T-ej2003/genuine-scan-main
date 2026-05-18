@@ -100,10 +100,57 @@ const run = () => {
   );
   assert(firstOnlineVerification.state === "READY", "First online fallback should verify as READY");
 
+  const zdesignerWithVirtualPrinters = [
+    {
+      printerId: "Fax",
+      printerName: "Fax",
+      model: "Microsoft Shared Fax Driver",
+      connection: "spooler",
+      online: true,
+      isDefault: false,
+      protocols: [],
+      languages: [],
+      mediaSizes: [],
+      dpi: null,
+    },
+    {
+      printerId: "ZDesigner ZT410-300dpi ZPL",
+      printerName: "ZDesigner ZT410-300dpi ZPL",
+      model: "ZDesigner ZT410-300dpi ZPL",
+      connection: "usb",
+      online: true,
+      isDefault: true,
+      protocols: ["usb"],
+      languages: ["ZPL"],
+      mediaSizes: [],
+      dpi: null,
+    },
+  ];
+  const repairedFaxSelection = resolveSelectedPrinter(zdesignerWithVirtualPrinters, "Fax");
+  assert(
+    repairedFaxSelection.printerId === "ZDesigner ZT410-300dpi ZPL",
+    "Persisted Fax selection should repair to the online ZDesigner printer"
+  );
+
+  const faxOnlySelection = resolveSelectedPrinter([zdesignerWithVirtualPrinters[0]], "Fax");
+  const faxOnlyVerification = buildSetupVerification({
+    printers: [zdesignerWithVirtualPrinters[0]],
+    selection: faxOnlySelection,
+    connected: true,
+  });
+  assert(faxOnlyVerification.state === "PRINTER_UNAVAILABLE", "Fax alone must not verify as MSCQR ready");
+
   const multiplePrinters = [
     { ...localPrinters[1], printerName: "Offline Canon", printerId: "Offline Canon", online: false, isDefault: false },
     { ...localPrinters[0], printerName: "Zebra Ready", printerId: "Zebra Ready", online: true, isDefault: false },
-    { ...localPrinters[0], printerName: "HP Also Ready", printerId: "HP Also Ready", online: true, isDefault: false },
+    {
+      ...localPrinters[0],
+      printerName: "HP Also Ready",
+      printerId: "HP Also Ready",
+      model: "HP Universal Printing",
+      online: true,
+      isDefault: false,
+    },
   ];
   const multipleSelection = resolveSelectedPrinter(multiplePrinters, null);
   const multipleVerification = buildSetupVerification({

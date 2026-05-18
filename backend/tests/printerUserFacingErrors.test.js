@@ -5,6 +5,7 @@ const {
   describeMissingPrinterReadinessFields,
 } = require("../dist/controllers/print-job/errorResponses");
 const { createPrintJobSchema } = require("../dist/controllers/print-job/shared");
+const { pickSafeHeartbeatPrinterForProfile } = require("../dist/services/localAgentPrinterMappingService");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -97,6 +98,57 @@ const run = () => {
   assert(
     mappingFailure.payload.errorCode === "printer_mapping_missing",
     "Missing printer mappings should not be collapsed into invalid_payload"
+  );
+
+  const virtualSelectionFailure = describePrintJobCreateFailure(
+    Object.assign(new Error("PRINTER_SELECTION_MISMATCH"), {
+      printerStatus: {
+        connected: true,
+        eligibleForPrinting: true,
+        selectedPrinterId: "Fax",
+        selectedPrinterName: "Fax",
+      },
+    })
+  );
+  assert(virtualSelectionFailure.payload.errorCode === "invalid_printer", "Virtual selections should remain invalid_printer");
+  assert(
+    virtualSelectionFailure.payload.message ===
+      "Fax/PDF printers cannot be used for MSCQR labels. Choose the ZDesigner label printer.",
+    "Virtual printer mismatch should return specific copy"
+  );
+
+  const repairedHeartbeatPrinter = pickSafeHeartbeatPrinterForProfile(
+    {
+      name: "ZDesigner ZT410-300dpi ZPL",
+      nativePrinterId: "ZDesigner ZT410-300dpi ZPL",
+      commandLanguage: "ZPL",
+    },
+    {
+      selectedPrinterId: "Fax",
+      selectedPrinterName: "Fax",
+      printers: [
+        {
+          printerId: "Fax",
+          printerName: "Fax",
+          model: "Microsoft Shared Fax Driver",
+          connection: "spooler",
+          online: true,
+          languages: [],
+        },
+        {
+          printerId: "ZDesigner ZT410-300dpi ZPL",
+          printerName: "ZDesigner ZT410-300dpi ZPL",
+          model: "ZDesigner ZT410-300dpi ZPL",
+          connection: "usb",
+          online: true,
+          languages: ["ZPL"],
+        },
+      ],
+    }
+  );
+  assert(
+    repairedHeartbeatPrinter?.printerId === "ZDesigner ZT410-300dpi ZPL",
+    "Server-side mapping should repair stale Fax selection using trusted heartbeat inventory"
   );
 
   console.log("printer user-facing error tests passed");

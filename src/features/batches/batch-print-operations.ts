@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 
 import apiClient from "@/lib/api-client";
 import { setOptionalLocalStorageItem } from "@/lib/consent";
+import { chooseStablePrinterSelection } from "@/lib/printer-diagnostics";
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
 
 import { defaultPrinterStatus } from "./print-workflow-utils";
@@ -142,6 +143,52 @@ export const syncProgressFromPrintJob = (
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
+const reportLocalPrinterHeartbeat = async () => {
+  const local = await apiClient.getLocalPrintAgentStatus();
+  if (!local.success || !local.data) return null;
+  const data = local.data as {
+    connected?: boolean;
+    printerName?: string;
+    printerId?: string;
+    selectedPrinterId?: string;
+    selectedPrinterName?: string;
+    deviceName?: string;
+    agentVersion?: string;
+    error?: string;
+    agentId?: string;
+    deviceFingerprint?: string;
+    publicKeyPem?: string;
+    clientCertFingerprint?: string;
+    heartbeatNonce?: string;
+    heartbeatIssuedAt?: string;
+    heartbeatSignature?: string;
+    capabilitySummary?: Record<string, unknown>;
+    printers?: unknown[];
+    calibrationProfile?: Record<string, unknown>;
+  };
+  const heartbeat = await apiClient.reportPrinterHeartbeat({
+    connected: Boolean(data.connected),
+    printerName: data.printerName || undefined,
+    printerId: data.printerId || undefined,
+    selectedPrinterId: data.selectedPrinterId || undefined,
+    selectedPrinterName: data.selectedPrinterName || undefined,
+    deviceName: data.deviceName || undefined,
+    agentVersion: data.agentVersion || undefined,
+    error: data.error || undefined,
+    agentId: data.agentId || undefined,
+    deviceFingerprint: data.deviceFingerprint || undefined,
+    publicKeyPem: data.publicKeyPem || undefined,
+    clientCertFingerprint: data.clientCertFingerprint || undefined,
+    heartbeatNonce: data.heartbeatNonce || undefined,
+    heartbeatIssuedAt: data.heartbeatIssuedAt || undefined,
+    heartbeatSignature: data.heartbeatSignature || undefined,
+    capabilitySummary: data.capabilitySummary || undefined,
+    printers: Array.isArray(data.printers) ? (data.printers as any) : [],
+    calibrationProfile: data.calibrationProfile || undefined,
+  });
+  return heartbeat.success && heartbeat.data ? heartbeat.data : null;
+};
+
 export const printJobCreateFailureMessage = (response: {
   status?: number;
   code?: string;
@@ -166,7 +213,11 @@ export const printJobCreateFailureMessage = (response: {
     return "There are no labels ready to print in this batch.";
   }
   if (errorCode === "invalid_printer") {
-    return "The saved printer is not linked to this computer's Zebra printer. Choose the ZDesigner printer again or refresh printer setup.";
+    const message = String(response.message || response.error || "").trim();
+    if (/fax|pdf|zdesigner|printer on this computer/i.test(message)) {
+      return sanitizePrinterUiError(message, message);
+    }
+    return "Choose the ZDesigner printer under Printer on this computer, then refresh printer setup.";
   }
   if (errorCode === "invalid_payload") {
     return "The print job request is missing required information. Refresh the page and try again.";
@@ -260,6 +311,36 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
   }
 
   if (selectedPrinterProfile.connectionType === "LOCAL_AGENT") {
+    const preferredLocalPrinter = chooseStablePrinterSelection(
+      detectedPrinters,
+      selectedPrinterId,
+      printerStatus.selectedPrinterId,
+      printerStatus.printerId
+    );
+    const preferredLocalPrinterId = String(preferredLocalPrinter?.printerId || selectedPrinterId || "").trim();
+    const savedNativePrinterId = String(selectedPrinterProfile.nativePrinterId || "").trim();
+    const targetLocalPrinterId = String(
+      preferredLocalPrinterId || savedNativePrinterId || activeLocalPrinterId || ""
+    ).trim();
+    if (targetLocalPrinterId) {
+      const selectedBeforePrint = await apiClient.selectLocalPrinter(targetLocalPrinterId);
+      if (!selectedBeforePrint.success) {
+        const message = sanitizePrinterUiError(
+          selectedBeforePrint.error,
+          "Choose the ZDesigner printer under Printer on this computer, then refresh printer setup."
+        );
+        toast({ title: "Printer switch failed", description: message, variant: "destructive" });
+        setPrintProgressOpen(true);
+        setPrintProgressPhase("Print needs attention");
+        setPrintProgressError(message);
+        return;
+      }
+      const heartbeatStatus = await reportLocalPrinterHeartbeat();
+      if (heartbeatStatus) {
+        setPrinterStatus((previous) => ({ ...previous, ...(heartbeatStatus as PrinterConnectionStatus) }));
+      }
+    }
+
     const livePrinterStatus = await apiClient.getPrinterConnectionStatus({ force: true, minIntervalMs: 0 });
     const refreshRateLimited =
       livePrinterStatus.status === 429 || String(livePrinterStatus.code || "").toUpperCase() === "RATE_LIMITED";
@@ -320,9 +401,10 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
     }
 
     if (
-      selectedPrinterProfile.nativePrinterId &&
+      savedNativePrinterId &&
       activeLocalPrinterId &&
-      selectedPrinterProfile.nativePrinterId !== activeLocalPrinterId
+      savedNativePrinterId !== activeLocalPrinterId &&
+      !detectedPrinters.some((row) => row.printerId === targetLocalPrinterId && row.online !== false)
     ) {
       toast({
         title: "Selected printer changed",
