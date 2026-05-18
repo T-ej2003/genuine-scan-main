@@ -38,6 +38,31 @@ const savedProfileLooksLikeLabelPrinter = (printer: any) =>
     LABEL_PRINTER_TERMS
   );
 
+export const hasExactTrustedSelectedPrinterMatch = (printer: any, printerStatus: any) => {
+  const expectedNativePrinterId = normalizePrinterIdentity(printer?.nativePrinterId);
+  const selectedNativePrinterId = normalizePrinterIdentity(printerStatus?.selectedPrinterId || printerStatus?.printerId);
+  const selectedPrinterName = normalizePrinterIdentity(printerStatus?.selectedPrinterName || printerStatus?.printerName);
+  const expectedRegistrationId = normalizePrinterIdentity(printer?.printerRegistrationId);
+  const activeRegistrationId = normalizePrinterIdentity(printerStatus?.registrationId);
+  const expectedAgentId = normalizePrinterIdentity(printer?.agentId);
+  const activeAgentId = normalizePrinterIdentity(printerStatus?.agentId);
+  const expectedDeviceFingerprint = normalizePrinterIdentity(printer?.deviceFingerprint);
+  const activeDeviceFingerprint = normalizePrinterIdentity(printerStatus?.deviceFingerprint);
+
+  return Boolean(
+    expectedNativePrinterId &&
+      selectedNativePrinterId &&
+      samePrinterText(expectedNativePrinterId, selectedNativePrinterId) &&
+      samePrinterText(printer?.name, selectedPrinterName) &&
+      expectedRegistrationId &&
+      samePrinterText(expectedRegistrationId, activeRegistrationId) &&
+      (!expectedAgentId || samePrinterText(expectedAgentId, activeAgentId)) &&
+      (!expectedDeviceFingerprint || samePrinterText(expectedDeviceFingerprint, activeDeviceFingerprint)) &&
+      printerStatus?.eligibleForPrinting === true &&
+      printerStatus?.stale === false
+  );
+};
+
 export const pickSafeHeartbeatPrinterForProfile = (printer: any, printerStatus: any) => {
   const rows = Array.isArray(printerStatus?.printers) ? printerStatus.printers : [];
   const safeRows = rows.filter(isSafeLabelPrinterRow);
@@ -111,6 +136,10 @@ export const resolveLocalAgentPrinterMapping = async (params: {
       expectedNativePrinterId,
       activeNativePrinterId,
     });
+  }
+
+  if (hasExactTrustedSelectedPrinterMatch(printer, printerStatus)) {
+    return printer;
   }
 
   const activeStatusRow =

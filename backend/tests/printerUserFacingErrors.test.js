@@ -5,7 +5,10 @@ const {
   describeMissingPrinterReadinessFields,
 } = require("../dist/controllers/print-job/errorResponses");
 const { createPrintJobSchema } = require("../dist/controllers/print-job/shared");
-const { pickSafeHeartbeatPrinterForProfile } = require("../dist/services/localAgentPrinterMappingService");
+const {
+  hasExactTrustedSelectedPrinterMatch,
+  pickSafeHeartbeatPrinterForProfile,
+} = require("../dist/services/localAgentPrinterMappingService");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -149,6 +152,59 @@ const run = () => {
   assert(
     repairedHeartbeatPrinter?.printerId === "ZDesigner ZT410-300dpi ZPL",
     "Server-side mapping should repair stale Fax selection using trusted heartbeat inventory"
+  );
+
+  assert(
+    hasExactTrustedSelectedPrinterMatch(
+      {
+        id: "00000000-0000-4000-8000-000000000402",
+        name: "E2E Local Agent Printer",
+        nativePrinterId: "e2e-local-printer",
+        agentId: "e2e-agent",
+        deviceFingerprint: "e2e-device-fingerprint",
+        printerRegistrationId: "00000000-0000-4000-8000-000000000401",
+      },
+      {
+        connected: true,
+        trusted: true,
+        compatibilityMode: false,
+        eligibleForPrinting: true,
+        stale: false,
+        registrationId: "00000000-0000-4000-8000-000000000401",
+        agentId: "e2e-agent",
+        deviceFingerprint: "e2e-device-fingerprint",
+        printerId: "e2e-local-printer",
+        printerName: "E2E Local Agent Printer",
+        selectedPrinterId: "e2e-local-printer",
+        selectedPrinterName: "E2E Local Agent Printer",
+      }
+    ),
+    "Exact trusted E2E local-agent printer identity should not require Zebra naming"
+  );
+
+  assert(
+    hasExactTrustedSelectedPrinterMatch(
+      {
+        name: "E2E Local Agent Printer",
+        nativePrinterId: "e2e-local-printer",
+        agentId: "e2e-agent",
+        deviceFingerprint: "e2e-device-fingerprint",
+        printerRegistrationId: "00000000-0000-4000-8000-000000000401",
+      },
+      {
+        connected: true,
+        trusted: false,
+        compatibilityMode: true,
+        eligibleForPrinting: true,
+        stale: false,
+        registrationId: "00000000-0000-4000-8000-000000000401",
+        agentId: "e2e-agent",
+        deviceFingerprint: "e2e-device-fingerprint",
+        selectedPrinterId: "e2e-local-printer",
+        selectedPrinterName: "E2E Local Agent Printer",
+      }
+    ),
+    "Compatibility mode remains allowed when the exact profile identity is eligible and fresh"
   );
 
   console.log("printer user-facing error tests passed");
