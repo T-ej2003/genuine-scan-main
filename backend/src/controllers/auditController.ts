@@ -5,8 +5,14 @@ import prisma from "../config/database";
 import { UserRole } from "@prisma/client";
 import { z } from "zod";
 import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
-
-const hiddenActionsForNonSuper = ["CUSTOMER_FRAUD_REPORT", "CUSTOMER_FRAUD_REPORT_RESPONSE"];
+import {
+  buildAuditLogsCsv,
+  coerceAuditDetails,
+  emptyAuditCsv,
+  hiddenActionsForNonSuper,
+  isAuditManufacturerUser,
+  isAuditSuperUser,
+} from "../services/auditExportRedactionService";
 
 const fraudResponseSchema = z.object({
   status: z.enum(["REVIEWED", "RESOLVED", "DISMISSED"]).default("REVIEWED"),
@@ -36,11 +42,6 @@ const auditExportQuerySchema = z.object({
   licenseeId: z.string().uuid().optional(),
 }).strict();
 
-const coerceDetails = (details: unknown): Record<string, any> => {
-  if (!details || typeof details !== "object" || Array.isArray(details)) return {};
-  return details as Record<string, any>;
-};
-
 const defaultFraudReply = (status: "REVIEWED" | "RESOLVED" | "DISMISSED", code: string) => {
   if (status === "RESOLVED") {
     return `Thanks for reporting code ${code}. Our security team reviewed it and completed corrective action.`;
@@ -69,11 +70,8 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
     const entityId = parsed.data.entityId;
     const action = parsed.data.action;
 
-    const isSuper = req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN;
-    const isManufacturer =
-      req.user.role === UserRole.MANUFACTURER ||
-      req.user.role === UserRole.MANUFACTURER_ADMIN ||
-      req.user.role === UserRole.MANUFACTURER_USER;
+    const isSuper = isAuditSuperUser(req.user.role);
+    const isManufacturer = isAuditManufacturerUser(req.user.role);
     const licenseeId = isSuper ? parsed.data.licenseeId : isManufacturer ? undefined : req.user.licenseeId ?? undefined;
 
     let userIds: string[] | undefined;
@@ -158,11 +156,8 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
     const entityId = parsed.data.entityId;
     const action = parsed.data.action;
 
-    const isSuper = req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN;
-    const isManufacturer =
-      req.user.role === UserRole.MANUFACTURER ||
-      req.user.role === UserRole.MANUFACTURER_ADMIN ||
-      req.user.role === UserRole.MANUFACTURER_USER;
+    const isSuper = isAuditSuperUser(req.user.role);
+    const isManufacturer = isAuditManufacturerUser(req.user.role);
     const licenseeId = isSuper ? parsed.data.licenseeId : isManufacturer ? undefined : req.user.licenseeId ?? undefined;
 
     let userIds: string[] | undefined;
@@ -178,10 +173,6 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
       userIds = users.map((u) => u.id);
     }
 
-    const csvHeaders = isSuper
-      ? ["createdAt", "action", "entityType", "entityId", "userId", "userName", "userEmail", "licenseeId", "ipAddress", "details"]
-      : ["createdAt", "action", "entityType", "userName", "userEmail"];
-
     if (
       req.user.role !== UserRole.SUPER_ADMIN &&
       req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
@@ -190,7 +181,7 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
     ) {
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", "attachment; filename=\"audit-logs.csv\"");
-      return res.status(200).send(`${csvHeaders.join(",")}\n`);
+      return res.status(200).send(emptyAuditCsv(isSuper));
     }
 
     const result = await getAuditLogs({
@@ -215,44 +206,9 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
       userMap = new Map(users.map((u) => [u.id, u]));
     }
 
-    const esc = (val: any) => {
-      const s = val == null ? "" : String(val);
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-
-    const lines = [csvHeaders.join(",")];
-
-    for (const log of result.logs) {
-      const user = log.userId ? userMap.get(log.userId) : null;
-      const baseRow = [
-        esc(log.createdAt?.toISOString?.() || log.createdAt),
-        esc(log.action),
-        esc(log.entityType),
-        esc(user?.name || ""),
-        esc(user?.email || ""),
-      ];
-      lines.push(
-        (isSuper
-          ? [
-              baseRow[0],
-              baseRow[1],
-              baseRow[2],
-              esc(log.entityId),
-              esc(log.userId),
-              baseRow[3],
-              baseRow[4],
-              esc(log.licenseeId),
-              esc(log.ipAddress),
-              esc(log.details ? JSON.stringify(log.details) : ""),
-            ]
-          : baseRow
-        ).join(",")
-      );
-    }
-
     res.setHeader("Content-Type", "text/csv");
     res.setHeader("Content-Disposition", "attachment; filename=\"audit-logs.csv\"");
-    return res.status(200).send(lines.join("\n"));
+    return res.status(200).send(buildAuditLogsCsv(result.logs, userMap, isSuper));
   } catch (err) {
     console.error("Audit logs export error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
@@ -274,11 +230,8 @@ export const streamLogs = async (req: AuthRequest, res: Response) => {
     res.write(`event: ping\ndata: {}\n\n`);
   }, 20000);
 
-  const isSuper = req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN;
-  const isManufacturer =
-    req.user.role === UserRole.MANUFACTURER ||
-    req.user.role === UserRole.MANUFACTURER_ADMIN ||
-    req.user.role === UserRole.MANUFACTURER_USER;
+  const isSuper = isAuditSuperUser(req.user.role);
+  const isManufacturer = isAuditManufacturerUser(req.user.role);
   const linkedLicenseeIds =
     req.user.role === UserRole.MANUFACTURER ||
     req.user.role === UserRole.MANUFACTURER_ADMIN ||
@@ -291,7 +244,7 @@ export const streamLogs = async (req: AuthRequest, res: Response) => {
     if (!isSuper && hiddenActionsForNonSuper.includes(String(log.action || ""))) return;
     if (!isSuper) {
       if (isManufacturer) {
-        const details = coerceDetails(log.details);
+        const details = coerceAuditDetails(log.details);
         if (log.userId !== req.user!.userId && log.entityId !== req.user!.userId && details.manufacturerId !== req.user!.userId) {
           return;
         }
@@ -356,7 +309,7 @@ export const getFraudReports = async (req: AuthRequest, res: Response) => {
 
     const latestResponseByReportId = new Map<string, any>();
     for (const log of responseLogs) {
-      const details = coerceDetails(log.details);
+      const details = coerceAuditDetails(log.details);
       const reportId = String(details.reportId || "");
       if (!reportId || latestResponseByReportId.has(reportId)) continue;
       latestResponseByReportId.set(reportId, log);
@@ -364,9 +317,9 @@ export const getFraudReports = async (req: AuthRequest, res: Response) => {
 
     const reports = reportLogs
       .map((reportLog) => {
-        const reportDetails = coerceDetails(reportLog.details);
+        const reportDetails = coerceAuditDetails(reportLog.details);
         const responseLog = latestResponseByReportId.get(reportLog.id);
-        const responseDetails = coerceDetails(responseLog?.details);
+        const responseDetails = coerceAuditDetails(responseLog?.details);
         const status = String(responseDetails.status || "OPEN").toUpperCase();
 
         return {
@@ -445,7 +398,7 @@ export const respondToFraudReport = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, error: "Fraud report not found" });
     }
 
-    const reportDetails = coerceDetails(reportLog.details);
+    const reportDetails = coerceAuditDetails(reportLog.details);
     const normalizedCode = String(reportDetails.code || reportLog.entityId || "UNKNOWN");
     const recipientEmail =
       reportDetails.contactEmail && typeof reportDetails.contactEmail === "string"
