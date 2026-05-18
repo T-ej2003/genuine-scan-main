@@ -32,6 +32,6 @@ Passing does not mean the whole platform is security-perfect. It does not replac
 
 ## Deferred Items
 
-- PostgreSQL RLS is formally deferred in `docs/security/RLS_DEFERRED_DECISION.md`.
-- Full `npm run lint` still has historical debt documented in `docs/security/LINT_DEBT_SECURITY_RELEASE_NOTE.md`.
+- PostgreSQL RLS is formally deferred in `documents/security/RLS_DEFERRED_DECISION.md`.
+- Full `npm run lint` still has historical debt documented in `documents/security/LINT_DEBT_SECURITY_RELEASE_NOTE.md`.
 - Remaining Prisma allowlist entries are exact and documented, but should be reduced further by moving legacy direct Prisma access into scoped repository/helper layers.

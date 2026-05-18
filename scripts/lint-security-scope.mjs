@@ -36,7 +36,7 @@ const isSecurityScopeFile = (file) =>
   file === "scripts/lint-security-scope.mjs" ||
   file === "scripts/security-scope-allowlist.json" ||
   file.startsWith("scripts/tests/") ||
-  file.startsWith("docs/security/") ||
+  file.startsWith("documents/security/") ||
   file.startsWith("backend/tests/") ||
   file.startsWith("backend/src/controllers/") ||
   file.startsWith("backend/src/middleware/") ||

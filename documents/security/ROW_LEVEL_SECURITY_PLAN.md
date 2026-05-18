@@ -2,7 +2,7 @@
 
 Runtime RLS is not enabled in this pass. The application currently uses pooled Prisma connections and several public verification flows, so enabling policies without a reliable per-request database session context would risk either overexposure or production outages.
 
-Final release decision: RLS is formally deferred for this multi-tenant isolation hardening release. See `docs/security/RLS_DEFERRED_DECISION.md` for the deployment decision, compensating controls, and staged rollout requirements.
+Final release decision: RLS is formally deferred for this multi-tenant isolation hardening release. See `documents/security/RLS_DEFERRED_DECISION.md` for the deployment decision, compensating controls, and staged rollout requirements.
 
 Prerequisites before enabling RLS:
 
