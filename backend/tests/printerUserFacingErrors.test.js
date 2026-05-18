@@ -72,7 +72,10 @@ const run = () => {
 
   const unsupportedPrinterFailure = describePrintJobCreateFailure(new Error("PRINTER_MODE_UNSUPPORTED"));
   assert(unsupportedPrinterFailure.status === 400, "Unsupported printer modes should be rejected safely");
-  assert(unsupportedPrinterFailure.payload.errorCode === "invalid_printer", "Unsupported printer modes should use invalid_printer");
+  assert(
+    unsupportedPrinterFailure.payload.errorCode === "unsupported_printer_route",
+    "Unsupported printer modes should use a precise route code"
+  );
 
   const validPayload = createPrintJobSchema.safeParse({
     batchId: "c9dabd08-9393-4be3-bb33-0269b543285d",
@@ -113,11 +116,58 @@ const run = () => {
       },
     })
   );
-  assert(virtualSelectionFailure.payload.errorCode === "invalid_printer", "Virtual selections should remain invalid_printer");
+  assert(
+    virtualSelectionFailure.payload.errorCode === "printer_selection_mismatch",
+    "Virtual selections should expose the exact selection mismatch"
+  );
   assert(
     virtualSelectionFailure.payload.message ===
       "Fax/PDF printers cannot be used for MSCQR labels. Choose the ZDesigner label printer.",
     "Virtual printer mismatch should return specific copy"
+  );
+
+  const printerNotFoundFailure = describePrintJobCreateFailure(new Error("PRINTER_NOT_FOUND"));
+  assert(printerNotFoundFailure.status === 404, "Missing printer profiles should return not found");
+  assert(
+    printerNotFoundFailure.payload.errorCode === "printer_not_found",
+    "Missing printer profiles should not be collapsed into invalid_printer"
+  );
+
+  const transactionFailure = describePrintJobCreateFailure(Object.assign(new Error("Foreign key failed"), { code: "P2003" }));
+  assert(transactionFailure.status === 409, "Transaction constraint failures should be conflicts");
+  assert(
+    transactionFailure.payload.errorCode === "print_job_transaction_failed",
+    "Transaction failures should not be collapsed into invalid_payload"
+  );
+
+  const reservationFailure = describePrintJobCreateFailure(
+    Object.assign(new Error("Duplicate print item"), { code: "P2002", meta: { target: ["qrCodeId"] } })
+  );
+  assert(
+    reservationFailure.payload.errorCode === "print_item_reservation_failed",
+    "Reservation conflicts should use a precise print item code"
+  );
+
+  const unknownFailure = describePrintJobCreateFailure(new Error("Unexpected downstream failure"));
+  assert(unknownFailure.status === 500, "Unknown downstream failures should be internal failures");
+  assert(
+    unknownFailure.payload.errorCode === "internal_print_job_create_failed",
+    "Unknown downstream failures should never be invalid_payload after validation"
+  );
+
+  const contextualFailure = describePrintJobCreateFailure(new Error("Unexpected downstream failure"), {
+    requestId: "req-print-123",
+    failureStage: "transaction_started",
+    diagnostics: { batch: { present: true }, printerProfile: { found: true } },
+  });
+  assert(contextualFailure.payload.requestId === "req-print-123", "Failure payload should include requestId");
+  assert(
+    contextualFailure.payload.failureStage === "transaction_started",
+    "Failure payload should include the server-side failure stage"
+  );
+  assert(
+    contextualFailure.payload.data && contextualFailure.payload.data.diagnostics,
+    "Failure payload should include safe diagnostics when available"
   );
 
   const repairedHeartbeatPrinter = pickSafeHeartbeatPrinterForProfile(

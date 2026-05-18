@@ -46,7 +46,7 @@ describe("printer user-facing helpers", () => {
     );
     expect(
       printJobCreateFailureMessage({
-        errorCode: "invalid_printer",
+        errorCode: "printer_selection_mismatch",
         message: "Fax/PDF printers cannot be used for MSCQR labels. Choose the ZDesigner label printer.",
       })
     ).toBe(
@@ -55,9 +55,31 @@ describe("printer user-facing helpers", () => {
     expect(printJobCreateFailureMessage({ errorCode: "printer_mapping_missing" })).toBe(
       "The saved printer is not linked to this computer's Zebra printer. Choose the ZDesigner printer again or refresh printer setup."
     );
+    expect(printJobCreateFailureMessage({ errorCode: "printer_status_unavailable" })).toBe(
+      "Printer status is temporarily unavailable."
+    );
+    expect(printJobCreateFailureMessage({ errorCode: "print_job_transaction_failed", requestId: "req-123" })).toBe(
+      "Print job could not be saved. Request ID: req-123."
+    );
+    expect(printJobCreateFailureMessage({ errorCode: "print_item_reservation_failed" })).toBe(
+      "Print items could not be reserved for this batch. Refresh and try again."
+    );
     expect(printJobCreateFailureMessage({ status: 401 })).toBe(
       "Your session expired. Refresh or sign in again, then start the print run."
     );
+  });
+
+  it("does not claim missing fields for invalid_payload without validation details", () => {
+    expect(printJobCreateFailureMessage({ errorCode: "invalid_payload", requestId: "req-print-1" })).toBe(
+      "Print job could not be started. Request ID: req-print-1. Please refresh printer setup and try again."
+    );
+
+    expect(
+      printJobCreateFailureMessage({
+        errorCode: "invalid_payload",
+        details: { missingFields: ["printerId"], validationIssuePaths: ["printerId"] },
+      })
+    ).toBe("The print job request is missing required information. Refresh the page and try again.");
   });
 
   it("prefers ZDesigner over persisted Fax in printer diagnostics", () => {

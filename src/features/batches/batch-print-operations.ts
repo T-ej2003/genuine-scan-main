@@ -195,8 +195,15 @@ export const printJobCreateFailureMessage = (response: {
   errorCode?: string;
   error?: string;
   message?: string;
+  requestId?: string | null;
+  details?: {
+    missingFields?: string[];
+    validationIssuePaths?: string[];
+  };
 }) => {
   const errorCode = String(response.errorCode || response.code || "").trim().toLowerCase();
+  const requestId = String(response.requestId || "").trim();
+  const requestSuffix = requestId ? ` Request ID: ${requestId}.` : "";
   if (response.status === 401 || errorCode === "unauthenticated" || errorCode === "session_expired") {
     return "Your session expired. Refresh or sign in again, then start the print run.";
   }
@@ -212,7 +219,14 @@ export const printJobCreateFailureMessage = (response: {
   if (errorCode === "batch_not_printable") {
     return "There are no labels ready to print in this batch.";
   }
-  if (errorCode === "invalid_printer") {
+  if (errorCode === "printer_selection_mismatch") {
+    const message = String(response.message || response.error || "").trim();
+    if (/fax|pdf|zdesigner|printer on this computer/i.test(message)) {
+      return sanitizePrinterUiError(message, message);
+    }
+    return "Choose the ZDesigner printer under Printer on this computer, then refresh printer setup.";
+  }
+  if (errorCode === "invalid_printer" || errorCode === "printer_not_found" || errorCode === "unsupported_printer_route") {
     const message = String(response.message || response.error || "").trim();
     if (/fax|pdf|zdesigner|printer on this computer/i.test(message)) {
       return sanitizePrinterUiError(message, message);
@@ -220,7 +234,25 @@ export const printJobCreateFailureMessage = (response: {
     return "Choose the ZDesigner printer under Printer on this computer, then refresh printer setup.";
   }
   if (errorCode === "invalid_payload") {
-    return "The print job request is missing required information. Refresh the page and try again.";
+    const hasValidationDetails =
+      (response.details?.missingFields?.length || 0) > 0 ||
+      (response.details?.validationIssuePaths?.length || 0) > 0;
+    if (hasValidationDetails) {
+      return "The print job request is missing required information. Refresh the page and try again.";
+    }
+    return `Print job could not be started.${requestSuffix} Please refresh printer setup and try again.`;
+  }
+  if (errorCode === "printer_status_unavailable") {
+    return "Printer status is temporarily unavailable.";
+  }
+  if (errorCode === "print_job_transaction_failed") {
+    return `Print job could not be saved.${requestSuffix || " Please try again."}`;
+  }
+  if (errorCode === "print_item_reservation_failed") {
+    return "Print items could not be reserved for this batch. Refresh and try again.";
+  }
+  if (errorCode === "internal_print_job_create_failed") {
+    return `Print job could not be started.${requestSuffix} Please refresh printer setup and try again.`;
   }
   if (errorCode === "print_service_unavailable") {
     return "Printing is temporarily unavailable. Please try again.";

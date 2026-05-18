@@ -83,10 +83,10 @@ aws ecs describe-task-definition \
   --include TAGS \
   >"$RAW_FILE"
 
-node --input-type=module - "$RAW_FILE" "$PAYLOAD_FILE" "$CONTAINER_NAME" "$IMAGE_URI" <<'NODE'
+node --input-type=module - "$RAW_FILE" "$PAYLOAD_FILE" "$CONTAINER_NAME" "$IMAGE_URI" "${EXPECTED_GIT_SHA:-}" <<'NODE'
 import fs from "node:fs";
 
-const [rawPath, payloadPath, containerName, imageUri] = process.argv.slice(2);
+const [rawPath, payloadPath, containerName, imageUri, expectedGitSha] = process.argv.slice(2);
 const raw = JSON.parse(fs.readFileSync(rawPath, "utf8"));
 const taskDefinition = raw.taskDefinition;
 
@@ -98,7 +98,13 @@ let containerFound = false;
 const containerDefinitions = (taskDefinition.containerDefinitions || []).map((container) => {
   if (container.name !== containerName) return container;
   containerFound = true;
-  return { ...container, image: imageUri };
+  const environment = Array.isArray(container.environment)
+    ? container.environment.filter((entry) => entry?.name !== "GIT_SHA")
+    : [];
+  if (expectedGitSha) {
+    environment.push({ name: "GIT_SHA", value: expectedGitSha });
+  }
+  return { ...container, image: imageUri, environment };
 });
 
 if (!containerFound) {
