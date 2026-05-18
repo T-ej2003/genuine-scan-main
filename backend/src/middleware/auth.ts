@@ -5,6 +5,7 @@ import { UserRole } from "@prisma/client";
 import { ACCESS_TOKEN_COOKIE, verifyAccessToken, verifyMfaBootstrapToken } from "../services/auth/tokenService";
 import { openCookieToken } from "../services/auth/cookieTokenProtectionService";
 import { isManufacturerRole, listManufacturerLinkedLicenseeIds } from "../services/manufacturerScopeService";
+import { isDisabledUserRecord } from "../services/accessControlService";
 import { readCookie } from "../utils/cookies";
 import {
   getAdminStepUpWindowMinutes,
@@ -32,21 +33,27 @@ const getCookieAccessToken = (req: Request) => {
 async function hydrateTenantIfNeeded(payload: AuthenticatedSessionClaims): Promise<AuthenticatedSessionClaims> {
   if (!payload?.userId || !payload?.role) return payload;
 
-  if (payload.role === UserRole.SUPER_ADMIN || payload.role === UserRole.PLATFORM_SUPER_ADMIN) return payload;
-  if (isManufacturerRole(payload.role) && Array.isArray(payload.linkedLicenseeIds) && payload.linkedLicenseeIds.length > 0) {
-    return payload;
-  }
-  if (!isManufacturerRole(payload.role) && payload.licenseeId && payload.orgId) return payload;
-
   const u = await prisma.user.findUnique({
     where: { id: payload.userId },
     select: {
+      id: true,
+      email: true,
+      role: true,
       licenseeId: true,
       orgId: true,
+      isActive: true,
+      status: true,
+      deletedAt: true,
+      disabledAt: true,
     },
   });
 
-  const linkedLicenseeIds = isManufacturerRole(payload.role)
+  if (!u || isDisabledUserRecord(u)) {
+    throw new Error("Account is disabled");
+  }
+
+  const effectiveRole = u.role || payload.role;
+  const linkedLicenseeIds = isManufacturerRole(effectiveRole)
     ? await listManufacturerLinkedLicenseeIds(payload.userId, prisma).catch(() => [])
     : Array.isArray(payload.linkedLicenseeIds)
       ? payload.linkedLicenseeIds
@@ -54,6 +61,8 @@ async function hydrateTenantIfNeeded(payload: AuthenticatedSessionClaims): Promi
 
   return {
     ...payload,
+    email: u.email || payload.email,
+    role: effectiveRole,
     licenseeId: u?.licenseeId ?? payload.licenseeId ?? linkedLicenseeIds?.[0] ?? null,
     orgId: u?.orgId ?? payload.orgId ?? null,
     linkedLicenseeIds: linkedLicenseeIds.length ? linkedLicenseeIds : payload.linkedLicenseeIds ?? null,

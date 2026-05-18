@@ -1,7 +1,7 @@
 //File: backend/src/controllers/qrController.ts  
 import { Response } from "express";
 import { z } from "zod";
-import { QRStatus, UserRole } from "@prisma/client";
+import { Prisma, QRStatus, UserRole } from "@prisma/client";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { createAuditLog } from "../services/auditService";
@@ -14,6 +14,7 @@ import {
   enrichBatchSummaries,
   getBatchAllocationMap as loadBatchAllocationMap,
 } from "../services/batchAllocationService";
+import { buildScopedWhere, findScopedBatch } from "../services/accessControlService";
 import { resolveScopedLicenseeAccess } from "../services/manufacturerScopeService";
 import { summarizeQrStatusCounts } from "../services/qrStatusMetrics";
 import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
@@ -56,6 +57,9 @@ const allocateLicenseeTopupSchema = z
   .refine((d) => (d.startNumber != null && d.endNumber != null ? d.endNumber >= d.startNumber : true), {
     message: "End number must be >= start number",
   });
+
+const isScopeError = (error: unknown) =>
+  error instanceof Error && /access denied|no licensee association/i.test(error.message);
 
 const createBatchSchema = z
   .object({
@@ -326,15 +330,11 @@ export const bulkDeleteQRCodes = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const where: any = {};
+    const where = (await buildScopedWhere(req.user!, {
+      relationManufacturerField: "batch",
+    })) as Prisma.QRCodeWhereInput;
     if (parsed.data.ids?.length) where.id = { in: parsed.data.ids };
     if (parsed.data.codes?.length) where.code = { in: parsed.data.codes };
-
-    if (auth.role !== UserRole.SUPER_ADMIN && auth.role !== UserRole.PLATFORM_SUPER_ADMIN) {
-      const licenseeId = req.user?.licenseeId;
-      if (!licenseeId) return res.status(403).json({ success: false, error: "No licensee association" });
-      where.licenseeId = licenseeId;
-    }
 
     const deleted = await prisma.qRCode.deleteMany({ where });
 
@@ -490,8 +490,7 @@ export const deleteBatch = async (req: AuthRequest, res: Response) => {
     }
     const batchId = paramsParsed.data.id;
 
-    const batch = await prisma.batch.findUnique({
-      where: { id: batchId },
+    const batch = await findScopedBatch(req.user!, batchId, {
       select: { id: true, name: true, licenseeId: true, printedAt: true },
     });
     if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
@@ -528,7 +527,7 @@ export const deleteBatch = async (req: AuthRequest, res: Response) => {
 
     const result = await prisma.$transaction(async (tx) => {
       const unassigned = await tx.qRCode.updateMany({
-        where: { batchId: batch.id },
+        where: { batchId: batch.id, licenseeId: batch.licenseeId },
         data: {
           batchId: null,
           status: QRStatus.DORMANT,
@@ -587,31 +586,34 @@ export const bulkDeleteBatches = async (req: AuthRequest, res: Response) => {
 
     const batchIds = parsed.data.ids;
 
-    if (auth.role === UserRole.LICENSEE_ADMIN || auth.role === UserRole.ORG_ADMIN) {
-      const licId = req.user?.licenseeId;
-      if (!licId) return res.status(403).json({ success: false, error: "No licensee association" });
+    const scopedBatchWhere = await buildScopedWhere(req.user!, {
+      base: { id: { in: batchIds } },
+      manufacturerField: "manufacturerId",
+    });
 
-      const bad = await prisma.batch.findFirst({
-        where: { id: { in: batchIds }, licenseeId: { not: licId } },
-        select: { id: true },
-      });
-
-      if (bad) return res.status(403).json({ success: false, error: "Some batches are outside your tenant" });
+    const visibleBatchCount = await prisma.batch.count({ where: scopedBatchWhere });
+    if (visibleBatchCount !== new Set(batchIds).size) {
+      return res.status(404).json({ success: false, error: "Batch not found" });
     }
 
     // disallow deleting printed batches
     const printed = await prisma.batch.findFirst({
-      where: { id: { in: batchIds }, printedAt: { not: null } },
+      where: { ...scopedBatchWhere, printedAt: { not: null } },
       select: { id: true },
     });
     if (printed) {
       return res.status(400).json({ success: false, error: "Cannot bulk delete: some batches are printed" });
     }
 
-    const dependentAllocation = await prisma.batch.findFirst({
-      where: {
+    const dependentAllocationWhere = await buildScopedWhere(req.user!, {
+      base: {
         OR: [{ parentBatchId: { in: batchIds } }, { rootBatchId: { in: batchIds } }],
       },
+      manufacturerField: "manufacturerId",
+    });
+
+    const dependentAllocation = await prisma.batch.findFirst({
+      where: dependentAllocationWhere,
       select: { id: true },
     });
     if (dependentAllocation) {
@@ -623,7 +625,10 @@ export const bulkDeleteBatches = async (req: AuthRequest, res: Response) => {
 
     const txResult = await prisma.$transaction(async (tx) => {
       const unassigned = await tx.qRCode.updateMany({
-        where: { batchId: { in: batchIds } },
+        where: {
+          batchId: { in: batchIds },
+          ...(scopedBatchWhere.licenseeId ? { licenseeId: scopedBatchWhere.licenseeId } : {}),
+        },
         data: {
           batchId: null,
           status: QRStatus.DORMANT,
@@ -640,7 +645,7 @@ export const bulkDeleteBatches = async (req: AuthRequest, res: Response) => {
       });
 
       const deleted = await tx.batch.deleteMany({
-        where: { id: { in: batchIds } },
+        where: scopedBatchWhere,
       });
 
       return { unassignedCount: unassigned.count, deletedCount: deleted.count };
@@ -680,8 +685,7 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
     }
     const batchId = paramsParsed.data.id;
 
-    const batch = await prisma.batch.findUnique({
-      where: { id: batchId },
+    const batch = await findScopedBatch(req.user!, batchId, {
       select: { id: true, name: true, licenseeId: true, printedAt: true, manufacturerId: true },
     });
     if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
@@ -692,12 +696,6 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
 
     if (batch.manufacturerId) {
       return res.status(400).json({ success: false, error: "Batch already assigned to a manufacturer" });
-    }
-
-    if (auth.role === UserRole.LICENSEE_ADMIN || auth.role === UserRole.ORG_ADMIN) {
-      if (!req.user?.licenseeId || req.user.licenseeId !== batch.licenseeId) {
-        return res.status(403).json({ success: false, error: "Access denied" });
-      }
     }
 
     const manufacturer = await prisma.user.findFirst({
@@ -916,17 +914,10 @@ export const renameBatch = async (req: AuthRequest, res: Response) => {
     }
     const batchId = paramsParsed.data.id;
 
-    const existing = await prisma.batch.findUnique({
-      where: { id: batchId },
+    const existing = await findScopedBatch(req.user!, batchId, {
       select: { id: true, name: true, licenseeId: true },
     });
     if (!existing) return res.status(404).json({ success: false, error: "Batch not found" });
-
-    if (auth.role === UserRole.LICENSEE_ADMIN || auth.role === UserRole.ORG_ADMIN) {
-      if (!req.user?.licenseeId || req.user.licenseeId !== existing.licenseeId) {
-        return res.status(403).json({ success: false, error: "Access denied" });
-      }
-    }
 
     const nextName = parsed.data.name.trim();
     if (nextName === existing.name) {
@@ -1248,16 +1239,10 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
     if (!req.user) {
       return res.status(401).json({ success: false, error: "Not authenticated" });
     }
-    const where: any = {};
-    const scope = await resolveScopedLicenseeAccess(req.user, (req.query.licenseeId as string | undefined) || null);
-
-    if (scope.scopeLicenseeId) {
-      where.licenseeId = scope.scopeLicenseeId;
-    }
-
-    if (isManufacturerRole(req.user?.role)) {
-      where.manufacturerId = req.user.userId;
-    }
+    const where = (await buildScopedWhere(req.user, {
+      requestedLicenseeId: (req.query.licenseeId as string | undefined) || null,
+      manufacturerField: "manufacturerId",
+    })) as Prisma.BatchWhereInput;
 
     const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 500);
     const offset = Math.max(0, parseInt(String(req.query.offset ?? "0"), 10) || 0);
@@ -1287,6 +1272,9 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
 
     return res.json({ success: true, data: enriched, meta: { total, limit, offset } });
   } catch (e) {
+    if (isScopeError(e)) {
+      return res.status(404).json({ success: false, error: "Batches not found" });
+    }
     console.error("getBatches error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
@@ -1304,23 +1292,11 @@ export const getBatchAllocationMap = async (req: AuthRequest, res: Response) => 
       return res.status(400).json({ success: false, error: "Missing batch id" });
     }
 
-    const focusBatch = await prisma.batch.findUnique({
-      where: { id: batchId },
+    const focusBatch = await findScopedBatch(req.user, batchId, {
       select: { id: true, licenseeId: true, manufacturerId: true },
     });
     if (!focusBatch) {
       return res.status(404).json({ success: false, error: "Batch not found" });
-    }
-
-    if (isManufacturerRole(req.user.role)) {
-      if (focusBatch.manufacturerId !== req.user.userId) {
-        return res.status(403).json({ success: false, error: "Access denied" });
-      }
-    } else if (
-      (req.user.role === UserRole.LICENSEE_ADMIN || req.user.role === UserRole.ORG_ADMIN) &&
-      req.user.licenseeId !== focusBatch.licenseeId
-    ) {
-      return res.status(403).json({ success: false, error: "Access denied" });
     }
 
     const allocationMap = await loadBatchAllocationMap(batchId, { licenseeId: focusBatch.licenseeId });
@@ -1349,21 +1325,12 @@ export const getQRCodes = async (req: AuthRequest, res: Response) => {
     const limit = Math.min(parseInt(String(req.query.limit ?? "500"), 10) || 500, 2000);
     const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
 
-    const scope = await resolveScopedLicenseeAccess(req.user, (req.query.licenseeId as string | undefined) || null);
-
-    const where: any = {};
-    if (scope.scopeLicenseeId) where.licenseeId = scope.scopeLicenseeId;
+    const where = (await buildScopedWhere(req.user, {
+      requestedLicenseeId: (req.query.licenseeId as string | undefined) || null,
+      relationManufacturerField: "batch",
+    })) as Prisma.QRCodeWhereInput;
     if (status) where.status = status;
     if (q) where.code = { contains: q, mode: "insensitive" };
-
-    if (
-      (role === UserRole.MANUFACTURER ||
-        role === UserRole.MANUFACTURER_ADMIN ||
-        role === UserRole.MANUFACTURER_USER) &&
-      userId
-    ) {
-      where.batch = { manufacturerId: userId };
-    }
 
     const [total, qrCodes] = await Promise.all([
       prisma.qRCode.count({ where }),
@@ -1386,6 +1353,9 @@ export const getQRCodes = async (req: AuthRequest, res: Response) => {
 
     return res.json({ success: true, data: { qrCodes: enrichedQRCodes, total, limit, offset } });
   } catch (e: any) {
+    if (isScopeError(e)) {
+      return res.status(404).json({ success: false, error: "QR codes not found" });
+    }
     console.error("getQRCodes error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
@@ -1416,10 +1386,10 @@ export const getStats = async (req: AuthRequest, res: Response) => {
         role === UserRole.MANUFACTURER_USER) &&
       userId
     ) {
-      const where: any = {
-        batch: { manufacturerId: userId },
-      };
-      if (licenseeId) where.licenseeId = licenseeId;
+      const where = (await buildScopedWhere(req.user, {
+        requestedLicenseeId: (req.query.licenseeId as string | undefined) || null,
+        relationManufacturerField: "batch",
+      })) as Prisma.QRCodeWhereInput;
 
       const grouped = await prisma.qRCode.groupBy({
         by: ["status"],
@@ -1445,6 +1415,9 @@ export const getStats = async (req: AuthRequest, res: Response) => {
     const stats = await getQRStats(licenseeId);
     return res.json({ success: true, data: stats });
   } catch (e) {
+    if (isScopeError(e)) {
+      return res.status(404).json({ success: false, error: "QR stats not found" });
+    }
     console.error("getStats error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
@@ -1459,21 +1432,12 @@ export const exportQRCodesCsv = async (req: AuthRequest, res: Response) => {
     const q = (req.query.q as string | undefined)?.trim();
     const status = (req.query.status as QRStatus | undefined) || undefined;
 
-    const scope = await resolveScopedLicenseeAccess(req.user, (req.query.licenseeId as string | undefined) || null);
-    const licenseeId = scope.scopeLicenseeId || undefined;
-
-    const where: any = {};
-    if (licenseeId) where.licenseeId = licenseeId;
+    const where = (await buildScopedWhere(req.user, {
+      requestedLicenseeId: (req.query.licenseeId as string | undefined) || null,
+      relationManufacturerField: "batch",
+    })) as Prisma.QRCodeWhereInput;
     if (status) where.status = status;
     if (q) where.code = { contains: q, mode: "insensitive" };
-
-    if (
-      role === UserRole.MANUFACTURER ||
-      role === UserRole.MANUFACTURER_ADMIN ||
-      role === UserRole.MANUFACTURER_USER
-    ) {
-      where.batch = { manufacturerId: userId };
-    }
 
     const rows = await prisma.qRCode.findMany({
       where,
@@ -1482,6 +1446,15 @@ export const exportQRCodesCsv = async (req: AuthRequest, res: Response) => {
         licensee: { select: { name: true, prefix: true } },
         batch: { select: { id: true, name: true, printedAt: true } },
       },
+    });
+
+    await createAuditLog({
+      userId,
+      licenseeId: typeof where.licenseeId === "string" ? where.licenseeId : undefined,
+      action: "EXPORT_QR_CODES",
+      entityType: "QRCode",
+      details: { status: status || null, query: q || null, count: rows.length },
+      ipAddress: req.ip,
     });
 
     const header = [
@@ -1531,6 +1504,9 @@ export const exportQRCodesCsv = async (req: AuthRequest, res: Response) => {
     res.setHeader("Content-Disposition", `attachment; filename="qr-codes.csv"`);
     return res.status(200).send(csv);
   } catch (e) {
+    if (isScopeError(e)) {
+      return res.status(404).json({ success: false, error: "QR codes not found" });
+    }
     console.error("exportQRCodesCsv error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }

@@ -589,6 +589,7 @@ const listNotificationsForUserUncached = async (params: {
       where: {
         OR: scopedOr,
         readAt: null,
+        ...(hiddenTypes.length > 0 ? { type: { notIn: hiddenTypes } } : {}),
       },
     });
 
@@ -691,6 +692,12 @@ export const markNotificationRead = async (params: {
     });
 
     if (!existing) return null;
+    if (existing.userId !== params.userId) {
+      return {
+        ...existing,
+        readAt: existing.readAt || new Date(),
+      };
+    }
 
     const updated = await prisma.notification.update({
       where: { id: existing.id },
@@ -727,40 +734,12 @@ export const markAllNotificationsRead = async (params: {
   licenseeIds?: string[] | null;
   orgId?: string | null;
 }) => {
-  const audience = normalizeRole(params.role);
   const hiddenTypes = hiddenNotificationTypesForRole(params.role);
 
-  const sharedScope: any = {
-    userId: null,
-    channel: NotificationChannel.WEB,
-    audience: { in: [NotificationAudience.ALL, audience] },
-  };
-  if (params.role !== UserRole.SUPER_ADMIN && params.role !== UserRole.PLATFORM_SUPER_ADMIN) {
-    const tenantFilters: any[] = [];
-    const licenseeScope = buildLicenseeBroadcastScope(params.licenseeId, params.licenseeIds);
-    if (licenseeScope) {
-      tenantFilters.push(licenseeScope);
-    } else if (audience === NotificationAudience.MANUFACTURER) {
-      tenantFilters.push({ licenseeId: null });
-    } else {
-      tenantFilters.push({ licenseeId: null });
-    }
-    if (audience === NotificationAudience.MANUFACTURER) {
-      if (params.orgId) {
-        tenantFilters.push({ OR: [{ orgId: params.orgId }, { orgId: null }] });
-      } else {
-        tenantFilters.push({ orgId: null });
-      }
-    }
-    if (tenantFilters.length) sharedScope.AND = tenantFilters;
-  }
-
   const where: any = {
+    userId: params.userId,
+    channel: NotificationChannel.WEB,
     readAt: null,
-    OR: [
-      { userId: params.userId, channel: NotificationChannel.WEB },
-      sharedScope,
-    ],
   };
   if (hiddenTypes.length > 0) {
     where.type = { notIn: hiddenTypes };

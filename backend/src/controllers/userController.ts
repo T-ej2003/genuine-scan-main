@@ -10,12 +10,12 @@ import { hashPassword } from "../services/auth/passwordService";
 import { isValidEmailAddress, normalizeEmailAddress } from "../utils/email";
 import {
   MANUFACTURER_ROLES,
-  assertUserCanAccessLicensee,
   isManufacturerRole,
   isPlatformRole,
   normalizeLinkedLicensees,
   upsertManufacturerLicenseeLink,
 } from "../services/manufacturerScopeService";
+import { buildScopedUserWhere, resolveRequestedLicenseeScope } from "../services/accessControlService";
 
 /**
  * Notes:
@@ -104,9 +104,16 @@ const ensureAuth = (req: AuthRequest) => {
 
 const isPlatform = (role: UserRole) => isPlatformRole(role);
 
-const getTenantLicenseeId = (req: AuthRequest) => {
-  // if your middleware sets (req as any).licenseeId you can support it
-  return (req as any).licenseeId || req.user?.licenseeId || null;
+const isScopeError = (error: unknown) =>
+  error instanceof Error && /access denied|no licensee association/i.test(error.message);
+
+const getRequestedLicenseeId = (req: AuthRequest) =>
+  String(req.body?.licenseeId || req.query?.licenseeId || req.params?.licenseeId || "").trim() || null;
+
+const resolveActorLicenseeId = async (req: AuthRequest) => {
+  if (!req.user) return null;
+  const scope = await resolveRequestedLicenseeScope(req.user, getRequestedLicenseeId(req));
+  return scope.scopeLicenseeId || scope.accessibleLicenseeIds?.[0] || req.user.licenseeId || null;
 };
 
 const serializeScopedUser = (row: {
@@ -164,9 +171,15 @@ const serializeScopedUser = (row: {
   };
 };
 
-const assertManufacturerTarget = async (id: string) => {
-  const target = await prisma.user.findUnique({
-    where: { id },
+const assertManufacturerTarget = async (req: AuthRequest, id: string, includeInactive = true) => {
+  if (!req.user) return { ok: false as const, status: 401, error: "Not authenticated" };
+  const target = await prisma.user.findFirst({
+    where: await buildScopedUserWhere(req.user, {
+      base: { id },
+      requestedLicenseeId: getRequestedLicenseeId(req),
+      manufacturerOnly: true,
+      includeInactive,
+    }),
     select: {
       id: true,
       role: true,
@@ -236,11 +249,6 @@ export const createUser = async (req: AuthRequest, res: Response) => {
     const password = parsed.data.password.trim();
     const role = canonicalizeRole(parsed.data.role as UserRole);
 
-    // Tenant logic:
-    // - SUPER_ADMIN: can create LICENSEE_ADMIN or MANUFACTURER for any licenseeId (required)
-    // - LICENSEE_ADMIN: should only create MANUFACTURER under own licensee (licenseeId ignored)
-    const actorLicenseeId = getTenantLicenseeId(req);
-
     let effectiveLicenseeId: string | null = null;
 
     if (isPlatform(auth.role)) {
@@ -249,7 +257,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
         return res.status(400).json({ success: false, error: "licenseeId is required for super admin createUser" });
       }
     } else {
-      // non-super: must be tenant scoped
+      const actorLicenseeId = await resolveActorLicenseeId(req);
       if (!actorLicenseeId) {
         return res.status(403).json({ success: false, error: "No licensee association found" });
       }
@@ -332,6 +340,9 @@ export const createUser = async (req: AuthRequest, res: Response) => {
 
     return res.status(201).json({ success: true, data: serializeScopedUser(created, licenseeId || null) });
   } catch (e: any) {
+    if (isScopeError(e)) {
+      return res.status(403).json({ success: false, error: "Access denied" });
+    }
     // nice error for unique constraint (email)
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
       return res.status(409).json({ success: false, error: "Email already exists" });
@@ -350,24 +361,23 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
 
     const queryLicenseeId = (req.query.licenseeId as string | undefined) || undefined;
     const includeInactive = String(req.query.includeInactive || "false").toLowerCase() === "true";
-    const roleFilter = (req.query.role as UserRole | undefined) || undefined;
-    const effectiveLicenseeId = isPlatform(auth.role) ? queryLicenseeId : getTenantLicenseeId(req) || undefined;
+    const rawRoleFilter = String(req.query.role || "").trim() as UserRole;
+    const roleFilter = Object.values(UserRole).includes(rawRoleFilter) ? rawRoleFilter : undefined;
     const { limit, offset } = parsePagination(req.query as Record<string, unknown>);
 
-    const where: any = {};
+    const baseWhere: Prisma.UserWhereInput = {};
     if (roleFilter && isManufacturerRole(roleFilter)) {
-      where.role = { in: MANUFACTURER_ROLES };
-      if (effectiveLicenseeId) {
-        where.OR = [
-          { licenseeId: effectiveLicenseeId },
-          { manufacturerLicenseeLinks: { some: { licenseeId: effectiveLicenseeId } } },
-        ];
-      }
-    } else {
-      if (effectiveLicenseeId) where.licenseeId = effectiveLicenseeId;
-      if (roleFilter) where.role = roleFilter;
+      baseWhere.role = { in: MANUFACTURER_ROLES };
+    } else if (roleFilter) {
+      baseWhere.role = roleFilter;
     }
-    if (!includeInactive) where.isActive = true;
+    const where = await buildScopedUserWhere(req.user!, {
+      base: baseWhere,
+      requestedLicenseeId: queryLicenseeId,
+      includeInactive,
+    });
+    const resolvedScope = await resolveRequestedLicenseeScope(req.user!, queryLicenseeId);
+    const effectiveLicenseeId = resolvedScope.scopeLicenseeId || queryLicenseeId || undefined;
 
     const [users, total] = await Promise.all([
       prisma.user.findMany({
@@ -404,6 +414,9 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
       meta: { total, limit, offset },
     });
   } catch (e) {
+    if (isScopeError(e)) {
+      return res.status(404).json({ success: false, error: "Users not found" });
+    }
     console.error("getUsers error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
@@ -417,19 +430,16 @@ export const getManufacturers = async (req: AuthRequest, res: Response) => {
     if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
 
     const includeInactive = String(req.query.includeInactive || "false").toLowerCase() === "true";
-    const licenseeId = isPlatform(auth.role)
-      ? ((req.query.licenseeId as string | undefined) || undefined)
-      : (getTenantLicenseeId(req) || undefined);
+    const licenseeId = (req.query.licenseeId as string | undefined) || undefined;
     const { limit, offset } = parsePagination(req.query as Record<string, unknown>);
 
-    const where: any = { role: { in: MANUFACTURER_ROLES } };
-    if (licenseeId) {
-      where.OR = [
-        { licenseeId },
-        { manufacturerLicenseeLinks: { some: { licenseeId } } },
-      ];
-    }
-    if (!includeInactive) where.isActive = true;
+    const where = await buildScopedUserWhere(req.user!, {
+      requestedLicenseeId: licenseeId,
+      manufacturerOnly: true,
+      includeInactive,
+    });
+    const resolvedScope = await resolveRequestedLicenseeScope(req.user!, licenseeId);
+    const effectiveLicenseeId = resolvedScope.scopeLicenseeId || licenseeId || null;
 
     const [manufacturers, total] = await Promise.all([
       prisma.user.findMany({
@@ -462,10 +472,13 @@ export const getManufacturers = async (req: AuthRequest, res: Response) => {
 
     return res.json({
       success: true,
-      data: manufacturers.map((row) => serializeScopedUser(row, licenseeId || null)),
+      data: manufacturers.map((row) => serializeScopedUser(row, effectiveLicenseeId)),
       meta: { total, limit, offset },
     });
   } catch (e) {
+    if (isScopeError(e)) {
+      return res.status(404).json({ success: false, error: "Manufacturers not found" });
+    }
     console.error("getManufacturers error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
@@ -488,16 +501,15 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid user id" });
     }
     const targetId = paramsParsed.data.id;
-    const t = await assertManufacturerTarget(targetId);
+    const t = await assertManufacturerTarget(req, targetId);
     if (!t.ok) return res.status(t.status).json({ success: false, error: t.error });
 
-    const actorLicenseeId = getTenantLicenseeId(req);
+    const actorLicenseeId = await resolveActorLicenseeId(req);
     if (!isPlatform(auth.role)) {
       if (!actorLicenseeId) {
         return res.status(403).json({ success: false, error: "No licensee association found" });
       }
-      const allowed = await assertUserCanAccessLicensee(req.user!, actorLicenseeId);
-      if (!allowed || !targetHasLicenseeLink(t.target, actorLicenseeId)) {
+      if (!targetHasLicenseeLink(t.target, actorLicenseeId)) {
         return res.status(403).json({ success: false, error: "Access denied to this tenant" });
       }
     }
@@ -578,6 +590,9 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
 
     return res.json({ success: true, data: updated });
   } catch (e: any) {
+    if (isScopeError(e)) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
       return res.status(409).json({ success: false, error: "Email already exists" });
     }
@@ -605,10 +620,10 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
     const targetId = paramsParsed.data.id;
     const hard = queryParsed.data.hard === "true";
 
-    const t = await assertManufacturerTarget(targetId);
+    const t = await assertManufacturerTarget(req, targetId);
     if (!t.ok) return res.status(t.status).json({ success: false, error: t.error });
 
-    const actorLicenseeId = getTenantLicenseeId(req);
+    const actorLicenseeId = await resolveActorLicenseeId(req);
     if (!isPlatform(auth.role)) {
       if (!actorLicenseeId || !targetHasLicenseeLink(t.target, actorLicenseeId)) {
         return res.status(403).json({ success: false, error: "Access denied to this tenant" });
@@ -719,6 +734,9 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
 
     return res.json({ success: true, data: { deletedId: targetId, hard: false, ...updated } });
   } catch (e) {
+    if (isScopeError(e)) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
     console.error("deleteUser error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
@@ -741,10 +759,10 @@ export const restoreManufacturer = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid user id" });
     }
     const targetId = paramsParsed.data.id;
-    const t = await assertManufacturerTarget(targetId);
+    const t = await assertManufacturerTarget(req, targetId);
     if (!t.ok) return res.status(t.status).json({ success: false, error: t.error });
 
-    const actorLicenseeId = getTenantLicenseeId(req);
+    const actorLicenseeId = await resolveActorLicenseeId(req);
     if (!isPlatform(auth.role)) {
       if (!actorLicenseeId) {
         return res.status(403).json({ success: false, error: "No licensee association found" });
@@ -793,6 +811,9 @@ export const restoreManufacturer = async (req: AuthRequest, res: Response) => {
 
     return res.json({ success: true, data: updated });
   } catch (e) {
+    if (isScopeError(e)) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
     console.error("restoreManufacturer error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }

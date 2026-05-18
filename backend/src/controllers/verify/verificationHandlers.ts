@@ -133,7 +133,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
     const requestQuery = queryParsed.data;
     const signedToken = String(requestQuery.t || "").trim() || null;
     const defaultVerifyUxPolicy = await resolveVerifyUxPolicy(null);
-    let proofSource: VerificationProofSource = signedToken ? "SIGNED_LABEL" : "MANUAL_CODE_LOOKUP";
+    const proofSource: VerificationProofSource = signedToken ? "SIGNED_LABEL" : "MANUAL_CODE_LOOKUP";
     const customerUserId = req.customer?.userId || null;
     const requestDeviceFingerprint = deriveRequestDeviceFingerprint(req);
     const actorDeviceHash = requestDeviceFingerprint ? hashToken(`device:${requestDeviceFingerprint}`) : null;
@@ -316,7 +316,6 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       previousScanAt: scanInsight.previousScanAt,
       previousScanLocation: scanInsight.previousScanLocation,
       scanSignals: scanInsight.signals,
-      replacementChainId: replacement.replacementChainId,
     };
 
     if (qrCode.status === QRStatus.BLOCKED) {

@@ -20,6 +20,9 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (err) {
+    if (err instanceof Error && /access denied|no licensee association/i.test(err.message)) {
+      return res.status(404).json({ success: false, error: "Dashboard not found" });
+    }
     console.error("getDashboardStats error", err);
     return res.status(500).json({ success: false, error: "Failed to load dashboard stats" });
   }
@@ -34,6 +37,9 @@ export const getDashboardAttentionQueue = async (req: AuthRequest, res: Response
     const snapshot = await getAttentionQueueSnapshot(req);
     return res.json({ success: true, data: snapshot });
   } catch (err) {
+    if (err instanceof Error && /access denied|no licensee association/i.test(err.message)) {
+      return res.status(404).json({ success: false, error: "Dashboard not found" });
+    }
     console.error("getDashboardAttentionQueue error", err);
     return res.status(500).json({ success: false, error: "Failed to load attention queue" });
   }

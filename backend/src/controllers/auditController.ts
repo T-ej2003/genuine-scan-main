@@ -178,6 +178,10 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
       userIds = users.map((u) => u.id);
     }
 
+    const csvHeaders = isSuper
+      ? ["createdAt", "action", "entityType", "entityId", "userId", "userName", "userEmail", "licenseeId", "ipAddress", "details"]
+      : ["createdAt", "action", "entityType", "userName", "userEmail"];
+
     if (
       req.user.role !== UserRole.SUPER_ADMIN &&
       req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
@@ -186,7 +190,7 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
     ) {
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", "attachment; filename=\"audit-logs.csv\"");
-      return res.status(200).send("createdAt,action,entityType,entityId,userId,userName,userEmail,licenseeId,ipAddress,details\n");
+      return res.status(200).send(`${csvHeaders.join(",")}\n`);
     }
 
     const result = await getAuditLogs({
@@ -216,36 +220,33 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
 
-    const lines = [
-      [
-        "createdAt",
-        "action",
-        "entityType",
-        "entityId",
-        "userId",
-        "userName",
-        "userEmail",
-        "licenseeId",
-        "ipAddress",
-        "details",
-      ].join(","),
-    ];
+    const lines = [csvHeaders.join(",")];
 
     for (const log of result.logs) {
       const user = log.userId ? userMap.get(log.userId) : null;
+      const baseRow = [
+        esc(log.createdAt?.toISOString?.() || log.createdAt),
+        esc(log.action),
+        esc(log.entityType),
+        esc(user?.name || ""),
+        esc(user?.email || ""),
+      ];
       lines.push(
-        [
-          esc(log.createdAt?.toISOString?.() || log.createdAt),
-          esc(log.action),
-          esc(log.entityType),
-          esc(log.entityId),
-          esc(log.userId),
-          esc(user?.name || ""),
-          esc(user?.email || ""),
-          esc(log.licenseeId),
-          esc(log.ipAddress),
-          esc(log.details ? JSON.stringify(log.details) : ""),
-        ].join(",")
+        (isSuper
+          ? [
+              baseRow[0],
+              baseRow[1],
+              baseRow[2],
+              esc(log.entityId),
+              esc(log.userId),
+              baseRow[3],
+              baseRow[4],
+              esc(log.licenseeId),
+              esc(log.ipAddress),
+              esc(log.details ? JSON.stringify(log.details) : ""),
+            ]
+          : baseRow
+        ).join(",")
       );
     }
 
@@ -274,6 +275,10 @@ export const streamLogs = async (req: AuthRequest, res: Response) => {
   }, 20000);
 
   const isSuper = req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN;
+  const isManufacturer =
+    req.user.role === UserRole.MANUFACTURER ||
+    req.user.role === UserRole.MANUFACTURER_ADMIN ||
+    req.user.role === UserRole.MANUFACTURER_USER;
   const linkedLicenseeIds =
     req.user.role === UserRole.MANUFACTURER ||
     req.user.role === UserRole.MANUFACTURER_ADMIN ||
@@ -285,7 +290,12 @@ export const streamLogs = async (req: AuthRequest, res: Response) => {
   const unsubscribe = onAuditLog((log) => {
     if (!isSuper && hiddenActionsForNonSuper.includes(String(log.action || ""))) return;
     if (!isSuper) {
-      if (linkedLicenseeIds.length > 0) {
+      if (isManufacturer) {
+        const details = coerceDetails(log.details);
+        if (log.userId !== req.user!.userId && log.entityId !== req.user!.userId && details.manufacturerId !== req.user!.userId) {
+          return;
+        }
+      } else if (linkedLicenseeIds.length > 0) {
         if (!log.licenseeId || !linkedLicenseeIds.includes(log.licenseeId)) return;
       } else if (log.licenseeId !== tenantId) {
         return;

@@ -33,7 +33,6 @@ const normalizeIssuanceMode = (value: unknown) => {
 export const mapLicensee = (licensee: any) =>
   licensee
     ? {
-        id: licensee.id,
         name: licensee.name,
         prefix: licensee.prefix,
         brandName: licensee.brandName,
@@ -47,10 +46,15 @@ export const mapLicensee = (licensee: any) =>
 export const mapBatch = (batch: any) =>
   batch
     ? {
-        id: batch.id,
         name: batch.name,
         printedAt: batch.printedAt,
-        manufacturer: batch.manufacturer || null,
+        manufacturer: batch.manufacturer
+          ? {
+              name: batch.manufacturer.name,
+              location: batch.manufacturer.location || null,
+              website: batch.manufacturer.website || null,
+            }
+          : null,
       }
     : null;
 

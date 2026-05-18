@@ -2,8 +2,7 @@ import { UserRole } from "@prisma/client";
 
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
-import { getEffectiveLicenseeId } from "../middleware/tenantIsolation";
-import { resolveAccessibleLicenseeIdsForUser } from "./manufacturerScopeService";
+import { buildScopedWhere, resolveRequestedLicenseeScope } from "./accessControlService";
 import { summarizeQrStatusCounts } from "./qrStatusMetrics";
 import { getOrComputeVersionedCache } from "./versionedCacheService";
 
@@ -29,13 +28,18 @@ const isManufacturerRole = (role: UserRole) =>
 const loadInventoryAggregate = async (params: {
   role: UserRole;
   userId: string;
-  scopedLicenseeId: string | null;
+  requestedLicenseeId?: string | null;
+  accessibleLicenseeIds?: string[] | null;
 }) => {
   const where: Record<string, unknown> = {};
   if (isManufacturerRole(params.role)) {
     where.manufacturerId = params.userId;
-  } else if (params.scopedLicenseeId) {
-    where.licenseeId = params.scopedLicenseeId;
+  }
+  if (params.requestedLicenseeId) {
+    where.licenseeId = params.requestedLicenseeId;
+  } else if (params.accessibleLicenseeIds && params.accessibleLicenseeIds.length > 0) {
+    where.licenseeId =
+      params.accessibleLicenseeIds.length === 1 ? params.accessibleLicenseeIds[0] : { in: params.accessibleLicenseeIds };
   }
 
   const rollupAggregate = await prisma.inventoryStatusRollup.aggregate({
@@ -78,42 +82,52 @@ const computeDashboardSnapshot = async (req: AuthRequest): Promise<DashboardSnap
 
   const role = req.user.role;
   const userId = req.user.userId;
-  const scopedLicenseeId = getEffectiveLicenseeId(req);
+  const requestedLicenseeId = String(req.query?.licenseeId || "").trim() || null;
+  const scope = await resolveRequestedLicenseeScope(req.user, requestedLicenseeId);
 
-  const qrWhere: any = {};
-  const batchWhere: any = {};
+  const qrWhere: any = await buildScopedWhere(req.user, {
+    requestedLicenseeId,
+    relationManufacturerField: "batch",
+  });
+  const batchWhere: any = await buildScopedWhere(req.user, {
+    requestedLicenseeId,
+    manufacturerField: "manufacturerId",
+  });
   const manufacturersWhere: any = {
     role: { in: [UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER] },
     isActive: true,
   };
 
   if (isManufacturerRole(role)) {
-    batchWhere.manufacturerId = userId;
-    qrWhere.batch = { manufacturerId: userId };
     manufacturersWhere.id = userId;
-  } else if (scopedLicenseeId) {
-    qrWhere.licenseeId = scopedLicenseeId;
-    batchWhere.licenseeId = scopedLicenseeId;
+  } else if (scope.scopeLicenseeId) {
     manufacturersWhere.OR = [
-      { licenseeId: scopedLicenseeId },
-      { manufacturerLicenseeLinks: { some: { licenseeId: scopedLicenseeId } } },
+      { licenseeId: scope.scopeLicenseeId },
+      { manufacturerLicenseeLinks: { some: { licenseeId: scope.scopeLicenseeId } } },
+    ];
+  } else if (scope.accessibleLicenseeIds && scope.accessibleLicenseeIds.length > 0) {
+    const licenseeFilter =
+      scope.accessibleLicenseeIds.length === 1 ? scope.accessibleLicenseeIds[0] : { in: scope.accessibleLicenseeIds };
+    manufacturersWhere.OR = [
+      { licenseeId: licenseeFilter },
+      { manufacturerLicenseeLinks: { some: { licenseeId: licenseeFilter } } },
     ];
   }
 
-  const linkedLicenseeIds = isManufacturerRole(role) ? await resolveAccessibleLicenseeIdsForUser(req.user) : [];
   const inventoryAggregate = await loadInventoryAggregate({
     role,
     userId,
-    scopedLicenseeId,
+    requestedLicenseeId: scope.scopeLicenseeId,
+    accessibleLicenseeIds: scope.accessibleLicenseeIds,
   });
 
   const [activeLicensees, manufacturers, totalBatches, fallbackQrGrouped, fallbackQrTotal] = await Promise.all([
     role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN
-      ? prisma.licensee.count({ where: { ...(scopedLicenseeId ? { id: scopedLicenseeId } : {}), isActive: true } })
-      : linkedLicenseeIds.length > 0
-        ? prisma.licensee.count({ where: { id: { in: linkedLicenseeIds }, isActive: true } })
-        : scopedLicenseeId
-          ? prisma.licensee.count({ where: { id: scopedLicenseeId, isActive: true } })
+      ? prisma.licensee.count({ where: { ...(scope.scopeLicenseeId ? { id: scope.scopeLicenseeId } : {}), isActive: true } })
+      : scope.accessibleLicenseeIds && scope.accessibleLicenseeIds.length > 0
+        ? prisma.licensee.count({ where: { id: { in: scope.accessibleLicenseeIds }, isActive: true } })
+        : scope.scopeLicenseeId
+          ? prisma.licensee.count({ where: { id: scope.scopeLicenseeId, isActive: true } })
           : 0,
     prisma.user.count({ where: manufacturersWhere }),
     prisma.batch.count({ where: batchWhere }),
@@ -152,7 +166,7 @@ const makeScopeKey = (req: AuthRequest) => {
   return [
     req.user.role,
     req.user.userId,
-    getEffectiveLicenseeId(req) || "all",
+    String(req.query?.licenseeId || "").trim() || "all",
     req.user.licenseeId || "none",
     req.user.orgId || "none",
   ].join(":");

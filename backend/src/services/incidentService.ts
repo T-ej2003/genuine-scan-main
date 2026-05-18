@@ -15,6 +15,7 @@ import { reverseGeocode } from "./locationService";
 import { evaluatePolicyRulesForIncidentVolume } from "./ir/policyRuleEngineService";
 import { ensureIncidentWorkflowArtifacts } from "./supportWorkflowService";
 import { notifyIncidentLifecycle } from "./notificationService";
+import { buildIncidentScopeWhere } from "./accessControlService";
 
 type IncidentReportInput = {
   qrCodeValue: string;
@@ -408,14 +409,12 @@ export const createIncidentFromReport = async (
   return incident;
 };
 
-export const getIncidentByIdScoped = async (incidentId: string, actor: { role: UserRole; licenseeId?: string | null }) => {
-  const where: any = { id: incidentId };
-  if (actor.role !== UserRole.SUPER_ADMIN && actor.role !== UserRole.PLATFORM_SUPER_ADMIN) {
-    where.licenseeId = actor.licenseeId || "__none__";
-  }
-
+export const getIncidentByIdScoped = async (
+  incidentId: string,
+  actor: { role: UserRole; userId?: string | null; licenseeId?: string | null; linkedLicenseeIds?: string[] | null }
+) => {
   return prisma.incident.findFirst({
-    where,
+    where: await buildIncidentScopeWhere(actor, { id: incidentId }),
     include: {
       assignedToUser: { select: { id: true, name: true, email: true } },
       handoff: true,
@@ -442,7 +441,9 @@ export const getIncidentByIdScoped = async (incidentId: string, actor: { role: U
 
 export const listIncidentsScoped = async (input: {
   role: UserRole;
+  actorUserId?: string | null;
   actorLicenseeId?: string | null;
+  linkedLicenseeIds?: string[] | null;
   filters: {
     status?: IncidentStatus;
     severity?: IncidentSeverity;
@@ -456,12 +457,19 @@ export const listIncidentsScoped = async (input: {
     offset: number;
   };
 }) => {
-  const where: any = {};
-  if (input.role !== UserRole.SUPER_ADMIN && input.role !== UserRole.PLATFORM_SUPER_ADMIN) {
-    where.licenseeId = input.actorLicenseeId || "__none__";
-  } else if (input.filters.licenseeId) {
-    where.licenseeId = input.filters.licenseeId;
+  const baseWhere: any = {};
+  if ((input.role === UserRole.SUPER_ADMIN || input.role === UserRole.PLATFORM_SUPER_ADMIN) && input.filters.licenseeId) {
+    baseWhere.licenseeId = input.filters.licenseeId;
   }
+  const where: any = await buildIncidentScopeWhere(
+    {
+      role: input.role,
+      userId: input.actorUserId || null,
+      licenseeId: input.actorLicenseeId || null,
+      linkedLicenseeIds: input.linkedLicenseeIds || null,
+    },
+    baseWhere
+  );
   if (input.filters.status) where.status = input.filters.status;
   if (input.filters.severity) where.severity = input.filters.severity;
   if (input.filters.assignedTo) where.assignedToUserId = input.filters.assignedTo;

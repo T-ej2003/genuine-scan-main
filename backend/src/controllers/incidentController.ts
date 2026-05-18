@@ -402,7 +402,9 @@ export const listIncidents = async (req: AuthRequest, res: Response) => {
 
     const result = await listIncidentsScoped({
       role: req.user.role,
+      actorUserId: req.user.userId,
       actorLicenseeId: req.user.licenseeId,
+      linkedLicenseeIds: req.user.linkedLicenseeIds,
       filters: {
         status: status || undefined,
         severity: severity || undefined,
@@ -440,7 +442,9 @@ export const getIncident = async (req: AuthRequest, res: Response) => {
 
     const incident = await getIncidentByIdScoped(incidentId, {
       role: req.user.role,
+      userId: req.user.userId,
       licenseeId: req.user.licenseeId,
+      linkedLicenseeIds: req.user.linkedLicenseeIds,
     });
     if (!incident) return res.status(404).json({ success: false, error: "Incident not found" });
 
@@ -467,7 +471,9 @@ export const patchIncident = async (req: AuthRequest, res: Response) => {
 
     const incident = await getIncidentByIdScoped(incidentId, {
       role: req.user.role,
+      userId: req.user.userId,
       licenseeId: req.user.licenseeId,
+      linkedLicenseeIds: req.user.linkedLicenseeIds,
     });
     if (!incident) return res.status(404).json({ success: false, error: "Incident not found" });
 
@@ -599,7 +605,9 @@ export const addIncidentEventNote = async (req: AuthRequest, res: Response) => {
 
     const incident = await getIncidentByIdScoped(incidentId, {
       role: req.user.role,
+      userId: req.user.userId,
       licenseeId: req.user.licenseeId,
+      linkedLicenseeIds: req.user.linkedLicenseeIds,
     });
     if (!incident) return res.status(404).json({ success: false, error: "Incident not found" });
 
@@ -636,7 +644,9 @@ export const addIncidentEvidence = async (req: AuthRequest, res: Response) => {
 
     const incident = await getIncidentByIdScoped(incidentId, {
       role: req.user.role,
+      userId: req.user.userId,
       licenseeId: req.user.licenseeId,
+      linkedLicenseeIds: req.user.linkedLicenseeIds,
     });
     if (!incident) return res.status(404).json({ success: false, error: "Incident not found" });
 
@@ -730,7 +740,9 @@ export const notifyIncidentCustomer = async (req: AuthRequest, res: Response) =>
 
     const incident = await getIncidentByIdScoped(incidentId, {
       role: req.user.role,
+      userId: req.user.userId,
       licenseeId: req.user.licenseeId,
+      linkedLicenseeIds: req.user.linkedLicenseeIds,
     });
     if (!incident) return res.status(404).json({ success: false, error: "Incident not found" });
 
@@ -804,7 +816,9 @@ export const exportIncidentPdfHook = async (req: AuthRequest, res: Response) => 
 
     const incident = await getIncidentByIdScoped(incidentId, {
       role: req.user.role,
+      userId: req.user.userId,
       licenseeId: req.user.licenseeId,
+      linkedLicenseeIds: req.user.linkedLicenseeIds,
     });
     if (!incident) return res.status(404).json({ success: false, error: "Incident not found" });
 
@@ -829,7 +843,7 @@ export const exportIncidentPdfHook = async (req: AuthRequest, res: Response) => 
     });
 
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename=\"${fileName}\"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     return res.status(200).send(pdfBuffer);
   } catch (error) {
     console.error("exportIncidentPdfHook error:", error);

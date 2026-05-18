@@ -35,7 +35,6 @@ export const applyPublicSemantics = <T extends Record<string, unknown>>(
 
 const withDecisionMetadata = <T extends Record<string, unknown>>(payload: T, decision: VerificationDecisionSummary) => ({
   ...payload,
-  decisionId: decision.decisionId,
   decisionVersion: decision.decisionVersion,
   proofTier: decision.proofTier,
   reasonCodes: decision.reasonCodes,
@@ -43,7 +42,6 @@ const withDecisionMetadata = <T extends Record<string, unknown>>(payload: T, dec
   replacementStatus: decision.replacementStatus,
   degradationMode: decision.degradationMode,
   customerTrustLevel: decision.customerTrustLevel,
-  replacementChainId: decision.replacementChainId || null,
   publicOutcome: decision.publicOutcome || (payload as any).publicOutcome || null,
   riskDisposition: decision.riskDisposition || (payload as any).riskDisposition || null,
   messageKey: decision.messageKey || (payload as any).messageKey || null,

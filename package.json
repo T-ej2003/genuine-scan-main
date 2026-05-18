@@ -35,6 +35,8 @@
     "check:rotation-evidence": "node scripts/check-rotation-evidence.mjs",
     "check:rotation-cleanup": "node scripts/check-rotation-cleanup.mjs",
     "check:security-guardrails": "node scripts/check-security-guardrails.mjs",
+    "check:prisma-scope-guardrails": "node scripts/check-prisma-scope-guardrails.mjs",
+    "lint:security-scope": "node scripts/lint-security-scope.mjs",
     "check:trust-alert-bindings": "node scripts/check-trust-alert-bindings.mjs",
     "check:trust-observability": "node scripts/check-trust-observability.mjs",
     "ops:regional-drift": "node scripts/regional-drift.mjs",
@@ -55,7 +57,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "typecheck:incremental": "npm run typecheck",
-    "verify:guardrails": "npm run check:security-guardrails && npm run check:documents && npm run check:aws-dr-safety && npm run check:asg-multi-instance-readiness && npm run check:baseline-secret-patterns && npm run check:branch-secret-diff && npm run check:route-rate-limit-contracts && npm run check:rate-limit-observability && npm run check:dependency-audit && npm run check:trust-observability && npm run check:trust-alert-bindings && npm run check:cloudwatch-config && npm run check:rotation-evidence && npm run check:rotation-cleanup && npm run check:customer-auth-cutover && npm run check:nginx-hardening && npm run check:public-metadata-surface && npm run verify:seo",
+    "verify:guardrails": "npm run check:security-guardrails && npm run check:prisma-scope-guardrails && npm run check:documents && npm run check:aws-dr-safety && npm run check:asg-multi-instance-readiness && npm run check:baseline-secret-patterns && npm run check:branch-secret-diff && npm run check:route-rate-limit-contracts && npm run check:rate-limit-observability && npm run check:dependency-audit && npm run check:trust-observability && npm run check:trust-alert-bindings && npm run check:cloudwatch-config && npm run check:rotation-evidence && npm run check:rotation-cleanup && npm run check:customer-auth-cutover && npm run check:nginx-hardening && npm run check:public-metadata-surface && npm run verify:seo",
     "verify:seo": "node scripts/verify-seo-indexing.mjs",
     "verify:ci:security": "npm run verify:guardrails && npm run check:release-evidence-refs",
     "verify:ci:frontend": "npm run typecheck && node scripts/check-architecture-guardrails.mjs && npm run check:budgets && npm test && npm run build",
@@ -69,6 +71,7 @@
     "verify:staging-smoke": "node scripts/verify-staging-smoke.mjs",
     "backfill:provenance:dry-run": "node scripts/backfill-provenance-artifact.mjs",
     "backfill:provenance:execute": "node scripts/backfill-provenance-artifact.mjs --execute",
+    "security:release-gate": "git diff --check && npm --prefix backend run build && node backend/tests/accessControlIsolation.test.js && node backend/tests/tenantIsolationExtended.test.js && node backend/tests/securityResponseSurface.test.js && node backend/tests/securityRouteSurface.test.js && node scripts/check-prisma-scope-guardrails.mjs && node --test scripts/tests/prisma-scope-guardrails.test.mjs && npm --prefix backend run test:trust-critical:compiled && npm run typecheck && npm run build && npm run lint:security-scope",
     "verify:release": "npm run verify:guardrails && npm run check:release-evidence-refs && npm run typecheck && npm run build && npm run test:trust-critical && npm test && npm --prefix backend run prisma:generate && (cd backend && npm test)"
   },
   "dependencies": {
