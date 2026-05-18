@@ -9,6 +9,7 @@ export type PrintJobCreateFailureLogParams = {
   transactionStage?: string | null;
   exceptionName?: string | null;
   exceptionCode?: string | null;
+  cryptoMetadata?: Record<string, unknown> | null;
   missingFields?: string[];
   validationIssuePaths?: string[];
   batchId?: string | null;
@@ -56,6 +57,7 @@ export const buildAndLogPrintJobCreateFailure = async (
       reason: params.reason,
       failureStage: params.failureStage || null,
       transactionStage: params.transactionStage || null,
+      cryptoMetadata: params.cryptoMetadata || null,
       missingFields: params.missingFields || [],
       validationIssuePaths: params.validationIssuePaths || [],
       batchId: params.batchId || null,
@@ -76,6 +78,7 @@ export const buildAndLogPrintJobCreateFailure = async (
       reason: params.reason,
       failureStage: params.failureStage || null,
       transactionStage: params.transactionStage || null,
+      cryptoMetadata: params.cryptoMetadata || null,
       missingFields: params.missingFields || [],
       validationIssuePaths: params.validationIssuePaths || [],
       batchId: params.batchId || null,

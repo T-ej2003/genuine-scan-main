@@ -16,6 +16,7 @@ type PrintJobErrorCode =
   | "print_job_conflict"
   | "print_job_transaction_failed"
   | "print_item_reservation_failed"
+  | "print_signing_configuration_invalid"
   | "print_service_unavailable"
   | "session_expired"
   | "unsupported_printer_route";
@@ -324,6 +325,17 @@ export const describePrintJobCreateFailure = (error: any, context?: PrintJobFail
   }
   const prismaCode = String(error?.code || "").trim();
   const prismaTarget = Array.isArray(error?.meta?.target) ? error.meta.target.join(",") : String(error?.meta?.target || "");
+  if (["QR_SIGNING_CONFIGURATION_INVALID", "QR_SIGNING_KEY_TYPE_UNSUPPORTED"].includes(prismaCode)) {
+    return {
+      status: 500,
+      logReason: "print_signing_configuration_invalid",
+      payload: withFailureContext({
+        code: "print_signing_configuration_invalid",
+        message: "Print token signing is not configured correctly. Contact support with the request ID.",
+        data: error?.safeCryptoMetadata ? { cryptoMetadata: error.safeCryptoMetadata } : undefined,
+      }, context),
+    };
+  }
   if (prismaCode === "P2002" && hasAny(prismaTarget.toLowerCase(), ["qrcodeid", "printitem"])) {
     return {
       status: 400,

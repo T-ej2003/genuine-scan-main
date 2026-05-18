@@ -155,6 +155,29 @@ const run = () => {
     "Unknown downstream failures should never be invalid_payload after validation"
   );
 
+  const signingFailure = describePrintJobCreateFailure(
+    Object.assign(new Error("QR signing key configuration is invalid"), {
+      code: "QR_SIGNING_CONFIGURATION_INVALID",
+      safeCryptoMetadata: {
+        operation: "key_import",
+        mode: "ed25519",
+        provider: "env",
+        keySourceLabel: "env:QR_SIGN_PRIVATE_KEY/QR_SIGN_PUBLIC_KEY",
+        errorCode: "ERR_OSSL_UNSUPPORTED",
+      },
+    }),
+    { requestId: "req-signing-1", failureStage: "transaction_started" }
+  );
+  assert(signingFailure.status === 500, "Signing configuration failures should be server configuration errors");
+  assert(
+    signingFailure.payload.errorCode === "print_signing_configuration_invalid",
+    "Signing configuration failures should be precise"
+  );
+  assert(
+    signingFailure.payload.data.cryptoMetadata.errorCode === "ERR_OSSL_UNSUPPORTED",
+    "Safe crypto metadata should preserve the OpenSSL error code"
+  );
+
   const contextualFailure = describePrintJobCreateFailure(new Error("Unexpected downstream failure"), {
     requestId: "req-print-123",
     failureStage: "transaction_started",

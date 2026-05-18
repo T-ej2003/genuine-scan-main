@@ -439,6 +439,7 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
       transactionStage,
       exceptionName: e?.name || null,
       exceptionCode: e?.code || null,
+      cryptoMetadata: e?.safeCryptoMetadata || null,
       missingFields: initialFailure.payload.details?.missingFields,
       batchId: requestShape.batchId,
       printerId: requestShape.printerId,

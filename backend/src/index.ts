@@ -34,6 +34,7 @@ import {
   hasManagedQrSignerBridgeRegistered,
   hasManagedQrSignerRefs,
   isManagedQrSignerRequested,
+  validateQrSigningConfiguration,
 } from "./services/qrTokenService";
 import { bootstrapConfiguredSuperAdmin } from "./services/auth/superAdminBootstrapService";
 
@@ -178,6 +179,16 @@ if (process.env.NODE_ENV === "production") {
     logger.error(
       "Refusing to start: production QR signing must use Ed25519 when QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION is enabled."
     );
+    process.exit(1);
+  }
+
+  try {
+    validateQrSigningConfiguration();
+  } catch (error: any) {
+    logger.error("Refusing to start: QR signing configuration failed runtime validation.", {
+      code: String(error?.code || "").trim() || null,
+      cryptoMetadata: error?.safeCryptoMetadata || null,
+    });
     process.exit(1);
   }
 

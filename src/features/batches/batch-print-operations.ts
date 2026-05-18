@@ -251,6 +251,9 @@ export const printJobCreateFailureMessage = (response: {
   if (errorCode === "print_item_reservation_failed") {
     return "Print items could not be reserved for this batch. Refresh and try again.";
   }
+  if (errorCode === "print_signing_configuration_invalid") {
+    return `Print token signing is not configured correctly.${requestSuffix} Contact support with this request ID.`;
+  }
   if (errorCode === "internal_print_job_create_failed") {
     return `Print job could not be started.${requestSuffix} Please refresh printer setup and try again.`;
   }

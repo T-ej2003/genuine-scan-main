@@ -18,6 +18,7 @@ export const buildPrintJobCreateDiagnostics = async (
     parsedQuantity?: number | null;
     exceptionName?: string | null;
     exceptionCode?: string | null;
+    cryptoMetadata?: Record<string, unknown> | null;
     transactionStage?: string | null;
   }
 ) => {
@@ -80,6 +81,7 @@ export const buildPrintJobCreateDiagnostics = async (
       name: params.exceptionName || null,
       code: params.exceptionCode || null,
     },
+    crypto: params.cryptoMetadata || null,
     batch: {
       present: Boolean(params.batchId),
       validForManufacturer: Boolean(batch),

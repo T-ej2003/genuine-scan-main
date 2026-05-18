@@ -62,6 +62,7 @@ export const createPrintJobRecords = async (params: {
       }
 
       onStage("print_job_prepare_tokens", "print_job_prepare_tokens");
+      let cryptoMetadataLogged = false;
       const prepared = reservedRows.map((qr) => {
         const nonce = randomNonce();
         const payload = {
@@ -74,7 +75,16 @@ export const createPrintJobRecords = async (params: {
           exp: Math.floor(expAt.getTime() / 1000),
           nonce,
         };
-        const token = signQrPayload(payload);
+        const token = signQrPayload(payload, {
+          onCryptoMetadata: (metadata) => {
+            if (cryptoMetadataLogged) return;
+            cryptoMetadataLogged = true;
+            onEvent("crypto_metadata", {
+              transactionStage: "print_job_prepare_tokens",
+              ...metadata,
+            });
+          },
+        });
         const tokenHash = hashToken(token);
         return { qr, nonce, tokenHash };
       });
