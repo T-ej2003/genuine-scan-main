@@ -18,7 +18,7 @@ on:
       - "windows-connector-v*"
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
   attestations: write
   artifact-metadata: write
@@ -88,6 +88,9 @@ jobs:
           if (-not $version) {
             $today = [DateTime]::UtcNow
             $version = "{0}.{1}.{2}" -f $today.Year, $today.Month, $today.Day
+          }
+          if ($version -eq "2026.5.10") {
+            throw "Refusing to build stale connector version 2026.5.10. Use 2026.5.19 or newer."
           }
 
           $webAppBaseUrl = "$env:INPUT_WEB_APP_BASE_URL".Trim()
@@ -215,6 +218,42 @@ jobs:
             }
           }
 
+      - name: Publish signed Windows connector manifest
+        shell: pwsh
+        env:
+          WINDOWS_CONNECTOR_PUBLISHER_NAME: ${{ vars.WINDOWS_CONNECTOR_PUBLISHER_NAME }}
+        run: |
+          $signedInstaller = Join-Path $env:WINDOWS_RELEASE_OUTPUT_DIR "MSCQR-Connector-Windows-${env:CONNECTOR_RELEASE_VERSION}.exe"
+          if (-not (Test-Path $signedInstaller)) {
+            throw "Signed Windows installer was not found: $signedInstaller"
+          }
+
+          $publisherName = "$env:WINDOWS_CONNECTOR_PUBLISHER_NAME".Trim()
+          if (-not $publisherName) {
+            $publisherName = "L&D Health Ltd"
+          }
+
+          $env:WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH = $signedInstaller
+          $env:WINDOWS_CONNECTOR_PUBLISHER_NAME = $publisherName
+          $env:WINDOWS_CONNECTOR_SIGNED_AT = (Get-Date).ToUniversalTime().ToString("o")
+          npm --prefix backend run connector:windows:publish-signed
+
+      - name: Commit signed connector release files
+        if: github.ref_type == 'branch'
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "backend/local-print-agent/releases/manifest.json" "backend/local-print-agent/releases/${env:CONNECTOR_RELEASE_VERSION}/windows"
+          $changes = git diff --cached --name-only
+          if (-not $changes) {
+            Write-Host "No signed connector release file changes to commit."
+            exit 0
+          }
+
+          git commit -m "Publish Windows connector ${env:CONNECTOR_RELEASE_VERSION}"
+          git push origin "HEAD:${env:GITHUB_REF_NAME}"
+
       - name: Generate backend dependency SBOM
         id: sbom
         shell: pwsh
@@ -275,5 +314,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mscqr-windows-connector-signed-${{ steps.release_settings.outputs.connector_release_version }}
-          path: ${{ steps.release_settings.outputs.windows_release_output_dir }}
+          path: |
+            ${{ steps.release_settings.outputs.windows_release_output_dir }}
+            backend/local-print-agent/releases/manifest.json
           if-no-files-found: error

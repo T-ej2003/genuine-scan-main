@@ -16,15 +16,14 @@ import {
   Sparkles,
   Workflow,
 } from "lucide-react";
-
 import { BrandLockup } from "@/components/brand/BrandLockup";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LegalFooter } from "@/components/trust/LegalFooter";
+import { ConnectorReleaseDiagnostics } from "@/features/connector/ConnectorReleaseDiagnostics";
 import { cn } from "@/lib/utils";
 import apiClient from "@/lib/api-client";
-
 type ConnectorPlatformRelease = {
   platform: "macos" | "windows";
   label: string;
@@ -38,21 +37,26 @@ type ConnectorPlatformRelease = {
   architecture: string;
   bytes: number;
   sha256: string;
+  protocolVersion?: string | null;
+  buildVersion?: string | null;
   notes: string[];
   contentType: string;
   downloadPath: string;
   downloadUrl: string;
 };
-
 type LatestConnectorRelease = {
   productName: string;
   latestVersion: string;
+  requiredProtocolVersion?: string | null;
+  minimumBuildVersion?: string | null;
   supportPath: string;
   helpPath: string;
   setupGuidePath: string;
   release: {
     version: string;
     publishedAt: string;
+    requiredProtocolVersion?: string | null;
+    minimumBuildVersion?: string | null;
     summary: string;
     notes: string[];
     platforms: {
@@ -61,14 +65,18 @@ type LatestConnectorRelease = {
     };
   };
 };
-
 type InvitePreviewResponse = Awaited<ReturnType<typeof apiClient.getInvitePreview>>;
+type LocalConnectorStatus = {
+  reachable: boolean;
+  agentVersion: string | null;
+  buildVersion: string | null;
+  protocolVersion: string | null;
+};
 type NavigatorWithUserAgentData = Navigator & {
   userAgentData?: {
     platform?: string;
   };
 };
-
 type DownloadCard = ConnectorPlatformRelease & {
   title: string;
   description: string;
@@ -79,44 +87,34 @@ type DownloadCard = ConnectorPlatformRelease & {
   href: string;
   iconSurfaceClass: string;
 };
-
 const formatBytes = (value: number) => {
   if (!Number.isFinite(value) || value <= 0) return "Download available";
-
   const units = ["B", "KB", "MB", "GB"];
   let size = value;
   let index = 0;
-
   while (size >= 1024 && index < units.length - 1) {
     size /= 1024;
     index += 1;
   }
-
   return `${size.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 };
-
 const formatPublishedDate = (value: string) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Latest release";
-
   return new Intl.DateTimeFormat(undefined, {
     day: "2-digit",
     month: "short",
     year: "numeric",
   }).format(date);
 };
-
 const detectPlatform = () => {
   if (typeof navigator === "undefined") return "unknown";
-
   const nav = navigator as NavigatorWithUserAgentData;
   const ua = `${nav.userAgent || ""} ${nav.userAgentData?.platform || ""}`.toLowerCase();
-
   if (ua.includes("mac")) return "macos";
   if (ua.includes("win")) return "windows";
   return "unknown";
 };
-
 const ensureApiDownloadPath = (value: string) => {
   const normalized = value.startsWith("public/") ? `/${value}` : value;
   if (normalized.startsWith("/public/connector/download/")) {
@@ -124,36 +122,29 @@ const ensureApiDownloadPath = (value: string) => {
   }
   return normalized;
 };
-
 const normalizeDownloadHref = (downloadUrl: string, downloadPath: string) => {
   const candidate = String(downloadUrl || downloadPath || "").trim();
   if (!candidate) return "#";
-
   const origin = typeof window !== "undefined" ? window.location.origin : "https://mscqr.local";
   const absolute = /^[a-z][a-z\d+\-.]*:\/\//i.test(candidate);
-
   try {
     const url = new URL(candidate, origin);
     if (url.pathname.startsWith("/public/connector/download/")) {
       url.pathname = `/api${url.pathname}`;
     }
-
     if (!absolute) {
       return `${url.pathname}${url.search}${url.hash}`;
     }
-
     return url.toString();
   } catch {
     return ensureApiDownloadPath(candidate);
   }
 };
-
 const shortenChecksum = (value: string) => {
   const checksum = String(value || "").trim();
   if (checksum.length <= 18) return checksum || "Unavailable";
   return `${checksum.slice(0, 12)}...${checksum.slice(-8)}`;
 };
-
 const platformCopy: Record<
   "macos" | "windows",
   {
@@ -182,19 +173,15 @@ const platformCopy: Record<
     iconSurfaceClass: "bg-sky-100 text-sky-700",
   },
 };
-
 const formatTrustLabel = (item: ConnectorPlatformRelease) => {
   if (item.platform !== "windows") {
     return item.trustLevel === "trusted" ? "Signed release" : "Unsigned release";
   }
-
   if (item.trustLevel === "trusted") {
     return "Signed Windows installer";
   }
-
   return item.installerKind === "zip" ? "Unsigned test package" : "Unsigned test installer";
 };
-
 const formatSignatureLabel = (item: ConnectorPlatformRelease) => {
   if (item.platform === "windows" && item.signatureStatus === "signed") return "Azure Artifact Signing / signed";
   if (item.signatureStatus === "signed") return "Signed";
@@ -202,7 +189,6 @@ const formatSignatureLabel = (item: ConnectorPlatformRelease) => {
   if (item.signatureStatus === "unsigned") return "Unsigned";
   return item.trustLevel === "trusted" ? "Signed" : "Unsigned";
 };
-
 const getWindowsUnsignedCopy = (
   item: ConnectorPlatformRelease,
 ): Pick<DownloadCard, "title" | "description" | "action" | "helper" | "icon" | "iconSurfaceClass"> => {
@@ -218,7 +204,6 @@ const getWindowsUnsignedCopy = (
       iconSurfaceClass: "bg-amber-100 text-amber-800",
     };
   }
-
   return {
     title: "Windows test installer",
     description:
@@ -230,21 +215,17 @@ const getWindowsUnsignedCopy = (
     iconSurfaceClass: "bg-amber-100 text-amber-800",
   };
 };
-
 const getDownloadCardCopy = (
   item: ConnectorPlatformRelease,
 ): Pick<DownloadCard, "title" | "description" | "action" | "helper" | "icon" | "iconSurfaceClass"> => {
   if (item.platform === "macos") {
     return platformCopy.macos;
   }
-
   if (item.trustLevel === "unsigned") {
     return getWindowsUnsignedCopy(item);
   }
-
   return platformCopy.windows;
 };
-
 const workspaceHighlights = [
   {
     icon: ShieldCheck,
@@ -262,7 +243,6 @@ const workspaceHighlights = [
     detail: "Published packages, setup help, and the live version number all stay on one page without the cramped split-screen shell.",
   },
 ];
-
 const setupSteps = [
   "Open this page on the same computer that is already connected to the printer.",
   "Choose the Mac or Windows package that matches that computer.",
@@ -271,17 +251,14 @@ const setupSteps = [
   "If the printer still needs OS-side attention, MSCQR opens Printer Setup and keeps the helper installed.",
   "Return to Batches and create the print job.",
 ];
-
 const automaticBehaviors = [
   "The printer helper starts automatically whenever that computer user signs in.",
   "MSCQR keeps reading the operating-system printer list and surfaces business-safe readiness states.",
   "Manufacturers stay inside the normal batch workflow instead of launching scripts or extra local tools.",
 ];
-
 export default function ConnectorDownload() {
   const [params] = useSearchParams();
   const inviteToken = useMemo(() => String(params.get("inviteToken") || "").trim(), [params]);
-
   const [release, setRelease] = useState<LatestConnectorRelease | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -293,29 +270,24 @@ export default function ConnectorDownload() {
     requiresConnector: boolean;
   }>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-
+  const [localConnector, setLocalConnector] = useState<LocalConnectorStatus | null>(null);
   const detectedPlatform = useMemo(() => detectPlatform(), []);
-
   useEffect(() => {
     let cancelled = false;
-
     const load = async () => {
       setLoading(true);
       setError(null);
-
-      const [releaseRes, previewRes] = await Promise.all([
+      const [releaseRes, previewRes, localRes] = await Promise.all([
         apiClient.getLatestConnectorRelease(),
         inviteToken ? apiClient.getInvitePreview(inviteToken) : Promise.resolve<InvitePreviewResponse | null>(null),
+        apiClient.getLocalPrintAgentStatus().catch(() => null),
       ]);
-
       if (cancelled) return;
-
       if (!releaseRes?.success || !releaseRes.data) {
         setError(releaseRes?.error || "Printer helper downloads are not available right now.");
       } else {
         setRelease(releaseRes.data as LatestConnectorRelease);
       }
-
       if (inviteToken) {
         if (previewRes?.success && previewRes.data) {
           setPreview(previewRes.data);
@@ -328,25 +300,34 @@ export default function ConnectorDownload() {
         setPreview(null);
         setPreviewError(null);
       }
-
+      setLocalConnector(
+        localRes?.success && localRes.data
+          ? {
+              reachable: true,
+              agentVersion: String((localRes.data as any).agentVersion || "").trim() || null,
+              buildVersion: String((localRes.data as any).buildVersion || "").trim() || null,
+              protocolVersion: String((localRes.data as any).protocolVersion || "").trim() || null,
+            }
+          : {
+              reachable: false,
+              agentVersion: null,
+              buildVersion: null,
+              protocolVersion: null,
+            },
+      );
       setLoading(false);
     };
-
     void load();
-
     return () => {
       cancelled = true;
     };
   }, [inviteToken]);
-
   const downloadCards = useMemo(() => {
     if (!release) return [] as DownloadCard[];
-
     return (["macos", "windows"] as const)
       .map((platformKey) => {
         const item = release.release.platforms[platformKey];
         if (!item) return null;
-
         return {
           ...item,
           ...getDownloadCardCopy(item),
@@ -356,28 +337,34 @@ export default function ConnectorDownload() {
       })
       .filter(Boolean) as DownloadCard[];
   }, [detectedPlatform, release]);
-
   const detectedCard = useMemo(
     () => (detectedPlatform === "unknown" ? null : downloadCards.find((item) => item.platform === detectedPlatform) || null),
     [detectedPlatform, downloadCards],
   );
-
   const recommendedCard = useMemo(
     () => detectedCard || (detectedPlatform === "unknown" ? downloadCards[0] || null : null),
     [detectedCard, detectedPlatform, downloadCards],
   );
-
   const missingDetectedPlatformRelease = detectedPlatform !== "unknown" && !detectedCard;
   const recommendedCardIsUnsignedWindows = recommendedCard?.platform === "windows" && recommendedCard.trustLevel === "unsigned";
   const recommendedCardIsUnsignedWindowsZip = recommendedCardIsUnsignedWindows && recommendedCard?.installerKind === "zip";
-
+  const requiredProtocol = release?.requiredProtocolVersion || release?.release.requiredProtocolVersion || "local-agent-direct-v2";
+  const availableConnectorVersion = release?.latestVersion || release?.release.version || "";
+  const installedConnectorVersion =
+    localConnector?.buildVersion || localConnector?.agentVersion || (localConnector?.reachable ? "Installed version not reported" : "Not detected");
+  const connectorUpdateRequired = Boolean(
+    localConnector?.reachable &&
+      (
+        (localConnector.protocolVersion && requiredProtocol && localConnector.protocolVersion !== requiredProtocol) ||
+        (localConnector.buildVersion && availableConnectorVersion && localConnector.buildVersion !== availableConnectorVersion)
+      ),
+  );
   const detectedPlatformLabel =
     detectedPlatform === "macos"
       ? "This computer looks like a Mac."
       : detectedPlatform === "windows"
         ? "This computer looks like Windows."
         : "Choose the installer that matches the computer connected to the printer.";
-
   const recommendedBadgeLabel = missingDetectedPlatformRelease
     ? detectedPlatform === "macos"
       ? "Signed Mac installer not published yet"
@@ -385,7 +372,6 @@ export default function ConnectorDownload() {
     : recommendedCard
       ? `${recommendedCard.title} available`
       : "Choose Mac or Windows";
-
   return (
     <div className="relative min-h-screen overflow-hidden bg-mscqr-background text-slate-950">
       <div className="pointer-events-none absolute inset-0">
@@ -393,7 +379,6 @@ export default function ConnectorDownload() {
         <div className="absolute right-[-6rem] top-32 h-80 w-80 rounded-full bg-sky-200/35 blur-3xl" />
         <div className="absolute bottom-[-8rem] left-1/3 h-80 w-80 rounded-full bg-amber-200/30 blur-3xl" />
       </div>
-
       <div className="relative mx-auto flex min-h-screen w-full max-w-[1580px] flex-col px-4 py-4 sm:px-6 sm:py-6 lg:px-10 lg:py-8">
         <div className="overflow-hidden rounded-[34px] border border-white/70 bg-white/70 shadow-[0_40px_120px_-70px_rgba(15,23,42,0.4)] backdrop-blur-xl">
           <div className="border-b border-slate-200/80 px-5 py-5 sm:px-8 sm:py-6">
@@ -404,7 +389,6 @@ export default function ConnectorDownload() {
                 iconClassName="h-8 w-8"
                 textClassName="text-2xl text-slate-950"
               />
-
               <div className="flex flex-wrap gap-3">
                 <Button asChild size="sm" variant="outline">
                   <Link to={release?.setupGuidePath || "/help/manufacturer"} data-testid="open-printer-helper-guide">
@@ -421,7 +405,6 @@ export default function ConnectorDownload() {
               </div>
             </div>
           </div>
-
           <div className="space-y-6 px-5 py-5 sm:px-8 sm:py-8 lg:space-y-8">
             {loading ? (
               <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
@@ -429,7 +412,6 @@ export default function ConnectorDownload() {
                 Checking the latest printer helper release...
               </div>
             ) : null}
-
             {error ? (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
@@ -437,7 +419,6 @@ export default function ConnectorDownload() {
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             ) : null}
-
             {preview ? (
               <Alert className="border-emerald-200 bg-emerald-50 text-emerald-950">
                 <ShieldCheck className="h-4 w-4 text-emerald-700" />
@@ -458,14 +439,12 @@ export default function ConnectorDownload() {
                 </AlertDescription>
               </Alert>
             ) : null}
-
             {!preview && previewError ? (
               <Alert>
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>{previewError}</AlertDescription>
               </Alert>
             ) : null}
-
             <div className="grid gap-6 xl:grid-cols-[1.08fr_0.92fr]">
               <section className="relative overflow-hidden rounded-[32px] border border-mscqr-border bg-white px-6 py-7 text-mscqr-primary shadow-sm sm:px-8 sm:py-8 lg:px-10">
                 <div className="absolute inset-0 bg-mscqr-accent-soft/25" />
@@ -480,7 +459,6 @@ export default function ConnectorDownload() {
                       </Badge>
                     ) : null}
                   </div>
-
                   <div className="space-y-4">
                     <h1 className="max-w-3xl text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl">
                       Install the MSCQR printer helper on the computer that actually prints.
@@ -489,7 +467,6 @@ export default function ConnectorDownload() {
                       Open this page on the computer that prints garment labels, install the printer helper once, then return to batches to print and confirm QR labels.
                     </p>
                   </div>
-
                   <div className="grid gap-3 md:grid-cols-3">
                     {workspaceHighlights.map((item) => (
                       <div
@@ -508,7 +485,6 @@ export default function ConnectorDownload() {
                   </div>
                 </div>
               </section>
-
               <section className="rounded-[32px] border border-emerald-200/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(238,248,244,0.88))] p-6 shadow-[0_30px_80px_-60px_rgba(15,23,42,0.45)] sm:p-8">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
@@ -516,7 +492,6 @@ export default function ConnectorDownload() {
                   </Badge>
                   {release ? <Badge variant="outline">Published {formatPublishedDate(release.release.publishedAt)}</Badge> : null}
                 </div>
-
                 <div className="mt-5 space-y-4">
                   <h2 className="text-3xl font-semibold tracking-tight text-slate-950">
                     Install once on the printer computer.
@@ -527,7 +502,6 @@ export default function ConnectorDownload() {
                     in after that. Windows setup checks the local printer before it says the computer is ready.
                   </p>
                 </div>
-
                 {missingDetectedPlatformRelease ? (
                   <Alert className="mt-5 border-amber-200 bg-amber-50 text-amber-950">
                     <AlertCircle className="h-4 w-4 text-amber-700" />
@@ -543,7 +517,6 @@ export default function ConnectorDownload() {
                     </AlertDescription>
                   </Alert>
                 ) : null}
-
                 {recommendedCardIsUnsignedWindows ? (
                   <Alert className="mt-5 border-amber-200 bg-amber-50 text-amber-950">
                     <AlertCircle className="h-4 w-4 text-amber-700" />
@@ -569,7 +542,6 @@ export default function ConnectorDownload() {
                     </AlertDescription>
                   </Alert>
                 ) : null}
-
                 <div className="mt-6 grid gap-3 sm:grid-cols-2">
                   <div className="rounded-[24px] border border-slate-200 bg-white/80 p-4">
                     <div className="flex items-center gap-3">
@@ -582,7 +554,6 @@ export default function ConnectorDownload() {
                       </div>
                     </div>
                   </div>
-
                   <div className="rounded-[24px] border border-slate-200 bg-white/80 p-4">
                     <div className="flex items-center gap-3">
                       <div className="rounded-2xl bg-slate-950 p-3 text-white">
@@ -597,7 +568,6 @@ export default function ConnectorDownload() {
                     </div>
                   </div>
                 </div>
-
                 <div className="mt-6 flex flex-wrap gap-3">
                   {recommendedCard ? (
                     <Button asChild size="lg" className="sm:min-w-[240px]">
@@ -623,7 +593,6 @@ export default function ConnectorDownload() {
                 </div>
               </section>
             </div>
-
             {release ? (
               <section className="rounded-[32px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.92))] p-6 sm:p-8 lg:p-10">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -637,17 +606,22 @@ export default function ConnectorDownload() {
                       inside the normal MSCQR workflow.
                     </p>
                   </div>
-
                   <div className="rounded-[24px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
                     <div className="font-semibold text-slate-950">{release.productName}</div>
                     <div>Version {release.latestVersion}</div>
+                    <div>Required protocol {requiredProtocol}</div>
                   </div>
                 </div>
-
+                <ConnectorReleaseDiagnostics
+                  availableVersion={availableConnectorVersion}
+                  requiredProtocol={requiredProtocol}
+                  installedVersion={installedConnectorVersion}
+                  reachable={Boolean(localConnector?.reachable)}
+                  updateRequired={connectorUpdateRequired}
+                />
                 <div className="mt-8 grid gap-5 xl:grid-cols-2">
                   {downloadCards.map((item) => {
                     const Icon = item.icon;
-
                     return (
                       <article
                         key={item.platform}
@@ -662,7 +636,6 @@ export default function ConnectorDownload() {
                               <div className={cn("flex h-14 w-14 items-center justify-center rounded-[20px]", item.iconSurfaceClass)}>
                                 <Icon className="h-7 w-7" />
                               </div>
-
                               <div className="space-y-2">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <h3 className="text-2xl font-semibold text-slate-950">{item.title}</h3>
@@ -673,18 +646,15 @@ export default function ConnectorDownload() {
                                 <p className="max-w-xl text-sm leading-6 text-slate-600">{item.description}</p>
                               </div>
                             </div>
-
                             <div className="flex flex-wrap gap-2">
                               <Badge variant="outline">{item.architecture}</Badge>
                               <Badge variant="outline">{item.installerKind.toUpperCase()}</Badge>
                               <Badge variant="outline">{formatBytes(item.bytes)}</Badge>
                             </div>
                           </div>
-
                           <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(220px,0.58fr)]">
                             <div className="space-y-4">
                               <p className="text-sm leading-6 text-slate-600">{item.helper}</p>
-
                               {item.platform === "windows" && item.trustLevel === "unsigned" ? (
                                 <Alert className="border-amber-200 bg-amber-50 text-amber-950">
                                   <AlertCircle className="h-4 w-4 text-amber-700" />
@@ -709,7 +679,6 @@ export default function ConnectorDownload() {
                                   </AlertDescription>
                                 </Alert>
                               ) : null}
-
                               <ul className="space-y-3">
                                 {item.notes.map((note) => (
                                   <li key={note} className="flex items-start gap-3 text-sm leading-6 text-slate-600">
@@ -719,7 +688,6 @@ export default function ConnectorDownload() {
                                 ))}
                               </ul>
                             </div>
-
                             <div className="rounded-[24px] border border-slate-200 bg-slate-50/90 p-4">
                               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                                 Package details
@@ -729,7 +697,6 @@ export default function ConnectorDownload() {
                                   <div className="text-xs uppercase tracking-[0.16em] text-slate-400">File</div>
                                   <div className="mt-1 break-all font-medium text-slate-900">{item.filename}</div>
                                 </div>
-
                                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
                                   <div className="rounded-2xl bg-white px-3 py-2">
                                     <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Type</div>
@@ -744,25 +711,26 @@ export default function ConnectorDownload() {
                                     <div className="mt-1 font-medium text-slate-900">{formatTrustLabel(item)}</div>
                                   </div>
                                   <div className="rounded-2xl bg-white px-3 py-2">
+                                    <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Protocol</div>
+                                    <div className="mt-1 break-all font-medium text-slate-900">{item.protocolVersion || requiredProtocol}</div>
+                                  </div>
+                                  <div className="rounded-2xl bg-white px-3 py-2">
                                     <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Signature</div>
                                     <div className="mt-1 font-medium text-slate-900">{formatSignatureLabel(item)}</div>
                                   </div>
                                 </div>
-
                                 {item.publisherName ? (
                                   <div>
                                     <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Publisher</div>
                                     <div className="mt-1 font-medium text-slate-900">{item.publisherName}</div>
                                   </div>
                                 ) : null}
-
                                 {item.signedAt ? (
                                   <div>
                                     <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Signed</div>
                                     <div className="mt-1 font-medium text-slate-900">{formatPublishedDate(item.signedAt)}</div>
                                   </div>
                                 ) : null}
-
                                 <div>
                                   <div className="text-xs uppercase tracking-[0.16em] text-slate-400">SHA-256</div>
                                   <code className="mt-1 block rounded-xl bg-white px-3 py-2 text-xs text-slate-700">
@@ -772,7 +740,6 @@ export default function ConnectorDownload() {
                               </div>
                             </div>
                           </div>
-
                           <div className="flex flex-col gap-3 sm:flex-row">
                             <Button asChild size="lg" className="sm:min-w-[230px]">
                               <a href={item.href} data-testid={`download-printer-helper-${item.platform}`}>
@@ -794,7 +761,6 @@ export default function ConnectorDownload() {
                 </div>
               </section>
             ) : null}
-
             {release ? (
               <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
                 <section className="rounded-[32px] border border-slate-200 bg-white/90 p-6 sm:p-8">
@@ -809,7 +775,6 @@ export default function ConnectorDownload() {
                       </p>
                     </div>
                   </div>
-
                   <div className="mt-6 grid gap-4">
                     {setupSteps.map((step, index) => (
                       <div key={step} className="flex gap-4 rounded-[24px] border border-slate-200 bg-slate-50/75 p-4">
@@ -821,13 +786,11 @@ export default function ConnectorDownload() {
                     ))}
                   </div>
                 </section>
-
                 <section className="rounded-[32px] bg-slate-950 p-6 text-white sm:p-8">
                   <div className="flex items-center gap-3 text-emerald-300">
                     <Sparkles className="h-5 w-5" />
                     <h3 className="text-2xl font-semibold tracking-tight text-white">What stays automatic after install</h3>
                   </div>
-
                   <div className="mt-6 space-y-4">
                     {automaticBehaviors.map((item) => (
                       <div key={item} className="flex items-start gap-3 rounded-[24px] border border-white/10 bg-white/5 p-4">
@@ -836,7 +799,6 @@ export default function ConnectorDownload() {
                       </div>
                     ))}
                   </div>
-
                   <div className="mt-6 rounded-[24px] border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300">
                     If your printer is a shared office AirPrint or IPP printer, your admin can also save it as a shared
                     network printer. Use the printer helper when printing depends on that computer&apos;s local printer setup.

@@ -10,6 +10,7 @@ vi.mock("@/lib/api-client", () => ({
   default: {
     getLatestConnectorRelease: vi.fn(),
     getInvitePreview: vi.fn(),
+    getLocalPrintAgentStatus: vi.fn(),
   },
 }));
 
@@ -23,17 +24,29 @@ const expectAllLinksToMatch = (links: HTMLElement[], href: string) => {
 describe("ConnectorDownload", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
+      success: true,
+      data: {
+        agentVersion: "2026.5.19",
+        buildVersion: "2026.5.19",
+        protocolVersion: "local-agent-direct-v2",
+      },
+    } as any);
     vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue({
       success: true,
       data: {
         productName: "MSCQR Connector",
-        latestVersion: "2026.5.10",
+        latestVersion: "2026.5.19",
+        requiredProtocolVersion: "local-agent-direct-v2",
+        minimumBuildVersion: "2026.5.19",
         supportPath: "/help/manufacturer",
         helpPath: "/connector-download",
         setupGuidePath: "/help/manufacturer",
         release: {
-          version: "2026.5.10",
-          publishedAt: "2026-05-10T01:39:08.000Z",
+          version: "2026.5.19",
+          publishedAt: "2026-05-19T00:00:00.000Z",
+          requiredProtocolVersion: "local-agent-direct-v2",
+          minimumBuildVersion: "2026.5.19",
           summary: "Install once and print without manual startup.",
           notes: [],
           platforms: {
@@ -58,16 +71,18 @@ describe("ConnectorDownload", () => {
               trustLevel: "trusted",
               signatureStatus: "signed",
               publisherName: "L&D Health Ltd",
-              signedAt: "2026-05-10T01:39:08.000Z",
+              signedAt: "2026-05-19T00:00:00.000Z",
               windowsTrustMode: "trusted",
-              filename: "MSCQR-Connector-Windows-2026.5.10.exe",
+              filename: "MSCQR-Connector-Windows-2026.5.19.exe",
               architecture: "x64",
               bytes: 15587056,
               sha256: "0305cc85fe1af4ff65f87d584028d03745b6b70a227100d2f13f9ebe234e2d41",
+              protocolVersion: "local-agent-direct-v2",
+              buildVersion: "2026.5.19",
               notes: ["Run the signed Windows installer once."],
               contentType: "application/vnd.microsoft.portable-executable",
-              downloadPath: "/api/public/connector/download/2026.5.10/windows",
-              downloadUrl: "https://example.test/api/public/connector/download/2026.5.10/windows",
+              downloadPath: "/api/public/connector/download/2026.5.19/windows",
+              downloadUrl: "https://example.test/api/public/connector/download/2026.5.19/windows",
             },
           },
         },
@@ -101,12 +116,15 @@ describe("ConnectorDownload", () => {
     );
     expectAllLinksToMatch(
       await screen.findAllByRole("link", { name: /download windows installer/i }),
-      "https://example.test/api/public/connector/download/2026.5.10/windows",
+      "https://example.test/api/public/connector/download/2026.5.19/windows",
     );
     expect(screen.getByText(/Run the installer once/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Signed Windows installer/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/L&D Health Ltd/i)).toBeInTheDocument();
     expect(screen.getByText(/Azure Artifact Signing \/ signed/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/local-agent-direct-v2/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Update required/i)).toBeInTheDocument();
+    expect(screen.getByText(/^No$/i)).toBeInTheDocument();
     expect(screen.queryByText(/Windows can block this unsigned test package/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Extract the ZIP fully before running/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Unsigned test package/i)).not.toBeInTheDocument();
@@ -188,13 +206,13 @@ describe("ConnectorDownload", () => {
       success: true,
       data: {
         productName: "MSCQR Connector",
-        latestVersion: "2026.5.10",
+        latestVersion: "2026.5.19",
         supportPath: "/help/manufacturer",
         helpPath: "/connector-download",
         setupGuidePath: "/help/manufacturer",
         release: {
-          version: "2026.5.10",
-          publishedAt: "2026-05-10T01:39:08.000Z",
+          version: "2026.5.19",
+          publishedAt: "2026-05-19T00:00:00.000Z",
           summary: "Install once and print without manual startup.",
           notes: [],
           platforms: {
@@ -206,16 +224,16 @@ describe("ConnectorDownload", () => {
               trustLevel: "trusted",
               signatureStatus: "signed",
               publisherName: "L&D Health Ltd",
-              signedAt: "2026-05-10T01:39:08.000Z",
+              signedAt: "2026-05-19T00:00:00.000Z",
               windowsTrustMode: "trusted",
-              filename: "MSCQR-Connector-Windows-2026.5.10.exe",
+              filename: "MSCQR-Connector-Windows-2026.5.19.exe",
               architecture: "x64",
               bytes: 15587056,
               sha256: "0305cc85fe1af4ff65f87d584028d03745b6b70a227100d2f13f9ebe234e2d41",
               notes: ["Run the signed Windows installer once."],
               contentType: "application/vnd.microsoft.portable-executable",
-              downloadPath: "/api/public/connector/download/2026.5.10/windows",
-              downloadUrl: "https://example.test/api/public/connector/download/2026.5.10/windows",
+              downloadPath: "/api/public/connector/download/2026.5.19/windows",
+              downloadUrl: "https://example.test/api/public/connector/download/2026.5.19/windows",
             },
           },
         },
@@ -231,7 +249,7 @@ describe("ConnectorDownload", () => {
     expect(screen.queryByRole("link", { name: /download for mac/i })).not.toBeInTheDocument();
     expectAllLinksToMatch(
       await screen.findAllByRole("link", { name: /download windows installer/i }),
-      "https://example.test/api/public/connector/download/2026.5.10/windows",
+      "https://example.test/api/public/connector/download/2026.5.19/windows",
     );
   });
 
@@ -246,13 +264,13 @@ describe("ConnectorDownload", () => {
       success: true,
       data: {
         productName: "MSCQR Connector",
-        latestVersion: "2026.5.10",
+        latestVersion: "2026.5.19",
         supportPath: "/help/manufacturer",
         helpPath: "/connector-download",
         setupGuidePath: "/help/manufacturer",
         release: {
-          version: "2026.5.10",
-          publishedAt: "2026-05-10T01:39:08.000Z",
+          version: "2026.5.19",
+          publishedAt: "2026-05-19T00:00:00.000Z",
           summary: "Install once and print without manual startup.",
           notes: [],
           platforms: {
@@ -264,16 +282,16 @@ describe("ConnectorDownload", () => {
               trustLevel: "trusted",
               signatureStatus: "signed",
               publisherName: "L&D Health Ltd",
-              signedAt: "2026-05-10T01:39:08.000Z",
+              signedAt: "2026-05-19T00:00:00.000Z",
               windowsTrustMode: "trusted",
-              filename: "MSCQR-Connector-Windows-2026.5.10.exe",
+              filename: "MSCQR-Connector-Windows-2026.5.19.exe",
               architecture: "x64",
               bytes: 15587056,
               sha256: "0305cc85fe1af4ff65f87d584028d03745b6b70a227100d2f13f9ebe234e2d41",
               notes: ["Run the signed Windows installer once."],
               contentType: "application/vnd.microsoft.portable-executable",
-              downloadPath: "/api/public/connector/download/2026.5.10/windows",
-              downloadUrl: "https://example.test/api/public/connector/download/2026.5.10/windows",
+              downloadPath: "/api/public/connector/download/2026.5.19/windows",
+              downloadUrl: "https://example.test/api/public/connector/download/2026.5.19/windows",
             },
           },
         },
@@ -290,7 +308,7 @@ describe("ConnectorDownload", () => {
     expect(screen.queryByRole("link", { name: /get installer for this device/i })).not.toBeInTheDocument();
     expectAllLinksToMatch(
       await screen.findAllByRole("link", { name: /download windows installer/i }),
-      "https://example.test/api/public/connector/download/2026.5.10/windows",
+      "https://example.test/api/public/connector/download/2026.5.19/windows",
     );
 
     userAgentSpy.mockRestore();
@@ -348,5 +366,27 @@ describe("ConnectorDownload", () => {
       "https://example.test/api/public/connector/download/2026.3.12/windows",
     );
     expect(screen.getAllByText(/Windows can still warn on this unsigned test installer/i).length).toBeGreaterThan(0);
+  });
+
+  it("shows update required when an installed connector reports a stale protocol", async () => {
+    vi.mocked(apiClient.getInvitePreview).mockResolvedValue({ success: false, error: "No invite" } as any);
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
+      success: true,
+      data: {
+        agentVersion: "2026.5.10",
+        buildVersion: "2026.5.10",
+        protocolVersion: "test.v1#4",
+      },
+    } as any);
+
+    render(
+      <MemoryRouter initialEntries={["/connector-download"]}>
+        <ConnectorDownload />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/2026\.5\.10/i)).toBeInTheDocument();
+    expect(screen.getByText(/Update required/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Yes$/i)).toBeInTheDocument();
   });
 });

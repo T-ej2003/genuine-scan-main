@@ -38,6 +38,13 @@ const run = async () => {
     "packaging",
     "build-windows-installer.mjs"
   );
+  const signedReleasePublisherPath = path.join(
+    __dirname,
+    "..",
+    "local-print-agent",
+    "packaging",
+    "publish-windows-connector-release.mjs"
+  );
   const installerVerifierPath = path.join(
     __dirname,
     "..",
@@ -61,6 +68,14 @@ const run = async () => {
     "windows",
     "README.txt"
   );
+  const signedReleaseWorkflowPath = path.join(
+    __dirname,
+    "..",
+    "..",
+    ".github",
+    "workflows",
+    "windows-connector-signed-release.yml"
+  );
   const releaseZipPath = path.join(
     __dirname,
     "..",
@@ -74,9 +89,11 @@ const run = async () => {
   const installScript = fs.readFileSync(installScriptPath, "utf8");
   const installCmd = fs.readFileSync(installCmdPath, "utf8");
   const installerBuilder = fs.readFileSync(installerBuilderPath, "utf8");
+  const signedReleasePublisher = fs.readFileSync(signedReleasePublisherPath, "utf8");
   const installerVerifier = fs.readFileSync(installerVerifierPath, "utf8");
   const installerTemplate = fs.readFileSync(installerTemplatePath, "utf8");
   const readme = fs.readFileSync(readmePath, "utf8");
+  const signedReleaseWorkflow = fs.readFileSync(signedReleaseWorkflowPath, "utf8");
 
   assert(
     packagingScript.includes('readWindowsAssetTemplate("install-startup-task.ps1")'),
@@ -123,6 +140,18 @@ const run = async () => {
     installerBuilder.includes("const expectedOutput = `${outputBase}.exe`;") &&
       installerBuilder.includes("Created files: ${createdFiles}"),
     "Windows installer builder should accept the explicit pkg .exe output and report created files if packaging output is missing"
+  );
+  assert(
+    signedReleasePublisher.includes("LOCAL_AGENT_DIRECT_PROTOCOL_VERSION") &&
+      signedReleasePublisher.includes("LOCAL_AGENT_MIN_VERSION_HINT") &&
+      signedReleasePublisher.includes("Refusing to publish stale Windows connector version 2026.5.10"),
+    "Signed Windows publisher should stamp the backend protocol/build contract and block stale 2026.5.10 releases"
+  );
+  assert(
+    signedReleaseWorkflow.includes("npm --prefix backend run connector:windows:publish-signed") &&
+      signedReleaseWorkflow.includes("git add \"backend/local-print-agent/releases/manifest.json\"") &&
+      signedReleaseWorkflow.includes("Refusing to build stale connector version 2026.5.10"),
+    "Signed Windows workflow should publish and commit the manifest/artifact that production downloads use"
   );
   assert(
     installerVerifier.includes("Get-AuthenticodeSignature"),

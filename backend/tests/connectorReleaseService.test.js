@@ -1,4 +1,5 @@
 const { getLatestConnectorRelease, resolveConnectorDownload } = require("../dist/services/connectorReleaseService");
+const { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } = require("../dist/services/localAgentProtocol");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -8,6 +9,10 @@ const run = () => {
   const latest = getLatestConnectorRelease("https://mscqr.example.com/api");
   const latestFromWebOrigin = getLatestConnectorRelease("https://mscqr.example.com");
   assert(latest.latestVersion === "2026.5.10", "Latest connector version should come from manifest.json");
+  assert(
+    latest.requiredProtocolVersion === LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+    "Connector metadata should expose the backend-required local agent protocol"
+  );
   assert(
     latest.release.platforms.windows.downloadPath === "/api/public/connector/download/2026.5.10/windows",
     "Windows download path should route through the API prefix"
@@ -35,6 +40,10 @@ const run = () => {
   assert(
     latest.release.platforms.windows.installerKind === "exe",
     "Signed Windows release should be exposed as an EXE installer"
+  );
+  assert(
+    latest.release.platforms.windows.protocolVersion === LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+    "Windows download metadata should advertise the backend-required protocol"
   );
   assert(
     latest.release.platforms.windows.downloadUrl ===
