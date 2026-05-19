@@ -8,6 +8,35 @@
     app_dir: /home/ubuntu/genuine-scan-main
     branch: main
     deploy_ref: "origin/{{ branch }}"
+    qr_sign_provider: "{{ lookup('env', 'QR_SIGN_PROVIDER') | default('env', true) }}"
+    qr_sign_private_key: "{{ lookup('env', 'QR_SIGN_PRIVATE_KEY') }}"
+    qr_sign_public_key: "{{ lookup('env', 'QR_SIGN_PUBLIC_KEY') }}"
+    qr_sign_active_key_version: "{{ lookup('env', 'QR_SIGN_ACTIVE_KEY_VERSION') }}"
+    qr_sign_enforce_ed25519: "{{ lookup('env', 'QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION') | default('true', true) }}"
+    qr_sign_private_key_format: >-
+      {%- set v = qr_sign_private_key | trim -%}
+      {%- if not v -%}missing
+      {%- elif '\\n' in v or '\\r\\n' in v -%}escaped_newline_pem
+      {%- elif '-----BEGIN ' in v and '\n' in v -%}multiline_pem
+      {%- elif v.startswith('-----BEGIN ') and ' -----END ' in v -%}single_line_pem
+      {%- elif '-----BEGIN ' not in v and (v | length) >= 32 -%}base64_wrapped_pem_or_invalid
+      {%- else -%}invalid
+      {%- endif -%}
+    qr_sign_public_key_format: >-
+      {%- set v = qr_sign_public_key | trim -%}
+      {%- if not v -%}missing
+      {%- elif '\\n' in v or '\\r\\n' in v -%}escaped_newline_pem
+      {%- elif '-----BEGIN ' in v and '\n' in v -%}multiline_pem
+      {%- elif v.startswith('-----BEGIN ') and ' -----END ' in v -%}single_line_pem
+      {%- elif '-----BEGIN ' not in v and (v | length) >= 32 -%}base64_wrapped_pem_or_invalid
+      {%- else -%}invalid
+      {%- endif -%}
+    qr_sign_compose_environment:
+      QR_SIGN_PROVIDER: "{{ qr_sign_provider }}"
+      QR_SIGN_PRIVATE_KEY: "{{ qr_sign_private_key }}"
+      QR_SIGN_PUBLIC_KEY: "{{ qr_sign_public_key }}"
+      QR_SIGN_ACTIVE_KEY_VERSION: "{{ qr_sign_active_key_version }}"
+      QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION: "{{ qr_sign_enforce_ed25519 }}"
 
   tasks:
     - name: Validate deploy ref
@@ -84,20 +113,46 @@
       args:
         chdir: "{{ app_dir }}"
 
+    - name: Validate QR signing deploy secrets are present
+      assert:
+        that:
+          - qr_sign_provider | length > 0
+          - qr_sign_private_key | length > 0
+          - qr_sign_public_key | length > 0
+          - qr_sign_active_key_version | length > 0
+          - qr_sign_enforce_ed25519 | length > 0
+        fail_msg: "QR signing deploy secrets are missing from the Ansible controller environment."
+
+    - name: Show safe QR signing deploy preflight
+      debug:
+        msg:
+          - "QR_SIGN_PROVIDER={{ qr_sign_provider }}"
+          - "QR_SIGN_PRIVATE_KEY_PRESENT={{ (qr_sign_private_key | length > 0) | ternary('true', 'false') }}"
+          - "QR_SIGN_PUBLIC_KEY_PRESENT={{ (qr_sign_public_key | length > 0) | ternary('true', 'false') }}"
+          - "QR_SIGN_ACTIVE_KEY_VERSION_PRESENT={{ (qr_sign_active_key_version | length > 0) | ternary('true', 'false') }}"
+          - "QR_SIGN_PRIVATE_KEY_FORMAT={{ qr_sign_private_key_format }}"
+          - "QR_SIGN_PUBLIC_KEY_FORMAT={{ qr_sign_public_key_format }}"
+
     - name: Build Docker Compose stack with singleton worker profile
       command: docker compose --profile worker build
       args:
         chdir: "{{ app_dir }}"
+      environment: "{{ qr_sign_compose_environment }}"
+      no_log: true
 
     - name: Preflight QR signing runtime configuration
       command: docker compose run --rm --no-deps backend node dist/scripts/qrSigningPreflight.js
       args:
         chdir: "{{ app_dir }}"
+      environment: "{{ qr_sign_compose_environment }}"
+      no_log: true
 
     - name: Restart Docker Compose stack with singleton worker profile
       command: docker compose --profile worker up -d --no-build
       args:
         chdir: "{{ app_dir }}"
+      environment: "{{ qr_sign_compose_environment }}"
+      no_log: true
 
     - name: Show Docker Compose status
       command: docker compose ps
@@ -105,9 +160,11 @@
         chdir: "{{ app_dir }}"
       register: compose_ps
       changed_when: false
+      environment: "{{ qr_sign_compose_environment }}"
+      no_log: true
 
     - name: Print deployed commit and Docker Compose status
       debug:
         msg:
           - "Commit: {{ deployed_commit.stdout }}"
-          - "{{ compose_ps.stdout_lines }}"
+          - "Docker Compose status check completed; output suppressed because the compose environment carries QR signing secrets."

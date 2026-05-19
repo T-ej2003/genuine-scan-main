@@ -154,6 +154,11 @@ jobs:
           PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
           PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          QR_SIGN_ACTIVE_KEY_VERSION: ${{ secrets.QR_SIGN_ACTIVE_KEY_VERSION }}
+          QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION: ${{ secrets.QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION }}
+          QR_SIGN_PRIVATE_KEY: ${{ secrets.QR_SIGN_PRIVATE_KEY }}
+          QR_SIGN_PROVIDER: ${{ secrets.QR_SIGN_PROVIDER }}
+          QR_SIGN_PUBLIC_KEY: ${{ secrets.QR_SIGN_PUBLIC_KEY }}
         run: |
           set -euo pipefail
 
@@ -166,6 +171,11 @@ jobs:
             [ -n "$PROD_SSH_USER" ] || missing+=("PROD_SSH_USER")
             [ -n "$PROD_SSH_PRIVATE_KEY" ] || missing+=("PROD_SSH_PRIVATE_KEY")
           fi
+          [ -n "$QR_SIGN_ACTIVE_KEY_VERSION" ] || missing+=("QR_SIGN_ACTIVE_KEY_VERSION")
+          [ -n "$QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION" ] || missing+=("QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION")
+          [ -n "$QR_SIGN_PRIVATE_KEY" ] || missing+=("QR_SIGN_PRIVATE_KEY")
+          [ -n "$QR_SIGN_PROVIDER" ] || missing+=("QR_SIGN_PROVIDER")
+          [ -n "$QR_SIGN_PUBLIC_KEY" ] || missing+=("QR_SIGN_PUBLIC_KEY")
 
           if [ "${#missing[@]}" -gt 0 ]; then
             printf '::error::Missing required production deployment secret(s): %s\n' "${missing[*]}"
@@ -226,6 +236,12 @@ jobs:
         run: ansible-playbook -i ops/deploy/inventory.ini ops/deploy/deploy.yml --syntax-check
 
       - name: Deploy gated SHA to production
+        env:
+          QR_SIGN_ACTIVE_KEY_VERSION: ${{ secrets.QR_SIGN_ACTIVE_KEY_VERSION }}
+          QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION: ${{ secrets.QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION }}
+          QR_SIGN_PRIVATE_KEY: ${{ secrets.QR_SIGN_PRIVATE_KEY }}
+          QR_SIGN_PROVIDER: ${{ secrets.QR_SIGN_PROVIDER }}
+          QR_SIGN_PUBLIC_KEY: ${{ secrets.QR_SIGN_PUBLIC_KEY }}
         run: |
           set -euo pipefail
 
