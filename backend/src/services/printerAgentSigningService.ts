@@ -98,8 +98,12 @@ export const verifyPrinterAgentPayloadSignature = (params: {
 };
 
 export const isPrinterAgentIssuedAtFresh = (issuedAt: string) => {
+  const skewSeconds = getPrinterAgentIssuedAtSkewSeconds(issuedAt);
+  return skewSeconds !== null && skewSeconds <= MAX_SKEW_SECONDS;
+};
+
+export const getPrinterAgentIssuedAtSkewSeconds = (issuedAt: string) => {
   const issuedAtMs = new Date(issuedAt).getTime();
-  if (!Number.isFinite(issuedAtMs)) return false;
-  const skewSeconds = Math.abs(Date.now() - issuedAtMs) / 1000;
-  return skewSeconds <= MAX_SKEW_SECONDS;
+  if (!Number.isFinite(issuedAtMs)) return null;
+  return Math.abs(Date.now() - issuedAtMs) / 1000;
 };

@@ -47,6 +47,9 @@ export type PrinterConnectionStatusDTO = {
   selectedPrinterName?: string | null;
   deviceName?: string | null;
   agentVersion?: string | null;
+  protocolVersion?: string | null;
+  buildVersion?: string | null;
+  connectorUpdateRequired?: boolean;
   capabilitySummary?: PrinterCapabilitySummaryDTO | null;
   printers?: LocalPrinterDTO[];
   calibrationProfile?: Record<string, unknown> | null;

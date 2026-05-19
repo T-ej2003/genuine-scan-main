@@ -205,6 +205,8 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     selectedPrinterName?: string;
     deviceName?: string;
     agentVersion?: string;
+    protocolVersion?: string;
+    buildVersion?: string;
     error?: string;
     agentId?: string;
     deviceFingerprint?: string;
@@ -260,6 +262,9 @@ export const createPrintingApi = (core: ApiClientCore) => ({
       selectedPrinterName?: string | null;
       deviceName?: string | null;
       agentVersion?: string | null;
+      protocolVersion?: string | null;
+      buildVersion?: string | null;
+      connectorUpdateRequired?: boolean;
       capabilitySummary?: {
         transports: string[];
         protocols: string[];
@@ -315,6 +320,9 @@ export const createPrintingApi = (core: ApiClientCore) => ({
       selectedPrinterName?: string | null;
       deviceName?: string | null;
       agentVersion?: string | null;
+      protocolVersion?: string | null;
+      buildVersion?: string | null;
+      connectorUpdateRequired?: boolean;
       capabilitySummary?: {
         transports: string[];
         protocols: string[];
@@ -386,6 +394,8 @@ export const createPrintingApi = (core: ApiClientCore) => ({
           selectedPrinterName,
           deviceName: String((data as any).deviceName || "").trim() || null,
           agentVersion: String((data as any).agentVersion || "").trim() || null,
+          protocolVersion: String((data as any).protocolVersion || "").trim() || null,
+          buildVersion: String((data as any).buildVersion || "").trim() || null,
           error: String((data as any).error || "").trim() || null,
           agentId: String((data as any).agentId || "").trim() || null,
           deviceFingerprint: String((data as any).deviceFingerprint || "").trim() || null,

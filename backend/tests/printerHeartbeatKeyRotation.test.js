@@ -123,6 +123,7 @@ mockModule("config/database.js", {
 });
 
 const { buildPrinterAgentHeartbeatPayload, signPrinterAgentPayload } = require("../dist/services/printerAgentSigningService");
+const { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } = require("../dist/services/localAgentProtocol");
 const { upsertPrinterConnectionHeartbeat } = require("../dist/services/printerConnectionService");
 
 (async () => {
@@ -154,6 +155,8 @@ const { upsertPrinterConnectionHeartbeat } = require("../dist/services/printerCo
     selectedPrinterName: "Zebra ZD421",
     deviceName: "Factory Mac",
     agentVersion: "2.0.0",
+    protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+    buildVersion: "2.0.0",
     sourceIp: "198.51.100.10",
     userAgent: "Mozilla/5.0",
     agentId: registration.agentId,

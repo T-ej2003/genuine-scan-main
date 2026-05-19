@@ -154,6 +154,8 @@ const reportLocalPrinterHeartbeat = async () => {
     selectedPrinterName?: string;
     deviceName?: string;
     agentVersion?: string;
+    protocolVersion?: string;
+    buildVersion?: string;
     error?: string;
     agentId?: string;
     deviceFingerprint?: string;
@@ -174,6 +176,8 @@ const reportLocalPrinterHeartbeat = async () => {
     selectedPrinterName: data.selectedPrinterName || undefined,
     deviceName: data.deviceName || undefined,
     agentVersion: data.agentVersion || undefined,
+    protocolVersion: data.protocolVersion || undefined,
+    buildVersion: data.buildVersion || undefined,
     error: data.error || undefined,
     agentId: data.agentId || undefined,
     deviceFingerprint: data.deviceFingerprint || undefined,

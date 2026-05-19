@@ -1,9 +1,11 @@
 import os from "os";
+import { createHash } from "crypto";
 
 import { listLocalPrinters, resolveSelectedPrinter, waitForLocalPrintJobCompletion } from "./cups";
 import { printLabel } from "./render";
 import { loadAgentState } from "./state";
 import { buildPrinterAgentActionPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
+import { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } from "../services/localAgentProtocol";
 import { randomOpaqueToken } from "../utils/security";
 
 const DIRECT_PRINT_POLL_MS = Math.max(2000, Number(process.env.PRINT_AGENT_DIRECT_POLL_MS || 4000) || 4000);
@@ -12,6 +14,8 @@ const DIRECT_PRINT_MAX_BACKOFF_MS = Math.max(
   Number(process.env.PRINT_AGENT_DIRECT_MAX_BACKOFF_MS || 60_000) || 60_000
 );
 const AGENT_VERSION = String(process.env.PRINT_AGENT_VERSION || "1.0.0").trim() || "1.0.0";
+const AGENT_BUILD_VERSION = String(process.env.PRINT_AGENT_BUILD_VERSION || AGENT_VERSION).trim() || AGENT_VERSION;
+const sha256Hex = (value: string) => createHash("sha256").update(value).digest("hex");
 
 const clampRetryAfterMs = (value: unknown) => {
   const parsed = Number(value);
@@ -76,9 +80,23 @@ const postBackend = async <T>(path: string, body: Record<string, unknown>) => {
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(String((payload as any)?.error || `Direct-print agent request failed: HTTP ${response.status}`));
+    const error = Object.assign(
+      new Error(String((payload as any)?.error || `Direct-print agent request failed: HTTP ${response.status}`)),
+      {
+        status: response.status,
+        errorCode: (payload as any)?.errorCode || (payload as any)?.code || null,
+        serverTime: (payload as any)?.serverTime || null,
+        timestampSkewSeconds: (payload as any)?.timestampSkewSeconds ?? null,
+      }
+    );
+    throw error;
   }
   return payload as T;
+};
+
+const optionalString = (value: unknown) => {
+  const normalized = String(value || "").trim();
+  return normalized || undefined;
 };
 
 const claimNextLocalJob = async () => {
@@ -93,8 +111,10 @@ const claimNextLocalJob = async () => {
 
   return postBackend<{ success: boolean; data?: any; retryAfterMs?: number }>("/printer-agent/local/claim", {
     ...signed.body,
+    protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+    buildVersion: AGENT_BUILD_VERSION,
     selectedPrinterId,
-    selectedPrinterName: selection.printerName,
+    ...(optionalString(selection.printerName) ? { selectedPrinterName: optionalString(selection.printerName) } : {}),
     deviceName: os.hostname(),
     agentVersion: AGENT_VERSION,
   });
@@ -128,6 +148,8 @@ const ackLocalJob = async (payload: {
     agentMetadata: {
       deviceName: os.hostname(),
       agentVersion: AGENT_VERSION,
+      protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+      buildVersion: AGENT_BUILD_VERSION,
       printPath: payload.printPath,
       labelLanguage: payload.labelLanguage,
       jobRef: payload.jobRef || null,
@@ -161,6 +183,8 @@ const confirmLocalJob = async (payload: {
     agentMetadata: {
       deviceName: os.hostname(),
       agentVersion: AGENT_VERSION,
+      protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+      buildVersion: AGENT_BUILD_VERSION,
       printPath: payload.printPath,
       labelLanguage: payload.labelLanguage,
       jobRef: payload.jobRef || null,
@@ -189,8 +213,30 @@ const failLocalJob = async (payload: {
     agentMetadata: {
       deviceName: os.hostname(),
       agentVersion: AGENT_VERSION,
+      protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+      buildVersion: AGENT_BUILD_VERSION,
     },
   });
+};
+
+export const validateClaimedLocalPrintJobForAttempt = (payload: any) => {
+  const printJobId = String(payload?.printJobId || "").trim();
+  const printSessionId = String(payload?.printSessionId || "").trim();
+  const printItemId = String(payload?.printItemId || "").trim();
+  const code = String(payload?.code || "").trim();
+  const scanUrl = String(payload?.scanUrl || "").trim();
+  const payloadContent = typeof payload?.payloadContent === "string" ? payload.payloadContent : "";
+  const payloadHash = String(payload?.payloadHash || "").trim();
+  if (!printJobId || !printItemId) throw Object.assign(new Error("Claim response is missing job or item identity."), { errorCode: "claim_identity_missing" });
+  if (!code) throw Object.assign(new Error("Claim response is missing the QR code."), { errorCode: "claim_code_missing" });
+  if (!scanUrl) throw Object.assign(new Error("Claim response is missing the scan URL."), { errorCode: "claim_scan_url_missing" });
+  if (!payloadContent || !payloadHash) {
+    throw Object.assign(new Error("Claim response is missing its approved print payload."), { errorCode: "claim_payload_missing" });
+  }
+  if (sha256Hex(payloadContent) !== payloadHash) {
+    throw Object.assign(new Error("Claim response approved payload hash mismatch."), { errorCode: "claim_payload_hash_mismatch" });
+  }
+  return { printJobId, printSessionId, printItemId, code, scanUrl, payloadContent, payloadHash };
 };
 
 const runOnce = async () => {
@@ -215,6 +261,7 @@ const runOnce = async () => {
   const printerId = String(
     payload.printer?.nativePrinterId || payload.printer?.selectedPrinterId || payload.selectedPrinterId || ""
   ).trim();
+  let validated;
 
   if (!printerId) {
     await failLocalJob({
@@ -228,14 +275,22 @@ const runOnce = async () => {
 
   const printJobId = String(payload.printJobId || "").trim();
   const printItemId = String(payload.printItemId || "").trim();
-  const payloadHash = String(payload.payloadHash || "").trim();
 
   try {
+    validated = validateClaimedLocalPrintJobForAttempt(payload);
+    console.info("local direct-print payload validated", {
+      printJobId,
+      printSessionId: validated.printSessionId,
+      printItemId,
+      code: validated.code,
+      printerName: String(payload.printer?.name || payload.selectedPrinterName || printerId).trim(),
+      agentVersion: AGENT_VERSION,
+    });
     await ackLocalJob({
       printerId,
       printJobId,
       printItemId,
-      payloadHash,
+      payloadHash: validated.payloadHash,
       printPath: "agent-claimed",
       labelLanguage: payload.commandLanguage || payload.labelLanguage || "AUTO",
       jobRef: null,
@@ -259,11 +314,11 @@ const runOnce = async () => {
       printerLanguages: Array.isArray(payload.printer?.languages) ? payload.printer.languages : [],
       calibrationProfile,
       request: {
-        code: String(payload.code || "").trim(),
-        scanUrl: String(payload.scanUrl || "").trim(),
+        code: validated.code,
+        scanUrl: validated.scanUrl,
         payloadType: payload.payloadType || null,
-        payloadContent: payload.payloadContent || null,
-        payloadHash: payload.payloadHash || null,
+        payloadContent: validated.payloadContent,
+        payloadHash: validated.payloadHash,
         previewLabel: payload.previewLabel || null,
         copies: 1,
         printPath: payload.printPath || "auto",
@@ -285,7 +340,7 @@ const runOnce = async () => {
       printerId,
       printJobId,
       printItemId,
-      payloadHash,
+      payloadHash: validated.payloadHash,
       printPath: result.printPath,
       labelLanguage: result.labelLanguage,
       jobRef: result.jobRef,
@@ -298,7 +353,7 @@ const runOnce = async () => {
       printerId,
       printJobId,
       printItemId,
-      payloadHash,
+      payloadHash: validated.payloadHash,
       printPath: result.printPath,
       labelLanguage: result.labelLanguage,
       jobRef: result.jobRef,
@@ -310,17 +365,36 @@ const runOnce = async () => {
       jobRef: result.jobRef || null,
     });
   } catch (error: any) {
-    await failLocalJob({
-      printerId,
-      printJobId,
-      printItemId,
-      reason: error?.message || "Local direct-print pipeline failed.",
-    });
+    let failureReported = false;
+    if (printJobId && printItemId) {
+      await failLocalJob({
+        printerId,
+        printJobId,
+        printItemId,
+        reason: error?.message || "Local direct-print pipeline failed.",
+      })
+        .then(() => {
+          failureReported = true;
+        })
+        .catch((reportError: any) => {
+          console.error("local direct-print failure report failed", {
+            printJobId,
+            printItemId,
+            printerId,
+            error: reportError?.message || reportError,
+            errorCode: reportError?.errorCode || null,
+            serverTime: reportError?.serverTime || null,
+            timestampSkewSeconds: reportError?.timestampSkewSeconds ?? null,
+          });
+        });
+    }
     console.error("local direct-print item failed", {
       printJobId,
       printItemId,
       printerId,
       error: error?.message || error,
+      errorCode: error?.errorCode || null,
+      failureReported,
     });
     throw error;
   }

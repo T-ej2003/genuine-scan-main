@@ -4,10 +4,13 @@ import {
   PrintItemState,
   PrintJobStatus,
   PrintPipelineState,
+  QRStatus,
 } from "@prisma/client";
 
 import prisma from "../config/database";
+import { buildApprovedPrintPayload } from "./printPayloadService";
 import { buildPrintConfirmationDeadline } from "./printConfirmationService";
+import { failStopPrintSession } from "./printLifecycleService";
 
 export const LOCAL_AGENT_NO_WORK_RETRY_MS = Math.max(
   2_000,
@@ -36,6 +39,7 @@ export const reserveLocalAgentItem = async (params: { printSessionId: string; ac
             tokenIssuedAt: true,
             tokenExpiresAt: true,
             tokenHash: true,
+            replayEpoch: true,
             status: true,
           },
         },
@@ -105,4 +109,82 @@ export const countLocalAgentClaimItems = async (params: { printerIds: string[]; 
     }),
   ]);
   return { availableItemCount, inFlightItemCount };
+};
+
+export const buildClaimApprovedPayloadOrFail = async (params: {
+  job: any;
+  item: any;
+  registration: { id: string; agentId: string };
+}) => {
+  const { job, item, registration } = params;
+  if (item.qrCode.status !== QRStatus.ACTIVATED) {
+    const reason = `QR ${item.code} is not in ACTIVATED state for local direct printing.`;
+    await failStopAndMarkJob(job, item, reason, { dispatchMode: PrintDispatchMode.LOCAL_AGENT });
+    return { ok: false as const, status: 409, error: "Reserved QR code is not printable anymore.", code: "qr_not_printable" };
+  }
+
+  try {
+    return {
+      ok: true as const,
+      payload: buildApprovedPrintPayload({
+        printer: {
+          id: job.printer.id,
+          name: job.printer.name,
+          connectionType: job.printer.connectionType,
+          commandLanguage: job.printer.commandLanguage,
+          nativePrinterId: job.printer.nativePrinterId,
+          ipAddress: job.printer.ipAddress,
+          port: job.printer.port,
+          calibrationProfile: job.printer.calibrationProfile || null,
+          capabilitySummary: job.printer.capabilitySummary || null,
+          metadata: job.printer.metadata || null,
+        },
+        qr: item.qrCode,
+        manufacturerId: job.manufacturerId,
+        printJobId: job.id,
+        printItemId: item.id,
+        jobNumber: job.jobNumber,
+        reprintOfJobId: job.reprintOfJobId,
+      }),
+    };
+  } catch (payloadError: any) {
+    const reason = payloadError?.message || "Approved print payload could not be generated.";
+    console.error("local_agent_claim", {
+      event: "payload_generation_failed",
+      registrationId: registration.id,
+      agentId: registration.agentId,
+      printJobId: job.id,
+      printSessionId: job.printSession.id,
+      printItemId: item.id,
+      code: item.code,
+      error: reason,
+    });
+    await failStopAndMarkJob(job, item, reason, {
+      dispatchMode: PrintDispatchMode.LOCAL_AGENT,
+      failureStage: "claim_payload_generation",
+    });
+    return {
+      ok: false as const,
+      status: 409,
+      error: "The approved print payload could not be prepared for this label.",
+      code: "print_payload_invalid",
+    };
+  }
+};
+
+const failStopAndMarkJob = async (job: any, item: any, reason: string, metadata: Record<string, unknown>) => {
+  await failStopPrintSession({
+    printSessionId: job.printSession.id,
+    printJobId: job.id,
+    batchId: job.batchId,
+    licenseeId: job.batch.licenseeId || null,
+    actorUserId: job.manufacturerId,
+    reason,
+    printItemId: item.id,
+    metadata,
+  });
+  await prisma.printJob.update({
+    where: { id: job.id },
+    data: { status: PrintJobStatus.FAILED, pipelineState: PrintPipelineState.NEEDS_OPERATOR_ACTION, failureReason: reason },
+  });
 };

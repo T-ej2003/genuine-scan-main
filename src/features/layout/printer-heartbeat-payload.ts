@@ -8,6 +8,8 @@ export type LocalPrinterStatusPayload = {
   selectedPrinterName?: string | null;
   deviceName?: string | null;
   agentVersion?: string | null;
+  protocolVersion?: string | null;
+  buildVersion?: string | null;
   error?: string | null;
   agentId?: string | null;
   deviceFingerprint?: string | null;
@@ -48,6 +50,8 @@ export const buildHeartbeatPayloadFromLocalStatus = (
     selectedPrinterName: signedHeartbeatPrinter?.printerName || localData?.selectedPrinterName || undefined,
     deviceName: localData?.deviceName || undefined,
     agentVersion: localData?.agentVersion || undefined,
+    protocolVersion: localData?.protocolVersion || undefined,
+    buildVersion: localData?.buildVersion || undefined,
     error: localData?.error || undefined,
     agentId: localData?.agentId || undefined,
     deviceFingerprint: localData?.deviceFingerprint || undefined,

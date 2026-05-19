@@ -161,6 +161,8 @@ export default function PrinterDiagnostics() {
               selectedPrinterName: (local.data as any)?.selectedPrinterName || undefined,
               deviceName: (local.data as any)?.deviceName || undefined,
               agentVersion: (local.data as any)?.agentVersion || undefined,
+              protocolVersion: (local.data as any)?.protocolVersion || undefined,
+              buildVersion: (local.data as any)?.buildVersion || undefined,
               error: (local.data as any)?.error || undefined,
               agentId: (local.data as any)?.agentId || undefined,
               deviceFingerprint: (local.data as any)?.deviceFingerprint || undefined,

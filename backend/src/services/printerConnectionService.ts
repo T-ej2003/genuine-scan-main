@@ -8,6 +8,11 @@ import type {
 
 import prisma from "../config/database";
 import { hashIp, hashToken, normalizeUserAgent, randomOpaqueToken } from "../utils/security";
+import {
+  CONNECTOR_UPDATE_REQUIRED_MESSAGE,
+  isLocalAgentProtocolCompatible,
+  LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+} from "./localAgentProtocol";
 
 export type { PrinterCapabilitySummary, PrinterConnectionStatus, PrinterInventoryDevice };
 
@@ -249,6 +254,8 @@ const normalizeStatusPayload = (metadata: any) => {
     printerId: toCleanString(source.printerId, 180) || null,
     deviceName: toCleanString(source.deviceName, 180) || null,
     agentVersion: toCleanString(source.agentVersion, 80) || null,
+    protocolVersion: toCleanString(source.protocolVersion, 80) || null,
+    buildVersion: toCleanString(source.buildVersion, 80) || null,
     error: toCleanString(source.error, 500) || null,
     selectedPrinterId: toCleanString(source.selectedPrinterId, 180) || null,
     selectedPrinterName: toCleanString(source.selectedPrinterName, 180) || null,
@@ -284,6 +291,9 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
       printerId: null,
       deviceName: null,
       agentVersion: null,
+      protocolVersion: null,
+      buildVersion: null,
+      connectorUpdateRequired: false,
       selectedPrinterId: null,
       selectedPrinterName: null,
       capabilitySummary: null,
@@ -295,6 +305,7 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
 
   const latestAttestation = registration.attestations[0] || null;
   const payload = normalizeStatusPayload(latestAttestation?.metadata || {});
+  const connectorUpdateRequired = Boolean(payload.connected && !isLocalAgentProtocolCompatible(payload.protocolVersion));
   const nowMs = Date.now();
   const attestedMs = latestAttestation?.attestedAt ? new Date(latestAttestation.attestedAt).getTime() : NaN;
   const ageMs = Number.isFinite(attestedMs) ? Math.max(0, nowMs - attestedMs) : null;
@@ -302,12 +313,13 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
 
   const trustedRegistration = registration.trustStatus === PrinterTrustStatus.TRUSTED && !registration.revokedAt;
   const trustedAttestation = Boolean(latestAttestation?.trustValid && latestAttestation?.signatureValid);
-  const trusted = trustedRegistration && trustedAttestation && !stale;
+  const trusted = trustedRegistration && trustedAttestation && !stale && !connectorUpdateRequired;
   const compatibilityReason =
     latestAttestation?.rejectionReason || registration.trustReason || payload.error || "Compatibility mode fallback";
   const compatibilityMode = Boolean(
-    ALLOW_COMPATIBILITY_MODE &&
+      ALLOW_COMPATIBILITY_MODE &&
       payload.connected &&
+      !connectorUpdateRequired &&
       !trusted &&
       !stale &&
       registration.trustStatus !== PrinterTrustStatus.REVOKED
@@ -319,12 +331,16 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     ? null
     : registration.revokedAt
       ? "Printer registration revoked"
+      : connectorUpdateRequired
+        ? CONNECTOR_UPDATE_REQUIRED_MESSAGE
       : latestAttestation?.rejectionReason || registration.trustReason || null;
 
   const error = trusted
     ? null
     : connected && compatibilityMode
       ? `Compatibility mode active: ${compatibilityReason}`
+      : connectorUpdateRequired
+        ? `${CONNECTOR_UPDATE_REQUIRED_MESSAGE} Expected protocol ${LOCAL_AGENT_DIRECT_PROTOCOL_VERSION}.`
       : payload.error ||
         (stale
           ? "Printer attestation stale"
@@ -362,6 +378,9 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     printerId: payload.printerId,
     deviceName: payload.deviceName,
     agentVersion: payload.agentVersion,
+    protocolVersion: payload.protocolVersion,
+    buildVersion: payload.buildVersion,
+    connectorUpdateRequired,
     selectedPrinterId: payload.selectedPrinterId || payload.printerId || null,
     selectedPrinterName: payload.selectedPrinterName || payload.printerName || null,
     capabilitySummary: payload.capabilitySummary,
@@ -406,6 +425,8 @@ const statusChanged = (a: PrinterConnectionStatus, b: PrinterConnectionStatus) =
     String(a.printerId || "") !== String(b.printerId || "") ||
     String(a.deviceName || "") !== String(b.deviceName || "") ||
     String(a.agentVersion || "") !== String(b.agentVersion || "") ||
+    String((a as any).protocolVersion || "") !== String((b as any).protocolVersion || "") ||
+    Boolean((a as any).connectorUpdateRequired) !== Boolean((b as any).connectorUpdateRequired) ||
     String(a.selectedPrinterId || "") !== String(b.selectedPrinterId || "") ||
     String(a.selectedPrinterName || "") !== String(b.selectedPrinterName || "")
   );
@@ -436,6 +457,8 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
   printerId?: string | null;
   deviceName?: string | null;
   agentVersion?: string | null;
+  protocolVersion?: string | null;
+  buildVersion?: string | null;
   error?: string | null;
   sourceIp?: string | null;
   userAgent?: string | null;
@@ -483,6 +506,8 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
     printerId: String(input.printerId || "").trim() || null,
     deviceName: String(input.deviceName || "").trim() || null,
     agentVersion: String(input.agentVersion || "").trim() || null,
+    protocolVersion: String(input.protocolVersion || "").trim() || null,
+    buildVersion: String(input.buildVersion || "").trim() || null,
     error: String(input.error || "").trim() || null,
     selectedPrinterId: toCleanString(input.selectedPrinterId, 180) || null,
     selectedPrinterName: toCleanString(input.selectedPrinterName, 180) || null,

@@ -8,6 +8,7 @@ const {
   supportsNetworkDirectPayloadType,
   supportsNetworkDirectPayload,
 } = require("../dist/services/printPayloadService");
+const { hashToken, signQrPayload } = require("../dist/services/qrTokenService");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -108,6 +109,45 @@ const run = () => {
     builtPayload.previewLabel === "MSCQR QR LABEL",
     "Preview label should use MSCQR branding"
   );
+
+  const tokenIssuedAt = new Date("2026-03-11T10:00:00.000Z");
+  const tokenExpiresAt = new Date("2026-03-12T10:00:00.000Z");
+  const governedToken = signQrPayload({
+    qr_id: "qr-governed-1",
+    batch_id: "batch-1",
+    licensee_id: "licensee-1",
+    manufacturer_id: "manufacturer-1",
+    epoch: 7,
+    iat: Math.floor(tokenIssuedAt.getTime() / 1000),
+    exp: Math.floor(tokenExpiresAt.getTime() / 1000),
+    nonce: "nonce-governed-1",
+  });
+  const governedPayload = buildApprovedPrintPayload({
+    printer: {
+      id: "printer-1",
+      name: "Zebra printer",
+      connectionType: "LOCAL_AGENT",
+      commandLanguage: "ZPL",
+      calibrationProfile: null,
+      capabilitySummary: null,
+      metadata: null,
+    },
+    qr: {
+      id: "qr-governed-1",
+      code: "TBD0000000002",
+      batchId: "batch-1",
+      licenseeId: "licensee-1",
+      tokenNonce: "nonce-governed-1",
+      tokenIssuedAt,
+      tokenExpiresAt,
+      tokenHash: hashToken(governedToken),
+      replayEpoch: 7,
+    },
+    manufacturerId: "manufacturer-1",
+    printJobId: "job-1",
+    printItemId: "item-1",
+  });
+  assert(governedPayload.scanToken === governedToken, "Claim-time payload generation must preserve replay epoch");
 
   console.log("print payload service tests passed");
 };

@@ -35,6 +35,8 @@ const heartbeatSchema = z.object({
   selectedPrinterName: z.string().trim().max(180).optional(),
   deviceName: z.string().trim().max(180).optional(),
   agentVersion: z.string().trim().max(80).optional(),
+  protocolVersion: z.string().trim().max(80).optional(),
+  buildVersion: z.string().trim().max(80).optional(),
   error: z.string().trim().max(500).optional(),
   agentId: z.string().trim().max(180).optional(),
   deviceFingerprint: z.string().trim().max(256).optional(),
@@ -100,6 +102,9 @@ const buildDegradedHeartbeatStatus = (input: z.infer<typeof heartbeatSchema>, cu
     selectedPrinterName,
     deviceName: input.deviceName || currentStatus?.deviceName || null,
     agentVersion: input.agentVersion || currentStatus?.agentVersion || null,
+    protocolVersion: input.protocolVersion || currentStatus?.protocolVersion || null,
+    buildVersion: input.buildVersion || currentStatus?.buildVersion || null,
+    connectorUpdateRequired: Boolean(currentStatus?.connectorUpdateRequired),
     capabilitySummary:
       (input.capabilitySummary && typeof input.capabilitySummary === "object" ? input.capabilitySummary : null) ||
       currentStatus?.capabilitySummary ||
@@ -141,6 +146,8 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
         selectedPrinterName: parsed.data.selectedPrinterName || null,
         deviceName: parsed.data.deviceName || null,
         agentVersion: parsed.data.agentVersion || null,
+        protocolVersion: parsed.data.protocolVersion || null,
+        buildVersion: parsed.data.buildVersion || null,
         error: parsed.data.error || null,
         sourceIp: req.ip,
         userAgent: req.get("user-agent") || null,
@@ -247,6 +254,9 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
             calibrationProfile: update.status.calibrationProfile || null,
             deviceName: update.status.deviceName || null,
             agentVersion: update.status.agentVersion || null,
+            protocolVersion: update.status.protocolVersion || null,
+            buildVersion: update.status.buildVersion || null,
+            connectorUpdateRequired: Boolean(update.status.connectorUpdateRequired),
             agentId: update.status.agentId || null,
             deviceFingerprint: update.status.deviceFingerprint || null,
             mtlsFingerprint: update.status.mtlsFingerprint || null,

@@ -28,6 +28,7 @@ export type PrintPayloadQr = {
   tokenIssuedAt: Date | null;
   tokenExpiresAt: Date | null;
   tokenHash: string | null;
+  replayEpoch?: number | null;
 };
 
 export type BuiltPrintPayload = {
@@ -166,6 +167,7 @@ const toQrToken = (params: {
     iat: Math.floor(params.qr.tokenIssuedAt.getTime() / 1000),
     exp: Math.floor(params.qr.tokenExpiresAt.getTime() / 1000),
     nonce: params.qr.tokenNonce,
+    epoch: Number(params.qr.replayEpoch || 1),
   };
 
   const scanToken = signQrPayload(payload);

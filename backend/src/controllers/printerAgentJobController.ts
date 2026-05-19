@@ -3,13 +3,11 @@ import {
   PrintJobStatus,
   PrintPipelineState,
   PrinterTrustStatus,
-  QRStatus,
 } from "@prisma/client";
 import { Request, Response } from "express";
 import { z } from "zod";
 
 import prisma from "../config/database";
-import { buildApprovedPrintPayload } from "../services/printPayloadService";
 import { createAuditLog } from "../services/auditService";
 import { failStopPrintSession } from "../services/printLifecycleService";
 import {
@@ -18,6 +16,7 @@ import {
   resolvePrinterConfirmationMode,
 } from "../services/printConfirmationService";
 import {
+  buildClaimApprovedPayloadOrFail,
   countLocalAgentClaimItems,
   LOCAL_AGENT_BUSY_RETRY_MS,
   LOCAL_AGENT_NO_WORK_RETRY_MS,
@@ -25,9 +24,16 @@ import {
 } from "../services/localAgentClaimService";
 import {
   buildPrinterAgentActionPayload,
+  getPrinterAgentIssuedAtSkewSeconds,
   isPrinterAgentIssuedAtFresh,
   verifyPrinterAgentPayloadSignature,
 } from "../services/printerAgentSigningService";
+import {
+  CONNECTOR_UPDATE_REQUIRED_CODE,
+  CONNECTOR_UPDATE_REQUIRED_MESSAGE,
+  isLocalAgentProtocolCompatible,
+  LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+} from "../services/localAgentProtocol";
 import { ensurePrinterProfileForPrinter, resolvePrinterPreflight } from "../printing/registry/printerProfileService";
 
 const agentAuthSchema = z
@@ -43,8 +49,10 @@ const agentAuthSchema = z
 
 const claimSchema = agentAuthSchema
   .extend({
-    selectedPrinterId: z.string().trim().max(180).optional(),
-    selectedPrinterName: z.string().trim().max(180).optional(),
+    protocolVersion: z.string().trim().max(80).optional().nullable(),
+    buildVersion: z.string().trim().max(80).optional().nullable(),
+    selectedPrinterId: z.string().trim().max(180).optional().nullable(),
+    selectedPrinterName: z.string().trim().max(180).optional().nullable(),
     deviceName: z.string().trim().max(180).optional(),
     agentVersion: z.string().trim().max(80).optional(),
   })
@@ -84,7 +92,13 @@ const verifyLocalAgentRequest = async (
   identifiers?: { printJobId?: string | null; printItemId?: string | null }
 ) => {
   if (!isPrinterAgentIssuedAtFresh(parsed.issuedAt)) {
-    throw Object.assign(new Error("Agent request timestamp expired."), { statusCode: 401 });
+    const timestampSkewSeconds = getPrinterAgentIssuedAtSkewSeconds(parsed.issuedAt);
+    throw Object.assign(new Error("Agent request timestamp expired."), {
+      statusCode: 401,
+      errorCode: "agent_timestamp_expired",
+      serverTime: new Date().toISOString(),
+      timestampSkewSeconds: timestampSkewSeconds == null ? null : Math.round(timestampSkewSeconds),
+    });
   }
 
   const registration = await prisma.printerRegistration.findFirst({
@@ -130,6 +144,13 @@ const verifyLocalAgentRequest = async (
 
 const noClaimWork = (res: Response, retryAfterMs = LOCAL_AGENT_NO_WORK_RETRY_MS) => res.json({ success: true, data: null, retryAfterMs });
 
+const localAgentErrorResponse = (res: Response, error: any) => res.status(error?.statusCode || 500).json({
+  success: false, error: error?.message || "Internal server error",
+  ...(error?.errorCode ? { code: error.errorCode, errorCode: error.errorCode } : {}),
+  ...(error?.serverTime ? { serverTime: error.serverTime } : {}),
+  ...(error?.timestampSkewSeconds != null ? { timestampSkewSeconds: error.timestampSkewSeconds } : {}),
+});
+
 export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
   try {
     const parsed = claimSchema.safeParse(req.body || {});
@@ -138,6 +159,16 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
     }
 
     const registration = await verifyLocalAgentRequest(parsed.data, "claim");
+    if (!isLocalAgentProtocolCompatible(parsed.data.protocolVersion || null)) {
+      console.info("local_agent_claim", {
+        event: "connector_update_required", registrationId: registration.id, agentId: registration.agentId,
+        agentVersion: parsed.data.agentVersion || null, protocolVersion: parsed.data.protocolVersion || null,
+        expectedProtocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION, retryAfterMs: LOCAL_AGENT_NO_WORK_RETRY_MS,
+      });
+      return res.status(426).json({ success: false, error: CONNECTOR_UPDATE_REQUIRED_MESSAGE, code: CONNECTOR_UPDATE_REQUIRED_CODE,
+        errorCode: CONNECTOR_UPDATE_REQUIRED_CODE, retryAfterMs: LOCAL_AGENT_NO_WORK_RETRY_MS,
+        expectedProtocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION });
+    }
 
     const selectedPrinterId = String(parsed.data.selectedPrinterId || parsed.data.printerId || "").trim();
     const candidatePrinters = await prisma.printer.findMany({
@@ -264,50 +295,17 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
       return noClaimWork(res, inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS);
     }
 
-    if (item.qrCode.status !== QRStatus.ACTIVATED) {
-      await failStopPrintSession({
-        printSessionId: job.printSession.id,
-        printJobId: job.id,
-        batchId: job.batchId,
-        licenseeId: job.batch.licenseeId || null,
-        actorUserId: job.manufacturerId,
-        reason: `QR ${item.code} is not in ACTIVATED state for local direct printing.`,
-        printItemId: item.id,
-        metadata: {
-          dispatchMode: PrintDispatchMode.LOCAL_AGENT,
-        },
+    const approved = await buildClaimApprovedPayloadOrFail({ job, item, registration });
+    if (!approved.ok) {
+      return res.status(approved.status).json({
+        success: false,
+        error: approved.error,
+        code: approved.code,
+        errorCode: approved.code,
+        retryAfterMs: LOCAL_AGENT_NO_WORK_RETRY_MS,
       });
-      await prisma.printJob.update({
-        where: { id: job.id },
-        data: {
-          status: PrintJobStatus.FAILED,
-          pipelineState: PrintPipelineState.FAILED,
-          failureReason: `QR ${item.code} is not in ACTIVATED state for local direct printing.`,
-        },
-      });
-      return res.status(409).json({ success: false, error: "Reserved QR code is not printable anymore." });
     }
-
-    const approvedPayload = buildApprovedPrintPayload({
-      printer: {
-        id: job.printer.id,
-        name: job.printer.name,
-        connectionType: job.printer.connectionType,
-        commandLanguage: job.printer.commandLanguage,
-        nativePrinterId: job.printer.nativePrinterId,
-        ipAddress: job.printer.ipAddress,
-        port: job.printer.port,
-        calibrationProfile: (job.printer.calibrationProfile as Record<string, unknown> | null) || null,
-        capabilitySummary: (job.printer.capabilitySummary as Record<string, unknown> | null) || null,
-        metadata: (job.printer.metadata as Record<string, unknown> | null) || null,
-      },
-      qr: item.qrCode,
-      manufacturerId: job.manufacturerId,
-      printJobId: job.id,
-      printItemId: item.id,
-      jobNumber: job.jobNumber,
-      reprintOfJobId: job.reprintOfJobId,
-    });
+    const approvedPayload = approved.payload;
 
     console.info("local_agent_claim", {
       event: "work_returned",
@@ -326,7 +324,9 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
     return res.json({
       success: true,
       retryAfterMs: LOCAL_AGENT_BUSY_RETRY_MS,
+      protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
       data: {
+        protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
         printJobId: job.id,
         printSessionId: job.printSession.id,
         printItemId: item.id,
@@ -355,7 +355,7 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error("claimLocalAgentPrintJob error:", error);
-    return res.status(error?.statusCode || 500).json({ success: false, error: error?.message || "Internal server error" });
+    return localAgentErrorResponse(res, error);
   }
 };
 
@@ -471,7 +471,7 @@ export const ackLocalAgentPrintJob = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error("ackLocalAgentPrintJob error:", error);
-    return res.status(error?.statusCode || 500).json({ success: false, error: error?.message || "Internal server error" });
+    return localAgentErrorResponse(res, error);
   }
 };
 
@@ -598,7 +598,7 @@ export const confirmLocalAgentPrintJob = async (req: Request, res: Response) => 
     });
   } catch (error: any) {
     console.error("confirmLocalAgentPrintJob error:", error);
-    return res.status(error?.statusCode || 500).json({ success: false, error: error?.message || "Internal server error" });
+    return localAgentErrorResponse(res, error);
   }
 };
 
@@ -672,6 +672,6 @@ export const failLocalAgentPrintJob = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error("failLocalAgentPrintJob error:", error);
-    return res.status(error?.statusCode || 500).json({ success: false, error: error?.message || "Internal server error" });
+    return localAgentErrorResponse(res, error);
   }
 };

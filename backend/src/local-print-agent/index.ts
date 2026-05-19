@@ -24,6 +24,7 @@ import {
 import { startGatewayWorker } from "./gateway";
 import { startDirectPrintWorker } from "./directPrintWorker";
 import { buildPrinterAgentHeartbeatPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
+import { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } from "../services/localAgentProtocol";
 import { randomOpaqueToken } from "../utils/security";
 
 const app = express();
@@ -31,6 +32,7 @@ const app = express();
 const PORT = Number(String(process.env.PRINT_AGENT_PORT || "17866").trim()) || 17866;
 const HOST = String(process.env.PRINT_AGENT_HOST || "127.0.0.1").trim() || "127.0.0.1";
 const AGENT_VERSION = String(process.env.PRINT_AGENT_VERSION || "1.0.0").trim() || "1.0.0";
+const AGENT_BUILD_VERSION = String(process.env.PRINT_AGENT_BUILD_VERSION || AGENT_VERSION).trim() || AGENT_VERSION;
 const INVENTORY_TTL_MS = Math.max(1500, Number(String(process.env.PRINT_AGENT_INVENTORY_TTL_MS || "5000").trim()) || 5000);
 
 type AgentSnapshot = {
@@ -41,6 +43,8 @@ type AgentSnapshot = {
   selectedPrinterName: string | null;
   deviceName: string;
   agentVersion: string;
+  protocolVersion: string;
+  buildVersion: string;
   error: string | null;
   agentId: string;
   deviceFingerprint: string;
@@ -141,6 +145,8 @@ const buildSnapshot = async (forceRefresh = false): Promise<{ state: AgentState;
     selectedPrinterName: selectedPrinter?.printerName || null,
     deviceName: resolveDeviceName(),
     agentVersion: AGENT_VERSION,
+    protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+    buildVersion: AGENT_BUILD_VERSION,
     error,
     agentId: state.agentId,
     deviceFingerprint: state.deviceFingerprint,

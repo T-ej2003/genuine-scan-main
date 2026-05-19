@@ -47,6 +47,9 @@ export type PrinterConnectionStatusLike = {
   selectedPrinterName?: string | null;
   deviceName?: string | null;
   agentVersion?: string | null;
+  protocolVersion?: string | null;
+  buildVersion?: string | null;
+  connectorUpdateRequired?: boolean;
   printers?: PrinterInventoryRow[];
   error?: string | null;
   refreshPaused?: boolean;
