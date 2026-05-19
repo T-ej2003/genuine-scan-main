@@ -8,6 +8,7 @@ delete process.env.QR_SIGN_KMS_KEY_REF;
 delete process.env.QR_SIGN_KMS_VERIFY_KEY_REF;
 
 const {
+  classifyQrSigningSecretFormat,
   signQrPayload,
   validateQrSigningConfiguration,
   verifyQrToken,
@@ -47,6 +48,11 @@ assertRoundTrip("Quoted escaped PEM keys should import and sign");
 setEd25519Keys((value) => Buffer.from(value, "utf8").toString("base64"));
 assertRoundTrip("Base64-wrapped PEM keys should import and sign");
 
+setEd25519Keys((value) => value.trim().replace(/\r?\n/g, " "));
+assert.strictEqual(classifyQrSigningSecretFormat(process.env.QR_SIGN_PRIVATE_KEY), "single_line_pem");
+assert.strictEqual(classifyQrSigningSecretFormat(process.env.QR_SIGN_PUBLIC_KEY), "single_line_pem");
+assertRoundTrip("Single-line PEM keys with spaces should import and sign");
+
 process.env.QR_SIGN_PRIVATE_KEY = "not a pem key";
 process.env.QR_SIGN_PUBLIC_KEY = "not a pem key";
 let failed = false;
@@ -57,6 +63,7 @@ try {
   assert.strictEqual(error.code, "QR_SIGNING_CONFIGURATION_INVALID");
   assert(error.safeCryptoMetadata, "Invalid key errors should carry safe crypto metadata");
   assert.strictEqual(error.safeCryptoMetadata.errorCode, "ERR_OSSL_UNSUPPORTED");
+  assert.strictEqual(error.safeCryptoMetadata.privateKeyFormat, "invalid");
 }
 assert(failed, "Invalid QR signing key material should fail with a precise configuration error");
 

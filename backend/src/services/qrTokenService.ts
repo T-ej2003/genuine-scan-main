@@ -61,6 +61,11 @@ export type SafeQrCryptoMetadata = {
   keyVersion?: string | null;
   privateKeyType?: string | null;
   publicKeyType?: string | null;
+  privateKeyFormat?: QrSigningSecretFormat;
+  publicKeyFormat?: QrSigningSecretFormat;
+  privateKeyLength?: number;
+  publicKeyLength?: number;
+  hint?: string | null;
   errorName?: string | null;
   errorCode?: string | null;
 };
@@ -68,6 +73,14 @@ export type SafeQrCryptoMetadata = {
 type QrSigningOptions = {
   onCryptoMetadata?: (metadata: SafeQrCryptoMetadata) => void;
 };
+
+export type QrSigningSecretFormat =
+  | "missing"
+  | "multiline_pem"
+  | "escaped_newline_pem"
+  | "base64_wrapped_pem"
+  | "single_line_pem"
+  | "invalid";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 let managedQrSignerBridge: ManagedQrSignerBridge | null = null;
@@ -134,8 +147,49 @@ const decodeBase64PemIfNeeded = (value: string) => {
   }
 };
 
+const singleLinePemPattern = /^-----BEGIN ([A-Z0-9 ]+)-----\s+([A-Za-z0-9+/=\s]+?)\s+-----END \1-----$/;
+
+const chunkBase64 = (value: string) => value.match(/.{1,64}/g)?.join("\n") || value;
+
+const normalizeSingleLinePem = (value: string) => {
+  const match = value.trim().match(singleLinePemPattern);
+  if (!match) return value;
+  const [, label, bodyRaw] = match;
+  const body = bodyRaw.replace(/\s+/g, "");
+  if (!body || body.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(body)) return value;
+  return `-----BEGIN ${label}-----\n${chunkBase64(body)}\n-----END ${label}-----`;
+};
+
+export const classifyQrSigningSecretFormat = (value: string | undefined | null): QrSigningSecretFormat => {
+  const raw = String(value || "").trim();
+  if (!raw) return "missing";
+  const unwrapped = unwrapQuotedSecret(raw);
+  if (/\\r\\n|\\n/.test(unwrapped)) return "escaped_newline_pem";
+  if (/-----BEGIN [^-]+-----\r?\n/.test(unwrapped) && /\r?\n-----END [^-]+-----/.test(unwrapped)) {
+    return "multiline_pem";
+  }
+  if (singleLinePemPattern.test(unwrapped)) return "single_line_pem";
+  if (!unwrapped.includes("-----BEGIN ")) {
+    const decoded = decodeBase64PemIfNeeded(unwrapped);
+    if (decoded !== unwrapped && decoded.includes("-----BEGIN ")) return "base64_wrapped_pem";
+  }
+  return "invalid";
+};
+
+const keyFormatHint = (privateKeyFormat: QrSigningSecretFormat, publicKeyFormat: QrSigningSecretFormat) => {
+  if (privateKeyFormat === "single_line_pem" || publicKeyFormat === "single_line_pem") {
+    return "QR_SIGN_PRIVATE_KEY appears to be single-line PEM. Store as base64-wrapped PEM or escaped-newline PEM.";
+  }
+  if (privateKeyFormat === "invalid" || publicKeyFormat === "invalid") {
+    return "Store QR signing keys as base64-wrapped PEM, escaped-newline PEM, or valid multiline PEM.";
+  }
+  return null;
+};
+
 const normalizePem = (value: string) =>
-  decodeBase64PemIfNeeded(unwrapQuotedSecret(value).replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n")).trim();
+  normalizeSingleLinePem(
+    decodeBase64PemIfNeeded(unwrapQuotedSecret(value).replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n")).trim()
+  ).trim();
 
 const hasEd25519KeyPair = () => Boolean(process.env.QR_SIGN_PRIVATE_KEY && process.env.QR_SIGN_PUBLIC_KEY);
 const normalizeProviderSetting = () => String(process.env.QR_SIGN_PROVIDER || "").trim().toLowerCase();
@@ -244,7 +298,12 @@ const loadEd25519Keys = (options?: QrSigningOptions) => {
     provider: "env",
     keySourceLabel: "env:QR_SIGN_PRIVATE_KEY/QR_SIGN_PUBLIC_KEY",
     keyVersion: String(process.env.QR_SIGN_ACTIVE_KEY_VERSION || "").trim() || null,
+    privateKeyFormat: classifyQrSigningSecretFormat(priv),
+    publicKeyFormat: classifyQrSigningSecretFormat(pub),
+    privateKeyLength: String(priv || "").length,
+    publicKeyLength: String(pub || "").length,
   };
+  baseMetadata.hint = keyFormatHint(baseMetadata.privateKeyFormat!, baseMetadata.publicKeyFormat!);
 
   let privateKey: KeyObject;
   let publicKey: KeyObject;

@@ -84,8 +84,18 @@
       args:
         chdir: "{{ app_dir }}"
 
+    - name: Build Docker Compose stack with singleton worker profile
+      command: docker compose --profile worker build
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Preflight QR signing runtime configuration
+      command: docker compose run --rm --no-deps backend node dist/scripts/qrSigningPreflight.js
+      args:
+        chdir: "{{ app_dir }}"
+
     - name: Restart Docker Compose stack with singleton worker profile
-      command: docker compose --profile worker up -d --build
+      command: docker compose --profile worker up -d --no-build
       args:
         chdir: "{{ app_dir }}"
 
