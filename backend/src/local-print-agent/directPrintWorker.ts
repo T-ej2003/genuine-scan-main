@@ -7,7 +7,17 @@ import { buildPrinterAgentActionPayload, signPrinterAgentPayload } from "../serv
 import { randomOpaqueToken } from "../utils/security";
 
 const DIRECT_PRINT_POLL_MS = Math.max(2000, Number(process.env.PRINT_AGENT_DIRECT_POLL_MS || 4000) || 4000);
+const DIRECT_PRINT_MAX_BACKOFF_MS = Math.max(
+  DIRECT_PRINT_POLL_MS,
+  Number(process.env.PRINT_AGENT_DIRECT_MAX_BACKOFF_MS || 60_000) || 60_000
+);
 const AGENT_VERSION = String(process.env.PRINT_AGENT_VERSION || "1.0.0").trim() || "1.0.0";
+
+const clampRetryAfterMs = (value: unknown) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DIRECT_PRINT_POLL_MS;
+  return Math.max(DIRECT_PRINT_POLL_MS, Math.min(DIRECT_PRINT_MAX_BACKOFF_MS, Math.floor(parsed)));
+};
 
 const resolveBackendUrl = async () => {
   const state = await loadAgentState();
@@ -81,7 +91,7 @@ const claimNextLocalJob = async () => {
     printerId: selectedPrinterId,
   });
 
-  return postBackend<{ success: boolean; data?: any }>("/printer-agent/local/claim", {
+  return postBackend<{ success: boolean; data?: any; retryAfterMs?: number }>("/printer-agent/local/claim", {
     ...signed.body,
     selectedPrinterId,
     selectedPrinterName: selection.printerName,
@@ -98,6 +108,7 @@ const ackLocalJob = async (payload: {
   printPath: string;
   labelLanguage: string;
   jobRef?: string | null;
+  markDispatched?: boolean;
 }) => {
   const signed = await buildSignedBody({
     action: "ack",
@@ -113,6 +124,7 @@ const ackLocalJob = async (payload: {
     payloadHash: payload.payloadHash,
     bytesWritten: Math.max(1, payload.payloadHash.length),
     deviceJobRef: payload.jobRef || null,
+    markDispatched: payload.markDispatched !== false,
     agentMetadata: {
       deviceName: os.hostname(),
       agentVersion: AGENT_VERSION,
@@ -183,9 +195,19 @@ const failLocalJob = async (payload: {
 
 const runOnce = async () => {
   const claimed = await claimNextLocalJob();
-  if (!claimed?.data) return;
+  if (!claimed?.data) {
+    const retryAfterMs = clampRetryAfterMs(claimed?.retryAfterMs);
+    console.info("local direct-print claim returned no work", { retryAfterMs });
+    return retryAfterMs;
+  }
 
   const payload = claimed.data;
+  console.info("local direct-print claim returned work", {
+    printJobId: String(payload.printJobId || "").trim() || null,
+    printSessionId: String(payload.printSessionId || "").trim() || null,
+    printItemId: String(payload.printItemId || "").trim() || null,
+    payloadHashPresent: Boolean(String(payload.payloadHash || "").trim()),
+  });
   const calibrationProfile =
     payload.calibrationProfile && typeof payload.calibrationProfile === "object"
       ? (payload.calibrationProfile as Record<string, unknown>)
@@ -204,7 +226,33 @@ const runOnce = async () => {
     return;
   }
 
+  const printJobId = String(payload.printJobId || "").trim();
+  const printItemId = String(payload.printItemId || "").trim();
+  const payloadHash = String(payload.payloadHash || "").trim();
+
   try {
+    await ackLocalJob({
+      printerId,
+      printJobId,
+      printItemId,
+      payloadHash,
+      printPath: "agent-claimed",
+      labelLanguage: payload.commandLanguage || payload.labelLanguage || "AUTO",
+      jobRef: null,
+      markDispatched: false,
+    });
+    console.info("local direct-print item acknowledged", {
+      printJobId,
+      printItemId,
+      printerId,
+    });
+
+    console.info("local direct-print spooler start", {
+      printJobId,
+      printItemId,
+      printerId,
+      payloadType: payload.payloadType || null,
+    });
     const result = await printLabel({
       printerId,
       printerName: String(payload.printer?.name || payload.selectedPrinterName || printerId).trim(),
@@ -224,11 +272,20 @@ const runOnce = async () => {
       },
     });
 
+    console.info("local direct-print spooler result", {
+      printJobId,
+      printItemId,
+      printerId,
+      printPath: result.printPath,
+      labelLanguage: result.labelLanguage,
+      jobRef: result.jobRef || null,
+    });
+
     await ackLocalJob({
       printerId,
-      printJobId: String(payload.printJobId || "").trim(),
-      printItemId: String(payload.printItemId || "").trim(),
-      payloadHash: String(payload.payloadHash || "").trim(),
+      printJobId,
+      printItemId,
+      payloadHash,
       printPath: result.printPath,
       labelLanguage: result.labelLanguage,
       jobRef: result.jobRef,
@@ -239,22 +296,36 @@ const runOnce = async () => {
     });
     await confirmLocalJob({
       printerId,
-      printJobId: String(payload.printJobId || "").trim(),
-      printItemId: String(payload.printItemId || "").trim(),
-      payloadHash: String(payload.payloadHash || "").trim(),
+      printJobId,
+      printItemId,
+      payloadHash,
       printPath: result.printPath,
       labelLanguage: result.labelLanguage,
       jobRef: result.jobRef,
     });
+    console.info("local direct-print item confirmed", {
+      printJobId,
+      printItemId,
+      printerId,
+      jobRef: result.jobRef || null,
+    });
   } catch (error: any) {
     await failLocalJob({
       printerId,
-      printJobId: String(payload.printJobId || "").trim(),
-      printItemId: String(payload.printItemId || "").trim(),
+      printJobId,
+      printItemId,
       reason: error?.message || "Local direct-print pipeline failed.",
+    });
+    console.error("local direct-print item failed", {
+      printJobId,
+      printItemId,
+      printerId,
+      error: error?.message || error,
     });
     throw error;
   }
+
+  return clampRetryAfterMs(claimed?.retryAfterMs);
 };
 
 export const startDirectPrintWorker = () => {
@@ -264,7 +335,9 @@ export const startDirectPrintWorker = () => {
     while (!stopped) {
       try {
         if (await resolveBackendUrl()) {
-          await runOnce();
+          const retryAfterMs = await runOnce();
+          await new Promise((resolve) => setTimeout(resolve, clampRetryAfterMs(retryAfterMs)));
+          continue;
         }
       } catch (error) {
         console.error("local direct-print worker cycle failed:", error);

@@ -1,4 +1,4 @@
-import { PrintItemState, PrintJobStatus, PrintSessionStatus } from "@prisma/client";
+import { PrintItemState, PrintJobStatus, PrintPipelineState, PrintSessionStatus } from "@prisma/client";
 
 import prisma from "../config/database";
 import { logger } from "../utils/logger";
@@ -11,15 +11,41 @@ const RECONCILE_INTERVAL_MS = Math.max(
   5_000,
   Math.min(5 * 60_000, Number(process.env.PRINT_CONFIRMATION_RECONCILE_INTERVAL_MS || 15_000) || 15_000)
 );
+const ISSUED_WITHOUT_ACK_TIMEOUT_MS = Math.max(
+  10_000,
+  Math.min(30 * 60_000, Number(process.env.PRINT_ISSUED_WITHOUT_ACK_TIMEOUT_MS || 5 * 60_000) || 5 * 60_000)
+);
 
 export const reconcileExpiredAcknowledgedItems = async () => {
   const now = new Date();
+  const issuedAckCutoff = new Date(now.getTime() - ISSUED_WITHOUT_ACK_TIMEOUT_MS);
   const expiredItems = await prisma.printItem.findMany({
     where: {
-      state: PrintItemState.AGENT_ACKED,
-      confirmationDeadlineAt: {
-        lte: now,
-      },
+      OR: [
+        {
+          state: PrintItemState.AGENT_ACKED,
+          confirmationDeadlineAt: {
+            lte: now,
+          },
+        },
+        {
+          state: PrintItemState.ISSUED,
+          agentAckedAt: null,
+          OR: [
+            {
+              confirmationDeadlineAt: {
+                lte: now,
+              },
+            },
+            {
+              confirmationDeadlineAt: null,
+              issuedAt: {
+                lte: issuedAckCutoff,
+              },
+            },
+          ],
+        },
+      ],
       printSession: {
         is: {
           status: PrintSessionStatus.ACTIVE,
@@ -34,6 +60,9 @@ export const reconcileExpiredAcknowledgedItems = async () => {
     select: {
       id: true,
       code: true,
+      state: true,
+      issuedAt: true,
+      confirmationDeadlineAt: true,
       printSessionId: true,
       printSession: {
         select: {
@@ -69,11 +98,23 @@ export const reconcileExpiredAcknowledgedItems = async () => {
         batchId: item.printSession.printJob.batchId,
         licenseeId: item.printSession.printJob.batch.licenseeId || null,
         actorUserId: item.printSession.printJob.manufacturerId,
-        reason: `Printer confirmation deadline expired for ${item.code}.`,
+        reason:
+          item.state === PrintItemState.ISSUED
+            ? `Printer agent did not acknowledge issued label ${item.code} before the deadline.`
+            : `Printer confirmation deadline expired for ${item.code}.`,
         printItemId: item.id,
         metadata: {
           reconciliation: true,
           source: "print_confirmation_reconciler",
+          itemState: item.state,
+          issuedAt: item.issuedAt?.toISOString?.() || null,
+          confirmationDeadlineAt: item.confirmationDeadlineAt?.toISOString?.() || null,
+        },
+      });
+      await prisma.printJob.update({
+        where: { id: item.printSession.printJob.id },
+        data: {
+          pipelineState: PrintPipelineState.NEEDS_OPERATOR_ACTION,
         },
       });
     } catch (error: any) {

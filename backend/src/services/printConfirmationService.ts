@@ -117,6 +117,7 @@ export const acknowledgePrintItemDispatch = async (params: {
   dispatchMetadata?: Record<string, unknown> | null;
   confirmationMode?: PrintConfirmationMode | null;
   confirmationDeadlineAt?: Date | null;
+  markDispatched?: boolean;
   now?: Date;
 }) => {
   const tx = params.tx || prisma;
@@ -133,11 +134,13 @@ export const acknowledgePrintItemDispatch = async (params: {
     deviceJobRef: params.deviceJobRef || undefined,
     bytesWritten: params.bytesWritten ?? undefined,
   });
+  const markDispatched = params.markDispatched !== false;
 
   if (item.state === PrintItemState.AGENT_ACKED || item.state === PrintItemState.PRINT_CONFIRMED || item.state === PrintItemState.CLOSED) {
     await tx.printItem.update({
       where: { id: item.id },
       data: {
+        ...(markDispatched && !item.dispatchedAt ? { dispatchedAt: now } : {}),
         deviceJobRef: params.deviceJobRef || item.deviceJobRef || null,
         dispatchMetadata: mergedDispatchMetadata as Prisma.InputJsonValue,
         confirmationDeadlineAt: params.confirmationDeadlineAt || item.confirmationDeadlineAt || buildPrintConfirmationDeadline(now),
@@ -152,7 +155,7 @@ export const acknowledgePrintItemDispatch = async (params: {
       state: PrintItemState.AGENT_ACKED,
       pipelineState: PrintPipelineState.PRINTER_ACKNOWLEDGED,
       agentAckedAt: now,
-      dispatchedAt: item.dispatchedAt || now,
+      dispatchedAt: markDispatched ? item.dispatchedAt || now : item.dispatchedAt || null,
       attemptCount: { increment: 1 },
       deviceJobRef: params.deviceJobRef || null,
       dispatchMetadata: mergedDispatchMetadata as Prisma.InputJsonValue,
@@ -174,6 +177,7 @@ export const acknowledgePrintItemDispatch = async (params: {
         bytesWritten: params.bytesWritten ?? null,
         deviceJobRef: params.deviceJobRef || null,
         confirmationMode: params.confirmationMode || null,
+        markDispatched,
         ...(params.dispatchMetadata || {}),
       },
     },
