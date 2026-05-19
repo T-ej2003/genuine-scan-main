@@ -1,5 +1,9 @@
 const { createHash } = require("crypto");
 const { validateClaimedLocalPrintJobForAttempt } = require("../dist/local-print-agent/directPrintWorker");
+const {
+  isLocalAgentProtocolCompatible,
+  LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+} = require("../dist/services/localAgentProtocol");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -8,6 +12,13 @@ const assert = (condition, message) => {
 const sha256Hex = (value) => createHash("sha256").update(value).digest("hex");
 
 const run = () => {
+  assert(
+    isLocalAgentProtocolCompatible(LOCAL_AGENT_DIRECT_PROTOCOL_VERSION),
+    "Current direct-print protocol should be accepted"
+  );
+  assert(!isLocalAgentProtocolCompatible(null), "Missing protocol should require connector update");
+  assert(!isLocalAgentProtocolCompatible("test.v1#4"), "Stale test connector protocol should require update");
+
   const payloadContent = "^XA\n^XZ";
   const valid = validateClaimedLocalPrintJobForAttempt({
     printJobId: "job-1",

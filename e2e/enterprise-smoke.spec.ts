@@ -54,6 +54,8 @@ const requireEnterpriseCondition = (condition: boolean, message: string) => {
 };
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const E2E_LOCAL_AGENT_PROTOCOL_VERSION = "local-agent-direct-v2";
+const E2E_LOCAL_AGENT_BUILD_VERSION = "2026.5.19-e2e";
 
 const goto = async (page: Page, path: string) => {
   await page.goto(path, { waitUntil: "domcontentloaded" });
@@ -96,6 +98,8 @@ const buildE2EPrinterPayload = () => ({
   selectedPrinterName: env.printerProfileName || "E2E Local Agent Printer",
   deviceName: "E2E Print Workstation",
   agentVersion: "e2e-ci",
+  protocolVersion: E2E_LOCAL_AGENT_PROTOCOL_VERSION,
+  buildVersion: E2E_LOCAL_AGENT_BUILD_VERSION,
   agentId: "e2e-agent",
   deviceFingerprint: "e2e-device-fingerprint",
   printers: [
@@ -144,7 +148,13 @@ const installLocalPrintAgentMock = async (page: Page) => {
     route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ success: true, selectedPrinterId: "e2e-local-printer" }),
+      body: JSON.stringify({
+        success: true,
+        selectedPrinterId: "e2e-local-printer",
+        selectedPrinterName: env.printerProfileName || "E2E Local Agent Printer",
+        protocolVersion: E2E_LOCAL_AGENT_PROTOCOL_VERSION,
+        buildVersion: E2E_LOCAL_AGENT_BUILD_VERSION,
+      }),
     })
   );
 };
@@ -192,7 +202,10 @@ const refreshE2EPrinterHeartbeat = async (page: Page) => {
     };
   }, buildE2EPrinterPayload());
 
-  expect(result, `E2E printer helper readiness failed during ${result.phase}`).toMatchObject({ ok: true });
+  expect(
+    result.ok,
+    `E2E printer helper readiness failed during ${result.phase}: ${JSON.stringify(result, null, 2)}`
+  ).toBe(true);
 };
 
 test.describe.serial("Enterprise smoke flows", () => {

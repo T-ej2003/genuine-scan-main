@@ -14,6 +14,7 @@ import {
 import { createHash } from "crypto";
 
 import { hashPassword } from "../src/services/auth/passwordService";
+import { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION, LOCAL_AGENT_MIN_VERSION_HINT } from "../src/services/localAgentProtocol";
 
 const prisma = new PrismaClient();
 
@@ -218,6 +219,8 @@ const seedPrinter = async () => {
         selectedPrinterName: PRINTER_NAME,
         deviceName: "E2E Print Workstation",
         agentVersion: "e2e-ci",
+        protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+        buildVersion: `${LOCAL_AGENT_MIN_VERSION_HINT}-e2e`,
         capabilitySummary: {
           transports: ["LOCAL_AGENT"],
           protocols: ["DRIVER_QUEUE"],
