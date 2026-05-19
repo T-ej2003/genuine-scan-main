@@ -1,10 +1,49 @@
 {
   "productName": "MSCQR Connector",
-  "latestVersion": "2026.5.10",
+  "latestVersion": "2026.5.19",
+  "requiredProtocolVersion": "local-agent-direct-v2",
+  "minimumBuildVersion": "2026.5.19",
   "supportPath": "/help/manufacturer",
   "helpPath": "/connector-download",
   "setupGuidePath": "/help/manufacturer",
   "releases": [
+    {
+      "version": "2026.5.19",
+      "publishedAt": "2026-05-19T22:01:38.562Z",
+      "requiredProtocolVersion": "local-agent-direct-v2",
+      "minimumBuildVersion": "2026.5.19",
+      "summary": "Install the signed Windows connector once on the printing computer, then the MSCQR Connector starts automatically in the background.",
+      "notes": [
+        "Use the signed Windows installer on the Windows PC that is connected to the printer.",
+        "This connector advertises local-agent-direct-v2 and is compatible with the current direct-print backend.",
+        "Windows installation verifies local printer readiness before claiming success and opens Printer Setup automatically when attention is still needed.",
+        "Windows should show L&D Health Ltd as the verified publisher for this installer."
+      ],
+      "platforms": {
+        "windows": {
+          "label": "Windows installer",
+          "installerKind": "exe",
+          "trustLevel": "trusted",
+          "signatureStatus": "signed",
+          "publisherName": "L&D Health Ltd",
+          "signedAt": "2026-05-19T22:01:38.201Z",
+          "windowsTrustMode": "trusted",
+          "filename": "MSCQR-Connector-Windows-2026.5.19.exe",
+          "relativePath": "2026.5.19/windows/MSCQR-Connector-Windows-2026.5.19.exe",
+          "contentType": "application/vnd.microsoft.portable-executable",
+          "architecture": "x64",
+          "bytes": 15592296,
+          "sha256": "f682f54b8fe60ba0b34895740710302f97fd988dec64da6060cbe30fb34cee50",
+          "protocolVersion": "local-agent-direct-v2",
+          "buildVersion": "2026.5.19",
+          "notes": [
+            "Run the signed Windows installer once on the Windows computer that will print.",
+            "The installer installs the connector, configures auto-start, and verifies local printer readiness.",
+            "Publisher shown in Windows should be L&D Health Ltd."
+          ]
+        }
+      }
+    },
     {
       "version": "2026.5.10",
       "publishedAt": "2026-05-10T01:39:08.000Z",
