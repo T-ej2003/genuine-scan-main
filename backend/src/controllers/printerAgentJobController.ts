@@ -5,7 +5,6 @@ import {
   PrinterTrustStatus,
 } from "@prisma/client";
 import { Request, Response } from "express";
-import { z } from "zod";
 
 import prisma from "../config/database";
 import { createAuditLog } from "../services/auditService";
@@ -35,59 +34,19 @@ import {
   LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
 } from "../services/localAgentProtocol";
 import { ensurePrinterProfileForPrinter, resolvePrinterPreflight } from "../printing/registry/printerProfileService";
-
-const agentAuthSchema = z
-  .object({
-    agentId: z.string().trim().min(3).max(180),
-    deviceFingerprint: z.string().trim().min(8).max(256),
-    printerId: z.string().trim().min(1).max(180),
-    issuedAt: z.string().trim().min(10).max(80),
-    nonce: z.string().trim().min(8).max(180),
-    signature: z.string().trim().min(16).max(4096),
-  })
-  .strict();
-
-const claimSchema = agentAuthSchema
-  .extend({
-    protocolVersion: z.string().trim().max(80).optional().nullable(),
-    buildVersion: z.string().trim().max(80).optional().nullable(),
-    selectedPrinterId: z.string().trim().max(180).optional().nullable(),
-    selectedPrinterName: z.string().trim().max(180).optional().nullable(),
-    deviceName: z.string().trim().max(180).optional(),
-    agentVersion: z.string().trim().max(80).optional(),
-  })
-  .strict();
-
-const confirmSchema = agentAuthSchema
-  .extend({
-    printJobId: z.string().trim().uuid(),
-    printItemId: z.string().trim().uuid(),
-    payloadHash: z.string().trim().max(256).optional().or(z.literal("")),
-    bytesWritten: z.coerce.number().int().min(1).max(50_000_000).optional(),
-    deviceJobRef: z.string().trim().max(240).optional().or(z.literal("")),
-    markDispatched: z.boolean().optional(),
-    agentMetadata: z.any().optional(),
-  })
-  .strict();
-
-const ackSchema = confirmSchema;
-
-const failSchema = agentAuthSchema
-  .extend({
-    printJobId: z.string().trim().uuid(),
-    printItemId: z.string().trim().uuid(),
-    reason: z.string().trim().min(2).max(1000),
-    agentMetadata: z.any().optional(),
-  })
-  .strict();
+import {
+  buildLocalAgentValidationErrorPayload,
+  claimSchema,
+  confirmSchema,
+  failSchema,
+  getLocalAgentRequestId,
+  localAgentAckSchema,
+  type LocalAgentRequestPayload,
+  validateLocalAgentAckDispatchPhase,
+} from "../services/localAgentAckProtocolService";
 
 const verifyLocalAgentRequest = async (
-  parsed:
-    | z.infer<typeof agentAuthSchema>
-    | z.infer<typeof claimSchema>
-    | z.infer<typeof ackSchema>
-    | z.infer<typeof confirmSchema>
-    | z.infer<typeof failSchema>,
+  parsed: LocalAgentRequestPayload,
   action: "claim" | "ack" | "confirm" | "fail",
   identifiers?: { printJobId?: string | null; printItemId?: string | null }
 ) => {
@@ -361,9 +320,46 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
 
 export const ackLocalAgentPrintJob = async (req: Request, res: Response) => {
   try {
-    const parsed = ackSchema.safeParse(req.body || {});
+    const parsed = localAgentAckSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid local agent ack payload" });
+      const payload = buildLocalAgentValidationErrorPayload({
+        req,
+        body: req.body || {},
+        errorCode: "invalid_local_agent_ack_payload",
+        message: "Invalid local agent ACK payload.",
+        issues: parsed.error.issues,
+      });
+      console.info("local_agent_ack", {
+        event: "validation_failed",
+        requestId: getLocalAgentRequestId(req),
+        validationIssuePaths: payload.details.validationIssuePaths,
+        missingFields: payload.details.missingFields,
+        protocolVersion: payload.details.protocolVersion,
+        buildVersion: payload.details.buildVersion,
+      });
+      return res.status(400).json(payload);
+    }
+
+    const dispatchPhase = validateLocalAgentAckDispatchPhase(parsed.data);
+    if (!dispatchPhase.ok) {
+      const payload = buildLocalAgentValidationErrorPayload({
+        req,
+        body: req.body || {},
+        errorCode: "invalid_local_agent_ack_payload",
+        message: "Invalid local agent ACK payload.",
+        issues: dispatchPhase.issues,
+      });
+      console.info("local_agent_ack", {
+        event: "dispatch_validation_failed",
+        requestId: getLocalAgentRequestId(req),
+        printItemId: parsed.data.printItemId,
+        markDispatched: parsed.data.markDispatched !== false,
+        validationIssuePaths: payload.details.validationIssuePaths,
+        missingFields: payload.details.missingFields,
+        protocolVersion: payload.details.protocolVersion,
+        buildVersion: payload.details.buildVersion,
+      });
+      return res.status(400).json(payload);
     }
 
     const registration = await verifyLocalAgentRequest(parsed.data, "ack", {
@@ -423,6 +419,7 @@ export const ackLocalAgentPrintJob = async (req: Request, res: Response) => {
       dispatchMetadata: {
         printerRegistrationId: registration.id,
         agentMetadata: parsed.data.agentMetadata || null,
+        dispatchMetadata: parsed.data.dispatchMetadata || null,
       },
       confirmationMode,
       markDispatched: parsed.data.markDispatched !== false,
@@ -437,6 +434,8 @@ export const ackLocalAgentPrintJob = async (req: Request, res: Response) => {
       deviceJobRef: String(parsed.data.deviceJobRef || "").trim() || null,
       markDispatched: parsed.data.markDispatched !== false,
       payloadHashPresent: Boolean(payloadHash),
+      protocolVersion: parsed.data.protocolVersion || parsed.data.agentMetadata?.protocolVersion || null,
+      buildVersion: parsed.data.buildVersion || parsed.data.agentMetadata?.buildVersion || null,
     });
 
     await createAuditLog({

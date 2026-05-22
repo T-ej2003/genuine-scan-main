@@ -85,8 +85,12 @@ const postBackend = async <T>(path: string, body: Record<string, unknown>) => {
       {
         status: response.status,
         errorCode: (payload as any)?.errorCode || (payload as any)?.code || null,
+        requestId: (payload as any)?.requestId || response.headers.get("x-request-id") || null,
+        validationIssuePaths: (payload as any)?.details?.validationIssuePaths || [],
+        missingFields: (payload as any)?.details?.missingFields || [],
         serverTime: (payload as any)?.serverTime || null,
         timestampSkewSeconds: (payload as any)?.timestampSkewSeconds ?? null,
+        retryAfterMs: (payload as any)?.retryAfterMs ?? null,
       }
     );
     throw error;
@@ -123,7 +127,9 @@ const claimNextLocalJob = async () => {
 const ackLocalJob = async (payload: {
   printerId: string;
   printJobId: string;
+  printSessionId?: string | null;
   printItemId: string;
+  code?: string | null;
   payloadHash: string;
   printPath: string;
   labelLanguage: string;
@@ -137,14 +143,28 @@ const ackLocalJob = async (payload: {
     printItemId: payload.printItemId,
   });
 
-  await postBackend("/printer-agent/local/ack", {
+  const markDispatched = payload.markDispatched !== false;
+  const body = {
     ...signed.body,
+    protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+    buildVersion: AGENT_BUILD_VERSION,
     printJobId: payload.printJobId,
+    ...(payload.printSessionId ? { printSessionId: payload.printSessionId } : {}),
     printItemId: payload.printItemId,
+    ...(payload.code ? { code: payload.code } : {}),
     payloadHash: payload.payloadHash,
     bytesWritten: Math.max(1, payload.payloadHash.length),
-    deviceJobRef: payload.jobRef || null,
-    markDispatched: payload.markDispatched !== false,
+    ...(payload.jobRef ? { deviceJobRef: payload.jobRef } : {}),
+    markDispatched,
+    ...(markDispatched
+      ? {
+          dispatchMetadata: {
+            printPath: payload.printPath,
+            labelLanguage: payload.labelLanguage,
+            jobRef: payload.jobRef || null,
+          },
+        }
+      : {}),
     agentMetadata: {
       deviceName: os.hostname(),
       agentVersion: AGENT_VERSION,
@@ -154,7 +174,16 @@ const ackLocalJob = async (payload: {
       labelLanguage: payload.labelLanguage,
       jobRef: payload.jobRef || null,
     },
-  });
+  };
+
+  try {
+    await postBackend("/printer-agent/local/ack", body);
+  } catch (error: any) {
+    throw Object.assign(error, {
+      localAgentStage: markDispatched ? "dispatch_ack" : "pre_spool_ack",
+      spoolerAttempted: markDispatched,
+    });
+  }
 };
 
 const confirmLocalJob = async (payload: {
@@ -175,6 +204,8 @@ const confirmLocalJob = async (payload: {
 
   await postBackend("/printer-agent/local/confirm", {
     ...signed.body,
+    protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+    buildVersion: AGENT_BUILD_VERSION,
     printJobId: payload.printJobId,
     printItemId: payload.printItemId,
     payloadHash: payload.payloadHash,
@@ -207,6 +238,8 @@ const failLocalJob = async (payload: {
 
   await postBackend("/printer-agent/local/fail", {
     ...signed.body,
+    protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+    buildVersion: AGENT_BUILD_VERSION,
     printJobId: payload.printJobId,
     printItemId: payload.printItemId,
     reason: payload.reason,
@@ -217,6 +250,20 @@ const failLocalJob = async (payload: {
       buildVersion: AGENT_BUILD_VERSION,
     },
   });
+};
+
+export const isPreSpoolAckRejection = (error: any) =>
+  String(error?.localAgentStage || "") === "pre_spool_ack" &&
+  (Number(error?.status || 0) === 400 ||
+    Number(error?.status || 0) === 401 ||
+    Number(error?.status || 0) === 426 ||
+    String(error?.errorCode || "").includes("ack") ||
+    String(error?.errorCode || "") === "agent_timestamp_expired" ||
+    String(error?.errorCode || "") === "connector_update_required");
+
+export const shouldReportLocalPrintFailureToBackend = (error: any, spoolerAttempted: boolean) => {
+  if (!spoolerAttempted && isPreSpoolAckRejection(error)) return false;
+  return true;
 };
 
 export const validateClaimedLocalPrintJobForAttempt = (payload: any) => {
@@ -275,6 +322,7 @@ const runOnce = async () => {
 
   const printJobId = String(payload.printJobId || "").trim();
   const printItemId = String(payload.printItemId || "").trim();
+  let spoolerAttempted = false;
 
   try {
     validated = validateClaimedLocalPrintJobForAttempt(payload);
@@ -289,7 +337,9 @@ const runOnce = async () => {
     await ackLocalJob({
       printerId,
       printJobId,
+      printSessionId: validated.printSessionId,
       printItemId,
+      code: validated.code,
       payloadHash: validated.payloadHash,
       printPath: "agent-claimed",
       labelLanguage: payload.commandLanguage || payload.labelLanguage || "AUTO",
@@ -308,6 +358,7 @@ const runOnce = async () => {
       printerId,
       payloadType: payload.payloadType || null,
     });
+    spoolerAttempted = true;
     const result = await printLabel({
       printerId,
       printerName: String(payload.printer?.name || payload.selectedPrinterName || printerId).trim(),
@@ -339,7 +390,9 @@ const runOnce = async () => {
     await ackLocalJob({
       printerId,
       printJobId,
+      printSessionId: validated.printSessionId,
       printItemId,
+      code: validated.code,
       payloadHash: validated.payloadHash,
       printPath: result.printPath,
       labelLanguage: result.labelLanguage,
@@ -366,7 +419,8 @@ const runOnce = async () => {
     });
   } catch (error: any) {
     let failureReported = false;
-    if (printJobId && printItemId) {
+    const shouldReportFailure = shouldReportLocalPrintFailureToBackend(error, spoolerAttempted);
+    if (printJobId && printItemId && shouldReportFailure) {
       await failLocalJob({
         printerId,
         printJobId,
@@ -394,7 +448,15 @@ const runOnce = async () => {
       printerId,
       error: error?.message || error,
       errorCode: error?.errorCode || null,
+      localAgentStage: error?.localAgentStage || null,
+      spoolerAttempted,
+      requestId: error?.requestId || null,
+      validationIssuePaths: error?.validationIssuePaths || [],
+      missingFields: error?.missingFields || [],
       failureReported,
+      operatorMessage: !shouldReportFailure
+        ? "Connector ACK rejected by backend before printing. Update connector or contact support."
+        : null,
     });
     throw error;
   }
@@ -415,6 +477,17 @@ export const startDirectPrintWorker = () => {
         }
       } catch (error) {
         console.error("local direct-print worker cycle failed:", error);
+        const retryAfterMs = clampRetryAfterMs((error as any)?.retryAfterMs);
+        if ((error as any)?.serverTime || (error as any)?.timestampSkewSeconds != null) {
+          console.error("local direct-print backend time check failed", {
+            errorCode: (error as any)?.errorCode || null,
+            serverTime: (error as any)?.serverTime || null,
+            timestampSkewSeconds: (error as any)?.timestampSkewSeconds ?? null,
+            retryAfterMs,
+          });
+        }
+        await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
+        continue;
       }
       await new Promise((resolve) => setTimeout(resolve, DIRECT_PRINT_POLL_MS));
     }
