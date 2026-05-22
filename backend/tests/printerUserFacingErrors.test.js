@@ -148,6 +148,10 @@ const run = () => {
     reservationFailure.payload.errorCode === "print_item_reservation_failed",
     "Reservation conflicts should use a precise print item code"
   );
+  assert(
+    /locked by a failed print run/i.test(reservationFailure.payload.message),
+    "Reservation conflicts should tell operators how to recover"
+  );
 
   const unknownFailure = describePrintJobCreateFailure(new Error("Unexpected downstream failure"));
   assert(unknownFailure.status === 500, "Unknown downstream failures should be internal failures");

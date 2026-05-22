@@ -418,6 +418,7 @@ export const abandonUnconfirmedPrintJob = async (params: {
                 dispatchedAt: true,
                 printConfirmedAt: true,
                 deviceJobRef: true,
+                confirmationEvidence: true,
               },
             },
           },
@@ -427,7 +428,14 @@ export const abandonUnconfirmedPrintJob = async (params: {
     if (!job || !job.printSession) throw new Error("PRINT_JOB_NOT_FOUND");
 
     const acknowledgedOrPrinted = job.printSession.items.some(
-      (item) => item.agentAckedAt || item.dispatchedAt || item.printConfirmedAt || item.deviceJobRef
+      (item) =>
+        item.agentAckedAt ||
+        item.dispatchedAt ||
+        item.printConfirmedAt ||
+        item.deviceJobRef ||
+        (item.confirmationEvidence &&
+          typeof item.confirmationEvidence === "object" &&
+          Object.keys(item.confirmationEvidence as Record<string, unknown>).length > 0)
     );
     if (job.printSession.confirmedItems > 0 || acknowledgedOrPrinted) {
       throw Object.assign(new Error("PRINT_SESSION_NOT_ABANDONABLE"), {
@@ -458,6 +466,7 @@ export const abandonUnconfirmedPrintJob = async (params: {
         where: { id: { in: itemIds } },
         data: {
           state: PrintItemState.FAILED,
+          pipelineState: PrintPipelineState.NEEDS_OPERATOR_ACTION,
           failedAt: now,
           failureReason: reason,
           deadLetterReason: "operator_abandoned_unconfirmed_run",

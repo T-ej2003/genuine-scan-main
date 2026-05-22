@@ -1,5 +1,7 @@
 import {
   PrintDispatchMode,
+  PrintItemEventType,
+  PrintItemState,
   PrintJobStatus,
   PrintPipelineState,
   Prisma,
@@ -16,6 +18,11 @@ import { startNetworkIppDispatch } from "./networkIppPrintService";
 import { ensureSelectedPrinterReady, generatePrintJobNumber } from "../controllers/print-job/shared";
 import { buildScopedPrintJobWhere, type PrintJobScope } from "./printJobScopeService";
 import { materializeReplacementChainsForReissue } from "./replacementChainService";
+import {
+  buildReusablePrintItemResetData,
+  selectReservableQrCodesForPrint,
+  type ReservableQrCodeRow,
+} from "./printReservationService";
 
 const BLOCKING_REISSUE_STATUSES = new Set<PrintJobStatus>([PrintJobStatus.PENDING, PrintJobStatus.SENT]);
 
@@ -85,24 +92,16 @@ export const createAuthorizedPrintReissue = async (params: {
 
   const created = await prisma.$transaction(
     async (tx) => {
-      const reservedRows = await tx.$queryRaw<
-        Array<{ id: string; code: string; licenseeId: string; batchId: string | null; replayEpoch: number | null }>
-      >(Prisma.sql`
-        SELECT q."id", q."code", q."licenseeId", q."batchId", q."replayEpoch"
-        FROM "QRCode" q
-        WHERE q."batchId" = ${originalJob.batch.id}
-          AND q."status" = CAST(${QRStatus.ALLOCATED} AS "QRStatus")
-          AND q."printJobId" IS NULL
-        ORDER BY q."code" ASC
-        FOR UPDATE SKIP LOCKED
-        LIMIT ${quantity};
-      `);
+      const reservedRows = await selectReservableQrCodesForPrint(tx, {
+        batchId: originalJob.batch.id,
+        quantity,
+      });
 
       if (reservedRows.length < quantity) {
         throw new Error(`NOT_ENOUGH_CODES:${reservedRows.length}`);
       }
 
-      const prepared = reservedRows.map((qr) => {
+      const prepared = reservedRows.map((qr: ReservableQrCodeRow) => {
         const nonce = randomNonce();
         const payload = {
           qr_id: qr.id,
@@ -186,15 +185,61 @@ export const createAuthorizedPrintReissue = async (params: {
         },
       });
 
-      await tx.printItem.createMany({
-        data: prepared.map((item) => ({
-          printSessionId: session.id,
-          qrCodeId: item.qr.id,
-          code: item.qr.code,
-          state: "RESERVED",
-          pipelineState: PrintPipelineState.QUEUED,
-        })),
-      });
+      const newPreparedItems = prepared.filter((item) => !item.qr.reusablePrintItemId);
+      const reusablePreparedItems = prepared.filter((item) => item.qr.reusablePrintItemId);
+      if (newPreparedItems.length > 0) {
+        await tx.printItem.createMany({
+          data: newPreparedItems.map((item) => ({
+            printSessionId: session.id,
+            qrCodeId: item.qr.id,
+            code: item.qr.code,
+            state: "RESERVED",
+            pipelineState: PrintPipelineState.QUEUED,
+          })),
+        });
+      }
+      for (const item of reusablePreparedItems) {
+        const reusablePrintItemId = item.qr.reusablePrintItemId;
+        if (!reusablePrintItemId) continue;
+        const updated = await tx.printItem.updateMany({
+          where: {
+            id: reusablePrintItemId,
+            qrCodeId: item.qr.id,
+            agentAckedAt: null,
+            dispatchedAt: null,
+            printConfirmedAt: null,
+            deviceJobRef: null,
+            state: { in: [PrintItemState.FAILED, PrintItemState.FROZEN] },
+          },
+          data: buildReusablePrintItemResetData(now),
+        });
+        if (updated.count !== 1) throw new Error("BATCH_BUSY");
+        await tx.printItem.update({
+          where: { id: reusablePrintItemId },
+          data: { printSession: { connect: { id: session.id } } },
+        });
+        await tx.printItemEvent.create({
+          data: {
+            printItemId: reusablePrintItemId,
+            eventType: PrintItemEventType.RESERVED,
+            previousState: item.qr.previousPrintItemState || PrintItemState.FAILED,
+            nextState: PrintItemState.RESERVED,
+            actorUserId: params.scope.userId,
+            details: {
+              action: "zero_evidence_print_item_reused",
+              previousPrintSessionId: item.qr.previousPrintSessionId,
+              previousPrintJobId: item.qr.previousPrintJobId,
+              newPrintSessionId: session.id,
+              newPrintJobId: replacementJob.id,
+              qrCodeId: item.qr.id,
+              code: item.qr.code,
+              previousAttemptCount: item.qr.previousAttemptCount || 0,
+              nextAttemptCount: Number(item.qr.previousAttemptCount || 0) + 1,
+              context: "print_reissue",
+            },
+          },
+        });
+      }
 
       const reissueRequest = await tx.printReissueRequest.create({
         data: {

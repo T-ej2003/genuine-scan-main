@@ -1,6 +1,7 @@
 import { QRStatus } from "@prisma/client";
 
 import prisma from "../config/database";
+import { listReservableQrCodeSummaries } from "./printReservationService";
 
 const LINEAGE_BACKFILL_COOLDOWN_MS = 5 * 60_000;
 const lineageBackfillState = new Map<string, number>();
@@ -148,10 +149,11 @@ const buildCountMaps = async (batchIds: string[]) => {
       countsMap: new Map<string, BatchInventoryCounts>(),
       unassignedRangeMap: new Map<string, { start: string | null; end: string | null }>(),
       printableRangeMap: new Map<string, { start: string | null; end: string | null }>(),
+      reservableCountMap: new Map<string, number>(),
     };
   }
 
-  const [rollups, unassignedRanges, printableRanges] = await Promise.all([
+  const [rollups, unassignedRanges, reservableSummaries] = await Promise.all([
     prisma.inventoryStatusRollup.findMany({
       where: { batchId: { in: batchIds } },
       select: {
@@ -176,16 +178,7 @@ const buildCountMaps = async (batchIds: string[]) => {
       _min: { code: true },
       _max: { code: true },
     }),
-    prisma.qRCode.groupBy({
-      by: ["batchId"],
-      where: {
-        batchId: { in: batchIds },
-        status: { in: [...PRINTABLE_STATUSES] },
-      },
-      _count: { _all: true },
-      _min: { code: true },
-      _max: { code: true },
-    }),
+    listReservableQrCodeSummaries(prisma, batchIds),
   ]);
 
   const countsMap = new Map<string, BatchInventoryCounts>();
@@ -227,19 +220,16 @@ const buildCountMaps = async (batchIds: string[]) => {
     });
   }
 
-  const printableRangeMap = new Map<string, { start: string | null; end: string | null }>();
-  for (const group of printableRanges) {
-    if (!group.batchId) continue;
-    printableRangeMap.set(group.batchId, {
-      start: group._min?.code || null,
-      end: group._max?.code || null,
-    });
-  }
-
   return {
     countsMap,
     unassignedRangeMap,
-    printableRangeMap,
+    printableRangeMap: new Map(
+      [...reservableSummaries.entries()].map(([batchId, summary]) => [
+        batchId,
+        { start: summary.startCode, end: summary.endCode },
+      ])
+    ),
+    reservableCountMap: new Map([...reservableSummaries.entries()].map(([batchId, summary]) => [batchId, summary.count])),
   };
 };
 
@@ -247,13 +237,13 @@ export const enrichBatchSummaries = async (batches: BatchWithScope[]): Promise<B
   if (!batches.length) return [];
 
   const batchIds = batches.map((batch) => batch.id);
-  const { countsMap, unassignedRangeMap, printableRangeMap } = await buildCountMaps(batchIds);
+  const { countsMap, unassignedRangeMap, printableRangeMap, reservableCountMap } = await buildCountMaps(batchIds);
 
   return batches.map((batch) => {
     const counts = countsMap.get(batch.id) || emptyCounts();
     const batchKind: BatchKind = batch.manufacturerId ? "MANUFACTURER_CHILD" : "RECEIVED_PARENT";
     const unassignedRemainingCodes = batchKind === "RECEIVED_PARENT" ? counts.dormant + counts.active : 0;
-    const printableCodes = batchKind === "MANUFACTURER_CHILD" ? counts.allocated + counts.dormant + counts.active : 0;
+    const printableCodes = batchKind === "MANUFACTURER_CHILD" ? reservableCountMap.get(batch.id) || 0 : 0;
     const assignedCodes = batchKind === "MANUFACTURER_CHILD" ? batch.totalCodes : 0;
     const activeRange = batchKind === "MANUFACTURER_CHILD" ? printableRangeMap.get(batch.id) : unassignedRangeMap.get(batch.id);
 

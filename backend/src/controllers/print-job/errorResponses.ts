@@ -342,7 +342,8 @@ export const describePrintJobCreateFailure = (error: any, context?: PrintJobFail
       logReason: "print_item_already_reserved",
       payload: withFailureContext({
         code: "print_item_reservation_failed",
-        message: "Print items could not be reserved for this batch. Refresh and try again.",
+        message:
+          "Some labels are still locked by a failed print run. Close and release the failed run, then start printing again.",
       }, context),
     };
   }

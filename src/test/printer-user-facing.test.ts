@@ -62,7 +62,7 @@ describe("printer user-facing helpers", () => {
       "Print job could not be saved. Request ID: req-123."
     );
     expect(printJobCreateFailureMessage({ errorCode: "print_item_reservation_failed" })).toBe(
-      "Print items could not be reserved for this batch. Refresh and try again."
+      "Some labels are still locked by a failed print run. Close and release the failed run, then start printing again."
     );
     expect(printJobCreateFailureMessage({ errorCode: "print_signing_configuration_invalid", requestId: "req-456" })).toBe(
       "Print token signing is not configured correctly. Request ID: req-456. Contact support with this request ID."

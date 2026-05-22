@@ -253,7 +253,7 @@ export const printJobCreateFailureMessage = (response: {
     return `Print job could not be saved.${requestSuffix || " Please try again."}`;
   }
   if (errorCode === "print_item_reservation_failed") {
-    return "Print items could not be reserved for this batch. Refresh and try again.";
+    return "Some labels are still locked by a failed print run. Close and release the failed run, then start printing again.";
   }
   if (errorCode === "print_signing_configuration_invalid") {
     return `Print token signing is not configured correctly.${requestSuffix} Contact support with this request ID.`;

@@ -1,8 +1,7 @@
-import { QRStatus } from "@prisma/client";
-
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { getPrinterConnectionStatusForUser } from "./printerConnectionService";
+import { countBlockedQrCodesForPrint, countReservableQrCodesForPrint } from "./printReservationService";
 
 export const buildPrintJobCreateDiagnostics = async (
   req: AuthRequest,
@@ -23,7 +22,7 @@ export const buildPrintJobCreateDiagnostics = async (
   }
 ) => {
   const userId = req.user?.userId || null;
-  const [batch, printableCount, printer, printerStatus] = await Promise.all([
+  const [batch, printableCount, blockedPrintItemCount, printer, printerStatus] = await Promise.all([
     params.batchId && userId
       ? prisma.batch.findFirst({
           where: { id: params.batchId, manufacturerId: userId },
@@ -39,15 +38,10 @@ export const buildPrintJobCreateDiagnostics = async (
         })
       : Promise.resolve(null),
     params.batchId
-      ? prisma.qRCode
-          .count({
-            where: {
-              batchId: params.batchId,
-              status: QRStatus.ALLOCATED,
-              printJobId: null,
-            },
-          })
-          .catch(() => null)
+      ? countReservableQrCodesForPrint(prisma, { batchId: params.batchId }).catch(() => null)
+      : Promise.resolve(null),
+    params.batchId
+      ? countBlockedQrCodesForPrint(prisma, { batchId: params.batchId }).catch(() => null)
       : Promise.resolve(null),
     params.printerId
       ? prisma.printer.findUnique({
@@ -94,6 +88,7 @@ export const buildPrintJobCreateDiagnostics = async (
       suspendedAt: batch?.suspendedAt?.toISOString?.() || null,
       printableCount: printableCount ?? null,
       remainingCodes: printableCount ?? null,
+      blockedByPrintItemEvidenceCount: blockedPrintItemCount ?? null,
     },
     printerProfile: {
       present: Boolean(params.printerId),
