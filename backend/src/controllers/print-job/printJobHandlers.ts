@@ -7,6 +7,7 @@ export {
   resolveDirectPrintToken,
 } from "./directPrintHandlers";
 export {
+  abandonManufacturerPrintJob,
   downloadPrintJobPack,
   getManufacturerPrintJobStatus,
   listManufacturerPrintJobs,

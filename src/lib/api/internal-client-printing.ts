@@ -108,6 +108,12 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     return core.request<any>(`/manufacturer/printers/${encodeURIComponent(printerId)}/test-label`, { method: "POST" });
   },
 
+  async relinkLocalAgentPrinter(printerId: string) {
+    return core.request<any>(`/manufacturer/printers/${encodeURIComponent(printerId)}/relink-local-agent`, {
+      method: "POST",
+    });
+  },
+
   async discoverRegisteredPrinter(printerId: string) {
     return core.request(`/manufacturer/printers/${encodeURIComponent(printerId)}/discover`, { method: "POST" });
   },
@@ -138,6 +144,12 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     return core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/reissue`, {
       method: "POST",
       body: JSON.stringify(payload),
+    });
+  },
+
+  async abandonPrintJob(jobId: string) {
+    return core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/abandon`, {
+      method: "POST",
     });
   },
 

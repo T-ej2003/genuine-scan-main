@@ -155,6 +155,7 @@ import {
 } from "../controllers/verifyController";
 import { scanToken } from "../controllers/scanController";
 import {
+  abandonManufacturerPrintJob,
   confirmDirectPrintItem,
   createPrintJob,
   downloadPrintJobPack,
@@ -186,6 +187,7 @@ import {
   testPrinterLabel,
   updateNetworkPrinter,
 } from "../controllers/printerController";
+import { relinkLocalAgentPrinter } from "../controllers/printerRelinkController";
 import {
   ackGatewayDirectJob,
   ackGatewayIppJob,
@@ -1726,6 +1728,17 @@ protectedMutationRouter.delete(
   deleteNetworkPrinter
 );
 protectedMutationRouter.post(
+  "/manufacturer/printers/:id/relink-local-agent",
+  authenticate,
+  requireOpsUser,
+  enforceTenantIsolation,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
+  requireCsrf,
+  relinkLocalAgentPrinter
+);
+protectedMutationRouter.post(
   "/manufacturer/printers/:id/test",
   authenticate,
   requireOpsUser,
@@ -1778,6 +1791,17 @@ protectedReadRouter.get(
   protectedReadRouteLimiter,
   enforceTenantIsolation,
   getManufacturerPrintJobStatus
+);
+protectedMutationRouter.post(
+  "/manufacturer/print-jobs/:id/abandon",
+  authenticate,
+  requireOpsUser,
+  enforceTenantIsolation,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
+  requireCsrf,
+  abandonManufacturerPrintJob
 );
 protectedMutationRouter.post(
   "/manufacturer/print-jobs/:id/reissue",

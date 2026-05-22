@@ -3,7 +3,11 @@ import path from "path";
 import multer from "multer";
 import { randomUUID } from "crypto";
 
-const uploadsRoot = path.resolve(__dirname, "../../uploads/support-issues");
+const uploadsRoot = path.resolve(
+  process.env.SUPPORT_ISSUE_UPLOAD_DIR ||
+    process.env.UPLOADS_DIR ||
+    path.join(process.env.TMPDIR || "/tmp", "mscqr-support-issues")
+);
 
 const ensureDir = () => {
   if (!fs.existsSync(uploadsRoot)) {
@@ -40,3 +44,4 @@ export const supportIssueUpload = multer({
 });
 
 export const resolveSupportIssueUploadPath = (fileName: string) => path.resolve(uploadsRoot, fileName);
+export const supportIssueUploadsDirectory = uploadsRoot;

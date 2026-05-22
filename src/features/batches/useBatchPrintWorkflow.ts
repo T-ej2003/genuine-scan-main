@@ -30,6 +30,7 @@ import {
   retryPendingDirectPrint,
   syncProgressFromPrintJob as syncPrintJobProgress,
 } from "./batch-print-operations";
+import { abandonPrintJobAction, relinkSelectedPrinterAction } from "./print-workflow-recovery-actions";
 import type {
   BatchRow,
   LocalPrinterRow,
@@ -82,6 +83,7 @@ export function useBatchPrintWorkflow({
   const [selectedPrinterProfileId, setSelectedPrinterProfileId] = useState("");
   const [recentPrintJobs, setRecentPrintJobs] = useState<PrintJobRow[]>([]);
   const [switchingPrinter, setSwitchingPrinter] = useState(false);
+  const [relinkingPrinter, setRelinkingPrinter] = useState(false);
   const [calibrationProfile, setCalibrationProfile] = useState<CalibrationProfileState>({
     dpi: "",
     labelWidthMm: "50",
@@ -160,12 +162,20 @@ export function useBatchPrintWorkflow({
     selectedPrinterProfile?.connectionType === "LOCAL_AGENT"
       ? !selectedPrinterProfile.nativePrinterId || selectedPrinterProfile.nativePrinterId === activeLocalPrinterId
       : false;
+  const selectedLocalProfileRegistrationStale = Boolean(
+    selectedPrinterProfile?.connectionType === "LOCAL_AGENT" &&
+      printerReady &&
+      selectedPrinterProfile.printerRegistrationId &&
+      printerStatus.registrationId &&
+      selectedPrinterProfile.printerRegistrationId !== printerStatus.registrationId &&
+      selectedLocalProfileMatchesAgent
+  );
   const selectedPrinterCanPrint = Boolean(
     selectedPrinterProfile &&
       selectedPrinterProfile.isActive &&
       (selectedPrinterProfile.connectionType !== "LOCAL_AGENT"
         ? selectedPrinterProfile.registryStatus?.state === "READY"
-        : printerReady && selectedLocalProfileMatchesAgent)
+        : printerReady && selectedLocalProfileMatchesAgent && !selectedLocalProfileRegistrationStale)
   );
   const selectedPrinterNotice = useMemo<PrinterSelectionNotice>(() => {
     if (selectedPrinterProfile?.connectionType !== "LOCAL_AGENT") {
@@ -174,13 +184,17 @@ export function useBatchPrintWorkflow({
 
     return {
       title: printerDiagnostics.title,
-      summary: printerReady
+      summary: selectedLocalProfileRegistrationStale
+        ? "The printer is ready on this computer, but the saved printer link belongs to an older connector install."
+        : printerReady
         ? `${selectedDetectedPrinter?.printerName || printerStatus.selectedPrinterName || printerStatus.printerName || "Printer on this computer"} is ready.`
         : printerDiagnostics.summary,
-      detail: !printerReady
+      detail: selectedLocalProfileRegistrationStale
+        ? "Relink this saved printer to the current connector before starting the print run."
+        : !printerReady
         ? printerDiagnostics.detail
         : "This printer is ready for approved MSCQR printing.",
-      tone: printerDiagnostics.tone,
+      tone: selectedLocalProfileRegistrationStale ? "warning" : printerDiagnostics.tone,
     };
   }, [
     printerDiagnostics.detail,
@@ -191,6 +205,7 @@ export function useBatchPrintWorkflow({
     printerStatus.printerName,
     printerStatus.selectedPrinterName,
     selectedDetectedPrinter?.printerName,
+    selectedLocalProfileRegistrationStale,
     selectedPrinterProfile,
   ]);
 
@@ -478,6 +493,29 @@ export function useBatchPrintWorkflow({
     }
   };
 
+  const relinkSelectedPrinter = async () => {
+    await relinkSelectedPrinterAction({
+      selectedPrinterProfile,
+      setRelinkingPrinter,
+      setSelectedPrinterProfileId,
+      loadPrinterStatus,
+      toast,
+    });
+  };
+
+  const abandonPrintJob = async (jobId: string) => {
+    await abandonPrintJobAction({
+      jobId,
+      currentPrintJobId: printJobId,
+      setPrinting,
+      setPrintJobId,
+      setDirectRemainingToPrint,
+      loadRecentPrintJobs,
+      onBatchesChanged,
+      toast,
+    });
+  };
+
   const progressStateSetters = useMemo(
     () => ({
       setPrintProgressOpen,
@@ -619,6 +657,9 @@ export function useBatchPrintWorkflow({
     onSelectedPrinterIdChange: setSelectedPrinterId,
     switchingPrinter,
     onSwitchSelectedPrinter: switchSelectedPrinter,
+    relinkingPrinter,
+    selectedLocalProfileRegistrationStale,
+    onRelinkSelectedPrinter: relinkSelectedPrinter,
     printing,
     onStartPrint: createPrintJob,
     selectedPrinterCanPrint,
@@ -629,6 +670,7 @@ export function useBatchPrintWorkflow({
     directRemainingToPrint,
     onRefreshPrintStatus: refreshPendingPrintStatus,
     recentPrintJobs,
+    onAbandonPrintJob: abandonPrintJob,
     onClose: () => setPrintOpen(false),
   };
 
@@ -654,5 +696,4 @@ export function useBatchPrintWorkflow({
     progressDialogProps,
   };
 }
-
 export type BatchPrintWorkflow = ReturnType<typeof useBatchPrintWorkflow>;

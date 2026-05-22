@@ -158,6 +158,9 @@ type PrintJobDialogProps = {
   onSelectedPrinterIdChange: (value: string) => void;
   switchingPrinter: boolean;
   onSwitchSelectedPrinter: () => void;
+  relinkingPrinter: boolean;
+  selectedLocalProfileRegistrationStale: boolean;
+  onRelinkSelectedPrinter: () => void;
   printing: boolean;
   onStartPrint: () => void;
   selectedPrinterCanPrint: boolean;
@@ -168,6 +171,7 @@ type PrintJobDialogProps = {
   directRemainingToPrint: number | null;
   onRefreshPrintStatus: () => void;
   recentPrintJobs: PrintJobRow[];
+  onAbandonPrintJob: (jobId: string) => void;
   onClose: () => void;
 };
 
@@ -189,6 +193,9 @@ export function BatchPrintJobDialog({
   onSelectedPrinterIdChange,
   switchingPrinter,
   onSwitchSelectedPrinter,
+  relinkingPrinter,
+  selectedLocalProfileRegistrationStale,
+  onRelinkSelectedPrinter,
   printing,
   onStartPrint,
   selectedPrinterCanPrint,
@@ -199,6 +206,7 @@ export function BatchPrintJobDialog({
   directRemainingToPrint,
   onRefreshPrintStatus,
   recentPrintJobs,
+  onAbandonPrintJob,
   onClose,
 }: PrintJobDialogProps) {
   return (
@@ -336,6 +344,28 @@ export function BatchPrintJobDialog({
                   <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
                     Printing from this computer uses the printer selected here. Change it before the next run if needed.
                   </div>
+                  {selectedLocalProfileRegistrationStale ? (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                      <div className="font-medium">Saved printer link is stale</div>
+                      <div className="mt-1">
+                        The connector was reinstalled. Relink this saved printer to the current connector before starting.
+                      </div>
+                      <div className="mt-3 flex justify-end">
+                        <ActionButton
+                          variant="outline"
+                          size="sm"
+                          state={
+                            relinkingPrinter
+                              ? createUiActionState("pending", "Relinking the saved printer to this computer.")
+                              : createUiActionState("enabled")
+                          }
+                          onClick={onRelinkSelectedPrinter}
+                          idleLabel="Relink saved printer"
+                          pendingLabel="Relinking..."
+                        />
+                      </div>
+                    </div>
+                  ) : null}
                   <div className="flex flex-wrap justify-end gap-2">
                     <ActionButton
                       variant="outline"
@@ -457,6 +487,23 @@ export function BatchPrintJobDialog({
                           ? ` · ${sanitizePrinterUiError(job.failureReason, "This print job needs attention.")}`
                           : ""}
                       </div>
+                      {job.status === "FAILED" && (job.session?.confirmedItems || 0) === 0 ? (
+                        <div className="mt-2 flex justify-end">
+                          <ActionButton
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onAbandonPrintJob(job.id)}
+                            state={
+                              printing
+                                ? createUiActionState("pending", "Closing the print run.")
+                                : createUiActionState("enabled")
+                            }
+                            idleLabel="Close and release labels"
+                            pendingLabel="Closing..."
+                            showReasonBelow={false}
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   ))}
                 </div>

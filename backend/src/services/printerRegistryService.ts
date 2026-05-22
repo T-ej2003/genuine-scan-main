@@ -21,6 +21,7 @@ import { isGatewayFresh } from "./networkIppPrintService";
 import { getPrinterConnectionStatusForUser, type PrinterConnectionStatus } from "./printerConnectionService";
 import { supportsNetworkDirectCommandLanguage, supportsNetworkDirectPayload } from "./printPayloadService";
 import { resolvePrinterConfirmationMode } from "./printConfirmationService";
+import { assessLocalAgentPrinterRelink } from "./localAgentPrinterRelinkService";
 
 const toCleanString = (value: unknown, max = 180) => String(value || "").trim().slice(0, max);
 const toNullableString = (value: unknown, max = 180) => {
@@ -139,6 +140,18 @@ const buildLocalPrinterStatus = (printer: RegisteredPrinterRecord, connectionSta
   }
 
   const activeNativePrinterId = String(connectionStatus.selectedPrinterId || connectionStatus.printerId || "").trim();
+  const relinkAssessment = assessLocalAgentPrinterRelink(printer, connectionStatus);
+  if (relinkAssessment.relinkRequired) {
+    return {
+      state: "ATTENTION",
+      summary: "Saved printer link needs refresh",
+      detail: relinkAssessment.eligible
+        ? "This computer can see the same local printer, but the saved printer is linked to an older connector install. Relink it before starting a print run."
+        : "The saved printer is linked to an older connector install. Open Printer Setup and choose the ZDesigner printer again.",
+      connectionStatus,
+    };
+  }
+
   if (printer.nativePrinterId && activeNativePrinterId && printer.nativePrinterId !== activeNativePrinterId) {
     return {
       state: "ATTENTION",

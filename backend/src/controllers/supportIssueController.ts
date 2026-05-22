@@ -9,7 +9,7 @@ import { AuthRequest } from "../middleware/auth";
 import { sanitizeUnknownInput } from "../middleware/requestSanitizer";
 import { createAuditLog } from "../services/auditService";
 import { createRoleNotifications, createUserNotification } from "../services/notificationService";
-import { resolveSupportIssueUploadPath } from "../middleware/supportIssueUpload";
+import { resolveSupportIssueUploadPath, supportIssueUploadsDirectory } from "../middleware/supportIssueUpload";
 import { downloadObjectBuffer, isObjectStorageConfigured, removeLocalFileIfExists, uploadObjectFromFile } from "../services/objectStorageService";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
 
@@ -358,7 +358,7 @@ export const serveSupportIssueScreenshot = async (req: Request, res: Response) =
     }
 
     const resolved = resolveSupportIssueUploadPath(fileName);
-    const uploadsRoot = path.resolve(__dirname, "../../uploads/support-issues");
+    const uploadsRoot = supportIssueUploadsDirectory;
     if (!resolved.startsWith(uploadsRoot)) {
       return res.status(400).json({ success: false, error: "Invalid file path" });
     }

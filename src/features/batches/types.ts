@@ -152,6 +152,9 @@ export type RegisteredPrinterRow = {
   printerUri?: string | null;
   deliveryMode?: "DIRECT" | "SITE_GATEWAY";
   nativePrinterId?: string | null;
+  printerRegistrationId?: string | null;
+  agentId?: string | null;
+  deviceFingerprint?: string | null;
   isActive: boolean;
   isDefault?: boolean;
   registryStatus?: {

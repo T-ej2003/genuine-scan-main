@@ -9,6 +9,7 @@ const {
   hasExactTrustedSelectedPrinterMatch,
   pickSafeHeartbeatPrinterForProfile,
 } = require("../dist/services/localAgentPrinterMappingService");
+const { assessLocalAgentPrinterRelink } = require("../dist/services/localAgentPrinterRelinkService");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -279,6 +280,70 @@ const run = () => {
     ),
     "Compatibility mode remains allowed when the exact profile identity is eligible and fresh"
   );
+
+  const staleRegistrationAssessment = assessLocalAgentPrinterRelink(
+    {
+      id: "saved-printer-old",
+      name: "ZDesigner ZT410-300dpi ZPL",
+      connectionType: "LOCAL_AGENT",
+      commandLanguage: "ZPL",
+      nativePrinterId: "ZDesigner ZT410-300dpi ZPL",
+      printerRegistrationId: "old-registration",
+    },
+    {
+      connected: true,
+      eligibleForPrinting: true,
+      stale: false,
+      registrationId: "new-registration",
+      agentId: "agent-new",
+      deviceFingerprint: "device-new",
+      selectedPrinterId: "ZDesigner ZT410-300dpi ZPL",
+      selectedPrinterName: "ZDesigner ZT410-300dpi ZPL",
+      printers: [
+        {
+          printerId: "ZDesigner ZT410-300dpi ZPL",
+          printerName: "ZDesigner ZT410-300dpi ZPL",
+          model: "ZDesigner ZT410-300dpi ZPL",
+          connection: "usb",
+          online: true,
+          languages: ["ZPL"],
+        },
+      ],
+    }
+  );
+  assert(staleRegistrationAssessment.relinkRequired, "Connector reinstall registration mismatch should require relink");
+  assert(staleRegistrationAssessment.eligible, "Same scoped native ZPL printer should be safe to relink");
+
+  const unsafeNameOnlyAssessment = assessLocalAgentPrinterRelink(
+    {
+      id: "saved-printer-old",
+      name: "ZDesigner ZT410-300dpi ZPL",
+      connectionType: "LOCAL_AGENT",
+      commandLanguage: "ZPL",
+      nativePrinterId: "ZDesigner ZT410-300dpi ZPL",
+      printerRegistrationId: "old-registration",
+    },
+    {
+      connected: true,
+      eligibleForPrinting: true,
+      stale: false,
+      registrationId: "new-registration",
+      selectedPrinterId: "Fax",
+      selectedPrinterName: "Fax",
+      printers: [
+        {
+          printerId: "Fax",
+          printerName: "ZDesigner ZT410-300dpi ZPL",
+          model: "Microsoft Shared Fax Driver",
+          connection: "spooler",
+          online: true,
+          languages: [],
+        },
+      ],
+    }
+  );
+  assert(unsafeNameOnlyAssessment.relinkRequired, "Stale registration should still be detected");
+  assert(!unsafeNameOnlyAssessment.eligible, "Virtual/non-label rows should not be relinked by display name alone");
 
   console.log("printer user-facing error tests passed");
 };

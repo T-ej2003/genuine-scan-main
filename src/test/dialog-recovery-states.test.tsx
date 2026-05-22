@@ -54,6 +54,9 @@ describe("dialog recovery states", () => {
           onSelectedPrinterIdChange={() => undefined}
           switchingPrinter={false}
           onSwitchSelectedPrinter={() => undefined}
+          relinkingPrinter={false}
+          selectedLocalProfileRegistrationStale={false}
+          onRelinkSelectedPrinter={() => undefined}
           printing={false}
           onStartPrint={() => undefined}
           selectedPrinterCanPrint
@@ -64,6 +67,7 @@ describe("dialog recovery states", () => {
           directRemainingToPrint={null}
           onRefreshPrintStatus={() => undefined}
           recentPrintJobs={[]}
+          onAbandonPrintJob={() => undefined}
           onClose={() => undefined}
           {...overrides}
         />
@@ -92,6 +96,48 @@ describe("dialog recovery states", () => {
       "aria-description",
       "The printer helper is not available on this computer right now.",
     );
+  });
+
+  it("shows relink CTA and keeps print start disabled when saved local printer registration is stale", () => {
+    const onRelink = vi.fn();
+    renderPrintDialog({
+      selectedPrinterCanPrint: false,
+      selectedLocalProfileRegistrationStale: true,
+      onRelinkSelectedPrinter: onRelink,
+      selectedPrinterNotice: {
+        title: "Printer is ready",
+        summary: "The printer is ready on this computer, but the saved printer link belongs to an older connector install.",
+        detail: "Relink this saved printer to the current connector before starting the print run.",
+        tone: "warning",
+      },
+    });
+
+    expect(screen.getByText("Saved printer link is stale")).toBeInTheDocument();
+    expect(screen.getByTestId("print-job-start-button")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Relink saved printer" }));
+    expect(onRelink).toHaveBeenCalled();
+  });
+
+  it("offers a safe close action for failed print runs with no confirmed items", () => {
+    const onAbandon = vi.fn();
+    renderPrintDialog({
+      recentPrintJobs: [
+        {
+          id: "job-failed",
+          status: "FAILED",
+          printMode: "LOCAL_AGENT",
+          quantity: 1,
+          createdAt: new Date().toISOString(),
+          failureReason: "Printer agent did not acknowledge issued label before deadline.",
+          printer: { name: "E2E Local Agent Printer" },
+          session: { confirmedItems: 0, remainingToPrint: 1 },
+        } as any,
+      ],
+      onAbandonPrintJob: onAbandon,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Close and release labels" }));
+    expect(onAbandon).toHaveBeenCalledWith("job-failed");
   });
 
   it("lets users close the rename dialog when batch context is missing", () => {
@@ -160,6 +206,9 @@ describe("dialog recovery states", () => {
           onSelectedPrinterIdChange={() => undefined}
           switchingPrinter={false}
           onSwitchSelectedPrinter={() => undefined}
+          relinkingPrinter={false}
+          selectedLocalProfileRegistrationStale={false}
+          onRelinkSelectedPrinter={() => undefined}
           printing={false}
           onStartPrint={() => undefined}
           selectedPrinterCanPrint={false}
@@ -170,6 +219,7 @@ describe("dialog recovery states", () => {
           directRemainingToPrint={null}
           onRefreshPrintStatus={() => undefined}
           recentPrintJobs={[]}
+          onAbandonPrintJob={() => undefined}
           onClose={onClose}
         />
       </MemoryRouter>,

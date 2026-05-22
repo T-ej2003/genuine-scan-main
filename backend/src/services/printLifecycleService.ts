@@ -7,6 +7,7 @@ import {
   PrintJobStatus,
   PrintItemEventType,
   PrintItemState,
+  PrintPipelineState,
   PrintSessionStatus,
   Prisma,
   QRStatus,
@@ -386,6 +387,132 @@ export const failStopPrintSession = async (params: {
       frozenCount: result.frozenCount,
       incidentId: result.incident.id,
       metadata: params.metadata ?? null,
+    },
+  });
+
+  return result;
+};
+
+export const abandonUnconfirmedPrintJob = async (params: {
+  printJobId: string;
+  actorUserId: string;
+  licenseeId?: string | null;
+  reason?: string | null;
+}) => {
+  const now = new Date();
+  const reason = String(params.reason || "Operator abandoned unconfirmed print run before any printer acknowledgement.").trim();
+
+  const result = await prisma.$transaction(async (tx) => {
+    const job = await tx.printJob.findUnique({
+      where: { id: params.printJobId },
+      include: {
+        batch: { select: { id: true, licenseeId: true } },
+        printSession: {
+          include: {
+            items: {
+              select: {
+                id: true,
+                qrCodeId: true,
+                state: true,
+                agentAckedAt: true,
+                dispatchedAt: true,
+                printConfirmedAt: true,
+                deviceJobRef: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!job || !job.printSession) throw new Error("PRINT_JOB_NOT_FOUND");
+
+    const acknowledgedOrPrinted = job.printSession.items.some(
+      (item) => item.agentAckedAt || item.dispatchedAt || item.printConfirmedAt || item.deviceJobRef
+    );
+    if (job.printSession.confirmedItems > 0 || acknowledgedOrPrinted) {
+      throw Object.assign(new Error("PRINT_SESSION_NOT_ABANDONABLE"), {
+        reason: "printer_acknowledgement_or_confirmation_exists",
+      });
+    }
+
+    const itemIds = job.printSession.items.map((item) => item.id);
+    const qrCodeIds = job.printSession.items.map((item) => item.qrCodeId);
+
+    if (qrCodeIds.length > 0) {
+      await tx.qRCode.updateMany({
+        where: { id: { in: qrCodeIds }, printJobId: job.id },
+        data: {
+          status: QRStatus.ALLOCATED,
+          printJobId: null,
+          tokenNonce: null,
+          tokenIssuedAt: null,
+          tokenExpiresAt: null,
+          tokenHash: null,
+          issuanceMode: "LEGACY_UNSPECIFIED",
+        },
+      });
+    }
+
+    if (itemIds.length > 0) {
+      await tx.printItem.updateMany({
+        where: { id: { in: itemIds } },
+        data: {
+          state: PrintItemState.FAILED,
+          failedAt: now,
+          failureReason: reason,
+          deadLetterReason: "operator_abandoned_unconfirmed_run",
+          closedAt: now,
+        },
+      });
+
+      await tx.printItemEvent.createMany({
+        data: job.printSession.items.map((item) => ({
+          printItemId: item.id,
+          eventType: PrintItemEventType.FAILED,
+          previousState: item.state,
+          nextState: PrintItemState.FAILED,
+          actorUserId: params.actorUserId,
+          details: {
+            reason,
+            action: "operator_abandoned_unconfirmed_run",
+            qrCodeReleasedForReprint: true,
+          },
+        })),
+      });
+    }
+
+    const session = await tx.printSession.update({
+      where: { id: job.printSession.id },
+      data: {
+        status: PrintSessionStatus.CANCELLED,
+        failedReason: reason,
+        completedAt: now,
+      },
+    });
+
+    const updatedJob = await tx.printJob.update({
+      where: { id: job.id },
+      data: {
+        status: PrintJobStatus.CANCELLED,
+        pipelineState: PrintPipelineState.NEEDS_OPERATOR_ACTION,
+        failureReason: reason,
+        completedAt: now,
+      },
+    });
+
+    return { job: updatedJob, session, releasedQrCodeCount: qrCodeIds.length };
+  });
+
+  await createAuditLog({
+    userId: params.actorUserId,
+    licenseeId: params.licenseeId || undefined,
+    action: "PRINT_JOB_ABANDONED_UNCONFIRMED",
+    entityType: "PrintJob",
+    entityId: params.printJobId,
+    details: {
+      reason,
+      printSessionId: result.session.id,
+      releasedQrCodeCount: result.releasedQrCodeCount,
     },
   });
 

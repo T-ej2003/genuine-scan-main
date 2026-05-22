@@ -1,4 +1,5 @@
 export {
+  abandonManufacturerPrintJob,
   confirmDirectPrintItem,
   confirmPrintJob,
   createPrintJob,

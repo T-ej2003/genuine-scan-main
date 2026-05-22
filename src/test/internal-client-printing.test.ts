@@ -46,6 +46,32 @@ describe("printing api request control", () => {
     );
   });
 
+  it("posts local printer relink requests without browser-supplied connector identity", async () => {
+    const request = vi.fn(async () => ({ success: true, data: { repaired: true } }));
+    const api = createPrintingApi(createCore(request));
+
+    await api.relinkLocalAgentPrinter("62eea666-5a7f-444a-94fb-8fa040396874");
+
+    expect(request).toHaveBeenCalledWith(
+      "/manufacturer/printers/62eea666-5a7f-444a-94fb-8fa040396874/relink-local-agent",
+      expect.objectContaining({ method: "POST" })
+    );
+    const body = (request.mock.calls[0] as unknown as [string, RequestInit | undefined])[1]?.body;
+    expect(body).toBeUndefined();
+  });
+
+  it("posts safe abandon requests for unconfirmed print jobs", async () => {
+    const request = vi.fn(async () => ({ success: true, data: { status: "CANCELLED" } }));
+    const api = createPrintingApi(createCore(request));
+
+    await api.abandonPrintJob("9c7a03d6-db68-4f65-96c2-efb23f83cc08");
+
+    expect(request).toHaveBeenCalledWith(
+      "/manufacturer/print-jobs/9c7a03d6-db68-4f65-96c2-efb23f83cc08/abandon",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
   it("deduplicates concurrent printer status requests", async () => {
     let resolveRequest: ((response: ApiResponse<RequestPayload>) => void) | null = null;
     const request = vi.fn(

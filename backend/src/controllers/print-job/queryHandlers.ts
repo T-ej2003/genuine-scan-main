@@ -4,6 +4,7 @@ import { AuthRequest } from "../../middleware/auth";
 import { getEffectiveLicenseeId } from "../../middleware/tenantIsolation";
 import { getPrintJobOperationalView, listPrintJobsForManufacturer } from "../../services/networkDirectPrintService";
 import { createAuthorizedPrintReissue } from "../../services/printReissueService";
+import { abandonUnconfirmedPrintJob } from "../../services/printLifecycleService";
 import {
   ensurePrintOperationsUser,
   ensurePrintReissueApprover,
@@ -124,5 +125,59 @@ export const reissueManufacturerPrintJob = async (req: AuthRequest, res: Respons
       });
     }
     return res.status(500).json({ success: false, error: message || "Internal server error" });
+  }
+};
+
+export const abandonManufacturerPrintJob = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = ensurePrintOperationsUser(req, res);
+    if (!user) return;
+
+    const parsedParams = printJobIdParamSchema.safeParse(req.params || {});
+    if (!parsedParams.success) {
+      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid print job id" });
+    }
+
+    const scope = {
+      role: user.role,
+      userId: user.userId,
+      licenseeId: getEffectiveLicenseeId(req),
+    };
+    const view = await getPrintJobOperationalView({ jobId: parsedParams.data.id, scope });
+    if (!view) {
+      return res.status(404).json({ success: false, error: "Print job not found" });
+    }
+
+    const result = await abandonUnconfirmedPrintJob({
+      printJobId: parsedParams.data.id,
+      actorUserId: user.userId,
+      licenseeId: scope.licenseeId || view.batch?.licenseeId || null,
+      reason: "Operator closed unconfirmed failed print run so labels can be started again.",
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        jobId: result.job.id,
+        status: result.job.status,
+        printSessionId: result.session.id,
+        sessionStatus: result.session.status,
+        releasedQrCodeCount: result.releasedQrCodeCount,
+      },
+    });
+  } catch (error: any) {
+    console.error("abandonManufacturerPrintJob error:", error);
+    if (error?.message === "PRINT_SESSION_NOT_ABANDONABLE") {
+      return res.status(409).json({
+        success: false,
+        error: "This print run already reached the printer or has confirmed labels. It cannot be abandoned automatically.",
+        code: "print_session_not_abandonable",
+        errorCode: "print_session_not_abandonable",
+      });
+    }
+    if (error?.message === "PRINT_JOB_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Print job not found" });
+    }
+    return res.status(500).json({ success: false, error: error?.message || "Print run could not be closed." });
   }
 };
