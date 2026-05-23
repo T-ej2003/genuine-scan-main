@@ -31,6 +31,12 @@ import {
   syncProgressFromPrintJob as syncPrintJobProgress,
 } from "./batch-print-operations";
 import { abandonPrintJobAction, printDiagnosticTestLabelAction, relinkSelectedPrinterAction } from "./print-workflow-recovery-actions";
+import {
+  buildCalibrationPayload as buildBatchCalibrationPayload,
+  defaultCalibrationProfileState,
+  mergeStoredCalibrationProfile,
+  type CalibrationProfileState,
+} from "./batchPrintWorkflowHelpers";
 import type {
   BatchRow,
   LocalPrinterRow,
@@ -48,17 +54,6 @@ type UseBatchPrintWorkflowParams = {
   toast: ToastLike;
   getAvailableInventory: (batch: BatchRow) => number;
   onBatchesChanged?: () => Promise<void> | void;
-};
-
-type CalibrationProfileState = {
-  dpi: string;
-  labelWidthMm: string;
-  labelHeightMm: string;
-  offsetXmm: string;
-  offsetYmm: string;
-  qrTargetMm: string;
-  darkness: string;
-  speed: string;
 };
 
 export function useBatchPrintWorkflow({
@@ -81,16 +76,7 @@ export function useBatchPrintWorkflow({
   const [recentPrintJobs, setRecentPrintJobs] = useState<PrintJobRow[]>([]);
   const [switchingPrinter, setSwitchingPrinter] = useState(false);
   const [relinkingPrinter, setRelinkingPrinter] = useState(false);
-  const [calibrationProfile, setCalibrationProfile] = useState<CalibrationProfileState>({
-    dpi: "",
-    labelWidthMm: "50",
-    labelHeightMm: "50",
-    offsetXmm: "0",
-    offsetYmm: "0",
-    qrTargetMm: "25",
-    darkness: "",
-    speed: "",
-  });
+  const [calibrationProfile, setCalibrationProfile] = useState<CalibrationProfileState>(defaultCalibrationProfileState);
   const [printProgressOpen, setPrintProgressOpen] = useState(false);
   const [printProgressPhase, setPrintProgressPhase] = useState("Preparing print pipeline");
   const [printProgressTotal, setPrintProgressTotal] = useState(0);
@@ -229,22 +215,8 @@ export function useBatchPrintWorkflow({
     });
   };
 
-  const buildCalibrationPayload = () => ({
-    dpi:
-      Number(calibrationProfile.dpi || 0) ||
-      selectedDetectedPrinter?.dpi ||
-      (Array.isArray(printerStatus.capabilitySummary?.dpiOptions)
-        ? printerStatus.capabilitySummary?.dpiOptions[0]
-        : undefined) ||
-      undefined,
-    labelWidthMm: Number(calibrationProfile.labelWidthMm || 0) || undefined,
-    labelHeightMm: Number(calibrationProfile.labelHeightMm || 0) || undefined,
-    offsetXmm: Number(calibrationProfile.offsetXmm || 0) || 0,
-    offsetYmm: Number(calibrationProfile.offsetYmm || 0) || 0,
-    qrTargetMm: Number(calibrationProfile.qrTargetMm || 0) || 25,
-    darkness: Number(calibrationProfile.darkness || 0) || undefined,
-    speed: Number(calibrationProfile.speed || 0) || undefined,
-  });
+  const buildCalibrationPayload = () =>
+    buildBatchCalibrationPayload({ calibrationProfile, selectedDetectedPrinter, printerStatus });
 
   const applyPrinterRuntimeSnapshot = (
     snapshot: ManufacturerPrinterRuntime,
@@ -397,16 +369,7 @@ export function useBatchPrintWorkflow({
       if (!raw) return;
       const parsed = JSON.parse(raw) as Partial<CalibrationProfileState>;
       if (!parsed || typeof parsed !== "object") return;
-      setCalibrationProfile((previous) => ({
-        dpi: parsed.dpi ? String(parsed.dpi) : previous.dpi,
-        labelWidthMm: parsed.labelWidthMm ? String(parsed.labelWidthMm) : previous.labelWidthMm,
-        labelHeightMm: parsed.labelHeightMm ? String(parsed.labelHeightMm) : previous.labelHeightMm,
-        offsetXmm: parsed.offsetXmm != null ? String(parsed.offsetXmm) : previous.offsetXmm,
-        offsetYmm: parsed.offsetYmm != null ? String(parsed.offsetYmm) : previous.offsetYmm,
-        qrTargetMm: parsed.qrTargetMm ? String(parsed.qrTargetMm) : previous.qrTargetMm,
-        darkness: parsed.darkness ? String(parsed.darkness) : previous.darkness,
-        speed: parsed.speed ? String(parsed.speed) : previous.speed,
-      }));
+      setCalibrationProfile((previous) => mergeStoredCalibrationProfile(previous, parsed));
     } catch {
       // Ignore malformed local calibration state.
     }
