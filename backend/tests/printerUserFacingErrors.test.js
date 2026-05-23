@@ -33,7 +33,7 @@ const run = () => {
 
   assert(
     sanitizePrinterActionError("Label sent to Windows spooler, but Get-PrintJob rejected print job id as UInt32.") ===
-      "Label was sent to Windows spooler but confirmation failed.",
+      "Sent to printer, but local queue confirmation is unavailable. Check the printed label, then manually confirm or retry.",
     "Windows queue confirmation failures should not be reported as setup incompatibility"
   );
 

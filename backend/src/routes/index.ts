@@ -173,11 +173,16 @@ import {
   reportPrinterHeartbeat,
 } from "../controllers/printerAgentController";
 import {
-  ackLocalAgentPrintJob,
   claimLocalAgentPrintJob,
   confirmLocalAgentPrintJob,
+  ackLocalAgentPrintJob,
   failLocalAgentPrintJob,
 } from "../controllers/printerAgentJobController";
+import {
+  ackLocalAgentPrinterTestJob,
+  confirmLocalAgentPrinterTestJob,
+  failLocalAgentPrinterTestJob,
+} from "../controllers/printerAgentTestJobController";
 import {
   createNetworkPrinter,
   deleteNetworkPrinter,
@@ -1667,6 +1672,9 @@ router.post("/printer-agent/local/claim", gatewayJobRouteLimiter, gatewayJobIpLi
 router.post("/printer-agent/local/ack", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, ackLocalAgentPrintJob);
 router.post("/printer-agent/local/confirm", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, confirmLocalAgentPrintJob);
 router.post("/printer-agent/local/fail", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, failLocalAgentPrintJob);
+router.post("/printer-agent/local/test/ack", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, ackLocalAgentPrinterTestJob);
+router.post("/printer-agent/local/test/confirm", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, confirmLocalAgentPrinterTestJob);
+router.post("/printer-agent/local/test/fail", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, failLocalAgentPrinterTestJob);
 router.post("/print-gateway/ipp/confirm", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, confirmGatewayIppJob);
 router.post("/print-gateway/ipp/fail", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, failGatewayIppJob);
 

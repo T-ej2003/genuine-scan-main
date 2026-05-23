@@ -57,6 +57,7 @@ describe("dialog recovery states", () => {
           relinkingPrinter={false}
           selectedLocalProfileRegistrationStale={false}
           onRelinkSelectedPrinter={() => undefined}
+          onPrintDiagnosticTestLabel={() => undefined}
           printing={false}
           onStartPrint={() => undefined}
           selectedPrinterCanPrint
@@ -140,6 +141,38 @@ describe("dialog recovery states", () => {
     expect(onAbandon).toHaveBeenCalledWith("job-failed");
   });
 
+  it("shows queue confirmation unavailable without stale compatible-setup copy", () => {
+    renderPrintDialog({
+      recentPrintJobs: [
+        {
+          id: "job-awaiting",
+          status: "SENT",
+          pipelineState: "NEEDS_OPERATOR_ACTION",
+          printMode: "LOCAL_AGENT",
+          quantity: 1,
+          createdAt: new Date().toISOString(),
+          failureReason:
+            "Sent to printer queue, but local queue confirmation is unavailable. Operator confirmation is required before labels are treated as printed.",
+          printer: { name: "E2E Local Agent Printer" },
+          awaitingConfirmation: true,
+          session: { confirmedItems: 0, remainingToPrint: 0, awaitingConfirmationCount: 1 },
+        } as any,
+      ],
+    });
+
+    expect(screen.getByText(/Sent to printer, awaiting\/manual confirmation/i)).toBeInTheDocument();
+    expect(screen.queryByText(/compatible setup/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Remaining 0/i)).not.toBeInTheDocument();
+  });
+
+  it("offers a diagnostic test label action for local-agent printers", () => {
+    const onDiagnostic = vi.fn();
+    renderPrintDialog({ onPrintDiagnosticTestLabel: onDiagnostic });
+
+    fireEvent.click(screen.getByRole("button", { name: "Print diagnostic test label" }));
+    expect(onDiagnostic).toHaveBeenCalled();
+  });
+
   it("lets users close the rename dialog when batch context is missing", () => {
     const onOpenChange = vi.fn();
 
@@ -209,6 +242,7 @@ describe("dialog recovery states", () => {
           relinkingPrinter={false}
           selectedLocalProfileRegistrationStale={false}
           onRelinkSelectedPrinter={() => undefined}
+          onPrintDiagnosticTestLabel={() => undefined}
           printing={false}
           onStartPrint={() => undefined}
           selectedPrinterCanPrint={false}

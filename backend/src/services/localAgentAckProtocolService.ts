@@ -61,12 +61,35 @@ export const failSchema = agentAuthSchema
   })
   .strict();
 
+export const localAgentTestAckSchema = agentAuthSchema
+  .extend({
+    ...localAgentProtocolFields,
+    testJobId: z.string().trim().uuid(),
+    payloadHash: z.string().trim().max(256).optional().or(z.literal("")),
+    bytesWritten: z.coerce.number().int().min(1).max(50_000_000).optional(),
+    deviceJobRef: nullableTrimmedString(240),
+    payloadType: z.string().trim().max(80).optional().nullable(),
+    agentMetadata: metadataSchema,
+  })
+  .strict();
+
+export const localAgentTestFailSchema = agentAuthSchema
+  .extend({
+    ...localAgentProtocolFields,
+    testJobId: z.string().trim().uuid(),
+    reason: z.string().trim().min(2).max(1000),
+    agentMetadata: metadataSchema,
+  })
+  .strict();
+
 export type LocalAgentRequestPayload =
   | z.infer<typeof agentAuthSchema>
   | z.infer<typeof claimSchema>
   | z.infer<typeof localAgentAckSchema>
   | z.infer<typeof confirmSchema>
-  | z.infer<typeof failSchema>;
+  | z.infer<typeof failSchema>
+  | z.infer<typeof localAgentTestAckSchema>
+  | z.infer<typeof localAgentTestFailSchema>;
 
 export const getLocalAgentRequestId = (req: Request) =>
   String((req as Request & { requestId?: string }).requestId || req.get("x-request-id") || "").trim() || null;

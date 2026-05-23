@@ -19,7 +19,7 @@ import {
 } from "./qrTokenService";
 import { sendRawPayloadToNetworkPrinter } from "./networkPrinterSocketService";
 import { resolvePrinterConfirmationMode, type PrintConfirmationMode } from "./printConfirmationService";
-import { resolvePayloadType, supportsNetworkDirectPayload } from "./printPayloadService";
+import { buildKnownGoodDiagnosticZplPayload, resolvePayloadType, supportsNetworkDirectPayload } from "./printPayloadService";
 import { getZebraTotalLabelCount, waitForZebraLabelConfirmation } from "./zebraPrinterStatusService";
 
 const PRINTER_TEST_LABEL_TIMEOUT_MS = Math.max(
@@ -59,7 +59,7 @@ export type PrinterTestLabelResult = {
 
 type GatewayPrinterTestClaim = {
   testJobId: string;
-  connectionType: "NETWORK_DIRECT" | "NETWORK_IPP";
+  connectionType: "NETWORK_DIRECT" | "NETWORK_IPP" | "LOCAL_AGENT";
   code: string;
   scanUrl: string;
   previewLabel: string;
@@ -75,7 +75,7 @@ type GatewayPrinterTestClaim = {
 type GatewayPrinterTestJob = {
   id: string;
   printerId: string;
-  connectionType: "NETWORK_DIRECT" | "NETWORK_IPP";
+  connectionType: "NETWORK_DIRECT" | "NETWORK_IPP" | "LOCAL_AGENT";
   createdAt: number;
   expiresAt: number;
   status: "PENDING" | "CLAIMED" | "ACKED" | "CONFIRMED" | "FAILED";
@@ -260,6 +260,12 @@ const enqueueGatewayPrinterTestJob = (params: {
   const directPayload =
     params.printer.connectionType === PrinterConnectionType.NETWORK_DIRECT
       ? buildDirectTestPayload({ ...params, context })
+      : params.printer.connectionType === PrinterConnectionType.LOCAL_AGENT
+        ? {
+            payloadType: PrintPayloadType.ZPL,
+            payloadContent: buildKnownGoodDiagnosticZplPayload(),
+            payloadHash: sha256Hex(buildKnownGoodDiagnosticZplPayload()),
+          }
       : null;
 
   let resolvePromise!: (result: PrinterTestLabelResult) => void;
@@ -270,7 +276,26 @@ const enqueueGatewayPrinterTestJob = (params: {
   });
 
   const claim: GatewayPrinterTestClaim =
-    params.printer.connectionType === PrinterConnectionType.NETWORK_DIRECT
+    params.printer.connectionType === PrinterConnectionType.LOCAL_AGENT
+      ? {
+          testJobId: jobId,
+          connectionType: PrinterConnectionType.LOCAL_AGENT,
+          code: context.code,
+          scanUrl: context.scanUrl,
+          previewLabel: "MSCQR TEST",
+          printer: {
+            id: params.printer.id,
+            name: params.printer.name,
+            nativePrinterId: params.printer.nativePrinterId,
+          },
+          calibrationProfile: (params.printer.calibrationProfile as Record<string, unknown> | null) || null,
+          jobNumber,
+          payloadType: directPayload?.payloadType || PrintPayloadType.ZPL,
+          payloadContent: directPayload?.payloadContent || null,
+          payloadHash: directPayload?.payloadHash || null,
+          commandLanguage: PrinterLanguageKind.ZPL,
+        }
+      : params.printer.connectionType === PrinterConnectionType.NETWORK_DIRECT
       ? {
           testJobId: jobId,
           connectionType: PrinterConnectionType.NETWORK_DIRECT,
@@ -317,7 +342,7 @@ const enqueueGatewayPrinterTestJob = (params: {
   const job: GatewayPrinterTestJob = {
     id: jobId,
     printerId: params.printer.id,
-    connectionType: params.printer.connectionType as "NETWORK_DIRECT" | "NETWORK_IPP",
+    connectionType: params.printer.connectionType as "NETWORK_DIRECT" | "NETWORK_IPP" | "LOCAL_AGENT",
     createdAt: Date.now(),
     expiresAt,
     status: "PENDING",
@@ -344,6 +369,16 @@ export const claimGatewayPrinterTestJob = (params: {
   }
   job.status = "CLAIMED";
   return job.claim;
+};
+
+export const claimLocalAgentPrinterTestJob = (params: { printerIds: string[] }) => {
+  for (const printerId of params.printerIds) {
+    const job = getGatewayPrinterTestJob(printerId);
+    if (!job || job.connectionType !== PrinterConnectionType.LOCAL_AGENT || job.status !== "PENDING") continue;
+    job.status = "CLAIMED";
+    return job.claim;
+  }
+  return null;
 };
 
 export const acknowledgeGatewayPrinterTestJob = (params: {
@@ -376,10 +411,13 @@ export const confirmGatewayPrinterTestJob = (params: {
     message:
       job.connectionType === PrinterConnectionType.NETWORK_IPP
         ? "The site connector printed the live IPP test label and the printer confirmed completion."
+        : job.connectionType === PrinterConnectionType.LOCAL_AGENT
+          ? "The workstation connector printed the diagnostic Zebra RAW ZPL test label."
         : "The site connector printed the live label test and the printer confirmed completion.",
     confirmationMode: params.confirmationMode || null,
-    connectionType: job.connectionType,
-    deliveryMode: PrinterDeliveryMode.SITE_GATEWAY,
+    connectionType: job.connectionType as PrinterConnectionType,
+    deliveryMode:
+      job.connectionType === PrinterConnectionType.LOCAL_AGENT ? PrinterDeliveryMode.DIRECT : PrinterDeliveryMode.SITE_GATEWAY,
     payloadType: params.payloadType || null,
     deviceJobRef: params.deviceJobRef || null,
     dispatchedAt: now,
@@ -516,7 +554,7 @@ export const printTestLabelForRegisteredPrinter = async (params: {
   actorUserId: string;
 }) => {
   if (params.printer.connectionType === PrinterConnectionType.LOCAL_AGENT) {
-    throw new Error("Local workstation printers do not use this managed test-label path.");
+    return dispatchGatewayPrinterTestLabel(params);
   }
 
   if (params.printer.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY) {

@@ -155,7 +155,7 @@ const run = async () => {
     "Real Windows spooler job IDs should remain confirmable"
   );
   assert(
-    extractWindowsJobId("winspool-opaque:abc123") === null,
+    extractWindowsJobId("winspool-opaque:ZDesigner ZT410-300dpi ZPL:abc123") === null,
     "Opaque Windows dispatch refs should skip Get-PrintJob confirmation"
   );
   const unavailableConfirmation = await waitForLocalPrintJobCompletion({
@@ -173,6 +173,10 @@ const run = async () => {
     "Windows ZPL payloads should be routed to the RAW spooler path"
   );
   assert(validateZplPayloadForRawPrint(validZpl) === validZpl, "Valid ZPL should pass raw-print validation");
+  assert(
+    Buffer.byteLength(validateZplPayloadForRawPrint(validZpl), "utf8") === Buffer.byteLength(validZpl, "utf8"),
+    "Raw ZPL bytesWritten should be based on actual payload bytes, not payload hash length"
+  );
   let shortZplRejected = false;
   try {
     validateZplPayloadForRawPrint("^XA\n^FO0,0^BQN,2,7^FDLA,x^FS\n^XZ");
@@ -181,6 +185,18 @@ const run = async () => {
     assert(error.errorCode === "invalid_zpl_print_payload", "Short/placeholder ZPL should fail with a precise code");
   }
   assert(shortZplRejected, "Tiny ZPL must not be sent to a Zebra as a production label");
+
+  let blackBlockRejected = false;
+  try {
+    validateZplPayloadForRawPrint("^XA\n^PW600\n^LL400\n^FO0,0^GB600,400,390,B,0^FS\n^XZ");
+  } catch (error) {
+    blackBlockRejected = true;
+    assert(
+      error.zplValidationErrors.includes("zpl_full_label_black_box_risk"),
+      "Full-label black block ZPL should be rejected before print"
+    );
+  }
+  assert(blackBlockRejected, "Black-block-risk payload must not reach the Windows RAW spooler");
 
   const multiplePrinters = [
     { ...localPrinters[1], printerName: "Offline Canon", printerId: "Offline Canon", online: false, isDefault: false },

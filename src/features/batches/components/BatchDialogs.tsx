@@ -161,6 +161,7 @@ type PrintJobDialogProps = {
   relinkingPrinter: boolean;
   selectedLocalProfileRegistrationStale: boolean;
   onRelinkSelectedPrinter: () => void;
+  onPrintDiagnosticTestLabel: () => void;
   printing: boolean;
   onStartPrint: () => void;
   selectedPrinterCanPrint: boolean;
@@ -196,6 +197,7 @@ export function BatchPrintJobDialog({
   relinkingPrinter,
   selectedLocalProfileRegistrationStale,
   onRelinkSelectedPrinter,
+  onPrintDiagnosticTestLabel,
   printing,
   onStartPrint,
   selectedPrinterCanPrint,
@@ -407,6 +409,21 @@ export function BatchPrintJobDialog({
               <Button asChild variant="outline">
                 <Link to="/printer-setup">Open printer setup</Link>
               </Button>
+              {selectedPrinterProfile?.connectionType === "LOCAL_AGENT" ? (
+                <ActionButton
+                  variant="outline"
+                  onClick={onPrintDiagnosticTestLabel}
+                  state={
+                    printing
+                      ? createUiActionState("pending", "Printing a diagnostic test label.")
+                      : !selectedPrinterProfile
+                        ? createUiActionState("disabled", "Choose a saved printer before printing a diagnostic label.")
+                        : createUiActionState("enabled")
+                  }
+                  idleLabel="Print diagnostic test label"
+                  pendingLabel="Printing..."
+                />
+              ) : null}
               <ActionButton
                 data-testid="print-job-start-button"
                 onClick={onStartPrint}
@@ -481,8 +498,19 @@ export function BatchPrintJobDialog({
                         {job.itemCount || job.quantity} labels
                       </div>
                       <div className="mt-1 text-xs text-muted-foreground">
-                        Confirmed {job.session?.confirmedItems || 0}
-                        {typeof job.session?.remainingToPrint === "number" ? ` · Remaining ${job.session.remainingToPrint}` : ""}
+                        {job.awaitingConfirmation
+                          ? "Sent to printer, awaiting/manual confirmation"
+                          : job.pipelineState === "NEEDS_OPERATOR_ACTION" && job.status !== "FAILED"
+                            ? "Queue confirmation unavailable"
+                            : job.status === "FAILED"
+                              ? "Needs attention"
+                              : `Confirmed ${job.session?.confirmedItems || 0}`}
+                        {!job.awaitingConfirmation &&
+                        job.status !== "FAILED" &&
+                        typeof job.session?.remainingToPrint === "number" &&
+                        job.session.remainingToPrint > 0
+                          ? ` · Remaining ${job.session.remainingToPrint}`
+                          : ""}
                         {job.failureReason
                           ? ` · ${sanitizePrinterUiError(job.failureReason, "This print job needs attention.")}`
                           : ""}

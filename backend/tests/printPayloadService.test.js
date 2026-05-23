@@ -4,6 +4,8 @@ if (!process.env.QR_SIGN_HMAC_SECRET && !process.env.QR_SIGN_PRIVATE_KEY) {
 
 const {
   buildPrintPayloadDiagnostics,
+  buildKnownGoodDiagnosticZplPayload,
+  getZplPayloadSafetyIssues,
   buildApprovedPrintPayload,
   resolvePayloadType,
   supportsNetworkDirectPayloadType,
@@ -161,6 +163,28 @@ const run = () => {
   assert(!diagnostics.unresolvedPlaceholderPresent, "ZPL payload should not contain unresolved placeholders");
   assert(diagnostics.payloadByteLength > 120, "ZPL payload should be a complete label, not a tiny placeholder");
   assert(diagnostics.qrPayloadLength > 80, "ZPL QR payload should contain the signed scan token URL");
+  assert(diagnostics.endsWithZplEnd === true, "ZPL diagnostics should report ^XZ end");
+  assert(diagnostics.qrCommandCount === 1, "Production ZPL should contain exactly one QR command");
+  assert(diagnostics.graphicBoxCommandCount === 0, "Production ZPL should not include graphic boxes");
+  assert(diagnostics.graphicFieldCommandCount === 0, "Production ZPL should not include raster graphics");
+  assert(diagnostics.hasFullLabelBlackBoxRisk === false, "Production ZPL should not look like a full black block");
+  assert(diagnostics.printWidthCommandPresent === true, "Production ZPL should include print width");
+  assert(diagnostics.labelLengthCommandPresent === true, "Production ZPL should include label length");
+  assert(
+    diagnostics.safeCommandSequence.includes("^FD<redacted>") && !diagnostics.safeCommandSequence.join(" ").includes(governedToken),
+    "ZPL diagnostics should redact QR token data"
+  );
+
+  const riskyBlackBlock = "^XA\n^PW600\n^LL400\n^FO0,0^GB600,400,380,B,0^FS\n^XZ";
+  const risky = getZplPayloadSafetyIssues({ payloadContent: riskyBlackBlock, requireQr: true });
+  assert(risky.issues.includes("missing_zpl_qr_command"), "QR labels without ^BQN should be rejected");
+  assert(risky.issues.includes("zpl_full_label_black_box_risk"), "Full-label black box risk should be rejected");
+
+  const diagnosticZpl = buildKnownGoodDiagnosticZplPayload();
+  const diagnostic = buildPrintPayloadDiagnostics({ payloadType: "ZPL", labelLanguage: "ZPL", payloadContent: diagnosticZpl });
+  assert(diagnostic.startsWithZplStart && diagnostic.endsWithZplEnd, "Diagnostic ZPL should be a complete ZPL label");
+  assert(diagnostic.containsQrCommand, "Diagnostic ZPL should contain a harmless QR");
+  assert(!diagnostic.hasFullLabelBlackBoxRisk, "Diagnostic ZPL border must not look like a filled black block");
 
   console.log("print payload service tests passed");
 };

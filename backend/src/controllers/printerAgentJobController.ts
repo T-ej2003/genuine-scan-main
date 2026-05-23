@@ -1,19 +1,16 @@
 import {
   PrintDispatchMode,
+  PrintItemEventType,
+  PrintItemState,
   PrintJobStatus,
   PrintPipelineState,
-  PrinterTrustStatus,
 } from "@prisma/client";
 import { Request, Response } from "express";
 
 import prisma from "../config/database";
 import { createAuditLog } from "../services/auditService";
 import { failStopPrintSession } from "../services/printLifecycleService";
-import {
-  acknowledgePrintItemDispatch,
-  confirmPrintItemDispatch,
-  resolvePrinterConfirmationMode,
-} from "../services/printConfirmationService";
+import { acknowledgePrintItemDispatch, confirmPrintItemDispatch, resolvePrinterConfirmationMode } from "../services/printConfirmationService";
 import {
   buildClaimApprovedPayloadOrFail,
   countLocalAgentClaimItems,
@@ -21,18 +18,7 @@ import {
   LOCAL_AGENT_NO_WORK_RETRY_MS,
   reserveLocalAgentItem,
 } from "../services/localAgentClaimService";
-import {
-  buildPrinterAgentActionPayload,
-  getPrinterAgentIssuedAtSkewSeconds,
-  isPrinterAgentIssuedAtFresh,
-  verifyPrinterAgentPayloadSignature,
-} from "../services/printerAgentSigningService";
-import {
-  CONNECTOR_UPDATE_REQUIRED_CODE,
-  CONNECTOR_UPDATE_REQUIRED_MESSAGE,
-  isLocalAgentProtocolCompatible,
-  LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
-} from "../services/localAgentProtocol";
+import { CONNECTOR_UPDATE_REQUIRED_CODE, CONNECTOR_UPDATE_REQUIRED_MESSAGE, isLocalAgentProtocolCompatible, LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } from "../services/localAgentProtocol";
 import { ensurePrinterProfileForPrinter, resolvePrinterPreflight } from "../printing/registry/printerProfileService";
 import {
   buildLocalAgentValidationErrorPayload,
@@ -41,75 +27,37 @@ import {
   failSchema,
   getLocalAgentRequestId,
   localAgentAckSchema,
-  type LocalAgentRequestPayload,
   validateLocalAgentAckDispatchPhase,
 } from "../services/localAgentAckProtocolService";
 import { buildPrintPayloadDiagnostics } from "../services/printPayloadService";
-
-const verifyLocalAgentRequest = async (
-  parsed: LocalAgentRequestPayload,
-  action: "claim" | "ack" | "confirm" | "fail",
-  identifiers?: { printJobId?: string | null; printItemId?: string | null }
-) => {
-  if (!isPrinterAgentIssuedAtFresh(parsed.issuedAt)) {
-    const timestampSkewSeconds = getPrinterAgentIssuedAtSkewSeconds(parsed.issuedAt);
-    throw Object.assign(new Error("Agent request timestamp expired."), {
-      statusCode: 401,
-      errorCode: "agent_timestamp_expired",
-      serverTime: new Date().toISOString(),
-      timestampSkewSeconds: timestampSkewSeconds == null ? null : Math.round(timestampSkewSeconds),
-    });
-  }
-
-  const registration = await prisma.printerRegistration.findFirst({
-    where: {
-      agentId: parsed.agentId,
-      deviceFingerprint: parsed.deviceFingerprint,
-      revokedAt: null,
-    },
-    orderBy: [{ lastSeenAt: "desc" }, { updatedAt: "desc" }],
-  });
-
-  if (!registration || registration.trustStatus === PrinterTrustStatus.REVOKED) {
-    throw Object.assign(new Error("Printer registration not trusted."), { statusCode: 401 });
-  }
-
-  if (!String(registration.publicKeyPem || "").includes("BEGIN")) {
-    throw Object.assign(new Error("Printer registration public key is not enrolled."), { statusCode: 401 });
-  }
-
-  const payload = buildPrinterAgentActionPayload({
-    action,
-    agentId: parsed.agentId,
-    deviceFingerprint: parsed.deviceFingerprint,
-    printerId: parsed.printerId,
-    printJobId: identifiers?.printJobId || null,
-    printItemId: identifiers?.printItemId || null,
-    nonce: parsed.nonce,
-    issuedAt: parsed.issuedAt,
-  });
-
-  const signatureValid = verifyPrinterAgentPayloadSignature({
-    publicKeyPem: registration.publicKeyPem,
-    payload,
-    signature: parsed.signature,
-  });
-
-  if (!signatureValid) {
-    throw Object.assign(new Error("Printer agent signature verification failed."), { statusCode: 401 });
-  }
-
-  return registration;
-};
+import { claimLocalAgentPrinterTestJob } from "../services/printerTestLabelService";
+import { verifyLocalAgentRequest } from "../services/localAgentRequestAuthService";
 
 const noClaimWork = (res: Response, retryAfterMs = LOCAL_AGENT_NO_WORK_RETRY_MS) => res.json({ success: true, data: null, retryAfterMs });
 
-const localAgentErrorResponse = (res: Response, error: any) => res.status(error?.statusCode || 500).json({
-  success: false, error: error?.message || "Internal server error",
-  ...(error?.errorCode ? { code: error.errorCode, errorCode: error.errorCode } : {}),
-  ...(error?.serverTime ? { serverTime: error.serverTime } : {}),
-  ...(error?.timestampSkewSeconds != null ? { timestampSkewSeconds: error.timestampSkewSeconds } : {}),
-});
+export const localAgentErrorResponse = (res: Response, error: any) =>
+  res.status(error?.statusCode || 500).json({
+    success: false, error: error?.message || "Internal server error",
+    ...(error?.errorCode ? { code: error.errorCode, errorCode: error.errorCode } : {}),
+    ...(error?.serverTime ? { serverTime: error.serverTime } : {}),
+    ...(error?.timestampSkewSeconds != null ? { timestampSkewSeconds: error.timestampSkewSeconds } : {}),
+  });
+
+const toRecord = (value: unknown) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {} as Record<string, unknown>;
+  return value as Record<string, unknown>;
+};
+
+const hasQueueConfirmationUnavailable = (value: unknown) => {
+  const root = toRecord(value);
+  const dispatchMetadata = toRecord(root.dispatchMetadata);
+  const agentMetadata = toRecord(root.agentMetadata);
+  return Boolean(
+    root.queueConfirmationUnavailable ||
+      dispatchMetadata.queueConfirmationUnavailable ||
+      agentMetadata.queueConfirmationUnavailable
+  );
+};
 
 export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
   try {
@@ -178,6 +126,31 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
     });
 
     if (!job || !job.printSession || !job.printer) {
+      const testClaim = claimLocalAgentPrinterTestJob({ printerIds });
+      if (testClaim) {
+        console.info("local_agent_claim", {
+          event: "test_work_returned",
+          registrationId: registration.id,
+          agentId: registration.agentId,
+          selectedPrinterId,
+          printerIds,
+          testJobId: testClaim.testJobId,
+          payloadDiagnostics: buildPrintPayloadDiagnostics({
+            payloadType: testClaim.payloadType,
+            labelLanguage: testClaim.commandLanguage,
+            payloadContent: testClaim.payloadContent,
+          }),
+        });
+        return res.json({
+          success: true,
+          retryAfterMs: LOCAL_AGENT_BUSY_RETRY_MS,
+          protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+          data: {
+            ...testClaim,
+            protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+          },
+        });
+      }
       console.info("local_agent_claim", {
         event: "no_active_job",
         registrationId: registration.id,
@@ -426,6 +399,33 @@ export const ackLocalAgentPrintJob = async (req: Request, res: Response) => {
       confirmationMode,
       markDispatched: parsed.data.markDispatched !== false,
     });
+
+    if (hasQueueConfirmationUnavailable(parsed.data)) {
+      const message =
+        "Sent to printer queue, but local queue confirmation is unavailable. Operator confirmation is required before labels are treated as printed.";
+      await prisma.printJob.update({
+        where: { id: job.id },
+        data: {
+          pipelineState: PrintPipelineState.NEEDS_OPERATOR_ACTION,
+          failureReason: message,
+        },
+      });
+      await prisma.printItemEvent.create({
+        data: {
+          printItemId: item.id,
+          eventType: PrintItemEventType.AGENT_ACKED,
+          previousState: PrintItemState.AGENT_ACKED,
+          nextState: PrintItemState.AGENT_ACKED,
+          actorUserId: job.manufacturerId,
+          details: {
+            dispatchMode: PrintDispatchMode.LOCAL_AGENT,
+            queueConfirmationUnavailable: true,
+            deviceJobRef: String(parsed.data.deviceJobRef || "").trim() || null,
+            message,
+          },
+        },
+      });
+    }
 
     console.info("local_agent_ack", {
       registrationId: registration.id,

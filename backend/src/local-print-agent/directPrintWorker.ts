@@ -137,6 +137,7 @@ const ackLocalJob = async (payload: {
   jobRef?: string | null;
   markDispatched?: boolean;
   bytesWritten?: number | null;
+  queueConfirmationUnavailable?: boolean;
 }) => {
   const signed = await buildSignedBody({
     action: "ack",
@@ -146,6 +147,7 @@ const ackLocalJob = async (payload: {
   });
 
   const markDispatched = payload.markDispatched !== false;
+  const bytesWritten = Number(payload.bytesWritten || 0);
   const body = {
     ...signed.body,
     protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
@@ -155,7 +157,7 @@ const ackLocalJob = async (payload: {
     printItemId: payload.printItemId,
     ...(payload.code ? { code: payload.code } : {}),
     payloadHash: payload.payloadHash,
-    bytesWritten: Math.max(1, Number(payload.bytesWritten || 0) || payload.payloadHash.length),
+    ...(bytesWritten > 0 ? { bytesWritten: Math.floor(bytesWritten) } : {}),
     ...(payload.jobRef ? { deviceJobRef: payload.jobRef } : {}),
     markDispatched,
     ...(markDispatched
@@ -164,6 +166,7 @@ const ackLocalJob = async (payload: {
             printPath: payload.printPath,
             labelLanguage: payload.labelLanguage,
             jobRef: payload.jobRef || null,
+            queueConfirmationUnavailable: Boolean(payload.queueConfirmationUnavailable),
           },
         }
       : {}),
@@ -175,6 +178,7 @@ const ackLocalJob = async (payload: {
       printPath: payload.printPath,
       labelLanguage: payload.labelLanguage,
       jobRef: payload.jobRef || null,
+      queueConfirmationUnavailable: Boolean(payload.queueConfirmationUnavailable),
     },
   };
 
@@ -205,6 +209,7 @@ const confirmLocalJob = async (payload: {
     printItemId: payload.printItemId,
   });
 
+  const bytesWritten = Number(payload.bytesWritten || 0);
   await postBackend("/printer-agent/local/confirm", {
     ...signed.body,
     protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
@@ -212,7 +217,7 @@ const confirmLocalJob = async (payload: {
     printJobId: payload.printJobId,
     printItemId: payload.printItemId,
     payloadHash: payload.payloadHash,
-    bytesWritten: Math.max(1, Number(payload.bytesWritten || 0) || payload.payloadHash.length),
+    ...(bytesWritten > 0 ? { bytesWritten: Math.floor(bytesWritten) } : {}),
     deviceJobRef: payload.jobRef || null,
     agentMetadata: {
       deviceName: os.hostname(),
@@ -245,6 +250,102 @@ const failLocalJob = async (payload: {
     buildVersion: AGENT_BUILD_VERSION,
     printJobId: payload.printJobId,
     printItemId: payload.printItemId,
+    reason: payload.reason,
+    agentMetadata: {
+      deviceName: os.hostname(),
+      agentVersion: AGENT_VERSION,
+      protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+      buildVersion: AGENT_BUILD_VERSION,
+    },
+  });
+};
+
+const ackLocalTestJob = async (payload: {
+  printerId: string;
+  testJobId: string;
+  payloadHash: string;
+  payloadType?: string | null;
+  printPath: string;
+  labelLanguage: string;
+  jobRef?: string | null;
+  bytesWritten?: number | null;
+}) => {
+  const signed = await buildSignedBody({
+    action: "ack",
+    printerId: payload.printerId,
+  });
+  const bytesWritten = Number(payload.bytesWritten || 0);
+  await postBackend("/printer-agent/local/test/ack", {
+    ...signed.body,
+    protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+    buildVersion: AGENT_BUILD_VERSION,
+    testJobId: payload.testJobId,
+    payloadHash: payload.payloadHash,
+    payloadType: payload.payloadType || null,
+    ...(bytesWritten > 0 ? { bytesWritten: Math.floor(bytesWritten) } : {}),
+    deviceJobRef: payload.jobRef || null,
+    agentMetadata: {
+      deviceName: os.hostname(),
+      agentVersion: AGENT_VERSION,
+      protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+      buildVersion: AGENT_BUILD_VERSION,
+      printPath: payload.printPath,
+      labelLanguage: payload.labelLanguage,
+      jobRef: payload.jobRef || null,
+    },
+  });
+};
+
+const confirmLocalTestJob = async (payload: {
+  printerId: string;
+  testJobId: string;
+  payloadHash: string;
+  payloadType?: string | null;
+  printPath: string;
+  labelLanguage: string;
+  jobRef?: string | null;
+  bytesWritten?: number | null;
+}) => {
+  const signed = await buildSignedBody({
+    action: "confirm",
+    printerId: payload.printerId,
+  });
+  const bytesWritten = Number(payload.bytesWritten || 0);
+  await postBackend("/printer-agent/local/test/confirm", {
+    ...signed.body,
+    protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+    buildVersion: AGENT_BUILD_VERSION,
+    testJobId: payload.testJobId,
+    payloadHash: payload.payloadHash,
+    payloadType: payload.payloadType || null,
+    ...(bytesWritten > 0 ? { bytesWritten: Math.floor(bytesWritten) } : {}),
+    deviceJobRef: payload.jobRef || null,
+    agentMetadata: {
+      deviceName: os.hostname(),
+      agentVersion: AGENT_VERSION,
+      protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+      buildVersion: AGENT_BUILD_VERSION,
+      printPath: payload.printPath,
+      labelLanguage: payload.labelLanguage,
+      jobRef: payload.jobRef || null,
+    },
+  });
+};
+
+const failLocalTestJob = async (payload: {
+  printerId: string;
+  testJobId: string;
+  reason: string;
+}) => {
+  const signed = await buildSignedBody({
+    action: "fail",
+    printerId: payload.printerId,
+  });
+  await postBackend("/printer-agent/local/test/fail", {
+    ...signed.body,
+    protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+    buildVersion: AGENT_BUILD_VERSION,
+    testJobId: payload.testJobId,
     reason: payload.reason,
     agentMetadata: {
       deviceName: os.hostname(),
@@ -289,6 +390,83 @@ export const validateClaimedLocalPrintJobForAttempt = (payload: any) => {
   return { printJobId, printSessionId, printItemId, code, scanUrl, payloadContent, payloadHash };
 };
 
+const runLocalDiagnosticTestJob = async (payload: any, printerId: string) => {
+  const testJobId = String(payload?.testJobId || "").trim();
+  const backendPrinterId = String(payload?.printer?.id || "").trim() || printerId;
+  const payloadContent = typeof payload?.payloadContent === "string" ? payload.payloadContent : "";
+  const payloadHash = String(payload?.payloadHash || "").trim();
+  if (!testJobId || !payloadContent || !payloadHash) {
+    throw Object.assign(new Error("Diagnostic test claim is missing its approved ZPL payload."), {
+      errorCode: "test_claim_payload_missing",
+    });
+  }
+  if (sha256Hex(payloadContent) !== payloadHash) {
+    throw Object.assign(new Error("Diagnostic test payload hash mismatch."), { errorCode: "test_payload_hash_mismatch" });
+  }
+  const payloadDiagnostics = buildPrintPayloadDiagnostics({
+    payloadType: payload.payloadType || "ZPL",
+    labelLanguage: payload.commandLanguage || "ZPL",
+    payloadContent,
+  });
+  console.info("local direct-print diagnostic test payload validated", {
+    testJobId,
+    printerName: String(payload.printer?.name || payload.selectedPrinterName || printerId).trim(),
+    payloadDiagnostics,
+  });
+  try {
+    const result = await printLabel({
+      printerId,
+      printerName: String(payload.printer?.name || payload.selectedPrinterName || printerId).trim(),
+      printerLanguages: ["ZPL"],
+      calibrationProfile: null,
+      request: {
+        code: String(payload.code || "MSCQR-TEST").trim(),
+        scanUrl: String(payload.scanUrl || "MSCQR-DIAGNOSTIC-TEST").trim(),
+        payloadType: payload.payloadType || "ZPL",
+        payloadContent,
+        payloadHash,
+        previewLabel: payload.previewLabel || "MSCQR TEST",
+        copies: 1,
+        printPath: "label-language",
+        labelLanguage: payload.commandLanguage || "ZPL",
+      },
+    });
+    await ackLocalTestJob({
+      printerId: backendPrinterId,
+      testJobId,
+      payloadHash,
+      payloadType: payload.payloadType || "ZPL",
+      printPath: result.printPath,
+      labelLanguage: result.labelLanguage,
+      jobRef: result.jobRef,
+      bytesWritten: result.bytesWritten ?? payloadDiagnostics.payloadByteLength,
+    });
+    await confirmLocalTestJob({
+      printerId: backendPrinterId,
+      testJobId,
+      payloadHash,
+      payloadType: payload.payloadType || "ZPL",
+      printPath: result.printPath,
+      labelLanguage: result.labelLanguage,
+      jobRef: result.jobRef,
+      bytesWritten: result.bytesWritten ?? payloadDiagnostics.payloadByteLength,
+    });
+    console.info("local direct-print diagnostic test label sent", {
+      testJobId,
+      printerId,
+      printPath: result.printPath,
+      bytesWritten: result.bytesWritten ?? payloadDiagnostics.payloadByteLength,
+    });
+  } catch (error: any) {
+    await failLocalTestJob({
+      printerId: backendPrinterId,
+      testJobId,
+      reason: error?.message || "Diagnostic test label failed.",
+    }).catch(() => undefined);
+    throw error;
+  }
+};
+
 const runOnce = async () => {
   const claimed = await claimNextLocalJob();
   if (!claimed?.data) {
@@ -328,6 +506,11 @@ const runOnce = async () => {
   let spoolerAttempted = false;
 
   try {
+    if (payload.testJobId) {
+      await runLocalDiagnosticTestJob(payload, printerId);
+      return clampRetryAfterMs(claimed?.retryAfterMs);
+    }
+
     validated = validateClaimedLocalPrintJobForAttempt(payload);
     const payloadDiagnostics = buildPrintPayloadDiagnostics({
       payloadType: payload.payloadType || null,
@@ -409,13 +592,26 @@ const runOnce = async () => {
       printPath: result.printPath,
       labelLanguage: result.labelLanguage,
       jobRef: result.jobRef,
-      bytesWritten: result.bytesWritten ?? payloadDiagnostics.payloadByteLength,
+      bytesWritten: result.bytesWritten ?? null,
     });
     const completion = await waitForLocalPrintJobCompletion({
       printerId,
       jobRef: result.jobRef,
     });
     if ((completion as any)?.confirmationUnavailable || (completion as any)?.confirmed === false) {
+      await ackLocalJob({
+        printerId,
+        printJobId,
+        printSessionId: validated.printSessionId,
+        printItemId,
+        code: validated.code,
+        payloadHash: validated.payloadHash,
+        printPath: result.printPath,
+        labelLanguage: result.labelLanguage,
+        jobRef: result.jobRef,
+        bytesWritten: result.bytesWritten ?? null,
+        queueConfirmationUnavailable: true,
+      });
       console.warn("local direct-print queue confirmation unavailable after dispatch", {
         printJobId,
         printItemId,
@@ -433,7 +629,7 @@ const runOnce = async () => {
       printPath: result.printPath,
       labelLanguage: result.labelLanguage,
       jobRef: result.jobRef,
-      bytesWritten: result.bytesWritten ?? payloadDiagnostics.payloadByteLength,
+      bytesWritten: result.bytesWritten ?? null,
     });
     console.info("local direct-print item confirmed", {
       printJobId,
@@ -505,6 +701,7 @@ export const startDirectPrintWorker = () => {
         if ((error as any)?.serverTime || (error as any)?.timestampSkewSeconds != null) {
           console.error("local direct-print backend time check failed", {
             errorCode: (error as any)?.errorCode || null,
+            localTime: new Date().toISOString(),
             serverTime: (error as any)?.serverTime || null,
             timestampSkewSeconds: (error as any)?.timestampSkewSeconds ?? null,
             retryAfterMs,

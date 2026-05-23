@@ -24,7 +24,11 @@ describe("printer user-facing helpers", () => {
 
     expect(
       sanitizePrinterUiError("Label sent to Windows spooler, but Get-PrintJob rejected print job id as UInt32.")
-    ).toBe("Label was sent to Windows spooler but confirmation failed.");
+    ).toBe("Sent to printer, but local queue confirmation is unavailable. Check the printed label, then manually confirm or retry.");
+
+    expect(sanitizePrinterUiError("Generated ZPL looks unsafe for this Zebra profile.")).toBe(
+      "Payload rejected before print: generated Zebra ZPL looks unsafe for this profile."
+    );
   });
 
   it("redacts duplicate printer registration errors", () => {

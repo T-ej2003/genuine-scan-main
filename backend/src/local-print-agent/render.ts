@@ -11,6 +11,7 @@ import {
   renderPdfLabelBuffer,
   renderQrLabelImageBuffer,
 } from "../printing/pdfLabel";
+import { assertZplPayloadSafeForQrLabel, buildKnownGoodDiagnosticZplPayload } from "../services/printPayloadService";
 
 const execFileAsync = promisify(execFile);
 
@@ -48,11 +49,12 @@ const parseLpJobRef = (output: string) => {
 
 const parseWindowsJobRef = (output: string, printerId: string) => {
   const match = String(output || "").match(/JOB_ID=(\d+)/i);
-  if (match?.[1]) {
+  const jobId = Number(match?.[1] || 0);
+  if (match?.[1] && Number.isInteger(jobId) && jobId > 0 && jobId <= 4_294_967_295) {
     return `winspool-id:${printerId}:${match[1]}`;
   }
   const opaque = sha256Hex(`${printerId}:${output}:${Date.now()}`).slice(0, 16);
-  return `winspool-opaque:${opaque}`;
+  return `winspool-opaque:${printerId}:${opaque}`;
 };
 
 const normalizeLanguage = (value: unknown) => String(value || "").trim().toUpperCase();
@@ -66,20 +68,19 @@ export const isRawWindowsZplPayload = (request: PrintRequest) => {
 
 export const validateZplPayloadForRawPrint = (payloadContent: string) => {
   const trimmed = String(payloadContent || "").trim();
-  const errors: string[] = [];
-  if (!trimmed.startsWith("^XA")) errors.push("missing_zpl_start");
-  if (!trimmed.endsWith("^XZ")) errors.push("missing_zpl_end");
-  if (!/\^BQ[N]?/i.test(trimmed)) errors.push("missing_zpl_qr_command");
-  if (!/\^FDLA,[\s\S]+?\^FS/i.test(trimmed)) errors.push("missing_zpl_qr_payload");
-  if (Buffer.byteLength(trimmed, "utf8") < 120) errors.push("zpl_payload_too_short");
-  if (errors.length > 0) {
-    throw Object.assign(new Error(`Approved ZPL payload is not safe to send to the label printer: ${errors.join(", ")}`), {
+  try {
+    assertZplPayloadSafeForQrLabel(trimmed);
+  } catch (error: any) {
+    throw Object.assign(new Error("Generated ZPL looks unsafe for this Zebra profile. Use diagnostic test label or adjust label template."), {
       errorCode: "invalid_zpl_print_payload",
-      zplValidationErrors: errors,
+      zplValidationErrors: error?.zplSafetyIssues || [],
+      payloadDiagnostics: error?.payloadDiagnostics || null,
     });
   }
   return trimmed;
 };
+
+export const buildDiagnosticTestZplPayload = buildKnownGoodDiagnosticZplPayload;
 
 const writeFileEnsured = async (filename: string, content: string | Buffer) => {
   await fs.mkdir(TMP_DIR, { recursive: true });

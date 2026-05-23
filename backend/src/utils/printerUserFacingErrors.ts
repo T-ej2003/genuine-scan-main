@@ -44,7 +44,13 @@ export const sanitizePrinterActionError = (
     return "The saved factory printer could not be reached. Check the printer or network connection and try again.";
   }
   if (hasAny(value, ["queue confirmation", "confirmation unavailable", "get-printjob", "uint32", "windows spooler"]) && hasAny(value, ["sent", "dispatch", "confirmation", "spooler", "print job id"])) {
-    return "Label was sent to Windows spooler but confirmation failed.";
+    return "Sent to printer, but local queue confirmation is unavailable. Check the printed label, then manually confirm or retry.";
+  }
+  if (hasAny(value, ["generated zpl looks unsafe", "unsafe_zpl_payload", "black box", "black-block", "raster graphics not allowed"])) {
+    return "Payload rejected before print: generated Zebra ZPL looks unsafe for this profile.";
+  }
+  if (hasAny(value, ["operator confirmation", "manual confirmation", "awaiting/manual confirmation"])) {
+    return "Sent to printer, awaiting manual operator confirmation.";
   }
   if (hasAny(value, ["command language", "zpl", "tspl", "epl", "cpcl", "sbpl", "esc/pos", "esc_pos"])) {
     return "This printer profile needs a compatible setup before it can be used.";

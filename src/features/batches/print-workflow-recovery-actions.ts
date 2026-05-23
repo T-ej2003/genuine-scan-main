@@ -70,3 +70,33 @@ export const abandonPrintJobAction = async (params: {
     params.setPrinting(false);
   }
 };
+
+export const printDiagnosticTestLabelAction = async (params: {
+  selectedPrinterProfile: RegisteredPrinterRow | null;
+  setPrinting: (value: boolean) => void;
+  toast: ToastLike;
+}) => {
+  if (!params.selectedPrinterProfile?.id) return;
+  params.setPrinting(true);
+  try {
+    const response = await apiClient.testPrinterLabel(params.selectedPrinterProfile.id);
+    const data = (response.data || {}) as { outcome?: string; message?: string };
+    if (!response.success || data.outcome !== "confirmed") {
+      params.toast({
+        title: "Diagnostic test label needs attention",
+        description: sanitizePrinterUiError(
+          response.error || data.message,
+          "Print the diagnostic label again after checking label size, darkness, media type, driver RAW datatype, and ZPL mode."
+        ),
+        variant: "destructive",
+      });
+      return;
+    }
+    params.toast({
+      title: "Diagnostic test label printed",
+      description: data.message || "The printer accepted a known-good MSCQR ZPL diagnostic label.",
+    });
+  } finally {
+    params.setPrinting(false);
+  }
+};

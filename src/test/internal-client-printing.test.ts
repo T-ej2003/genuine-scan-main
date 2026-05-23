@@ -72,6 +72,18 @@ describe("printing api request control", () => {
     );
   });
 
+  it("posts diagnostic test-label requests for saved printer profiles", async () => {
+    const request = vi.fn(async () => ({ success: true, data: { outcome: "confirmed" } }));
+    const api = createPrintingApi(createCore(request));
+
+    await api.testPrinterLabel("62eea666-5a7f-444a-94fb-8fa040396874");
+
+    expect(request).toHaveBeenCalledWith(
+      "/manufacturer/printers/62eea666-5a7f-444a-94fb-8fa040396874/test-label",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
   it("deduplicates concurrent printer status requests", async () => {
     let resolveRequest: ((response: ApiResponse<RequestPayload>) => void) | null = null;
     const request = vi.fn(

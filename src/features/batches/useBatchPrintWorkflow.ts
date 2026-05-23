@@ -30,7 +30,7 @@ import {
   retryPendingDirectPrint,
   syncProgressFromPrintJob as syncPrintJobProgress,
 } from "./batch-print-operations";
-import { abandonPrintJobAction, relinkSelectedPrinterAction } from "./print-workflow-recovery-actions";
+import { abandonPrintJobAction, printDiagnosticTestLabelAction, relinkSelectedPrinterAction } from "./print-workflow-recovery-actions";
 import type {
   BatchRow,
   LocalPrinterRow,
@@ -40,11 +40,7 @@ import type {
   RegisteredPrinterRow,
 } from "./types";
 
-type ToastLike = (options: {
-  title?: string;
-  description?: string;
-  variant?: "default" | "destructive";
-}) => unknown;
+type ToastLike = (options: { title?: string; description?: string; variant?: "default" | "destructive" }) => unknown;
 
 type UseBatchPrintWorkflowParams = {
   isManufacturer: boolean;
@@ -660,6 +656,9 @@ export function useBatchPrintWorkflow({
     relinkingPrinter,
     selectedLocalProfileRegistrationStale,
     onRelinkSelectedPrinter: relinkSelectedPrinter,
+    onPrintDiagnosticTestLabel: () => {
+      void printDiagnosticTestLabelAction({ selectedPrinterProfile, setPrinting, toast });
+    },
     printing,
     onStartPrint: createPrintJob,
     selectedPrinterCanPrint,
