@@ -44,6 +44,7 @@ import {
   type LocalAgentRequestPayload,
   validateLocalAgentAckDispatchPhase,
 } from "../services/localAgentAckProtocolService";
+import { buildPrintPayloadDiagnostics } from "../services/printPayloadService";
 
 const verifyLocalAgentRequest = async (
   parsed: LocalAgentRequestPayload,
@@ -278,6 +279,7 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
       availableItemCount,
       inFlightItemCount,
       retryAfterMs: LOCAL_AGENT_BUSY_RETRY_MS,
+      payloadDiagnostics: buildPrintPayloadDiagnostics({ payloadType: approvedPayload.payloadType, labelLanguage: approvedPayload.commandLanguage, payloadContent: approvedPayload.payloadContent }),
     });
 
     return res.json({

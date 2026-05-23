@@ -1,14 +1,20 @@
 const {
   buildSetupVerification,
+  extractWindowsJobId,
   parseWindowsPrinters,
   resolveSelectedPrinter,
+  waitForLocalPrintJobCompletion,
 } = require("../dist/local-print-agent/cups");
+const {
+  isRawWindowsZplPayload,
+  validateZplPayloadForRawPrint,
+} = require("../dist/local-print-agent/render");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
 };
 
-const run = () => {
+const run = async () => {
   const printers = parseWindowsPrinters(
     JSON.stringify([
       {
@@ -140,6 +146,42 @@ const run = () => {
   });
   assert(faxOnlyVerification.state === "PRINTER_UNAVAILABLE", "Fax alone must not verify as MSCQR ready");
 
+  assert(
+    extractWindowsJobId("winspool:ZDesigner ZT410-300dpi ZPL:1779493447676") === null,
+    "Timestamp-based legacy winspool refs must not be treated as Windows PrintJob IDs"
+  );
+  assert(
+    extractWindowsJobId("winspool-id:ZDesigner ZT410-300dpi ZPL:42") === 42,
+    "Real Windows spooler job IDs should remain confirmable"
+  );
+  assert(
+    extractWindowsJobId("winspool-opaque:abc123") === null,
+    "Opaque Windows dispatch refs should skip Get-PrintJob confirmation"
+  );
+  const unavailableConfirmation = await waitForLocalPrintJobCompletion({
+    printerId: "ZDesigner ZT410-300dpi ZPL",
+    jobRef: null,
+  });
+  assert(
+    unavailableConfirmation.confirmationUnavailable === true && unavailableConfirmation.confirmed === false,
+    "Missing or opaque spooler refs should not be converted into physical printer failures"
+  );
+
+  const validZpl = `^XA\n^PW590\n^LL590\n^LH0,0\n^CI28\n^FO24,24^BQN,2,7^FDLA,https://mscqr.example.test/scan/${"a".repeat(100)}^FS\n^XZ`;
+  assert(
+    isRawWindowsZplPayload({ payloadType: "ZPL", labelLanguage: "ZPL", payloadContent: validZpl }),
+    "Windows ZPL payloads should be routed to the RAW spooler path"
+  );
+  assert(validateZplPayloadForRawPrint(validZpl) === validZpl, "Valid ZPL should pass raw-print validation");
+  let shortZplRejected = false;
+  try {
+    validateZplPayloadForRawPrint("^XA\n^FO0,0^BQN,2,7^FDLA,x^FS\n^XZ");
+  } catch (error) {
+    shortZplRejected = true;
+    assert(error.errorCode === "invalid_zpl_print_payload", "Short/placeholder ZPL should fail with a precise code");
+  }
+  assert(shortZplRejected, "Tiny ZPL must not be sent to a Zebra as a production label");
+
   const multiplePrinters = [
     { ...localPrinters[1], printerName: "Offline Canon", printerId: "Offline Canon", online: false, isDefault: false },
     { ...localPrinters[0], printerName: "Zebra Ready", printerId: "Zebra Ready", online: true, isDefault: false },
@@ -165,4 +207,7 @@ const run = () => {
   console.log("local print agent windows tests passed");
 };
 
-run();
+run().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

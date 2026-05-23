@@ -69,6 +69,9 @@ export const sanitizePrinterUiError = (raw?: string | null, fallback = "Printing
   if (hasAny(value, ["tcp", "socket", "host and port", "9100", "jetdirect", "network-direct"])) {
     return "The saved factory printer could not be reached. Check the printer or network connection and try again.";
   }
+  if (hasAny(value, ["queue confirmation", "confirmation unavailable", "get-printjob", "uint32", "windows spooler"]) && hasAny(value, ["sent", "dispatch", "confirmation", "spooler", "print job id"])) {
+    return "Label was sent to Windows spooler but confirmation failed.";
+  }
   if (hasAny(value, ["command language", "zpl", "tspl", "epl", "cpcl", "sbpl", "esc/pos", "esc_pos"])) {
     return "This printer profile needs a compatible setup before it can be used.";
   }

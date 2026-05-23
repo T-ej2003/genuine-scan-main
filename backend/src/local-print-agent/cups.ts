@@ -690,18 +690,30 @@ const waitForCupsJobCompletion = async (params: { printerId: string; jobRef: str
   throw new Error(`Timed out waiting for local spool completion of job ${params.jobRef}.`);
 };
 
-const extractWindowsJobId = (jobRef: string) => {
-  const match = normalizeJobRef(jobRef).match(/:(\d+)$/);
-  if (match?.[1]) return Number(match[1]);
+const WINDOWS_UINT32_MAX = 4_294_967_295;
+
+export const extractWindowsJobId = (jobRef: string) => {
+  const normalized = normalizeJobRef(jobRef);
+  if (normalized.startsWith("winspool-opaque:")) return null;
+  const match = normalized.match(/^(?:winspool-id|winspool):.+:(\d+)$/);
+  if (match?.[1]) {
+    const parsed = Number(match[1]);
+    return Number.isInteger(parsed) && parsed > 0 && parsed <= WINDOWS_UINT32_MAX ? parsed : null;
+  }
   const direct = Number(jobRef);
-  if (Number.isFinite(direct) && direct > 0) return direct;
+  if (Number.isInteger(direct) && direct > 0 && direct <= WINDOWS_UINT32_MAX) return direct;
   return null;
 };
 
 const waitForWindowsJobCompletion = async (params: { printerId: string; jobRef: string; timeoutMs?: number }) => {
   const jobId = extractWindowsJobId(params.jobRef);
   if (!jobId) {
-    throw new Error("Windows spooler did not provide a usable print job id for terminal confirmation.");
+    return {
+      confirmed: false as const,
+      confirmationUnavailable: true as const,
+      queue: "windows" as const,
+      jobRef: params.jobRef,
+    };
   }
 
   const deadline = Date.now() + (params.timeoutMs || JOB_WAIT_TIMEOUT_MS);
@@ -755,7 +767,12 @@ export const waitForLocalPrintJobCompletion = async (params: {
 }) => {
   const jobRef = normalizeJobRef(params.jobRef || "");
   if (!jobRef) {
-    throw new Error("Local spooler did not return a print job reference for confirmation.");
+    return {
+      confirmed: false as const,
+      confirmationUnavailable: true as const,
+      queue: process.platform === "win32" ? ("windows" as const) : ("cups" as const),
+      jobRef: null,
+    };
   }
 
   if (process.platform === "win32") {

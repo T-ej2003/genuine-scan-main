@@ -31,6 +31,12 @@ const run = () => {
     "Localhost errors should be redacted"
   );
 
+  assert(
+    sanitizePrinterActionError("Label sent to Windows spooler, but Get-PrintJob rejected print job id as UInt32.") ===
+      "Label was sent to Windows spooler but confirmation failed.",
+    "Windows queue confirmation failures should not be reported as setup incompatibility"
+  );
+
   const missingFields = describeMissingPrinterReadinessFields({
     connected: false,
     eligibleForPrinting: false,

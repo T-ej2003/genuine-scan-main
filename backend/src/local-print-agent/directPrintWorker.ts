@@ -6,6 +6,7 @@ import { printLabel } from "./render";
 import { loadAgentState } from "./state";
 import { buildPrinterAgentActionPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
 import { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } from "../services/localAgentProtocol";
+import { buildPrintPayloadDiagnostics } from "../services/printPayloadService";
 import { randomOpaqueToken } from "../utils/security";
 
 const DIRECT_PRINT_POLL_MS = Math.max(2000, Number(process.env.PRINT_AGENT_DIRECT_POLL_MS || 4000) || 4000);
@@ -135,6 +136,7 @@ const ackLocalJob = async (payload: {
   labelLanguage: string;
   jobRef?: string | null;
   markDispatched?: boolean;
+  bytesWritten?: number | null;
 }) => {
   const signed = await buildSignedBody({
     action: "ack",
@@ -153,7 +155,7 @@ const ackLocalJob = async (payload: {
     printItemId: payload.printItemId,
     ...(payload.code ? { code: payload.code } : {}),
     payloadHash: payload.payloadHash,
-    bytesWritten: Math.max(1, payload.payloadHash.length),
+    bytesWritten: Math.max(1, Number(payload.bytesWritten || 0) || payload.payloadHash.length),
     ...(payload.jobRef ? { deviceJobRef: payload.jobRef } : {}),
     markDispatched,
     ...(markDispatched
@@ -194,6 +196,7 @@ const confirmLocalJob = async (payload: {
   printPath: string;
   labelLanguage: string;
   jobRef?: string | null;
+  bytesWritten?: number | null;
 }) => {
   const signed = await buildSignedBody({
     action: "confirm",
@@ -209,7 +212,7 @@ const confirmLocalJob = async (payload: {
     printJobId: payload.printJobId,
     printItemId: payload.printItemId,
     payloadHash: payload.payloadHash,
-    bytesWritten: Math.max(1, payload.payloadHash.length),
+    bytesWritten: Math.max(1, Number(payload.bytesWritten || 0) || payload.payloadHash.length),
     deviceJobRef: payload.jobRef || null,
     agentMetadata: {
       deviceName: os.hostname(),
@@ -326,6 +329,11 @@ const runOnce = async () => {
 
   try {
     validated = validateClaimedLocalPrintJobForAttempt(payload);
+    const payloadDiagnostics = buildPrintPayloadDiagnostics({
+      payloadType: payload.payloadType || null,
+      labelLanguage: payload.commandLanguage || payload.labelLanguage || null,
+      payloadContent: validated.payloadContent,
+    });
     console.info("local direct-print payload validated", {
       printJobId,
       printSessionId: validated.printSessionId,
@@ -333,6 +341,7 @@ const runOnce = async () => {
       code: validated.code,
       printerName: String(payload.printer?.name || payload.selectedPrinterName || printerId).trim(),
       agentVersion: AGENT_VERSION,
+      payloadDiagnostics,
     });
     await ackLocalJob({
       printerId,
@@ -345,6 +354,7 @@ const runOnce = async () => {
       labelLanguage: payload.commandLanguage || payload.labelLanguage || "AUTO",
       jobRef: null,
       markDispatched: false,
+      bytesWritten: payloadDiagnostics.payloadByteLength,
     });
     console.info("local direct-print item acknowledged", {
       printJobId,
@@ -357,6 +367,7 @@ const runOnce = async () => {
       printItemId,
       printerId,
       payloadType: payload.payloadType || null,
+      payloadDiagnostics,
     });
     spoolerAttempted = true;
     const result = await printLabel({
@@ -385,6 +396,7 @@ const runOnce = async () => {
       printPath: result.printPath,
       labelLanguage: result.labelLanguage,
       jobRef: result.jobRef || null,
+      bytesWritten: result.bytesWritten ?? null,
     });
 
     await ackLocalJob({
@@ -397,11 +409,22 @@ const runOnce = async () => {
       printPath: result.printPath,
       labelLanguage: result.labelLanguage,
       jobRef: result.jobRef,
+      bytesWritten: result.bytesWritten ?? payloadDiagnostics.payloadByteLength,
     });
-    await waitForLocalPrintJobCompletion({
+    const completion = await waitForLocalPrintJobCompletion({
       printerId,
       jobRef: result.jobRef,
     });
+    if ((completion as any)?.confirmationUnavailable || (completion as any)?.confirmed === false) {
+      console.warn("local direct-print queue confirmation unavailable after dispatch", {
+        printJobId,
+        printItemId,
+        printerId,
+        jobRef: result.jobRef || null,
+        queue: (completion as any)?.queue || null,
+      });
+      return clampRetryAfterMs(claimed?.retryAfterMs);
+    }
     await confirmLocalJob({
       printerId,
       printJobId,
@@ -410,6 +433,7 @@ const runOnce = async () => {
       printPath: result.printPath,
       labelLanguage: result.labelLanguage,
       jobRef: result.jobRef,
+      bytesWritten: result.bytesWritten ?? payloadDiagnostics.payloadByteLength,
     });
     console.info("local direct-print item confirmed", {
       printJobId,

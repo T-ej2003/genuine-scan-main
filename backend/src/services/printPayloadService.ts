@@ -41,6 +41,17 @@ export type BuiltPrintPayload = {
   previewLabel: string;
 };
 
+export type PrintPayloadDiagnostics = {
+  payloadType: string | null;
+  labelLanguage: string | null;
+  payloadByteLength: number;
+  startsWithZplStart: boolean;
+  endsWithZplEnd: boolean;
+  containsQrCommand: boolean;
+  qrPayloadLength: number | null;
+  unresolvedPlaceholderPresent: boolean;
+};
+
 type ResolvedLayout = {
   labelWidthMm: number;
   labelHeightMm: number;
@@ -118,6 +129,26 @@ const escapeCpclText = (value: string) =>
     .replace(/[\r\n]+/g, " ")
     .replace(/"/g, "'")
     .trim();
+
+export const buildPrintPayloadDiagnostics = (params: {
+  payloadType?: string | null;
+  labelLanguage?: string | null;
+  payloadContent?: string | null;
+}): PrintPayloadDiagnostics => {
+  const payloadContent = String(params.payloadContent || "");
+  const trimmed = payloadContent.trim();
+  const qrPayloadMatch = payloadContent.match(/\^FDLA,([\s\S]*?)\^FS/i);
+  return {
+    payloadType: params.payloadType ? String(params.payloadType) : null,
+    labelLanguage: params.labelLanguage ? String(params.labelLanguage) : null,
+    payloadByteLength: Buffer.byteLength(payloadContent, "utf8"),
+    startsWithZplStart: trimmed.startsWith("^XA"),
+    endsWithZplEnd: trimmed.endsWith("^XZ"),
+    containsQrCommand: /\^BQ[N]?/i.test(payloadContent),
+    qrPayloadLength: qrPayloadMatch ? Buffer.byteLength(qrPayloadMatch[1], "utf8") : null,
+    unresolvedPlaceholderPresent: /(\{\{[^}]+\}\}|<[^>]+>|TODO|PLACEHOLDER)/i.test(payloadContent),
+  };
+};
 
 const getResolvedLayout = (printer: PrinterPayloadProfile): ResolvedLayout => {
   const calibration = printer.calibrationProfile || {};

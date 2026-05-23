@@ -21,6 +21,10 @@ describe("printer user-facing helpers", () => {
     expect(sanitizePrinterUiError("Too many printer status requests. Please wait before retrying.")).toBe(
       "Printer status refresh is temporarily paused. Printing can continue if the printer was already ready."
     );
+
+    expect(
+      sanitizePrinterUiError("Label sent to Windows spooler, but Get-PrintJob rejected print job id as UInt32.")
+    ).toBe("Label was sent to Windows spooler but confirmation failed.");
   });
 
   it("redacts duplicate printer registration errors", () => {

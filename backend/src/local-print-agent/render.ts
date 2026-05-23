@@ -32,6 +32,7 @@ type PrintResult = {
   jobRef: string | null;
   printPath: string;
   labelLanguage: string;
+  bytesWritten?: number | null;
 };
 
 const TMP_DIR = path.join(os.tmpdir(), "mscqr-local-print-agent");
@@ -48,9 +49,36 @@ const parseLpJobRef = (output: string) => {
 const parseWindowsJobRef = (output: string, printerId: string) => {
   const match = String(output || "").match(/JOB_ID=(\d+)/i);
   if (match?.[1]) {
-    return `winspool:${printerId}:${match[1]}`;
+    return `winspool-id:${printerId}:${match[1]}`;
   }
-  return `winspool:${printerId}:${Date.now()}`;
+  const opaque = sha256Hex(`${printerId}:${output}:${Date.now()}`).slice(0, 16);
+  return `winspool-opaque:${opaque}`;
+};
+
+const normalizeLanguage = (value: unknown) => String(value || "").trim().toUpperCase();
+
+export const isRawWindowsZplPayload = (request: PrintRequest) => {
+  const language = normalizeLanguage(request.labelLanguage || request.payloadType);
+  const payloadType = normalizeLanguage(request.payloadType);
+  const content = String(request.payloadContent || "").trim();
+  return Boolean(content && (language === "ZPL" || language === "ZSIM" || payloadType === "ZPL") && content.startsWith("^XA"));
+};
+
+export const validateZplPayloadForRawPrint = (payloadContent: string) => {
+  const trimmed = String(payloadContent || "").trim();
+  const errors: string[] = [];
+  if (!trimmed.startsWith("^XA")) errors.push("missing_zpl_start");
+  if (!trimmed.endsWith("^XZ")) errors.push("missing_zpl_end");
+  if (!/\^BQ[N]?/i.test(trimmed)) errors.push("missing_zpl_qr_command");
+  if (!/\^FDLA,[\s\S]+?\^FS/i.test(trimmed)) errors.push("missing_zpl_qr_payload");
+  if (Buffer.byteLength(trimmed, "utf8") < 120) errors.push("zpl_payload_too_short");
+  if (errors.length > 0) {
+    throw Object.assign(new Error(`Approved ZPL payload is not safe to send to the label printer: ${errors.join(", ")}`), {
+      errorCode: "invalid_zpl_print_payload",
+      zplValidationErrors: errors,
+    });
+  }
+  return trimmed;
 };
 
 const writeFileEnsured = async (filename: string, content: string | Buffer) => {
@@ -111,6 +139,113 @@ const tryRawLabelLanguage = async (params: {
     return parseLpJobRef(`${output.stdout || ""} ${output.stderr || ""}`);
   } finally {
     await fs.unlink(filePath).catch(() => undefined);
+  }
+};
+
+const printRawWithWindowsSpooler = async (params: {
+  printerId: string;
+  copies: number;
+  payloadContent: string;
+}) => {
+  const payloadContent = validateZplPayloadForRawPrint(params.payloadContent);
+  const payloadBytes = Buffer.from(payloadContent, "utf8");
+  const zplPath = await writeFileEnsured(`raw-zpl-${Date.now()}-${sha256Hex(payloadContent).slice(0, 8)}.zpl`, payloadBytes);
+  const scriptPath = await writeFileEnsured(
+    `raw-print-${Date.now()}-${sha256Hex(params.printerId).slice(0, 8)}.ps1`,
+    [
+      "param(",
+      "  [string]$PrinterName,",
+      "  [string]$PayloadPath,",
+      "  [int]$Copies = 1",
+      ")",
+      "$ErrorActionPreference = 'Stop'",
+      "$source = @'",
+      "using System;",
+      "using System.Runtime.InteropServices;",
+      "public static class MscqrRawPrinter {",
+      "  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]",
+      "  public class DOC_INFO_1 {",
+      "    public string pDocName;",
+      "    public string pOutputFile;",
+      "    public string pDatatype;",
+      "  }",
+      "  [DllImport(\"winspool.Drv\", EntryPoint = \"OpenPrinterW\", SetLastError = true, CharSet = CharSet.Unicode)]",
+      "  public static extern bool OpenPrinter(string pPrinterName, out IntPtr phPrinter, IntPtr pDefault);",
+      "  [DllImport(\"winspool.Drv\", EntryPoint = \"StartDocPrinterW\", SetLastError = true, CharSet = CharSet.Unicode)]",
+      "  public static extern int StartDocPrinter(IntPtr hPrinter, int level, [In] DOC_INFO_1 di);",
+      "  [DllImport(\"winspool.Drv\", SetLastError = true)]",
+      "  public static extern bool StartPagePrinter(IntPtr hPrinter);",
+      "  [DllImport(\"winspool.Drv\", SetLastError = true)]",
+      "  public static extern bool WritePrinter(IntPtr hPrinter, byte[] pBytes, int dwCount, out int dwWritten);",
+      "  [DllImport(\"winspool.Drv\", SetLastError = true)]",
+      "  public static extern bool EndPagePrinter(IntPtr hPrinter);",
+      "  [DllImport(\"winspool.Drv\", SetLastError = true)]",
+      "  public static extern bool EndDocPrinter(IntPtr hPrinter);",
+      "  [DllImport(\"winspool.Drv\", SetLastError = true)]",
+      "  public static extern bool ClosePrinter(IntPtr hPrinter);",
+      "}",
+      "'@",
+      "Add-Type -TypeDefinition $source",
+      "$bytes = [System.IO.File]::ReadAllBytes($PayloadPath)",
+      "$copiesClamped = [Math]::Max(1, [Math]::Min(5, $Copies))",
+      "$handle = [IntPtr]::Zero",
+      "if (-not [MscqrRawPrinter]::OpenPrinter($PrinterName, [ref]$handle, [IntPtr]::Zero)) { throw \"OpenPrinter failed for '$PrinterName'.\" }",
+      "try {",
+      "  $doc = New-Object 'MscqrRawPrinter+DOC_INFO_1'",
+      "  $doc.pDocName = 'MSCQR Label'",
+      "  $doc.pOutputFile = $null",
+      "  $doc.pDatatype = 'RAW'",
+      "  $jobId = [MscqrRawPrinter]::StartDocPrinter($handle, 1, $doc)",
+      "  if ($jobId -le 0) { throw 'StartDocPrinter failed.' }",
+      "  try {",
+      "    for ($i = 0; $i -lt $copiesClamped; $i++) {",
+      "      if (-not [MscqrRawPrinter]::StartPagePrinter($handle)) { throw 'StartPagePrinter failed.' }",
+      "      $written = 0",
+      "      if (-not [MscqrRawPrinter]::WritePrinter($handle, $bytes, $bytes.Length, [ref]$written)) { throw 'WritePrinter failed.' }",
+      "      if ($written -ne $bytes.Length) { throw \"WritePrinter wrote $written of $($bytes.Length) bytes.\" }",
+      "      [void][MscqrRawPrinter]::EndPagePrinter($handle)",
+      "    }",
+      "  } finally {",
+      "    [void][MscqrRawPrinter]::EndDocPrinter($handle)",
+      "  }",
+      "  Write-Output ('JOB_ID=' + $jobId)",
+      "  Write-Output ('RAW_WRITTEN=' + ($bytes.Length * $copiesClamped))",
+      "} finally {",
+      "  if ($handle -ne [IntPtr]::Zero) { [void][MscqrRawPrinter]::ClosePrinter($handle) }",
+      "}",
+    ].join(os.EOL)
+  );
+
+  try {
+    const result = await execFileAsync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        scriptPath,
+        "-PrinterName",
+        params.printerId,
+        "-PayloadPath",
+        zplPath,
+        "-Copies",
+        String(Math.max(1, Math.min(5, params.copies || 1))),
+      ],
+      {
+        timeout: WINDOWS_PRINT_TIMEOUT_MS,
+        maxBuffer: 1024 * 1024,
+      }
+    );
+    const combinedOutput = `${result.stdout || ""} ${result.stderr || ""}`;
+    return {
+      jobRef: parseWindowsJobRef(combinedOutput, params.printerId),
+      bytesWritten: payloadBytes.length * Math.max(1, Math.min(5, params.copies || 1)),
+    };
+  } finally {
+    await fs.unlink(scriptPath).catch(() => undefined);
+    await fs.unlink(zplPath).catch(() => undefined);
   }
 };
 
@@ -258,10 +393,26 @@ export const printLabel = async (params: {
       jobRef,
       printPath: "label-language",
       labelLanguage: requestedLanguage,
+      bytesWritten: Buffer.byteLength(payloadContent, "utf8"),
     };
   }
 
   if (process.platform === "win32") {
+    if (isRawWindowsZplPayload(params.request)) {
+      const result = await printRawWithWindowsSpooler({
+        printerId: params.printerId,
+        copies: Math.max(1, Number(params.request.copies || 1) || 1),
+        payloadContent,
+      });
+      return {
+        printerName: params.printerName,
+        jobRef: result.jobRef,
+        printPath: "windows-raw-zpl",
+        labelLanguage: requestedLanguage || "ZPL",
+        bytesWritten: result.bytesWritten,
+      };
+    }
+
     const jobRef = await printWithWindowsSpooler({
       printerId: params.printerId,
       copies: Math.max(1, Number(params.request.copies || 1) || 1),
@@ -275,6 +426,7 @@ export const printLabel = async (params: {
       jobRef,
       printPath: "windows-spooler",
       labelLanguage: requestedLanguage || "AUTO",
+      bytesWritten: null,
     };
   }
 
@@ -297,6 +449,7 @@ export const printLabel = async (params: {
       jobRef: parseLpJobRef(`${result.stdout || ""} ${result.stderr || ""}`),
       printPath: requestedPath === "spooler" ? "spooler" : "pdf-raster",
       labelLanguage: requestedLanguage || "AUTO",
+      bytesWritten: null,
     };
   } finally {
     await fs.unlink(pdfPath).catch(() => undefined);

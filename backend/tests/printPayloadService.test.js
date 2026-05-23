@@ -3,6 +3,7 @@ if (!process.env.QR_SIGN_HMAC_SECRET && !process.env.QR_SIGN_PRIVATE_KEY) {
 }
 
 const {
+  buildPrintPayloadDiagnostics,
   buildApprovedPrintPayload,
   resolvePayloadType,
   supportsNetworkDirectPayloadType,
@@ -148,6 +149,18 @@ const run = () => {
     printItemId: "item-1",
   });
   assert(governedPayload.scanToken === governedToken, "Claim-time payload generation must preserve replay epoch");
+  const diagnostics = buildPrintPayloadDiagnostics({
+    payloadType: governedPayload.payloadType,
+    labelLanguage: governedPayload.commandLanguage,
+    payloadContent: governedPayload.payloadContent,
+  });
+  assert(governedPayload.payloadContent.trim().startsWith("^XA"), "ZPL payload should start with ^XA");
+  assert(governedPayload.payloadContent.trim().endsWith("^XZ"), "ZPL payload should end with ^XZ");
+  assert(governedPayload.payloadContent.includes("^BQN"), "ZPL payload should use Zebra QR command");
+  assert(governedPayload.payloadContent.includes("^FDLA,"), "ZPL QR command should include data prefix");
+  assert(!diagnostics.unresolvedPlaceholderPresent, "ZPL payload should not contain unresolved placeholders");
+  assert(diagnostics.payloadByteLength > 120, "ZPL payload should be a complete label, not a tiny placeholder");
+  assert(diagnostics.qrPayloadLength > 80, "ZPL QR payload should contain the signed scan token URL");
 
   console.log("print payload service tests passed");
 };
