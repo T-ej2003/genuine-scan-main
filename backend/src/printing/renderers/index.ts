@@ -1,6 +1,7 @@
 import { PrinterLanguageKind, PrintPayloadType } from "@prisma/client";
 
 import type { CanonicalLabelDocument } from "../canonicalLabel";
+import { getZebraQrConfig, mmToDots } from "../zebraQrSizing";
 
 export type RenderedPrinterPayload = {
   payloadType: PrintPayloadType;
@@ -12,22 +13,24 @@ export type PrinterLanguageRenderer = {
   render: (document: CanonicalLabelDocument, params: { dpi?: number | null }) => RenderedPrinterPayload;
 };
 
-const mmToDots = (mm: number, dpi = 300) => Math.round((mm / 25.4) * dpi);
-
 const renderZpl = (document: CanonicalLabelDocument, params: { dpi?: number | null }): RenderedPrinterPayload => {
   const dpi = params.dpi || document.densityHintDpi || 300;
   const width = mmToDots(document.widthMm, dpi);
   const height = mmToDots(document.heightMm, dpi);
   const qr = document.blocks.find((block) => block.type === "qr");
-  const qrWidth = qr && "widthMm" in qr ? mmToDots(qr.widthMm, dpi) : Math.max(240, Math.min(width, height) - 32);
-  const qrLeft = qr ? mmToDots(qr.xMm, dpi) : 16;
-  const qrTop = qr ? mmToDots(qr.yMm, dpi) : 16;
-  const cellSize = Math.max(4, Math.min(10, Math.round(width / 75)));
   const scanUrl = qr && qr.type === "qr" ? qr.payload.scanUrl : document.qrReference.scanUrl;
+  const targetMm = qr && "widthMm" in qr ? qr.widthMm : 25;
+  const qrConfig = getZebraQrConfig({ targetMm, dpi, payload: scanUrl });
+  const qrLeft = qr
+    ? mmToDots(qr.xMm, dpi)
+    : Math.max(16, Math.round((width - qrConfig.estimatedSizeDots) / 2));
+  const qrTop = qr
+    ? mmToDots(qr.yMm, dpi)
+    : Math.max(16, Math.round((height - qrConfig.estimatedSizeDots) / 2));
 
   return {
     payloadType: PrintPayloadType.ZPL,
-    payloadContent: ["^XA", `^PW${width}`, `^LL${height}`, "^LH0,0", "^CI28", `^FO${qrLeft},${qrTop}^BQN,2,${cellSize}^FDLA,${scanUrl}^FS`, "^XZ"].join("\n"),
+    payloadContent: ["^XA", `^PW${width}`, `^LL${height}`, "^LH0,0", "^CI28", `^FO${qrLeft},${qrTop}^BQN,2,${qrConfig.magnification}^FDLA,${scanUrl}^FS`, "^XZ"].join("\n"),
   };
 };
 

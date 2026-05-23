@@ -3,6 +3,7 @@ import { PrintPayloadType, PrinterCommandLanguage, PrinterConnectionType, Printe
 
 import { buildCanonicalQrLabel } from "../printing/canonicalLabel";
 import { resolvePrinterLanguageRenderer } from "../printing/renderers";
+import { getZebraQrConfig, mmToDots, resolveConfiguredZebraDpi, resolveConfiguredZebraQrTargetMm } from "../printing/zebraQrSizing";
 import { buildScanUrl, hashToken, signQrPayload } from "./qrTokenService";
 
 export type PrinterPayloadProfile = {
@@ -67,6 +68,7 @@ type ResolvedLayout = {
   offsetYmm: number;
   gapMm: number;
   dpi: number;
+  qrTargetMm: number;
   widthDots: number;
   heightDots: number;
   offsetXDots: number;
@@ -259,19 +261,31 @@ export const assertZplPayloadSafeForQrLabel = (payloadContent: string) => {
   return diagnostics;
 };
 
-export const buildKnownGoodDiagnosticZplPayload = () =>
-  [
+const KNOWN_GOOD_DIAGNOSTIC_QR_PAYLOAD = "MSCQR-DIAGNOSTIC-TEST-300DPI-25MM-SCAN-CHECK";
+
+export const buildKnownGoodDiagnosticZplPayload = (params: { targetMm?: number | null; dpi?: number | null } = {}) => {
+  const qrConfig = getZebraQrConfig({
+    targetMm: params.targetMm ?? resolveConfiguredZebraQrTargetMm(),
+    dpi: params.dpi ?? resolveConfiguredZebraDpi(),
+    payload: KNOWN_GOOD_DIAGNOSTIC_QR_PAYLOAD,
+  });
+  const labelWidthDots = Math.max(590, qrConfig.estimatedSizeDots + 96);
+  const labelHeightDots = Math.max(390, qrConfig.estimatedSizeDots + 176);
+  const qrLeft = 36;
+  const qrTop = 132;
+  return [
     "^XA",
-    "^PW590",
-    "^LL390",
+    `^PW${labelWidthDots}`,
+    `^LL${labelHeightDots}`,
     "^LH0,0",
     "^CI28",
-    "^FO16,16^GB558,358,2,B,0^FS",
+    `^FO16,16^GB${labelWidthDots - 32},${labelHeightDots - 32},2,B,0^FS`,
     "^FO36,36^A0N,34,34^FDMSCQR TEST^FS",
     "^FO36,92^A0N,22,22^FDDiagnostic Zebra RAW ZPL^FS",
-    "^FO36,132^BQN,2,6^FDLA,MSCQR-DIAGNOSTIC-TEST^FS",
+    `^FO${qrLeft},${qrTop}^BQN,2,${qrConfig.magnification}^FDLA,${KNOWN_GOOD_DIAGNOSTIC_QR_PAYLOAD}^FS`,
     "^XZ",
   ].join("\n");
+};
 
 const getResolvedLayout = (printer: PrinterPayloadProfile): ResolvedLayout => {
   const calibration = printer.calibrationProfile || {};
@@ -280,7 +294,8 @@ const getResolvedLayout = (printer: PrinterPayloadProfile): ResolvedLayout => {
   const offsetXmm = calibrationValue(calibration, "offsetXmm", 0);
   const offsetYmm = calibrationValue(calibration, "offsetYmm", 0);
   const gapMm = Math.max(0, calibrationValue(calibration, "gapMm", 3));
-  const dpi = Math.max(150, calibrationValue(calibration, "dpi", 300));
+  const dpi = resolveConfiguredZebraDpi([calibration, printer.metadata, printer.capabilitySummary]);
+  const qrTargetMm = resolveConfiguredZebraQrTargetMm([calibration, printer.metadata]);
   const dotsPerMm = dpi / 25.4;
   const widthDots = Math.max(320, Math.round(labelWidthMm * dotsPerMm));
   const heightDots = Math.max(220, Math.round(labelHeightMm * dotsPerMm));
@@ -296,6 +311,7 @@ const getResolvedLayout = (printer: PrinterPayloadProfile): ResolvedLayout => {
     offsetYmm,
     gapMm,
     dpi,
+    qrTargetMm,
     widthDots,
     heightDots,
     offsetXDots,
@@ -340,17 +356,17 @@ const buildZplPayload = (params: {
   reprintLabel?: string | null;
 }) => {
   const layout = getResolvedLayout(params.printer);
-  const qrSizeDots = Math.max(240, Math.min(layout.widthDots, layout.heightDots) - 40);
+  const qrConfig = getZebraQrConfig({ targetMm: layout.qrTargetMm, dpi: layout.dpi, payload: params.scanUrl });
+  const qrSizeDots = qrConfig.estimatedSizeDots;
   const qrTop = Math.max(12, Math.round((layout.heightDots - qrSizeDots) / 2) + layout.offsetYDots);
   const qrLeft = Math.max(12, Math.round((layout.widthDots - qrSizeDots) / 2) + layout.offsetXDots);
-  const qrScale = Math.max(4, Math.min(10, Math.round(layout.widthDots / 75)));
   return [
     "^XA",
     `^PW${layout.widthDots}`,
     `^LL${layout.heightDots}`,
     "^LH0,0",
     "^CI28",
-    `^FO${qrLeft},${qrTop}^BQN,2,${qrScale}^FDLA,${params.scanUrl}^FS`,
+    `^FO${qrLeft},${qrTop}^BQN,2,${qrConfig.magnification}^FDLA,${params.scanUrl}^FS`,
     "^XZ",
   ].join("\n");
 };
@@ -570,6 +586,7 @@ export const buildApprovedPrintPayload = (params: {
     reissueOfJobId: params.reprintOfJobId || null,
     labelWidthMm: layout.labelWidthMm,
     labelHeightMm: layout.labelHeightMm,
+    qrTargetMm: layout.qrTargetMm,
     dpi: layout.dpi,
   });
   const resolvedLanguage = resolveLanguageKind(params.printer);

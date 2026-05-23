@@ -11,6 +11,7 @@ const {
   supportsNetworkDirectPayloadType,
   supportsNetworkDirectPayload,
 } = require("../dist/services/printPayloadService");
+const { getZebraQrConfig } = require("../dist/printing/zebraQrSizing");
 const { hashToken, signQrPayload } = require("../dist/services/qrTokenService");
 
 const assert = (condition, message) => {
@@ -160,6 +161,15 @@ const run = () => {
   assert(governedPayload.payloadContent.trim().endsWith("^XZ"), "ZPL payload should end with ^XZ");
   assert(governedPayload.payloadContent.includes("^BQN"), "ZPL payload should use Zebra QR command");
   assert(governedPayload.payloadContent.includes("^FDLA,"), "ZPL QR command should include data prefix");
+  const governedBqnMatch = governedPayload.payloadContent.match(/\^BQN,2,(\d+)/);
+  assert(governedBqnMatch, "ZPL payload should include computed Zebra QR magnification");
+  const governedMagnification = Number(governedBqnMatch[1]);
+  const governedQrConfig = getZebraQrConfig({ targetMm: 25, dpi: 300, payload: governedPayload.scanUrl });
+  assert(
+    governedMagnification === governedQrConfig.magnification,
+    "Production ZPL should use centralized data-aware Zebra QR sizing"
+  );
+  assert(governedMagnification < 8, "Production ZPL should not use the old oversized QR magnification");
   assert(!diagnostics.unresolvedPlaceholderPresent, "ZPL payload should not contain unresolved placeholders");
   assert(diagnostics.payloadByteLength > 120, "ZPL payload should be a complete label, not a tiny placeholder");
   assert(diagnostics.qrPayloadLength > 80, "ZPL QR payload should contain the signed scan token URL");
@@ -175,12 +185,42 @@ const run = () => {
     "ZPL diagnostics should redact QR token data"
   );
 
+  const governedPayload28mm = buildApprovedPrintPayload({
+    printer: {
+      id: "printer-1",
+      name: "Zebra printer",
+      connectionType: "LOCAL_AGENT",
+      commandLanguage: "ZPL",
+      calibrationProfile: { qrTargetMm: 28, dpi: 300, labelWidthMm: 50, labelHeightMm: 50 },
+      capabilitySummary: null,
+      metadata: null,
+    },
+    qr: {
+      id: "qr-governed-1",
+      code: "TBD0000000002",
+      batchId: "batch-1",
+      licenseeId: "licensee-1",
+      tokenNonce: "nonce-governed-1",
+      tokenIssuedAt,
+      tokenExpiresAt,
+      tokenHash: hashToken(governedToken),
+      replayEpoch: 7,
+    },
+    manufacturerId: "manufacturer-1",
+    printJobId: "job-1",
+    printItemId: "item-1",
+  });
+  const governed28Magnification = Number(governedPayload28mm.payloadContent.match(/\^BQN,2,(\d+)/)?.[1] || 0);
+  assert(governed28Magnification >= governedMagnification, "Configured 28 mm Zebra QR target should not shrink the QR");
+
   const riskyBlackBlock = "^XA\n^PW600\n^LL400\n^FO0,0^GB600,400,380,B,0^FS\n^XZ";
   const risky = getZplPayloadSafetyIssues({ payloadContent: riskyBlackBlock, requireQr: true });
   assert(risky.issues.includes("missing_zpl_qr_command"), "QR labels without ^BQN should be rejected");
   assert(risky.issues.includes("zpl_full_label_black_box_risk"), "Full-label black box risk should be rejected");
 
   const diagnosticZpl = buildKnownGoodDiagnosticZplPayload();
+  const diagnosticBqnMatch = diagnosticZpl.match(/\^BQN,2,(\d+)/);
+  assert(diagnosticBqnMatch, "Diagnostic ZPL should include computed Zebra QR magnification");
   const diagnostic = buildPrintPayloadDiagnostics({ payloadType: "ZPL", labelLanguage: "ZPL", payloadContent: diagnosticZpl });
   assert(diagnostic.startsWithZplStart && diagnostic.endsWithZplEnd, "Diagnostic ZPL should be a complete ZPL label");
   assert(diagnostic.containsQrCommand, "Diagnostic ZPL should contain a harmless QR");

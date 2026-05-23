@@ -56,6 +56,7 @@ type CalibrationProfileState = {
   labelHeightMm: string;
   offsetXmm: string;
   offsetYmm: string;
+  qrTargetMm: string;
   darkness: string;
   speed: string;
 };
@@ -86,6 +87,7 @@ export function useBatchPrintWorkflow({
     labelHeightMm: "50",
     offsetXmm: "0",
     offsetYmm: "0",
+    qrTargetMm: "25",
     darkness: "",
     speed: "",
   });
@@ -239,6 +241,7 @@ export function useBatchPrintWorkflow({
     labelHeightMm: Number(calibrationProfile.labelHeightMm || 0) || undefined,
     offsetXmm: Number(calibrationProfile.offsetXmm || 0) || 0,
     offsetYmm: Number(calibrationProfile.offsetYmm || 0) || 0,
+    qrTargetMm: Number(calibrationProfile.qrTargetMm || 0) || 25,
     darkness: Number(calibrationProfile.darkness || 0) || undefined,
     speed: Number(calibrationProfile.speed || 0) || undefined,
   });
@@ -400,6 +403,7 @@ export function useBatchPrintWorkflow({
         labelHeightMm: parsed.labelHeightMm ? String(parsed.labelHeightMm) : previous.labelHeightMm,
         offsetXmm: parsed.offsetXmm != null ? String(parsed.offsetXmm) : previous.offsetXmm,
         offsetYmm: parsed.offsetYmm != null ? String(parsed.offsetYmm) : previous.offsetYmm,
+        qrTargetMm: parsed.qrTargetMm ? String(parsed.qrTargetMm) : previous.qrTargetMm,
         darkness: parsed.darkness ? String(parsed.darkness) : previous.darkness,
         speed: parsed.speed ? String(parsed.speed) : previous.speed,
       }));

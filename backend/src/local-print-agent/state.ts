@@ -9,6 +9,7 @@ export type CalibrationProfile = {
   labelHeightMm?: number;
   offsetXmm?: number;
   offsetYmm?: number;
+  qrTargetMm?: number;
   darkness?: number;
   speed?: number;
 };
@@ -42,6 +43,7 @@ const sanitizeCalibrationProfile = (value: unknown): CalibrationProfile => {
     labelHeightMm: toNumber("labelHeightMm"),
     offsetXmm: toNumber("offsetXmm"),
     offsetYmm: toNumber("offsetYmm"),
+    qrTargetMm: toNumber("qrTargetMm"),
     darkness: toNumber("darkness"),
     speed: toNumber("speed"),
   };
