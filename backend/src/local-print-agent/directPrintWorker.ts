@@ -8,14 +8,15 @@ import { buildPrinterAgentActionPayload, signPrinterAgentPayload } from "../serv
 import { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } from "../services/localAgentProtocol";
 import { buildPrintPayloadDiagnostics } from "../services/printPayloadService";
 import { randomOpaqueToken } from "../utils/security";
+import { resolveLocalPrintAgentBuildVersion, resolveLocalPrintAgentVersion } from "./version";
 
 const DIRECT_PRINT_POLL_MS = Math.max(2000, Number(process.env.PRINT_AGENT_DIRECT_POLL_MS || 4000) || 4000);
 const DIRECT_PRINT_MAX_BACKOFF_MS = Math.max(
   DIRECT_PRINT_POLL_MS,
   Number(process.env.PRINT_AGENT_DIRECT_MAX_BACKOFF_MS || 60_000) || 60_000
 );
-const AGENT_VERSION = String(process.env.PRINT_AGENT_VERSION || "1.0.0").trim() || "1.0.0";
-const AGENT_BUILD_VERSION = String(process.env.PRINT_AGENT_BUILD_VERSION || AGENT_VERSION).trim() || AGENT_VERSION;
+const AGENT_VERSION = resolveLocalPrintAgentVersion(process.env.PRINT_AGENT_VERSION);
+const AGENT_BUILD_VERSION = resolveLocalPrintAgentBuildVersion(process.env.PRINT_AGENT_VERSION, process.env.PRINT_AGENT_BUILD_VERSION);
 const sha256Hex = (value: string) => createHash("sha256").update(value).digest("hex");
 
 const clampRetryAfterMs = (value: unknown) => {

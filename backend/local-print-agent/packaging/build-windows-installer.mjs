@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { readConnectorSourceVersion } from "./source-version.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,8 +11,7 @@ const backendRoot = path.resolve(__dirname, "../..");
 const buildRoot = path.join(backendRoot, ".connector-build", "windows-installer");
 const windowsInstallRoot = path.join(backendRoot, "local-print-agent", "install", "windows");
 const releaseRoot = path.join(backendRoot, "local-print-agent", "releases");
-const today = new Date();
-const defaultVersion = `${today.getUTCFullYear()}.${today.getUTCMonth() + 1}.${today.getUTCDate()}`;
+const defaultVersion = readConnectorSourceVersion(backendRoot);
 const version = String(process.env.CONNECTOR_RELEASE_VERSION || defaultVersion).trim();
 const webAppBaseUrl = String(process.env.WEB_APP_BASE_URL || "").trim().replace(/\/+$/g, "");
 const pkgBinary = process.platform === "win32"

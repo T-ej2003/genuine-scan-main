@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { assertConnectorVersionMatchesSource, readConnectorSourceVersion } from "./source-version.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,24 +17,18 @@ const readExportedString = (name) => {
   return match[1];
 };
 
-const requiredProtocolVersion = readExportedString("LOCAL_AGENT_DIRECT_PROTOCOL_VERSION");
-const minimumBuildVersion = readExportedString("LOCAL_AGENT_MIN_VERSION_HINT");
-
 const normalize = (value) => String(value || "").trim();
-const version = normalize(process.env.CONNECTOR_RELEASE_VERSION);
+const sourceVersion = readConnectorSourceVersion(backendRoot);
+const requiredProtocolVersion = readExportedString("LOCAL_AGENT_DIRECT_PROTOCOL_VERSION");
+const minimumBuildVersion = sourceVersion;
+const version = normalize(process.env.CONNECTOR_RELEASE_VERSION) || sourceVersion;
 const signedInstallerSource = normalize(process.env.WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH);
 const publisherName = normalize(process.env.WINDOWS_CONNECTOR_PUBLISHER_NAME) || "L&D Health Ltd";
 const signedAtRaw = normalize(process.env.WINDOWS_CONNECTOR_SIGNED_AT);
 const publishedAt = new Date().toISOString();
 const signedAt = signedAtRaw ? new Date(signedAtRaw).toISOString() : publishedAt;
 
-if (!version) {
-  throw new Error("CONNECTOR_RELEASE_VERSION is required.");
-}
-
-if (version === "2026.5.10") {
-  throw new Error("Refusing to publish stale Windows connector version 2026.5.10.");
-}
+assertConnectorVersionMatchesSource(version, backendRoot);
 
 if (!signedInstallerSource) {
   throw new Error("WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH is required.");

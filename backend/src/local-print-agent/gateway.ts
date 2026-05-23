@@ -6,12 +6,13 @@ import { inspectIppJob, submitPdfToIppPrinter } from "../printing/ippClient";
 import { sendRawPayloadToNetworkPrinter } from "../services/networkPrinterSocketService";
 import { getZebraTotalLabelCount, waitForZebraLabelConfirmation } from "../services/zebraPrinterStatusService";
 import { loadAgentState } from "./state";
+import { resolveLocalPrintAgentVersion } from "./version";
 
 const BACKEND_URL = String(process.env.PRINT_GATEWAY_BACKEND_URL || "").trim().replace(/\/+$/, "");
 const GATEWAY_ID = String(process.env.PRINT_GATEWAY_ID || "").trim();
 const GATEWAY_SECRET = String(process.env.PRINT_GATEWAY_SECRET || "").trim();
 const GATEWAY_POLL_MS = Math.max(2500, Number(process.env.PRINT_GATEWAY_POLL_MS || 5000) || 5000);
-const AGENT_VERSION = String(process.env.PRINT_AGENT_VERSION || "1.0.0").trim() || "1.0.0";
+const AGENT_VERSION = resolveLocalPrintAgentVersion(process.env.PRINT_AGENT_VERSION);
 const GATEWAY_IPP_CONFIRM_POLL_MS = Math.max(
   500,
   Number(process.env.PRINT_GATEWAY_IPP_CONFIRM_POLL_MS || 1500) || 1500

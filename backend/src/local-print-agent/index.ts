@@ -26,13 +26,14 @@ import { startDirectPrintWorker } from "./directPrintWorker";
 import { buildPrinterAgentHeartbeatPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
 import { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } from "../services/localAgentProtocol";
 import { randomOpaqueToken } from "../utils/security";
+import { resolveLocalPrintAgentBuildVersion, resolveLocalPrintAgentVersion } from "./version";
 
 const app = express();
 
 const PORT = Number(String(process.env.PRINT_AGENT_PORT || "17866").trim()) || 17866;
 const HOST = String(process.env.PRINT_AGENT_HOST || "127.0.0.1").trim() || "127.0.0.1";
-const AGENT_VERSION = String(process.env.PRINT_AGENT_VERSION || "1.0.0").trim() || "1.0.0";
-const AGENT_BUILD_VERSION = String(process.env.PRINT_AGENT_BUILD_VERSION || AGENT_VERSION).trim() || AGENT_VERSION;
+const AGENT_VERSION = resolveLocalPrintAgentVersion(process.env.PRINT_AGENT_VERSION);
+const AGENT_BUILD_VERSION = resolveLocalPrintAgentBuildVersion(process.env.PRINT_AGENT_VERSION, process.env.PRINT_AGENT_BUILD_VERSION);
 const INVENTORY_TTL_MS = Math.max(1500, Number(String(process.env.PRINT_AGENT_INVENTORY_TTL_MS || "5000").trim()) || 5000);
 
 type AgentSnapshot = {

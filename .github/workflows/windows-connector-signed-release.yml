@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       connector_release_version:
-        description: "Optional connector version. Defaults to UTC yyyy.M.d, matching the packaging script."
+        description: "Optional connector version. Defaults to backend/src/local-print-agent/version.ts and must match that source buildVersion."
         required: false
         type: string
       web_app_base_url:
@@ -85,12 +85,17 @@ jobs:
           VAR_WEB_APP_BASE_URL: ${{ vars.WEB_APP_BASE_URL }}
         run: |
           $version = "$env:INPUT_CONNECTOR_RELEASE_VERSION".Trim()
-          if (-not $version) {
-            $today = [DateTime]::UtcNow
-            $version = "{0}.{1}.{2}" -f $today.Year, $today.Month, $today.Day
+          $versionSourcePath = Join-Path $env:GITHUB_WORKSPACE "backend\src\local-print-agent\version.ts"
+          $versionSource = Get-Content -Path $versionSourcePath -Raw
+          if ($versionSource -notmatch 'LOCAL_PRINT_AGENT_SOURCE_VERSION\s*=\s*"([^"]+)"') {
+            throw "Could not read LOCAL_PRINT_AGENT_SOURCE_VERSION from $versionSourcePath"
           }
-          if ($version -eq "2026.5.10") {
-            throw "Refusing to build stale connector version 2026.5.10. Use 2026.5.19 or newer."
+          $sourceVersion = $Matches[1]
+          if (-not $version) {
+            $version = $sourceVersion
+          }
+          if ($version -ne $sourceVersion) {
+            throw "Refusing to build connector version $version because source buildVersion is $sourceVersion. Update backend/src/local-print-agent/version.ts or use the matching version."
           }
 
           $webAppBaseUrl = "$env:INPUT_WEB_APP_BASE_URL".Trim()
@@ -113,6 +118,7 @@ jobs:
           "WINDOWS_RELEASE_OUTPUT_DIR=$releaseOutputDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
           "connector_release_version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "source_connector_version=$sourceVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "web_app_base_url=$webAppBaseUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "windows_installer_stage_dir=$stageDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "windows_installer_project=$installerProject" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -237,6 +243,10 @@ jobs:
           $env:WINDOWS_CONNECTOR_PUBLISHER_NAME = $publisherName
           $env:WINDOWS_CONNECTOR_SIGNED_AT = (Get-Date).ToUniversalTime().ToString("o")
           npm --prefix backend run connector:windows:publish-signed
+
+      - name: Smoke-check published connector metadata
+        shell: pwsh
+        run: npm --prefix backend run connector:smoke
 
       - name: Commit signed connector release files
         if: github.ref_type == 'branch'

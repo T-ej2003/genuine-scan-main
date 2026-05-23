@@ -45,6 +45,20 @@ const run = async () => {
     "packaging",
     "publish-windows-connector-release.mjs"
   );
+  const sourceVersionHelperPath = path.join(
+    __dirname,
+    "..",
+    "local-print-agent",
+    "packaging",
+    "source-version.mjs"
+  );
+  const smokeScriptPath = path.join(
+    __dirname,
+    "..",
+    "local-print-agent",
+    "packaging",
+    "connector-release-smoke.mjs"
+  );
   const installerVerifierPath = path.join(
     __dirname,
     "..",
@@ -91,6 +105,8 @@ const run = async () => {
   const installerBuilder = fs.readFileSync(installerBuilderPath, "utf8");
   const signedReleasePublisher = fs.readFileSync(signedReleasePublisherPath, "utf8");
   const installerVerifier = fs.readFileSync(installerVerifierPath, "utf8");
+  const sourceVersionHelper = fs.readFileSync(sourceVersionHelperPath, "utf8");
+  const smokeScript = fs.readFileSync(smokeScriptPath, "utf8");
   const installerTemplate = fs.readFileSync(installerTemplatePath, "utf8");
   const readme = fs.readFileSync(readmePath, "utf8");
   const signedReleaseWorkflow = fs.readFileSync(signedReleaseWorkflowPath, "utf8");
@@ -106,6 +122,12 @@ const run = async () => {
   assert(
     packagingScript.includes("WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH"),
     "Release packaging should support publishing a separately signed Windows installer"
+  );
+  assert(
+    packagingScript.includes("readConnectorSourceVersion") &&
+      packagingScript.includes("minimumBuildVersion = version") &&
+      packagingScript.includes("buildVersion: version"),
+    "Release packaging should default to the source connector version and stamp build metadata"
   );
   assert(
     packagingScript.includes("WINDOWS_CONNECTOR_UNSIGNED_INSTALLER_PATH"),
@@ -143,15 +165,29 @@ const run = async () => {
   );
   assert(
     signedReleasePublisher.includes("LOCAL_AGENT_DIRECT_PROTOCOL_VERSION") &&
-      signedReleasePublisher.includes("LOCAL_AGENT_MIN_VERSION_HINT") &&
-      signedReleasePublisher.includes("Refusing to publish stale Windows connector version 2026.5.10"),
-    "Signed Windows publisher should stamp the backend protocol/build contract and block stale 2026.5.10 releases"
+      signedReleasePublisher.includes("assertConnectorVersionMatchesSource") &&
+      signedReleasePublisher.includes("minimumBuildVersion = sourceVersion"),
+    "Signed Windows publisher should stamp the backend protocol/build contract and block source version mismatches"
   );
   assert(
     signedReleaseWorkflow.includes("npm --prefix backend run connector:windows:publish-signed") &&
       signedReleaseWorkflow.includes("git add \"backend/local-print-agent/releases/manifest.json\"") &&
-      signedReleaseWorkflow.includes("Refusing to build stale connector version 2026.5.10"),
-    "Signed Windows workflow should publish and commit the manifest/artifact that production downloads use"
+      signedReleaseWorkflow.includes("LOCAL_PRINT_AGENT_SOURCE_VERSION") &&
+      signedReleaseWorkflow.includes("npm --prefix backend run connector:smoke"),
+    "Signed Windows workflow should publish, smoke-check, and commit the manifest/artifact that production downloads use"
+  );
+  assert(
+    sourceVersionHelper.includes("LOCAL_PRINT_AGENT_SOURCE_VERSION") &&
+      sourceVersionHelper.includes("assertConnectorVersionMatchesSource"),
+    "Packaging helpers should read the connector source version and reject stale release versions"
+  );
+  assert(
+    smokeScript.includes("current git commit") &&
+      smokeScript.includes("connector source version") &&
+      smokeScript.includes("published connector metadata version") &&
+      smokeScript.includes("published installer filename") &&
+      smokeScript.includes("installer exists/readable"),
+    "Connector smoke script should print the release fields needed for deploy validation"
   );
   assert(
     installerVerifier.includes("Get-AuthenticodeSignature"),
