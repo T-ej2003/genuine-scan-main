@@ -9,37 +9,37 @@
   "releases": [
     {
       "version": "2026.5.23",
-      "publishedAt": "2026-05-23T08:01:27.277Z",
+      "publishedAt": "2026-05-23T08:54:32.636Z",
       "requiredProtocolVersion": "local-agent-direct-v2",
       "minimumBuildVersion": "2026.5.23",
-      "summary": "Install once on the printing computer, then the MSCQR Connector starts automatically in the background.",
+      "summary": "Install the signed Windows connector once on the printing computer, then the MSCQR Connector starts automatically in the background.",
       "notes": [
-        "Use the Mac package on the Mac that is connected to the printer.",
-        "Use the Windows test package only for internal validation on the Windows PC that is connected to the printer.",
-        "Windows installation now verifies local printer readiness before claiming success and opens Printer Setup automatically when attention is still needed.",
-        "Windows Smart App Control can block the unsigned Windows test package until a signed Windows installer is published."
+        "Use the signed Windows installer on the Windows PC that is connected to the printer.",
+        "This connector advertises local-agent-direct-v2 and is compatible with the current direct-print backend.",
+        "Windows installation verifies local printer readiness before claiming success and opens Printer Setup automatically when attention is still needed.",
+        "Windows should show L&D Health Ltd as the verified publisher for this installer."
       ],
       "platforms": {
         "windows": {
-          "label": "Windows test package",
-          "installerKind": "zip",
-          "trustLevel": "unsigned",
-          "signatureStatus": "unsigned",
-          "publisherName": null,
-          "signedAt": null,
-          "windowsTrustMode": "unsigned-test",
-          "filename": "MSCQR-Connector-Windows-2026.5.23.zip",
-          "relativePath": "2026.5.23/windows/MSCQR-Connector-Windows-2026.5.23.zip",
-          "contentType": "application/zip",
+          "label": "Windows installer",
+          "installerKind": "exe",
+          "trustLevel": "trusted",
+          "signatureStatus": "signed",
+          "publisherName": "L&D Health Ltd",
+          "signedAt": "2026-05-23T08:54:32.421Z",
+          "windowsTrustMode": "trusted",
+          "filename": "MSCQR-Connector-Windows-2026.5.23.exe",
+          "relativePath": "2026.5.23/windows/MSCQR-Connector-Windows-2026.5.23.exe",
+          "contentType": "application/vnd.microsoft.portable-executable",
           "architecture": "x64",
-          "bytes": 32951064,
-          "sha256": "1d5b27578d82a1c83aeb69e60397215f766d1daf384f7f1ead1cea212dae3dbc",
+          "bytes": 22543928,
+          "sha256": "738ad652289388835a68c5314461b5556b84de84582f468982b69178f6419052",
           "protocolVersion": "local-agent-direct-v2",
           "buildVersion": "2026.5.23",
           "notes": [
-            "Extract this Windows test package on the Windows computer that will print.",
-            "Run Install Connector.cmd once to install, auto-start, and locally verify the connector.",
-            "Windows Smart App Control can block this unsigned setup package until a signed Windows installer is published."
+            "Run the signed Windows installer once on the Windows computer that will print.",
+            "The installer installs the connector, configures auto-start, and verifies local printer readiness.",
+            "Publisher shown in Windows should be L&D Health Ltd."
           ]
         }
       }
