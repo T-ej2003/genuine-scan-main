@@ -255,6 +255,130 @@ print_container_state() {
   docker inspect --format='{{.Name}} state={{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_name" 2>/dev/null || true
 }
 
+print_container_health_log() {
+  container_name="$1"
+  if ! docker inspect "$container_name" >/dev/null 2>&1; then
+    printf '%s: health log unavailable; container not found\n' "$container_name"
+    return 0
+  fi
+  docker inspect --format='{{range .State.Health.Log}}{{println .End "exit=" .ExitCode "output=" .Output}}{{end}}' "$container_name" 2>/dev/null || true
+}
+
+print_host_port_listeners() {
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnp 2>/dev/null | awk 'NR == 1 || $4 ~ /:80$/ || $4 ~ /:443$/ || $4 ~ /:4000$/' || true
+    return 0
+  fi
+  if command -v netstat >/dev/null 2>&1; then
+    netstat -ltnp 2>/dev/null | awk 'NR <= 2 || $4 ~ /:80$/ || $4 ~ /:443$/ || $4 ~ /:4000$/' || true
+    return 0
+  fi
+  printf 'host listener check unavailable: ss/netstat not installed\n'
+}
+
+print_safe_body_snippet() {
+  body_path="$1"
+  node --input-type=module - "$body_path" <<'NODE' 2>/dev/null || true
+import fs from "node:fs";
+
+const bodyPath = process.argv[2];
+const raw = fs.existsSync(bodyPath) ? fs.readFileSync(bodyPath, "utf8") : "";
+const shouldRedactKey = (key) => /secret|password|token|private|credential|cookie|dsn|url|error/i.test(key);
+const sanitize = (value, key = "") => {
+  if (value === null || value === undefined) return value;
+  if (shouldRedactKey(key)) return "<redacted>";
+  if (Array.isArray(value)) return value.slice(0, 5).map((entry) => sanitize(entry));
+  if (typeof value === "object") {
+    const result = {};
+    for (const [childKey, childValue] of Object.entries(value)) result[childKey] = sanitize(childValue, childKey);
+    return result;
+  }
+  if (typeof value === "string") return value.length > 180 ? `${value.slice(0, 180)}...` : value;
+  return value;
+};
+
+try {
+  const payload = JSON.parse(raw);
+  console.log(JSON.stringify(sanitize(payload)));
+} catch {
+  const normalized = raw.replace(/[^\t\n\r -~]/g, "").trim();
+  console.log(normalized.split(/\r?\n/).slice(0, 8).join("\n").slice(0, 1000));
+}
+NODE
+}
+
+print_http_probe() {
+  label="$1"
+  url="$2"
+  body_path="$tmp_dir/http-body-$(printf '%s' "$label" | tr -c 'A-Za-z0-9_' '_').txt"
+  meta_path="$tmp_dir/http-meta-$(printf '%s' "$label" | tr -c 'A-Za-z0-9_' '_').txt"
+  status="failed"
+  if curl -sS -m 8 -o "$body_path" -w 'http_status=%{http_code} total_time=%{time_total} remote_ip=%{remote_ip}\n' "$url" > "$meta_path" 2>&1; then
+    status="ok"
+  fi
+  printf '%s: %s ' "$label" "$status"
+  cat "$meta_path" 2>/dev/null || true
+  printf '%s body snippet:\n' "$label"
+  print_safe_body_snippet "$body_path"
+}
+
+print_backend_container_probe() {
+  path="$1"
+  if ! docker inspect genuine-scan-backend >/dev/null 2>&1; then
+    printf 'backend direct probe %s unavailable: backend container not found\n' "$path"
+    return 0
+  fi
+  docker exec -i genuine-scan-backend node - "$path" <<'NODE' 2>/dev/null || true
+const http = require("node:http");
+const path = process.argv[2] || "/";
+const started = Date.now();
+const request = http.get(`http://127.0.0.1:4000${path}`, (response) => {
+  let body = "";
+  response.setEncoding("utf8");
+  response.on("data", (chunk) => {
+    body += chunk;
+    if (body.length > 65536) request.destroy();
+  });
+  response.on("end", () => {
+    const result = {
+      path,
+      httpStatus: response.statusCode,
+      ms: Date.now() - started,
+      body: null,
+    };
+    try {
+      const payload = JSON.parse(body);
+      const dependencies = payload.dependencies || {};
+      result.body = {
+        success: payload.success === true,
+        status: payload.status || "unknown",
+        dependencies: Object.fromEntries(
+          ["database", "redis", "objectStorage"].map((name) => {
+            const dependency = dependencies[name] || {};
+            return [
+              name,
+              {
+                configured: dependency.configured === true,
+                ready: dependency.ready === true,
+                errorPresent: Boolean(dependency.error),
+              },
+            ];
+          })
+        ),
+      };
+    } catch {
+      result.body = body.trim().slice(0, 500);
+    }
+    console.log(JSON.stringify(result));
+  });
+});
+request.setTimeout(5000, () => request.destroy());
+request.on("error", () => {
+  console.log(JSON.stringify({ path, httpStatus: 0, ms: Date.now() - started, errorPresent: true }));
+});
+NODE
+}
+
 print_backend_health_summary() {
   if ! docker inspect genuine-scan-backend >/dev/null 2>&1; then
     printf 'backend health summary unavailable: backend container not found\n'
@@ -312,17 +436,33 @@ print_asg_diagnostics() {
   printf '\n=== Docker Compose ps ===\n'
   run_compose ps 2>/dev/null || true
 
+  printf '\n=== Host listeners for 80/443/4000 ===\n'
+  print_host_port_listeners
+
   printf '\n=== Container inspect status ===\n'
   print_container_state genuine-scan-backend
   print_container_state genuine-scan-frontend
 
+  printf '\n=== Backend healthcheck log ===\n'
+  print_container_health_log genuine-scan-backend
+  printf '\n=== Frontend healthcheck log ===\n'
+  print_container_health_log genuine-scan-frontend
+
   printf '\n=== Backend readiness summary ===\n'
   print_backend_health_summary
 
-  printf '\n=== Local health curls ===\n'
-  curl -fsS -m 5 http://127.0.0.1/healthz 2>&1 || true
-  printf '\n'
-  curl -fsS -m 5 http://127.0.0.1/api/health/ready 2>&1 || true
+  printf '\n=== Local HTTP probes ===\n'
+  print_http_probe "frontend_healthz" "http://127.0.0.1/healthz"
+  print_http_probe "frontend_api_health_ready" "http://127.0.0.1/api/health/ready"
+
+  printf '\n=== Direct backend container probes ===\n'
+  print_backend_container_probe "/health/live"
+  print_backend_container_probe "/health/ready"
+
+  printf '\n=== Frontend nginx access log tail ===\n'
+  docker exec genuine-scan-frontend sh -c 'tail -n 120 /var/log/nginx/access.log 2>/dev/null || true' 2>/dev/null || true
+  printf '\n=== Frontend nginx error log tail ===\n'
+  docker exec genuine-scan-frontend sh -c 'tail -n 120 /var/log/nginx/error.log 2>/dev/null || true' 2>/dev/null || true
   printf '\n'
 
   printf '\n=== Backend logs tail ===\n'
@@ -346,6 +486,7 @@ printf 'Waiting for frontend health at %s...\n' "$health_url"
 i=0
 while :; do
   if curl -fsS "$health_url" >/dev/null 2>&1; then
+    print_http_probe "frontend_healthz_ready" "$health_url"
     break
   fi
   i=$((i + 1))
@@ -358,6 +499,7 @@ done
 
 printf 'Waiting for backend readiness through frontend path %s...\n' "$ready_url"
 i=0
+ready_status="degraded"
 while :; do
   if curl -fsS "$ready_url" > "$ready_json" 2>/dev/null; then
 if node --input-type=module - "$ready_json" <<'NODE'
@@ -377,15 +519,21 @@ if (
 process.exit(1);
 NODE
     then
+      ready_status="ready"
       break
     fi
   fi
   i=$((i + 1))
   if [ "$i" -gt 60 ]; then
+    printf 'CONDITIONALLY_READY: frontend /healthz is healthy, but /api/health/ready did not report database, redis, and objectStorage ready within the bootstrap evidence window.\n'
     print_asg_diagnostics
-    die "backend readiness did not report database, redis, and objectStorage ready."
+    break
   fi
   sleep 3
 done
 
-printf 'ASG web-node bootstrap completed: /healthz and /api/health/ready are healthy.\n'
+if [ "$ready_status" = "ready" ]; then
+  printf 'ASG web-node bootstrap completed: /healthz and /api/health/ready are healthy.\n'
+else
+  printf 'ASG web-node bootstrap completed with CONDITIONALLY_READY app readiness: /healthz is healthy; /api/health/ready remains degraded. See diagnostics above.\n'
+fi

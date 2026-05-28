@@ -42,6 +42,7 @@
     "check:trust-alert-bindings": "node scripts/check-trust-alert-bindings.mjs",
     "check:trust-observability": "node scripts/check-trust-observability.mjs",
     "ops:regional-drift": "node scripts/regional-drift.mjs",
+    "ops:asg-health-evidence": "scripts/dr/collect-asg-health-evidence.sh",
     "lint": "eslint .",
     "report:lint:changed": "node scripts/lint-changed.mjs",
     "lint:changed": "node scripts/lint-changed.mjs",

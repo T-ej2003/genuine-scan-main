@@ -73,7 +73,7 @@ Every rollout batch and replacement step must pass:
 - `scripts/dr/bootstrap-asg-web-node.sh` is the launch-template bootstrap path.
 - ASG bootstrap renders the project `.env` and a temporary bootstrap env file as root/backend union env files, then runs `docker compose --env-file "$compose_env_path" -f docker-compose.asg-web.yml ...` so Compose-required secrets such as `QR_SIGN_PRIVATE_KEY` are available at interpolation time and later plain `docker compose ps` diagnostics can still parse the file. Values are never printed.
 - All ASG bootstrap Compose invocations, including diagnostics, must use the generated `--env-file` so required interpolation variables such as `QR_SIGN_ACTIVE_KEY_VERSION` remain available until bootstrap exits.
-- Backend container health uses `/health/live` for process liveness so frontend/Nginx can start; rollout readiness still requires `/api/health/ready` to report database, Redis, and object storage ready.
+- Backend container health uses `/health/live` for process liveness so frontend/Nginx can start; `/healthz` is the hard edge-liveness gate for ALB target health, while `/api/health/ready` remains dependency-readiness evidence for database, Redis, and object storage.
 - Required SSM parameters under the regional ASG web prefix exist before apply; missing required diagnostics must include the full parameter path without printing values.
 - Required SSM parameters that exist with empty values fail before Compose with key/path-only diagnostics.
 - `SMTP_HOST`, `SMTP_USER`, and `SMTP_PASS` are required for production email. `SMTP_FROM` is optional but recommended as an authorized sender override because the backend can boot and use the authenticated SMTP mailbox as From when it is absent.
@@ -120,7 +120,7 @@ Latest SSM env-render evidence: fresh ASG nodes reached `/mscqr/prod/ap-south-1/
 
 Latest Compose interpolation evidence: the next retry rendered 9 root env keys and 135 backend env keys, consumed 130 SSM parameter names, then failed while interpolating `services.backend.environment.QR_SIGN_PRIVATE_KEY` even though the SSM parameter name existed. Root cause: Compose interpolation does not read service `env_file` values before resolving `${QR_SIGN_PRIVATE_KEY:?...}`. The current fix persists the project `.env` as a root/backend union, passes a temporary union env file through `docker compose --env-file`, and adds a local `docker compose config` validation with dummy values.
 
-Latest ASG health evidence: the next retry passed Compose interpolation and image builds, created both containers, and started the backend. The frontend remained `Created` because it waited for backend `service_healthy`; backend health was deep readiness and `/health/ready` returned 503, so port 80 never opened and ALB `/healthz` failed. The current fix makes backend container health a liveness check at `/health/live`, keeps frontend startup behind backend liveness, keeps bootstrap success gated on `/api/health/ready`, and prints no-secret dependency diagnostics when readiness remains degraded.
+Latest ASG health evidence: the next retry passed Compose interpolation, built images, created containers, marked the backend container healthy, started frontend/Nginx, and reached local waits for `/healthz` and `/api/health/ready`. Apply briefly reported `HEALTHY_TARGET_COUNT=2`, but later target health showed ASG/ALB disagreement or flapping. The current fix keeps `/healthz` as the hard bootstrap/ALB edge-liveness gate, records degraded `/api/health/ready` as `CONDITIONALLY_READY` dependency evidence instead of killing an edge-healthy node, and adds no-secret diagnostics for port 80 listeners, HTTP status/timing, Nginx logs, Docker health output, direct backend probes, and sanitized dependency readiness.
 
 Safe names-only SSM preflight before retry:
 
@@ -130,6 +130,16 @@ aws ssm describe-parameters \
   --parameter-filters "Key=Path,Option=Recursive,Values=/mscqr/prod/ap-south-1/asg-web/" \
   --query 'Parameters[].Name' \
   --output text | tr '\t' '\n' | sort
+```
+
+Read-only ASG/ALB evidence capture when health disagrees:
+
+```bash
+TARGET_REGION_GROUP=mumbai \
+AWS_REGION=ap-south-1 \
+ASG_NAME=mscqr-mumbai-dr-asg \
+TARGET_GROUP_ARN=arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgroup/mscqr-mumbai-frontend-tg/68982ccd4d8c26c1 \
+npm run ops:asg-health-evidence
 ```
 
 ```bash

@@ -54,6 +54,16 @@ for (const variable of ["QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY", "QR_SIGN_AC
   }
 }
 
+if (!/http:\/\/127\.0\.0\.1:4000\/health\/live/.test(compose)) {
+  fail(`${composePath} backend healthcheck must use /health/live so frontend startup is not blocked by deep readiness.`);
+}
+if (!/wget -q -O \/dev\/null http:\/\/127\.0\.0\.1\/healthz/.test(compose)) {
+  fail(`${composePath} frontend healthcheck must use /healthz edge liveness.`);
+}
+if (!/\$\{FRONTEND_PORT:-80\}:80/.test(compose)) {
+  fail(`${composePath} frontend must publish host port 80 for ALB /healthz checks.`);
+}
+
 if (!/const composeEnv = new Map\(\[\.\.\.rootEnv\.entries\(\), \.\.\.backendEnv\.entries\(\)\]\)/.test(bootstrap)) {
   fail(`${bootstrapPath} must render a Compose interpolation env from rootEnv plus backendEnv.`);
 }

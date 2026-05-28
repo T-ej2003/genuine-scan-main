@@ -51,6 +51,9 @@ const drRunbook = requireFile("documents/ops/aws-multi-region-disaster-recovery-
 const protectedEnv = requireFile("documents/ops/aws-dr-protected-environments.md");
 const mumbaiEnvExample = requireFile(".env.production.mumbai.example");
 const capetownEnvExample = requireFile(".env.production.capetown.example");
+const nginxHttpConf = requireFile("nginx.conf");
+const nginxHttpsConf = requireFile("nginx.https.conf");
+const asgEvidenceCollector = requireFile("scripts/dr/collect-asg-health-evidence.sh");
 
 let checklist = null;
 let asgSsmManifest = null;
@@ -194,6 +197,9 @@ if (!packageJson.scripts?.["check:asg-multi-instance-readiness"]) {
 if (!packageJson.scripts?.["check:asg-compose-interpolation"]) {
   failures.push("package.json must expose check:asg-compose-interpolation.");
 }
+if (!packageJson.scripts?.["ops:asg-health-evidence"]) {
+  failures.push("package.json must expose ops:asg-health-evidence.");
+}
 if (!String(packageJson.scripts?.["verify:guardrails"] || "").includes("check:asg-multi-instance-readiness")) {
   failures.push("verify:guardrails must run check:asg-multi-instance-readiness.");
 }
@@ -218,9 +224,18 @@ requireMatch("asg web compose", asgWebCompose, /QR_SIGN_PUBLIC_KEY:\s+\$\{QR_SIG
 requireMatch("asg web compose", asgWebCompose, /QR_SIGN_ACTIVE_KEY_VERSION:\s+\$\{QR_SIGN_ACTIVE_KEY_VERSION:\?Set QR_SIGN_ACTIVE_KEY_VERSION/, "ASG web mode must require QR_SIGN_ACTIVE_KEY_VERSION during interpolation.");
 requireMatch("asg web compose", asgWebCompose, /http:\/\/127\.0\.0\.1:4000\/health\/live/, "ASG backend container healthcheck must use process liveness so frontend can start.");
 requireMatch("asg web compose", asgWebCompose, /condition:\s+service_healthy/, "ASG frontend should wait for backend liveness health before starting.");
+requireMatch("asg web compose", asgWebCompose, /ports:\s*\n\s+- "\$\{FRONTEND_PORT:-80\}:80"/, "ASG frontend must publish host port 80 for ALB /healthz checks.");
+requireMatch("asg web compose", asgWebCompose, /wget -q -O \/dev\/null http:\/\/127\.0\.0\.1\/healthz/, "ASG frontend container healthcheck must use /healthz.");
 if (/\n\s+worker:/.test(asgWebCompose)) failures.push("ASG web compose must not define a worker service.");
 if (/\n\s+redis:/.test(asgWebCompose)) failures.push("ASG web compose must not define a local Redis service.");
 if (/\n\s+minio:/.test(asgWebCompose)) failures.push("ASG web compose must not define a local MinIO service.");
+for (const [label, source] of [
+  ["nginx HTTP config", nginxHttpConf],
+  ["nginx HTTPS config", nginxHttpsConf],
+]) {
+  requireMatch(label, source, /location = \/healthz[\s\S]*return 200 "ok\\n"/, "frontend Nginx must serve /healthz directly without backend dependency.");
+  requireMatch(label, source, /location ~ \^\/api\/health\/\?\(\.\*\)\$[\s\S]*proxy_pass http:\/\/backend:4000\/health\/\$1/, "frontend Nginx must proxy /api/health/* to backend /health/*.");
+}
 requireMatch("ASG bootstrap", asgBootstrap, /aws ssm get-parameters-by-path/, "bootstrap must fetch parameters from SSM by path.");
 requireMatch("ASG bootstrap", asgBootstrap, /--with-decryption/, "bootstrap must decrypt SecureString parameters.");
 requireMatch("ASG bootstrap", asgBootstrap, /\$\{ssmPrefix\}\$\{key\}/, "bootstrap missing-parameter diagnostics must include full SSM parameter paths.");
@@ -237,6 +252,12 @@ requireMatch("ASG bootstrap", asgBootstrap, /run_compose\(\)[\s\S]*docker compos
 requireMatch("ASG bootstrap", asgBootstrap, /print_asg_diagnostics/, "bootstrap must include safe ASG diagnostics on health failures.");
 requireMatch("ASG bootstrap", asgBootstrap, /docker ps -a --format/, "bootstrap diagnostics must print docker container status without secrets.");
 requireMatch("ASG bootstrap", asgBootstrap, /print_backend_health_summary/, "bootstrap diagnostics must summarize backend readiness without secret values.");
+requireMatch("ASG bootstrap", asgBootstrap, /print_host_port_listeners/, "bootstrap diagnostics must show host port 80 listener state.");
+requireMatch("ASG bootstrap", asgBootstrap, /print_http_probe/, "bootstrap diagnostics must print HTTP status and timing for local health probes.");
+requireMatch("ASG bootstrap", asgBootstrap, /print_backend_container_probe/, "bootstrap diagnostics must include direct backend container liveness/readiness probes.");
+requireMatch("ASG bootstrap", asgBootstrap, /print_container_health_log/, "bootstrap diagnostics must include Docker healthcheck log output.");
+requireMatch("ASG bootstrap", asgBootstrap, /\/var\/log\/nginx\/access\.log/, "bootstrap diagnostics must include frontend Nginx access logs.");
+requireMatch("ASG bootstrap", asgBootstrap, /\/var\/log\/nginx\/error\.log/, "bootstrap diagnostics must include frontend Nginx error logs.");
 requireMatch("ASG bootstrap", asgBootstrap, /docker logs genuine-scan-backend --tail 160/, "bootstrap diagnostics must include backend log tail.");
 requireMatch("ASG bootstrap", asgBootstrap, /docker logs genuine-scan-frontend --tail 160/, "bootstrap diagnostics must include frontend log tail.");
 requireMatch("ASG bootstrap", asgBootstrap, /fs\.chmodSync\(filePath, 0o600\)/, "bootstrap must chmod generated env files to 0600.");
@@ -257,6 +278,8 @@ requireMatch("ASG bootstrap", asgBootstrap, /deps\.redis\?\.configured === true/
 requireMatch("ASG bootstrap", asgBootstrap, /deps\.redis\?\.ready === true/, "bootstrap must require Redis readiness.");
 requireMatch("ASG bootstrap", asgBootstrap, /deps\.objectStorage\?\.configured === true/, "bootstrap must require object storage configured.");
 requireMatch("ASG bootstrap", asgBootstrap, /deps\.objectStorage\?\.ready === true/, "bootstrap must require object storage readiness.");
+requireMatch("ASG bootstrap", asgBootstrap, /CONDITIONALLY_READY: frontend \/healthz is healthy/, "bootstrap must keep edge liveness success separate from degraded dependency readiness.");
+requireMatch("ASG bootstrap", asgBootstrap, /ASG web-node bootstrap completed with CONDITIONALLY_READY app readiness/, "bootstrap must exit successfully with explicit conditional diagnostics when only deep readiness is degraded.");
 requireMatch("ASG compose interpolation check", asgComposeInterpolationCheck, /requiredInterpolationVars/, "local check must detect Compose required interpolation variables.");
 requireMatch("ASG compose interpolation check", asgComposeInterpolationCheck, /\(\?::\\\?\|\\\?\)/, "local check must detect both ${VAR:?message} and ${VAR?message} forms.");
 requireMatch("ASG compose interpolation check", asgComposeInterpolationCheck, /QR_SIGN_PRIVATE_KEY/, "local check must cover QR_SIGN_PRIVATE_KEY interpolation.");
@@ -407,6 +430,16 @@ requireMatch("health controller", healthController, /dependencies\.redis\.config
 requireMatch("health controller", healthController, /dependencies\.objectStorage\.configured && dependencies\.objectStorage\.ready/, "production readiness must validate object storage.");
 requireMatch("routes", routes, /\/health\/ready/, "backend routes must expose dependency readiness.");
 requireMatch("routes", routes, /\/healthz/, "backend routes must expose liveness/status.");
+
+requireMatch("ASG evidence collector", asgEvidenceCollector, /describe-auto-scaling-groups/, "evidence collector must read ASG state.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /describe-target-health/, "evidence collector must read target health.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /get-console-output/, "evidence collector must collect console output.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /for instance_id in \$ASG_INSTANCE_IDS/, "evidence collector must iterate instance IDs individually.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /\/tmp\/mscqr-asg-evidence/, "evidence collector must write local evidence under /tmp/mscqr-asg-evidence.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /gzip -kf/, "evidence collector must gzip evidence logs.");
+if (/update-auto-scaling-group|create-launch-template|modify-launch-template|terminate-instances|change-resource-record-sets|put-parameter|delete-parameter/.test(asgEvidenceCollector)) {
+  failures.push("ASG evidence collector must stay read-only and must not contain AWS mutation commands.");
+}
 
 requireMatch("redis service", redisService, /REDIS_URL|REDIS_HOST/, "Redis must be environment-configured.");
 requireMatch("rate limiter", publicRateLimit, /RedisStore/, "public rate limiter must use RedisStore when Redis is configured.");
@@ -632,6 +665,11 @@ if (asgRollingPolicyChecklist) {
     "run docker compose with --env-file for Compose interpolation",
     "use docker compose --env-file for diagnostics",
     "print safe backend/frontend diagnostics on bootstrap readiness failure",
+    "verify /healthz as hard edge liveness before bootstrap success",
+    "record degraded /api/health/ready as CONDITIONALLY_READY dependency evidence",
+    "print host port 80 listener diagnostics",
+    "print HTTP status and timing diagnostics for /healthz and /api/health/ready",
+    "print frontend Nginx access and error log tails",
     "install/check node",
     "install/check npm",
     "pin Node.js major 24 for ASG host prerequisites",

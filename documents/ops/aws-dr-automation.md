@@ -419,7 +419,7 @@ Rollback notes:
 - Latest Node prerequisite evidence: AWS CLI installed from apt and verified, the repo cloned to `/home/ubuntu/genuine-scan-main` at HEAD `c97edfe`, and `scripts/dr/bootstrap-asg-web-node.sh` then failed with `ERROR: node is required.` UserData now checks `node --version` and `npm --version`, installs Node.js from pinned NodeSource major 24 when needed, and fails clearly with `failed to install node/npm` if the runtime remains unavailable.
 - Latest SSM env-render evidence: fresh ASG nodes passed Git, Docker, Docker Compose, AWS CLI, Node.js 24, npm 11, repo clone, and bootstrap handoff, then failed fetching `/mscqr/prod/ap-south-1/asg-web/` because `SMTP_FROM` was treated as required. Backend review confirmed `SMTP_FROM` is optional for boot and email sending falls back to the authenticated SMTP mailbox when absent. The ASG manifest now treats `/mscqr/prod/ap-south-1/asg-web/SMTP_FROM` as optional/recommended, while true missing required SSM keys are reported with their full paths and no values.
 - Latest Compose interpolation evidence: fresh ASG nodes rendered SSM-backed env files and then failed before container start with `QR_SIGN_PRIVATE_KEY` missing during Compose interpolation, even though the names-only SSM preflight showed `/mscqr/prod/ap-south-1/asg-web/QR_SIGN_PRIVATE_KEY` exists. The fix keeps `backend/.env` for container env, writes project `.env` as the persistent root/backend union for later diagnostics, adds a temporary root/backend union env file for `docker compose --env-file`, and fails early if any required SSM parameter exists but is empty.
-- Latest ASG health evidence: the following retry built backend/frontend images, created both containers, started the backend, and logged QR signing ready with `keyVersion: v1`; backend `/health/ready` still returned 503. Because frontend waited for backend `service_healthy` and backend health was deep readiness, the frontend stayed `Created`, host port 80 refused connections, and ALB `/healthz` remained unhealthy. The fix uses backend `/health/live` for container health, starts Nginx after backend process liveness, keeps `/api/health/ready` as the bootstrap readiness gate, and prints no-secret diagnostics for database/Redis/object-storage readiness.
+- Latest ASG health evidence: the following retry built backend/frontend images, created containers, started the backend, marked backend container health `Healthy`, started frontend/Nginx, and reached waits for `http://127.0.0.1/healthz` plus `http://127.0.0.1/api/health/ready`. Apply briefly reached `HEALTHY_TARGET_COUNT=2`, but later ASG and ALB evidence disagreed or flapped with at least one ASG target in `Target.FailedHealthChecks`. The fix keeps `/healthz` as the hard edge-liveness gate, treats degraded `/api/health/ready` as explicit `CONDITIONALLY_READY` dependency evidence instead of killing an edge-healthy node, and prints no-secret diagnostics for host port 80 listeners, HTTP status/timing, direct backend probes, Nginx logs, Docker health output, and sanitized database/Redis/object-storage readiness.
 - If `ASG_REPO_DIR` exists but is not a git checkout, UserData fails clearly and does not delete the directory automatically.
 - Preferred production design is private ASG subnets with NAT Gateway or VPC endpoints for SSM, EC2Messages, SSMMessages, S3, ECR, CloudWatch Logs, and Git access, then `ASG_ASSOCIATE_PUBLIC_IP=false`.
 
@@ -518,13 +518,25 @@ Add only for protected apply:
 CONFIRM_ASG_APPLY=I_APPROVE_REGIONAL_ASG_CREATE_AND_ATTACH
 ```
 
-If ASG targets fail, capture debug evidence before rollback cleanup removes the instances:
+If ASG targets fail or ASG and ALB health disagree, capture read-only debug evidence before rollback cleanup removes the instances:
 
 ```bash
-mapfile -t ASG_INSTANCE_IDS < <(aws autoscaling describe-auto-scaling-groups --region ap-south-1 --auto-scaling-group-names mscqr-mumbai-dr-asg --query 'AutoScalingGroups[0].Instances[].InstanceId' --output text | tr '\t' '\n')
-for instance_id in "${ASG_INSTANCE_IDS[@]}"; do
-  aws ec2 get-console-output --region ap-south-1 --instance-id "$instance_id" --latest --output text > "artifacts/dr/mumbai-asg-console-$instance_id.txt"
-done
+TARGET_REGION_GROUP=mumbai \
+AWS_REGION=ap-south-1 \
+ASG_NAME=mscqr-mumbai-dr-asg \
+TARGET_GROUP_ARN=arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgroup/mscqr-mumbai-frontend-tg/68982ccd4d8c26c1 \
+npm run ops:asg-health-evidence
+
+# Optional read-only SSH deep inspection:
+# ENABLE_ASG_SSH_DEEP_INSPECTION=I_APPROVE_READ_ONLY_SSH \
+# ASG_SSH_KEY=/Users/abhiramteja/Desktop/keys/mscqr-prod-mumbai.pem \
+# TARGET_REGION_GROUP=mumbai AWS_REGION=ap-south-1 ASG_NAME=mscqr-mumbai-dr-asg TARGET_GROUP_ARN=... \
+# npm run ops:asg-health-evidence
+```
+
+Manual spot inspection remains available:
+
+```bash
 ssh -i /Users/abhiramteja/Desktop/keys/mscqr-prod-mumbai.pem ubuntu@<asg-instance-public-ip>
 sudo tail -n 240 /var/log/mscqr-asg-bootstrap.log
 sudo tail -n 240 /var/log/cloud-init-output.log
