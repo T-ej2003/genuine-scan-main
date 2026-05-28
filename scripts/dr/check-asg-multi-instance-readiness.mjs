@@ -179,8 +179,9 @@ requireMatch("rolling policy doc", asgRollingPolicyDoc, /NetworkInterfaces\[0\]\
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /SecurityGroupIds=\[SOURCE_SECURITY_GROUP\]/, "must define non-public-IP launch template networking shape.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /UserData/, "must define UserData bootstrap.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /deregistration delay/i, "must define the target group deregistration delay.");
-requireMatch("rolling policy doc", asgRollingPolicyDoc, /health check grace period: 180 seconds/i, "must define 180 second health grace.");
-requireMatch("rolling policy doc", asgRollingPolicyDoc, /default instance warmup: 180 seconds/i, "must define 180 second default instance warmup.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /health check grace period: 900 seconds/i, "must define 900 second health grace for cold bootstrap.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /default instance warmup: 900 seconds/i, "must define 900 second default instance warmup for cold bootstrap.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /current ASG/i, "must require current ASG targets rather than legacy target-group health.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /minimum healthy percentage: 100/i, "must define 100 percent min healthy.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /checkpoint/i, "must define refresh checkpoints.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /CloudWatch alarms/i, "must define rollback alarm expectations.");
@@ -389,6 +390,10 @@ requireMatch("ASG apply plan", asgApplyPlanScript, /write_asg_web_launch_templat
 requireMatch("ASG apply plan", asgApplyPlanScript, /validate_asg_launch_template_json/, "apply plan must validate proposed launch template JSON.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /HealthCheckGracePeriod/, "apply plan must include health check grace period in the plan artifact.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /DefaultInstanceWarmup/, "apply plan must include default instance warmup in the plan artifact.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /health_check_grace_period_seconds >= 900/, "policy renderer must reject health grace below the cold-bootstrap floor.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /default_instance_warmup_seconds >= 900/, "policy renderer must reject default warmup below the cold-bootstrap floor.");
+requireMatch("ASG target accounting", requireFile("scripts/dr/check-asg-target-health-accounting.mjs"), /legacy healthy target must not mask one unhealthy ASG target/, "target accounting self-test must cover a legacy target masking an unhealthy ASG target.");
+requireMatch("ASG target accounting", requireFile("scripts/dr/check-asg-target-health-accounting.mjs"), /two current ASG healthy targets should pass/, "target accounting self-test must cover two healthy current ASG targets plus legacy target.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /Target deregistration delay required on target group/, "apply plan must include deregistration delay.");
 requireMatch("ASG apply plan", asgApplyPlanScript, /Remaining live go\/no-go/, "apply plan must call out the remaining live drill.");
 requireMatch("ASG apply", asgApplyScript, /aws-asg-rolling-deploy-policy\.checklist\.json/, "apply script must read the rolling policy checklist.");
@@ -422,7 +427,9 @@ requireMatch("ASG apply", asgApplyScript, /deregistration_delay\.timeout_seconds
 requireMatch("ASG apply", asgApplyScript, /default-instance-warmup/, "apply script must enforce default instance warmup.");
 requireMatch("ASG apply", asgApplyScript, /health-check-grace-period/, "apply script must enforce health check grace period.");
 requireMatch("ASG apply", asgApplyScript, /health-check-type/, "apply script must enforce ASG health check type.");
-requireMatch("ASG apply", asgApplyScript, /target count .* below policy requirement|below policy requirement/, "apply script must enforce healthy target count policy.");
+requireMatch("ASG apply", asgApplyScript, /check-asg-target-health-accounting\.mjs/, "apply script must use ASG-only target-health accounting.");
+requireMatch("ASG apply", asgApplyScript, /current ASG healthy target count/, "apply script must enforce current ASG healthy target count policy.");
+requireMatch("ASG apply", asgApplyScript, /LEGACY_OR_NON_ASG_HEALTHY_TARGET_IDS/, "apply script must report legacy or non-ASG healthy targets separately.");
 if (/IamInstanceProfile\.Arn/.test(asgApplyScript)) {
   failures.push("ASG apply script must not copy IamInstanceProfile from SOURCE_INSTANCE_ID.");
 }
@@ -441,6 +448,9 @@ requireMatch("routes", routes, /\/healthz/, "backend routes must expose liveness
 
 requireMatch("ASG evidence collector", asgEvidenceCollector, /describe-auto-scaling-groups/, "evidence collector must read ASG state.");
 requireMatch("ASG evidence collector", asgEvidenceCollector, /describe-target-health/, "evidence collector must read target health.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /check-asg-target-health-accounting\.mjs/, "evidence collector must summarize current-ASG target health separately from legacy targets.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /LEGACY_SOURCE_TARGET_STILL_REGISTERED/, "evidence collector must report whether a legacy/source healthy target is still registered.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /POSSIBLE_ASG_HEALTH_REPLACEMENT_BEFORE_TARGET_STABILIZES/, "evidence collector must flag likely ASG health churn.");
 requireMatch("ASG evidence collector", asgEvidenceCollector, /get-console-output/, "evidence collector must collect console output.");
 requireMatch("ASG evidence collector", asgEvidenceCollector, /set -- \$ASG_INSTANCE_IDS/, "evidence collector must split ASG instance IDs into separate POSIX shell arguments.");
 requireMatch("ASG evidence collector", asgEvidenceCollector, /collect_all_instance_ips "\$@"/, "evidence collector must describe multiple instances with separate arguments.");
@@ -603,8 +613,8 @@ if (asgRollingPolicyChecklist) {
   for (const [field, expected] of Object.entries({
     health_check_type: "ELB",
     deregistration_delay_seconds: 60,
-    health_check_grace_period_seconds: 180,
-    default_instance_warmup_seconds: 180,
+    health_check_grace_period_seconds: 900,
+    default_instance_warmup_seconds: 900,
     instance_refresh_min_healthy_percentage: 100,
     desired_capacity_initial: 2,
     min_size_initial: 2,

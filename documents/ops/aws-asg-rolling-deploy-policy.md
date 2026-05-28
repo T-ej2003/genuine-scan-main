@@ -26,14 +26,14 @@ Source of truth: `documents/ops/aws-asg-rolling-deploy-policy.checklist.json`
 - When `ASG_ASSOCIATE_PUBLIC_IP=false`, launch template data must use top-level `SecurityGroupIds=[SOURCE_SECURITY_GROUP]` and no `NetworkInterfaces`.
 - ALB target group deregistration delay: 60 seconds.
 - ASG health check type: `ELB`.
-- ASG health check grace period: 180 seconds.
-- ASG default instance warmup: 180 seconds.
+- ASG health check grace period: 900 seconds.
+- ASG default instance warmup: 900 seconds.
 - Instance refresh minimum healthy percentage: 100.
 - Instance refresh maximum healthy percentage if supported: 150.
 - Instance refresh checkpoints: 50 percent and 100 percent.
 - Instance refresh checkpoint wait: 300 seconds.
 - Initial ASG capacity for first production-safe rollout: `min=2 desired=2 max=4`.
-- Required healthy target count after ASG apply and after each replacement step: at least 2.
+- Required healthy current ASG target count after ASG apply and after each replacement step: at least 2. Healthy legacy/source targets that remain registered in the same target group are diagnostics only and do not satisfy ASG readiness.
 
 ## Required Alarms
 
@@ -120,7 +120,7 @@ Latest SSM env-render evidence: fresh ASG nodes reached `/mscqr/prod/ap-south-1/
 
 Latest Compose interpolation evidence: the next retry rendered 9 root env keys and 135 backend env keys, consumed 130 SSM parameter names, then failed while interpolating `services.backend.environment.QR_SIGN_PRIVATE_KEY` even though the SSM parameter name existed. Root cause: Compose interpolation does not read service `env_file` values before resolving `${QR_SIGN_PRIVATE_KEY:?...}`. The current fix persists the project `.env` as a root/backend union, passes a temporary union env file through `docker compose --env-file`, and adds a local `docker compose config` validation with dummy values.
 
-Latest ASG health evidence: the next retry passed Compose interpolation, built images, created containers, marked the backend container healthy, started frontend/Nginx, and reached local waits for `/healthz` and `/api/health/ready`; console evidence showed local `frontend_healthz_ready: ok http_status=200`. Apply briefly reported `HEALTHY_TARGET_COUNT=2`, but later target health showed ASG/ALB disagreement or flapping and ASG targets reported `Target.FailedHealthChecks` on port 80. The prior evidence collection malformed multiple instance IDs into one `--instance-ids` value, so the current fix hardens read-only evidence collection to split IDs as POSIX shell args, describe instances with separate args, loop console output per ID, curl each public IP `/healthz`, and optionally SSH each public IP only with explicit approval. Bootstrap now hard-gates host-primary-IP `/healthz` after loopback `/healthz`, and also prints Docker frontend port mappings, localhost `/healthz`, host-primary-IP `/healthz`, and iptables/nft summaries.
+Latest ASG stabilization evidence: the next retry proved loopback `/healthz`, host-primary-IP `/healthz`, and at least one public `/healthz` probe, but ASG nodes still churned. Console timing showed cold plain-Ubuntu bootstrap reaching frontend `/healthz` at roughly 295 seconds, while the committed ASG health grace/default warmup were still 180 seconds. The target group also still contained legacy/source instance `i-04ae3b689ab72a68a`, so total target-group healthy count could report 2 even when only one current ASG instance was healthy. The current policy raises health grace and default warmup to 900 seconds and makes apply/evidence count only current ASG instance IDs as satisfying readiness; legacy/source healthy targets are printed separately.
 
 Safe names-only SSM preflight before retry:
 
@@ -171,16 +171,16 @@ CONFIRM_ASG_APPLY=I_APPROVE_REGIONAL_ASG_CREATE_AND_ATTACH
 ```
 
 1. Create and attach the regional ASG with `min=2 desired=2 max=4` and no production DNS cutover.
-2. Wait for at least 2 healthy targets on the regional ALB target group.
+2. Wait for at least 2 healthy current ASG targets on the regional ALB target group; do not count the legacy/source target if it is still registered.
 3. Run the smoke tests on the regional test hostname:
    `https://dr-mumbai.mscqr.com/healthz` or `https://dr-capetown.mscqr.com/healthz`
    `https://dr-mumbai.mscqr.com/api/health/ready` or `https://dr-capetown.mscqr.com/api/health/ready`
 4. Start a one-instance replacement step, either through instance refresh with the documented checkpoints or by a controlled single-instance replacement without decrementing desired capacity.
-5. Confirm the new instance reaches healthy target state and both health endpoints pass.
+5. Confirm the new ASG instance reaches healthy target state and both health endpoints pass.
 6. Confirm CloudWatch alarms remain green and target response time stays within the approved baseline.
 7. Record artifacts under `artifacts/dr/` and link them in the incident or rollout record.
 
-This drill is successful only when healthy target count returns to at least 2 after replacement and no rollback criteria fire.
+This drill is successful only when current-ASG healthy target count returns to at least 2 after replacement and no rollback criteria fire.
 
 ## Operator Rule
 

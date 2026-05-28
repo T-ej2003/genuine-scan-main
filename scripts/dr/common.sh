@@ -220,10 +220,10 @@ const deregistrationDelaySeconds = asInt(policy.deregistration_delay_seconds, "d
 if (deregistrationDelaySeconds < 60) fail("ASG rolling policy must keep deregistration_delay_seconds >= 60.");
 
 const healthCheckGracePeriodSeconds = asInt(policy.health_check_grace_period_seconds, "health_check_grace_period_seconds");
-if (healthCheckGracePeriodSeconds < 180) fail("ASG rolling policy must keep health_check_grace_period_seconds >= 180.");
+if (healthCheckGracePeriodSeconds < 900) fail("ASG rolling policy must keep health_check_grace_period_seconds >= 900 for cold Ubuntu bootstrap.");
 
 const defaultInstanceWarmupSeconds = asInt(policy.default_instance_warmup_seconds, "default_instance_warmup_seconds");
-if (defaultInstanceWarmupSeconds < 180) fail("ASG rolling policy must keep default_instance_warmup_seconds >= 180.");
+if (defaultInstanceWarmupSeconds < 900) fail("ASG rolling policy must keep default_instance_warmup_seconds >= 900 for cold Ubuntu bootstrap.");
 
 const minHealthyPercentage = asInt(policy.instance_refresh_min_healthy_percentage, "instance_refresh_min_healthy_percentage");
 if (minHealthyPercentage < 100) fail("ASG rolling policy must keep instance_refresh_min_healthy_percentage >= 100 for the first rollout.");

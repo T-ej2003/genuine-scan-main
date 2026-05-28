@@ -317,8 +317,9 @@ Recommended ALB/ASG settings before apply:
 - Timeout: 5 seconds for `/healthz`; 10 seconds for readiness smoke.
 - Healthy threshold: 2.
 - Unhealthy threshold: 3.
-- ASG health check grace period: 180 seconds initially, then tune from measured boot evidence.
-- Default instance warmup: 180 seconds.
+- ASG health check grace period: 900 seconds.
+- Default instance warmup: 900 seconds.
+- Measured Mumbai cold-bootstrap evidence showed plain Ubuntu nodes reaching frontend `/healthz` at roughly 295 seconds after installing host prerequisites, building images, and starting containers; 180 seconds caused premature ASG health churn.
 
 ## I. Rolling Deploy Behavior
 
@@ -356,7 +357,7 @@ Mumbai retry note:
 - Latest Node prerequisite evidence: instances reached repo HEAD `c97edfe`, AWS CLI installed from apt and verified, then `scripts/dr/bootstrap-asg-web-node.sh` failed with `ERROR: node is required.` New ASG targets reached EC2/ASG healthy states but failed ALB health checks because app bootstrap never completed; the old manual Mumbai target remained healthy and no DNS cutover happened. The fix adds Node.js 24/npm 11 host prerequisite checks before running the bootstrap script.
 - Latest SSM env-render evidence: fresh ASG nodes passed Git, Docker, Docker Compose, AWS CLI, Node.js 24, npm 11, repo clone, and bootstrap handoff, then failed while fetching `/mscqr/prod/ap-south-1/asg-web/` with `backendEnv missing required SSM parameter(s): SMTP_FROM`. Source review showed `SMTP_FROM` is a recommended authorized sender override, not a backend startup requirement; the backend falls back to `SMTP_USER` as the From address when absent. The ASG manifest now makes `SMTP_FROM` optional/recommended and missing required errors include the full SSM parameter path.
 - Latest Compose interpolation evidence: fresh ASG nodes rendered env files successfully and consumed SSM parameter names including `/mscqr/prod/ap-south-1/asg-web/QR_SIGN_PRIVATE_KEY`, but Compose failed before container creation with `services.backend.environment.QR_SIGN_PRIVATE_KEY` missing. Root cause: `QR_SIGN_PRIVATE_KEY` was written to `backend/.env`, while Compose interpolation runs before service `env_file` loading. The fix renders the project `.env` and temporary bootstrap env as root/backend union files, invokes `docker compose --env-file` during bootstrap, and still writes `backend/.env` for the backend container without logging values.
-- Latest ASG health evidence: fresh ASG nodes now build backend/frontend images, start the backend, mark backend container health `Healthy`, start the frontend, and reach waits for `http://127.0.0.1/healthz` and `http://127.0.0.1/api/health/ready`; one console log showed local `frontend_healthz_ready: ok http_status=200`. The remaining live issue is ALB target health still reporting `Target.FailedHealthChecks` for ASG nodes on port 80 while the legacy source target remains healthy. A previous evidence capture malformed two instance IDs into one newline/space-containing `--instance-ids` argument, so the repo evidence collector now splits ASG IDs with POSIX shell argument handling, describes all instances with separate args, loops console output one ID at a time, curls each public IP `/healthz`, and optionally SSHes each public IP only with explicit read-only approval. Bootstrap now hard-gates both loopback and host-primary-IP `/healthz`; diagnostics also print Docker port mappings, localhost and host-primary-IP probes, and iptables/nft summaries.
+- Latest ASG stabilization evidence: fresh ASG nodes now build backend/frontend images, start the backend, mark backend container health `Healthy`, start frontend/Nginx, and prove loopback plus host-primary-IP `/healthz`; at least one public `/healthz` curl also returned 200. The remaining issue is ASG/ALB health oscillation: cold bootstrap reaches frontend `/healthz` around 295 seconds, but the previous 180 second health grace/default warmup could allow ASG replacement before target health stabilizes. The target group also still includes legacy source instance `i-04ae3b689ab72a68a`, so total healthy target count can be misleading. The repo now requires at least 2 healthy targets from the current ASG instance set only, prints legacy/source healthy targets separately, and keeps the evidence collector’s POSIX-safe per-ID splitting.
 - Mumbai selected public subnets currently have `MapPublicIpOnLaunch=false`, so the next no-DNS Mumbai retry should use `ASG_ASSOCIATE_PUBLIC_IP=true`.
 - The next no-DNS Mumbai retry should also use `ASG_KEY_NAME=mscqr-prod-mumbai` to make failed nodes inspectable.
 - The next no-DNS Mumbai retry should set `ASG_REPO_URL=https://github.com/T-ej2003/genuine-scan-main.git`, `ASG_REPO_BRANCH=main`, and `ASG_REPO_DIR=/home/ubuntu/genuine-scan-main`.
@@ -393,17 +394,17 @@ CONFIRM_ASG_APPLY=I_APPROVE_REGIONAL_ASG_CREATE_AND_ATTACH
 Approved first-rollout values:
 
 - Use ALB target deregistration delay of 60 seconds.
-- Use `ELB` health checks with 180 second ASG grace period.
-- Use 180 second default instance warmup.
+- Use `ELB` health checks with 900 second ASG grace period.
+- Use 900 second default instance warmup.
 - Use instance refresh minimum healthy capacity at 100 percent for desired capacity 2.
 - Use maximum healthy percentage 150 if supported by the selected rollout path.
 - Use checkpoints at 50 percent and 100 percent with 300 second wait per checkpoint.
 - Do not run migrations during instance boot.
 - Roll out web first with `RUN_BACKGROUND_WORKERS=false`.
 - Promote or restart singleton worker only after web readiness is green.
-- Roll back by canceling instance refresh, keeping the previous launch template version available, and restoring healthy target count before removing any new unhealthy instance.
+- Roll back by canceling instance refresh, keeping the previous launch template version available, and restoring current-ASG healthy target count before removing any new unhealthy instance.
 - Capture `/healthz`, `/api/health/ready`, ALB target health, and app version evidence per batch.
-- If ASG and ALB health disagree, run `npm run ops:asg-health-evidence` with the Mumbai ASG variables to capture read-only ASG, target-health, per-instance console, per-instance public-IP `/healthz`, and optional SSH evidence under `/tmp/mscqr-asg-evidence/`; never pass multiple instance IDs as one string.
+- If ASG and ALB health disagree, run `npm run ops:asg-health-evidence` with the Mumbai ASG variables to capture read-only ASG, target-health, ASG-only healthy target count, legacy/source target diagnostics, per-instance console, per-instance public-IP `/healthz`, and optional SSH evidence under `/tmp/mscqr-asg-evidence/`; never pass multiple instance IDs as one string.
 - Keep production DNS on London EC2 during the first ASG rollout and replacement-instance drill.
 
 ## Current Go/No-Go
@@ -420,7 +421,7 @@ Exact remaining live test:
 
 - Create and attach the regional ASG with `min=2 desired=2 max=4`.
 - Keep production DNS on London EC2.
-- Verify at least 2 healthy targets on the regional ALB.
+- Verify at least 2 healthy current ASG targets on the regional ALB. The legacy/source target must not satisfy ASG readiness.
 - Run the documented replacement-instance drill and record CloudWatch plus target-health evidence.
 
 No-go for production DNS cutover until that live drill passes and the regional rollback path is practiced cleanly.

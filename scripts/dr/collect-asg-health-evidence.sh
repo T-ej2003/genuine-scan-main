@@ -74,7 +74,7 @@ collect_instance_ips() {
   aws ec2 describe-instances \
     --region "$AWS_REGION" \
     --instance-ids "$instance_id" \
-    --query 'Reservations[].Instances[].{Id:InstanceId,State:State.Name,LaunchTime:LaunchTime,PrivateIp:PrivateIpAddress,PublicIp:PublicIpAddress}' \
+    --query 'Reservations[].Instances[].{Id:InstanceId,State:State.Name,LaunchTime:LaunchTime,PrivateIp:PrivateIpAddress,PublicIp:PublicIpAddress,Subnet:SubnetId,SecurityGroups:SecurityGroups[].GroupId}' \
     --output table
 }
 
@@ -99,6 +99,11 @@ get_instance_public_ip() {
     --output text 2>/dev/null || true
 }
 
+collect_instance_target_health() {
+  instance_id="$1"
+  node -e 'const fs=require("fs"); const target=process.argv[2]; const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const d=(p.TargetHealthDescriptions||[]).find((item)=>item.Target?.Id===target); if (!d) { console.log(`${target}: target_health=not_registered reason=Target.NotRegistered`); process.exit(0); } console.log(`${target}: target_health=${d.TargetHealth?.State||"unknown"} reason=${d.TargetHealth?.Reason||""} port=${d.Target?.Port||""}`);' "$target_health_json" "$instance_id"
+}
+
 curl_public_health() {
   instance_id="$1"
   public_ip="$2"
@@ -117,6 +122,11 @@ curl_public_health() {
   printf 'Public /healthz body snippet for %s:\n' "$instance_id"
   sed -n '1,8p' "$body_path" 2>/dev/null | tr -cd '\11\12\15\40-\176' || true
   printf '\n'
+}
+
+print_asg_target_health_summary() {
+  /bin/cat "$target_summary_env" 2>/dev/null || true
+  node -e 'const fs=require("fs"); const asg=JSON.parse(fs.readFileSync(process.argv[1],"utf8")).AutoScalingGroups?.[0] || {}; const summary=JSON.parse(fs.readFileSync(process.argv[2],"utf8")); const instances=asg.Instances||[]; const lifecycle=instances.map((i)=>`${i.InstanceId}:${i.LifecycleState || "unknown"}:${i.HealthStatus || "unknown"}`).join(",") || "none"; const churn=instances.some((i)=>i.LifecycleState!=="InService" || i.HealthStatus!=="Healthy") || !summary.ready; console.log(`ASG_LIFECYCLE_HEALTH=${lifecycle}`); console.log(`LEGACY_SOURCE_TARGET_STILL_REGISTERED=${summary.legacyOrNonAsgHealthyTargetIds.length > 0 ? "true" : "false"}`); console.log(`ASG_READINESS_USES_CURRENT_ASG_TARGETS_ONLY=true`); console.log(`POSSIBLE_ASG_HEALTH_REPLACEMENT_BEFORE_TARGET_STABILIZES=${churn ? "true" : "false"}`);' "$asg_json" "$target_summary_json" 2>/dev/null || true
 }
 
 ssh_deep_inspection() {
@@ -195,11 +205,33 @@ run_section "Target health" aws elbv2 describe-target-health \
   --target-group-arn "$TARGET_GROUP_ARN" \
   --output table
 
-ASG_INSTANCE_IDS="$(aws autoscaling describe-auto-scaling-groups \
+asg_json="$out_dir/asg-$timestamp.json"
+target_health_json="$out_dir/target-health-$timestamp.json"
+target_summary_json="$out_dir/asg-target-health-summary-$timestamp.json"
+target_summary_env="$out_dir/asg-target-health-summary-$timestamp.env"
+
+aws autoscaling describe-auto-scaling-groups \
   --region "$AWS_REGION" \
   --auto-scaling-group-names "$ASG_NAME" \
-  --query 'AutoScalingGroups[0].Instances[].InstanceId' \
-  --output text | tr '\t' '\n')"
+  --output json > "$asg_json"
+
+aws elbv2 describe-target-health \
+  --region "$AWS_REGION" \
+  --target-group-arn "$TARGET_GROUP_ARN" \
+  --output json > "$target_health_json"
+
+DESIRED_CAPACITY="$(node -e 'const fs=require("fs"); const asg=JSON.parse(fs.readFileSync(process.argv[1],"utf8")).AutoScalingGroups?.[0]; console.log(asg?.DesiredCapacity ?? 0);' "$asg_json")"
+
+node scripts/dr/check-asg-target-health-accounting.mjs \
+  --asg-json "$asg_json" \
+  --target-health-json "$target_health_json" \
+  --desired "$DESIRED_CAPACITY" \
+  --out-json "$target_summary_json" \
+  --no-fail > "$target_summary_env"
+
+run_section "ASG-only target health summary" print_asg_target_health_summary
+
+ASG_INSTANCE_IDS="$(node -e 'const fs=require("fs"); const asg=JSON.parse(fs.readFileSync(process.argv[1],"utf8")).AutoScalingGroups?.[0]; for (const instance of asg?.Instances || []) console.log(instance.InstanceId);' "$asg_json")"
 
 {
   printf '\n=== Current ASG instance IDs ===\n'
@@ -212,6 +244,7 @@ run_section "All current ASG instance IPs" collect_all_instance_ips "$@"
 for instance_id do
   [ -n "$instance_id" ] || continue
   run_section "Instance $instance_id IPs" collect_instance_ips "$instance_id"
+  run_section "Instance $instance_id ASG target health" collect_instance_target_health "$instance_id"
   run_section "Instance $instance_id filtered console output" safe_console_output "$instance_id"
   public_ip="$(get_instance_public_ip "$instance_id")"
   run_section "Instance $instance_id public /healthz curl" curl_public_health "$instance_id" "$public_ip"

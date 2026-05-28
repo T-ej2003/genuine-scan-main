@@ -26,6 +26,8 @@ ASG_REPO_DIR="${ASG_REPO_DIR:-/home/ubuntu/genuine-scan-main}"
 ROLLING_POLICY_CHECKLIST_PATH="${ROLLING_POLICY_CHECKLIST_PATH:-documents/ops/aws-asg-rolling-deploy-policy.checklist.json}"
 ROLLBACK_ALARM_NAMES_CSV="${ROLLBACK_ALARM_NAMES_CSV:-}"
 CONFIRM_ASG_APPLY="${CONFIRM_ASG_APPLY:-}"
+ASG_TARGET_HEALTH_WAIT_ATTEMPTS="${ASG_TARGET_HEALTH_WAIT_ATTEMPTS:-75}"
+ASG_TARGET_HEALTH_WAIT_INTERVAL_SECONDS="${ASG_TARGET_HEALTH_WAIT_INTERVAL_SECONDS:-20}"
 
 case "$TARGET_REGION_GROUP" in
   mumbai|capetown) ;;
@@ -63,6 +65,14 @@ esac
 case "$ASG_REPO_DIR" in
   ""|*[[:space:]]*) echo "ASG_REPO_DIR must be non-empty and must not contain whitespace." >&2; exit 2 ;;
 esac
+case "$ASG_TARGET_HEALTH_WAIT_ATTEMPTS" in
+  *[!0-9]*|"") echo "ASG_TARGET_HEALTH_WAIT_ATTEMPTS must be a positive integer." >&2; exit 2 ;;
+esac
+case "$ASG_TARGET_HEALTH_WAIT_INTERVAL_SECONDS" in
+  *[!0-9]*|"") echo "ASG_TARGET_HEALTH_WAIT_INTERVAL_SECONDS must be a positive integer." >&2; exit 2 ;;
+esac
+[ "$ASG_TARGET_HEALTH_WAIT_ATTEMPTS" -gt 0 ] || { echo "ASG_TARGET_HEALTH_WAIT_ATTEMPTS must be greater than zero." >&2; exit 2; }
+[ "$ASG_TARGET_HEALTH_WAIT_INTERVAL_SECONDS" -gt 0 ] || { echo "ASG_TARGET_HEALTH_WAIT_INTERVAL_SECONDS must be greater than zero." >&2; exit 2; }
 
 policy_env_file="$(mktemp "${TMPDIR:-/tmp}/mscqr-asg-rolling-policy.XXXXXX")"
 trap 'rm -f "$policy_env_file"' EXIT HUP INT TERM
@@ -273,24 +283,37 @@ aws autoscaling update-auto-scaling-group \
   > "$out_dir/update-asg-capacity.log" 2>&1
 
 attempts=0
-healthy_count=0
-while [ "$attempts" -lt 30 ]; do
+asg_healthy_count=0
+asg_target_health_ready=false
+while [ "$attempts" -lt "$ASG_TARGET_HEALTH_WAIT_ATTEMPTS" ]; do
   attempts=$((attempts + 1))
+  aws autoscaling describe-auto-scaling-groups --region "$AWS_REGION" --auto-scaling-group-names "$asg_name" --output json > "$out_dir/asg-target-health-check.json"
   aws elbv2 describe-target-health --region "$AWS_REGION" --target-group-arn "$TARGET_GROUP_ARN" --output json > "$out_dir/target-health.json"
-  healthy_count="$(node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); console.log((p.TargetHealthDescriptions || []).filter((d) => d.TargetHealth && d.TargetHealth.State === "healthy").length)' "$out_dir/target-health.json")"
-  if [ "$healthy_count" -ge "$DESIRED_CAPACITY" ]; then
+  node scripts/dr/check-asg-target-health-accounting.mjs \
+    --asg-json "$out_dir/asg-target-health-check.json" \
+    --target-health-json "$out_dir/target-health.json" \
+    --desired "$DESIRED_CAPACITY" \
+    --out-json "$out_dir/asg-target-health-summary.json" \
+    --no-fail > "$out_dir/asg-target-health-summary.env"
+  asg_healthy_count="$(node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); console.log(p.asgHealthyTargetCount)' "$out_dir/asg-target-health-summary.json")"
+  asg_target_health_ready="$(node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); console.log(p.ready ? "true" : "false")' "$out_dir/asg-target-health-summary.json")"
+  if [ "$asg_target_health_ready" = "true" ]; then
     break
   fi
-  /bin/sleep 20
+  if [ "$attempts" -lt "$ASG_TARGET_HEALTH_WAIT_ATTEMPTS" ]; then
+    /bin/sleep "$ASG_TARGET_HEALTH_WAIT_INTERVAL_SECONDS"
+  fi
 done
 
-if [ "$healthy_count" -lt "$DESIRED_CAPACITY" ]; then
-  echo "ASG apply completed, but healthy target count $healthy_count is below desired capacity $DESIRED_CAPACITY." >&2
+if [ "$asg_target_health_ready" != "true" ]; then
+  echo "ASG apply completed, but current ASG healthy target count $asg_healthy_count is below desired capacity $DESIRED_CAPACITY." >&2
+  /bin/cat "$out_dir/asg-target-health-summary.env" >&2
   exit 3
 fi
 
-[ "$healthy_count" -ge "$ASG_POLICY_TARGET_GROUP_HEALTH_REQUIRED" ] || {
-  echo "ASG apply completed, but healthy target count $healthy_count is below policy requirement $ASG_POLICY_TARGET_GROUP_HEALTH_REQUIRED." >&2
+[ "$asg_healthy_count" -ge "$ASG_POLICY_TARGET_GROUP_HEALTH_REQUIRED" ] || {
+  echo "ASG apply completed, but current ASG healthy target count $asg_healthy_count is below policy requirement $ASG_POLICY_TARGET_GROUP_HEALTH_REQUIRED." >&2
+  /bin/cat "$out_dir/asg-target-health-summary.env" >&2
   exit 3
 }
 
@@ -303,7 +326,9 @@ aws autoscaling describe-auto-scaling-groups --region "$AWS_REGION" --auto-scali
   printf 'LAUNCH_TEMPLATE_ID=%s\n' "$launch_template_id"
   printf 'LAUNCH_TEMPLATE_VERSION=%s\n' "$launch_template_version"
   printf 'TARGET_GROUP_ARN=%s\n' "$TARGET_GROUP_ARN"
-  printf 'HEALTHY_TARGET_COUNT=%s\n' "$healthy_count"
+  printf 'HEALTHY_TARGET_COUNT=%s\n' "$asg_healthy_count"
+  printf 'ASG_HEALTHY_TARGET_COUNT=%s\n' "$asg_healthy_count"
+  /usr/bin/grep -E '^(CURRENT_ASG_INSTANCE_IDS|HEALTHY_ASG_TARGET_IDS|UNHEALTHY_ASG_TARGETS|LEGACY_OR_NON_ASG_HEALTHY_TARGET_IDS|TOTAL_HEALTHY_TARGET_IDS|ASG_TARGET_HEALTH_READY)=' "$out_dir/asg-target-health-summary.env" || true
   printf 'ROLLING_POLICY_CHECKLIST_PATH=%s\n' "$ROLLING_POLICY_CHECKLIST_PATH"
   printf 'ROLLBACK_ALARM_NAMES_CSV=%s\n' "$ROLLBACK_ALARM_NAMES_CSV"
   printf 'ASG_ASSOCIATE_PUBLIC_IP=%s\n' "$ASG_ASSOCIATE_PUBLIC_IP"

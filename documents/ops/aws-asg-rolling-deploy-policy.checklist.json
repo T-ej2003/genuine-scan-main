@@ -6,8 +6,8 @@
   "no_production_dns_cutover_during_validation": true,
   "health_check_type": "ELB",
   "deregistration_delay_seconds": 60,
-  "health_check_grace_period_seconds": 180,
-  "default_instance_warmup_seconds": 180,
+  "health_check_grace_period_seconds": 900,
+  "default_instance_warmup_seconds": 900,
   "instance_refresh_min_healthy_percentage": 100,
   "instance_refresh_max_healthy_percentage": 150,
   "instance_refresh_checkpoint_percentages": [
