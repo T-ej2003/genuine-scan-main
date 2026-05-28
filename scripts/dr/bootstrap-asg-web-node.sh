@@ -115,13 +115,15 @@ const fail = (message) => {
   process.exit(1);
 };
 
+const formatMissingParameter = (key) => `${key} (${ssmPrefix}${key})`;
+
 const assertPresent = (sectionName, keys) => {
   const missing = [];
   for (const key of keys || []) {
     if (!values.has(key) || values.get(key) === "") missing.push(key);
   }
   if (missing.length > 0) {
-    fail(`${sectionName} missing required SSM parameter(s): ${missing.join(", ")}`);
+    fail(`${sectionName} missing required SSM parameter(s): ${missing.map(formatMissingParameter).join(", ")}`);
   }
 };
 

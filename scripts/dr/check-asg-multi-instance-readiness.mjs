@@ -131,6 +131,9 @@ requireMatch("readiness doc", doc, /scripts\/dr\/bootstrap-asg-web-node\.sh/, "m
 requireMatch("readiness doc", doc, /documents\/ops\/aws-asg-web-ssm-parameter-manifest\.json/, "must document ASG SSM parameter manifest.");
 requireMatch("readiness doc", doc, /\/mscqr\/prod\/ap-south-1\/asg-web\//, "must document Mumbai SSM prefix.");
 requireMatch("readiness doc", doc, /\/mscqr\/prod\/af-south-1\/asg-web\//, "must document Cape Town SSM prefix.");
+requireMatch("readiness doc", doc, /SMTP_FROM[\s\S]*optional but recommended/, "must document SMTP_FROM as optional but recommended for ASG SSM.");
+requireMatch("readiness doc", doc, /\/mscqr\/prod\/ap-south-1\/asg-web\/SMTP_FROM/, "must document the Mumbai SMTP_FROM SSM path.");
+requireMatch("readiness doc", doc, /describe-parameters[\s\S]*Parameters\[\]\.Name/, "must document a names-only SSM parameter preflight.");
 requireMatch("readiness doc", doc, /asg-web-instance-profile-policy\.template\.json/, "must document ASG instance-profile IAM template.");
 requireMatch("readiness doc", doc, /Secrets\/bootstrap is conditionally proven/, "must mark secrets/bootstrap conditionally proven.");
 requireMatch("readiness doc", doc, /ASG_WEB_INSTANCE_PROFILE_ARN/, "must document explicit ASG web instance profile ARN input.");
@@ -158,6 +161,8 @@ requireMatch("readiness doc", doc, /Keep production DNS on London EC2/i, "must d
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_STATUS=CONDITIONALLY_READY/, "must mark the rolling policy document conditionally ready.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_WEB_INSTANCE_PROFILE_ARN/, "must define explicit ASG web instance profile ARN input.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_WEB_INSTANCE_PROFILE_NAME/, "must define explicit ASG web instance profile name input.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /SMTP_FROM[\s\S]*optional but recommended/, "must document SMTP_FROM as optional but recommended.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /describe-parameters[\s\S]*asg-web/, "must document names-only SSM preflight.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_ASSOCIATE_PUBLIC_IP/, "must define explicit ASG public IP association input.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_KEY_NAME/, "must define optional ASG SSH KeyName input.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_REPO_URL/, "must define ASG repository URL input.");
@@ -204,6 +209,8 @@ if (/\n\s+redis:/.test(asgWebCompose)) failures.push("ASG web compose must not d
 if (/\n\s+minio:/.test(asgWebCompose)) failures.push("ASG web compose must not define a local MinIO service.");
 requireMatch("ASG bootstrap", asgBootstrap, /aws ssm get-parameters-by-path/, "bootstrap must fetch parameters from SSM by path.");
 requireMatch("ASG bootstrap", asgBootstrap, /--with-decryption/, "bootstrap must decrypt SecureString parameters.");
+requireMatch("ASG bootstrap", asgBootstrap, /\$\{ssmPrefix\}\$\{key\}/, "bootstrap missing-parameter diagnostics must include full SSM parameter paths.");
+requireMatch("ASG bootstrap", asgBootstrap, /formatMissingParameter[\s\S]*missing required SSM parameter\(s\)/, "bootstrap must keep missing SSM parameter errors actionable without printing values.");
 requireMatch("ASG bootstrap", asgBootstrap, /root_env_path=.*\/\.env/, "bootstrap must write project .env.");
 requireMatch("ASG bootstrap", asgBootstrap, /backend_env_path=.*backend\/\.env/, "bootstrap must write backend/.env.");
 requireMatch("ASG bootstrap", asgBootstrap, /fs\.chmodSync\(filePath, 0o600\)/, "bootstrap must chmod generated env files to 0600.");
@@ -388,6 +395,7 @@ for (const [label, source, region] of [
   requireMatch(label, source, /OBJECT_STORAGE_SECRET_KEY=\n/, `${region} env example must keep static object secret key empty.`);
   requireMatch(label, source, /OBJECT_STORAGE_FORCE_PATH_STYLE=false/, `${region} env example must disable path-style for native S3.`);
   requireMatch(label, source, /COMPLIANCE_PACK_SCHEDULER_ENABLED=false/, `${region} env example must keep compliance scheduler disabled.`);
+  requireMatch(label, source, /SMTP_FROM=/, `${region} env example must document optional SMTP_FROM override.`);
 }
 
 for (const [label, source] of [
@@ -413,6 +421,7 @@ if (asgSsmManifest) {
     if (!rootRequired.has(key)) failures.push(`ASG SSM manifest rootEnv.requiredFromSsm is missing ${key}.`);
   }
   const backendRequired = new Set(asgSsmManifest.backendEnv?.requiredFromSsm || []);
+  const backendOptional = new Set(asgSsmManifest.backendEnv?.optionalFromSsm || []);
   for (const key of [
     "DATABASE_URL",
     "JWT_SECRET_CURRENT",
@@ -427,8 +436,18 @@ if (asgSsmManifest) {
     "PRINTER_SSE_SIGN_SECRET_CURRENT",
     "INCIDENT_HASH_SALT_CURRENT",
     "AUTH_MFA_ENCRYPTION_KEY",
+    "SMTP_HOST",
+    "SMTP_USER",
+    "SMTP_PASS",
+    "SUPER_ADMIN_EMAIL",
   ]) {
     if (!backendRequired.has(key)) failures.push(`ASG SSM manifest backendEnv.requiredFromSsm is missing ${key}.`);
+  }
+  if (backendRequired.has("SMTP_FROM")) {
+    failures.push("ASG SSM manifest must not require SMTP_FROM; backend can boot and send using SMTP_USER as From when SMTP_FROM is absent.");
+  }
+  if (!backendOptional.has("SMTP_FROM")) {
+    failures.push("ASG SSM manifest backendEnv.optionalFromSsm must include SMTP_FROM as the recommended authorized sender override.");
   }
   for (const [sectionName, forced] of [
     ["rootEnv", asgSsmManifest.rootEnv?.forced || {}],
@@ -560,6 +579,7 @@ if (asgRollingPolicyChecklist) {
     "install/check node",
     "install/check npm",
     "pin Node.js major 24 for ASG host prerequisites",
+    "report missing required SSM parameters with full paths and no values",
     "clone ASG_REPO_URL into ASG_REPO_DIR when missing",
     "git fetch origin ASG_REPO_BRANCH",
     "git reset --hard origin/ASG_REPO_BRANCH",

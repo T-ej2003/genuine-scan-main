@@ -198,6 +198,7 @@ Evidence:
 - Production startup validates many required secret and URL values without printing secret values.
 - `scripts/dr/bootstrap-asg-web-node.sh` fetches env values from SSM Parameter Store with `--with-decryption`, writes project `.env` and `backend/.env` with `0600` permissions, and does not print secret values.
 - The bootstrap script validates required manifest keys, rejects MinIO secrets, and forces ASG-safe values before starting containers.
+- Missing required SSM values are reported as parameter names plus full paths, for example `DATABASE_URL (/mscqr/prod/ap-south-1/asg-web/DATABASE_URL)`, without printing values.
 - The bootstrap script starts only ASG web mode:
 
 ```bash
@@ -228,7 +229,7 @@ Required production env categories:
 - Object storage: `OBJECT_STORAGE_BUCKET`, `OBJECT_STORAGE_REGION` or `AWS_REGION`, optional external endpoint, optional static credentials only for custom endpoints.
 - Public URLs/CORS: `PUBLIC_SCAN_WEB_BASE_URL`, `PUBLIC_VERIFY_WEB_BASE_URL`, `PUBLIC_ADMIN_WEB_BASE_URL`, `WEB_APP_BASE_URL`, `CORS_ORIGIN`.
 - Cookies: `COOKIE_SECURE=true` in production.
-- SMTP: SMTP user/pass aliases used by backend.
+- SMTP: `SMTP_HOST`, `SMTP_USER`, and `SMTP_PASS` are required for production email. `SMTP_FROM` is optional but recommended; the backend can boot without it and uses the authenticated SMTP mailbox as the From address when the override is absent.
 
 ASG requirement:
 
@@ -237,9 +238,21 @@ ASG requirement:
 - Test the final ASG web instance profile from an EC2 role before ASG apply by running the bootstrap in render-only mode and confirming it can fetch the approved SSM prefix without printing values.
 - Render container environment at boot without logging values.
 - Fail boot if any required value is missing.
+- Before retry, list SSM parameter names only and compare them with `documents/ops/aws-asg-web-ssm-parameter-manifest.json`; do not fetch or print parameter values.
 - Do not rely on SSH/manual edits to `backend/.env` for new ASG instances.
 - Keep `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_ACCESS_KEY`, and `OBJECT_STORAGE_SECRET_KEY` empty.
 - Keep `OBJECT_STORAGE_FORCE_PATH_STYLE=false`, `REDIS_TLS=true`, `RUN_BACKGROUND_WORKERS=false`, `RUN_DB_MIGRATIONS_ON_START=false`, and `COMPLIANCE_PACK_SCHEDULER_ENABLED=false`.
+- Recommended email sender override for Mumbai, if the SMTP provider authorizes it: `/mscqr/prod/ap-south-1/asg-web/SMTP_FROM`. This key is optional for boot, but should be created before email-delivery validation.
+
+Safe names-only SSM preflight:
+
+```bash
+aws ssm describe-parameters \
+  --region ap-south-1 \
+  --parameter-filters "Key=Path,Option=Recursive,Values=/mscqr/prod/ap-south-1/asg-web/" \
+  --query 'Parameters[].Name' \
+  --output text | tr '\t' '\n' | sort
+```
 
 ## G. Docker Startup And Bootstrap Repeatability
 
@@ -334,6 +347,7 @@ Mumbai retry note:
 - The fix is a manual pinned Docker Compose v2 plugin fallback after the apt plugin attempt.
 - Latest retry evidence: the Docker Compose fallback succeeded, Docker Compose verification completed, the repo bootstrap reached `running bootstrap script`, and `scripts/dr/bootstrap-asg-web-node.sh` existed. Failure moved into the bootstrap script, likely because AWS CLI was missing for SSM fetches or because detailed bootstrap output was only redirected into `/var/log/mscqr-asg-bootstrap.log` on a terminated node. The fix adds AWS CLI as a UserData prerequisite and mirrors bootstrap output into cloud-init console while keeping the same non-secret log file.
 - Latest Node prerequisite evidence: instances reached repo HEAD `c97edfe`, AWS CLI installed from apt and verified, then `scripts/dr/bootstrap-asg-web-node.sh` failed with `ERROR: node is required.` New ASG targets reached EC2/ASG healthy states but failed ALB health checks because app bootstrap never completed; the old manual Mumbai target remained healthy and no DNS cutover happened. The fix adds Node.js 24/npm 11 host prerequisite checks before running the bootstrap script.
+- Latest SSM env-render evidence: fresh ASG nodes passed Git, Docker, Docker Compose, AWS CLI, Node.js 24, npm 11, repo clone, and bootstrap handoff, then failed while fetching `/mscqr/prod/ap-south-1/asg-web/` with `backendEnv missing required SSM parameter(s): SMTP_FROM`. Source review showed `SMTP_FROM` is a recommended authorized sender override, not a backend startup requirement; the backend falls back to `SMTP_USER` as the From address when absent. The ASG manifest now makes `SMTP_FROM` optional/recommended and missing required errors include the full SSM parameter path.
 - Mumbai selected public subnets currently have `MapPublicIpOnLaunch=false`, so the next no-DNS Mumbai retry should use `ASG_ASSOCIATE_PUBLIC_IP=true`.
 - The next no-DNS Mumbai retry should also use `ASG_KEY_NAME=mscqr-prod-mumbai` to make failed nodes inspectable.
 - The next no-DNS Mumbai retry should set `ASG_REPO_URL=https://github.com/T-ej2003/genuine-scan-main.git`, `ASG_REPO_BRANCH=main`, and `ASG_REPO_DIR=/home/ubuntu/genuine-scan-main`.

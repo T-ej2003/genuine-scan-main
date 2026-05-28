@@ -67,6 +67,7 @@
     "install/check node",
     "install/check npm",
     "pin Node.js major 24 for ASG host prerequisites",
+    "report missing required SSM parameters with full paths and no values",
     "clone ASG_REPO_URL into ASG_REPO_DIR when missing",
     "git fetch origin ASG_REPO_BRANCH",
     "git reset --hard origin/ASG_REPO_BRANCH",
@@ -108,6 +109,7 @@
     "Regional Redis readiness is green through /api/health/ready.",
     "Regional S3 object storage readiness is green through /api/health/ready.",
     "ASG web nodes use docker-compose.asg-web.yml only.",
+    "Required ASG SSM parameter names exist under the regional asg-web prefix before apply; SMTP_FROM is optional but recommended as the authorized sender override.",
     "RUN_BACKGROUND_WORKERS=false, RUN_DB_MIGRATIONS_ON_START=false, and COMPLIANCE_PACK_SCHEDULER_ENABLED=false remain forced.",
     "CloudWatch alarms for ALB 5XX, target 5XX, target response time, and unhealthy hosts are green before refresh.",
     "At least two healthy targets are present after ASG apply and after every replacement step."
