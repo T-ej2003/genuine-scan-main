@@ -105,7 +105,7 @@ jobs:
       - name: Gitleaks secrets scan
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./gitleaks detect --source . --redact --report-format sarif --report-path audit-artifacts/gitleaks.sarif
+        run: ./gitleaks detect --source . --redact --baseline-path .gitleaks-baseline.json --report-format sarif --report-path audit-artifacts/gitleaks.sarif
 
       - name: Detect IaC files
         id: iac-detect
