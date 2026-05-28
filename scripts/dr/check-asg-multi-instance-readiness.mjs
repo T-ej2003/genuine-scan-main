@@ -244,9 +244,17 @@ requireMatch("DR common", requireFile("scripts/dr/common.sh"), /safe_diagnostics
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /cloud-init-output\.log/, "UserData failure message must point operators to cloud-init output.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /export DEBIAN_FRONTEND=noninteractive/, "UserData must use noninteractive package installation.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /apt-get install -y git ca-certificates curl/, "UserData must install git prerequisites when missing.");
-requireMatch("DR common", requireFile("scripts/dr/common.sh"), /apt-get install -y docker\.io docker-compose-plugin/, "UserData must install Docker and Compose plugin when missing.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /apt-get install -y docker\.io/, "UserData must install Docker when missing.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /systemctl enable --now docker/, "UserData must enable and start Docker.");
-requireMatch("DR common", requireFile("scripts/dr/common.sh"), /docker compose version/, "UserData must verify Docker Compose plugin.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /checking docker compose[\s\S]*docker compose version/, "UserData must check Docker Compose before installing it.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /apt-get install -y docker-compose-plugin/, "UserData must try apt docker-compose-plugin before manual fallback.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /DOCKER_COMPOSE_VERSION="v[0-9]+\.[0-9]+\.[0-9]+"/, "UserData must pin the manual Docker Compose release version.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /install_compose_plugin_from_pinned_release/, "UserData must include the manual Docker Compose plugin fallback.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /\/usr\/local\/lib\/docker\/cli-plugins\/docker-compose/, "UserData must install manual Compose fallback under the Docker CLI plugin path.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /x86_64\|amd64\).*ARCH="x86_64"/, "UserData must map x86_64 and amd64 Compose release architecture.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /aarch64\|arm64\).*ARCH="aarch64"/, "UserData must map aarch64 and arm64 Compose release architecture.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /failed to install docker compose plugin from pinned release/, "UserData must fail clearly if manual Compose plugin fallback fails.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /verifying docker compose[\s\S]*docker compose version/, "UserData must verify Docker Compose after apt or manual fallback.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /git clone --branch "\$ASG_REPO_BRANCH" --depth 1 "\$ASG_REPO_URL" "\$ASG_REPO_DIR"/, "UserData must clone the repo when missing.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /repo directory exists but is not a git checkout/, "UserData must fail clearly when ASG_REPO_DIR exists but is not a git checkout.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /docker --version/, "UserData safe diagnostics must include docker version when available.");
@@ -518,6 +526,8 @@ if (asgRollingPolicyChecklist) {
     "install/check git",
     "install/check docker",
     "install/check docker compose",
+    "try apt docker-compose-plugin before manual Compose fallback",
+    "install pinned Docker Compose v2 plugin under /usr/local/lib/docker/cli-plugins/docker-compose when apt plugin is unavailable",
     "clone ASG_REPO_URL into ASG_REPO_DIR when missing",
     "git fetch origin ASG_REPO_BRANCH",
     "git reset --hard origin/ASG_REPO_BRANCH",

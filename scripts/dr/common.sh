@@ -407,7 +407,8 @@ AWS_REGION="${awsRegion}"
 ASG_REPO_URL="${repoUrl}"
 ASG_REPO_BRANCH="${repoBranch}"
 ASG_REPO_DIR="${repoDir}"
-export TARGET_REGION_GROUP AWS_REGION ASG_REPO_URL ASG_REPO_BRANCH ASG_REPO_DIR
+DOCKER_COMPOSE_VERSION="v2.29.7"
+export TARGET_REGION_GROUP AWS_REGION ASG_REPO_URL ASG_REPO_BRANCH ASG_REPO_DIR DOCKER_COMPOSE_VERSION
 
 log() {
   /usr/bin/printf "%s %s\\n" "$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | /usr/bin/tee -a "$log_file"
@@ -477,10 +478,7 @@ if ! command -v docker >/dev/null 2>&1; then
   current_step="installing docker"
   log "installing docker"
   apt-get update >> "$log_file" 2>&1
-  if ! apt-get install -y docker.io docker-compose-plugin >> "$log_file" 2>&1; then
-    log "docker-compose-plugin was not available from apt; installing docker.io and will verify compose plugin"
-    apt-get install -y docker.io >> "$log_file" 2>&1
-  fi
+  apt-get install -y docker.io >> "$log_file" 2>&1
 else
   log "docker already installed"
 fi
@@ -496,9 +494,79 @@ if id ubuntu >/dev/null 2>&1 && getent group docker >/dev/null 2>&1; then
   usermod -aG docker ubuntu >> "$log_file" 2>&1 || true
 fi
 
+ensure_compose_download_prereqs() {
+  if ! command -v curl >/dev/null 2>&1 || ! dpkg -s ca-certificates >/dev/null 2>&1; then
+    current_step="installing docker compose download prerequisites"
+    log "installing docker compose download prerequisites"
+    apt-get update >> "$log_file" 2>&1
+    apt-get install -y curl ca-certificates >> "$log_file" 2>&1
+  fi
+}
+
+install_compose_plugin_from_pinned_release() {
+  current_step="installing docker compose plugin from pinned release"
+  log "installing docker compose plugin from pinned release $DOCKER_COMPOSE_VERSION"
+  ensure_compose_download_prereqs
+
+  arch_raw="$(uname -m)"
+  case "$arch_raw" in
+    x86_64|amd64) ARCH="x86_64" ;;
+    aarch64|arm64) ARCH="aarch64" ;;
+    *)
+      log "unsupported architecture for docker compose plugin: $arch_raw"
+      return 1
+      ;;
+  esac
+
+  plugin_dir="/usr/local/lib/docker/cli-plugins"
+  plugin_path="/usr/local/lib/docker/cli-plugins/docker-compose"
+  tmp_path="$(mktemp)"
+  /bin/mkdir -p "$plugin_dir"
+
+  if ! curl -fsSL "https://github.com/docker/compose/releases/download/\${DOCKER_COMPOSE_VERSION}/docker-compose-linux-\${ARCH}" -o "$tmp_path" >> "$log_file" 2>&1; then
+    log "failed to install docker compose plugin from pinned release"
+    /bin/rm -f "$tmp_path"
+    return 1
+  fi
+
+  /bin/cp "$tmp_path" "$plugin_path"
+  /bin/chmod +x "$plugin_path"
+  /bin/rm -f "$tmp_path"
+
+  if ! docker compose version >> "$log_file" 2>&1; then
+    log "failed to install docker compose plugin from pinned release"
+    return 1
+  fi
+}
+
 current_step="checking docker compose"
 log "checking docker compose"
 docker --version >> "$log_file" 2>&1
+if docker compose version >> "$log_file" 2>&1; then
+  log "docker compose already available"
+else
+  current_step="installing docker compose plugin with apt"
+  log "docker compose not available; trying apt docker-compose-plugin"
+  apt-get update >> "$log_file" 2>&1
+  if apt-get install -y docker-compose-plugin >> "$log_file" 2>&1; then
+    log "docker-compose-plugin installed from apt"
+  else
+    log "docker-compose-plugin was not available from apt"
+  fi
+
+  current_step="checking docker compose after apt"
+  if docker compose version >> "$log_file" 2>&1; then
+    log "docker compose available after apt plugin install"
+  else
+    if ! install_compose_plugin_from_pinned_release; then
+      log "failed to install docker compose plugin from pinned release"
+      exit 2
+    fi
+  fi
+fi
+
+current_step="verifying docker compose"
+log "verifying docker compose"
 docker compose version >> "$log_file" 2>&1
 
 current_step="checking repo directory"
@@ -693,7 +761,16 @@ for (const required of [
   "docker.io",
   "starting docker",
   "checking docker compose",
+  "apt-get install -y docker-compose-plugin",
+  "DOCKER_COMPOSE_VERSION=",
+  "/usr/local/lib/docker/cli-plugins",
+  "/usr/local/lib/docker/cli-plugins/docker-compose",
+  "docker-compose-linux-${ARCH}",
+  "x86_64|amd64",
+  "aarch64|arm64",
+  "failed to install docker compose plugin from pinned release",
   "docker compose version",
+  "verifying docker compose",
   "git clone --branch \"$ASG_REPO_BRANCH\" --depth 1 \"$ASG_REPO_URL\" \"$ASG_REPO_DIR\"",
   "git fetch origin \"$ASG_REPO_BRANCH\"",
   "git reset --hard \"origin/$ASG_REPO_BRANCH\"",

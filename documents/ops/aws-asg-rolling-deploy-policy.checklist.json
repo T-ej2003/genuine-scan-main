@@ -58,6 +58,8 @@
     "install/check git",
     "install/check docker",
     "install/check docker compose",
+    "try apt docker-compose-plugin before manual Compose fallback",
+    "install pinned Docker Compose v2 plugin under /usr/local/lib/docker/cli-plugins/docker-compose when apt plugin is unavailable",
     "clone ASG_REPO_URL into ASG_REPO_DIR when missing",
     "git fetch origin ASG_REPO_BRANCH",
     "git reset --hard origin/ASG_REPO_BRANCH",
