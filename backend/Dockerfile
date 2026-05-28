@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:20-bookworm-slim AS deps
+FROM node:24-bookworm-slim AS deps
 
 WORKDIR /workspace/backend
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false
@@ -16,6 +16,7 @@ FROM deps AS builder
 
 ARG RUN_VERIFY=false
 COPY backend/prisma ./prisma
+COPY backend/prisma.config.ts ./prisma.config.ts
 RUN npx prisma generate
 
 COPY backend/tsconfig.json ./tsconfig.json
@@ -24,9 +25,10 @@ COPY backend/tests ./tests
 COPY backend/scripts ./scripts
 COPY backend/local-print-agent ./local-print-agent
 COPY shared ../shared
-RUN if [ "$RUN_VERIFY" = "true" ]; then npm test; else npm run build; fi
+RUN if [ "$RUN_VERIFY" = "true" ]; then npm test; else npm run build; fi \
+  && npm prune --omit=dev --no-audit --no-fund
 
-FROM node:20-bookworm-slim AS runtime
+FROM node:24-bookworm-slim AS runtime
 
 WORKDIR /app
 ARG GIT_SHA=unknown
@@ -41,6 +43,7 @@ RUN apt-get update \
 
 COPY --chown=node:node backend/package*.json ./
 COPY --chown=node:node backend/prisma ./prisma
+COPY --chown=node:node backend/prisma.config.ts ./prisma.config.ts
 COPY --chown=node:node backend/scripts ./scripts
 COPY --chown=node:node backend/local-print-agent ./local-print-agent
 COPY --chown=node:node backend/docker/start-runtime.sh /usr/local/bin/start-runtime.sh

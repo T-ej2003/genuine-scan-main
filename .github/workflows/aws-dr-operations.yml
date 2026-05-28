@@ -138,12 +138,12 @@ jobs:
       HOSTNAME: ${{ inputs.hostname }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -181,7 +181,7 @@ jobs:
 
       - name: Upload DR smoke-test artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: aws-dr-operations-${{ inputs.operation }}-${{ github.run_id }}
           path: artifacts/dr/**
@@ -197,12 +197,12 @@ jobs:
       HOSTNAME: ${{ inputs.hostname }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -241,7 +241,7 @@ jobs:
 
       - name: Upload DR smoke-test artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: aws-dr-operations-${{ inputs.operation }}-${{ github.run_id }}
           path: artifacts/dr/**
@@ -261,12 +261,12 @@ jobs:
       AWS_REGION: eu-west-2
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -319,7 +319,7 @@ jobs:
           echo "Object storage OIDC role variable is present."
 
       - name: Configure AWS credentials for object storage readiness
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: eu-west-2
           role-to-assume: ${{ env.AWS_DR_OBJECT_STORAGE_ROLE_ARN }}
@@ -331,7 +331,7 @@ jobs:
 
       - name: Upload DR smoke-test artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: aws-dr-operations-${{ inputs.operation }}-${{ github.run_id }}
           path: artifacts/dr/**
@@ -363,12 +363,12 @@ jobs:
       DR_DB_RESTORE_ROLE_TO_ASSUME: ${{ vars.DR_DB_RESTORE_ROLE_TO_ASSUME }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -454,7 +454,7 @@ jobs:
           echo "DB OIDC role variable is present."
 
       - name: Configure AWS credentials for DB readiness
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ inputs.aws_region }}
           role-to-assume: ${{ steps.resolve_db_role.outputs.role_arn }}
@@ -555,7 +555,7 @@ jobs:
 
       - name: Upload DR smoke-test artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: aws-dr-operations-${{ inputs.operation }}-${{ github.run_id }}
           path: artifacts/dr/**
@@ -576,12 +576,12 @@ jobs:
       STANDBY_SSH_PRIVATE_KEY: ${{ secrets.STANDBY_SSH_PRIVATE_KEY }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -641,7 +641,7 @@ jobs:
 
       - name: Upload DR smoke-test artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: aws-dr-operations-${{ inputs.operation }}-${{ github.run_id }}
           path: artifacts/dr/**

@@ -4,7 +4,7 @@ Use this setup to avoid missing-tool failures during security hardening and rele
 
 ## Required baseline tools
 
-- Node.js 20.x
+- Node.js 24.x LTS
 - npm
 - git
 - docker + docker compose

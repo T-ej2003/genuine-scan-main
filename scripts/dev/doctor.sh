@@ -27,8 +27,8 @@ done
 
 if command -v node >/dev/null 2>&1; then
   node_major="$(node -p 'process.versions.node.split(".")[0]')"
-  if [[ "$node_major" -lt 20 ]]; then
-    echo "FAIL: Node.js major version must be >=20 (found $(node -v))"
+  if [[ "$node_major" -lt 24 ]]; then
+    echo "FAIL: Node.js major version must be >=24 (found $(node -v))"
     failures=$((failures + 1))
   else
     echo "OK: Node.js version $(node -v)"
@@ -50,4 +50,3 @@ if [[ "$failures" -gt 0 ]]; then
 fi
 
 echo "Doctor passed."
-

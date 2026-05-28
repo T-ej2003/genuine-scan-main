@@ -147,7 +147,7 @@ jobs:
       DR_HARDENING_APPLY_ROLE_TO_ASSUME: ${{ vars.DR_HARDENING_APPLY_ROLE_TO_ASSUME }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Resolve hardening OIDC role
         id: resolve_role
@@ -163,7 +163,7 @@ jobs:
           printf 'role_arn=%s\n' "$role_arn" >> "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials using OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ inputs.aws_region }}
           role-to-assume: ${{ steps.resolve_role.outputs.role_arn }}
@@ -233,7 +233,7 @@ jobs:
 
       - name: Upload immutable DR evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dr-hardening-apply-evidence-${{ inputs.operation }}-${{ github.run_id }}
           path: artifacts/dr

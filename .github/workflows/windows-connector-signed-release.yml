@@ -43,7 +43,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Validate Azure signing configuration
         shell: pwsh
@@ -67,9 +67,9 @@ jobs:
           Write-Host "Azure signing configuration is present. Secret values were not printed."
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
@@ -140,7 +140,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Sign staged Windows payload files
-        uses: azure/artifact-signing-action@v1
+        uses: azure/artifact-signing-action@v2
         with:
           endpoint: ${{ env.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
           signing-account-name: ${{ env.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
@@ -189,7 +189,7 @@ jobs:
           }
 
       - name: Sign final Windows release artifacts
-        uses: azure/artifact-signing-action@v1
+        uses: azure/artifact-signing-action@v2
         with:
           endpoint: ${{ env.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
           signing-account-name: ${{ env.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
@@ -321,7 +321,7 @@ jobs:
           sbom-path: ${{ steps.sbom.outputs.windows_sbom_path }}
 
       - name: Upload signed Windows connector artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mscqr-windows-connector-signed-${{ steps.release_settings.outputs.connector_release_version }}
           path: |

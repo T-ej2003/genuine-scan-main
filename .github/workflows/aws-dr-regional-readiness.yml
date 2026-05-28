@@ -109,7 +109,7 @@ jobs:
       AWS_DR_ALB_APPLY_ROLE_ARN: ${{ vars.AWS_DR_ALB_APPLY_ROLE_ARN }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Resolve read-only OIDC role
         id: resolve_role
@@ -126,7 +126,7 @@ jobs:
           printf 'role_arn=%s\n' "$role_arn" >> "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials using OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ inputs.aws_region }}
           role-to-assume: ${{ steps.resolve_role.outputs.role_arn }}
@@ -182,7 +182,7 @@ jobs:
 
       - name: Upload immutable DR evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dr-regional-readiness-evidence-${{ inputs.operation }}-${{ github.run_id }}
           path: artifacts/dr

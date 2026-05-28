@@ -59,7 +59,7 @@ jobs:
       CONFIRM_DNS_CUTOVER: ${{ inputs.confirm_dns_cutover }}
       AWS_ROLE_TO_ASSUME: ${{ vars.DR_DNS_CUTOVER_ROLE_TO_ASSUME }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Validate DNS cutover approval inputs
         run: |
@@ -74,7 +74,7 @@ jobs:
           echo "::add-mask::$AWS_ROLE_TO_ASSUME"
 
       - name: Configure AWS credentials using OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ inputs.aws_region }}
           role-to-assume: ${{ vars.DR_DNS_CUTOVER_ROLE_TO_ASSUME }}
@@ -97,7 +97,7 @@ jobs:
 
       - name: Upload immutable DR evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dr-dns-cutover-evidence-${{ github.run_id }}
           path: artifacts/dr
@@ -117,7 +117,7 @@ jobs:
       CONFIRM_DNS_ROLLBACK: ${{ inputs.confirm_dns_rollback }}
       AWS_ROLE_TO_ASSUME: ${{ vars.DR_DNS_ROLLBACK_ROLE_TO_ASSUME }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Validate DNS rollback approval inputs
         run: |
@@ -132,7 +132,7 @@ jobs:
           echo "::add-mask::$AWS_ROLE_TO_ASSUME"
 
       - name: Configure AWS credentials using OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ inputs.aws_region }}
           role-to-assume: ${{ vars.DR_DNS_ROLLBACK_ROLE_TO_ASSUME }}
@@ -155,7 +155,7 @@ jobs:
 
       - name: Upload immutable DR evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dr-dns-rollback-evidence-${{ github.run_id }}
           path: artifacts/dr

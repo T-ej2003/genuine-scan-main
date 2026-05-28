@@ -4,8 +4,8 @@ Use this for a repeatable local validation before release.
 
 ## Prerequisites
 
-- Node.js 18+ (Node 20 recommended)
-- npm 9+
+- Node.js 24 LTS
+- npm 11+
 - PostgreSQL reachable from local machine
 - Docker (optional; needed only for container scan/build validation)
 

@@ -98,7 +98,7 @@ jobs:
       CONFIRM_DB_RESTORE: ${{ inputs.confirm_db_restore }}
       AWS_ROLE_TO_ASSUME: ${{ vars.DR_DB_RESTORE_ROLE_TO_ASSUME }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Validate DB restore approval inputs
         run: |
@@ -117,7 +117,7 @@ jobs:
           echo "::add-mask::$AWS_ROLE_TO_ASSUME"
 
       - name: Configure AWS credentials using OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ inputs.aws_region }}
           role-to-assume: ${{ vars.DR_DB_RESTORE_ROLE_TO_ASSUME }}
@@ -134,7 +134,7 @@ jobs:
 
       - name: Upload immutable DR evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dr-db-restore-evidence-${{ github.run_id }}
           path: artifacts/dr
@@ -159,7 +159,7 @@ jobs:
       CONFIRM_REGION_LOCAL_DB_RESTORE: ${{ inputs.confirm_region_local_db_restore }}
       AWS_ROLE_TO_ASSUME: ${{ vars.DR_DB_RESTORE_ROLE_TO_ASSUME }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Validate region-local DB restore approval inputs
         run: |
@@ -181,7 +181,7 @@ jobs:
           echo "::add-mask::$AWS_ROLE_TO_ASSUME"
 
       - name: Configure AWS credentials using OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ inputs.target_region }}
           role-to-assume: ${{ vars.DR_DB_RESTORE_ROLE_TO_ASSUME }}
@@ -198,7 +198,7 @@ jobs:
 
       - name: Upload immutable DR evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dr-region-local-db-restore-evidence-${{ github.run_id }}
           path: artifacts/dr

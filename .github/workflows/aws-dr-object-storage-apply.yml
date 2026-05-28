@@ -42,7 +42,7 @@ jobs:
       CONFIRM_DELETE_TEST_OBJECT: ${{ inputs.delete_test_object && inputs.confirm_delete_test_object || '' }}
       AWS_ROLE_TO_ASSUME: ${{ vars.DR_OBJECT_STORAGE_WRITE_TEST_ROLE_TO_ASSUME }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Validate object storage write-test approval inputs
         run: |
@@ -56,7 +56,7 @@ jobs:
           echo "::add-mask::$AWS_ROLE_TO_ASSUME"
 
       - name: Configure AWS credentials using OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ inputs.aws_region }}
           role-to-assume: ${{ vars.DR_OBJECT_STORAGE_WRITE_TEST_ROLE_TO_ASSUME }}
@@ -73,7 +73,7 @@ jobs:
 
       - name: Upload immutable DR evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dr-object-storage-write-test-evidence-${{ github.run_id }}
           path: artifacts/dr

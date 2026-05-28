@@ -149,7 +149,7 @@ const buildMatchingLogWhereSql = (filters: TrackingAnalyticsFilters) => {
 
 const buildLogWhereObject = (filters: TrackingAnalyticsFilters): Prisma.QrScanLogWhereInput => {
   const batchQuery = String(filters.batchQuery || "").trim();
-  const batchFilter: Prisma.BatchNullableRelationFilter | undefined =
+  const batchFilter: Prisma.BatchNullableScalarRelationFilter | undefined =
     filters.manufacturerId || batchQuery
       ? {
           is: {

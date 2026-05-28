@@ -119,7 +119,7 @@ Each operation requires both:
 
 ## Immutable Evidence
 
-The apply workflows write logs under `artifacts/dr/`, generate `artifacts/dr/sha256-manifest.txt`, and upload evidence with `actions/upload-artifact@v4`.
+The apply workflows write logs under `artifacts/dr/`, generate `artifacts/dr/sha256-manifest.txt`, and upload evidence with the current `actions/upload-artifact` workflow action.
 
 Artifact v4 uploads are immutable for the workflow run. Retention is set to 90 days. Incident commanders should copy the artifact URL into the incident record.
 

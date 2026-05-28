@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:20-bookworm-slim AS builder
+FROM node:24-bookworm-slim AS builder
 
 WORKDIR /app
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false
@@ -39,7 +39,7 @@ RUN if [ "$RUN_VERIFY" = "true" ]; then npm run check:security-guardrails \
   && npm test; fi \
   && npm run build
 
-FROM nginx:1.27-alpine
+FROM nginx:1.29-alpine
 
 COPY nginx.conf /etc/nginx/templates/default.http.conf
 COPY nginx.https.conf /etc/nginx/templates/default.https.conf

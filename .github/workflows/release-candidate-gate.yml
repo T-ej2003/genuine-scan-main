@@ -24,12 +24,12 @@ jobs:
     timeout-minutes: 40
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -70,14 +70,14 @@ jobs:
       SMOKE_EVIDENCE_PATH: ${{ vars.STAGING_SMOKE_EVIDENCE_PATH }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -165,7 +165,7 @@ jobs:
 
       - name: Upload staging smoke log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: staging-smoke-log
           path: smoke-release.log
@@ -177,12 +177,12 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -203,12 +203,12 @@ jobs:
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -232,7 +232,7 @@ jobs:
 
       - name: Upload lint debt report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lint-debt-report
           path: |
@@ -241,7 +241,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload release checklist artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-checklist-artifact
           path: audit-artifacts/release-checklist.json

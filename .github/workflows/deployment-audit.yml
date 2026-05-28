@@ -30,12 +30,12 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -67,7 +67,7 @@ jobs:
       actions: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -75,13 +75,13 @@ jobs:
         run: mkdir -p audit-artifacts
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: javascript
           build-mode: none
 
       - name: Analyze with CodeQL
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
 
       - name: Install OSV Scanner
         run: |
@@ -91,12 +91,16 @@ jobs:
       - name: Run OSV Scanner
         run: ./osv-scanner --recursive .
 
+      - name: Install Gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_linux_x64.tar.gz -o gitleaks.tar.gz
+          tar -xzf gitleaks.tar.gz gitleaks
+          chmod +x gitleaks
+
       - name: Gitleaks secrets scan
-        uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          args: --redact --report-format sarif --report-path audit-artifacts/gitleaks.sarif
+        run: ./gitleaks detect --source . --redact --report-format sarif --report-path audit-artifacts/gitleaks.sarif
 
       - name: Detect IaC files
         id: iac-detect
@@ -145,7 +149,7 @@ jobs:
           output: audit-artifacts/container-trivy.sarif
 
       - name: Generate SBOM
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@v0.24.0
         with:
           path: .
           format: spdx-json
@@ -153,13 +157,13 @@ jobs:
 
       - name: Attest SBOM provenance
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: audit-artifacts/sbom.spdx.json
 
       - name: Upload audit artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deployment-audit-artifacts
           path: audit-artifacts

@@ -38,8 +38,8 @@ Do not commit private key contents, real secrets, or local-only operator invento
 All deployment targets should use:
 
 ```text
-Node.js v20.20.2
-npm 10.8.2
+Node.js v24 LTS
+npm 11.x
 ```
 
 Older Node.js runtimes can fail TypeScript/build steps with modern syntax errors.

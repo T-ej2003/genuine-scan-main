@@ -73,7 +73,7 @@ jobs:
       AWS_DR_RECOVERY_CLEANUP_ROLE_ARN: ${{ vars.AWS_DR_RECOVERY_CLEANUP_ROLE_ARN }}
       DR_RECOVERY_CLEANUP_ROLE_TO_ASSUME: ${{ vars.DR_RECOVERY_CLEANUP_ROLE_TO_ASSUME }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Resolve recovery cleanup OIDC role
         id: resolve_cleanup_role
@@ -126,7 +126,7 @@ jobs:
           esac
 
       - name: Configure AWS credentials using OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ inputs.aws_region }}
           role-to-assume: ${{ steps.resolve_cleanup_role.outputs.role_arn }}
@@ -152,7 +152,7 @@ jobs:
 
       - name: Upload immutable DR evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dr-recovery-cleanup-evidence-${{ github.run_id }}
           path: artifacts/dr

@@ -42,7 +42,7 @@ jobs:
       deploy_ref: ${{ steps.resolve.outputs.deploy_ref }}
     steps:
       - name: Checkout deployment tooling
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
@@ -97,7 +97,7 @@ jobs:
       DEPLOY_SHA: ${{ needs.verify-gates.outputs.deploy_sha }}
     steps:
       - name: Checkout deployment tooling
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
