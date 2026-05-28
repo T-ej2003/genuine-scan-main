@@ -93,10 +93,14 @@ jobs:
         run: ./osv-scanner --recursive .
 
       - name: Install Gitleaks
+        shell: bash
         run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_linux_x64.tar.gz -o gitleaks.tar.gz
+          set -euo pipefail
+          GITLEAKS_VERSION="$(curl -sSfL https://api.github.com/repos/gitleaks/gitleaks/releases/latest | node -e "let data=''; process.stdin.on('data', c => data += c); process.stdin.on('end', () => console.log(JSON.parse(data).tag_name.replace(/^v/, '')));")"
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o gitleaks.tar.gz
           tar -xzf gitleaks.tar.gz gitleaks
           chmod +x gitleaks
+          ./gitleaks version
 
       - name: Gitleaks secrets scan
         env:
