@@ -71,7 +71,9 @@ Every rollout batch and replacement step must pass:
 - UserData installs/checks `git`, `docker.io`, `docker compose`, `aws --version`, `node --version`, and `npm --version`; if `docker compose version` is unavailable, it tries apt `docker-compose-plugin` and then installs a pinned Compose v2 plugin under `/usr/local/lib/docker/cli-plugins/docker-compose` when apt cannot provide it; if AWS CLI is unavailable, it tries apt `awscli` and then installs AWS CLI v2 from the official installer when apt cannot provide it; if Node.js/npm are unavailable or outside `node >=24 <27` and `npm >=11`, it configures NodeSource `node_24.x` and installs `nodejs`; if `ASG_REPO_DIR` is missing, it clones `ASG_REPO_URL`; if `ASG_REPO_DIR` is already a git checkout, it fetches/resets `ASG_REPO_BRANCH`; if the path exists but is not a git checkout, it fails without deleting it.
 - UserData tees bootstrap script output to `/var/log/mscqr-asg-bootstrap.log` and cloud-init console output, and preserves the bootstrap script exit code without relying on `pipefail`.
 - `scripts/dr/bootstrap-asg-web-node.sh` is the launch-template bootstrap path.
+- ASG bootstrap renders a temporary root/backend union env file and runs `docker compose --env-file "$compose_env_path" -f docker-compose.asg-web.yml ...` so Compose-required secrets such as `QR_SIGN_PRIVATE_KEY` are available at interpolation time. Values are never printed.
 - Required SSM parameters under the regional ASG web prefix exist before apply; missing required diagnostics must include the full parameter path without printing values.
+- Required SSM parameters that exist with empty values fail before Compose with key/path-only diagnostics.
 - `SMTP_HOST`, `SMTP_USER`, and `SMTP_PASS` are required for production email. `SMTP_FROM` is optional but recommended as an authorized sender override because the backend can boot and use the authenticated SMTP mailbox as From when it is absent.
 - `RUN_BACKGROUND_WORKERS=false`, `RUN_DB_MIGRATIONS_ON_START=false`, and `COMPLIANCE_PACK_SCHEDULER_ENABLED=false` remain forced.
 - Regional Redis and regional S3/default-credential object storage are green through readiness.
@@ -113,6 +115,8 @@ Latest retry evidence: Docker Compose fallback succeeded and verification reache
 Latest Node prerequisite evidence: AWS CLI installed from apt and verified, repo clone succeeded to HEAD `c97edfe`, then the SSM bootstrap failed with `ERROR: node is required.` The current fix installs and verifies Node.js 24/npm 11 before running `scripts/dr/bootstrap-asg-web-node.sh`, so the next retry should test app/bootstrap health rather than missing host runtime.
 
 Latest SSM env-render evidence: fresh ASG nodes reached `/mscqr/prod/ap-south-1/asg-web/` SSM fetch and then failed with `backendEnv missing required SSM parameter(s): SMTP_FROM`. Source review showed `SMTP_FROM` is not a startup requirement; it is an optional sender override and the backend falls back to the authenticated SMTP mailbox when absent. The manifest now treats `/mscqr/prod/ap-south-1/asg-web/SMTP_FROM` as optional/recommended, and true missing required SSM errors include full paths.
+
+Latest Compose interpolation evidence: the next retry rendered 9 root env keys and 135 backend env keys, consumed 130 SSM parameter names, then failed while interpolating `services.backend.environment.QR_SIGN_PRIVATE_KEY` even though the SSM parameter name existed. Root cause: Compose interpolation does not read service `env_file` values before resolving `${QR_SIGN_PRIVATE_KEY:?...}`. The current fix passes a temporary union env file through `docker compose --env-file` and adds a local `docker compose config` validation with dummy values.
 
 Safe names-only SSM preflight before retry:
 

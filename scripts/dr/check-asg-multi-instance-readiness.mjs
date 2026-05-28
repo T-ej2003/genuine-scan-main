@@ -27,6 +27,7 @@ const packageJsonRaw = requireFile("package.json");
 const compose = requireFile("docker-compose.yml");
 const asgWebCompose = requireFile("docker-compose.asg-web.yml");
 const asgBootstrap = requireFile("scripts/dr/bootstrap-asg-web-node.sh");
+const asgComposeInterpolationCheck = requireFile("scripts/dr/check-asg-compose-interpolation.mjs");
 const asgSsmManifestRaw = requireFile("documents/ops/aws-asg-web-ssm-parameter-manifest.json");
 const asgInstancePolicyRaw = requireFile("ops/aws/iam/dr/asg-web-instance-profile-policy.template.json");
 const asgRollingPolicyDoc = requireFile("documents/ops/aws-asg-rolling-deploy-policy.md");
@@ -133,6 +134,7 @@ requireMatch("readiness doc", doc, /\/mscqr\/prod\/ap-south-1\/asg-web\//, "must
 requireMatch("readiness doc", doc, /\/mscqr\/prod\/af-south-1\/asg-web\//, "must document Cape Town SSM prefix.");
 requireMatch("readiness doc", doc, /SMTP_FROM[\s\S]*optional but recommended/, "must document SMTP_FROM as optional but recommended for ASG SSM.");
 requireMatch("readiness doc", doc, /\/mscqr\/prod\/ap-south-1\/asg-web\/SMTP_FROM/, "must document the Mumbai SMTP_FROM SSM path.");
+requireMatch("readiness doc", doc, /QR_SIGN_PRIVATE_KEY[\s\S]*Compose interpolation/, "must document QR_SIGN_PRIVATE_KEY Compose interpolation handling.");
 requireMatch("readiness doc", doc, /describe-parameters[\s\S]*Parameters\[\]\.Name/, "must document a names-only SSM parameter preflight.");
 requireMatch("readiness doc", doc, /asg-web-instance-profile-policy\.template\.json/, "must document ASG instance-profile IAM template.");
 requireMatch("readiness doc", doc, /Secrets\/bootstrap is conditionally proven/, "must mark secrets/bootstrap conditionally proven.");
@@ -162,6 +164,7 @@ requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_STATUS=CONDITIONALL
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_WEB_INSTANCE_PROFILE_ARN/, "must define explicit ASG web instance profile ARN input.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_WEB_INSTANCE_PROFILE_NAME/, "must define explicit ASG web instance profile name input.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /SMTP_FROM[\s\S]*optional but recommended/, "must document SMTP_FROM as optional but recommended.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /QR_SIGN_PRIVATE_KEY[\s\S]*Compose interpolation/, "must document QR_SIGN_PRIVATE_KEY Compose interpolation handling.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /describe-parameters[\s\S]*asg-web/, "must document names-only SSM preflight.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_ASSOCIATE_PUBLIC_IP/, "must define explicit ASG public IP association input.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_KEY_NAME/, "must define optional ASG SSH KeyName input.");
@@ -188,6 +191,9 @@ const packageJson = packageJsonRaw ? JSON.parse(packageJsonRaw) : { scripts: {} 
 if (!packageJson.scripts?.["check:asg-multi-instance-readiness"]) {
   failures.push("package.json must expose check:asg-multi-instance-readiness.");
 }
+if (!packageJson.scripts?.["check:asg-compose-interpolation"]) {
+  failures.push("package.json must expose check:asg-compose-interpolation.");
+}
 if (!String(packageJson.scripts?.["verify:guardrails"] || "").includes("check:asg-multi-instance-readiness")) {
   failures.push("verify:guardrails must run check:asg-multi-instance-readiness.");
 }
@@ -204,6 +210,8 @@ requireMatch("asg web compose", asgWebCompose, /RUN_BACKGROUND_WORKERS:\s+"false
 requireMatch("asg web compose", asgWebCompose, /REDIS_URL:\s+\$\{REDIS_URL:\?Set shared regional REDIS_URL/, "ASG web mode must require shared regional Redis.");
 requireMatch("asg web compose", asgWebCompose, /REDIS_TLS:\s+\$\{REDIS_TLS:-true\}/, "ASG web mode must default Redis TLS on.");
 requireMatch("asg web compose", asgWebCompose, /OBJECT_STORAGE_BUCKET:\s+\$\{OBJECT_STORAGE_BUCKET:\?Set shared regional OBJECT_STORAGE_BUCKET/, "ASG web mode must require shared regional object storage.");
+requireMatch("asg web compose", asgWebCompose, /QR_SIGN_PRIVATE_KEY:\s+\$\{QR_SIGN_PRIVATE_KEY:\?Set QR_SIGN_PRIVATE_KEY/, "ASG web mode must require QR_SIGN_PRIVATE_KEY during interpolation.");
+requireMatch("asg web compose", asgWebCompose, /QR_SIGN_PUBLIC_KEY:\s+\$\{QR_SIGN_PUBLIC_KEY:\?Set QR_SIGN_PUBLIC_KEY/, "ASG web mode must require QR_SIGN_PUBLIC_KEY during interpolation.");
 if (/\n\s+worker:/.test(asgWebCompose)) failures.push("ASG web compose must not define a worker service.");
 if (/\n\s+redis:/.test(asgWebCompose)) failures.push("ASG web compose must not define a local Redis service.");
 if (/\n\s+minio:/.test(asgWebCompose)) failures.push("ASG web compose must not define a local MinIO service.");
@@ -213,6 +221,11 @@ requireMatch("ASG bootstrap", asgBootstrap, /\$\{ssmPrefix\}\$\{key\}/, "bootstr
 requireMatch("ASG bootstrap", asgBootstrap, /formatMissingParameter[\s\S]*missing required SSM parameter\(s\)/, "bootstrap must keep missing SSM parameter errors actionable without printing values.");
 requireMatch("ASG bootstrap", asgBootstrap, /root_env_path=.*\/\.env/, "bootstrap must write project .env.");
 requireMatch("ASG bootstrap", asgBootstrap, /backend_env_path=.*backend\/\.env/, "bootstrap must write backend/.env.");
+requireMatch("ASG bootstrap", asgBootstrap, /compose_env_path="\$tmp_dir\/compose\.env"/, "bootstrap must create a temporary Compose interpolation env file.");
+requireMatch("ASG bootstrap", asgBootstrap, /const composeEnv = new Map\(\[\.\.\.rootEnv\.entries\(\), \.\.\.backendEnv\.entries\(\)\]\)/, "bootstrap must render Compose interpolation env from rootEnv and backendEnv.");
+requireMatch("ASG bootstrap", asgBootstrap, /writeEnv\(composeEnvPath, "composeInterpolationEnv", composeEnv\)/, "bootstrap must write the Compose interpolation env without printing values.");
+requireMatch("ASG bootstrap", asgBootstrap, /docker compose --env-file "\$compose_env_path" -f docker-compose\.asg-web\.yml/, "bootstrap must pass the generated env file to docker compose interpolation.");
+requireMatch("ASG bootstrap", asgBootstrap, /required SSM parameter is empty/, "bootstrap must fail before Compose when a required SSM parameter exists but is empty.");
 requireMatch("ASG bootstrap", asgBootstrap, /fs\.chmodSync\(filePath, 0o600\)/, "bootstrap must chmod generated env files to 0600.");
 requireMatch("ASG bootstrap", asgBootstrap, /Forbidden ASG web-node parameter is present in SSM/, "bootstrap must reject forbidden parameters such as MinIO secrets.");
 requireMatch("ASG bootstrap", asgBootstrap, /RUN_BACKGROUND_WORKERS: "false"/, "bootstrap must force workers off.");
@@ -223,7 +236,7 @@ requireMatch("ASG bootstrap", asgBootstrap, /OBJECT_STORAGE_ENDPOINT: ""/, "boot
 requireMatch("ASG bootstrap", asgBootstrap, /OBJECT_STORAGE_ACCESS_KEY: ""/, "bootstrap must force static object access key empty.");
 requireMatch("ASG bootstrap", asgBootstrap, /OBJECT_STORAGE_SECRET_KEY: ""/, "bootstrap must force static object secret key empty.");
 requireMatch("ASG bootstrap", asgBootstrap, /OBJECT_STORAGE_FORCE_PATH_STYLE: "false"/, "bootstrap must force path-style false.");
-requireMatch("ASG bootstrap", asgBootstrap, /docker compose -f docker-compose\.asg-web\.yml up -d --build --remove-orphans backend frontend/, "bootstrap must start ASG web compose only.");
+requireMatch("ASG bootstrap", asgBootstrap, /docker compose --env-file "\$compose_env_path" -f docker-compose\.asg-web\.yml up -d --build --remove-orphans backend frontend/, "bootstrap must start ASG web compose only with the generated Compose interpolation env.");
 requireMatch("ASG bootstrap", asgBootstrap, /http:\/\/127\.0\.0\.1\/healthz/, "bootstrap must check frontend health through localhost.");
 requireMatch("ASG bootstrap", asgBootstrap, /http:\/\/127\.0\.0\.1\/api\/health\/ready/, "bootstrap must check backend readiness through frontend/Nginx path.");
 requireMatch("ASG bootstrap", asgBootstrap, /deps\.database\?\.ready === true/, "bootstrap must require database readiness.");
@@ -231,6 +244,9 @@ requireMatch("ASG bootstrap", asgBootstrap, /deps\.redis\?\.configured === true/
 requireMatch("ASG bootstrap", asgBootstrap, /deps\.redis\?\.ready === true/, "bootstrap must require Redis readiness.");
 requireMatch("ASG bootstrap", asgBootstrap, /deps\.objectStorage\?\.configured === true/, "bootstrap must require object storage configured.");
 requireMatch("ASG bootstrap", asgBootstrap, /deps\.objectStorage\?\.ready === true/, "bootstrap must require object storage readiness.");
+requireMatch("ASG compose interpolation check", asgComposeInterpolationCheck, /requiredInterpolationVars/, "local check must detect Compose required interpolation variables.");
+requireMatch("ASG compose interpolation check", asgComposeInterpolationCheck, /QR_SIGN_PRIVATE_KEY/, "local check must cover QR_SIGN_PRIVATE_KEY interpolation.");
+requireMatch("ASG compose interpolation check", asgComposeInterpolationCheck, /docker compose config/, "local check must support a docker compose config interpolation validation.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /write_asg_web_launch_template_json/, "common helpers must generate ASG web launch template JSON.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /validate_asg_launch_template_json/, "common helpers must validate ASG web launch template JSON.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /ASG_WEB_INSTANCE_PROFILE_ARN or ASG_WEB_INSTANCE_PROFILE_NAME is required/, "common helpers must require explicit ASG web instance profile input.");
@@ -416,12 +432,31 @@ if (/OBJECT_STORAGE_ENDPOINT=http:\/\/minio:9000/.test(`${mumbaiEnvExample}\n${c
 }
 
 if (asgSsmManifest) {
+  const collectManifestKeys = (section = {}) =>
+    new Set([
+      ...(section.requiredFromSsm || []),
+      ...(section.optionalFromSsm || []),
+      ...Object.keys(section.forced || {}),
+    ]);
   const rootRequired = new Set(asgSsmManifest.rootEnv?.requiredFromSsm || []);
   for (const key of ["AWS_REGION", "OBJECT_STORAGE_BUCKET", "OBJECT_STORAGE_REGION", "REDIS_URL"]) {
     if (!rootRequired.has(key)) failures.push(`ASG SSM manifest rootEnv.requiredFromSsm is missing ${key}.`);
   }
   const backendRequired = new Set(asgSsmManifest.backendEnv?.requiredFromSsm || []);
   const backendOptional = new Set(asgSsmManifest.backendEnv?.optionalFromSsm || []);
+  const composeEnvKeys = new Set([
+    ...collectManifestKeys(asgSsmManifest.rootEnv),
+    ...collectManifestKeys(asgSsmManifest.backendEnv),
+  ]);
+  const composeRequiredVars = new Set([...asgWebCompose.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*):\?/g)].map((item) => item[1]));
+  for (const key of composeRequiredVars) {
+    if (!composeEnvKeys.has(key)) {
+      failures.push(`ASG Compose requires ${key} during interpolation, but the SSM manifest does not render it into the Compose interpolation env.`);
+    }
+  }
+  for (const key of ["QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY", "QR_SIGN_ACTIVE_KEY_VERSION"]) {
+    if (!composeEnvKeys.has(key)) failures.push(`ASG Compose interpolation env must include ${key}.`);
+  }
   for (const key of [
     "DATABASE_URL",
     "JWT_SECRET_CURRENT",
@@ -576,10 +611,13 @@ if (asgRollingPolicyChecklist) {
     "try apt awscli before manual AWS CLI v2 fallback",
     "tee bootstrap output to /var/log/mscqr-asg-bootstrap.log and cloud-init console",
     "preserve bootstrap script exit code without pipefail",
+    "render temporary Compose interpolation env from rootEnv plus backendEnv",
+    "run docker compose with --env-file for Compose interpolation",
     "install/check node",
     "install/check npm",
     "pin Node.js major 24 for ASG host prerequisites",
     "report missing required SSM parameters with full paths and no values",
+    "fail before Compose when required SSM parameters exist but are empty",
     "clone ASG_REPO_URL into ASG_REPO_DIR when missing",
     "git fetch origin ASG_REPO_BRANCH",
     "git reset --hard origin/ASG_REPO_BRANCH",

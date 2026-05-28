@@ -22,6 +22,7 @@
     "check:documents": "node scripts/check-documents-organization.mjs",
     "check:architecture-guardrails": "node scripts/check-architecture-guardrails.mjs",
     "check:aws-dr-safety": "node scripts/check-aws-dr-safety.mjs",
+    "check:asg-compose-interpolation": "node scripts/dr/check-asg-compose-interpolation.mjs",
     "check:asg-multi-instance-readiness": "node scripts/dr/check-asg-multi-instance-readiness.mjs",
     "check:baseline-secret-patterns": "node scripts/check-baseline-secret-patterns.mjs",
     "check:branch-secret-diff": "node scripts/check-branch-secret-diff.mjs",

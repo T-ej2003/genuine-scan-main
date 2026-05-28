@@ -194,11 +194,11 @@ ASG requirement:
 
 Evidence:
 
-- Backend loads `.env` via dotenv and Compose uses `env_file: ./backend/.env`.
+- Backend loads `.env` via dotenv and Compose uses `env_file: ./backend/.env`. Docker Compose interpolation happens before service `env_file` values are applied, so ASG bootstrap also renders a temporary union env file and passes it with `docker compose --env-file`.
 - Production startup validates many required secret and URL values without printing secret values.
 - `scripts/dr/bootstrap-asg-web-node.sh` fetches env values from SSM Parameter Store with `--with-decryption`, writes project `.env` and `backend/.env` with `0600` permissions, and does not print secret values.
 - The bootstrap script validates required manifest keys, rejects MinIO secrets, and forces ASG-safe values before starting containers.
-- Missing required SSM values are reported as parameter names plus full paths, for example `DATABASE_URL (/mscqr/prod/ap-south-1/asg-web/DATABASE_URL)`, without printing values.
+- Missing required SSM values are reported as parameter names plus full paths, for example `DATABASE_URL (/mscqr/prod/ap-south-1/asg-web/DATABASE_URL)`, without printing values. Required parameters that exist but are empty fail before Compose with the same key/path-only diagnostics.
 - The bootstrap script starts only ASG web mode:
 
 ```bash
@@ -242,6 +242,7 @@ ASG requirement:
 - Do not rely on SSH/manual edits to `backend/.env` for new ASG instances.
 - Keep `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_ACCESS_KEY`, and `OBJECT_STORAGE_SECRET_KEY` empty.
 - Keep `OBJECT_STORAGE_FORCE_PATH_STYLE=false`, `REDIS_TLS=true`, `RUN_BACKGROUND_WORKERS=false`, `RUN_DB_MIGRATIONS_ON_START=false`, and `COMPLIANCE_PACK_SCHEDULER_ENABLED=false`.
+- `QR_SIGN_PRIVATE_KEY`, `QR_SIGN_PUBLIC_KEY`, and `QR_SIGN_ACTIVE_KEY_VERSION` must be present and non-empty in SSM because `docker-compose.asg-web.yml` interpolates them before the backend container starts. The value format remains the existing backend contract: base64-wrapped PEM or escaped-newline PEM, with no secret values printed by bootstrap or checks.
 - Recommended email sender override for Mumbai, if the SMTP provider authorizes it: `/mscqr/prod/ap-south-1/asg-web/SMTP_FROM`. This key is optional for boot, but should be created before email-delivery validation.
 
 Safe names-only SSM preflight:
@@ -276,6 +277,7 @@ ASG bootstrap checklist:
 - Fail clearly without deleting anything if `ASG_REPO_DIR` exists but is not a git checkout.
 - Pull or build the approved image for the exact commit SHA.
 - Fetch environment from SSM Parameter Store through instance profile using `scripts/dr/bootstrap-asg-web-node.sh`.
+- Render project `.env`, `backend/.env`, and a temporary Compose interpolation env file from SSM. The Compose interpolation env is a 0600 temp file containing the root/backend union so required variables such as `QR_SIGN_PRIVATE_KEY` are visible to `docker compose --env-file` without printing values.
 - Include launch-template `UserData` that logs only non-secret bootstrap status to `/var/log/mscqr-asg-bootstrap.log`.
 - Keep launch-template `IamInstanceProfile` explicit and supplied by `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`.
 - Set launch-template public IP behavior explicitly with `ASG_ASSOCIATE_PUBLIC_IP=true` or `ASG_ASSOCIATE_PUBLIC_IP=false`.
@@ -285,7 +287,7 @@ ASG bootstrap checklist:
 - Set backend `RUN_BACKGROUND_WORKERS=false` on web nodes.
 - Point `REDIS_URL` to shared regional Redis.
 - Point object storage to shared S3/managed endpoint.
-- Start only frontend/backend containers on web ASG nodes with `docker-compose.asg-web.yml`.
+- Start only frontend/backend containers on web ASG nodes with `docker-compose.asg-web.yml` and the generated `--env-file` interpolation env.
 - Register only after `/api/health/ready` is healthy.
 - Ship logs to CloudWatch; do not depend on instance-local log retention.
 
@@ -348,6 +350,7 @@ Mumbai retry note:
 - Latest retry evidence: the Docker Compose fallback succeeded, Docker Compose verification completed, the repo bootstrap reached `running bootstrap script`, and `scripts/dr/bootstrap-asg-web-node.sh` existed. Failure moved into the bootstrap script, likely because AWS CLI was missing for SSM fetches or because detailed bootstrap output was only redirected into `/var/log/mscqr-asg-bootstrap.log` on a terminated node. The fix adds AWS CLI as a UserData prerequisite and mirrors bootstrap output into cloud-init console while keeping the same non-secret log file.
 - Latest Node prerequisite evidence: instances reached repo HEAD `c97edfe`, AWS CLI installed from apt and verified, then `scripts/dr/bootstrap-asg-web-node.sh` failed with `ERROR: node is required.` New ASG targets reached EC2/ASG healthy states but failed ALB health checks because app bootstrap never completed; the old manual Mumbai target remained healthy and no DNS cutover happened. The fix adds Node.js 24/npm 11 host prerequisite checks before running the bootstrap script.
 - Latest SSM env-render evidence: fresh ASG nodes passed Git, Docker, Docker Compose, AWS CLI, Node.js 24, npm 11, repo clone, and bootstrap handoff, then failed while fetching `/mscqr/prod/ap-south-1/asg-web/` with `backendEnv missing required SSM parameter(s): SMTP_FROM`. Source review showed `SMTP_FROM` is a recommended authorized sender override, not a backend startup requirement; the backend falls back to `SMTP_USER` as the From address when absent. The ASG manifest now makes `SMTP_FROM` optional/recommended and missing required errors include the full SSM parameter path.
+- Latest Compose interpolation evidence: fresh ASG nodes rendered env files successfully and consumed SSM parameter names including `/mscqr/prod/ap-south-1/asg-web/QR_SIGN_PRIVATE_KEY`, but Compose failed before container creation with `services.backend.environment.QR_SIGN_PRIVATE_KEY` missing. Root cause: `QR_SIGN_PRIVATE_KEY` was written to `backend/.env`, while Compose interpolation runs before service `env_file` loading. The fix renders a temporary root/backend union env file and invokes `docker compose --env-file` so QR signing keys are available for interpolation and still passed into the backend container without logging values.
 - Mumbai selected public subnets currently have `MapPublicIpOnLaunch=false`, so the next no-DNS Mumbai retry should use `ASG_ASSOCIATE_PUBLIC_IP=true`.
 - The next no-DNS Mumbai retry should also use `ASG_KEY_NAME=mscqr-prod-mumbai` to make failed nodes inspectable.
 - The next no-DNS Mumbai retry should set `ASG_REPO_URL=https://github.com/T-ej2003/genuine-scan-main.git`, `ASG_REPO_BRANCH=main`, and `ASG_REPO_DIR=/home/ubuntu/genuine-scan-main`.
@@ -421,6 +424,7 @@ Run:
 
 ```bash
 node scripts/dr/check-asg-multi-instance-readiness.mjs
+node scripts/dr/check-asg-compose-interpolation.mjs --docker-compose-config
 /bin/sh -n scripts/dr/*.sh
 npm run check:aws-dr-safety
 npm run verify:guardrails

@@ -418,6 +418,7 @@ Rollback notes:
 - Latest retry evidence: the pinned Docker Compose fallback installed successfully, `docker compose` verification completed, and UserData reached `running bootstrap script` with `scripts/dr/bootstrap-asg-web-node.sh` present. The likely blocker is missing AWS CLI for SSM Parameter Store reads, with detailed bootstrap output previously visible only in `/var/log/mscqr-asg-bootstrap.log` on the replaced node. UserData now checks `aws --version`, tries apt `awscli`, falls back to AWS CLI v2 from the official installer, and tees bootstrap output to both the ASG bootstrap log and cloud-init console while preserving the script exit code.
 - Latest Node prerequisite evidence: AWS CLI installed from apt and verified, the repo cloned to `/home/ubuntu/genuine-scan-main` at HEAD `c97edfe`, and `scripts/dr/bootstrap-asg-web-node.sh` then failed with `ERROR: node is required.` UserData now checks `node --version` and `npm --version`, installs Node.js from pinned NodeSource major 24 when needed, and fails clearly with `failed to install node/npm` if the runtime remains unavailable.
 - Latest SSM env-render evidence: fresh ASG nodes passed Git, Docker, Docker Compose, AWS CLI, Node.js 24, npm 11, repo clone, and bootstrap handoff, then failed fetching `/mscqr/prod/ap-south-1/asg-web/` because `SMTP_FROM` was treated as required. Backend review confirmed `SMTP_FROM` is optional for boot and email sending falls back to the authenticated SMTP mailbox when absent. The ASG manifest now treats `/mscqr/prod/ap-south-1/asg-web/SMTP_FROM` as optional/recommended, while true missing required SSM keys are reported with their full paths and no values.
+- Latest Compose interpolation evidence: fresh ASG nodes rendered SSM-backed env files and then failed before container start with `QR_SIGN_PRIVATE_KEY` missing during Compose interpolation, even though the names-only SSM preflight showed `/mscqr/prod/ap-south-1/asg-web/QR_SIGN_PRIVATE_KEY` exists. The fix keeps `backend/.env` for container env, adds a temporary root/backend union env file for `docker compose --env-file`, and fails early if any required SSM parameter exists but is empty.
 - If `ASG_REPO_DIR` exists but is not a git checkout, UserData fails clearly and does not delete the directory automatically.
 - Preferred production design is private ASG subnets with NAT Gateway or VPC endpoints for SSM, EC2Messages, SSMMessages, S3, ECR, CloudWatch Logs, and Git access, then `ASG_ASSOCIATE_PUBLIC_IP=false`.
 
@@ -429,6 +430,12 @@ aws ssm describe-parameters \
   --parameter-filters "Key=Path,Option=Recursive,Values=/mscqr/prod/ap-south-1/asg-web/" \
   --query 'Parameters[].Name' \
   --output text | tr '\t' '\n' | sort
+```
+
+Local no-secret Compose interpolation preflight before apply:
+
+```bash
+node scripts/dr/check-asg-compose-interpolation.mjs --docker-compose-config
 ```
 
 Mumbai hardening values:

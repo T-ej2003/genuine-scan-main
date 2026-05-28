@@ -74,6 +74,7 @@ command -v node >/dev/null 2>&1 || die "node is required."
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mscqr-asg-bootstrap.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
 params_json="$tmp_dir/ssm-parameters.json"
+compose_env_path="$tmp_dir/compose.env"
 
 printf 'Fetching ASG web-node parameters from SSM path %s in %s...\n' "$ssm_prefix" "$aws_region"
 aws ssm get-parameters-by-path \
@@ -84,7 +85,7 @@ aws ssm get-parameters-by-path \
   --output json > "$params_json"
 
 umask 077
-node --input-type=module - "$manifest_path" "$params_json" "$ssm_prefix" "$root_env_path" "$backend_env_path" "$aws_region" <<'NODE'
+node --input-type=module - "$manifest_path" "$params_json" "$ssm_prefix" "$root_env_path" "$backend_env_path" "$compose_env_path" "$aws_region" <<'NODE'
 import fs from "node:fs";
 import path from "node:path";
 
@@ -94,6 +95,7 @@ const [
   ssmPrefix,
   rootEnvPath,
   backendEnvPath,
+  composeEnvPath,
   awsRegion,
 ] = process.argv.slice(2);
 
@@ -119,11 +121,19 @@ const formatMissingParameter = (key) => `${key} (${ssmPrefix}${key})`;
 
 const assertPresent = (sectionName, keys) => {
   const missing = [];
+  const empty = [];
   for (const key of keys || []) {
-    if (!values.has(key) || values.get(key) === "") missing.push(key);
+    if (!values.has(key)) {
+      missing.push(key);
+    } else if (values.get(key) === "") {
+      empty.push(key);
+    }
   }
   if (missing.length > 0) {
     fail(`${sectionName} missing required SSM parameter(s): ${missing.map(formatMissingParameter).join(", ")}`);
+  }
+  if (empty.length > 0) {
+    fail(`${sectionName} required SSM parameter is empty: ${empty.map(formatMissingParameter).join(", ")}`);
   }
 };
 
@@ -156,6 +166,7 @@ const buildSection = (section) => {
 
 const rootEnv = buildSection(manifest.rootEnv || {});
 const backendEnv = buildSection(manifest.backendEnv || {});
+const composeEnv = new Map([...rootEnv.entries(), ...backendEnv.entries()]);
 
 for (const key of ["AWS_REGION", "OBJECT_STORAGE_REGION"]) {
   if (rootEnv.get(key) !== awsRegion) {
@@ -213,8 +224,10 @@ const writeEnv = (filePath, sectionName, entries) => {
 
 writeEnv(rootEnvPath, "rootEnv", rootEnv);
 writeEnv(backendEnvPath, "backendEnv", backendEnv);
+writeEnv(composeEnvPath, "composeInterpolationEnv", composeEnv);
 
 console.log(`Rendered ${rootEnv.size} root env key(s) and ${backendEnv.size} backend env key(s).`);
+console.log(`Rendered ${composeEnv.size} Compose interpolation env key(s) into a temporary env file.`);
 console.log(`SSM parameter names consumed: ${parameters.length}. Values were not printed.`);
 NODE
 
@@ -229,7 +242,7 @@ command -v curl >/dev/null 2>&1 || die "curl is required unless ASG_BOOTSTRAP_SK
 printf 'Starting ASG web-node Compose mode (backend + frontend only)...\n'
 (
   cd "$project_dir"
-  docker compose -f docker-compose.asg-web.yml up -d --build --remove-orphans backend frontend
+  docker compose --env-file "$compose_env_path" -f docker-compose.asg-web.yml up -d --build --remove-orphans backend frontend
 )
 
 health_url="http://127.0.0.1/healthz"
