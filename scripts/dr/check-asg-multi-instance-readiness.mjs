@@ -253,9 +253,13 @@ requireMatch("ASG bootstrap", asgBootstrap, /print_asg_diagnostics/, "bootstrap 
 requireMatch("ASG bootstrap", asgBootstrap, /docker ps -a --format/, "bootstrap diagnostics must print docker container status without secrets.");
 requireMatch("ASG bootstrap", asgBootstrap, /print_backend_health_summary/, "bootstrap diagnostics must summarize backend readiness without secret values.");
 requireMatch("ASG bootstrap", asgBootstrap, /print_host_port_listeners/, "bootstrap diagnostics must show host port 80 listener state.");
+requireMatch("ASG bootstrap", asgBootstrap, /docker port genuine-scan-frontend/, "bootstrap diagnostics must show Docker frontend port mappings.");
+requireMatch("ASG bootstrap", asgBootstrap, /print_firewall_summary/, "bootstrap diagnostics must include host firewall summaries.");
 requireMatch("ASG bootstrap", asgBootstrap, /print_http_probe/, "bootstrap diagnostics must print HTTP status and timing for local health probes.");
 requireMatch("ASG bootstrap", asgBootstrap, /print_backend_container_probe/, "bootstrap diagnostics must include direct backend container liveness/readiness probes.");
 requireMatch("ASG bootstrap", asgBootstrap, /print_container_health_log/, "bootstrap diagnostics must include Docker healthcheck log output.");
+requireMatch("ASG bootstrap", asgBootstrap, /http:\/\/localhost\/healthz/, "bootstrap diagnostics must probe localhost /healthz.");
+requireMatch("ASG bootstrap", asgBootstrap, /http:\/\/\$host_ip\/healthz/, "bootstrap diagnostics must probe the host primary IP /healthz when available.");
 requireMatch("ASG bootstrap", asgBootstrap, /\/var\/log\/nginx\/access\.log/, "bootstrap diagnostics must include frontend Nginx access logs.");
 requireMatch("ASG bootstrap", asgBootstrap, /\/var\/log\/nginx\/error\.log/, "bootstrap diagnostics must include frontend Nginx error logs.");
 requireMatch("ASG bootstrap", asgBootstrap, /docker logs genuine-scan-backend --tail 160/, "bootstrap diagnostics must include backend log tail.");
@@ -272,13 +276,17 @@ requireMatch("ASG bootstrap", asgBootstrap, /OBJECT_STORAGE_SECRET_KEY: ""/, "bo
 requireMatch("ASG bootstrap", asgBootstrap, /OBJECT_STORAGE_FORCE_PATH_STYLE: "false"/, "bootstrap must force path-style false.");
 requireMatch("ASG bootstrap", asgBootstrap, /run_compose up -d --build --remove-orphans backend frontend/, "bootstrap must start ASG web compose only through the generated Compose interpolation env wrapper.");
 requireMatch("ASG bootstrap", asgBootstrap, /http:\/\/127\.0\.0\.1\/healthz/, "bootstrap must check frontend health through localhost.");
+requireMatch("ASG bootstrap", asgBootstrap, /ip route get 1\.1\.1\.1/, "bootstrap must derive the host primary IP from the host routing table before falling back to hostname -I.");
+requireMatch("ASG bootstrap", asgBootstrap, /host_health_url="http:\/\/\$host_ip\/healthz"/, "bootstrap must construct a host-primary-IP /healthz URL.");
+requireMatch("ASG bootstrap", asgBootstrap, /frontend_host_ip_healthz_ready/, "bootstrap must prove host-primary-IP /healthz before success.");
+requireMatch("ASG bootstrap", asgBootstrap, /frontend host-primary-IP \/healthz did not become healthy/, "bootstrap must fail clearly if host-primary-IP /healthz cannot pass.");
 requireMatch("ASG bootstrap", asgBootstrap, /http:\/\/127\.0\.0\.1\/api\/health\/ready/, "bootstrap must check backend readiness through frontend/Nginx path.");
 requireMatch("ASG bootstrap", asgBootstrap, /deps\.database\?\.ready === true/, "bootstrap must require database readiness.");
 requireMatch("ASG bootstrap", asgBootstrap, /deps\.redis\?\.configured === true/, "bootstrap must require Redis configured.");
 requireMatch("ASG bootstrap", asgBootstrap, /deps\.redis\?\.ready === true/, "bootstrap must require Redis readiness.");
 requireMatch("ASG bootstrap", asgBootstrap, /deps\.objectStorage\?\.configured === true/, "bootstrap must require object storage configured.");
 requireMatch("ASG bootstrap", asgBootstrap, /deps\.objectStorage\?\.ready === true/, "bootstrap must require object storage readiness.");
-requireMatch("ASG bootstrap", asgBootstrap, /CONDITIONALLY_READY: frontend \/healthz is healthy/, "bootstrap must keep edge liveness success separate from degraded dependency readiness.");
+requireMatch("ASG bootstrap", asgBootstrap, /CONDITIONALLY_READY: loopback \/healthz and host-primary-IP \/healthz are healthy/, "bootstrap must keep edge liveness success separate from degraded dependency readiness.");
 requireMatch("ASG bootstrap", asgBootstrap, /ASG web-node bootstrap completed with CONDITIONALLY_READY app readiness/, "bootstrap must exit successfully with explicit conditional diagnostics when only deep readiness is degraded.");
 requireMatch("ASG compose interpolation check", asgComposeInterpolationCheck, /requiredInterpolationVars/, "local check must detect Compose required interpolation variables.");
 requireMatch("ASG compose interpolation check", asgComposeInterpolationCheck, /\(\?::\\\?\|\\\?\)/, "local check must detect both ${VAR:?message} and ${VAR?message} forms.");
@@ -434,9 +442,17 @@ requireMatch("routes", routes, /\/healthz/, "backend routes must expose liveness
 requireMatch("ASG evidence collector", asgEvidenceCollector, /describe-auto-scaling-groups/, "evidence collector must read ASG state.");
 requireMatch("ASG evidence collector", asgEvidenceCollector, /describe-target-health/, "evidence collector must read target health.");
 requireMatch("ASG evidence collector", asgEvidenceCollector, /get-console-output/, "evidence collector must collect console output.");
-requireMatch("ASG evidence collector", asgEvidenceCollector, /for instance_id in \$ASG_INSTANCE_IDS/, "evidence collector must iterate instance IDs individually.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /set -- \$ASG_INSTANCE_IDS/, "evidence collector must split ASG instance IDs into separate POSIX shell arguments.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /collect_all_instance_ips "\$@"/, "evidence collector must describe multiple instances with separate arguments.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /--instance-ids "\$@"/, "evidence collector must pass multi-instance describe IDs as separate AWS args.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /for instance_id do/, "evidence collector must iterate instance IDs individually.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /curl_public_health "\$instance_id" "\$public_ip"/, "evidence collector must curl each public instance IP safely.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /ALLOW_SSH_DEEP_INSPECTION/, "evidence collector must gate optional SSH deep inspection behind ALLOW_SSH_DEEP_INSPECTION.");
 requireMatch("ASG evidence collector", asgEvidenceCollector, /\/tmp\/mscqr-asg-evidence/, "evidence collector must write local evidence under /tmp/mscqr-asg-evidence.");
 requireMatch("ASG evidence collector", asgEvidenceCollector, /gzip -kf/, "evidence collector must gzip evidence logs.");
+if (/--instance-ids "\$ASG_INSTANCE_IDS"/.test(asgEvidenceCollector)) {
+  failures.push("ASG evidence collector must not pass newline-separated ASG_INSTANCE_IDS as one --instance-ids argument.");
+}
 if (/update-auto-scaling-group|create-launch-template|modify-launch-template|terminate-instances|change-resource-record-sets|put-parameter|delete-parameter/.test(asgEvidenceCollector)) {
   failures.push("ASG evidence collector must stay read-only and must not contain AWS mutation commands.");
 }
@@ -665,9 +681,12 @@ if (asgRollingPolicyChecklist) {
     "run docker compose with --env-file for Compose interpolation",
     "use docker compose --env-file for diagnostics",
     "print safe backend/frontend diagnostics on bootstrap readiness failure",
-    "verify /healthz as hard edge liveness before bootstrap success",
+    "verify loopback /healthz and host-primary-IP /healthz as hard edge liveness before bootstrap success",
     "record degraded /api/health/ready as CONDITIONALLY_READY dependency evidence",
     "print host port 80 listener diagnostics",
+    "print Docker frontend port mapping diagnostics",
+    "print host firewall diagnostics",
+    "print localhost and host-primary-IP /healthz diagnostics",
     "print HTTP status and timing diagnostics for /healthz and /api/health/ready",
     "print frontend Nginx access and error log tails",
     "install/check node",

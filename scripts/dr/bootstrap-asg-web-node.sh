@@ -276,6 +276,35 @@ print_host_port_listeners() {
   printf 'host listener check unavailable: ss/netstat not installed\n'
 }
 
+print_firewall_summary() {
+  if command -v iptables >/dev/null 2>&1; then
+    printf '\n--- iptables rules summary ---\n'
+    iptables -S 2>/dev/null | awk 'NR <= 120' || true
+  else
+    printf 'iptables unavailable\n'
+  fi
+  if command -v nft >/dev/null 2>&1; then
+    printf '\n--- nft ruleset summary ---\n'
+    nft list ruleset 2>/dev/null | awk 'NR <= 160' || true
+  else
+    printf 'nft unavailable\n'
+  fi
+}
+
+first_host_ip() {
+  host_ip=""
+  if command -v ip >/dev/null 2>&1; then
+    host_ip="$(ip route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}' || true)"
+  fi
+  if [ -n "$host_ip" ]; then
+    printf '%s\n' "$host_ip"
+    return 0
+  fi
+  if command -v hostname >/dev/null 2>&1; then
+    hostname -I 2>/dev/null | awk '{print $1}'
+  fi
+}
+
 print_safe_body_snippet() {
   body_path="$1"
   node --input-type=module - "$body_path" <<'NODE' 2>/dev/null || true
@@ -436,8 +465,14 @@ print_asg_diagnostics() {
   printf '\n=== Docker Compose ps ===\n'
   run_compose ps 2>/dev/null || true
 
+  printf '\n=== Docker frontend port mappings ===\n'
+  docker port genuine-scan-frontend 2>/dev/null || true
+
   printf '\n=== Host listeners for 80/443/4000 ===\n'
   print_host_port_listeners
+
+  printf '\n=== Host firewall summary ===\n'
+  print_firewall_summary
 
   printf '\n=== Container inspect status ===\n'
   print_container_state genuine-scan-backend
@@ -453,6 +488,13 @@ print_asg_diagnostics() {
 
   printf '\n=== Local HTTP probes ===\n'
   print_http_probe "frontend_healthz" "http://127.0.0.1/healthz"
+  print_http_probe "frontend_localhost_healthz" "http://localhost/healthz"
+  host_ip="$(first_host_ip || true)"
+  if [ -n "$host_ip" ]; then
+    print_http_probe "frontend_host_ip_healthz" "http://$host_ip/healthz"
+  else
+    printf 'frontend_host_ip_healthz skipped: hostname -I returned no IP\n'
+  fi
   print_http_probe "frontend_api_health_ready" "http://127.0.0.1/api/health/ready"
 
   printf '\n=== Direct backend container probes ===\n'
@@ -481,6 +523,12 @@ fi
 health_url="http://127.0.0.1/healthz"
 ready_url="http://127.0.0.1/api/health/ready"
 ready_json="$tmp_dir/ready.json"
+host_ip="$(first_host_ip || true)"
+if [ -z "$host_ip" ]; then
+  print_asg_diagnostics
+  die "host primary IP is required for ASG edge health validation."
+fi
+host_health_url="http://$host_ip/healthz"
 
 printf 'Waiting for frontend health at %s...\n' "$health_url"
 i=0
@@ -493,6 +541,21 @@ while :; do
   if [ "$i" -gt 40 ]; then
     print_asg_diagnostics
     die "frontend /healthz did not become healthy."
+  fi
+  sleep 3
+done
+
+printf 'Waiting for host-network frontend health at %s...\n' "$host_health_url"
+i=0
+while :; do
+  if curl -fsS "$host_health_url" >/dev/null 2>&1; then
+    print_http_probe "frontend_host_ip_healthz_ready" "$host_health_url"
+    break
+  fi
+  i=$((i + 1))
+  if [ "$i" -gt 40 ]; then
+    print_asg_diagnostics
+    die "frontend host-primary-IP /healthz did not become healthy."
   fi
   sleep 3
 done
@@ -525,7 +588,7 @@ NODE
   fi
   i=$((i + 1))
   if [ "$i" -gt 60 ]; then
-    printf 'CONDITIONALLY_READY: frontend /healthz is healthy, but /api/health/ready did not report database, redis, and objectStorage ready within the bootstrap evidence window.\n'
+    printf 'CONDITIONALLY_READY: loopback /healthz and host-primary-IP /healthz are healthy, but /api/health/ready did not report database, redis, and objectStorage ready within the bootstrap evidence window.\n'
     print_asg_diagnostics
     break
   fi
@@ -533,7 +596,7 @@ NODE
 done
 
 if [ "$ready_status" = "ready" ]; then
-  printf 'ASG web-node bootstrap completed: /healthz and /api/health/ready are healthy.\n'
+  printf 'ASG web-node bootstrap completed: loopback /healthz, host-primary-IP /healthz, and /api/health/ready are healthy.\n'
 else
-  printf 'ASG web-node bootstrap completed with CONDITIONALLY_READY app readiness: /healthz is healthy; /api/health/ready remains degraded. See diagnostics above.\n'
+  printf 'ASG web-node bootstrap completed with CONDITIONALLY_READY app readiness: loopback /healthz and host-primary-IP /healthz are healthy; /api/health/ready remains degraded. See diagnostics above.\n'
 fi

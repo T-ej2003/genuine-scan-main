@@ -119,7 +119,7 @@ Latest SSM env-render evidence: fresh ASG nodes reached `Fetching ASG web-node p
 
 Latest Compose interpolation evidence: fresh ASG nodes rendered 9 root env keys and 135 backend env keys, consumed 130 SSM parameter names, and then failed with `error while interpolating services.backend.environment.QR_SIGN_PRIVATE_KEY`. The names-only preflight showed `/mscqr/prod/ap-south-1/asg-web/QR_SIGN_PRIVATE_KEY` exists, so the repo-side issue was interpolation scope, not proof that the secret value was absent. The bootstrap now fails early for empty required values, writes project `.env` as a persistent Compose interpolation env, and passes a generated temp env file to Compose so QR signing keys are available without printing them.
 
-Latest ASG health evidence: fresh ASG nodes got through Docker image builds, backend startup, backend container health, frontend/Nginx startup, and waits for `http://127.0.0.1/healthz` plus `http://127.0.0.1/api/health/ready`. Apply briefly reached `HEALTHY_TARGET_COUNT=2`, then later inspection showed ASG and ALB health disagreeing or flapping. The repo fix keeps `/healthz` independent of backend dependencies and hard-fails only if edge liveness or host port 80 fails; degraded `/api/health/ready` now logs `CONDITIONALLY_READY` dependency evidence with no-secret diagnostics for listener state, HTTP status/timing, Nginx logs, Docker health output, direct backend probes, and sanitized database/Redis/object-storage readiness.
+Latest ASG health evidence: fresh ASG nodes got through Docker image builds, backend startup, backend container health, frontend/Nginx startup, and waits for `http://127.0.0.1/healthz` plus `http://127.0.0.1/api/health/ready`; console evidence showed local `frontend_healthz_ready: ok http_status=200`. Apply briefly reached `HEALTHY_TARGET_COUNT=2`, then later inspection showed ASG and ALB health disagreeing or flapping with ASG targets in `Target.FailedHealthChecks` on port 80. The previous evidence collection malformed multiple instance IDs into a single AWS argument, hiding the real per-instance state. The repo fix keeps `/healthz` independent of backend dependencies, hard-fails unless both loopback and host-primary-IP edge liveness pass, adds Docker port mapping plus firewall diagnostics, and hardens evidence collection to split IDs safely, curl each public IP, and loop console/SSH collection per instance.
 
 Safe names-only SSM preflight before retry:
 
@@ -173,7 +173,7 @@ TARGET_GROUP_ARN=arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgrou
 npm run ops:asg-health-evidence
 ```
 
-Optional SSH deep inspection requires `ENABLE_ASG_SSH_DEEP_INSPECTION=I_APPROVE_READ_ONLY_SSH` and `ASG_SSH_KEY=/Users/abhiramteja/Desktop/keys/mscqr-prod-mumbai.pem`. Immediate rollback remains:
+Optional SSH deep inspection requires `ALLOW_SSH_DEEP_INSPECTION=true` and `ASG_SSH_KEY=/Users/abhiramteja/Desktop/keys/mscqr-prod-mumbai.pem`. Immediate rollback remains:
 
 ```bash
 aws autoscaling update-auto-scaling-group --region ap-south-1 --auto-scaling-group-name mscqr-mumbai-dr-asg --min-size 0 --desired-capacity 0 --max-size 4

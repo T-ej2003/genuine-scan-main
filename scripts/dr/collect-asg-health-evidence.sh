@@ -14,7 +14,7 @@ Required environment:
   TARGET_GROUP_ARN     ALB target group ARN
 
 Optional read-only SSH inspection:
-  ENABLE_ASG_SSH_DEEP_INSPECTION=I_APPROVE_READ_ONLY_SSH
+  ALLOW_SSH_DEEP_INSPECTION=true
   ASG_SSH_KEY=/path/to/key.pem
   ASG_SSH_USER=ubuntu
 
@@ -34,6 +34,7 @@ ASG_NAME="${ASG_NAME:-}"
 TARGET_GROUP_ARN="${TARGET_GROUP_ARN:-}"
 ASG_SSH_USER="${ASG_SSH_USER:-ubuntu}"
 ASG_SSH_KEY="${ASG_SSH_KEY:-}"
+ALLOW_SSH_DEEP_INSPECTION="${ALLOW_SSH_DEEP_INSPECTION:-}"
 ENABLE_ASG_SSH_DEEP_INSPECTION="${ENABLE_ASG_SSH_DEEP_INSPECTION:-}"
 
 [ -n "$TARGET_REGION_GROUP" ] || { echo "TARGET_REGION_GROUP is required." >&2; exit 1; }
@@ -77,10 +78,51 @@ collect_instance_ips() {
     --output table
 }
 
+collect_all_instance_ips() {
+  [ "$#" -gt 0 ] || {
+    printf 'No current ASG instance IDs to describe.\n'
+    return 0
+  }
+  aws ec2 describe-instances \
+    --region "$AWS_REGION" \
+    --instance-ids "$@" \
+    --query 'Reservations[].Instances[].{Id:InstanceId,State:State.Name,LaunchTime:LaunchTime,PrivateIp:PrivateIpAddress,PublicIp:PublicIpAddress,SecurityGroups:SecurityGroups[].GroupId}' \
+    --output table
+}
+
+get_instance_public_ip() {
+  instance_id="$1"
+  aws ec2 describe-instances \
+    --region "$AWS_REGION" \
+    --instance-ids "$instance_id" \
+    --query 'Reservations[0].Instances[0].PublicIpAddress' \
+    --output text 2>/dev/null || true
+}
+
+curl_public_health() {
+  instance_id="$1"
+  public_ip="$2"
+  if [ -z "$public_ip" ] || [ "$public_ip" = "None" ]; then
+    printf 'Public /healthz curl skipped for %s: no public IP.\n' "$instance_id"
+    return 0
+  fi
+  body_path="$out_dir/public-healthz-$instance_id.body"
+  meta_path="$out_dir/public-healthz-$instance_id.meta"
+  if curl -sS -m 10 -o "$body_path" -w 'http_status=%{http_code} total_time=%{time_total} remote_ip=%{remote_ip}\n' "http://$public_ip/healthz" > "$meta_path" 2>&1; then
+    printf 'Public /healthz curl for %s (%s): ok ' "$instance_id" "$public_ip"
+  else
+    printf 'Public /healthz curl for %s (%s): failed ' "$instance_id" "$public_ip"
+  fi
+  cat "$meta_path" 2>/dev/null || true
+  printf 'Public /healthz body snippet for %s:\n' "$instance_id"
+  sed -n '1,8p' "$body_path" 2>/dev/null | tr -cd '\11\12\15\40-\176' || true
+  printf '\n'
+}
+
 ssh_deep_inspection() {
   instance_id="$1"
   public_ip="$2"
-  if [ "$ENABLE_ASG_SSH_DEEP_INSPECTION" != "I_APPROVE_READ_ONLY_SSH" ]; then
+  if [ "$ALLOW_SSH_DEEP_INSPECTION" != "true" ] && [ "$ENABLE_ASG_SSH_DEEP_INSPECTION" != "I_APPROVE_READ_ONLY_SSH" ]; then
     printf 'SSH deep inspection skipped for %s: approval env not set.\n' "$instance_id"
     return 0
   fi
@@ -102,11 +144,28 @@ ssh_deep_inspection() {
     sudo tail -n 180 /var/log/cloud-init-output.log 2>/dev/null || true
     printf "\n--- host listeners ---\n"
     (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null || true) | awk "NR == 1 || /:80|:443|:4000/"
+    printf "\n--- docker port frontend ---\n"
+    docker port genuine-scan-frontend 2>/dev/null || true
+    printf "\n--- firewall summary ---\n"
+    (sudo iptables -S 2>/dev/null | head -n 80 || true)
+    (sudo nft list ruleset 2>/dev/null | head -n 120 || true)
     printf "\n--- docker ps ---\n"
     docker ps -a --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || true
     printf "\n--- local /healthz ---\n"
     curl -sS -m 8 -o /tmp/mscqr-healthz.body -w "http_status=%{http_code} total_time=%{time_total}\n" http://127.0.0.1/healthz 2>&1 || true
     head -n 8 /tmp/mscqr-healthz.body 2>/dev/null || true
+    printf "\n--- localhost /healthz ---\n"
+    curl -sS -m 8 -o /tmp/mscqr-localhost-healthz.body -w "http_status=%{http_code} total_time=%{time_total}\n" http://localhost/healthz 2>&1 || true
+    head -n 8 /tmp/mscqr-localhost-healthz.body 2>/dev/null || true
+    host_ip="$(ip route get 1.1.1.1 2>/dev/null | awk "{for (i = 1; i <= NF; i++) if (\$i == \"src\") {print \$(i + 1); exit}}" || true)"
+    if [ -z "$host_ip" ]; then
+      host_ip="$(hostname -I 2>/dev/null | awk "{print \$1}")"
+    fi
+    if [ -n "$host_ip" ]; then
+      printf "\n--- host-ip /healthz (%s) ---\n" "$host_ip"
+      curl -sS -m 8 -o /tmp/mscqr-hostip-healthz.body -w "http_status=%{http_code} total_time=%{time_total}\n" "http://$host_ip/healthz" 2>&1 || true
+      head -n 8 /tmp/mscqr-hostip-healthz.body 2>/dev/null || true
+    fi
     printf "\n--- local /api/health/ready ---\n"
     curl -sS -m 8 -o /tmp/mscqr-ready.body -w "http_status=%{http_code} total_time=%{time_total}\n" http://127.0.0.1/api/health/ready 2>&1 || true
     node -e "const fs=require(\"fs\"); const p=\"/tmp/mscqr-ready.body\"; if (fs.existsSync(p)) { try { const x=JSON.parse(fs.readFileSync(p,\"utf8\")); const d=x.dependencies||{}; console.log(JSON.stringify({success:x.success===true,status:x.status||\"unknown\",dependencies:Object.fromEntries([\"database\",\"redis\",\"objectStorage\"].map(k=>[k,{configured:d[k]?.configured===true,ready:d[k]?.ready===true,errorPresent:Boolean(d[k]?.error)}]))})); } catch { console.log(fs.readFileSync(p,\"utf8\").slice(0,500)); } }" 2>/dev/null || true
@@ -147,15 +206,15 @@ ASG_INSTANCE_IDS="$(aws autoscaling describe-auto-scaling-groups \
   printf '%s\n' "$ASG_INSTANCE_IDS"
 } >> "$log_file"
 
-for instance_id in $ASG_INSTANCE_IDS; do
+set -- $ASG_INSTANCE_IDS
+run_section "All current ASG instance IPs" collect_all_instance_ips "$@"
+
+for instance_id do
   [ -n "$instance_id" ] || continue
   run_section "Instance $instance_id IPs" collect_instance_ips "$instance_id"
   run_section "Instance $instance_id filtered console output" safe_console_output "$instance_id"
-  public_ip="$(aws ec2 describe-instances \
-    --region "$AWS_REGION" \
-    --instance-ids "$instance_id" \
-    --query 'Reservations[0].Instances[0].PublicIpAddress' \
-    --output text 2>/dev/null || true)"
+  public_ip="$(get_instance_public_ip "$instance_id")"
+  run_section "Instance $instance_id public /healthz curl" curl_public_health "$instance_id" "$public_ip"
   run_section "Instance $instance_id optional SSH deep inspection" ssh_deep_inspection "$instance_id" "$public_ip"
 done
 
