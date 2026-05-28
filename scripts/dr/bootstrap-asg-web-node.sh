@@ -222,11 +222,11 @@ const writeEnv = (filePath, sectionName, entries) => {
   fs.chmodSync(filePath, 0o600);
 };
 
-writeEnv(rootEnvPath, "rootEnv", rootEnv);
 writeEnv(backendEnvPath, "backendEnv", backendEnv);
+writeEnv(rootEnvPath, "composeRootEnv", composeEnv);
 writeEnv(composeEnvPath, "composeInterpolationEnv", composeEnv);
 
-console.log(`Rendered ${rootEnv.size} root env key(s) and ${backendEnv.size} backend env key(s).`);
+console.log(`Rendered ${composeEnv.size} project Compose env key(s) and ${backendEnv.size} backend env key(s).`);
 console.log(`Rendered ${composeEnv.size} Compose interpolation env key(s) into a temporary env file.`);
 console.log(`SSM parameter names consumed: ${parameters.length}. Values were not printed.`);
 NODE
@@ -239,11 +239,104 @@ fi
 command -v docker >/dev/null 2>&1 || die "docker is required unless ASG_BOOTSTRAP_SKIP_DOCKER=true."
 command -v curl >/dev/null 2>&1 || die "curl is required unless ASG_BOOTSTRAP_SKIP_DOCKER=true."
 
+run_compose() {
+  (
+    cd "$project_dir"
+    docker compose --env-file "$compose_env_path" -f docker-compose.asg-web.yml "$@"
+  )
+}
+
+print_container_state() {
+  container_name="$1"
+  if ! docker inspect "$container_name" >/dev/null 2>&1; then
+    printf '%s: container not found\n' "$container_name"
+    return 0
+  fi
+  docker inspect --format='{{.Name}} state={{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_name" 2>/dev/null || true
+}
+
+print_backend_health_summary() {
+  if ! docker inspect genuine-scan-backend >/dev/null 2>&1; then
+    printf 'backend health summary unavailable: backend container not found\n'
+    return 0
+  fi
+  docker exec -i genuine-scan-backend node <<'NODE' 2>/dev/null || true
+const http = require("node:http");
+
+const summarize = (payload) => {
+  const dependencies = payload.dependencies || {};
+  const result = {
+    success: payload.success === true,
+    status: payload.status || "unknown",
+    dependencies: {},
+  };
+  for (const name of ["database", "redis", "objectStorage"]) {
+    const dependency = dependencies[name] || {};
+    result.dependencies[name] = {
+      configured: dependency.configured === true,
+      ready: dependency.ready === true,
+      errorPresent: Boolean(dependency.error),
+    };
+  }
+  return result;
+};
+
+const request = http.get("http://127.0.0.1:4000/health/ready", (response) => {
+  let body = "";
+  response.setEncoding("utf8");
+  response.on("data", (chunk) => {
+    body += chunk;
+    if (body.length > 65536) request.destroy();
+  });
+  response.on("end", () => {
+    try {
+      const payload = JSON.parse(body);
+      console.log(JSON.stringify(summarize(payload)));
+    } catch {
+      console.log(JSON.stringify({ success: false, status: "unparseable", httpStatus: response.statusCode }));
+    }
+  });
+});
+request.setTimeout(5000, () => request.destroy());
+request.on("error", () => {
+  console.log(JSON.stringify({ success: false, status: "request_failed" }));
+});
+NODE
+}
+
+print_asg_diagnostics() {
+  printf '\n=== ASG web-node diagnostics (no secret values) ===\n'
+  printf '\n=== Docker containers ===\n'
+  docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || true
+
+  printf '\n=== Docker Compose ps ===\n'
+  run_compose ps 2>/dev/null || true
+
+  printf '\n=== Container inspect status ===\n'
+  print_container_state genuine-scan-backend
+  print_container_state genuine-scan-frontend
+
+  printf '\n=== Backend readiness summary ===\n'
+  print_backend_health_summary
+
+  printf '\n=== Local health curls ===\n'
+  curl -fsS -m 5 http://127.0.0.1/healthz 2>&1 || true
+  printf '\n'
+  curl -fsS -m 5 http://127.0.0.1/api/health/ready 2>&1 || true
+  printf '\n'
+
+  printf '\n=== Backend logs tail ===\n'
+  docker logs genuine-scan-backend --tail 160 2>&1 || true
+  printf '\n=== Frontend logs tail ===\n'
+  docker logs genuine-scan-frontend --tail 160 2>&1 || true
+  printf '\n=== End ASG web-node diagnostics ===\n'
+}
+
 printf 'Starting ASG web-node Compose mode (backend + frontend only)...\n'
-(
-  cd "$project_dir"
-  docker compose --env-file "$compose_env_path" -f docker-compose.asg-web.yml up -d --build --remove-orphans backend frontend
-)
+if ! run_compose up -d --build --remove-orphans backend frontend; then
+  print_asg_diagnostics
+  die "docker compose ASG web startup failed."
+fi
 
 health_url="http://127.0.0.1/healthz"
 ready_url="http://127.0.0.1/api/health/ready"
@@ -256,7 +349,10 @@ while :; do
     break
   fi
   i=$((i + 1))
-  [ "$i" -le 40 ] || die "frontend /healthz did not become healthy."
+  if [ "$i" -gt 40 ]; then
+    print_asg_diagnostics
+    die "frontend /healthz did not become healthy."
+  fi
   sleep 3
 done
 
@@ -285,7 +381,10 @@ NODE
     fi
   fi
   i=$((i + 1))
-  [ "$i" -le 60 ] || die "backend readiness did not report database, redis, and objectStorage ready."
+  if [ "$i" -gt 60 ]; then
+    print_asg_diagnostics
+    die "backend readiness did not report database, redis, and objectStorage ready."
+  fi
   sleep 3
 done
 

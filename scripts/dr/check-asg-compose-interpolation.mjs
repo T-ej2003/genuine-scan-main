@@ -33,7 +33,7 @@ const backendKeys = collectSectionKeys(manifest.backendEnv);
 const composeEnvKeys = new Set([...rootKeys, ...backendKeys]);
 
 const requiredInterpolationVars = new Set();
-const requiredInterpolationPattern = /\$\{([A-Za-z_][A-Za-z0-9_]*):\?/g;
+const requiredInterpolationPattern = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::\?|\?)[^}]*\}/g;
 let match;
 while ((match = requiredInterpolationPattern.exec(compose)) !== null) {
   requiredInterpolationVars.add(match[1]);
@@ -56,6 +56,9 @@ for (const variable of ["QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY", "QR_SIGN_AC
 
 if (!/const composeEnv = new Map\(\[\.\.\.rootEnv\.entries\(\), \.\.\.backendEnv\.entries\(\)\]\)/.test(bootstrap)) {
   fail(`${bootstrapPath} must render a Compose interpolation env from rootEnv plus backendEnv.`);
+}
+if (!/writeEnv\(rootEnvPath, "composeRootEnv", composeEnv\)/.test(bootstrap)) {
+  fail(`${bootstrapPath} must persist project .env as a Compose interpolation env for post-bootstrap diagnostics.`);
 }
 if (!/docker compose --env-file "\$compose_env_path" -f docker-compose\.asg-web\.yml/.test(bootstrap)) {
   fail(`${bootstrapPath} must pass the generated Compose interpolation env with docker compose --env-file.`);
@@ -96,9 +99,14 @@ if (runDockerComposeConfig) {
   try {
     fs.writeFileSync(path.join(tmpDir, "docker-compose.asg-web.yml"), compose);
     fs.mkdirSync(path.join(tmpDir, "backend"), { recursive: true });
+    writeEnv(path.join(tmpDir, ".env"), composeEnvKeys);
     writeEnv(path.join(tmpDir, "compose.env"), composeEnvKeys);
     writeEnv(path.join(tmpDir, "backend", ".env"), backendKeys);
     execFileSync("docker", ["compose", "--env-file", "compose.env", "-f", "docker-compose.asg-web.yml", "config", "--quiet"], {
+      cwd: tmpDir,
+      stdio: "pipe",
+    });
+    execFileSync("docker", ["compose", "-f", "docker-compose.asg-web.yml", "config", "--quiet"], {
       cwd: tmpDir,
       stdio: "pipe",
     });
