@@ -255,6 +255,14 @@ requireMatch("DR common", requireFile("scripts/dr/common.sh"), /x86_64\|amd64\).
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /aarch64\|arm64\).*ARCH="aarch64"/, "UserData must map aarch64 and arm64 Compose release architecture.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /failed to install docker compose plugin from pinned release/, "UserData must fail clearly if manual Compose plugin fallback fails.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /verifying docker compose[\s\S]*docker compose version/, "UserData must verify Docker Compose after apt or manual fallback.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /checking aws cli[\s\S]*aws --version/, "UserData must check AWS CLI before running the bootstrap script.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /apt-get install -y awscli/, "UserData must try apt awscli before manual AWS CLI v2 fallback.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /awscli\.amazonaws\.com\/awscli-exe-linux-\\?\$\{ARCH\}\.zip/, "UserData must use the official AWS CLI v2 installer URL.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /apt-get install -y curl unzip ca-certificates/, "UserData must install unzip for manual AWS CLI v2 fallback.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /install_aws_cli_v2_from_official_installer/, "UserData must include the manual AWS CLI v2 installer fallback.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /x86_64\|amd64\).*ARCH="x86_64"/, "UserData must map x86_64 and amd64 installer architecture.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /aarch64\|arm64\).*ARCH="aarch64"/, "UserData must map aarch64 and arm64 installer architecture.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /verifying aws cli[\s\S]*aws --version/, "UserData must verify AWS CLI before bootstrap.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /git clone --branch "\$ASG_REPO_BRANCH" --depth 1 "\$ASG_REPO_URL" "\$ASG_REPO_DIR"/, "UserData must clone the repo when missing.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /repo directory exists but is not a git checkout/, "UserData must fail clearly when ASG_REPO_DIR exists but is not a git checkout.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /docker --version/, "UserData safe diagnostics must include docker version when available.");
@@ -265,6 +273,10 @@ requireMatch("DR common", requireFile("scripts/dr/common.sh"), /\/bin\/ls -ld "\
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /git fetch origin "\$ASG_REPO_BRANCH"/, "UserData must fetch configured branch.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /git reset --hard "origin\/\$ASG_REPO_BRANCH"/, "UserData must reset to configured branch.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /scripts\/dr\/bootstrap-asg-web-node\.sh "\$TARGET_REGION_GROUP" "\$AWS_REGION"/, "UserData must run the ASG bootstrap script with region inputs.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /scripts\/dr\/bootstrap-asg-web-node\.sh "\$TARGET_REGION_GROUP" "\$AWS_REGION"[\s\S]*tee -a "\$log_file"/, "UserData must tee bootstrap output to the log and cloud-init console.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /bootstrap_status_file="\$\(mktemp\)"/, "UserData must capture bootstrap script status without relying on pipefail.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /bootstrap_status="\$\(\/bin\/cat "\$bootstrap_status_file"\)"/, "UserData must read the captured bootstrap script status.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /bootstrap script failed/, "UserData must log a clear non-secret bootstrap failure line.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /MetadataOptions\?\.HttpTokens !== "required"/, "launch template validation must require IMDSv2 token enforcement.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /data\.IamInstanceProfile/, "launch template validation must require IamInstanceProfile.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /data\.UserData/, "launch template validation must require UserData.");
@@ -528,6 +540,10 @@ if (asgRollingPolicyChecklist) {
     "install/check docker compose",
     "try apt docker-compose-plugin before manual Compose fallback",
     "install pinned Docker Compose v2 plugin under /usr/local/lib/docker/cli-plugins/docker-compose when apt plugin is unavailable",
+    "install/check aws cli",
+    "try apt awscli before manual AWS CLI v2 fallback",
+    "tee bootstrap output to /var/log/mscqr-asg-bootstrap.log and cloud-init console",
+    "preserve bootstrap script exit code without pipefail",
     "clone ASG_REPO_URL into ASG_REPO_DIR when missing",
     "git fetch origin ASG_REPO_BRANCH",
     "git reset --hard origin/ASG_REPO_BRANCH",

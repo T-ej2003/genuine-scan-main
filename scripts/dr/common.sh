@@ -443,6 +443,9 @@ safe_diagnostics() {
     safe_diag_cmd "docker version" docker --version
     safe_diag_cmd "docker compose version" docker compose version
   fi
+  if command -v aws >/dev/null 2>&1; then
+    safe_diag_cmd "aws cli version" aws --version
+  fi
   if command -v systemctl >/dev/null 2>&1; then
     safe_diag_cmd "docker service state" systemctl is-active docker
   fi
@@ -569,6 +572,85 @@ current_step="verifying docker compose"
 log "verifying docker compose"
 docker compose version >> "$log_file" 2>&1
 
+ensure_aws_cli_download_prereqs() {
+  if ! command -v curl >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1 || ! dpkg -s ca-certificates >/dev/null 2>&1; then
+    current_step="installing aws cli download prerequisites"
+    log "installing aws cli download prerequisites"
+    apt-get update >> "$log_file" 2>&1
+    apt-get install -y curl unzip ca-certificates >> "$log_file" 2>&1
+  fi
+}
+
+install_aws_cli_v2_from_official_installer() {
+  current_step="installing aws cli v2 from pinned official installer"
+  log "installing aws cli v2 from pinned official installer"
+  ensure_aws_cli_download_prereqs
+
+  arch_raw="$(uname -m)"
+  case "$arch_raw" in
+    x86_64|amd64) ARCH="x86_64" ;;
+    aarch64|arm64) ARCH="aarch64" ;;
+    *)
+      log "unsupported architecture for aws cli v2 installer: $arch_raw"
+      return 1
+      ;;
+  esac
+
+  aws_tmp_dir="$(mktemp -d)"
+  aws_zip="$aws_tmp_dir/awscliv2.zip"
+  if ! curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-\${ARCH}.zip" -o "$aws_zip" >> "$log_file" 2>&1; then
+    log "failed to install aws cli v2 from official installer"
+    /bin/rm -rf "$aws_tmp_dir"
+    return 1
+  fi
+  if ! unzip -q "$aws_zip" -d "$aws_tmp_dir" >> "$log_file" 2>&1; then
+    log "failed to install aws cli v2 from official installer"
+    /bin/rm -rf "$aws_tmp_dir"
+    return 1
+  fi
+  if ! "$aws_tmp_dir/aws/install" --update >> "$log_file" 2>&1; then
+    log "failed to install aws cli v2 from official installer"
+    /bin/rm -rf "$aws_tmp_dir"
+    return 1
+  fi
+  /bin/rm -rf "$aws_tmp_dir"
+
+  if ! aws --version >> "$log_file" 2>&1; then
+    log "failed to verify aws cli after official installer"
+    return 1
+  fi
+}
+
+current_step="checking aws cli"
+log "checking aws cli"
+if aws --version >> "$log_file" 2>&1; then
+  log "aws cli already available"
+else
+  current_step="installing aws cli from apt"
+  log "installing aws cli from apt"
+  apt-get update >> "$log_file" 2>&1
+  if apt-get install -y awscli >> "$log_file" 2>&1; then
+    log "awscli installed from apt"
+  else
+    log "awscli was not available from apt"
+  fi
+
+  current_step="verifying aws cli"
+  log "verifying aws cli"
+  if aws --version >> "$log_file" 2>&1; then
+    log "aws cli available after apt install"
+  else
+    if ! install_aws_cli_v2_from_official_installer; then
+      log "failed to install aws cli"
+      exit 2
+    fi
+  fi
+fi
+
+current_step="verifying aws cli"
+log "verifying aws cli"
+aws --version >> "$log_file" 2>&1
+
 current_step="checking repo directory"
 log "checking repo directory: $ASG_REPO_DIR"
 if [ -d "$ASG_REPO_DIR/.git" ]; then
@@ -603,7 +685,24 @@ current_step="making bootstrap script executable"
 
 current_step="running bootstrap script"
 log "running bootstrap script"
-scripts/dr/bootstrap-asg-web-node.sh "$TARGET_REGION_GROUP" "$AWS_REGION" >> "$log_file" 2>&1
+bootstrap_status_file="$(mktemp)"
+(
+  set +e
+  scripts/dr/bootstrap-asg-web-node.sh "$TARGET_REGION_GROUP" "$AWS_REGION"
+  /usr/bin/printf "%s\\n" "$?" > "$bootstrap_status_file"
+) 2>&1 | /usr/bin/tee -a "$log_file"
+bootstrap_status="1"
+if [ -f "$bootstrap_status_file" ]; then
+  bootstrap_status="$(/bin/cat "$bootstrap_status_file")"
+fi
+/bin/rm -f "$bootstrap_status_file"
+case "$bootstrap_status" in
+  0) ;;
+  *)
+    log "bootstrap script failed"
+    exit "$bootstrap_status"
+    ;;
+esac
 
 current_step="bootstrap complete"
 log "bootstrap complete"
@@ -771,11 +870,21 @@ for (const required of [
   "failed to install docker compose plugin from pinned release",
   "docker compose version",
   "verifying docker compose",
+  "checking aws cli",
+  "apt-get install -y awscli",
+  "installing aws cli v2 from pinned official installer",
+  "https://awscli.amazonaws.com/awscli-exe-linux-${ARCH}.zip",
+  "apt-get install -y curl unzip ca-certificates",
+  "aws --version",
+  "verifying aws cli",
   "git clone --branch \"$ASG_REPO_BRANCH\" --depth 1 \"$ASG_REPO_URL\" \"$ASG_REPO_DIR\"",
   "git fetch origin \"$ASG_REPO_BRANCH\"",
   "git reset --hard \"origin/$ASG_REPO_BRANCH\"",
   "repo directory exists but is not a git checkout",
   "cd \"$ASG_REPO_DIR\"",
+  "bootstrap_status_file=\"$(mktemp)\"",
+  "tee -a \"$log_file\"",
+  "bootstrap script failed",
   "scripts/dr/bootstrap-asg-web-node.sh \"$TARGET_REGION_GROUP\" \"$AWS_REGION\"",
 ]) {
   if (!decoded.includes(required)) fail(`Launch template UserData is missing ${required}.`);

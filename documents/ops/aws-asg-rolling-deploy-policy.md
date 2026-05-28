@@ -18,7 +18,7 @@ This document defines the approved rolling deploy and instance refresh contract 
 Source of truth: `documents/ops/aws-asg-rolling-deploy-policy.checklist.json`
 
 - Launch template instance profile: explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`; ARN wins when both are set.
-- Launch template bootstrap: base64 `UserData` that can boot a plain Ubuntu 22.04 host by installing/checking Git, Docker, and Docker Compose, including an apt `docker-compose-plugin` attempt plus a pinned manual Compose v2 plugin fallback, cloning/updating the repository, and running `scripts/dr/bootstrap-asg-web-node.sh "$TARGET_REGION_GROUP" "$AWS_REGION"` from `ASG_REPO_DIR`.
+- Launch template bootstrap: base64 `UserData` that can boot a plain Ubuntu 22.04 host by installing/checking Git, Docker, Docker Compose, and AWS CLI, including apt attempts plus manual Docker Compose and AWS CLI v2 fallbacks, cloning/updating the repository, and running `scripts/dr/bootstrap-asg-web-node.sh "$TARGET_REGION_GROUP" "$AWS_REGION"` from `ASG_REPO_DIR`.
 - Launch template repository inputs: required `ASG_REPO_URL`, default `ASG_REPO_BRANCH=main`, and default `ASG_REPO_DIR=/home/ubuntu/genuine-scan-main`. Mumbai debug retry should use `ASG_REPO_URL=https://github.com/T-ej2003/genuine-scan-main.git`, `ASG_REPO_BRANCH=main`, and `ASG_REPO_DIR=/home/ubuntu/genuine-scan-main`.
 - Launch template SSH key: optional `ASG_KEY_NAME`; when set it must become `KeyName` in `LaunchTemplateData`, and Mumbai debug retry should use `ASG_KEY_NAME=mscqr-prod-mumbai`.
 - Launch template public IP association: `ASG_ASSOCIATE_PUBLIC_IP=false` by default; accepted values are only `true` and `false`.
@@ -68,7 +68,8 @@ Every rollout batch and replacement step must pass:
 - Generated launch template data contains `IamInstanceProfile`, `UserData`, `MetadataOptions.HttpTokens=required`, `ImageId`, `InstanceType`, and the expected networking shape for `ASG_ASSOCIATE_PUBLIC_IP`.
 - For debug retries, generated launch template data contains `KeyName=mscqr-prod-mumbai` so failed nodes can be inspected without relying on console output alone.
 - UserData mirrors non-secret status and failure lines to cloud-init console output and writes the full bootstrap log to `/var/log/mscqr-asg-bootstrap.log`.
-- UserData installs/checks `git`, `docker.io`, and `docker compose`; if `docker compose version` is unavailable, it tries apt `docker-compose-plugin` and then installs a pinned Compose v2 plugin under `/usr/local/lib/docker/cli-plugins/docker-compose` when apt cannot provide it; if `ASG_REPO_DIR` is missing, it clones `ASG_REPO_URL`; if `ASG_REPO_DIR` is already a git checkout, it fetches/resets `ASG_REPO_BRANCH`; if the path exists but is not a git checkout, it fails without deleting it.
+- UserData installs/checks `git`, `docker.io`, `docker compose`, and `aws --version`; if `docker compose version` is unavailable, it tries apt `docker-compose-plugin` and then installs a pinned Compose v2 plugin under `/usr/local/lib/docker/cli-plugins/docker-compose` when apt cannot provide it; if AWS CLI is unavailable, it tries apt `awscli` and then installs AWS CLI v2 from the official installer when apt cannot provide it; if `ASG_REPO_DIR` is missing, it clones `ASG_REPO_URL`; if `ASG_REPO_DIR` is already a git checkout, it fetches/resets `ASG_REPO_BRANCH`; if the path exists but is not a git checkout, it fails without deleting it.
+- UserData tees bootstrap script output to `/var/log/mscqr-asg-bootstrap.log` and cloud-init console output, and preserves the bootstrap script exit code without relying on `pipefail`.
 - `scripts/dr/bootstrap-asg-web-node.sh` is the launch-template bootstrap path.
 - `RUN_BACKGROUND_WORKERS=false`, `RUN_DB_MIGRATIONS_ON_START=false`, and `COMPLIANCE_PACK_SCHEDULER_ENABLED=false` remain forced.
 - Regional Redis and regional S3/default-credential object storage are green through readiness.
@@ -104,6 +105,8 @@ This is the remaining live go/no-go after repo hardening.
 Mumbai no-DNS retry inputs for the next drill:
 
 Latest Mumbai failure evidence: ASG instances launched with public IP, `KeyName`, and instance profile; `git` was already installed; Docker installed and the service was active; apt did not provide `docker-compose-plugin`; `docker compose` returned `docker: unknown command: docker compose`; the bootstrap failed while checking Docker Compose before repo clone, so app containers never started and ALB target health failed. A later SSH attempt saw `PublicIp=None` because ASG had already terminated/replaced the node. The original Mumbai EC2 stayed healthy and no DNS cutover happened. The retry fix is the pinned manual Compose v2 plugin fallback after the apt attempt.
+
+Latest retry evidence: Docker Compose fallback succeeded and verification reached; the repo bootstrap found `scripts/dr/bootstrap-asg-web-node.sh`; failure moved to `running bootstrap script`. The likely causes are missing AWS CLI for SSM Parameter Store reads or bootstrap details hidden only in the node-local log. The current fix adds AWS CLI prerequisite handling and mirrors bootstrap output to cloud-init console without printing secrets.
 
 ```bash
 TARGET_REGION_GROUP=mumbai
