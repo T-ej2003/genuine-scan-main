@@ -263,11 +263,24 @@ requireMatch("DR common", requireFile("scripts/dr/common.sh"), /install_aws_cli_
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /x86_64\|amd64\).*ARCH="x86_64"/, "UserData must map x86_64 and amd64 installer architecture.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /aarch64\|arm64\).*ARCH="aarch64"/, "UserData must map aarch64 and arm64 installer architecture.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /verifying aws cli[\s\S]*aws --version/, "UserData must verify AWS CLI before bootstrap.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /NODE_MAJOR="24"/, "UserData must pin Node.js to the repo-supported major.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /NPM_MIN_MAJOR="11"/, "UserData must require the repo-supported npm major floor.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /checking node[\s\S]*verify_node_runtime/, "UserData must check Node.js and npm before bootstrap.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /deb\.nodesource\.com\/node_.*NODE_MAJOR.*\.x|deb\.nodesource\.com\/node_%s\.x/, "UserData must install Node.js through a deterministic pinned-major NodeSource repo.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /apt-get install -y curl ca-certificates gnupg/, "UserData must install NodeSource key prerequisites.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /apt-get install -y nodejs/, "UserData must install nodejs after configuring the pinned-major repo.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /npm install -g "npm@\$NPM_VERSION"/, "UserData must explicitly install the pinned npm 11 version.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /node --version/, "UserData must verify node --version.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /npm --version/, "UserData must verify npm --version.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /failed to install node\/npm/, "UserData must fail clearly if Node.js or npm cannot be installed.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /verifying npm[\s\S]*npm available[\s\S]*checking repo directory/, "UserData must verify Node.js and npm before repo bootstrap.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /git clone --branch "\$ASG_REPO_BRANCH" --depth 1 "\$ASG_REPO_URL" "\$ASG_REPO_DIR"/, "UserData must clone the repo when missing.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /repo directory exists but is not a git checkout/, "UserData must fail clearly when ASG_REPO_DIR exists but is not a git checkout.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /docker --version/, "UserData safe diagnostics must include docker version when available.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /systemctl is-active docker/, "UserData safe diagnostics must include docker service state when available.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /git --version/, "UserData safe diagnostics must include git version when available.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /node --version/, "UserData safe diagnostics must include node version when available.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /npm --version/, "UserData safe diagnostics must include npm version when available.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /\/bin\/ls -ld \/home\/ubuntu/, "UserData safe diagnostics must list /home/ubuntu only.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /\/bin\/ls -ld "\$ASG_REPO_DIR"/, "UserData safe diagnostics must list only ASG_REPO_DIR.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /git fetch origin "\$ASG_REPO_BRANCH"/, "UserData must fetch configured branch.");
@@ -544,6 +557,9 @@ if (asgRollingPolicyChecklist) {
     "try apt awscli before manual AWS CLI v2 fallback",
     "tee bootstrap output to /var/log/mscqr-asg-bootstrap.log and cloud-init console",
     "preserve bootstrap script exit code without pipefail",
+    "install/check node",
+    "install/check npm",
+    "pin Node.js major 24 for ASG host prerequisites",
     "clone ASG_REPO_URL into ASG_REPO_DIR when missing",
     "git fetch origin ASG_REPO_BRANCH",
     "git reset --hard origin/ASG_REPO_BRANCH",

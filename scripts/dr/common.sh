@@ -408,7 +408,11 @@ ASG_REPO_URL="${repoUrl}"
 ASG_REPO_BRANCH="${repoBranch}"
 ASG_REPO_DIR="${repoDir}"
 DOCKER_COMPOSE_VERSION="v2.29.7"
-export TARGET_REGION_GROUP AWS_REGION ASG_REPO_URL ASG_REPO_BRANCH ASG_REPO_DIR DOCKER_COMPOSE_VERSION
+NODE_MAJOR="24"
+NODE_MAX_MAJOR="27"
+NPM_MIN_MAJOR="11"
+NPM_VERSION="11.16.0"
+export TARGET_REGION_GROUP AWS_REGION ASG_REPO_URL ASG_REPO_BRANCH ASG_REPO_DIR DOCKER_COMPOSE_VERSION NODE_MAJOR NODE_MAX_MAJOR NPM_MIN_MAJOR NPM_VERSION
 
 log() {
   /usr/bin/printf "%s %s\\n" "$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | /usr/bin/tee -a "$log_file"
@@ -445,6 +449,12 @@ safe_diagnostics() {
   fi
   if command -v aws >/dev/null 2>&1; then
     safe_diag_cmd "aws cli version" aws --version
+  fi
+  if command -v node >/dev/null 2>&1; then
+    safe_diag_cmd "node version" node --version
+  fi
+  if command -v npm >/dev/null 2>&1; then
+    safe_diag_cmd "npm version" npm --version
   fi
   if command -v systemctl >/dev/null 2>&1; then
     safe_diag_cmd "docker service state" systemctl is-active docker
@@ -650,6 +660,110 @@ fi
 current_step="verifying aws cli"
 log "verifying aws cli"
 aws --version >> "$log_file" 2>&1
+
+verify_node_runtime() {
+  if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    return 1
+  fi
+
+  node_version="$(node --version 2>/dev/null || true)"
+  npm_version="$(npm --version 2>/dev/null || true)"
+  node_major="$(/usr/bin/printf "%s" "$node_version" | /usr/bin/sed 's/^v//; s/[.].*$//')"
+  npm_major="$(/usr/bin/printf "%s" "$npm_version" | /usr/bin/sed 's/[.].*$//')"
+
+  case "$node_major" in
+    ""|*[!0-9]*) return 1 ;;
+  esac
+  case "$npm_major" in
+    ""|*[!0-9]*) return 1 ;;
+  esac
+
+  if [ "$node_major" -lt "$NODE_MAJOR" ] || [ "$node_major" -ge "$NODE_MAX_MAJOR" ]; then
+    return 1
+  fi
+  if [ "$npm_major" -lt "$NPM_MIN_MAJOR" ]; then
+    return 1
+  fi
+}
+
+install_node_download_prereqs() {
+  current_step="installing node download prerequisites"
+  log "installing node download prerequisites"
+  apt-get update >> "$log_file" 2>&1
+  apt-get install -y curl ca-certificates gnupg >> "$log_file" 2>&1
+}
+
+install_node_from_pinned_nodesource_major() {
+  current_step="installing node"
+  log "installing node"
+  install_node_download_prereqs
+
+  /bin/mkdir -p /etc/apt/keyrings
+  node_key_tmp="$(mktemp)"
+  if ! curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o "$node_key_tmp" >> "$log_file" 2>&1; then
+    log "failed to install node from pinned NodeSource major"
+    /bin/rm -f "$node_key_tmp"
+    return 1
+  fi
+  /bin/rm -f /etc/apt/keyrings/nodesource.gpg
+  if ! gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg "$node_key_tmp" >> "$log_file" 2>&1; then
+    log "failed to install node from pinned NodeSource major"
+    /bin/rm -f "$node_key_tmp"
+    return 1
+  fi
+  /bin/rm -f "$node_key_tmp"
+
+  /usr/bin/printf "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_%s.x nodistro main\\n" "$NODE_MAJOR" > /etc/apt/sources.list.d/nodesource.list
+  apt-get update >> "$log_file" 2>&1
+  if ! apt-get install -y nodejs >> "$log_file" 2>&1; then
+    log "failed to install node from pinned NodeSource major"
+    return 1
+  fi
+
+  current_step="installing npm"
+  log "installing npm"
+  if ! command -v npm >/dev/null 2>&1; then
+    log "failed to install node/npm"
+    return 1
+  fi
+  if ! npm install -g "npm@$NPM_VERSION" >> "$log_file" 2>&1; then
+    log "failed to install node/npm"
+    return 1
+  fi
+}
+
+current_step="checking node"
+log "checking node"
+if verify_node_runtime; then
+  node --version >> "$log_file" 2>&1
+  npm --version >> "$log_file" 2>&1
+  log "node already available"
+else
+  if ! install_node_from_pinned_nodesource_major; then
+    log "failed to install node/npm"
+    exit 2
+  fi
+fi
+
+current_step="verifying node"
+log "verifying node"
+if ! node --version >> "$log_file" 2>&1; then
+  log "failed to install node/npm"
+  exit 2
+fi
+if ! verify_node_runtime; then
+  log "failed to install node/npm"
+  exit 2
+fi
+log "node available"
+
+current_step="verifying npm"
+log "verifying npm"
+if ! npm --version >> "$log_file" 2>&1; then
+  log "failed to install node/npm"
+  exit 2
+fi
+log "npm available"
 
 current_step="checking repo directory"
 log "checking repo directory: $ASG_REPO_DIR"
@@ -877,6 +991,20 @@ for (const required of [
   "apt-get install -y curl unzip ca-certificates",
   "aws --version",
   "verifying aws cli",
+  "NODE_MAJOR=\"24\"",
+  "NPM_MIN_MAJOR=\"11\"",
+  "checking node",
+  "https://deb.nodesource.com/node_%s.x",
+  "apt-get install -y curl ca-certificates gnupg",
+  "apt-get install -y nodejs",
+  "npm install -g \"npm@$NPM_VERSION\"",
+  "node --version",
+  "npm --version",
+  "verifying node",
+  "node available",
+  "verifying npm",
+  "npm available",
+  "failed to install node/npm",
   "git clone --branch \"$ASG_REPO_BRANCH\" --depth 1 \"$ASG_REPO_URL\" \"$ASG_REPO_DIR\"",
   "git fetch origin \"$ASG_REPO_BRANCH\"",
   "git reset --hard \"origin/$ASG_REPO_BRANCH\"",

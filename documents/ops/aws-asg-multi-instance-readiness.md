@@ -23,7 +23,7 @@ The app has several good production controls already:
 - `scripts/dr/bootstrap-asg-web-node.sh` is the committed ASG web-node bootstrap path using AWS SSM Parameter Store.
 - `documents/ops/aws-asg-web-ssm-parameter-manifest.json` records required root/backend env parameter names without values.
 - ASG launch-template plan/apply now requires explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`.
-- ASG launch-template plan/apply now emits base64 `UserData` that can boot a plain Ubuntu 22.04 host by installing/checking Git, Docker, Docker Compose, and AWS CLI, including apt attempts plus manual Docker Compose and AWS CLI v2 fallbacks, cloning/updating the repository, and then running the ASG web bootstrap script from `ASG_REPO_DIR`.
+- ASG launch-template plan/apply now emits base64 `UserData` that can boot a plain Ubuntu 22.04 host by installing/checking Git, Docker, Docker Compose, AWS CLI, Node.js 24, and npm 11, including apt attempts plus manual Docker Compose/AWS CLI fallbacks and pinned-major NodeSource setup, cloning/updating the repository, and then running the ASG web bootstrap script from `ASG_REPO_DIR`.
 - ASG launch-template plan/apply now supports explicit `ASG_ASSOCIATE_PUBLIC_IP=true|false` networking, with `false` as the default.
 - ASG launch-template plan/apply now supports optional `ASG_KEY_NAME`; Mumbai debug retry should use `ASG_KEY_NAME=mscqr-prod-mumbai`.
 - ASG launch-template plan/apply now supports `ASG_REPO_URL`, `ASG_REPO_BRANCH`, and `ASG_REPO_DIR`; Mumbai debug retry should use `ASG_REPO_URL=https://github.com/T-ej2003/genuine-scan-main.git`, `ASG_REPO_BRANCH=main`, and `ASG_REPO_DIR=/home/ubuntu/genuine-scan-main`.
@@ -250,13 +250,14 @@ Evidence:
 - Legacy Compose topology includes local Redis/MinIO and local certbot volumes.
 - ASG web-node Compose topology excludes local Redis, MinIO, and worker services.
 - Regional ASG launch-template scripts exist as plan/apply scaffolding, but ASG creation is out of scope and not run by this audit.
-- ASG UserData no longer assumes a pre-baked application host. For the no-DNS validation path it can start from a plain Ubuntu 22.04 AMI, install/check required packages, install Docker Compose v2 even when the apt plugin package is unavailable, install AWS CLI for SSM Parameter Store access, clone or refresh the repo, and invoke the SSM-backed ASG web bootstrap.
+- ASG UserData no longer assumes a pre-baked application host. For the no-DNS validation path it can start from a plain Ubuntu 22.04 AMI, install/check required packages, install Docker Compose v2 even when the apt plugin package is unavailable, install AWS CLI for SSM Parameter Store access, install Node.js/npm for the bootstrap script, clone or refresh the repo, and invoke the SSM-backed ASG web bootstrap.
 
 ASG bootstrap checklist:
 
 - Install/check `git`, `ca-certificates`, `curl`, `docker.io`, and Docker Compose v2 before repository bootstrap.
 - If `docker compose version` is missing after Docker starts, try `apt-get install -y docker-compose-plugin`; if apt cannot supply it, install the pinned Compose v2 binary under `/usr/local/lib/docker/cli-plugins/docker-compose` using architecture mapping for `x86_64`/`amd64` and `aarch64`/`arm64`.
 - Install/check AWS CLI before the SSM bootstrap. If `aws --version` is missing, try `apt-get install -y awscli`; if apt cannot supply a working CLI, install AWS CLI v2 from the official installer at `https://awscli.amazonaws.com/awscli-exe-linux-${ARCH}.zip` after installing `curl`, `unzip`, and `ca-certificates`.
+- Install/check Node.js and npm before the SSM bootstrap. The repo engine contract is `node >=24 <27` and `npm >=11`, so UserData configures the pinned NodeSource `node_24.x` repository and installs `nodejs` when the host runtime is missing or out of range.
 - Use `ASG_REPO_URL` to clone the repository if `ASG_REPO_DIR` is missing.
 - Use `ASG_REPO_BRANCH` to fetch/reset the checkout if `ASG_REPO_DIR` already contains a git checkout.
 - Fail clearly without deleting anything if `ASG_REPO_DIR` exists but is not a git checkout.
@@ -312,7 +313,7 @@ Launch-template requirements:
 
 - `IamInstanceProfile` must come from explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`.
 - `UserData` must be base64 encoded and must run `scripts/dr/bootstrap-asg-web-node.sh "$TARGET_REGION_GROUP" "$AWS_REGION"` from `ASG_REPO_DIR`.
-- `UserData` must install/check Git, Docker, Docker Compose, and AWS CLI before app bootstrap, with an apt `docker-compose-plugin` attempt, a pinned manual Compose v2 plugin fallback under `/usr/local/lib/docker/cli-plugins/docker-compose`, an apt `awscli` attempt, and an official AWS CLI v2 installer fallback.
+- `UserData` must install/check Git, Docker, Docker Compose, AWS CLI, Node.js, and npm before app bootstrap, with an apt `docker-compose-plugin` attempt, a pinned manual Compose v2 plugin fallback under `/usr/local/lib/docker/cli-plugins/docker-compose`, an apt `awscli` attempt, an official AWS CLI v2 installer fallback, and pinned-major Node.js 24 setup.
 - `UserData` must tee `scripts/dr/bootstrap-asg-web-node.sh` output to `/var/log/mscqr-asg-bootstrap.log` and cloud-init console output while preserving the bootstrap script exit code without relying on `pipefail`.
 - `UserData` must clone `ASG_REPO_URL` into `ASG_REPO_DIR` when missing; if `ASG_REPO_DIR` already contains a git checkout, it must fetch/reset `ASG_REPO_BRANCH`; if the path exists but is not a git checkout, it must fail clearly and must not delete it automatically.
 - `UserData` must log to `/var/log/mscqr-asg-bootstrap.log`, avoid printing secret values, and never touch Route 53 or production DNS.
@@ -332,6 +333,7 @@ Mumbai retry note:
 - Latest Mumbai no-DNS evidence: EC2 instances launched successfully with public IP, `KeyName`, and instance profile; `git` was already installed; Docker installed successfully and the Docker service became active; `docker-compose-plugin` was unavailable from apt; `docker compose` returned `docker: unknown command: docker compose`; bootstrap failed during the Docker Compose check before the repo clone; ALB target health failed because app containers never started; a later SSH attempt returned `PublicIp=None` because ASG had already replaced the node; the original Mumbai EC2 remained healthy; no DNS cutover happened.
 - The fix is a manual pinned Docker Compose v2 plugin fallback after the apt plugin attempt.
 - Latest retry evidence: the Docker Compose fallback succeeded, Docker Compose verification completed, the repo bootstrap reached `running bootstrap script`, and `scripts/dr/bootstrap-asg-web-node.sh` existed. Failure moved into the bootstrap script, likely because AWS CLI was missing for SSM fetches or because detailed bootstrap output was only redirected into `/var/log/mscqr-asg-bootstrap.log` on a terminated node. The fix adds AWS CLI as a UserData prerequisite and mirrors bootstrap output into cloud-init console while keeping the same non-secret log file.
+- Latest Node prerequisite evidence: instances reached repo HEAD `c97edfe`, AWS CLI installed from apt and verified, then `scripts/dr/bootstrap-asg-web-node.sh` failed with `ERROR: node is required.` New ASG targets reached EC2/ASG healthy states but failed ALB health checks because app bootstrap never completed; the old manual Mumbai target remained healthy and no DNS cutover happened. The fix adds Node.js 24/npm 11 host prerequisite checks before running the bootstrap script.
 - Mumbai selected public subnets currently have `MapPublicIpOnLaunch=false`, so the next no-DNS Mumbai retry should use `ASG_ASSOCIATE_PUBLIC_IP=true`.
 - The next no-DNS Mumbai retry should also use `ASG_KEY_NAME=mscqr-prod-mumbai` to make failed nodes inspectable.
 - The next no-DNS Mumbai retry should set `ASG_REPO_URL=https://github.com/T-ej2003/genuine-scan-main.git`, `ASG_REPO_BRANCH=main`, and `ASG_REPO_DIR=/home/ubuntu/genuine-scan-main`.
