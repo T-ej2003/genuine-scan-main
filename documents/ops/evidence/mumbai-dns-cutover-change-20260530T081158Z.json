@@ -1,0 +1,17 @@
+{
+  "Comment": "Cut over mscqr.com apex to Mumbai ALB after ASG replacement drill success",
+  "Changes": [
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "mscqr.com.",
+        "Type": "A",
+        "AliasTarget": {
+          "HostedZoneId": "ZP97RAFLXTNZK",
+          "DNSName": "mscqr-mumbai-alb-1249752376.ap-south-1.elb.amazonaws.com.",
+          "EvaluateTargetHealth": true
+        }
+      }
+    }
+  ]
+}

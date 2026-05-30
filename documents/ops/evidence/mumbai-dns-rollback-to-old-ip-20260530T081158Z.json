@@ -1,0 +1,18 @@
+{
+  "Comment": "Rollback mscqr.com apex to previous EC2 public IP",
+  "Changes": [
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "mscqr.com.",
+        "Type": "A",
+        "TTL": 60,
+        "ResourceRecords": [
+          {
+            "Value": "13.135.108.69"
+          }
+        ]
+      }
+    }
+  ]
+}
