@@ -13,6 +13,8 @@ const requiredPatterns = [
   { name: "scan location", pattern: /location\s+~\s+\^\/api\/scan/i },
   { name: "incidents location", pattern: /location\s+~\s+\^\/api\/incidents/i },
   { name: "forwarded host header", pattern: /proxy_set_header\s+X-Forwarded-Host\s+\$host/i },
+  { name: "external scheme map", pattern: /map\s+\$http_x_forwarded_proto\s+\$external_scheme\s*\{[\s\S]*~\*\^https\$\s+https;[\s\S]*\}/i },
+  { name: "forwarded proto header preserves external scheme", pattern: /proxy_set_header\s+X-Forwarded-Proto\s+\$external_scheme/i },
 ];
 
 const failures = [];
@@ -49,6 +51,18 @@ for (const filePath of nginxFiles) {
   if (!strictReportOnlyStyle) {
     failures.push(`${relative}: report-only CSP must include strict style-src 'self'`);
   }
+
+  if (/\$scheme:\/\/www\.mscqr\.com/i.test(contents) || /return\s+301\s+http:\/\/www\.mscqr\.com/i.test(contents)) {
+    failures.push(`${relative}: apex canonical redirects must not downgrade HTTPS traffic behind ALB TLS termination`);
+  }
+  if (/Report-To[\s\S]*http:\/\/www\.mscqr\.com/i.test(contents)) {
+    failures.push(`${relative}: Report-To endpoint must stay HTTPS canonical`);
+  }
+}
+
+const httpConfig = readFileSync(path.join(repoRoot, "nginx.conf"), "utf8");
+if (!/return\s+301\s+\$external_scheme:\/\/www\.mscqr\.com\$request_uri/i.test(httpConfig)) {
+  failures.push("nginx.conf: apex redirect must use $external_scheme so X-Forwarded-Proto=https redirects to https://www.mscqr.com/");
 }
 
 if (failures.length > 0) {
