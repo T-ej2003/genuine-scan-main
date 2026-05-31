@@ -42,6 +42,8 @@
     "IamInstanceProfile",
     "UserData",
     "MetadataOptions.HttpTokens=required",
+    "MetadataOptions.HttpEndpoint=enabled",
+    "MetadataOptions.HttpPutResponseHopLimit=2",
     "SecurityGroupIds when ASG_ASSOCIATE_PUBLIC_IP=false",
     "NetworkInterfaces[0].AssociatePublicIpAddress=true and Groups when ASG_ASSOCIATE_PUBLIC_IP=true",
     "ImageId",
@@ -56,6 +58,7 @@
     "set TARGET_REGION_GROUP and AWS_REGION",
     "set ASG_REPO_URL, ASG_REPO_BRANCH, and ASG_REPO_DIR",
     "install/check git",
+    "set IMDSv2 required with HttpPutResponseHopLimit=2 for Docker default credentials",
     "install/check docker",
     "install/check docker compose",
     "try apt docker-compose-plugin before manual Compose fallback",
@@ -118,7 +121,7 @@
     ]
   },
   "go_no_go_checklist": [
-    "Production DNS remains on London EC2 during ASG rollout validation.",
+    "Production DNS change is out of scope during ASG rollout validation.",
     "Regional ALB target group already serves healthy test-record traffic.",
     "Regional Redis readiness is green through /api/health/ready.",
     "Regional S3 object storage readiness is green through /api/health/ready.",

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "service": "MSCQR",
-  "lastAudited": "2026-05-15",
+  "lastAudited": "2026-05-31",
   "asgStatus": "CONDITIONALLY_READY",
   "statusReason": "Regional Redis, regional S3 object storage, ASG web-node worker exclusion, SSM-backed bootstrap, self-sufficient launch-template UserData for plain Ubuntu hosts, optional ASG SSH KeyName support, explicit ASG web instance profile input, explicit ASG public-IP networking mode, and the rolling deploy contract are committed. The remaining go/no-go is a first live ASG create/attach plus replacement-instance drill with no production DNS cutover.",
   "safeToCreateAsg": false,
@@ -65,6 +65,8 @@
         "Bootstrap diagnostics include docker ps, docker compose ps with --env-file, Docker frontend port mappings, host port 80 listener state, localhost and host-primary-IP /healthz probes, iptables/nft summaries, backend/frontend inspect status, Docker healthcheck output, sanitized backend readiness summary, HTTP status/timing probes, direct backend container probes, Nginx access/error logs, and backend/frontend log tails without printing secret values.",
         "scripts/dr/collect-asg-health-evidence.sh splits current ASG instance IDs into POSIX shell arguments, describes instances with separate --instance-ids args, loops console output per ID, curls each public IP /healthz, summarizes current-ASG target health separately from legacy/source targets, and only runs SSH deep inspection when ALLOW_SSH_DEEP_INSPECTION=true.",
         "scripts/dr/generate-asg-apply-plan.sh and scripts/dr/apply-asg-launch-template-approved.sh require ASG_WEB_INSTANCE_PROFILE_ARN or ASG_WEB_INSTANCE_PROFILE_NAME and do not reuse the source instance profile automatically.",
+        "Launch template MetadataOptions require HttpTokens=required, HttpEndpoint=enabled, and HttpPutResponseHopLimit=2 so Dockerized backend processes can use the instance profile through the default credential provider chain.",
+        "Static AWS keys are forbidden for ASG web object storage; the instance profile is the intended credential source.",
         "Generated launch template data includes base64 UserData that runs scripts/dr/bootstrap-asg-web-node.sh with the target region group and AWS region.",
         "scripts/dr/generate-asg-apply-plan.sh and scripts/dr/apply-asg-launch-template-approved.sh support ASG_ASSOCIATE_PUBLIC_IP=true or false only.",
         "scripts/dr/generate-asg-apply-plan.sh and scripts/dr/apply-asg-launch-template-approved.sh support optional ASG_KEY_NAME and omit KeyName when it is not set.",
@@ -87,9 +89,9 @@
         "documents/ops/aws-asg-rolling-deploy-policy.md defines the ASG rolling deploy contract, smoke tests, rollback rules, and replacement-instance drill.",
         "documents/ops/aws-asg-rolling-deploy-policy.checklist.json commits concrete values for deregistration delay, 900 second health grace, 900 second warmup, min healthy percentage, initial capacity, current-ASG target healthy count, and rollback alarm placeholders.",
         "scripts/dr/generate-asg-apply-plan.sh reads the rolling policy checklist and includes those values in the generated ASG apply plan.",
-        "scripts/dr/generate-asg-apply-plan.sh validates proposed launch template data for IamInstanceProfile, UserData, required IMDSv2, security group, AMI, and instance type.",
+        "scripts/dr/generate-asg-apply-plan.sh validates proposed launch template data for IamInstanceProfile, UserData, required IMDSv2, enabled IMDS endpoint, hop limit 2, security group, AMI, and instance type.",
         "scripts/dr/apply-asg-launch-template-approved.sh reads the rolling policy checklist, refuses non-policy first-rollout capacity, and refuses apply when deregistration delay or rollback alarm names are unsafe.",
-        "scripts/dr/apply-asg-launch-template-approved.sh validates launch-template-data.json for IamInstanceProfile, UserData, required IMDSv2, AMI, instance type, KeyName behavior, and the expected public-IP networking shape before any create/update path.",
+        "scripts/dr/apply-asg-launch-template-approved.sh validates launch-template-data.json for IamInstanceProfile, UserData, required IMDSv2, enabled IMDS endpoint, hop limit 2, AMI, instance type, KeyName behavior, and the expected public-IP networking shape before any create/update path.",
         "scripts/dr/apply-asg-launch-template-approved.sh requires at least desired-capacity current ASG instance IDs to be target-health healthy and reports legacy/source healthy targets separately.",
         "scripts/dr/apply-asg-launch-template-approved.sh writes intended and live launch template data artifacts, creates a fresh launch template version when data differs, and verifies the ASG points at the intended version before capacity update."
       ],
@@ -98,7 +100,7 @@
   ],
   "blockers": [],
   "conditionsBeforeReaudit": [
-    "Production DNS remains rolled back to London EC2 until a separate approved DNS cutover.",
+    "Production DNS remains unchanged during ASG rollout validation; Mumbai production cutover is already complete.",
     "ASG web nodes use docker-compose.asg-web.yml, not the legacy local-state Compose path.",
     "Redis is external/shared per region and not container-local per EC2 node.",
     "Object storage is shared regional S3/default credentials and not container-local MinIO per EC2 node.",

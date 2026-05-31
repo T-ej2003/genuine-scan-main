@@ -1,6 +1,6 @@
 # Object Storage Write Path Checklist
 
-Last updated: 2026-05-11
+Last updated: 2026-05-31
 
 Run this only after database recovery and write gate approval.
 
@@ -8,6 +8,7 @@ Run this only after database recovery and write gate approval.
 
 - [ ] Database recovery approved.
 - [ ] Write gate approved.
+- [ ] S3/default-credentials read-path proof completed.
 - [ ] Safe test upload selected.
 - [ ] Test object/key naming avoids production collision.
 - [ ] Metadata/database linkage verification plan approved.
@@ -20,7 +21,7 @@ Run this only after database recovery and write gate approval.
 
 - Do not delete production objects.
 - Do not delete buckets.
-- Do not decommission MinIO.
+- Do not delete MinIO data automatically.
 - Do not run write tests before database recovery is approved.
 
 ## Evidence Table

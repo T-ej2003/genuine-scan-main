@@ -143,6 +143,9 @@ requireMatch("readiness doc", doc, /asg-web-instance-profile-policy\.template\.j
 requireMatch("readiness doc", doc, /Secrets\/bootstrap is conditionally proven/, "must mark secrets/bootstrap conditionally proven.");
 requireMatch("readiness doc", doc, /ASG_WEB_INSTANCE_PROFILE_ARN/, "must document explicit ASG web instance profile ARN input.");
 requireMatch("readiness doc", doc, /ASG_WEB_INSTANCE_PROFILE_NAME/, "must document explicit ASG web instance profile name input.");
+requireMatch("readiness doc", doc, /HttpPutResponseHopLimit=2/, "must document IMDS hop limit 2 for Docker ASG web nodes.");
+requireMatch("readiness doc", doc, /IMDSv2 remains required/, "must document that IMDSv2 remains required.");
+requireMatch("readiness doc", doc, /static AWS keys are forbidden/i, "must forbid static AWS keys for ASG S3 default credentials.");
 requireMatch("readiness doc", doc, /ASG_ASSOCIATE_PUBLIC_IP/, "must document explicit ASG public IP association input.");
 requireMatch("readiness doc", doc, /ASG_KEY_NAME/, "must document optional ASG SSH KeyName input.");
 requireMatch("readiness doc", doc, /ASG_REPO_URL/, "must document ASG repository URL input.");
@@ -162,10 +165,12 @@ requireMatch("readiness doc", doc, /\/api\/health\/ready/, "must document depend
 requireMatch("readiness doc", doc, /deregistration delay/i, "must document rolling deploy drain behavior.");
 requireMatch("readiness doc", doc, /Secrets Manager|SSM/i, "must document safe secret injection expectations.");
 requireMatch("readiness doc", doc, /replacement-instance drill/i, "must document the remaining live replacement-instance drill.");
-requireMatch("readiness doc", doc, /Keep production DNS on London EC2/i, "must document no DNS cutover during rollout validation.");
+requireMatch("readiness doc", doc, /Keep production DNS unchanged/i, "must document no DNS mutation during rollout validation.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_STATUS=CONDITIONALLY_READY/, "must mark the rolling policy document conditionally ready.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_WEB_INSTANCE_PROFILE_ARN/, "must define explicit ASG web instance profile ARN input.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /ASG_WEB_INSTANCE_PROFILE_NAME/, "must define explicit ASG web instance profile name input.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /HttpPutResponseHopLimit=2/, "must define IMDS hop limit 2 for Docker ASG web nodes.");
+requireMatch("rolling policy doc", asgRollingPolicyDoc, /static AWS keys are forbidden/i, "must forbid static AWS keys for ASG S3 default credentials.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /SMTP_FROM[\s\S]*optional but recommended/, "must document SMTP_FROM as optional but recommended.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /QR_SIGN_PRIVATE_KEY[\s\S]*Compose interpolation/, "must document QR_SIGN_PRIVATE_KEY Compose interpolation handling.");
 requireMatch("rolling policy doc", asgRollingPolicyDoc, /describe-parameters[\s\S]*asg-web/, "must document names-only SSM preflight.");
@@ -267,6 +272,11 @@ requireMatch("ASG bootstrap", asgBootstrap, /docker logs genuine-scan-backend --
 requireMatch("ASG bootstrap", asgBootstrap, /docker logs genuine-scan-frontend --tail 160/, "bootstrap diagnostics must include frontend log tail.");
 requireMatch("ASG bootstrap", asgBootstrap, /fs\.chmodSync\(filePath, 0o600\)/, "bootstrap must chmod generated env files to 0600.");
 requireMatch("ASG bootstrap", asgBootstrap, /Forbidden ASG web-node parameter is present in SSM/, "bootstrap must reject forbidden parameters such as MinIO secrets.");
+requireMatch("ASG bootstrap", asgBootstrap, /forbiddenObjectStorageInputs/, "bootstrap must explicitly reject object-storage endpoint/static credential SSM inputs.");
+requireMatch("ASG bootstrap", asgBootstrap, /MinIO\/custom object-storage endpoints are forbidden/, "bootstrap must reject MinIO/custom object-storage endpoints in ASG web mode.");
+requireMatch("ASG bootstrap", asgBootstrap, /static object-storage access keys are forbidden/, "bootstrap must reject static object-storage access keys in ASG web mode.");
+requireMatch("ASG bootstrap", asgBootstrap, /static object-storage secret keys are forbidden/, "bootstrap must reject static object-storage secret keys in ASG web mode.");
+requireMatch("ASG bootstrap", asgBootstrap, /OBJECT_STORAGE_FORCE_PATH_STYLE=true is forbidden/, "bootstrap must reject MinIO-style path addressing in ASG web mode.");
 requireMatch("ASG bootstrap", asgBootstrap, /RUN_BACKGROUND_WORKERS: "false"/, "bootstrap must force workers off.");
 requireMatch("ASG bootstrap", asgBootstrap, /RUN_DB_MIGRATIONS_ON_START: "false"/, "bootstrap must force startup migrations off.");
 requireMatch("ASG bootstrap", asgBootstrap, /COMPLIANCE_PACK_SCHEDULER_ENABLED: "false"/, "bootstrap must force compliance scheduler off.");
@@ -362,6 +372,9 @@ requireMatch("DR common", requireFile("scripts/dr/common.sh"), /bootstrap_status
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /bootstrap_status="\$\(\/bin\/cat "\$bootstrap_status_file"\)"/, "UserData must read the captured bootstrap script status.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /bootstrap script failed/, "UserData must log a clear non-secret bootstrap failure line.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /MetadataOptions\?\.HttpTokens !== "required"/, "launch template validation must require IMDSv2 token enforcement.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /MetadataOptions\?\.HttpEndpoint !== "enabled"/, "launch template validation must require IMDS endpoint enabled.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /HttpPutResponseHopLimit: 2/, "launch template generation must set IMDS hop limit 2 for Docker ASG web nodes.");
+requireMatch("DR common", requireFile("scripts/dr/common.sh"), /HttpPutResponseHopLimit >= 2 for Docker ASG web nodes/, "launch template validation must reject IMDS hop limit below 2.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /data\.IamInstanceProfile/, "launch template validation must require IamInstanceProfile.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /data\.UserData/, "launch template validation must require UserData.");
 requireMatch("DR common", requireFile("scripts/dr/common.sh"), /NetworkInterfaces = \[/, "common helpers must emit NetworkInterfaces when ASG_ASSOCIATE_PUBLIC_IP=true.");
@@ -421,6 +434,10 @@ requireMatch("ASG apply", asgApplyScript, /modify-launch-template/, "apply scrip
 requireMatch("ASG apply", asgApplyScript, /ASG launch template mismatch before capacity update/, "apply script must refuse capacity changes when ASG is not on intended launch template version.");
 requireMatch("ASG apply", asgApplyScript, /update-asg-capacity\.log/, "apply script must update ASG capacity only after version verification.");
 requireMatch("ASG apply", asgApplyScript, /--launch-template "LaunchTemplateId=\$launch_template_id,Version=\$launch_template_version"/, "apply script must update ASG to the validated launch template version.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /LaunchTemplateData\.MetadataOptions/, "evidence collector must report launch template MetadataOptions.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /IamInstanceProfile:IamInstanceProfile/, "evidence collector must report instance profile association.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /MetadataOptions:MetadataOptions/, "evidence collector must report live instance MetadataOptions.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /objectStorage:\{configured/, "evidence collector must report objectStorage readiness.");
 requireMatch("ASG apply", asgApplyScript, /Refusing ASG apply without concrete rollback alarm names/, "apply script must refuse placeholder rollback alarm names.");
 requireMatch("ASG apply", asgApplyScript, /describe-target-group-attributes/, "apply script must verify target group attributes before apply.");
 requireMatch("ASG apply", asgApplyScript, /deregistration_delay\.timeout_seconds/, "apply script must check target group deregistration delay.");
@@ -663,6 +680,8 @@ if (asgRollingPolicyChecklist) {
     "IamInstanceProfile",
     "UserData",
     "MetadataOptions.HttpTokens=required",
+    "MetadataOptions.HttpEndpoint=enabled",
+    "MetadataOptions.HttpPutResponseHopLimit=2",
     "SecurityGroupIds when ASG_ASSOCIATE_PUBLIC_IP=false",
     "NetworkInterfaces[0].AssociatePublicIpAddress=true and Groups when ASG_ASSOCIATE_PUBLIC_IP=true",
     "ImageId",

@@ -157,6 +157,7 @@ JSON
   else
     printf '%s\n' "- KeyName: not provided"
   fi
+  printf '%s\n' "- Metadata options: \`HttpTokens=required\`, \`HttpEndpoint=enabled\`, \`HttpPutResponseHopLimit=2\` for Dockerized default-credentials access through the instance profile."
   printf '%s\n' "- Repository URL: \`$ASG_REPO_URL\`"
   printf '%s\n' "- Repository branch: \`$ASG_REPO_BRANCH\`"
   printf '%s\n' "- Repository directory: \`$ASG_REPO_DIR\`"

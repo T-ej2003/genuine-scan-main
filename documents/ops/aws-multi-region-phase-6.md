@@ -1,96 +1,70 @@
-# AWS Multi-Region Phase 6: Object Storage DR Hardening
+# AWS Multi-Region Phase C: MinIO Decommission / S3 Proof
 
-Last updated: 2026-05-11
+Last updated: 2026-05-31
 
 ## Summary
 
-Phase 6 documents object storage disaster recovery hardening for MSCQR. It is documentation and safe checklists only.
+Phase C proves MSCQR production and ASG DR paths no longer depend on MinIO. It is a safe evidence phase: inventory current MinIO references, prove S3/default-credentials read readiness, optionally prove write readiness only after write gate approval, and prepare a MinIO archival plan.
 
-## Goal
+Do not delete MinIO data automatically. Do not mutate AWS from this document. Do not change production DNS. Do not start Phase D automatic failover.
 
-Make sure a selected standby region can read required objects and, after database recovery plus write gate approval, safely write new objects without data loss or split-brain behavior.
+## Current Roadmap Status
 
-## Current Known State From Public Health
+- Phase A DB recovery: complete by operator evidence and approval.
+- Phase B controlled Route 53 cutover: complete for Mumbai production.
+- Phase C MinIO decommission / S3 proof: active.
+- Phase D automatic failover: blocked until Phase C is complete and separately approved.
 
-The public health output showed production object storage configured and ready. This is health-output evidence, not secret disclosure.
+## Current Known S3 State From Existing Evidence
+
+The public health output previously showed production object storage configured and ready. This is health-output evidence, not secret disclosure.
 
 | Field | Observed value |
 | --- | --- |
-| Bucket | `mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an` |
-| Region | `eu-west-2` |
+| Bucket | `mscqr-prod-aps1-artifacts-368992683803-ap-south-1` |
+| Region | `ap-south-1` |
 | Endpoint | `null` |
 | Mode | `default-credentials` |
 | Ready | `true` |
 
-## Object Storage Recovery Options
+ASG web-node expectations are stricter than generic object-storage support:
 
-| Option | Description | Current recommendation |
-| --- | --- | --- |
-| Continue using approved central S3 bucket from standby | Standby app reads/writes to the approved bucket if IAM/network policy allows. | Verify read access first. |
-| Restore/copy required objects to regional bucket | Copy only required objects to selected region after approval. | Consider only after DB recovery is proven. |
-| Future S3 Cross-Region Replication | Automated replication configured later after validation. | Future option, not Phase 6 implementation. |
-| MinIO intentionally retained | Keep current MinIO containers/data if used by the deployment. | Do not decommission as part of Phase 6. |
+- `docker-compose.asg-web.yml` contains only `backend` and `frontend`.
+- `OBJECT_STORAGE_BUCKET` and `OBJECT_STORAGE_REGION` or `AWS_REGION` are required.
+- `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_ACCESS_KEY`, and `OBJECT_STORAGE_SECRET_KEY` must be empty.
+- `OBJECT_STORAGE_FORCE_PATH_STYLE` must be unset or `false`.
+- The ASG web backend runs inside Docker on EC2.
+- The ASG web instance profile is the desired S3 credential source through the AWS SDK default provider chain.
+- Static AWS keys are forbidden in ASG web mode.
+- IMDSv2 remains required with `MetadataOptions.HttpTokens=required` and `MetadataOptions.HttpEndpoint=enabled`.
+- `MetadataOptions.HttpPutResponseHopLimit=2` is required so the containerized backend can receive IMDSv2 credential responses from the EC2 instance profile.
+- `scripts/dr/bootstrap-asg-web-node.sh` rejects non-empty object-storage endpoint/static credential SSM values and does not print the values.
+- Local development MinIO remains allowed only in `docker-compose.yml`.
 
-## Verify Read Path
+## Phase C Completion Criteria
 
-- Identify a safe non-sensitive test object.
-- Verify standby app IAM role or credential source.
-- Verify bucket policy allows intended read path.
-- Verify backend can read required assets.
-- Verify logs show no access denied or endpoint errors.
+- MinIO usage inventory is reviewed and classified.
+- ASG/production docs no longer recommend MinIO for DR steady state.
+- Local guardrail check passes:
 
-## Verify Upload/Write Path
+```bash
+npm run check:minio-decommission-readiness
+```
 
-Run write verification only after:
-
-- Database recovery is approved.
-- Write gate is approved.
-- Test object naming avoids production collision.
-- Cleanup owner is assigned.
-
-Do not delete production objects during write verification.
-
-## Bucket Policy/IAM Checks
-
-- Confirm standby app role or credential source.
-- Confirm least-privilege bucket access.
-- Confirm encryption/KMS permissions.
-- Confirm region-specific access from Mumbai.
-- Confirm region-specific access from Cape Town.
-- Confirm logs/audit trails are available.
-
-## App Environment Checks
-
-- `OBJECT_STORAGE_BUCKET` points to approved bucket.
-- `OBJECT_STORAGE_REGION` or `AWS_REGION` matches the approved plan.
-- `OBJECT_STORAGE_ENDPOINT` is blank for native S3 default-credentials mode.
-- Static access keys are not copied into docs.
-- Credential source is recorded without secret values.
-
-## Rollback Plan
-
-- Preserve objects and evidence.
-- Stop write tests if any object/database linkage fails.
-- Do not delete buckets.
-- Do not delete production objects.
-- Keep test object cleanup separate from incident evidence retention.
-- Reconcile object references with database rows if writes occurred.
-
-## Completion Checklist
-
-- [ ] Current storage inventory completed.
-- [ ] Read path verified from Mumbai.
-- [ ] Read path verified from Cape Town.
-- [ ] Write path checklist approved but not run until DB recovery gate passes.
-- [ ] IAM/bucket policy reviewed.
-- [ ] Rollback/reconciliation owner assigned.
-- [ ] Replication option recommendation recorded.
+- Mumbai production/ASG object storage evidence proves S3/default-credentials read readiness.
+- Optional write-path proof is either explicitly approved and captured or explicitly deferred.
+- MinIO data archival plan is approved before any MinIO retirement action.
+- Rollback owner and evidence location are recorded.
+- Phase D remains blocked until this checklist is complete.
 
 ## Explicit Exclusions
 
-- No MinIO decommission.
-- No destructive object deletion.
-- No bucket deletion.
 - No automatic failover.
-- No active-active writes.
-- No object storage migration implementation in Phase 6.
+- No Route 53 failover routing.
+- No production DNS mutation.
+- No AWS mutation from this runbook.
+- No secret changes or secret disclosure.
+- No MinIO data deletion, volume deletion, or bucket deletion.
+- No object storage migration write test without write gate approval.
+
+Detailed operator steps live in [Phase C MinIO decommission / S3 proof runbook](object-storage-recovery/minio-decommission-s3-proof-runbook.md).

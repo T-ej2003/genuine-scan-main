@@ -1,6 +1,6 @@
 # AWS ASG Multi-Instance Readiness
 
-Last updated: 2026-05-28
+Last updated: 2026-05-31
 
 ASG_STATUS=CONDITIONALLY_READY
 
@@ -98,6 +98,7 @@ Evidence:
 - `docker-compose.yml` still defines a local MinIO service and `minio_data` volume.
 - Regional env examples now keep `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_ACCESS_KEY`, and `OBJECT_STORAGE_SECRET_KEY` empty for S3/default credentials.
 - Operator evidence confirms Mumbai and Cape Town use regional S3/default credentials with `endpoint=null` and `mode=default-credentials`.
+- Phase C Mumbai ASG evidence shows the backend runs inside Docker on EC2 and must receive instance-profile credentials through the AWS SDK default provider chain. IMDSv2 remains required, but launch templates must set `MetadataOptions.HttpPutResponseHopLimit=2`; hop limit `1` can prevent containerized backend processes from receiving IMDSv2 responses and leaves object storage in `configured=true ready=false` with `Could not load credentials from any providers`.
 
 Residual risk:
 
@@ -114,6 +115,8 @@ ASG requirement:
 
 - ASG launch templates must use `docker-compose.asg-web.yml` and regional S3/default credentials.
 - Do not use the legacy local MinIO service in ASG web nodes.
+- Use the ASG web instance profile as the credential source for S3. Static AWS keys are forbidden for ASG web object storage.
+- Keep `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_ACCESS_KEY`, and `OBJECT_STORAGE_SECRET_KEY` empty in ASG web mode.
 
 ## C. Database Migrations
 
@@ -333,13 +336,16 @@ Committed policy:
 Launch-template requirements:
 
 - `IamInstanceProfile` must come from explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`.
+- `IamInstanceProfile` is the desired S3 credential source for the containerized backend through the AWS SDK default provider chain; static AWS keys are forbidden.
 - `UserData` must be base64 encoded and must run `scripts/dr/bootstrap-asg-web-node.sh "$TARGET_REGION_GROUP" "$AWS_REGION"` from `ASG_REPO_DIR`.
 - `UserData` must install/check Git, Docker, Docker Compose, AWS CLI, Node.js, and npm before app bootstrap, with an apt `docker-compose-plugin` attempt, a pinned manual Compose v2 plugin fallback under `/usr/local/lib/docker/cli-plugins/docker-compose`, an apt `awscli` attempt, an official AWS CLI v2 installer fallback, and pinned-major Node.js 24 setup.
 - `UserData` must tee `scripts/dr/bootstrap-asg-web-node.sh` output to `/var/log/mscqr-asg-bootstrap.log` and cloud-init console output while preserving the bootstrap script exit code without relying on `pipefail`.
 - `UserData` must clone `ASG_REPO_URL` into `ASG_REPO_DIR` when missing; if `ASG_REPO_DIR` already contains a git checkout, it must fetch/reset `ASG_REPO_BRANCH`; if the path exists but is not a git checkout, it must fail clearly and must not delete it automatically.
 - `UserData` must log to `/var/log/mscqr-asg-bootstrap.log`, avoid printing secret values, and never touch Route 53 or production DNS.
 - `UserData` must mirror non-secret status/failure lines to cloud-init console output and include a failure trap with safe diagnostics only.
-- `MetadataOptions.HttpTokens` must be `required`.
+- `MetadataOptions.HttpTokens` must be `required`; IMDSv2 remains required.
+- `MetadataOptions.HttpEndpoint` must be `enabled`.
+- `MetadataOptions.HttpPutResponseHopLimit=2` is required because the ASG web backend runs inside Docker and needs the instance-profile credential response to traverse the container networking hop.
 - `ImageId` and `InstanceType` must be present.
 - `ASG_KEY_NAME` is optional generally; when set it must become `KeyName`, and when omitted `KeyName` must be absent.
 - `ASG_REPO_URL` is required for self-sufficient ASG web-node bootstrap and must not contain whitespace or embedded credentials.
@@ -405,7 +411,7 @@ Approved first-rollout values:
 - Roll back by canceling instance refresh, keeping the previous launch template version available, and restoring current-ASG healthy target count before removing any new unhealthy instance.
 - Capture `/healthz`, `/api/health/ready`, ALB target health, and app version evidence per batch.
 - If ASG and ALB health disagree, run `npm run ops:asg-health-evidence` with the Mumbai ASG variables to capture read-only ASG, target-health, ASG-only healthy target count, legacy/source target diagnostics, per-instance console, per-instance public-IP `/healthz`, and optional SSH evidence under `/tmp/mscqr-asg-evidence/`; never pass multiple instance IDs as one string.
-- Keep production DNS on London EC2 during the first ASG rollout and replacement-instance drill.
+- Do not change production DNS during the ASG rollout and replacement-instance drill. Mumbai production cutover is already complete; ASG validation is launch-template/bootstrap evidence only.
 
 ## Current Go/No-Go
 
@@ -420,11 +426,11 @@ Rolling deploy policy is conditionally proven at repository level: the contract 
 Exact remaining live test:
 
 - Create and attach the regional ASG with `min=2 desired=2 max=4`.
-- Keep production DNS on London EC2.
+- Keep production DNS unchanged.
 - Verify at least 2 healthy current ASG targets on the regional ALB. The legacy/source target must not satisfy ASG readiness.
 - Run the documented replacement-instance drill and record CloudWatch plus target-health evidence.
 
-No-go for production DNS cutover until that live drill passes and the regional rollback path is practiced cleanly.
+No-go for Phase D automatic failover until Phase C MinIO decommission / S3 proof is complete and the regional rollback path is practiced cleanly.
 
 ## Validation
 

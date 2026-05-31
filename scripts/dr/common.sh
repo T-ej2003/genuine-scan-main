@@ -839,6 +839,7 @@ const data = {
   MetadataOptions: {
     HttpTokens: "required",
     HttpEndpoint: "enabled",
+    HttpPutResponseHopLimit: 2,
   },
   TagSpecifications: [
     {
@@ -948,6 +949,15 @@ if (expectedKeyName) {
 if (!data.UserData) fail("Launch template data is missing UserData.");
 if (data.MetadataOptions?.HttpTokens !== "required") {
   fail("Launch template data must set MetadataOptions.HttpTokens to required.");
+}
+if (data.MetadataOptions?.HttpEndpoint !== "enabled") {
+  fail("Launch template data must set MetadataOptions.HttpEndpoint to enabled.");
+}
+if (!Object.hasOwn(data.MetadataOptions || {}, "HttpPutResponseHopLimit")) {
+  fail("Launch template data must set MetadataOptions.HttpPutResponseHopLimit.");
+}
+if (!Number.isInteger(data.MetadataOptions.HttpPutResponseHopLimit) || data.MetadataOptions.HttpPutResponseHopLimit < 2) {
+  fail("Launch template data must set MetadataOptions.HttpPutResponseHopLimit >= 2 for Docker ASG web nodes.");
 }
 
 let decoded = "";

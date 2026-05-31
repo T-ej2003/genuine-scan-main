@@ -17,6 +17,7 @@ Optional read-only SSH inspection:
   ALLOW_SSH_DEEP_INSPECTION=true
   ASG_SSH_KEY=/path/to/key.pem
   ASG_SSH_USER=ubuntu
+  READY_URL=https://www.mscqr.com/api/health/ready
 
 Evidence is written under /tmp/mscqr-asg-evidence and gzipped.
 This script does not mutate AWS resources.
@@ -36,6 +37,7 @@ ASG_SSH_USER="${ASG_SSH_USER:-ubuntu}"
 ASG_SSH_KEY="${ASG_SSH_KEY:-}"
 ALLOW_SSH_DEEP_INSPECTION="${ALLOW_SSH_DEEP_INSPECTION:-}"
 ENABLE_ASG_SSH_DEEP_INSPECTION="${ENABLE_ASG_SSH_DEEP_INSPECTION:-}"
+READY_URL="${READY_URL:-}"
 
 [ -n "$TARGET_REGION_GROUP" ] || { echo "TARGET_REGION_GROUP is required." >&2; exit 1; }
 [ -n "$AWS_REGION" ] || { echo "AWS_REGION is required." >&2; exit 1; }
@@ -74,7 +76,7 @@ collect_instance_ips() {
   aws ec2 describe-instances \
     --region "$AWS_REGION" \
     --instance-ids "$instance_id" \
-    --query 'Reservations[].Instances[].{Id:InstanceId,State:State.Name,LaunchTime:LaunchTime,PrivateIp:PrivateIpAddress,PublicIp:PublicIpAddress,Subnet:SubnetId,SecurityGroups:SecurityGroups[].GroupId}' \
+    --query 'Reservations[].Instances[].{Id:InstanceId,State:State.Name,LaunchTime:LaunchTime,PrivateIp:PrivateIpAddress,PublicIp:PublicIpAddress,Subnet:SubnetId,SecurityGroups:SecurityGroups[].GroupId,IamInstanceProfile:IamInstanceProfile.Arn,MetadataOptions:MetadataOptions}' \
     --output table
 }
 
@@ -86,7 +88,7 @@ collect_all_instance_ips() {
   aws ec2 describe-instances \
     --region "$AWS_REGION" \
     --instance-ids "$@" \
-    --query 'Reservations[].Instances[].{Id:InstanceId,State:State.Name,LaunchTime:LaunchTime,PrivateIp:PrivateIpAddress,PublicIp:PublicIpAddress,SecurityGroups:SecurityGroups[].GroupId}' \
+    --query 'Reservations[].Instances[].{Id:InstanceId,State:State.Name,LaunchTime:LaunchTime,PrivateIp:PrivateIpAddress,PublicIp:PublicIpAddress,SecurityGroups:SecurityGroups[].GroupId,IamInstanceProfile:IamInstanceProfile.Arn,MetadataOptions:MetadataOptions}' \
     --output table
 }
 
@@ -97,6 +99,57 @@ get_instance_public_ip() {
     --instance-ids "$instance_id" \
     --query 'Reservations[0].Instances[0].PublicIpAddress' \
     --output text 2>/dev/null || true
+}
+
+collect_launch_template_metadata_options() {
+  launch_template_id="$(node -e 'const fs=require("fs"); const asg=JSON.parse(fs.readFileSync(process.argv[1],"utf8")).AutoScalingGroups?.[0]; const lt=asg?.LaunchTemplate || asg?.MixedInstancesPolicy?.LaunchTemplate?.LaunchTemplateSpecification; console.log(lt?.LaunchTemplateId || "");' "$asg_json")"
+  launch_template_version="$(node -e 'const fs=require("fs"); const asg=JSON.parse(fs.readFileSync(process.argv[1],"utf8")).AutoScalingGroups?.[0]; const lt=asg?.LaunchTemplate || asg?.MixedInstancesPolicy?.LaunchTemplate?.LaunchTemplateSpecification; console.log(lt?.Version || "$Default");' "$asg_json")"
+  if [ -z "$launch_template_id" ]; then
+    printf 'Launch template metadata: not available on ASG payload.\n'
+    return 0
+  fi
+  printf 'LAUNCH_TEMPLATE_ID=%s\n' "$launch_template_id"
+  printf 'LAUNCH_TEMPLATE_VERSION=%s\n' "$launch_template_version"
+  aws ec2 describe-launch-template-versions \
+    --region "$AWS_REGION" \
+    --launch-template-id "$launch_template_id" \
+    --versions "$launch_template_version" \
+    --query 'LaunchTemplateVersions[].{Version:VersionNumber,Default:DefaultVersion,InstanceProfile:LaunchTemplateData.IamInstanceProfile,MetadataOptions:LaunchTemplateData.MetadataOptions}' \
+    --output json
+}
+
+collect_instance_metadata_profile() {
+  instance_id="$1"
+  aws ec2 describe-instances \
+    --region "$AWS_REGION" \
+    --instance-ids "$instance_id" \
+    --query 'Reservations[].Instances[].{Id:InstanceId,IamInstanceProfile:IamInstanceProfile,MetadataOptions:MetadataOptions}' \
+    --output json
+}
+
+curl_object_storage_readiness() {
+  ready_url="$READY_URL"
+  if [ -z "$ready_url" ]; then
+    case "$TARGET_REGION_GROUP" in
+      mumbai) ready_url="https://www.mscqr.com/api/health/ready" ;;
+      capetown) ready_url="https://dr-capetown.mscqr.com/api/health/ready" ;;
+      *) ready_url="" ;;
+    esac
+  fi
+  if [ -z "$ready_url" ]; then
+    printf 'Object storage readiness curl skipped: READY_URL not set.\n'
+    return 0
+  fi
+
+  ready_body="$out_dir/object-storage-ready-$timestamp.body"
+  ready_meta="$out_dir/object-storage-ready-$timestamp.meta"
+  if curl -sS -m 12 -o "$ready_body" -w 'http_status=%{http_code} total_time=%{time_total} remote_ip=%{remote_ip}\n' "$ready_url" > "$ready_meta" 2>&1; then
+    printf 'Readiness curl: ok '
+  else
+    printf 'Readiness curl: failed '
+  fi
+  cat "$ready_meta" 2>/dev/null || true
+  node -e 'const fs=require("fs"); const file=process.argv[1]; if (!fs.existsSync(file)) process.exit(0); try { const payload=JSON.parse(fs.readFileSync(file,"utf8")); const objectStorage=payload.dependencies?.objectStorage || {}; console.log(JSON.stringify({success:payload.success===true,status:payload.status||"unknown",objectStorage:{configured:objectStorage.configured===true,ready:objectStorage.ready===true,bucket:objectStorage.bucket||null,region:objectStorage.region||null,endpoint:objectStorage.endpoint||null,mode:objectStorage.mode||null,reason:objectStorage.reason||null}})); } catch { console.log(fs.readFileSync(file,"utf8").slice(0,500)); }' "$ready_body" 2>/dev/null || true
 }
 
 collect_instance_target_health() {
@@ -230,6 +283,8 @@ node scripts/dr/check-asg-target-health-accounting.mjs \
   --no-fail > "$target_summary_env"
 
 run_section "ASG-only target health summary" print_asg_target_health_summary
+run_section "Launch template metadata options and instance profile" collect_launch_template_metadata_options
+run_section "Object storage readiness" curl_object_storage_readiness
 
 ASG_INSTANCE_IDS="$(node -e 'const fs=require("fs"); const asg=JSON.parse(fs.readFileSync(process.argv[1],"utf8")).AutoScalingGroups?.[0]; for (const instance of asg?.Instances || []) console.log(instance.InstanceId);' "$asg_json")"
 
@@ -244,6 +299,7 @@ run_section "All current ASG instance IPs" collect_all_instance_ips "$@"
 for instance_id do
   [ -n "$instance_id" ] || continue
   run_section "Instance $instance_id IPs" collect_instance_ips "$instance_id"
+  run_section "Instance $instance_id metadata options and profile" collect_instance_metadata_profile "$instance_id"
   run_section "Instance $instance_id ASG target health" collect_instance_target_health "$instance_id"
   run_section "Instance $instance_id filtered console output" safe_console_output "$instance_id"
   public_ip="$(get_instance_public_ip "$instance_id")"

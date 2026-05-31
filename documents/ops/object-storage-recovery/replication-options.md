@@ -1,6 +1,6 @@
 # Object Storage Replication Options
 
-Last updated: 2026-05-11
+Last updated: 2026-05-31
 
 ## Comparison
 
@@ -10,11 +10,11 @@ Last updated: 2026-05-11
 | Manual copy | Copy required objects during recovery. | Operator-controlled. | Slower RTO, easy to miss objects. | Use only for scoped recovery if documented. |
 | S3 Cross-Region Replication | AWS-managed replication to regional buckets. | Better regional readiness. | Requires policy/KMS/versioning design and testing. | Future option after DB recovery and manual cutover are proven. |
 | Future dedicated regional buckets | App uses region-local bucket after cutover. | Clear regional isolation. | More app/env and reconciliation complexity. | Later phase only. |
-| MinIO retained | Keep existing MinIO data/containers where intentionally used. | Avoids risky cleanup. | Not a long-term DR substitute by itself. | Retain until a separate approved migration exists. |
+| MinIO data archived before retirement | Preserve existing MinIO data through a read-only archive or platform snapshot before any retirement action. | Avoids data loss while removing production/DR dependency. | Requires storage owner and retention decision. | Phase C requirement before decommission approval. |
 
 ## Current Recommendation
 
-For the current stage, verify standby read access first. Do not migrate object storage until database recovery and manual cutover are proven.
+For Phase C, verify S3/default-credentials read access first. Do not migrate or delete MinIO data automatically. Do not use MinIO as the production/ASG DR steady-state dependency.
 
 ## Decision Inputs
 

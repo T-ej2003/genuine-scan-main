@@ -1,6 +1,6 @@
 # Object Storage Rollback And Reconciliation
 
-Last updated: 2026-05-11
+Last updated: 2026-05-31
 
 ## Preserve Objects
 
@@ -8,7 +8,8 @@ Last updated: 2026-05-11
 - Preserve logs and object metadata evidence.
 - Do not delete production objects during rollback.
 - Do not delete buckets.
-- Do not decommission MinIO.
+- Do not delete MinIO data automatically.
+- Do not retire MinIO services until S3 proof, archive evidence, and rollback ownership are approved.
 
 ## Compare Object References With DB Rows
 
@@ -38,6 +39,6 @@ Last updated: 2026-05-11
 
 - Do not delete buckets.
 - Do not delete production objects.
-- Do not decommission MinIO.
+- Do not delete MinIO data automatically.
 - Do not hide missing-object evidence.
 - Do not allow writes before database and storage gates are approved.

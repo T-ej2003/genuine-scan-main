@@ -1,6 +1,6 @@
 # AWS ASG Rolling Deploy Policy
 
-Last updated: 2026-05-28
+Last updated: 2026-05-31
 
 ASG_STATUS=CONDITIONALLY_READY
 
@@ -11,13 +11,15 @@ This document defines the approved rolling deploy and instance refresh contract 
 - Applies only to ASG web nodes running `docker compose -f docker-compose.asg-web.yml up -d --build backend frontend`.
 - Applies to Mumbai and Cape Town regional ALB target groups.
 - Assumes singleton workers remain outside the web ASG.
-- Production DNS must remain on London EC2 during ASG rollout validation.
+- ASG rollout validation must not change production DNS. Mumbai production cutover is already complete; this policy only validates launch-template/bootstrap replacement safety behind the regional ALB.
 
 ## Policy Values
 
 Source of truth: `documents/ops/aws-asg-rolling-deploy-policy.checklist.json`
 
 - Launch template instance profile: explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`; ARN wins when both are set.
+- Launch template metadata: `MetadataOptions.HttpTokens=required`, `MetadataOptions.HttpEndpoint=enabled`, and `MetadataOptions.HttpPutResponseHopLimit=2`. IMDSv2 remains required; hop limit 2 is required because the ASG web backend runs inside Docker and uses the instance profile through the AWS SDK default provider chain.
+- Static AWS keys are forbidden for ASG web object storage. The instance profile is the desired credential source.
 - Launch template bootstrap: base64 `UserData` that can boot a plain Ubuntu 22.04 host by installing/checking Git, Docker, Docker Compose, AWS CLI, Node.js 24, and npm 11, including apt attempts plus manual Docker Compose/AWS CLI fallbacks and pinned-major NodeSource setup, cloning/updating the repository, and running `scripts/dr/bootstrap-asg-web-node.sh "$TARGET_REGION_GROUP" "$AWS_REGION"` from `ASG_REPO_DIR`.
 - Launch template repository inputs: required `ASG_REPO_URL`, default `ASG_REPO_BRANCH=main`, and default `ASG_REPO_DIR=/home/ubuntu/genuine-scan-main`. Mumbai debug retry should use `ASG_REPO_URL=https://github.com/T-ej2003/genuine-scan-main.git`, `ASG_REPO_BRANCH=main`, and `ASG_REPO_DIR=/home/ubuntu/genuine-scan-main`.
 - Launch template SSH key: optional `ASG_KEY_NAME`; when set it must become `KeyName` in `LaunchTemplateData`, and Mumbai debug retry should use `ASG_KEY_NAME=mscqr-prod-mumbai`.
@@ -61,11 +63,11 @@ Every rollout batch and replacement step must pass:
 
 ## Go/No-Go Checklist
 
-- Production DNS still points to London EC2.
+- Production DNS change is out of scope for ASG rollout validation.
 - Regional test hostname is healthy before the rollout starts.
 - `node scripts/dr/check-asg-multi-instance-readiness.mjs` passes.
 - The ASG web instance profile has been tested from an EC2 role against the target region SSM prefix before apply.
-- Generated launch template data contains `IamInstanceProfile`, `UserData`, `MetadataOptions.HttpTokens=required`, `ImageId`, `InstanceType`, and the expected networking shape for `ASG_ASSOCIATE_PUBLIC_IP`.
+- Generated launch template data contains `IamInstanceProfile`, `UserData`, `MetadataOptions.HttpTokens=required`, `MetadataOptions.HttpEndpoint=enabled`, `MetadataOptions.HttpPutResponseHopLimit=2`, `ImageId`, `InstanceType`, and the expected networking shape for `ASG_ASSOCIATE_PUBLIC_IP`.
 - For debug retries, generated launch template data contains `KeyName=mscqr-prod-mumbai` so failed nodes can be inspected without relying on console output alone.
 - UserData mirrors non-secret status and failure lines to cloud-init console output and writes the full bootstrap log to `/var/log/mscqr-asg-bootstrap.log`.
 - UserData installs/checks `git`, `docker.io`, `docker compose`, `aws --version`, `node --version`, and `npm --version`; if `docker compose version` is unavailable, it tries apt `docker-compose-plugin` and then installs a pinned Compose v2 plugin under `/usr/local/lib/docker/cli-plugins/docker-compose` when apt cannot provide it; if AWS CLI is unavailable, it tries apt `awscli` and then installs AWS CLI v2 from the official installer when apt cannot provide it; if Node.js/npm are unavailable or outside `node >=24 <27` and `npm >=11`, it configures NodeSource `node_24.x` and installs `nodejs`; if `ASG_REPO_DIR` is missing, it clones `ASG_REPO_URL`; if `ASG_REPO_DIR` is already a git checkout, it fetches/resets `ASG_REPO_BRANCH`; if the path exists but is not a git checkout, it fails without deleting it.

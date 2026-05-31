@@ -293,12 +293,11 @@ Only after Mumbai and Cape Town inventory, plan, apply, and regional test-record
 
 ## Regional Scaling And Reliability Readiness
 
-Current stable state before final DNS cutover:
+Current stable state after Mumbai production cutover:
 
-- Production DNS points to London EC2 `13.135.108.69`.
-- Mumbai ALB is healthy and available through `dr-mumbai.mscqr.com`.
+- Mumbai production DNS is cut over to the Mumbai ALB, with final stability evidence preserved under `documents/ops/evidence/`.
 - Cape Town ALB is healthy and available through `dr-capetown.mscqr.com`.
-- Production cutover/rollback plans exist, but production DNS must not be changed by readiness work.
+- Production DNS must not be changed by readiness work.
 - ASG_STATUS=CONDITIONALLY_READY in `documents/ops/aws-asg-multi-instance-readiness.md`, with a required no-DNS live replacement-instance drill still pending.
 
 Use this workflow for read-only evidence and plan generation:
@@ -409,8 +408,9 @@ Rollback notes:
 - ALB access logs are non-traffic-impacting, but require an approved logging bucket.
 - WAF COUNT mode is non-blocking; do not move rules to BLOCK in this phase.
 - ASG apply creates extra capacity and attaches it to the target group. It does not detach or delete the source instance, terminate instances, or change DNS.
-- The first ASG rollout must keep production DNS on London EC2 and must include the replacement-instance drill from `documents/ops/aws-asg-rolling-deploy-policy.md`.
+- The first ASG rollout must keep production DNS unchanged and must include the replacement-instance drill from `documents/ops/aws-asg-rolling-deploy-policy.md`.
 - ASG launch templates must use explicit `ASG_WEB_INSTANCE_PROFILE_ARN` or `ASG_WEB_INSTANCE_PROFILE_NAME`. Do not reuse the source instance profile automatically.
+- ASG launch templates must keep IMDSv2 required with `MetadataOptions.HttpTokens=required`, `MetadataOptions.HttpEndpoint=enabled`, and `MetadataOptions.HttpPutResponseHopLimit=2` so Dockerized backend containers can use instance-profile default credentials for S3. Do not add static AWS keys.
 - ASG launch templates must set `ASG_ASSOCIATE_PUBLIC_IP=true` or `ASG_ASSOCIATE_PUBLIC_IP=false` explicitly. Mumbai first retry should use `true` because the selected public subnets currently have `MapPublicIpOnLaunch=false`.
 - Mumbai debug retry should set `ASG_KEY_NAME=mscqr-prod-mumbai` so failed ASG nodes can be inspected with the approved SSH key.
 - Mumbai debug retry should set `ASG_REPO_URL=https://github.com/T-ej2003/genuine-scan-main.git`, `ASG_REPO_BRANCH=main`, and `ASG_REPO_DIR=/home/ubuntu/genuine-scan-main`. The UserData path now installs/checks Git, Docker, Docker Compose, AWS CLI, Node.js 24, and npm 11 on a plain Ubuntu 22.04 host before cloning or updating the repo and running bootstrap.
@@ -792,7 +792,7 @@ hostname: www.mscqr.com
 Branch: aws-dr-finish
 operation: object-storage-readiness
 target_region: standby
-bucket: mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an
+bucket: mscqr-prod-aps1-artifacts-368992683803-ap-south-1
 test_object_key: blank
 ```
 

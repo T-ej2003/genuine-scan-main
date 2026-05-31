@@ -1,19 +1,18 @@
 # AWS Multi-Region Disaster Recovery Runbook
 
-Last updated: 2026-05-11
+Last updated: 2026-05-31
 
 ## Overview
 
-This is the top-level MSCQR operator runbook for multi-region disaster recovery. It links the standby deployment, manual failover, controlled DNS cutover, database recovery, and object storage recovery documentation.
+This is the top-level MSCQR operator runbook for multi-region disaster recovery. It links the standby deployment, manual failover, controlled DNS cutover, database recovery, object storage recovery, and the current MinIO decommission / S3 proof work.
 
 ## Current Status By Phase
 
-- Phase 2: standby servers ready and manually deployable.
-- Phase 3: manual failover drill recorded.
-- Phase 4: manual DNS cutover tabletop recorded.
-- Phase 5: database recovery documentation added.
-- Phase 6: object storage recovery documentation added.
-- Regional ALB test records: Mumbai and Cape Town are available through `dr-mumbai.mscqr.com` and `dr-capetown.mscqr.com`; production DNS is currently rolled back to London EC2 `13.135.108.69`.
+- Phase A: DB recovery is complete by operator evidence and approval. Do not reopen it in this phase.
+- Phase B: controlled Route 53 cutover is complete for Mumbai production. Evidence is preserved in `documents/ops/evidence/`, including Mumbai ASG success, post-legacy deregistration, ASG replacement drill, DNS cutover, apex redirect, and final stability artifacts.
+- Phase C: MinIO decommission / S3 proof is the active phase. The goal is to prove production/ASG DR paths use S3/default credentials and do not depend on MinIO, while preserving local development MinIO and all MinIO data.
+- Phase D: automatic failover remains blocked until Phase C is complete and approved. Do not design or implement automatic Route 53 failover in Phase C.
+- Regional ALB records: Mumbai production is cut over to the Mumbai ALB; `https://mscqr.com` redirects to `https://www.mscqr.com/`. Cape Town remains a later DR target, not the active production cutover target for this phase.
 
 ## Phase Links
 
@@ -21,7 +20,7 @@ This is the top-level MSCQR operator runbook for multi-region disaster recovery.
 - [Phase 3 manual failover readiness](aws-multi-region-phase-3.md)
 - [Phase 4 controlled manual DNS cutover](aws-multi-region-phase-4.md)
 - [Phase 5 database recovery strategy](aws-multi-region-phase-5.md)
-- [Phase 6 object storage DR hardening](aws-multi-region-phase-6.md)
+- [Phase C MinIO decommission / S3 proof](aws-multi-region-phase-6.md)
 - [Database recovery pack](database-recovery/README.md)
 - [Object storage recovery pack](object-storage-recovery/README.md)
 - [Manual failover drill pack](manual-failover-drill/README.md)
@@ -46,7 +45,7 @@ Route 53 is authoritative for `mscqr.com`. The professional public HTTPS path fo
 Route 53 -> regional ALB HTTPS 443 with ACM -> EC2 frontend HTTP 80
 ```
 
-This avoids copying Let's Encrypt private keys into standby containers. London currently still has working local TLS; Mumbai and Cape Town should receive public HTTPS through regional ALBs before any production DNS cutover is considered.
+This avoids copying Let's Encrypt private keys into standby containers. Mumbai production now receives public HTTPS through the regional ALB. Cape Town should receive public HTTPS through a regional ALB before it is considered for any later DR promotion.
 
 Use `AWS DR ALB Apply` for inventory, plan generation, and protected ALB/ACM apply. This workflow does not cut over `mscqr.com` or `www.mscqr.com`. DNS cutover remains in `AWS DR DNS Apply`.
 
@@ -67,18 +66,18 @@ The raw `*.elb.amazonaws.com` ALB hostname is not on the MSCQR ACM certificate, 
 
 ## Scaling And Observability Readiness
 
-Before final DNS cutover, run `AWS DR Regional Readiness` for Mumbai and Cape Town. This workflow is read/plan-only and does not change DNS, enable access logs, attach WAF, create ASGs, mutate RDS/S3, or delete resources.
+For later DR targets, run `AWS DR Regional Readiness` before any approved cutover discussion. This workflow is read/plan-only and does not change DNS, enable access logs, attach WAF, create ASGs, mutate RDS/S3, or delete resources.
 
 Current app scaling gate: ASG_STATUS=CONDITIONALLY_READY. Review `documents/ops/aws-asg-multi-instance-readiness.md`, `documents/ops/aws-asg-rolling-deploy-policy.md`, and run `node scripts/dr/check-asg-multi-instance-readiness.mjs` before any ASG create/attach discussion.
 
-Phases before final cutover:
+Current roadmap gates:
 
-1. Current stable state: London EC2 remains production DNS.
-2. Test-record validation: `dr-mumbai.mscqr.com` and `dr-capetown.mscqr.com` pass HTTPS health checks.
-3. Scaling readiness: capacity inventory and ASG/launch-template plan artifacts exist for both regions.
-4. Observability readiness: CloudWatch alarm plan, ALB access log plan, and WAF plan artifacts exist for both regions.
-5. Final production DNS cutover: use only the protected DNS workflow after incident commander approval.
-6. Rollback: restore London ALB or London EC2 DNS rollback JSON if validation fails.
+1. Phase A complete: DB recovery accepted by operator evidence and approval.
+2. Phase B complete for Mumbai: production DNS is cut over to the Mumbai ALB and legacy/source target removal plus replacement drill evidence is preserved.
+3. Phase C active: prove ASG/production object storage is S3/default-credentials, archive MinIO data safely, and keep local development MinIO only.
+4. Phase D blocked: do not implement automatic failover until Phase C is complete and a separate approval starts Phase D.
+
+For a future non-Mumbai cutover, use only the protected DNS workflow after incident commander approval and a fresh rollback plan for the target region.
 
 Recommended operations per region:
 
@@ -105,7 +104,7 @@ Apply order:
 
 Hardening does not perform production DNS cutover, delete AWS resources, mutate RDS, mutate application S3 buckets, copy Let's Encrypt keys, or move WAF rules to BLOCK mode. WAF remains COUNT mode only in this phase.
 
-ASG apply is intentionally last because current single-node assumptions may include node-local Redis, MinIO, secrets, sessions, migrations, worker behavior, and filesystem state. ASG_STATUS=CONDITIONALLY_READY means the repo-side blockers are closed, but the first live create/attach plus replacement-instance drill still needs evidence. The launch template must include explicit ASG web instance profile input, deterministic UserData bootstrap, optional debug `ASG_KEY_NAME`, and the expected `ASG_ASSOCIATE_PUBLIC_IP` networking shape. For Mumbai's first retry, use `ASG_ASSOCIATE_PUBLIC_IP=true` because the selected public subnets have `MapPublicIpOnLaunch=false`, and use `ASG_KEY_NAME=mscqr-prod-mumbai` so failed nodes can be inspected. Because the selected AMI is not app-baked, UserData must also install/check Git, Docker, Docker Compose, AWS CLI, Node.js 24, and npm 11, then clone or refresh the repo through `ASG_REPO_URL`, `ASG_REPO_BRANCH`, and `ASG_REPO_DIR`. Docker Compose installation must not depend solely on apt: the latest Mumbai no-DNS failure proved Docker could install and start while `docker-compose-plugin` was unavailable and `docker compose` failed with `docker: unknown command: docker compose`; UserData now falls back to a pinned Compose v2 CLI plugin under `/usr/local/lib/docker/cli-plugins/docker-compose`. The next retry moved past Compose and failed while running `scripts/dr/bootstrap-asg-web-node.sh`, so UserData now checks AWS CLI through apt plus official AWS CLI v2 fallback and mirrors bootstrap output to cloud-init console while preserving the exit code. The latest retry reached repo HEAD `c97edfe` and failed with `ERROR: node is required`, so UserData now installs/verifies Node.js 24/npm 11 before invoking the bootstrap script. The following retry reached SSM env render and failed because `SMTP_FROM` was treated as required; source review confirmed `SMTP_FROM` is optional for boot and the backend falls back to `SMTP_USER` as the From address when it is absent. The next retry reached Compose interpolation and failed because `QR_SIGN_PRIVATE_KEY` was in `backend/.env` but not in Compose's interpolation environment. The fix writes project `.env` as a persistent root/backend union for later diagnostics and adds a temporary root/backend union env file passed with `docker compose --env-file`, while preserving `backend/.env` for the backend container. The next retry started the backend but deadlocked frontend startup on backend deep readiness; the fix now uses backend `/health/live` for container health. The latest retry proved backend and frontend containers start and the node reaches `/healthz` plus `/api/health/ready` waits; bootstrap now treats `/healthz` as the hard edge-liveness gate and records degraded `/api/health/ready` as `CONDITIONALLY_READY` dependency evidence with no-secret diagnostics. The preferred production design is private ASG subnets with NAT Gateway or VPC endpoints, then `ASG_ASSOCIATE_PUBLIC_IP=false`. Do not use final production DNS cutover until at least the selected region has healthy multi-target evidence and a reviewed rollback plan.
+ASG apply is intentionally last because current single-node assumptions may include node-local Redis, MinIO, secrets, sessions, migrations, worker behavior, and filesystem state. ASG_STATUS=CONDITIONALLY_READY means the repo-side blockers are closed, but the first live create/attach plus replacement-instance drill still needs evidence. The launch template must include explicit ASG web instance profile input, deterministic UserData bootstrap, optional debug `ASG_KEY_NAME`, and the expected `ASG_ASSOCIATE_PUBLIC_IP` networking shape. For Mumbai's first retry, use `ASG_ASSOCIATE_PUBLIC_IP=true` because the selected public subnets have `MapPublicIpOnLaunch=false`, and use `ASG_KEY_NAME=mscqr-prod-mumbai` so failed nodes can be inspected. Because the selected AMI is not app-baked, UserData must also install/check Git, Docker, Docker Compose, AWS CLI, Node.js 24, and npm 11, then clone or refresh the repo through `ASG_REPO_URL`, `ASG_REPO_BRANCH`, and `ASG_REPO_DIR`. Docker Compose installation must not depend solely on apt: the latest Mumbai no-DNS failure proved Docker could install and start while `docker-compose-plugin` was unavailable and `docker compose` failed with `docker: unknown command: docker compose`; UserData now falls back to a pinned Compose v2 CLI plugin under `/usr/local/lib/docker/cli-plugins/docker-compose`. The next retry moved past Compose and failed while running `scripts/dr/bootstrap-asg-web-node.sh`, so UserData now checks AWS CLI through apt plus official AWS CLI v2 fallback and mirrors bootstrap output to cloud-init console while preserving the exit code. The latest retry reached repo HEAD `c97edfe` and failed with `ERROR: node is required`, so UserData now installs/verifies Node.js 24/npm 11 before invoking the bootstrap script. The following retry reached SSM env render and failed because `SMTP_FROM` was treated as required; source review confirmed `SMTP_FROM` is optional for boot and the backend falls back to `SMTP_USER` as the From address when it is absent. The next retry reached Compose interpolation and failed because `QR_SIGN_PRIVATE_KEY` was in `backend/.env` but not in Compose's interpolation environment. The fix writes project `.env` as a persistent root/backend union for later diagnostics and adds a temporary root/backend union env file passed with `docker compose --env-file`, while preserving `backend/.env` for the backend container. The next retry started the backend but deadlocked frontend startup on backend deep readiness; the fix now uses backend `/health/live` for container health. The latest retry proved backend and frontend containers start and the node reaches `/healthz` plus `/api/health/ready` waits; bootstrap now treats `/healthz` as the hard edge-liveness gate and records degraded `/api/health/ready` as `CONDITIONALLY_READY` dependency evidence with no-secret diagnostics. Phase C object-storage evidence shows the ASG web backend runs inside Docker and must use the instance profile through default credentials; launch templates must keep IMDSv2 required with `HttpEndpoint=enabled` and `HttpPutResponseHopLimit=2`, and static AWS keys remain forbidden. The preferred production design is private ASG subnets with NAT Gateway or VPC endpoints, then `ASG_ASSOCIATE_PUBLIC_IP=false`. Future DNS changes remain out of scope for ASG validation; do not start Phase D automatic failover until Phase C is complete.
 
 Mumbai no-DNS ASG debug retry inputs:
 
@@ -334,7 +333,7 @@ backup_path_for_rollback: /home/ubuntu/genuine-scan-main/backend/.env.backup.dr-
 confirmation: I_APPROVE_STANDBY_DB_ENV_ROLLBACK
 ```
 
-Record the env backup path, health check result, workflow artifact name, and timestamps in the RTO/RPO evidence. This test does not change DNS, Route 53, production DB, object storage, MinIO, or London.
+Record the env backup path, health check result, workflow artifact name, and timestamps in the RTO/RPO evidence. This test does not change DNS, Route 53, production DB, object storage, or MinIO.
 
 ## RTO/RPO Evidence Links
 
@@ -360,7 +359,7 @@ Record the env backup path, health check result, workflow artifact name, and tim
 - Do not allow active-active writes.
 - Do not wipe or destructively clean up databases.
 - Do not delete buckets or production objects.
-- Do not decommission MinIO.
+- Do not delete MinIO data automatically. Phase C may plan MinIO retirement only after S3 read-path proof, archival evidence, rollback ownership, and operator approval.
 - Do not paste secrets into evidence.
 - Do not overwrite real `.env` files or `ops/deploy/inventory.ini`.
 
