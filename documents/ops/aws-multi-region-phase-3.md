@@ -120,7 +120,7 @@ This section is documentation only. Do not implement DNS automation in Phase 3. 
 - No automatic failover.
 - No Route 53 failover routing.
 - No active-active writes.
-- No MinIO decommission.
+- No MinIO cleanup or deletion during Phase 3.
 - No destructive Docker cleanup.
 - No public DNS/certbot for Mumbai or Cape Town unless approved in a later phase.
 
@@ -128,11 +128,11 @@ This section is documentation only. Do not implement DNS automation in Phase 3. 
 
 - Phase 4: [controlled manual DNS cutover](aws-multi-region-phase-4.md) only after manual failover is proven.
 - Phase 5: [database recovery strategy](aws-multi-region-phase-5.md) before any real DNS cutover.
-- Phase 6: [object storage DR hardening](aws-multi-region-phase-6.md), only after DB recovery is proven.
+- Phase C: [MinIO decommission / S3 proof](aws-multi-region-phase-6.md), after DB recovery and Mumbai controlled cutover are complete.
 
 ## Later Phases
 
 - [Phase 4 controlled manual DNS cutover](aws-multi-region-phase-4.md)
 - [Phase 5 database recovery strategy](aws-multi-region-phase-5.md)
-- [Phase 6 object storage DR hardening](aws-multi-region-phase-6.md)
+- [Phase C MinIO decommission / S3 proof](aws-multi-region-phase-6.md)
 - [Final multi-region disaster recovery runbook](aws-multi-region-disaster-recovery-runbook.md)

@@ -206,7 +206,7 @@ if (process.env.NODE_ENV === "production") {
   const objectStorageConfiguration = getObjectStorageConfiguration();
   if (!objectStorageConfiguration.configured) {
     logger.error(
-      `Refusing to start: production requires object storage. ${objectStorageConfiguration.reason} Set OBJECT_STORAGE_BUCKET and OBJECT_STORAGE_REGION/AWS_REGION, then either provide OBJECT_STORAGE_ACCESS_KEY + OBJECT_STORAGE_SECRET_KEY (plus OBJECT_STORAGE_ENDPOINT for MinIO/custom S3) or rely on AWS default credentials/IAM task role with no static object storage credentials.`
+      `Refusing to start: production requires object storage. ${objectStorageConfiguration.reason} Set OBJECT_STORAGE_BUCKET and OBJECT_STORAGE_REGION/AWS_REGION, then either rely on AWS default credentials/IAM task role with no static object storage credentials or provide OBJECT_STORAGE_ACCESS_KEY + OBJECT_STORAGE_SECRET_KEY for a separately approved custom S3-compatible endpoint. ASG web mode must use default credentials with no endpoint/static object-storage credentials.`
     );
     process.exit(1);
   }

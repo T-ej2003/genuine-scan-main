@@ -1,10 +1,10 @@
 # AWS Multi-Region Phase 5: Database Recovery Strategy
 
-Last updated: 2026-05-11
+Last updated: 2026-05-31
 
 ## Summary
 
-Phase 5 documents how MSCQR should recover database service for a selected standby region during a disaster recovery event. This phase is documentation and operator checklists only.
+Phase 5 documents how MSCQR should recover database service for a selected standby region during a disaster recovery event. For the current roadmap, this maps to Phase A and is complete by operator evidence and approval.
 
 Phase 5 does not implement active-active writes, database replication, automatic failover, Route 53 automation, or destructive cleanup.
 
@@ -17,7 +17,10 @@ Define a safe, repeatable database recovery strategy that can be tested before a
 - Phase 2 standby app servers are manually deployable and health-checkable.
 - Phase 3 manual failover app drills were recorded.
 - Phase 4 manual DNS cutover tabletop was recorded.
-- Database restore and RPO validation remain the main gap before a real production DNS cutover.
+- Phase A DB recovery is complete by operator evidence and approval. Do not reopen it during Phase C.
+- Phase B controlled Route 53 cutover is complete for Mumbai production.
+- Phase C MinIO decommission / S3 proof is the active phase.
+- Phase D automatic failover remains blocked until Phase C is complete.
 
 ## Why Phase 5 Exists
 
@@ -169,9 +172,9 @@ Writes may resume only after:
 - No automatic failover.
 - No Route 53 automation.
 - No destructive DB cleanup.
-- No MinIO decommission.
+- No MinIO cleanup or deletion during Phase A database recovery.
 - No database replication implementation in Phase 5.
 
 ## Future Phase Handoff
 
-Phase 6 covers object storage DR hardening after database recovery is documented and tested.
+Phase C covers MinIO decommission / S3 proof after DB recovery and Mumbai controlled cutover are complete.

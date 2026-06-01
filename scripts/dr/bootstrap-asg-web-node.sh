@@ -154,6 +154,22 @@ for (const excluded of [...(manifest.rootEnv?.excluded || []), ...(manifest.back
   }
 }
 
+const forbiddenObjectStorageInputs = [
+  ["OBJECT_STORAGE_ENDPOINT", "ASG web mode must use native S3 default credentials; MinIO/custom object-storage endpoints are forbidden."],
+  ["OBJECT_STORAGE_ACCESS_KEY", "ASG web mode must use instance-profile/default credentials; static object-storage access keys are forbidden."],
+  ["OBJECT_STORAGE_SECRET_KEY", "ASG web mode must use instance-profile/default credentials; static object-storage secret keys are forbidden."],
+];
+
+for (const [key, message] of forbiddenObjectStorageInputs) {
+  if (String(values.get(key) || "").trim()) {
+    fail(`${message} Remove ${ssmPrefix}${key}; value was not printed.`);
+  }
+}
+
+if (parseBool(values.get("OBJECT_STORAGE_FORCE_PATH_STYLE"))) {
+  fail(`ASG web mode must use native S3 virtual-host addressing; OBJECT_STORAGE_FORCE_PATH_STYLE=true is forbidden. Remove ${ssmPrefix}OBJECT_STORAGE_FORCE_PATH_STYLE; value was not printed.`);
+}
+
 const buildSection = (section) => {
   const output = new Map();
   for (const key of section.requiredFromSsm || []) output.set(key, values.get(key) || "");

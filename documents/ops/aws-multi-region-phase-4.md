@@ -1,6 +1,6 @@
 # AWS Multi-Region Phase 4: Controlled Manual DNS Cutover Plan
 
-Last updated: 2026-05-11
+Last updated: 2026-05-31
 
 ## Summary
 
@@ -9,6 +9,8 @@ Phase 4 documents a controlled manual DNS cutover process for moving MSCQR publi
 This is a plan and operator checklist only. It does not implement DNS automation, Route 53 failover routing, automatic failover, active-active database writes, or MinIO cleanup.
 
 The target outcome is a low-surprise manual cutover with named approvals, known rollback, recorded RTO/RPO impact, and clear evidence.
+
+Current roadmap note: Phase B controlled Route 53 cutover is complete for Mumbai production by operator evidence. Phase C MinIO decommission / S3 proof is now active, and Phase D automatic failover remains blocked until Phase C is complete.
 
 ## Entry Criteria
 
@@ -241,5 +243,5 @@ Phase 5 should prove snapshot/backup restore, recovered endpoint approval, app c
 
 ## Later Phases
 
-- [Phase 6 object storage DR hardening](aws-multi-region-phase-6.md)
+- [Phase C MinIO decommission / S3 proof](aws-multi-region-phase-6.md)
 - [Final multi-region disaster recovery runbook](aws-multi-region-disaster-recovery-runbook.md)

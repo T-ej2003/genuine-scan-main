@@ -152,7 +152,7 @@ ansible -i ops/deploy/inventory.ini standby -m shell -a 'cd /home/ubuntu/genuine
 - [Phase 3 manual failover readiness](aws-multi-region-phase-3.md)
 - [Phase 4 controlled manual DNS cutover](aws-multi-region-phase-4.md)
 - [Phase 5 database recovery strategy](aws-multi-region-phase-5.md)
-- [Phase 6 object storage DR hardening](aws-multi-region-phase-6.md)
+- [Phase C MinIO decommission / S3 proof](aws-multi-region-phase-6.md)
 - [Final multi-region disaster recovery runbook](aws-multi-region-disaster-recovery-runbook.md)
 
 ## Safety Boundaries
