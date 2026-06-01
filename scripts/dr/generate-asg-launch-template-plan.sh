@@ -58,7 +58,7 @@ plan="$out_dir/asg-launch-template-plan.md"
   printf '%s\n' '- Approved instance type and capacity targets.'
   printf '%s\n' '- Secrets injection path for app environment.'
   printf '%s\n' '- Health check grace period and rolling deployment policy.'
-  printf '%s\n\n' '- Whether MinIO/Redis remain node-local or move to managed/shared services before multi-instance scale-out.'
+  printf '%s\n\n' '- Confirm Redis is shared/regional and object storage is S3/default-credentials; node-local MinIO is not allowed for ASG web nodes.'
   printf '## Example apply steps, for a separate approved scaling change\n\n'
   printf '1. Create a launch template from approved AMI/user-data.\n'
   printf '2. Create an Auto Scaling Group across public app subnets.\n'

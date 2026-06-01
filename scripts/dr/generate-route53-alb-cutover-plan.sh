@@ -103,7 +103,7 @@ JSON
 else
   /bin/cat > "$rollback_file" <<JSON
 {
-  "Comment": "MSCQR approved DNS rollback to prior London EC2 A record",
+  "Comment": "MSCQR approved DNS rollback to prior captured A record",
   "Changes": [
     {
       "Action": "UPSERT",

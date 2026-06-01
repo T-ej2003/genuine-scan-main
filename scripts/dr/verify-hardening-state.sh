@@ -18,6 +18,7 @@ ALB_ACCESS_LOGS_PREFIX="${ALB_ACCESS_LOGS_PREFIX:-${ACCESS_LOGS_PREFIX:-}}"
 WAF_WEB_ACL_NAME="${WAF_WEB_ACL_NAME:-${WAF_NAME:-mscqr-$TARGET_REGION_GROUP-regional-waf}}"
 ASG_NAME="${ASG_NAME:-mscqr-$TARGET_REGION_GROUP-dr-asg}"
 CHECK_PRODUCTION_DNS="${CHECK_PRODUCTION_DNS:-true}"
+EXPECTED_PRODUCTION_DNS_VALUE="${EXPECTED_PRODUCTION_DNS_VALUE:-}"
 
 case "$TARGET_REGION_GROUP" in
   mumbai|capetown) ;;
@@ -67,10 +68,14 @@ aws autoscaling describe-auto-scaling-groups \
 dns_status="not-checked"
 if [ "$CHECK_PRODUCTION_DNS" = "true" ] && command -v dig >/dev/null 2>&1; then
   dig +short mscqr.com > "$out_dir/mscqr-apex-dns.txt"
-  if /usr/bin/grep -qx "13.135.108.69" "$out_dir/mscqr-apex-dns.txt"; then
-    dns_status="london-ec2"
-  else
-    dns_status="unexpected"
+  dig +short www.mscqr.com > "$out_dir/mscqr-www-dns.txt"
+  dns_status="observed"
+  if [ -n "$EXPECTED_PRODUCTION_DNS_VALUE" ]; then
+    if /usr/bin/grep -qx "$EXPECTED_PRODUCTION_DNS_VALUE" "$out_dir/mscqr-apex-dns.txt" || /usr/bin/grep -qx "$EXPECTED_PRODUCTION_DNS_VALUE" "$out_dir/mscqr-www-dns.txt"; then
+      dns_status="expected"
+    else
+      dns_status="unexpected"
+    fi
   fi
 fi
 
@@ -95,6 +100,6 @@ access_logs_enabled="$(node -e 'const fs=require("fs"); const p=JSON.parse(fs.re
 /bin/cat "$out_dir/hardening-state-summary.md"
 
 if [ "$dns_status" = "unexpected" ]; then
-  echo "Production DNS is not pointing at expected London EC2 rollback IP." >&2
+  echo "Production DNS does not include EXPECTED_PRODUCTION_DNS_VALUE." >&2
   exit 3
 fi
