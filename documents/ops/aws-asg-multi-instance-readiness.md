@@ -1,6 +1,6 @@
 # AWS ASG Multi-Instance Readiness
 
-Last updated: 2026-05-31
+Last updated: 2026-06-01
 
 ASG_STATUS=CONDITIONALLY_READY
 
@@ -36,6 +36,7 @@ The remaining go/no-go is live validation, not a missing repo artifact:
 - First regional ASG create/attach must be run as a no-production-DNS rehearsal.
 - One replacement-instance drill must prove target replacement, alarms, and rollback behavior with evidence.
 - Some upload flows stage files on local disk before object-storage upload. That is acceptable only as short-lived temp/staging, not as persistent state.
+- Cape Town ASG has now reached healthy state after SSM parameter fixes and instance refresh. The next safe Cape Town step is clean final ASG/IMDS/object-storage evidence plus Africa DNS plan generation only, not Route 53 apply.
 
 ## Architecture Evidence
 
@@ -411,6 +412,19 @@ Approved first-rollout values:
 - Roll back by canceling instance refresh, keeping the previous launch template version available, and restoring current-ASG healthy target count before removing any new unhealthy instance.
 - Capture `/healthz`, `/api/health/ready`, ALB target health, and app version evidence per batch.
 - If ASG and ALB health disagree, run `npm run ops:asg-health-evidence` with the Mumbai ASG variables to capture read-only ASG, target-health, ASG-only healthy target count, legacy/source target diagnostics, per-instance console, per-instance public-IP `/healthz`, and optional SSH evidence under `/tmp/mscqr-asg-evidence/`; never pass multiple instance IDs as one string.
+- For Cape Town final evidence, run:
+
+```bash
+TARGET_REGION_GROUP=capetown \
+AWS_REGION=af-south-1 \
+ASG_NAME=mscqr-capetown-dr-asg \
+TARGET_GROUP_ARN=arn:aws:elasticloadbalancing:af-south-1:368992683803:targetgroup/mscqr-capetown-frontend-tg/a9b43fd2d346e26d \
+ALB_DNS_NAME=mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com \
+ALB_HTTP_HEALTHZ_URL=http://mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com/healthz \
+npm run ops:asg-health-evidence
+```
+
+- Raw ALB HTTPS against `mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com` is expected to fail hostname verification because that AWS hostname is not on the MSCQR ACM certificate. Treat only raw ALB HTTP `/healthz` as raw ALB liveness evidence; DNS/TLS validation must use real Route 53 records and certificate-valid domains.
 - Do not change production DNS during the ASG rollout and replacement-instance drill. Mumbai production cutover is already complete; ASG validation is launch-template/bootstrap evidence only.
 
 ## Current Go/No-Go

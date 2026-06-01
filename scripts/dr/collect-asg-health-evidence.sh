@@ -18,6 +18,11 @@ Optional read-only SSH inspection:
   ASG_SSH_KEY=/path/to/key.pem
   ASG_SSH_USER=ubuntu
   READY_URL=https://www.mscqr.com/api/health/ready
+  ALB_HTTP_HEALTHZ_URL=http://regional-alb.elb.amazonaws.com/healthz
+  ALB_DNS_NAME=regional-alb.elb.amazonaws.com
+  DR_HOSTNAME=dr-capetown.mscqr.com
+  DR_HOST_SCHEME=https
+  DR_HEALTH_PATH=/healthz
 
 Evidence is written under /tmp/mscqr-asg-evidence and gzipped.
 This script does not mutate AWS resources.
@@ -38,12 +43,25 @@ ASG_SSH_KEY="${ASG_SSH_KEY:-}"
 ALLOW_SSH_DEEP_INSPECTION="${ALLOW_SSH_DEEP_INSPECTION:-}"
 ENABLE_ASG_SSH_DEEP_INSPECTION="${ENABLE_ASG_SSH_DEEP_INSPECTION:-}"
 READY_URL="${READY_URL:-}"
+ALB_DNS_NAME="${ALB_DNS_NAME:-}"
+ALB_HTTP_HEALTHZ_URL="${ALB_HTTP_HEALTHZ_URL:-}"
+DR_HOSTNAME="${DR_HOSTNAME:-}"
+DR_HOST_SCHEME="${DR_HOST_SCHEME:-https}"
+DR_HEALTH_PATH="${DR_HEALTH_PATH:-/healthz}"
 
 [ -n "$TARGET_REGION_GROUP" ] || { echo "TARGET_REGION_GROUP is required." >&2; exit 1; }
 [ -n "$AWS_REGION" ] || { echo "AWS_REGION is required." >&2; exit 1; }
 [ -n "$ASG_NAME" ] || { echo "ASG_NAME is required." >&2; exit 1; }
 [ -n "$TARGET_GROUP_ARN" ] || { echo "TARGET_GROUP_ARN is required." >&2; exit 1; }
 command -v aws >/dev/null 2>&1 || { echo "aws CLI is required." >&2; exit 1; }
+
+if [ -z "$ALB_DNS_NAME" ] && [ "$TARGET_REGION_GROUP" = "capetown" ]; then
+  ALB_DNS_NAME="mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com"
+fi
+
+if [ -z "$ALB_HTTP_HEALTHZ_URL" ] && [ -n "$ALB_DNS_NAME" ]; then
+  ALB_HTTP_HEALTHZ_URL="http://$ALB_DNS_NAME/healthz"
+fi
 
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 out_dir="/tmp/mscqr-asg-evidence"
@@ -92,6 +110,14 @@ collect_all_instance_ips() {
     --output table
 }
 
+collect_asg_final_state() {
+  aws autoscaling describe-auto-scaling-groups \
+    --region "$AWS_REGION" \
+    --auto-scaling-group-names "$ASG_NAME" \
+    --query 'AutoScalingGroups[0].{Name:AutoScalingGroupName,Min:MinSize,Desired:DesiredCapacity,Max:MaxSize,HealthCheckType:HealthCheckType,HealthCheckGracePeriod:HealthCheckGracePeriod,DefaultInstanceWarmup:DefaultInstanceWarmup,LaunchTemplate:LaunchTemplate,Instances:Instances[].{Id:InstanceId,Lifecycle:LifecycleState,Health:HealthStatus,AZ:AvailabilityZone}}' \
+    --output json
+}
+
 get_instance_public_ip() {
   instance_id="$1"
   aws ec2 describe-instances \
@@ -127,12 +153,100 @@ collect_instance_metadata_profile() {
     --output json
 }
 
+verify_instance_metadata_options() {
+  instance_id="$1"
+  metadata_json="$out_dir/metadata-options-$instance_id-$timestamp.json"
+  aws ec2 describe-instances \
+    --region "$AWS_REGION" \
+    --instance-ids "$instance_id" \
+    --query 'Reservations[0].Instances[0].MetadataOptions' \
+    --output json > "$metadata_json"
+
+  node -e '
+const fs = require("fs");
+const instanceId = process.argv[2];
+const metadata = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const hopLimit = Number(metadata.HttpPutResponseHopLimit || 0);
+const pass = metadata.HttpTokens === "required" && metadata.HttpEndpoint === "enabled" && hopLimit >= 2;
+console.log(`INSTANCE_ID=${instanceId}`);
+console.log(`HttpTokens=${metadata.HttpTokens || "unknown"}`);
+console.log(`HttpEndpoint=${metadata.HttpEndpoint || "unknown"}`);
+console.log(`HttpPutResponseHopLimit=${Number.isFinite(hopLimit) ? hopLimit : "unknown"}`);
+console.log(`IMDS_METADATA_OPTIONS_CHECK=${pass ? "pass" : "fail"}`);
+if (!pass) process.exit(1);
+' "$metadata_json" "$instance_id"
+}
+
+curl_alb_http_healthz() {
+  if [ -z "$ALB_HTTP_HEALTHZ_URL" ]; then
+    printf 'ALB HTTP /healthz skipped: ALB_HTTP_HEALTHZ_URL not set.\n'
+    return 0
+  fi
+  case "$ALB_HTTP_HEALTHZ_URL" in
+    http://*) ;;
+    https://*)
+      printf 'ALB HTTP /healthz skipped: raw ALB HTTPS is intentionally not used because certificate hostname mismatch is expected. Use a real DR hostname for HTTPS validation.\n'
+      return 0
+      ;;
+    *)
+      printf 'ALB HTTP /healthz skipped: ALB_HTTP_HEALTHZ_URL must start with http:// for raw ALB evidence.\n'
+      return 0
+      ;;
+  esac
+
+  body_path="$out_dir/alb-http-healthz-$timestamp.body"
+  meta_path="$out_dir/alb-http-healthz-$timestamp.meta"
+  if curl -sS -m 10 -o "$body_path" -w 'http_status=%{http_code} total_time=%{time_total} remote_ip=%{remote_ip}\n' "$ALB_HTTP_HEALTHZ_URL" > "$meta_path" 2>&1; then
+    printf 'ALB HTTP /healthz curl: ok '
+  else
+    printf 'ALB HTTP /healthz curl: failed '
+  fi
+  cat "$meta_path" 2>/dev/null || true
+  printf 'ALB HTTP /healthz body snippet:\n'
+  sed -n '1,8p' "$body_path" 2>/dev/null | tr -cd '\11\12\15\40-\176' || true
+  printf '\n'
+}
+
+curl_dr_hostname_health() {
+  if [ -z "$DR_HOSTNAME" ]; then
+    printf 'DR hostname health skipped: DR_HOSTNAME not set.\n'
+    return 0
+  fi
+  case "$DR_HEALTH_PATH" in
+    /*) ;;
+    *) printf 'DR hostname health skipped: DR_HEALTH_PATH must start with /.\n'; return 0 ;;
+  esac
+  case "$DR_HOST_SCHEME" in
+    http|https) ;;
+    *) printf 'DR hostname health skipped: DR_HOST_SCHEME must be http or https.\n'; return 0 ;;
+  esac
+
+  dr_url="$DR_HOST_SCHEME://$DR_HOSTNAME$DR_HEALTH_PATH"
+  body_path="$out_dir/dr-hostname-health-$timestamp.body"
+  meta_path="$out_dir/dr-hostname-health-$timestamp.meta"
+  if curl -sS -m 12 -o "$body_path" -w 'http_status=%{http_code} total_time=%{time_total} remote_ip=%{remote_ip}\n' "$dr_url" > "$meta_path" 2>&1; then
+    printf 'DR hostname health curl: ok '
+  else
+    printf 'DR hostname health curl: failed '
+  fi
+  cat "$meta_path" 2>/dev/null || true
+  printf 'DR hostname health body snippet:\n'
+  sed -n '1,8p' "$body_path" 2>/dev/null | tr -cd '\11\12\15\40-\176' || true
+  printf '\n'
+}
+
 curl_object_storage_readiness() {
   ready_url="$READY_URL"
   if [ -z "$ready_url" ]; then
     case "$TARGET_REGION_GROUP" in
       mumbai) ready_url="https://www.mscqr.com/api/health/ready" ;;
-      capetown) ready_url="https://dr-capetown.mscqr.com/api/health/ready" ;;
+      capetown)
+        if [ -n "$ALB_DNS_NAME" ]; then
+          ready_url="http://$ALB_DNS_NAME/api/health/ready"
+        else
+          ready_url="https://dr-capetown.mscqr.com/api/health/ready"
+        fi
+        ;;
       *) ready_url="" ;;
     esac
   fi
@@ -149,7 +263,7 @@ curl_object_storage_readiness() {
     printf 'Readiness curl: failed '
   fi
   cat "$ready_meta" 2>/dev/null || true
-  node -e 'const fs=require("fs"); const file=process.argv[1]; if (!fs.existsSync(file)) process.exit(0); try { const payload=JSON.parse(fs.readFileSync(file,"utf8")); const objectStorage=payload.dependencies?.objectStorage || {}; console.log(JSON.stringify({success:payload.success===true,status:payload.status||"unknown",objectStorage:{configured:objectStorage.configured===true,ready:objectStorage.ready===true,bucket:objectStorage.bucket||null,region:objectStorage.region||null,endpoint:objectStorage.endpoint||null,mode:objectStorage.mode||null,reason:objectStorage.reason||null}})); } catch { console.log(fs.readFileSync(file,"utf8").slice(0,500)); }' "$ready_body" 2>/dev/null || true
+  node -e 'const fs=require("fs"); const file=process.argv[1]; if (!fs.existsSync(file)) process.exit(0); const sanitize=(value)=>typeof value==="string" ? value.replace(/([A-Za-z_]*(?:SECRET|PASSWORD|TOKEN|KEY)[A-Za-z_]*=)[^&\s]+/gi,"$1[redacted]").slice(0,240) : value; try { const payload=JSON.parse(fs.readFileSync(file,"utf8")); const objectStorage=payload.dependencies?.objectStorage || {}; console.log(JSON.stringify({success:payload.success===true,status:payload.status||"unknown",objectStorage:{configured:objectStorage.configured===true,ready:objectStorage.ready===true,bucket:objectStorage.bucket||null,region:objectStorage.region||null,endpointConfigured:Boolean(objectStorage.endpoint),mode:objectStorage.mode||null,reason:sanitize(objectStorage.reason||null)}})); } catch { console.log(sanitize(fs.readFileSync(file,"utf8")).slice(0,500)); }' "$ready_body" 2>/dev/null || true
 }
 
 collect_instance_target_health() {
@@ -243,6 +357,8 @@ ssh_deep_inspection() {
   printf '=== Evidence started UTC ===\n'
   date -u
   printf '\nTARGET_REGION_GROUP=%s\nAWS_REGION=%s\nASG_NAME=%s\nTARGET_GROUP_ARN=%s\n' "$TARGET_REGION_GROUP" "$AWS_REGION" "$ASG_NAME" "$TARGET_GROUP_ARN"
+  printf 'ALB_HTTP_HEALTHZ_URL=%s\n' "${ALB_HTTP_HEALTHZ_URL:-not-set}"
+  printf 'DR_HOSTNAME=%s\n' "${DR_HOSTNAME:-not-set}"
   printf '\n=== Current commit ===\n'
   git log --oneline -5 2>/dev/null || true
 } > "$log_file"
@@ -284,13 +400,18 @@ node scripts/dr/check-asg-target-health-accounting.mjs \
 
 run_section "ASG-only target health summary" print_asg_target_health_summary
 run_section "Launch template metadata options and instance profile" collect_launch_template_metadata_options
+run_section "Cape Town/raw ALB HTTP /healthz" curl_alb_http_healthz
+run_section "Optional DR hostname health" curl_dr_hostname_health
 run_section "Object storage readiness" curl_object_storage_readiness
 
-ASG_INSTANCE_IDS="$(node -e 'const fs=require("fs"); const asg=JSON.parse(fs.readFileSync(process.argv[1],"utf8")).AutoScalingGroups?.[0]; for (const instance of asg?.Instances || []) console.log(instance.InstanceId);' "$asg_json")"
+asg_instance_ids_file="$out_dir/asg-instance-ids-$timestamp.txt"
+node -e 'const fs=require("fs"); const asg=JSON.parse(fs.readFileSync(process.argv[1],"utf8")).AutoScalingGroups?.[0]; for (const instance of asg?.Instances || []) console.log(instance.InstanceId);' "$asg_json" > "$asg_instance_ids_file"
+ASG_INSTANCE_IDS="$(/bin/cat "$asg_instance_ids_file")"
 
 {
   printf '\n=== Current ASG instance IDs ===\n'
-  printf '%s\n' "$ASG_INSTANCE_IDS"
+  printf 'Instance IDs are printed one per line and passed to AWS as separate arguments.\n'
+  /bin/cat "$asg_instance_ids_file"
 } >> "$log_file"
 
 set -- $ASG_INSTANCE_IDS
@@ -300,12 +421,15 @@ for instance_id do
   [ -n "$instance_id" ] || continue
   run_section "Instance $instance_id IPs" collect_instance_ips "$instance_id"
   run_section "Instance $instance_id metadata options and profile" collect_instance_metadata_profile "$instance_id"
+  run_section "Instance $instance_id IMDSv2 metadata options verification" verify_instance_metadata_options "$instance_id"
   run_section "Instance $instance_id ASG target health" collect_instance_target_health "$instance_id"
   run_section "Instance $instance_id filtered console output" safe_console_output "$instance_id"
   public_ip="$(get_instance_public_ip "$instance_id")"
   run_section "Instance $instance_id public /healthz curl" curl_public_health "$instance_id" "$public_ip"
   run_section "Instance $instance_id optional SSH deep inspection" ssh_deep_inspection "$instance_id" "$public_ip"
 done
+
+run_section "ASG final state" collect_asg_final_state
 
 gzip -kf "$log_file"
 

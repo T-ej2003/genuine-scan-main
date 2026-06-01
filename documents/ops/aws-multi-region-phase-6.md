@@ -1,6 +1,6 @@
 # AWS Multi-Region Phase C: MinIO Decommission / S3 Proof
 
-Last updated: 2026-05-31
+Last updated: 2026-06-01
 
 ## Summary
 
@@ -10,10 +10,12 @@ Do not delete MinIO data automatically. Do not mutate AWS from this document. Do
 
 ## Current Roadmap Status
 
-- Phase A DB recovery: complete by operator evidence and approval.
+- Phase A DB recovery: complete for Mumbai and Cape Town by operator evidence and approval.
 - Phase B controlled Route 53 cutover: complete for Mumbai production.
-- Phase C MinIO decommission / S3 proof: active.
-- Phase D automatic failover: blocked until Phase C is complete and separately approved.
+- Cape Town ASG: completed at live ASG health level after SSM parameter fixes and instance refresh; pending clean final evidence and Africa DNS planning/approval.
+- Phase C MinIO decommission / S3 proof: Mumbai S3/default-credentials proof is complete; Cape Town needs clean proof after final ASG/DNS evidence.
+- London audit/rebuild: next after Cape Town DNS readiness.
+- Phase D automatic failover: blocked until Phase C is complete, and then remains blocked until London, Mumbai, and Cape Town are standardized and no-MinIO/S3 proof is green across all three regions.
 
 ## Current Known S3 State From Existing Evidence
 
@@ -52,6 +54,7 @@ npm run check:minio-decommission-readiness
 ```
 
 - Mumbai production/ASG object storage evidence proves S3/default-credentials read readiness.
+- Cape Town evidence proves ASG web nodes can use S3/default credentials through the instance profile with IMDSv2 `HttpTokens=required`, `HttpEndpoint=enabled`, and `HttpPutResponseHopLimit>=2`.
 - Optional write-path proof is either explicitly approved and captured or explicitly deferred.
 - MinIO data archival plan is approved before any MinIO retirement action.
 - Rollback owner and evidence location are recorded.
@@ -62,6 +65,7 @@ npm run check:minio-decommission-readiness
 - No automatic failover.
 - No Route 53 failover routing.
 - No production DNS mutation.
+- No Africa DNS mutation until the Cape Town plan-only change batch and rollback batch are generated, reviewed, and separately approved.
 - No AWS mutation from this runbook.
 - No secret changes or secret disclosure.
 - No MinIO data deletion, volume deletion, or bucket deletion.

@@ -16,6 +16,7 @@ const objectStorageApplyWorkflow = ".github/workflows/aws-dr-object-storage-appl
 const albApplyWorkflow = ".github/workflows/aws-dr-alb-apply.yml";
 const hardeningApplyWorkflow = ".github/workflows/aws-dr-hardening-apply.yml";
 const operationsWorkflow = ".github/workflows/aws-dr-operations.yml";
+const africaDnsPlanScript = "scripts/dr/generate-route53-africa-dns-plan.sh";
 const applyWorkflowPaths = new Set([
   dnsApplyWorkflow,
   snapshotApplyWorkflow,
@@ -578,6 +579,49 @@ for (const scanRoot of scanRoots) {
         });
       }
     }
+  }
+}
+
+const packageJsonPath = path.join(root, "package.json");
+const africaDnsPlanPath = path.join(root, africaDnsPlanScript);
+if (!fs.existsSync(africaDnsPlanPath)) {
+  findings.push({
+    repoPath: africaDnsPlanScript,
+    line: 1,
+    message: "Africa DNS plan-only generator is required before any Cape Town Africa routing change.",
+  });
+} else {
+  const source = fs.readFileSync(africaDnsPlanPath, "utf8");
+  if (!source.includes("GeoLocation") || !source.includes('ContinentCode: "AF"') || !source.includes('CountryCode: "*"')) {
+    findings.push({
+      repoPath: africaDnsPlanScript,
+      line: 1,
+      message: "Africa DNS plan must use Africa geolocation plus a default/global record.",
+    });
+  }
+  if (!source.includes("DEFAULT_ALB_DNS_NAME") || !source.includes("CURRENT_GLOBAL_ALB_DNS_NAME")) {
+    findings.push({
+      repoPath: africaDnsPlanScript,
+      line: 1,
+      message: "Africa DNS plan must require explicit Mumbai default/current global ALB inputs.",
+    });
+  }
+  if (/\baws\s+route53\s+change-resource-record-sets\b/i.test(source)) {
+    findings.push({
+      repoPath: africaDnsPlanScript,
+      line: 1,
+      message: "Africa DNS generator must remain plan-only and must not apply Route 53 changes.",
+    });
+  }
+}
+if (fs.existsSync(packageJsonPath)) {
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+  if (!packageJson.scripts?.["ops:route53-africa-dns-plan"]) {
+    findings.push({
+      repoPath: "package.json",
+      line: 1,
+      message: "package.json must expose ops:route53-africa-dns-plan for Cape Town Africa DNS planning.",
+    });
   }
 }
 

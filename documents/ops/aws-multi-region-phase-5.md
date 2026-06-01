@@ -1,6 +1,6 @@
 # AWS Multi-Region Phase 5: Database Recovery Strategy
 
-Last updated: 2026-05-31
+Last updated: 2026-06-01
 
 ## Summary
 
@@ -17,10 +17,12 @@ Define a safe, repeatable database recovery strategy that can be tested before a
 - Phase 2 standby app servers are manually deployable and health-checkable.
 - Phase 3 manual failover app drills were recorded.
 - Phase 4 manual DNS cutover tabletop was recorded.
-- Phase A DB recovery is complete by operator evidence and approval. Do not reopen it during Phase C.
+- Phase A DB recovery is complete for Mumbai and Cape Town by operator evidence and approval. Do not reopen it during Cape Town DNS readiness or Phase C.
 - Phase B controlled Route 53 cutover is complete for Mumbai production.
-- Phase C MinIO decommission / S3 proof is the active phase.
-- Phase D automatic failover remains blocked until Phase C is complete.
+- Cape Town ASG is complete at the live health level and is pending clean final evidence plus Africa DNS planning/approval.
+- Phase C MinIO decommission / S3 proof is active: Mumbai proof is complete; Cape Town proof needs clean evidence after DNS/evidence.
+- London audit/rebuild is next after Cape Town DNS readiness.
+- Phase D automatic failover remains blocked until London, Mumbai, and Cape Town are standardized and no-MinIO/S3 proof is green everywhere.
 
 ## Why Phase 5 Exists
 

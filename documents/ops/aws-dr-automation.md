@@ -1,6 +1,6 @@
 # AWS DR Automation Framework
 
-Last updated: 2026-05-11
+Last updated: 2026-06-01
 
 This guide covers the MSCQR operator-controlled AWS multi-region DR automation framework. The rule is simple: automate evidence and reversible preparation; require explicit human approval for traffic movement, restore execution, and write tests.
 
@@ -22,6 +22,7 @@ This guide covers the MSCQR operator-controlled AWS multi-region DR automation f
 - Read-only regional ALB/ACM inventory.
 - Regional ALB/ACM implementation plan generation.
 - Route 53 ALB cutover and regional test-record change batch generation.
+- Route 53 Africa geolocation plan generation for Cape Town while preserving Mumbai as default/global routing.
 - Object storage read-path inspection.
 - Evidence capture under `artifacts/dr/<timestamp>/`.
 - CI validation and AWS DR safety scanning.
@@ -88,6 +89,25 @@ scripts/dr/generate-route53-change-batch.sh
 ```
 
 Review the generated `artifacts/dr/<timestamp>/route53-change-batch.json` before any apply.
+
+## Route 53 Africa DNS Plan
+
+Generate the Cape Town Africa geolocation plan only after clean Cape Town ASG evidence is captured. This command does not call AWS and does not apply DNS:
+
+```bash
+HOSTED_ZONE_ID=Z0569586VLFIGGVI7HAZ \
+DOMAIN_NAME=mscqr.com \
+WWW_DOMAIN_NAME=www.mscqr.com \
+AFRICA_ALB_DNS_NAME=mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com \
+AFRICA_ALB_HOSTED_ZONE_ID=Z268VQBMOI5EKX \
+DEFAULT_ALB_DNS_NAME=mscqr-mumbai-alb-1249752376.ap-south-1.elb.amazonaws.com \
+DEFAULT_ALB_HOSTED_ZONE_ID=ZP97RAFLXTNZK \
+CURRENT_GLOBAL_ALB_DNS_NAME=mscqr-mumbai-alb-1249752376.ap-south-1.elb.amazonaws.com \
+CURRENT_GLOBAL_ALB_HOSTED_ZONE_ID=ZP97RAFLXTNZK \
+npm run ops:route53-africa-dns-plan
+```
+
+The cutover batch replaces the current simple apex Mumbai alias with geolocation records: default `*` remains Mumbai and Africa `AF` routes to Cape Town. The rollback batch removes those geolocation records and restores the simple Mumbai alias. Apply remains a separate protected DNS action and requires explicit manual approval.
 
 ## Approved DNS Cutover
 
@@ -281,6 +301,20 @@ curl -fsS --resolve www.mscqr.com:443:<ALB_IP> https://www.mscqr.com/healthz
 
 Production cutover must use ALB alias records, not raw EC2 IPs, and must still go through the existing approved DNS workflow.
 
+For Cape Town ASG evidence, use raw ALB HTTP only:
+
+```bash
+TARGET_REGION_GROUP=capetown \
+AWS_REGION=af-south-1 \
+ASG_NAME=mscqr-capetown-dr-asg \
+TARGET_GROUP_ARN=arn:aws:elasticloadbalancing:af-south-1:368992683803:targetgroup/mscqr-capetown-frontend-tg/a9b43fd2d346e26d \
+ALB_DNS_NAME=mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com \
+ALB_HTTP_HEALTHZ_URL=http://mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com/healthz \
+npm run ops:asg-health-evidence
+```
+
+The evidence collector prints ASG instance IDs one per line and passes them to AWS as separate arguments, so zsh newline handling cannot collapse two IDs into one malformed `--instance-ids` value.
+
 Cape Town uses the same sequence with:
 
 ```text
@@ -296,8 +330,8 @@ Only after Mumbai and Cape Town inventory, plan, apply, and regional test-record
 Current stable state after Mumbai production cutover:
 
 - Mumbai production DNS is cut over to the Mumbai ALB, with final stability evidence preserved under `documents/ops/evidence/`.
-- Cape Town ALB is healthy and available through `dr-capetown.mscqr.com`.
-- Production DNS must not be changed by readiness work.
+- Cape Town ASG has reached healthy state after SSM parameter fixes and instance refresh; clean final evidence and Africa DNS plan review are pending.
+- Production default/global Mumbai routing must not be accidentally replaced during Africa-only routing work.
 - ASG_STATUS=CONDITIONALLY_READY in `documents/ops/aws-asg-multi-instance-readiness.md`, with a required no-DNS live replacement-instance drill still pending.
 
 Use this workflow for read-only evidence and plan generation:

@@ -34,6 +34,7 @@ const asgRollingPolicyDoc = requireFile("documents/ops/aws-asg-rolling-deploy-po
 const asgRollingPolicyChecklistRaw = requireFile("documents/ops/aws-asg-rolling-deploy-policy.checklist.json");
 const asgApplyPlanScript = requireFile("scripts/dr/generate-asg-apply-plan.sh");
 const asgApplyScript = requireFile("scripts/dr/apply-asg-launch-template-approved.sh");
+const route53AfricaDnsPlan = requireFile("scripts/dr/generate-route53-africa-dns-plan.sh");
 const backendDockerfile = requireFile("backend/Dockerfile");
 const backendStartup = requireFile("backend/docker/start-runtime.sh");
 const backendIndex = requireFile("backend/src/index.ts");
@@ -205,6 +206,9 @@ if (!packageJson.scripts?.["check:asg-compose-interpolation"]) {
 }
 if (!packageJson.scripts?.["ops:asg-health-evidence"]) {
   failures.push("package.json must expose ops:asg-health-evidence.");
+}
+if (!packageJson.scripts?.["ops:route53-africa-dns-plan"]) {
+  failures.push("package.json must expose ops:route53-africa-dns-plan.");
 }
 if (!String(packageJson.scripts?.["verify:guardrails"] || "").includes("check:asg-multi-instance-readiness")) {
   failures.push("verify:guardrails must run check:asg-multi-instance-readiness.");
@@ -474,6 +478,13 @@ requireMatch("ASG evidence collector", asgEvidenceCollector, /collect_all_instan
 requireMatch("ASG evidence collector", asgEvidenceCollector, /--instance-ids "\$@"/, "evidence collector must pass multi-instance describe IDs as separate AWS args.");
 requireMatch("ASG evidence collector", asgEvidenceCollector, /for instance_id do/, "evidence collector must iterate instance IDs individually.");
 requireMatch("ASG evidence collector", asgEvidenceCollector, /curl_public_health "\$instance_id" "\$public_ip"/, "evidence collector must curl each public instance IP safely.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /ALB_HTTP_HEALTHZ_URL/, "evidence collector must support raw ALB HTTP health checks.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /mscqr-capetown-alb-1730011881\.af-south-1\.elb\.amazonaws\.com/, "evidence collector must default Cape Town raw ALB HTTP evidence to the known ALB DNS name.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /raw ALB HTTPS is intentionally not used/, "evidence collector must document that raw ALB HTTPS hostname mismatch is expected.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /DR_HOSTNAME/, "evidence collector must support optional real DR hostname health checks.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /IMDS_METADATA_OPTIONS_CHECK/, "evidence collector must verify live instance IMDS metadata options.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /HttpPutResponseHopLimit.*>= 2|hopLimit >= 2/, "evidence collector must require IMDS hop limit >= 2.");
+requireMatch("ASG evidence collector", asgEvidenceCollector, /ASG final state/, "evidence collector must print ASG final state after per-instance checks.");
 requireMatch("ASG evidence collector", asgEvidenceCollector, /ALLOW_SSH_DEEP_INSPECTION/, "evidence collector must gate optional SSH deep inspection behind ALLOW_SSH_DEEP_INSPECTION.");
 requireMatch("ASG evidence collector", asgEvidenceCollector, /\/tmp\/mscqr-asg-evidence/, "evidence collector must write local evidence under /tmp/mscqr-asg-evidence.");
 requireMatch("ASG evidence collector", asgEvidenceCollector, /gzip -kf/, "evidence collector must gzip evidence logs.");
@@ -482,6 +493,16 @@ if (/--instance-ids "\$ASG_INSTANCE_IDS"/.test(asgEvidenceCollector)) {
 }
 if (/update-auto-scaling-group|create-launch-template|modify-launch-template|terminate-instances|change-resource-record-sets|put-parameter|delete-parameter/.test(asgEvidenceCollector)) {
   failures.push("ASG evidence collector must stay read-only and must not contain AWS mutation commands.");
+}
+
+requireMatch("Route 53 Africa DNS plan", route53AfricaDnsPlan, /GeoLocation/, "Africa DNS plan must use Route 53 geolocation routing.");
+requireMatch("Route 53 Africa DNS plan", route53AfricaDnsPlan, /ContinentCode: "AF"/, "Africa DNS plan must route Africa to Cape Town.");
+requireMatch("Route 53 Africa DNS plan", route53AfricaDnsPlan, /CountryCode: "\*"/, "Africa DNS plan must preserve a default/global route.");
+requireMatch("Route 53 Africa DNS plan", route53AfricaDnsPlan, /DEFAULT_ALB_DNS_NAME/, "Africa DNS plan must require default/global Mumbai ALB input.");
+requireMatch("Route 53 Africa DNS plan", route53AfricaDnsPlan, /CURRENT_GLOBAL_ALB_DNS_NAME/, "Africa DNS rollback must know the current simple global record.");
+requireMatch("Route 53 Africa DNS plan", route53AfricaDnsPlan, /PLAN ONLY|plan-only/i, "Africa DNS plan must say it is plan-only.");
+if (/change-resource-record-sets/.test(route53AfricaDnsPlan)) {
+  failures.push("Route 53 Africa DNS plan must not apply change-resource-record-sets.");
 }
 
 requireMatch("redis service", redisService, /REDIS_URL|REDIS_HOST/, "Redis must be environment-configured.");

@@ -1,6 +1,6 @@
 # AWS Multi-Region Disaster Recovery Runbook
 
-Last updated: 2026-05-31
+Last updated: 2026-06-01
 
 ## Overview
 
@@ -8,11 +8,13 @@ This is the top-level MSCQR operator runbook for multi-region disaster recovery.
 
 ## Current Status By Phase
 
-- Phase A: DB recovery is complete by operator evidence and approval. Do not reopen it in this phase.
+- Phase A: DB recovery is complete for Mumbai and Cape Town by operator evidence and approval. Do not reopen it in this phase.
 - Phase B: controlled Route 53 cutover is complete for Mumbai production. Evidence is preserved in `documents/ops/evidence/`, including Mumbai ASG success, post-legacy deregistration, ASG replacement drill, DNS cutover, apex redirect, and final stability artifacts.
-- Phase C: MinIO decommission / S3 proof is the active phase. The goal is to prove production/ASG DR paths use S3/default credentials and do not depend on MinIO, while preserving local development MinIO and all MinIO data.
-- Phase D: automatic failover remains blocked until Phase C is complete and approved. Do not design or implement automatic Route 53 failover in Phase C.
-- Regional ALB records: Mumbai production is cut over to the Mumbai ALB; `https://mscqr.com` redirects to `https://www.mscqr.com/`. Cape Town remains a later DR target, not the active production cutover target for this phase.
+- Cape Town ASG: live ASG health is now achieved after SSM parameter fixes and instance refresh; clean final evidence and Africa DNS planning/approval are pending before any Africa routing change.
+- Phase C: Mumbai S3/default-credentials proof is complete. Cape Town still needs clean no-secret proof after final ASG/DNS evidence. Preserve local development MinIO and all MinIO data.
+- London: audit/rebuild to the same standard is next after Cape Town DNS readiness; no London changes are part of the Cape Town pass.
+- Phase D: automatic failover remains blocked until Phase C is complete, and then remains blocked until London, Mumbai, and Cape Town are standardized and no-MinIO/S3 proof is green everywhere. Do not design or implement automatic Route 53 failover now.
+- Regional ALB records: Mumbai production is cut over to the Mumbai ALB; `https://mscqr.com` redirects to `https://www.mscqr.com/`. Cape Town is the next Africa geolocation routing candidate only after clean evidence and approved plan review.
 
 ## Phase Links
 
@@ -21,6 +23,7 @@ This is the top-level MSCQR operator runbook for multi-region disaster recovery.
 - [Phase 4 controlled manual DNS cutover](aws-multi-region-phase-4.md)
 - [Phase 5 database recovery strategy](aws-multi-region-phase-5.md)
 - [Phase C MinIO decommission / S3 proof](aws-multi-region-phase-6.md)
+- [Cape Town Africa DNS readiness](capetown-africa-dns-readiness.md)
 - [Database recovery pack](database-recovery/README.md)
 - [Object storage recovery pack](object-storage-recovery/README.md)
 - [Manual failover drill pack](manual-failover-drill/README.md)
@@ -64,6 +67,8 @@ ALB subnet selection is intentionally constrained to one subnet per Availability
 
 The raw `*.elb.amazonaws.com` ALB hostname is not on the MSCQR ACM certificate, so direct HTTPS checks against that hostname without `-k` are expected to fail certificate hostname verification. Use `curl --resolve www.mscqr.com:443:<ALB_IP> https://www.mscqr.com/healthz` or a regional alias with matching certificate coverage for cert-valid smoke tests.
 
+For Cape Town Africa routing, raw ALB DNS validation is HTTP-only: `http://mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com/healthz`. DNS validation must use real Route 53 records and a certificate-valid domain, not raw ALB HTTPS. Generate and review the Africa geolocation plan with `npm run ops:route53-africa-dns-plan`; do not apply it without explicit manual DNS approval.
+
 ## Scaling And Observability Readiness
 
 For later DR targets, run `AWS DR Regional Readiness` before any approved cutover discussion. This workflow is read/plan-only and does not change DNS, enable access logs, attach WAF, create ASGs, mutate RDS/S3, or delete resources.
@@ -72,10 +77,12 @@ Current app scaling gate: ASG_STATUS=CONDITIONALLY_READY. Review `documents/ops/
 
 Current roadmap gates:
 
-1. Phase A complete: DB recovery accepted by operator evidence and approval.
+1. Phase A complete: DB recovery accepted by operator evidence and approval for Mumbai and Cape Town.
 2. Phase B complete for Mumbai: production DNS is cut over to the Mumbai ALB and legacy/source target removal plus replacement drill evidence is preserved.
-3. Phase C active: prove ASG/production object storage is S3/default-credentials, archive MinIO data safely, and keep local development MinIO only.
-4. Phase D blocked: do not implement automatic failover until Phase C is complete and a separate approval starts Phase D.
+3. Cape Town active: ASG is healthy, pending clean final ASG/IMDS/object-storage evidence and Africa DNS plan review.
+4. Phase C active: Mumbai S3/default-credentials proof is complete; Cape Town proof remains pending after DNS/evidence; archive MinIO data safely and keep local development MinIO only.
+5. London next: audit/rebuild London after Cape Town DNS readiness.
+6. Phase D blocked: do not implement automatic failover until all three regional stacks are standardized and no-MinIO/S3 proof is green.
 
 For a future non-Mumbai cutover, use only the protected DNS workflow after incident commander approval and a fresh rollback plan for the target region.
 

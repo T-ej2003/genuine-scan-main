@@ -1,12 +1,14 @@
 # MSCQR Regional Failover Runbook v1
 
+Last updated: 2026-06-01
+
 Purpose: provide an operator-safe manual failover process for moving MSCQR production service from London to Mumbai or Cape Town when London cannot safely serve traffic.
 
 This runbook reflects the current architecture:
 
-- London (`eu-west-2`) is active production.
-- Mumbai (`ap-south-1`) is warm standby.
-- Cape Town (`af-south-1`) is warm standby.
+- Mumbai (`ap-south-1`) is current production for `www.mscqr.com`.
+- Cape Town (`af-south-1`) is the next Africa DNS readiness target after ASG health reached healthy state.
+- London (`eu-west-2`) needs audit/rebuild after Cape Town DNS readiness and is not changed in this pass.
 - There is no active-active multi-write topology.
 - DNS cutover is manual and must be treated as a controlled incident action.
 - Object storage steady state is region-local S3 through EC2 IAM role credentials: blank endpoint, blank static keys, `OBJECT_STORAGE_FORCE_PATH_STYLE=false`.
@@ -15,9 +17,9 @@ This runbook reflects the current architecture:
 
 | Region | Role | App health endpoint | RDS identifier | S3 artifacts bucket |
 | --- | --- | --- | --- | --- |
-| London / `eu-west-2` | Active production | `https://www.mscqr.com/api/health/ready` | `mscqr-prod-db` | `mscqr-prod-euw2-artifacts-ACCOUNT_ID-eu-west-2` |
-| Mumbai / `ap-south-1` | Warm standby | `https://mumbai-standby.example.internal/api/health/ready` | `mscqr-prod-db-aps1` | `mscqr-prod-aps1-artifacts-ACCOUNT_ID-ap-south-1` |
-| Cape Town / `af-south-1` | Warm standby | `https://capetown-standby.example.internal/api/health/ready` | `mscqr-prod-db-afs1` | `mscqr-prod-afs1-artifacts-ACCOUNT_ID-af-south-1` |
+| Mumbai / `ap-south-1` | Current production | `https://www.mscqr.com/api/health/ready` | `mscqr-prod-db-aps1` | `mscqr-prod-aps1-artifacts-ACCOUNT_ID-ap-south-1` |
+| Cape Town / `af-south-1` | Africa DNS readiness target | `http://mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com/healthz` | `mscqr-prod-db-afs1` | `mscqr-prod-afs1-artifacts-ACCOUNT_ID-af-south-1` |
+| London / `eu-west-2` | Pending audit/rebuild | Audit before use | `mscqr-prod-db` | `mscqr-prod-euw2-artifacts-ACCOUNT_ID-eu-west-2` |
 
 ## Prerequisites
 
@@ -61,7 +63,7 @@ npm run ops:regional-drift -- --out-dir reports/pre-failover-$(date -u +%Y%m%dT%
 ```
 
 4. Confirm London cannot safely remain active.
-5. Pick exactly one target: Mumbai or Cape Town.
+5. Pick exactly one target. For the current safe DR step, only Cape Town Africa DNS readiness is in scope.
 6. Confirm the target has:
    - Ready health passing.
    - Object storage ready with the target region-local bucket.
@@ -142,6 +144,37 @@ npm run verify:staging-smoke
 
 9. Watch CloudWatch alarms and backend logs for at least 30 minutes.
 10. Declare Cape Town active only after health, smoke, auth, verification, controlled print, and support flows are validated.
+
+## Africa Routing: Mumbai Default To Cape Town Africa
+
+This is the current planning path. It is not a full failover and it is not automatic failover.
+
+1. Capture clean Cape Town ASG evidence:
+
+```bash
+TARGET_REGION_GROUP=capetown \
+AWS_REGION=af-south-1 \
+ASG_NAME=mscqr-capetown-dr-asg \
+TARGET_GROUP_ARN=arn:aws:elasticloadbalancing:af-south-1:368992683803:targetgroup/mscqr-capetown-frontend-tg/a9b43fd2d346e26d \
+ALB_DNS_NAME=mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com \
+ALB_HTTP_HEALTHZ_URL=http://mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com/healthz \
+npm run ops:asg-health-evidence
+```
+
+2. Generate the Africa DNS plan only:
+
+```bash
+AFRICA_ALB_DNS_NAME=mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com \
+AFRICA_ALB_HOSTED_ZONE_ID=Z268VQBMOI5EKX \
+DEFAULT_ALB_DNS_NAME=mscqr-mumbai-alb-1249752376.ap-south-1.elb.amazonaws.com \
+DEFAULT_ALB_HOSTED_ZONE_ID=ZP97RAFLXTNZK \
+CURRENT_GLOBAL_ALB_DNS_NAME=mscqr-mumbai-alb-1249752376.ap-south-1.elb.amazonaws.com \
+CURRENT_GLOBAL_ALB_HOSTED_ZONE_ID=ZP97RAFLXTNZK \
+npm run ops:route53-africa-dns-plan
+```
+
+3. Review the proposed cutover and rollback batches. Do not apply Route 53 changes from this runbook.
+4. Confirm raw ALB HTTPS certificate mismatch is ignored as expected; use real domain records for DNS/TLS validation.
 
 ## Validation Checklist After Cutover
 

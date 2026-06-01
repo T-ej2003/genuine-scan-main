@@ -1,6 +1,6 @@
 # AWS Multi-Region Phase 4: Controlled Manual DNS Cutover Plan
 
-Last updated: 2026-05-31
+Last updated: 2026-06-01
 
 ## Summary
 
@@ -10,7 +10,7 @@ This is a plan and operator checklist only. It does not implement DNS automation
 
 The target outcome is a low-surprise manual cutover with named approvals, known rollback, recorded RTO/RPO impact, and clear evidence.
 
-Current roadmap note: Phase B controlled Route 53 cutover is complete for Mumbai production by operator evidence. Phase C MinIO decommission / S3 proof is now active, and Phase D automatic failover remains blocked until Phase C is complete.
+Current roadmap note: Phase B controlled Route 53 cutover is complete for Mumbai production by operator evidence. Cape Town ASG has reached healthy state and is pending clean final evidence plus Africa DNS plan review only. Phase C S3/default-credentials proof is complete for Mumbai and still pending clean Cape Town proof after DNS/evidence. Phase D automatic failover remains blocked until London, Mumbai, and Cape Town are standardized and no-MinIO/S3 proof is green in all three regions.
 
 ## Entry Criteria
 
@@ -33,6 +33,7 @@ Do not start Phase 4 until these are true:
 
 - No DNS automation.
 - No Route 53 failover routing.
+- No unapproved Route 53 geolocation apply.
 - No health-check-driven DNS switching.
 - No automatic failover.
 - No active-active writes.
@@ -126,6 +127,14 @@ curl -fsS https://www.mscqr.com/healthz
 ```
 
 If `dig` is unavailable on the operator workstation, use the approved DNS console or another approved DNS lookup tool and record the result.
+
+Cape Town Africa DNS readiness uses a plan-only geolocation generator. It must preserve Mumbai as the default/global route and route only Africa (`AF`) to Cape Town after approval:
+
+```bash
+npm run ops:route53-africa-dns-plan
+```
+
+Do not apply the generated JSON from this phase document. Use it only as reviewed input for a later protected DNS apply.
 
 ## Manual DNS Cutover Procedure
 
