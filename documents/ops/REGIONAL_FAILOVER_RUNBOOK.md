@@ -1,17 +1,25 @@
 # MSCQR Regional Failover Runbook v1
 
-Last updated: 2026-06-01
+Last updated: 2026-06-02
 
 Purpose: provide an operator-safe manual failover process for moving MSCQR production service from London to Mumbai or Cape Town when London cannot safely serve traffic.
 
 This runbook reflects the current architecture:
 
-- Mumbai (`ap-south-1`) is current production for `www.mscqr.com`.
-- Cape Town (`af-south-1`) is the next Africa DNS readiness target after ASG health reached healthy state.
-- London (`eu-west-2`) needs audit/rebuild after Cape Town DNS readiness and is not changed in this pass.
+- Mumbai (`ap-south-1`) is the default/global Route 53 geolocation target for `mscqr.com`.
+- Cape Town (`af-south-1`) is the Africa `AF` Route 53 geolocation target.
+- London (`eu-west-2`) is the Europe `EU` Route 53 geolocation target; no-active-MinIO evidence is preserved and should be rechecked through SSH when SSH context is available.
 - There is no active-active multi-write topology.
 - DNS cutover is manual and must be treated as a controlled incident action.
 - Object storage steady state is region-local S3 through EC2 IAM role credentials: blank endpoint, blank static keys, `OBJECT_STORAGE_FORCE_PATH_STYLE=false`.
+
+Current DNS policy:
+
+| Route 53 geolocation | Set identifier | Target |
+| --- | --- | --- |
+| Africa `AF` | `africa-capetown` | Cape Town ALB |
+| Europe `EU` | `europe-london` | London ALB |
+| Default/global `*` | `default-mumbai` | Mumbai ALB |
 
 ## Region Roles
 
@@ -176,6 +184,59 @@ npm run ops:route53-africa-dns-plan
 3. Review the proposed cutover and rollback batches. Do not apply Route 53 changes from this runbook.
 4. Confirm raw ALB HTTPS certificate mismatch is ignored as expected; use real domain records for DNS/TLS validation.
 
+## Regional Rollback / Failover Planning
+
+Use the plan-only generator for the current three-region DNS policy. It never calls AWS and writes both the requested action batch and the inverse rollback batch under `artifacts/dr/<timestamp>/route53-regional-rollback-plan/`.
+
+Dry-run examples:
+
+```bash
+npm run ops:route53-regional-rollback-plan -- --operation rollback-europe
+npm run ops:route53-regional-rollback-plan -- --operation rollback-africa
+npm run ops:route53-regional-rollback-plan -- --operation restore-default-mumbai
+```
+
+Safety expectations:
+
+- `rollback-europe` deletes only `europe-london`.
+- `rollback-africa` deletes only `africa-capetown`.
+- `restore-default-mumbai` UPSERTs only `default-mumbai`.
+- MX, TXT, NS, SOA, and `www.mscqr.com` CNAME records are preserved because they are not present in the generated batches.
+
+Run the truth-table checker before and after any approved action:
+
+```bash
+HOSTED_ZONE_ID=Z0569586VLFIGGVI7HAZ \
+npm run ops:three-region-truth-table
+```
+
+Readiness defaults to each regional ALB `/api/health/ready`; override URLs or add London no-active-MinIO SSH evidence when needed:
+
+```bash
+HOSTED_ZONE_ID=Z0569586VLFIGGVI7HAZ \
+MUMBAI_READY_URL=http://mscqr-mumbai-alb-1249752376.ap-south-1.elb.amazonaws.com/api/health/ready \
+CAPETOWN_READY_URL=http://mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com/api/health/ready \
+LONDON_READY_URL=http://mscqr-alb-euw2-524835535.eu-west-2.elb.amazonaws.com/api/health/ready \
+LONDON_SSH_HOST=<london-host> \
+LONDON_SSH_USER=ubuntu \
+LONDON_SSH_KEY=/path/to/approved/london-read-only-key \
+npm run ops:three-region-truth-table
+```
+
+If London SSH env vars are absent, the no-active-MinIO check is marked `SKIP`, not failed.
+
+Approved apply example:
+
+```bash
+# DO NOT RUN until manually approved by the incident commander.
+APPROVED_ROUTE53_ROLLBACK=true \
+HOSTED_ZONE_ID=Z0569586VLFIGGVI7HAZ \
+CHANGE_BATCH_JSON=artifacts/dr/<timestamp>/route53-regional-rollback-plan/rollback-europe-cutover.json \
+npm run ops:route53-rollback-apply-approved
+```
+
+The approved apply script captures before records, the Route 53 change ID, change status, and after records. It waits for `INSYNC`, refuses batches without geolocation A-record set identifiers, and refuses deletion of MX, TXT, NS, SOA, or `www.mscqr.com` CNAME records.
+
 ## Validation Checklist After Cutover
 
 1. `https://www.mscqr.com/api/health/ready` returns HTTP 200 JSON.
@@ -218,6 +279,8 @@ Capture:
 - CloudWatch alarm screenshots or exported alarm state.
 - RDS snapshot identifiers and creation times.
 - DNS records before and after cutover.
+- Three-region truth-table CSV-like summary and gzip evidence.
+- Reviewed Route 53 regional rollback/failover cutover and rollback JSON.
 - Timeline of decisions and operator names.
 - Customer/support impact notes.
 
@@ -244,6 +307,7 @@ Do not paste secrets, full database URLs, JWT secrets, QR signing secrets, SMTP 
 - Do not treat a warm standby as active-active multi-write.
 - Do not skip evidence capture because the site appears healthy.
 - Do not commit secrets, generated storage state, or raw environment files while operating the incident.
+- Do not run resource cleanup as part of rollback/failover execution. Cleanup comes only after rollback/failover proof, evidence review, and separate approval.
 
 ## Post-Incident Actions
 

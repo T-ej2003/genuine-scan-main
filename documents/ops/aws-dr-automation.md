@@ -13,6 +13,8 @@ This guide covers the MSCQR operator-controlled AWS multi-region DR automation f
 - Public production health checks.
 - Route 53 change batch generation for review.
 - Route 53 rollback batch generation for review.
+- Route 53 regional rollback/failover plan generation for the current three-region policy.
+- Three-region DNS and ALB health truth-table evidence capture.
 - Read-only RDS inventory and snapshot readiness inspection.
 - DB restore plan generation.
 - Read-only AWS topology inventory for region-local DB recovery.
@@ -39,6 +41,7 @@ This guide covers the MSCQR operator-controlled AWS multi-region DR automation f
 - Recovery DB cleanup requires `CONFIRM_RECOVERY_DB_CLEANUP=I_APPROVE_RECOVERY_DB_CLEANUP` and either a final snapshot identifier or `CONFIRM_SKIP_FINAL_SNAPSHOT=I_APPROVE_SKIP_FINAL_SNAPSHOT`.
 - Copied DR snapshot cleanup requires `CONFIRM_DR_SNAPSHOT_CLEANUP=I_APPROVE_DR_SNAPSHOT_CLEANUP`.
 - Regional ALB/ACM entrypoint apply requires `CONFIRM_REGIONAL_ALB_APPLY=I_APPROVE_REGIONAL_ALB_ENTRYPOINT_APPLY`.
+- Regional Route 53 rollback apply requires `APPROVED_ROUTE53_ROLLBACK=true`, `HOSTED_ZONE_ID`, and `CHANGE_BATCH_JSON`.
 
 Do not run apply commands without incident commander approval.
 
@@ -108,6 +111,68 @@ npm run ops:route53-africa-dns-plan
 ```
 
 The cutover batch replaces the current simple apex Mumbai alias with geolocation records: default `*` remains Mumbai and Africa `AF` routes to Cape Town. The rollback batch removes those geolocation records and restores the simple Mumbai alias. Apply remains a separate protected DNS action and requires explicit manual approval.
+
+## Route 53 Regional Rollback / Failover Plan
+
+The current reviewed production policy is:
+
+- Africa `AF` -> Cape Town ALB.
+- Europe `EU` -> London ALB.
+- Default/global `*` -> Mumbai ALB.
+
+Generate plan-only JSON for a single targeted rollback action. This does not call AWS, does not mutate Route 53, and does not include unrelated records such as MX, TXT, NS, SOA, or `www` CNAME:
+
+```bash
+npm run ops:route53-regional-rollback-plan -- --operation rollback-europe
+npm run ops:route53-regional-rollback-plan -- --operation rollback-africa
+npm run ops:route53-regional-rollback-plan -- --operation restore-default-mumbai
+```
+
+Each run writes:
+
+- `artifacts/dr/<timestamp>/route53-regional-rollback-plan/<operation>-cutover.json`
+- `artifacts/dr/<timestamp>/route53-regional-rollback-plan/<operation>-rollback.json`
+- `artifacts/dr/<timestamp>/route53-regional-rollback-plan/summary.md`
+
+The generated cutover JSON touches only the selected geolocation A record. For example, `rollback-europe` deletes only `europe-london`; Africa and default Mumbai are preserved by absence from the batch.
+
+## Three-Region Truth Table
+
+Run this before and after any approved rollback/failover action:
+
+```bash
+HOSTED_ZONE_ID=Z0569586VLFIGGVI7HAZ \
+npm run ops:three-region-truth-table
+```
+
+Readiness defaults to each regional ALB `/api/health/ready`; override URLs or add SSH context when needed:
+
+```bash
+HOSTED_ZONE_ID=Z0569586VLFIGGVI7HAZ \
+MUMBAI_READY_URL=http://mscqr-mumbai-alb-1249752376.ap-south-1.elb.amazonaws.com/api/health/ready \
+CAPETOWN_READY_URL=http://mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com/api/health/ready \
+LONDON_READY_URL=http://mscqr-alb-euw2-524835535.eu-west-2.elb.amazonaws.com/api/health/ready \
+LONDON_SSH_HOST=<london-host> \
+LONDON_SSH_USER=ubuntu \
+LONDON_SSH_KEY=/path/to/approved/london-read-only-key \
+npm run ops:three-region-truth-table
+```
+
+If London SSH env vars are omitted, the London no-active-MinIO check is marked `SKIP`, not failed. Evidence is saved as gzip files under `artifacts/dr/<timestamp>/three-region-truth-table/`.
+
+## Approved Regional Route 53 Rollback Apply
+
+Do not run this until the incident commander has manually approved the reviewed JSON path. The apply script refuses to run unless `APPROVED_ROUTE53_ROLLBACK=true` is present, validates that the batch contains only geolocation A records with set identifiers, captures before/change/after evidence, and waits for `INSYNC`.
+
+```bash
+# DO NOT RUN until manually approved.
+APPROVED_ROUTE53_ROLLBACK=true \
+HOSTED_ZONE_ID=Z0569586VLFIGGVI7HAZ \
+CHANGE_BATCH_JSON=artifacts/dr/<timestamp>/route53-regional-rollback-plan/rollback-europe-cutover.json \
+npm run ops:route53-rollback-apply-approved
+```
+
+The guarded apply path rejects deletion of MX, TXT, NS, SOA, and `www.mscqr.com` CNAME records. It does not delete AWS resources. Resource cleanup, if any, happens only after rollback/failover proof and evidence review, through separate cleanup runbooks and approvals.
 
 ## Approved DNS Cutover
 

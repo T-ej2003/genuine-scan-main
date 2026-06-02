@@ -6,6 +6,7 @@ const scanRoots = [".github/workflows", "scripts", "ops/deploy", "documents/ops"
 const allowedRoute53Apply = new Set([
   "scripts/dr/apply-route53-change.sh",
   "scripts/dr/apply-route53-rollback.sh",
+  "scripts/dr/apply-route53-rollback-approved.mjs",
   "scripts/dr/apply-regional-alb-entrypoint-approved.sh",
 ]);
 const dnsApplyWorkflow = ".github/workflows/aws-dr-dns-apply.yml";
@@ -335,7 +336,7 @@ for (const scanRoot of scanRoots) {
         }
       }
 
-      const route53Regex = /\baws\s+route53\s+change-resource-record-sets\b/gi;
+      const route53Regex = /\baws\s+route53\s+change-resource-record-sets\b|["']route53["']\s*,\s*["']change-resource-record-sets["']/gi;
       for (const match of source.matchAll(route53Regex)) {
         if (!allowedRoute53Apply.has(repoPath)) {
           findings.push({
@@ -350,7 +351,9 @@ for (const scanRoot of scanRoots) {
           ? "CONFIRM_DNS_CUTOVER"
           : repoPath.endsWith("apply-route53-rollback.sh")
             ? "CONFIRM_DNS_ROLLBACK"
-            : "CONFIRM_REGIONAL_ALB_APPLY";
+            : repoPath.endsWith("apply-route53-rollback-approved.mjs")
+              ? "APPROVED_ROUTE53_ROLLBACK"
+              : "CONFIRM_REGIONAL_ALB_APPLY";
         if (!source.includes(requiredConfirmation)) {
           findings.push({
             repoPath,
