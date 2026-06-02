@@ -32,21 +32,22 @@ Current DNS policy:
 ## Prerequisites
 
 1. AWS operator access can read EC2, RDS, S3, and CloudWatch in all three regions.
-2. The regional drift checker is available from the repo:
+2. Normal production code deployment uses GitHub Actions -> `Release Train`; `Release Gate` is the final protected deploy gate invoked by the train. If `Release Gate` reports missing required workflow gates, stop and run `Release Train` for the target SHA.
+3. The regional drift checker is available from the repo:
 
 ```bash
 npm run ops:regional-drift -- --out-dir reports/regional-drift
 ```
 
-3. Optional runtime inspection is available from an operator workstation with EC2 Instance Connect and SSH:
+4. Optional runtime inspection is available from an operator workstation with EC2 Instance Connect and SSH:
 
 ```bash
 npm run ops:regional-drift -- --ssh --out-dir reports/regional-drift-ssh
 ```
 
-4. At least one recent manual RDS snapshot exists for the target standby region.
-5. Target region EC2, RDS, S3 bucket, IAM role, and CloudWatch alarms exist.
-6. DNS/TLS ownership is available to the incident commander or release engineer.
+5. At least one recent manual RDS snapshot exists for the target standby region.
+6. Target region EC2, RDS, S3 bucket, IAM role, and CloudWatch alarms exist.
+7. DNS/TLS ownership is available to the incident commander or release engineer.
 
 ## Trigger Conditions
 

@@ -8,7 +8,34 @@ Production baseline after SEO polish: `9148e06`
 
 MSCQR production currently uses London as the active production region, with Mumbai and Cape Town as warm standby targets.
 
-Documentation-only changes under `documents/**`, `docs/**`, Markdown/MDX, or DOCX files no longer trigger the deployment audit path that can wake the production deploy chain. Validation workflows still run where configured; production server deploys remain on the approved deployment flow.
+Documentation-only changes under `documents/**`, `docs/**`, Markdown/MDX, or DOCX files no longer trigger the deployment audit path. Validation workflows still run where configured; production server deploys remain on the approved deployment flow.
+
+## GitHub Release Orchestration
+
+Normal production deployment starts from GitHub Actions -> `Release Train`.
+
+`Release Train` resolves the target main-branch SHA, dispatches or waits for:
+
+- `quality-gate.yml`
+- `secret-scan.yml`
+- `deployment-audit.yml`
+
+After all three pass for the exact target SHA, it dispatches `release-gate.yml` for that same SHA. `Release Train` never deploys directly.
+
+`Release Gate` is the final protected production deploy gate only. It keeps the existing `production` GitHub Environment approval and the Ansible deployment job. If `Release Gate` reports missing required gates, stop and run `Release Train` for the target SHA. Direct `Release Gate` use with `expert_override=true` is an emergency expert-only path after human verification.
+
+Operator commands:
+
+```bash
+gh workflow run release-train.yml --ref main -f git_ref=main
+gh workflow run release-train.yml --ref main -f git_ref=main -f target_sha=<main_sha>
+```
+
+Expert-only direct gate:
+
+```bash
+gh workflow run release-gate.yml --ref <main_sha> -f git_ref=main -f target_sha=<main_sha> -f expert_override=true
+```
 
 DR automation work should happen on `aws-dr-finish` or an approved feature branch, not directly on `main`.
 

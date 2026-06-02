@@ -45,6 +45,14 @@ This guide covers the MSCQR operator-controlled AWS multi-region DR automation f
 
 Do not run apply commands without incident commander approval.
 
+## Production Release Orchestration
+
+For normal production deployment, run GitHub Actions -> `Release Train`. The train resolves the target main-branch SHA, dispatches or waits for `quality-gate.yml`, `secret-scan.yml`, and `deployment-audit.yml`, then invokes `release-gate.yml` for that exact SHA.
+
+`Release Gate` is the final protected deploy gate only. It keeps the `production` GitHub Environment approval and the existing Ansible deployment job. If a `Release Gate` run says required gates are missing, stop and use `Release Train`; do not keep rerunning `Release Gate` as an orchestrator.
+
+Expert-only direct `Release Gate` use requires `expert_override=true` after human verification. It is not the normal release path.
+
 ## Local Preflight
 
 ```bash

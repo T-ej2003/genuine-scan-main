@@ -1,12 +1,13 @@
 # Enterprise Deployment Checklist
 
-Use this checklist for production releases. It aligns with the Deployment Audit workflow and the release gate.
+Use this checklist for production releases. It aligns with Release Train, the Deployment Audit workflow, and the final Release Gate deploy approval.
 
 ## Change control
 - [ ] Scope approved and PR reviewed.
 - [ ] Release notes capture user-facing changes and breaking risks.
 - [ ] Environment-specific configuration updated (no credential changes in code).
 - [ ] `.github/workflows` deployment controls are committed and enabled in remote repository.
+- [ ] Normal production deployment is started from `Release Train`, not direct `Release Gate`.
 - [ ] `Release Candidate Gate / rc-trust-critical` passed on the release candidate branch.
 - [ ] `Release Candidate Gate / rc-staging-smoke` passed against staging.
 - [ ] `main` branch protection requires both Release Candidate Gate checks before merge.

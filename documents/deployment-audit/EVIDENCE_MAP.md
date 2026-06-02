@@ -11,5 +11,6 @@ This map ties required controls to their evidence sources in CI.
 | Container scan (conditional) | Trivy image SARIF report | Artifact `deployment-audit-artifacts` -> `audit-artifacts/container-trivy.sarif` |
 | SBOM generation | SPDX JSON SBOM | Artifact `deployment-audit-artifacts` -> `audit-artifacts/sbom.spdx.json` |
 | Provenance attestation | Build provenance attestation | GitHub Actions run -> Attestations for `audit-artifacts/sbom.spdx.json` |
-| Release gate | Deployment blocked unless audit succeeds | Workflow `release-gate` job `deploy` |
+| Release train | Required quality, secret scan, and deployment audit gates passed for exact SHA | Workflow `release-train` orchestration logs |
+| Release gate | Production deployment blocked behind final environment approval | Workflow `release-gate` job `deploy-production` |
 | Migration reproducibility | `prisma migrate status` and clean DB validation logs | Release pipeline logs or deployment preflight script output |

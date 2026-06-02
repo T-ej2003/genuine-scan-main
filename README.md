@@ -779,16 +779,18 @@ Production note:
 - On production hosts, create a project-root `.env` beside `docker-compose.yml` so Docker Compose can interpolate these values before startup. `backend/.env` alone is not enough for the `minio` and `minio-init` services.
 - ECS/Fargate deployments do not need the MinIO env set. Use `OBJECT_STORAGE_BUCKET` plus `OBJECT_STORAGE_REGION` or `AWS_REGION`, leave `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_ACCESS_KEY`, and `OBJECT_STORAGE_SECRET_KEY` unset, leave `OBJECT_STORAGE_FORCE_PATH_STYLE` unset or set it to `false`, and grant the task role S3 access.
 
-Production auto-deploy via Ansible:
-- The active production VM/EC2 Docker Compose path is controlled by the `Release Gate` GitHub Actions workflow. On a push to `main`, it waits for `Quality Gate`, `Secret Scan`, and `Deployment Audit` to pass for the exact commit SHA, then pauses at the protected GitHub Environment named `production` before SSH or deployment secrets are available.
+Production release via Ansible:
+- The active production VM/EC2 Docker Compose path is controlled by the `Release Train` GitHub Actions workflow. Operators run `Release Train` for the target `main` commit; it dispatches/checks `Quality Gate`, `Secret Scan`, and `Deployment Audit` for the exact commit SHA, then dispatches `Release Gate` for the same SHA.
+- `Release Gate` is the final protected production deploy gate. It pauses at the protected GitHub Environment named `production` before SSH or deployment secrets are available. Do not use it as the normal one-click orchestrator.
 - Configure `production` with required reviewers. This keeps deployment automatic after merge but never unattended.
 - Required `production` environment secrets: `PROD_SSH_HOST`, `PROD_SSH_USER`, `PROD_SSH_PRIVATE_KEY`. Optional: `PROD_SSH_PORT` (defaults to `22`) and `PROD_KNOWN_HOSTS` (preferred). Without `PROD_KNOWN_HOSTS`, the workflow uses `ssh-keyscan -H` and strict host checking for the generated inventory.
 - For multi-host active/standby deployment from Actions, set optional `PROD_ANSIBLE_INVENTORY` to the full private inventory content and set each host's `ansible_ssh_private_key_file` to `~/.ssh/prod_deploy_key`. Set `PROD_KNOWN_HOSTS` for every host in that inventory. Do not commit `ops/deploy/inventory.ini`; it is ignored and generated at runtime in CI.
 - The Ansible deployment job must run on a self-hosted runner labeled `self-hosted`, `linux`, and `production-deploy`. GitHub-hosted runners can timeout because production EC2 security groups should not allow public SSH from GitHub's changing runner IP ranges.
 - Place the runner inside AWS/VPC or another secure deploy network path that can SSH to London `13.135.108.69`, Mumbai `15.206.45.108`, and Cape Town `15.240.28.113`.
 - Security groups should allow SSH only from the runner or bastion security group, a private subnet, or a fixed runner Elastic IP `/32`. Never open production SSH to `0.0.0.0/0`.
-- Manual deploy: run the `Release Gate` workflow from GitHub Actions with `git_ref=main` or a main-branch SHA that already has green gates.
-- Rollback: rerun `Release Gate` with the previous known-good main-branch SHA, or from an operator machine run `ansible-playbook -i ops/deploy/inventory.ini ops/deploy/deploy.yml --extra-vars "branch=main deploy_ref=<previous_sha>"`.
+- Normal manual deploy: run the `Release Train` workflow from GitHub Actions with `git_ref=main`; optionally set `target_sha` to an exact main-branch commit.
+- Expert-only direct deploy: run `Release Gate` only after human verification, with `target_sha=<main_sha>` and `expert_override=true`.
+- Rollback: run `Release Train` for the previous known-good main-branch SHA when the full train is available; in an emergency, use expert-only `Release Gate` override or from an operator machine run `ansible-playbook -i ops/deploy/inventory.ini ops/deploy/deploy.yml --extra-vars "branch=main deploy_ref=<previous_sha>"`.
 
 Production runner checklist:
 - Create or register the self-hosted runner in GitHub: Settings -> Actions -> Runners -> New self-hosted runner.
@@ -796,7 +798,7 @@ Production runner checklist:
 - Run it in AWS/VPC or a secure deploy network with outbound HTTPS to GitHub.
 - Confirm SSH reachability from the runner to all production hosts.
 - Confirm production EC2 security groups only allow SSH from the runner, bastion, or private deploy network.
-- Confirm the runner shows `Idle`, then run `Release Gate` and approve the `production` environment.
+- Confirm the runner shows `Idle`, then run `Release Train`; approve the `production` environment when the final `Release Gate` run starts.
 
 ECS/Fargate image architecture note:
 - Local Docker Compose remains a developer-native workflow. On Apple Silicon, `docker compose build` will naturally create an `arm64` image unless you explicitly cross-build. That is correct for local development and must not be treated as the production publishing path.
@@ -873,6 +875,11 @@ Backend tests (`backend/package.json`):
 Frontend tests:
 
 - `vitest` via `npm run test`.
+
+Auth/security DB-backed proof:
+
+- `npm run test:p3:auth-security-db` starts a disposable Postgres 16 test service, applies Prisma migrations to a generated test database, seeds P2 auth/security fixtures, and runs DB-backed authorization/IDOR/export/printer checks.
+- `npm run test:p2:db:down` destroys the local disposable test database service and volume.
 
 Recommended smoke checks after changes:
 

@@ -1,18 +1,26 @@
 name: Release Gate
 
 on:
-  workflow_run:
-    workflows:
-      - Deployment Audit
-    types:
-      - completed
   workflow_dispatch:
     inputs:
       git_ref:
-        description: "Main-branch commit SHA or ref to deploy after required gates have passed"
+        description: "Main-branch ref used by Release Train"
         required: false
         type: string
         default: main
+      target_sha:
+        description: "Exact main-branch commit SHA to deploy"
+        required: false
+        type: string
+      release_train_run_id:
+        description: "Release Train run ID that dispatched this gate"
+        required: false
+        type: string
+      expert_override:
+        description: "Expert-only emergency override. Skips final required-gate sanity check."
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,19 +32,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  verify-gates:
-    name: Verify required main gates
-    if: >-
-      ${{
-        github.event_name == 'workflow_dispatch' ||
-        (
-          github.event.workflow_run.conclusion == 'success' &&
-          github.event.workflow_run.event == 'push' &&
-          github.event.workflow_run.head_branch == 'main'
-        )
-      }}
+  resolve-deploy-target:
+    name: Resolve deploy target
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 10
     outputs:
       deploy_sha: ${{ steps.resolve.outputs.deploy_sha }}
       deploy_ref: ${{ steps.resolve.outputs.deploy_ref }}
@@ -50,51 +49,58 @@ jobs:
       - name: Resolve deploy SHA
         id: resolve
         env:
-          EVENT_NAME: ${{ github.event_name }}
           INPUT_GIT_REF: ${{ inputs.git_ref }}
-          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          INPUT_TARGET_SHA: ${{ inputs.target_sha }}
         run: |
           set -euo pipefail
 
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            deploy_ref="${INPUT_GIT_REF:-main}"
-            git fetch --prune origin main
-            deploy_sha="$(git rev-parse "${deploy_ref}^{commit}")"
+          deploy_ref="${INPUT_GIT_REF:-main}"
+          git fetch --prune origin main
 
-            if ! git merge-base --is-ancestor "$deploy_sha" origin/main; then
-              echo "::error::Manual production deploy ref must resolve to a commit on main."
-              exit 1
-            fi
+          if [ -n "${INPUT_TARGET_SHA:-}" ]; then
+            deploy_sha="$INPUT_TARGET_SHA"
+            git cat-file -e "${deploy_sha}^{commit}"
           else
-            deploy_ref="main"
-            deploy_sha="$WORKFLOW_RUN_SHA"
+            deploy_sha="$(git rev-parse "${deploy_ref}^{commit}")"
+          fi
+
+          if ! git merge-base --is-ancestor "$deploy_sha" origin/main; then
+            echo "::error::Production deploy target must resolve to a commit on main."
+            exit 1
           fi
 
           echo "deploy_ref=$deploy_ref" >> "$GITHUB_OUTPUT"
           echo "deploy_sha=$deploy_sha" >> "$GITHUB_OUTPUT"
           echo "Resolved production deploy SHA: $deploy_sha"
 
-      - name: Wait for required workflow gates
+      - name: Final required-gate sanity check
+        if: ${{ !inputs.expert_override }}
         env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TARGET_BRANCH: main
-          TARGET_EVENT: push
           TARGET_SHA: ${{ steps.resolve.outputs.deploy_sha }}
+          TARGET_EVENTS: push,workflow_dispatch
           REQUIRED_WORKFLOW_FILES: quality-gate.yml,secret-scan.yml,deployment-audit.yml
-          MAX_ATTEMPTS: 60
-          POLL_SECONDS: 30
+          MAX_ATTEMPTS: 1
+          POLL_SECONDS: 0
         run: node scripts/github/check-required-workflow-gates.mjs
+
+      - name: Expert override notice
+        if: ${{ inputs.expert_override }}
+        run: |
+          echo "::warning::Expert override enabled. Required workflow gate sanity check was skipped."
+          echo "Use only for emergency production deployment after human verification."
 
   deploy-production:
     name: Deploy production via Ansible
-    needs: verify-gates
-    if: ${{ needs.verify-gates.outputs.deploy_sha != '' }}
+    needs: resolve-deploy-target
+    if: ${{ needs.resolve-deploy-target.outputs.deploy_sha != '' }}
     runs-on: [self-hosted, linux, production-deploy]
     timeout-minutes: 60
     environment: production
     env:
       ANSIBLE_HOST_KEY_CHECKING: "true"
-      DEPLOY_SHA: ${{ needs.verify-gates.outputs.deploy_sha }}
+      DEPLOY_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
     steps:
       - name: Checkout deployment tooling
         uses: actions/checkout@v6

@@ -1,0 +1,109 @@
+name: Release Train
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: "Main branch ref to release. Use main for the normal production train."
+        required: false
+        type: string
+        default: main
+      target_sha:
+        description: "Optional exact main-branch commit SHA. Defaults to git_ref HEAD."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: release-train-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  orchestrate:
+    name: Trigger and verify release train
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Checkout release tooling
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Resolve target SHA
+        id: resolve
+        env:
+          INPUT_GIT_REF: ${{ inputs.git_ref }}
+          INPUT_TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+
+          git fetch --prune origin main
+          target_ref="${INPUT_GIT_REF:-main}"
+
+          if [ -n "${INPUT_TARGET_SHA:-}" ]; then
+            target_sha="$INPUT_TARGET_SHA"
+            git cat-file -e "${target_sha}^{commit}"
+          else
+            target_sha="$(git rev-parse "${target_ref}^{commit}")"
+          fi
+
+          if ! git merge-base --is-ancestor "$target_sha" origin/main; then
+            echo "::error::Release Train target must be a commit on main."
+            exit 1
+          fi
+
+          echo "target_ref=$target_ref" >> "$GITHUB_OUTPUT"
+          echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
+          echo "Release Train target ref: $target_ref"
+          echo "Release Train target SHA: $target_sha"
+
+      - name: Trigger required workflow gates
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+
+          required_workflows=(quality-gate.yml secret-scan.yml deployment-audit.yml)
+
+          for workflow_file in "${required_workflows[@]}"; do
+            echo "Triggering ${workflow_file} for ${TARGET_SHA}"
+            gh workflow run "$workflow_file" --ref "$TARGET_SHA" || {
+              echo "::error::Unable to dispatch ${workflow_file} for ${TARGET_SHA}. Confirm the workflow has workflow_dispatch and the SHA is reachable on main."
+              exit 1
+            }
+          done
+
+      - name: Wait for required workflow gates
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
+          TARGET_EVENTS: push,workflow_dispatch
+          REQUIRED_WORKFLOW_FILES: quality-gate.yml,secret-scan.yml,deployment-audit.yml
+          MAX_ATTEMPTS: 90
+          POLL_SECONDS: 30
+        run: node scripts/github/check-required-workflow-gates.mjs
+
+      - name: Trigger final Release Gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_REF: ${{ steps.resolve.outputs.target_ref }}
+          TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+
+          echo "All required gates passed for ${TARGET_SHA}."
+          echo "Triggering release-gate.yml for exact target SHA ${TARGET_SHA}."
+          gh workflow run release-gate.yml \
+            --ref "$TARGET_SHA" \
+            -f git_ref="$TARGET_REF" \
+            -f target_sha="$TARGET_SHA" \
+            -f release_train_run_id="$GITHUB_RUN_ID" \
+            -f expert_override=false
+
+          echo "Final action: release-gate.yml dispatched for ${TARGET_SHA}. Release Train does not deploy directly."
