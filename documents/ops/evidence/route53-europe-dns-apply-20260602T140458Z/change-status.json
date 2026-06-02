@@ -1,0 +1,8 @@
+{
+    "ChangeInfo": {
+        "Id": "/change/C06995412W226989PJ44X",
+        "Status": "INSYNC",
+        "SubmittedAt": "2026-06-02T14:05:00.627000+00:00",
+        "Comment": "MSCQR: Europe geolocation to London ALB while preserving Africa Cape Town and Mumbai default routing"
+    }
+}

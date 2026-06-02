@@ -1,0 +1,10 @@
+{
+    "Nameserver": "205.251.193.149",
+    "RecordName": "www.mscqr.com",
+    "RecordType": "CNAME",
+    "RecordData": [
+        "mscqr.com."
+    ],
+    "ResponseCode": "NOERROR",
+    "Protocol": "UDP"
+}

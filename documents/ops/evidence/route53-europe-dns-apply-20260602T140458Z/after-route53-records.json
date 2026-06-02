@@ -1,0 +1,103 @@
+[
+    {
+        "Name": "mscqr.com.",
+        "Type": "A",
+        "SetIdentifier": "africa-capetown",
+        "GeoLocation": {
+            "ContinentCode": "AF"
+        },
+        "AliasTarget": {
+            "HostedZoneId": "Z268VQBMOI5EKX",
+            "DNSName": "mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com.",
+            "EvaluateTargetHealth": true
+        }
+    },
+    {
+        "Name": "mscqr.com.",
+        "Type": "A",
+        "SetIdentifier": "default-mumbai",
+        "GeoLocation": {
+            "CountryCode": "*"
+        },
+        "AliasTarget": {
+            "HostedZoneId": "ZP97RAFLXTNZK",
+            "DNSName": "mscqr-mumbai-alb-1249752376.ap-south-1.elb.amazonaws.com.",
+            "EvaluateTargetHealth": true
+        }
+    },
+    {
+        "Name": "mscqr.com.",
+        "Type": "A",
+        "SetIdentifier": "europe-london",
+        "GeoLocation": {
+            "ContinentCode": "EU"
+        },
+        "AliasTarget": {
+            "HostedZoneId": "ZHURV8PSTC4K8",
+            "DNSName": "mscqr-alb-euw2-524835535.eu-west-2.elb.amazonaws.com.",
+            "EvaluateTargetHealth": true
+        }
+    },
+    {
+        "Name": "mscqr.com.",
+        "Type": "MX",
+        "TTL": 300,
+        "ResourceRecords": [
+            {
+                "Value": "10 mx1.privateemail.com"
+            },
+            {
+                "Value": "10 mx2.privateemail.com"
+            }
+        ]
+    },
+    {
+        "Name": "mscqr.com.",
+        "Type": "NS",
+        "TTL": 172800,
+        "ResourceRecords": [
+            {
+                "Value": "ns-405.awsdns-50.com."
+            },
+            {
+                "Value": "ns-1523.awsdns-62.org."
+            },
+            {
+                "Value": "ns-575.awsdns-07.net."
+            },
+            {
+                "Value": "ns-1950.awsdns-51.co.uk."
+            }
+        ]
+    },
+    {
+        "Name": "mscqr.com.",
+        "Type": "SOA",
+        "TTL": 900,
+        "ResourceRecords": [
+            {
+                "Value": "ns-405.awsdns-50.com. awsdns-hostmaster.amazon.com. 1 7200 900 1209600 86400"
+            }
+        ]
+    },
+    {
+        "Name": "mscqr.com.",
+        "Type": "TXT",
+        "TTL": 300,
+        "ResourceRecords": [
+            {
+                "Value": "\"v=spf1 include:spf.privateemail.com ~all\""
+            }
+        ]
+    },
+    {
+        "Name": "www.mscqr.com.",
+        "Type": "CNAME",
+        "TTL": 300,
+        "ResourceRecords": [
+            {
+                "Value": "mscqr.com"
+            }
+        ]
+    }
+]
