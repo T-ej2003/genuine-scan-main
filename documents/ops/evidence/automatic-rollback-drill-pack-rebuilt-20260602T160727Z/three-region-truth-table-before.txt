@@ -1,0 +1,17 @@
+
+> genuine-scan-console@1.0.0 ops:three-region-truth-table
+> node scripts/dr/check-three-region-truth-table.mjs
+
+check,scope,status,detail
+route53_africa-capetown,Africa AF -> Cape Town ALB,PASS,mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com.
+route53_europe-london,Europe EU -> London ALB,PASS,mscqr-alb-euw2-524835535.eu-west-2.elb.amazonaws.com.
+route53_default-mumbai,Default/global * -> Mumbai ALB,PASS,mscqr-mumbai-alb-1249752376.ap-south-1.elb.amazonaws.com.
+mumbai_alb_healthz,Mumbai,PASS,200 text/plain
+capetown_alb_healthz,Cape Town,PASS,200 text/plain
+london_alb_healthz,London,PASS,200 text/plain
+mumbai_ready,Mumbai,PASS,200 application/json; charset=utf-8
+capetown_ready,Cape Town,PASS,200 application/json; charset=utf-8
+london_ready,London,WARN,raw ALB ready redirected to production hostname; use LONDON_READY_URL for region-specific readiness
+london_no_active_minio_ssh,London,PASS,no MinIO containers/processes and backend readiness reports default credentials
+verdict,three-region-policy,REVIEW_REQUIRED,review FAIL/WARN rows
+evidence_dir,artifacts,INFO,/Users/abhiramteja/Downloads/genuine-scan-main/artifacts/dr/20260602T160226Z/three-region-truth-table

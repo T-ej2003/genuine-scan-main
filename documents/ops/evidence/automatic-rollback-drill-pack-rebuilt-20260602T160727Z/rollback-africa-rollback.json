@@ -1,0 +1,21 @@
+{
+  "Comment": "MSCQR PLAN ONLY inverse batch for rollback-africa; review before any approved apply",
+  "Changes": [
+    {
+      "Action": "CREATE",
+      "ResourceRecordSet": {
+        "Name": "mscqr.com.",
+        "Type": "A",
+        "SetIdentifier": "africa-capetown",
+        "GeoLocation": {
+          "ContinentCode": "AF"
+        },
+        "AliasTarget": {
+          "HostedZoneId": "Z268VQBMOI5EKX",
+          "DNSName": "mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com.",
+          "EvaluateTargetHealth": true
+        }
+      }
+    }
+  ]
+}

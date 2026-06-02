@@ -1,0 +1,21 @@
+{
+  "Comment": "MSCQR PLAN ONLY inverse batch for restore-default-mumbai; review before any approved apply",
+  "Changes": [
+    {
+      "Action": "DELETE",
+      "ResourceRecordSet": {
+        "Name": "mscqr.com.",
+        "Type": "A",
+        "SetIdentifier": "default-mumbai",
+        "GeoLocation": {
+          "CountryCode": "*"
+        },
+        "AliasTarget": {
+          "HostedZoneId": "ZP97RAFLXTNZK",
+          "DNSName": "mscqr-mumbai-alb-1249752376.ap-south-1.elb.amazonaws.com.",
+          "EvaluateTargetHealth": true
+        }
+      }
+    }
+  ]
+}

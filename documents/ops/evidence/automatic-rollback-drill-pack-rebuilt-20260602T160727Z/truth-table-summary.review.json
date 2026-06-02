@@ -1,0 +1,97 @@
+{
+  "generatedAt": "2026-06-02T16:02:30.242Z",
+  "expectedPolicy": {
+    "domainName": "mscqr.com",
+    "records": {
+      "defaultMumbai": {
+        "label": "Default/global * -> Mumbai ALB",
+        "setIdentifier": "default-mumbai",
+        "geoLocation": {
+          "CountryCode": "*"
+        },
+        "albDnsName": "mscqr-mumbai-alb-1249752376.ap-south-1.elb.amazonaws.com",
+        "albHostedZoneId": "ZP97RAFLXTNZK"
+      },
+      "africaCapeTown": {
+        "label": "Africa AF -> Cape Town ALB",
+        "setIdentifier": "africa-capetown",
+        "geoLocation": {
+          "ContinentCode": "AF"
+        },
+        "albDnsName": "mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com",
+        "albHostedZoneId": "Z268VQBMOI5EKX"
+      },
+      "europeLondon": {
+        "label": "Europe EU -> London ALB",
+        "setIdentifier": "europe-london",
+        "geoLocation": {
+          "ContinentCode": "EU"
+        },
+        "albDnsName": "mscqr-alb-euw2-524835535.eu-west-2.elb.amazonaws.com",
+        "albHostedZoneId": "ZHURV8PSTC4K8"
+      }
+    }
+  },
+  "rows": [
+    {
+      "check": "route53_africa-capetown",
+      "scope": "Africa AF -> Cape Town ALB",
+      "status": "PASS",
+      "detail": "mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com."
+    },
+    {
+      "check": "route53_europe-london",
+      "scope": "Europe EU -> London ALB",
+      "status": "PASS",
+      "detail": "mscqr-alb-euw2-524835535.eu-west-2.elb.amazonaws.com."
+    },
+    {
+      "check": "route53_default-mumbai",
+      "scope": "Default/global * -> Mumbai ALB",
+      "status": "PASS",
+      "detail": "mscqr-mumbai-alb-1249752376.ap-south-1.elb.amazonaws.com."
+    },
+    {
+      "check": "mumbai_alb_healthz",
+      "scope": "Mumbai",
+      "status": "PASS",
+      "detail": "200 text/plain"
+    },
+    {
+      "check": "capetown_alb_healthz",
+      "scope": "Cape Town",
+      "status": "PASS",
+      "detail": "200 text/plain"
+    },
+    {
+      "check": "london_alb_healthz",
+      "scope": "London",
+      "status": "PASS",
+      "detail": "200 text/plain"
+    },
+    {
+      "check": "mumbai_ready",
+      "scope": "Mumbai",
+      "status": "PASS",
+      "detail": "200 application/json; charset=utf-8"
+    },
+    {
+      "check": "capetown_ready",
+      "scope": "Cape Town",
+      "status": "PASS",
+      "detail": "200 application/json; charset=utf-8"
+    },
+    {
+      "check": "london_ready",
+      "scope": "London",
+      "status": "WARN",
+      "detail": "raw ALB ready redirected to production hostname; use LONDON_READY_URL for region-specific readiness"
+    },
+    {
+      "check": "london_no_active_minio_ssh",
+      "scope": "London",
+      "status": "PASS",
+      "detail": "no MinIO containers/processes and backend readiness reports default credentials"
+    }
+  ]
+}

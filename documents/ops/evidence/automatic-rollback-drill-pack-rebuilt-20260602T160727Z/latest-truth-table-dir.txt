@@ -1,0 +1,1 @@
+artifacts/dr/20260602T160226Z/three-region-truth-table

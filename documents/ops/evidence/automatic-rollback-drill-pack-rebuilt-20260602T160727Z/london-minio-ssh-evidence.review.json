@@ -1,0 +1,16 @@
+{
+  "check": "london_no_active_minio_ssh",
+  "scope": "London",
+  "status": "PASS",
+  "detail": "no MinIO containers/processes and backend readiness reports default credentials",
+  "evidence": {
+    "activeMinioContainers": [],
+    "activeMinioProcesses": [],
+    "backendReadyStatusCode": 200,
+    "backendObjectStorageMode": "default-credentials",
+    "backendObjectStorageReady": true,
+    "backendObjectStorageBucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
+    "backendObjectStorageRegion": "eu-west-2",
+    "backendStorageDefaultCredentials": true
+  }
+}

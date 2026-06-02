@@ -1,0 +1,21 @@
+{
+  "Comment": "MSCQR PLAN ONLY: rollback-europe for current three-region geolocation DNS policy",
+  "Changes": [
+    {
+      "Action": "DELETE",
+      "ResourceRecordSet": {
+        "Name": "mscqr.com.",
+        "Type": "A",
+        "SetIdentifier": "europe-london",
+        "GeoLocation": {
+          "ContinentCode": "EU"
+        },
+        "AliasTarget": {
+          "HostedZoneId": "ZHURV8PSTC4K8",
+          "DNSName": "mscqr-alb-euw2-524835535.eu-west-2.elb.amazonaws.com.",
+          "EvaluateTargetHealth": true
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+
+> genuine-scan-console@1.0.0 ops:route53-regional-rollback-plan
+> node scripts/dr/plan-route53-regional-rollback.mjs --operation rollback-europe
+
+MSCQR Route 53 regional rollback/failover plan generated.
+Operation: rollback-europe
+Cutover JSON: /Users/abhiramteja/Downloads/genuine-scan-main/artifacts/dr/20260602T160230Z/route53-regional-rollback-plan/rollback-europe-cutover.json
+Rollback JSON: /Users/abhiramteja/Downloads/genuine-scan-main/artifacts/dr/20260602T160230Z/route53-regional-rollback-plan/rollback-europe-rollback.json
+Delete only the Europe geolocation route europe-london; Africa and default Mumbai are preserved.
+No AWS calls were made. Review JSON before any approved apply.

@@ -1,0 +1,5 @@
+4828a54 Preserve London no-MinIO truth table evidence
+71e6b58 Harden three-region truth table checks
+8c4196e Add guarded Route 53 regional rollback tooling
+e0ec6ec Preserve automatic rollback preflight evidence
+64e93df Preserve three-region truth table evidence

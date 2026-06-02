@@ -1,0 +1,10 @@
+
+> genuine-scan-console@1.0.0 ops:route53-regional-rollback-plan
+> node scripts/dr/plan-route53-regional-rollback.mjs --operation restore-default-mumbai
+
+MSCQR Route 53 regional rollback/failover plan generated.
+Operation: restore-default-mumbai
+Cutover JSON: /Users/abhiramteja/Downloads/genuine-scan-main/artifacts/dr/20260602T160231Z/route53-regional-rollback-plan/restore-default-mumbai-cutover.json
+Rollback JSON: /Users/abhiramteja/Downloads/genuine-scan-main/artifacts/dr/20260602T160231Z/route53-regional-rollback-plan/restore-default-mumbai-rollback.json
+Restore only the default/global Mumbai geolocation route; Africa and Europe are preserved.
+No AWS calls were made. Review JSON before any approved apply.

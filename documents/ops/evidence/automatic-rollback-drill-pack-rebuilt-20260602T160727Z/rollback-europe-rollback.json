@@ -1,0 +1,21 @@
+{
+  "Comment": "MSCQR PLAN ONLY inverse batch for rollback-europe; review before any approved apply",
+  "Changes": [
+    {
+      "Action": "CREATE",
+      "ResourceRecordSet": {
+        "Name": "mscqr.com.",
+        "Type": "A",
+        "SetIdentifier": "europe-london",
+        "GeoLocation": {
+          "ContinentCode": "EU"
+        },
+        "AliasTarget": {
+          "HostedZoneId": "ZHURV8PSTC4K8",
+          "DNSName": "mscqr-alb-euw2-524835535.eu-west-2.elb.amazonaws.com.",
+          "EvaluateTargetHealth": true
+        }
+      }
+    }
+  ]
+}

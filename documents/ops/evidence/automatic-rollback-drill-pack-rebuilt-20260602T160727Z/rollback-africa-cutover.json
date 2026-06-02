@@ -1,0 +1,21 @@
+{
+  "Comment": "MSCQR PLAN ONLY: rollback-africa for current three-region geolocation DNS policy",
+  "Changes": [
+    {
+      "Action": "DELETE",
+      "ResourceRecordSet": {
+        "Name": "mscqr.com.",
+        "Type": "A",
+        "SetIdentifier": "africa-capetown",
+        "GeoLocation": {
+          "ContinentCode": "AF"
+        },
+        "AliasTarget": {
+          "HostedZoneId": "Z268VQBMOI5EKX",
+          "DNSName": "mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com.",
+          "EvaluateTargetHealth": true
+        }
+      }
+    }
+  ]
+}
