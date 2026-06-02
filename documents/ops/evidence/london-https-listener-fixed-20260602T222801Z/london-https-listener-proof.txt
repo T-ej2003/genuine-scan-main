@@ -1,0 +1,12 @@
+London HTTPS listener fixed.
+
+Evidence observed:
+- ALB has HTTP 80 and HTTPS 443 listeners.
+- HTTPS listener uses ACM cert:
+  arn:aws:acm:eu-west-2:368992683803:certificate/297215d5-aebb-4c76-8323-564c147b0271
+- London ALB state: active, internet-facing, application.
+- Raw London ALB HTTP /healthz returned 200 OK.
+- Raw London ALB HTTPS /healthz returned HTTP/2 200.
+- Production https://www.mscqr.com/healthz returned HTTP/2 200.
+- SNI probes against both London ALB IPs returned HTTP/2 200.
+- TLS handshake verified OK with peer certificate CN=mscqr.com.
