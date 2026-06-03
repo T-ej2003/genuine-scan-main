@@ -1,0 +1,8 @@
+c4d8ec73827f8f5c37e043d46e48e4138eb725402d3c906b2b2e8f4e1c00aaf0  ./01-pre-change-b-route-tables.json
+882011458c29c1cb43ac5b99d03532cc3ad89418a0218f8977c8c5ea2f1c50a4  ./02-pre-change-nat-gateways.json
+fd0e439efabca241983bb5955b3e592c957595c3209f5c13a2e903d461968c06  ./03-post-change-route-tables.json
+2eac2d4d85779f4631f0155ee597925b491ee1a3bfd1efa6c445fd785970e331  ./04-human-route-verification.txt
+37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570  ./05-retiring-nat-route-references.json
+0d17ef2c48c372db067b7cc347d6cef45e2b8da0b81829ba9ffa67a89c1b318c  ./rollback-restore-nat-b-routes.sh
+c55018becef3875e02e2b2901ef0e05b013be27d79691c440a9f7e091a064fc6  ./route-migration-note.md
+2a01237a31f153634d5b8d12181eb260047c86b8e7d727e97d9330c9077cb4d5  ./SHA256SUMS.txt

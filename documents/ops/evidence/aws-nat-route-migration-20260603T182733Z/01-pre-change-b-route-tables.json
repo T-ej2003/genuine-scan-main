@@ -1,0 +1,90 @@
+{
+    "RouteTables": [
+        {
+            "Associations": [
+                {
+                    "Main": false,
+                    "RouteTableAssociationId": "rtbassoc-08416da81f441f5eb",
+                    "RouteTableId": "rtb-08944319a1a049253",
+                    "SubnetId": "subnet-043b12b3099be82f9",
+                    "AssociationState": {
+                        "State": "associated"
+                    }
+                }
+            ],
+            "PropagatingVgws": [],
+            "RouteTableId": "rtb-08944319a1a049253",
+            "Routes": [
+                {
+                    "DestinationCidrBlock": "10.0.0.0/16",
+                    "GatewayId": "local",
+                    "Origin": "CreateRouteTable",
+                    "State": "active"
+                },
+                {
+                    "DestinationCidrBlock": "0.0.0.0/0",
+                    "NatGatewayId": "nat-0a51226e1f9190b2e",
+                    "Origin": "CreateRoute",
+                    "State": "active"
+                },
+                {
+                    "DestinationPrefixListId": "pl-7ca54015",
+                    "GatewayId": "vpce-07b9f569ac0d4bf04",
+                    "Origin": "CreateRoute",
+                    "State": "active"
+                }
+            ],
+            "Tags": [
+                {
+                    "Key": "Name",
+                    "Value": "mscqr-prod-euw2-rtb-private4-eu-west-2b"
+                }
+            ],
+            "VpcId": "vpc-09825a6dc884b486a",
+            "OwnerId": "368992683803"
+        },
+        {
+            "Associations": [
+                {
+                    "Main": false,
+                    "RouteTableAssociationId": "rtbassoc-00f80e3c73d6778b7",
+                    "RouteTableId": "rtb-0bd0293e2aca23c60",
+                    "SubnetId": "subnet-068d949017bd2ce45",
+                    "AssociationState": {
+                        "State": "associated"
+                    }
+                }
+            ],
+            "PropagatingVgws": [],
+            "RouteTableId": "rtb-0bd0293e2aca23c60",
+            "Routes": [
+                {
+                    "DestinationCidrBlock": "10.0.0.0/16",
+                    "GatewayId": "local",
+                    "Origin": "CreateRouteTable",
+                    "State": "active"
+                },
+                {
+                    "DestinationCidrBlock": "0.0.0.0/0",
+                    "NatGatewayId": "nat-0a51226e1f9190b2e",
+                    "Origin": "CreateRoute",
+                    "State": "active"
+                },
+                {
+                    "DestinationPrefixListId": "pl-7ca54015",
+                    "GatewayId": "vpce-07b9f569ac0d4bf04",
+                    "Origin": "CreateRoute",
+                    "State": "active"
+                }
+            ],
+            "Tags": [
+                {
+                    "Key": "Name",
+                    "Value": "mscqr-prod-euw2-rtb-private2-eu-west-2b"
+                }
+            ],
+            "VpcId": "vpc-09825a6dc884b486a",
+            "OwnerId": "368992683803"
+        }
+    ]
+}
