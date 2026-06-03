@@ -15,6 +15,7 @@ This guide covers the MSCQR operator-controlled AWS multi-region DR automation f
 - Route 53 rollback batch generation for review.
 - Route 53 regional rollback/failover plan generation for the current three-region policy.
 - Three-region DNS and ALB health truth-table evidence capture.
+- Automatic regional failover dry-run decision artifacts and plan hashes.
 - Read-only RDS inventory and snapshot readiness inspection.
 - DB restore plan generation.
 - Read-only AWS topology inventory for region-local DB recovery.
@@ -167,6 +168,32 @@ npm run ops:three-region-truth-table
 ```
 
 If London SSH env vars are omitted, the London no-active-MinIO check is marked `SKIP`, not failed. Evidence is saved as gzip files under `artifacts/dr/<timestamp>/three-region-truth-table/`.
+
+## Automatic Regional Failover Dry Run
+
+This is recommendation-only automation. It consumes existing truth-table evidence, requires consecutive failed samples before recommending a regional rollback plan, and writes a hashed decision artifact under `artifacts/dr/<timestamp>/auto-failover-dry-run/`. It never calls AWS, never mutates Route 53, and never deletes resources.
+
+```bash
+npm run ops:auto-failover-dry-run -- --evidence-dir artifacts/dr --threshold 2
+```
+
+Or provide exact evidence samples:
+
+```bash
+npm run ops:auto-failover-dry-run -- \
+  --evidence artifacts/dr/<t1>/three-region-truth-table \
+  --evidence artifacts/dr/<t2>/three-region-truth-table
+```
+
+Behavior:
+
+- Europe/London threshold failure: `RECOMMEND_FAILOVER` with `rollback-europe`.
+- Africa/Cape Town threshold failure: `RECOMMEND_FAILOVER` with `rollback-africa`.
+- Default/Mumbai threshold failure: `BLOCKED_MANUAL_REVIEW`; default/global failover needs explicit business approval.
+- WARN-only rows are ignored unless `--strict-warn` or `AUTO_FAILOVER_STRICT_WARN=true` is set.
+- One failed sample remains `NOOP` because it may be transient.
+
+The selected plan JSON is still only a recommendation. Apply remains the protected manual command below with `APPROVED_ROUTE53_ROLLBACK=true`, `HOSTED_ZONE_ID`, and a reviewed `CHANGE_BATCH_JSON`.
 
 ## Approved Regional Route 53 Rollback Apply
 

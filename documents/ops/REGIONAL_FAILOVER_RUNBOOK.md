@@ -238,6 +238,47 @@ npm run ops:route53-rollback-apply-approved
 
 The approved apply script captures before records, the Route 53 change ID, change status, and after records. It waits for `INSYNC`, refuses batches without geolocation A-record set identifiers, and refuses deletion of MX, TXT, NS, SOA, or `www.mscqr.com` CNAME records.
 
+## Automatic Failover Dry Run
+
+Automatic regional failover is currently recommendation-only. The controller reads existing `ops:three-region-truth-table` evidence, requires consecutive failed samples, ignores WARN-only rows by default, generates a matching rollback plan JSON when safe, hashes the selected plan, and writes a decision artifact. It never calls AWS and never applies Route 53.
+
+Run at least two truth-table samples first:
+
+```bash
+HOSTED_ZONE_ID=Z0569586VLFIGGVI7HAZ npm run ops:three-region-truth-table
+# wait for an independent second sample, then run the truth table again
+HOSTED_ZONE_ID=Z0569586VLFIGGVI7HAZ npm run ops:three-region-truth-table
+```
+
+Dry-run decision examples:
+
+```bash
+npm run ops:auto-failover-dry-run -- --evidence-dir artifacts/dr --threshold 2
+npm run ops:auto-failover-dry-run -- --evidence artifacts/dr/<t1>/three-region-truth-table --evidence artifacts/dr/<t2>/three-region-truth-table
+```
+
+Decision behavior:
+
+- London/Europe threshold failure recommends `rollback-europe`.
+- Cape Town/Africa threshold failure recommends `rollback-africa`.
+- Mumbai/default threshold failure returns `BLOCKED_MANUAL_REVIEW`; default/global traffic movement requires an explicit business decision.
+- WARN-only rows, including the known London raw-ALB ready redirect, do not trigger failover unless `--strict-warn` or `AUTO_FAILOVER_STRICT_WARN=true` is set.
+- A single failed sample is treated as transient and returns `NOOP`.
+
+The decision artifact includes the timestamp, target SHA, input evidence paths, failed checks, selected operation, recommended plan JSON path, SHA256 of that plan, and `NOOP`, `RECOMMEND_FAILOVER`, or `BLOCKED_MANUAL_REVIEW`.
+
+Approved apply remains manual:
+
+```bash
+# DO NOT RUN until manually approved by the incident commander.
+APPROVED_ROUTE53_ROLLBACK=true \
+HOSTED_ZONE_ID=Z0569586VLFIGGVI7HAZ \
+CHANGE_BATCH_JSON=artifacts/dr/<timestamp>/auto-failover-dry-run/rollback-europe-cutover.json \
+npm run ops:route53-rollback-apply-approved
+```
+
+Legacy cleanup remains blocked until the dry-run decision engine has passed rehearsal with captured artifacts and the post-rehearsal truth table is reviewed.
+
 ## Validation Checklist After Cutover
 
 1. `https://www.mscqr.com/api/health/ready` returns HTTP 200 JSON.

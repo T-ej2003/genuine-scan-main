@@ -48,6 +48,7 @@
     "ops:route53-regional-rollback-plan": "node scripts/dr/plan-route53-regional-rollback.mjs",
     "ops:route53-rollback-apply-approved": "node scripts/dr/apply-route53-rollback-approved.mjs",
     "ops:three-region-truth-table": "node scripts/dr/check-three-region-truth-table.mjs",
+    "ops:auto-failover-dry-run": "node scripts/dr/auto-failover-dry-run.mjs",
     "lint": "eslint .",
     "report:lint:changed": "node scripts/lint-changed.mjs",
     "lint:changed": "node scripts/lint-changed.mjs",
