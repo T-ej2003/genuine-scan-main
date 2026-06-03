@@ -1,0 +1,12 @@
+replication_group: mscqr-redis-aps1-primary
+status: available
+node_type: cache.t4g.small
+automatic_failover: enabled
+multi_az: enabled
+member_cluster_count: 2
+member_clusters: mscqr-redis-aps1-primary-001, mscqr-redis-aps1-primary-002
+cache_cluster_types: cache.t4g.small
+target_states: healthy, healthy
+
+DECISION: MUMBAI_ELASTICACHE_DOWNSIZE_SUCCESS_KEEP_HA
+Mumbai ElastiCache was downsized while preserving two members, automatic failover, and Multi-AZ.

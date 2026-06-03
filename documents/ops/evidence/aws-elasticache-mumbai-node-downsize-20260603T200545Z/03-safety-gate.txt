@@ -1,0 +1,10 @@
+replication_group: mscqr-redis-aps1-primary
+status: available
+current_node_type: cache.t4g.medium
+target_node_type: cache.t4g.small
+automatic_failover: enabled
+multi_az: enabled
+member_cluster_count: 2
+member_clusters: mscqr-redis-aps1-primary-001, mscqr-redis-aps1-primary-002
+
+SAFETY_GATE_PASS
