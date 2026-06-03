@@ -1,0 +1,17 @@
+{
+    "Addresses": [
+        {
+            "AllocationId": "eipalloc-0d5bae537b16aece4",
+            "Domain": "vpc",
+            "Tags": [
+                {
+                    "Key": "Name",
+                    "Value": "mscqr-prod-euw2-eip-eu-west-2b"
+                }
+            ],
+            "PublicIpv4Pool": "amazon",
+            "NetworkBorderGroup": "eu-west-2",
+            "PublicIp": "35.179.203.86"
+        }
+    ]
+}
