@@ -1,0 +1,37 @@
+{
+    "DBSnapshots": [
+        {
+            "DBSnapshotIdentifier": "mscqr-prod-db-pre-class-downsize-20260603t185232z",
+            "DBInstanceIdentifier": "mscqr-prod-db",
+            "SnapshotCreateTime": "2026-06-03T18:52:37.395000+00:00",
+            "Engine": "postgres",
+            "AllocatedStorage": 20,
+            "Status": "available",
+            "Port": 5432,
+            "AvailabilityZone": "eu-west-2a",
+            "VpcId": "vpc-09825a6dc884b486a",
+            "InstanceCreateTime": "2026-04-24T22:01:36.665000+00:00",
+            "MasterUsername": "postgres",
+            "EngineVersion": "18.3",
+            "LicenseModel": "postgresql-license",
+            "SnapshotType": "manual",
+            "Iops": 3000,
+            "StorageThroughput": 125,
+            "OptionGroupName": "default:postgres-18",
+            "PercentProgress": 100,
+            "StorageType": "gp3",
+            "Encrypted": true,
+            "StorageEncryptionType": "sse-kms",
+            "BackupRetentionPeriod": 7,
+            "PreferredBackupWindow": "04:27-04:57",
+            "KmsKeyId": "arn:aws:kms:eu-west-2:368992683803:key/2549054e-7477-45e9-8e5a-66f73af5ae3e",
+            "DBSnapshotArn": "arn:aws:rds:eu-west-2:368992683803:snapshot:mscqr-prod-db-pre-class-downsize-20260603t185232z",
+            "IAMDatabaseAuthenticationEnabled": false,
+            "DbiResourceId": "db-NTLGA3CR45JTR7V43YXCJCSNDY",
+            "SnapshotTarget": "region",
+            "OriginalSnapshotCreateTime": "2026-06-03T18:52:37.395000+00:00",
+            "MultiTenant": false,
+            "DedicatedLogVolume": false
+        }
+    ]
+}

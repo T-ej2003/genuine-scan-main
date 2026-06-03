@@ -4,22 +4,22 @@
 
 `mscqr-prod-db`
 
-## Current class
-
-`db.t4g.medium`
-
-## Target class
+## Original target
 
 `db.t4g.small`
 
-## Reason
+## Result
 
-14-day metrics show low CPU, low IOPS, and low connection count. Memory is the limiting signal, so the first reduction is to `db.t4g.small`, not `db.t4g.micro`.
+Blocked.
 
-## Safety
+The RDS `describe-valid-db-instance-modifications` response did not return `db.t4g.small` as a valid target class. The mutation must not be run from this plan.
 
-A manual snapshot was created before mutation.
+## Snapshot
 
-## Mutation not done in this commit
+A manual pre-change snapshot was created and waited to completion:
 
-The DB class change is intentionally separated from the validation and snapshot evidence.
+`mscqr-prod-db-pre-class-downsize-20260603t185232z`
+
+## Next action
+
+Do not mutate RDS until valid class discovery confirms an allowed smaller class. If no smaller class is valid, skip RDS and move to EC2/ASG standby footprint.

@@ -3,6 +3,9 @@ a91374a6c9fbd2a210f8af316885380d23cffe2db920d41129a7e03f6b26ba63  ./02-valid-db-
 de5b080caaae2e47d9389d818c479c51bfec1134995e428f4a45da3a62560688  ./03-target-class-validation.txt
 784fc74d35f973095444591bf9691025085b515452b7832fd48e6033a485e3ad  ./04-create-pre-change-snapshot-response.json
 f16a9279a1cd9b770ef74ead6d85874c3f2dfac510ce02452b5a133c4bb11f01  ./05-pre-change-snapshot-final.json
-087e19eafc1f816fda7391dd14cf5e7d1d580599547e6cb317eda9fcdefa403b  ./rds-class-downsize-plan-note.md
-68f38a294450d60b49abaffac9795cbf3f09001a5cf8b5a457aa71bea18eef9e  ./SHA256SUMS.txt
+5afba5e365e90f09493b990efcececaab710e3990c639b63a4a5c34a592a034b  ./06-snapshot-status-after-interrupt.json
+50a8cdd2d3587034f3dac8a56ef2e625083fdbaedbfa7f5da69ed9f862fb7a40  ./07-snapshot-final-after-wait.json
+5fae6a883505250f81604fe7d71097895c348f96851c4d681c953bce61c62d44  ./08-orderable-postgres-18-3-options.json
+cc726a403be3878f4845656fdcde1db838d0241608b8333532dd07e57960f955  ./09-corrected-rds-class-decision.txt
+970830aaedeb9efccd21fd365246645664a2a30e28bc9b07a759c76fc946a3b3  ./rds-class-downsize-plan-note.md
 4f843b5bd3cda58d7e94bbe3e1d947ebe33f94401951e68a5ee7ea5047f6bb0e  ./SNAPSHOT_ID.txt
