@@ -1,0 +1,69 @@
+{
+    "CacheSubnetGroups": [
+        {
+            "CacheSubnetGroupName": "mscqr-redis-subnet-euw2",
+            "CacheSubnetGroupDescription": "Redis subnet group for London production VPC",
+            "VpcId": "vpc-09825a6dc884b486a",
+            "Subnets": [
+                {
+                    "SubnetIdentifier": "subnet-068d949017bd2ce45",
+                    "SubnetAvailabilityZone": {
+                        "Name": "eu-west-2b"
+                    },
+                    "SupportedNetworkTypes": [
+                        "ipv4"
+                    ]
+                },
+                {
+                    "SubnetIdentifier": "subnet-07e0a76e3a5241138",
+                    "SubnetAvailabilityZone": {
+                        "Name": "eu-west-2a"
+                    },
+                    "SupportedNetworkTypes": [
+                        "ipv4"
+                    ]
+                },
+                {
+                    "SubnetIdentifier": "subnet-028957bce09fae0c0",
+                    "SubnetAvailabilityZone": {
+                        "Name": "eu-west-2b"
+                    },
+                    "SupportedNetworkTypes": [
+                        "ipv4"
+                    ]
+                },
+                {
+                    "SubnetIdentifier": "subnet-0756dbd09eb4ece7f",
+                    "SubnetAvailabilityZone": {
+                        "Name": "eu-west-2a"
+                    },
+                    "SupportedNetworkTypes": [
+                        "ipv4"
+                    ]
+                },
+                {
+                    "SubnetIdentifier": "subnet-043b12b3099be82f9",
+                    "SubnetAvailabilityZone": {
+                        "Name": "eu-west-2b"
+                    },
+                    "SupportedNetworkTypes": [
+                        "ipv4"
+                    ]
+                },
+                {
+                    "SubnetIdentifier": "subnet-0c18d5d4c2a24a41a",
+                    "SubnetAvailabilityZone": {
+                        "Name": "eu-west-2a"
+                    },
+                    "SupportedNetworkTypes": [
+                        "ipv4"
+                    ]
+                }
+            ],
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:subnetgroup:mscqr-redis-subnet-euw2",
+            "SupportedNetworkTypes": [
+                "ipv4"
+            ]
+        }
+    ]
+}

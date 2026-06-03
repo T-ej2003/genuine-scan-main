@@ -1,0 +1,24 @@
+=== mscqr-redis-euw2-primary-001 ===
+CPUUtilization: datapoints=336 -> metrics-mscqr-redis-euw2-primary-001-CPUUtilization.json
+DatabaseMemoryUsagePercentage: datapoints=336 -> metrics-mscqr-redis-euw2-primary-001-DatabaseMemoryUsagePercentage.json
+FreeableMemory: datapoints=336 -> metrics-mscqr-redis-euw2-primary-001-FreeableMemory.json
+CurrConnections: datapoints=336 -> metrics-mscqr-redis-euw2-primary-001-CurrConnections.json
+NewConnections: datapoints=336 -> metrics-mscqr-redis-euw2-primary-001-NewConnections.json
+CacheHits: datapoints=336 -> metrics-mscqr-redis-euw2-primary-001-CacheHits.json
+CacheMisses: datapoints=336 -> metrics-mscqr-redis-euw2-primary-001-CacheMisses.json
+NetworkBytesIn: datapoints=336 -> metrics-mscqr-redis-euw2-primary-001-NetworkBytesIn.json
+NetworkBytesOut: datapoints=336 -> metrics-mscqr-redis-euw2-primary-001-NetworkBytesOut.json
+Evictions: datapoints=336 -> metrics-mscqr-redis-euw2-primary-001-Evictions.json
+SwapUsage: datapoints=336 -> metrics-mscqr-redis-euw2-primary-001-SwapUsage.json
+=== mscqr-redis-euw2-primary-002 ===
+CPUUtilization: datapoints=336 -> metrics-mscqr-redis-euw2-primary-002-CPUUtilization.json
+DatabaseMemoryUsagePercentage: datapoints=336 -> metrics-mscqr-redis-euw2-primary-002-DatabaseMemoryUsagePercentage.json
+FreeableMemory: datapoints=336 -> metrics-mscqr-redis-euw2-primary-002-FreeableMemory.json
+CurrConnections: datapoints=336 -> metrics-mscqr-redis-euw2-primary-002-CurrConnections.json
+NewConnections: datapoints=336 -> metrics-mscqr-redis-euw2-primary-002-NewConnections.json
+CacheHits: datapoints=336 -> metrics-mscqr-redis-euw2-primary-002-CacheHits.json
+CacheMisses: datapoints=336 -> metrics-mscqr-redis-euw2-primary-002-CacheMisses.json
+NetworkBytesIn: datapoints=336 -> metrics-mscqr-redis-euw2-primary-002-NetworkBytesIn.json
+NetworkBytesOut: datapoints=336 -> metrics-mscqr-redis-euw2-primary-002-NetworkBytesOut.json
+Evictions: datapoints=336 -> metrics-mscqr-redis-euw2-primary-002-Evictions.json
+SwapUsage: datapoints=336 -> metrics-mscqr-redis-euw2-primary-002-SwapUsage.json

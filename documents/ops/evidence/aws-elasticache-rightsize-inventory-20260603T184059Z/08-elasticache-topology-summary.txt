@@ -1,0 +1,40 @@
+Replication groups:
+- ReplicationGroupId: mscqr-redis-euw2-primary
+  Status: available
+  Description:  
+  Engine: valkey
+  MultiAZ: enabled
+  AutomaticFailover: enabled
+  TransitEncryptionEnabled: True
+  AtRestEncryptionEnabled: True
+  CacheNodeType: cache.t4g.medium
+  MemberClusters: mscqr-redis-euw2-primary-001, mscqr-redis-euw2-primary-002
+  NodeGroups: 1
+    - NodeGroupId: 0001
+      Status: available
+      PrimaryEndpoint: master.mscqr-redis-euw2-primary.mwntvg.euw2.cache.amazonaws.com
+      ReaderEndpoint: replica.mscqr-redis-euw2-primary.mwntvg.euw2.cache.amazonaws.com
+      Member: mscqr-redis-euw2-primary-001 / 0001 / replica / eu-west-2b
+      Member: mscqr-redis-euw2-primary-002 / 0001 / primary / eu-west-2a
+
+Cache clusters:
+- CacheClusterId: mscqr-redis-euw2-primary-001
+  Status: available
+  Engine: valkey 9.0.0
+  CacheNodeType: cache.t4g.medium
+  NumCacheNodes: 1
+  AZ: eu-west-2b
+  ReplicationGroupId: mscqr-redis-euw2-primary
+  SecurityGroups: sg-0db971332ae625441
+  SubnetGroup: mscqr-redis-subnet-euw2
+
+- CacheClusterId: mscqr-redis-euw2-primary-002
+  Status: available
+  Engine: valkey 9.0.0
+  CacheNodeType: cache.t4g.medium
+  NumCacheNodes: 1
+  AZ: eu-west-2a
+  ReplicationGroupId: mscqr-redis-euw2-primary
+  SecurityGroups: sg-0db971332ae625441
+  SubnetGroup: mscqr-redis-subnet-euw2
+

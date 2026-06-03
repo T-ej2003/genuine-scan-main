@@ -1,0 +1,144 @@
+{
+    "CacheParameterGroups": [
+        {
+            "CacheParameterGroupName": "default.memcached1.4",
+            "CacheParameterGroupFamily": "memcached1.4",
+            "Description": "Default parameter group for memcached1.4",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.memcached1.4"
+        },
+        {
+            "CacheParameterGroupName": "default.memcached1.5",
+            "CacheParameterGroupFamily": "memcached1.5",
+            "Description": "Default parameter group for memcached1.5",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.memcached1.5"
+        },
+        {
+            "CacheParameterGroupName": "default.memcached1.6",
+            "CacheParameterGroupFamily": "memcached1.6",
+            "Description": "Default parameter group for memcached1.6",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.memcached1.6"
+        },
+        {
+            "CacheParameterGroupName": "default.redis2.8",
+            "CacheParameterGroupFamily": "redis2.8",
+            "Description": "Default parameter group for redis2.8",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.redis2.8"
+        },
+        {
+            "CacheParameterGroupName": "default.redis3.2",
+            "CacheParameterGroupFamily": "redis3.2",
+            "Description": "Default parameter group for redis3.2",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.redis3.2"
+        },
+        {
+            "CacheParameterGroupName": "default.redis3.2.cluster.on",
+            "CacheParameterGroupFamily": "redis3.2",
+            "Description": "Customized default parameter group for redis3.2 with cluster mode on",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.redis3.2.cluster.on"
+        },
+        {
+            "CacheParameterGroupName": "default.redis4.0",
+            "CacheParameterGroupFamily": "redis4.0",
+            "Description": "Default parameter group for redis4.0",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.redis4.0"
+        },
+        {
+            "CacheParameterGroupName": "default.redis4.0.cluster.on",
+            "CacheParameterGroupFamily": "redis4.0",
+            "Description": "Customized default parameter group for redis4.0 with cluster mode on",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.redis4.0.cluster.on"
+        },
+        {
+            "CacheParameterGroupName": "default.redis5.0",
+            "CacheParameterGroupFamily": "redis5.0",
+            "Description": "Default parameter group for redis5.0",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.redis5.0"
+        },
+        {
+            "CacheParameterGroupName": "default.redis5.0.cluster.on",
+            "CacheParameterGroupFamily": "redis5.0",
+            "Description": "Customized default parameter group for redis5.0 with cluster mode on",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.redis5.0.cluster.on"
+        },
+        {
+            "CacheParameterGroupName": "default.redis6.x",
+            "CacheParameterGroupFamily": "redis6.x",
+            "Description": "Default parameter group for redis6.x",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.redis6.x"
+        },
+        {
+            "CacheParameterGroupName": "default.redis6.x.cluster.on",
+            "CacheParameterGroupFamily": "redis6.x",
+            "Description": "Customized default parameter group for redis6.x with cluster mode on",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.redis6.x.cluster.on"
+        },
+        {
+            "CacheParameterGroupName": "default.redis7",
+            "CacheParameterGroupFamily": "redis7",
+            "Description": "Default parameter group for redis7",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.redis7"
+        },
+        {
+            "CacheParameterGroupName": "default.redis7.cluster.on",
+            "CacheParameterGroupFamily": "redis7",
+            "Description": "Customized default parameter group for redis7 with cluster mode on",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.redis7.cluster.on"
+        },
+        {
+            "CacheParameterGroupName": "default.valkey7",
+            "CacheParameterGroupFamily": "valkey7",
+            "Description": "Default parameter group for valkey7",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.valkey7"
+        },
+        {
+            "CacheParameterGroupName": "default.valkey7.cluster.on",
+            "CacheParameterGroupFamily": "valkey7",
+            "Description": "Customized default parameter group for valkey7 with cluster mode on",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.valkey7.cluster.on"
+        },
+        {
+            "CacheParameterGroupName": "default.valkey8",
+            "CacheParameterGroupFamily": "valkey8",
+            "Description": "Default parameter group for valkey8",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.valkey8"
+        },
+        {
+            "CacheParameterGroupName": "default.valkey8.cluster.on",
+            "CacheParameterGroupFamily": "valkey8",
+            "Description": "Customized default parameter group for valkey8 with cluster mode on",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.valkey8.cluster.on"
+        },
+        {
+            "CacheParameterGroupName": "default.valkey9",
+            "CacheParameterGroupFamily": "valkey9",
+            "Description": "Default parameter group for valkey9",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.valkey9"
+        },
+        {
+            "CacheParameterGroupName": "default.valkey9.cluster.on",
+            "CacheParameterGroupFamily": "valkey9",
+            "Description": "Customized default parameter group for valkey9 with cluster mode on",
+            "IsGlobal": false,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:parametergroup:default.valkey9.cluster.on"
+        }
+    ]
+}

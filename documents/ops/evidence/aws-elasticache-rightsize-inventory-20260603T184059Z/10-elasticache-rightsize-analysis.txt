@@ -1,0 +1,38 @@
+ElastiCache rightsize analysis
+
+Cluster: mscqr-redis-euw2-primary-001
+- status: available
+- replication_group: mscqr-redis-euw2-primary
+- node_type: cache.t4g.medium
+- num_nodes: 1
+- cpu_avg_max_14d: 3.1513467946581737
+- memory_pct_avg_max_14d: 0.8232053858616636
+- curr_connections_avg_max_14d: 6.016666666666667
+- evictions_sum_14d: 0.0
+- swap_avg_max_14d: 520192.0
+- cache_hit_rate_14d: NO_DATA
+
+Cluster: mscqr-redis-euw2-primary-002
+- status: available
+- replication_group: mscqr-redis-euw2-primary
+- node_type: cache.t4g.medium
+- num_nodes: 1
+- cpu_avg_max_14d: 3.266909429866111
+- memory_pct_avg_max_14d: 0.8223341849983237
+- curr_connections_avg_max_14d: 5.016666666666667
+- evictions_sum_14d: 0.0
+- swap_avg_max_14d: 249856.0
+- cache_hit_rate_14d: NO_DATA
+
+Replication group posture:
+- mscqr-redis-euw2-primary
+  MultiAZ: enabled
+  AutomaticFailover: enabled
+  CacheNodeType: cache.t4g.medium
+  MemberClusters: mscqr-redis-euw2-primary-001, mscqr-redis-euw2-primary-002
+
+Initial decision framework:
+- If one-node Redis is unused/no connections/no hits: candidate for deletion after app env dependency check.
+- If two-node replication group has low traffic and cost pressure is higher than HA: candidate to remove replica / disable Multi-AZ.
+- If node type is overprovisioned but actively used: candidate to downsize node class, not delete.
+- If app task definitions contain Redis/Valkey endpoint env vars: do not delete until dependency is removed or replaced.
