@@ -1,0 +1,23 @@
+db_instance: mscqr-prod-db-aps1
+current_class: db.t4g.medium
+engine: postgres 18.3
+status: available
+multi_az: False
+publicly_accessible: False
+allocated_storage_gib: 20
+storage_type: gp3
+backup_retention_days: 7
+
+valid_modification_classes:
+- none
+
+preferred_classes_present_in_valid_modification_api:
+
+preferred_classes_present_in_orderable_options:
+- db.t4g.small
+- db.t4g.micro
+- db.t3.small
+- db.t3.micro
+
+DECISION: RDS_CLASS_DOWNSIZE_BLOCKED_BY_VALID_MODIFICATION_API
+Do not modify DB class. Orderable classes alone are not enough; valid modification API must approve the target.
