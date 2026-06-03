@@ -1,0 +1,55 @@
+NAT gateways:
+- nat-0a51226e1f9190b2e
+  name: mscqr-prod-euw2-nat-public2-eu-west-2b
+  state: available
+  vpc: vpc-09825a6dc884b486a
+  subnet: subnet-028957bce09fae0c0 mscqr-prod-euw2-public=b
+  az: eu-west-2b
+  public_ips: 35.179.203.86
+  allocation_ids: eipalloc-0d5bae537b16aece4
+  route_references: 2
+    - route_table: rtb-08944319a1a049253 mscqr-prod-euw2-rtb-private4-eu-west-2b
+      destination: 0.0.0.0/0
+      route_state: active
+      main: False
+      associated_subnets: subnet-043b12b3099be82f9
+      associated_subnet_names: mscqr-prod-euw2-data-b
+    - route_table: rtb-0bd0293e2aca23c60 mscqr-prod-euw2-rtb-private2-eu-west-2b
+      destination: 0.0.0.0/0
+      route_state: active
+      main: False
+      associated_subnets: subnet-068d949017bd2ce45
+      associated_subnet_names: mscqr-prod-euw2-app-b
+
+- nat-0be609dfc6ce97dc3
+  name: mscqr-prod-euw2-nat-public1-eu-west-2a
+  state: available
+  vpc: vpc-09825a6dc884b486a
+  subnet: subnet-0756dbd09eb4ece7f mscqr-prod-euw2-public=a
+  az: eu-west-2a
+  public_ips: 3.9.15.121
+  allocation_ids: eipalloc-0d048b9168225c496
+  route_references: 2
+    - route_table: rtb-0450c9c858725c61c mscqr-prod-euw2-rtb-private3-eu-west-2a
+      destination: 0.0.0.0/0
+      route_state: active
+      main: False
+      associated_subnets: subnet-07e0a76e3a5241138
+      associated_subnet_names: mscqr-prod-euw2-app-a
+    - route_table: rtb-068f3e23f2e21ec4f mscqr-prod-euw2-rtb-private1-eu-west-2a
+      destination: 0.0.0.0/0
+      route_state: active
+      main: False
+      associated_subnets: subnet-0c18d5d4c2a24a41a
+      associated_subnet_names: mscqr-prod-euw2-data-a
+
+Collapse-readiness:
+- Candidate: collapse from 2 NAT gateways to 1.
+- Current NAT A/private route dependency:
+  - nat-0be609dfc6ce97dc3 -> rtb-0450c9c858725c61c mscqr-prod-euw2-rtb-private3-eu-west-2a -> mscqr-prod-euw2-app-a
+  - nat-0be609dfc6ce97dc3 -> rtb-068f3e23f2e21ec4f mscqr-prod-euw2-rtb-private1-eu-west-2a -> mscqr-prod-euw2-data-a
+- Current NAT B/private route dependency:
+  - nat-0a51226e1f9190b2e -> rtb-08944319a1a049253 mscqr-prod-euw2-rtb-private4-eu-west-2b -> mscqr-prod-euw2-data-b
+  - nat-0a51226e1f9190b2e -> rtb-0bd0293e2aca23c60 mscqr-prod-euw2-rtb-private2-eu-west-2b -> mscqr-prod-euw2-app-b
+- Required mutation later: replace 0.0.0.0/0 routes in selected private route table(s) from retiring NAT to survivor NAT.
+- Do not delete retiring NAT until route migration and app egress verification pass.
