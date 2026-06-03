@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.egg-info/
+build/
+dist/
+evidence/
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+gitleaks-report.json

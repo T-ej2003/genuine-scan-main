@@ -1,0 +1,5 @@
+app_name: example-webapp
+mode: sample
+regions:
+  - us-east-1
+  - eu-west-1

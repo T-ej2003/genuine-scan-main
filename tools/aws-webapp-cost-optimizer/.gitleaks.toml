@@ -1,0 +1,8 @@
+title = "aws-webapp-cost-optimizer"
+
+[allowlist]
+description = "Generic placeholders used in examples and tests"
+paths = [
+  '''examples/.*''',
+  '''tests/.*''',
+]
