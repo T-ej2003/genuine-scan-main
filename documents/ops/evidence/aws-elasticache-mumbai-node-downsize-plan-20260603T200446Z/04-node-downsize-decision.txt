@@ -1,0 +1,22 @@
+replication_group: mscqr-redis-aps1-primary
+current_node_type: cache.t4g.medium
+automatic_failover: enabled
+multi_az: enabled
+member_clusters: mscqr-redis-aps1-primary-001, mscqr-redis-aps1-primary-002
+
+scale_down_modifications:
+- cache.t3.medium
+- cache.t3.micro
+- cache.t3.small
+- cache.t4g.micro
+- cache.t4g.small
+
+preferred_candidates_present:
+- cache.t4g.small
+- cache.t4g.micro
+- cache.t3.small
+- cache.t3.micro
+
+DECISION: DOWNSIZE_CANDIDATE_FOUND
+target_node_type: cache.t4g.small
+Plan: modify replication group cache node type only; keep automatic failover and Multi-AZ enabled.

@@ -1,0 +1,4 @@
+eac882e864d7c594a5213590272bde005027da2bc90913ba41838f2529bc5919  ./01-current-replication-group.json
+0ce2c60bb29309fb3a5f96e834d31a97bfcb269306a54ed731eee7cb189b5960  ./02-current-cache-clusters.json
+91ff60118272100e41acb4c8826bd768df9e2360aec443eb688cb144a9184f08  ./03-allowed-node-type-modifications.json
+15b81c456febf922385ff2cc6ad5de545f3c1e6ad96618a2b6615f33c626b9f2  ./04-node-downsize-decision.txt
