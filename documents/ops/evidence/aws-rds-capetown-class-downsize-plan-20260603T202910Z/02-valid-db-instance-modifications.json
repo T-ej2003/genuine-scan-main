@@ -1,0 +1,208 @@
+{
+    "ValidDBInstanceModificationsMessage": {
+        "Storage": [
+            {
+                "StorageType": "gp2",
+                "StorageSize": [
+                    {
+                        "From": 20,
+                        "To": 20,
+                        "Step": 1
+                    },
+                    {
+                        "From": 22,
+                        "To": 16384,
+                        "Step": 1
+                    }
+                ],
+                "ProvisionedIops": [
+                    {
+                        "From": 0,
+                        "To": 0,
+                        "Step": 1
+                    }
+                ],
+                "IopsToStorageRatio": [
+                    {
+                        "From": 0.0,
+                        "To": 0.0
+                    }
+                ],
+                "ProvisionedStorageThroughput": [
+                    {
+                        "From": 0,
+                        "To": 0,
+                        "Step": 1
+                    }
+                ],
+                "StorageThroughputToIopsRatio": [
+                    {
+                        "From": 0.0,
+                        "To": 0.0
+                    }
+                ],
+                "SupportsStorageAutoscaling": true
+            },
+            {
+                "StorageType": "gp3",
+                "StorageSize": [
+                    {
+                        "From": 20,
+                        "To": 20,
+                        "Step": 1
+                    },
+                    {
+                        "From": 22,
+                        "To": 16384,
+                        "Step": 1
+                    }
+                ],
+                "ProvisionedIops": [
+                    {
+                        "From": 3000,
+                        "To": 64000,
+                        "Step": 1
+                    }
+                ],
+                "IopsToStorageRatio": [
+                    {
+                        "From": 0.0,
+                        "To": 500.0
+                    }
+                ],
+                "ProvisionedStorageThroughput": [
+                    {
+                        "From": 125,
+                        "To": 2000,
+                        "Step": 1
+                    }
+                ],
+                "StorageThroughputToIopsRatio": [
+                    {
+                        "From": 0.0,
+                        "To": 0.25
+                    }
+                ],
+                "SupportsStorageAutoscaling": true
+            },
+            {
+                "StorageType": "io1",
+                "StorageSize": [
+                    {
+                        "From": 100,
+                        "To": 16384,
+                        "Step": 1
+                    }
+                ],
+                "ProvisionedIops": [
+                    {
+                        "From": 1000,
+                        "To": 64000,
+                        "Step": 1
+                    }
+                ],
+                "IopsToStorageRatio": [
+                    {
+                        "From": 0.5,
+                        "To": 50.0
+                    }
+                ],
+                "ProvisionedStorageThroughput": [
+                    {
+                        "From": 0,
+                        "To": 0,
+                        "Step": 1
+                    }
+                ],
+                "StorageThroughputToIopsRatio": [
+                    {
+                        "From": 0.0,
+                        "To": 0.0
+                    }
+                ],
+                "SupportsStorageAutoscaling": true
+            },
+            {
+                "StorageType": "io2",
+                "StorageSize": [
+                    {
+                        "From": 100,
+                        "To": 16384,
+                        "Step": 1
+                    }
+                ],
+                "ProvisionedIops": [
+                    {
+                        "From": 1000,
+                        "To": 160000,
+                        "Step": 1
+                    }
+                ],
+                "IopsToStorageRatio": [
+                    {
+                        "From": 0.5,
+                        "To": 1000.0
+                    }
+                ],
+                "ProvisionedStorageThroughput": [
+                    {
+                        "From": 0,
+                        "To": 0,
+                        "Step": 1
+                    }
+                ],
+                "StorageThroughputToIopsRatio": [
+                    {
+                        "From": 0.0,
+                        "To": 0.0
+                    }
+                ],
+                "SupportsStorageAutoscaling": true
+            },
+            {
+                "StorageType": "magnetic",
+                "StorageSize": [
+                    {
+                        "From": 20,
+                        "To": 20,
+                        "Step": 1
+                    },
+                    {
+                        "From": 22,
+                        "To": 3072,
+                        "Step": 1
+                    }
+                ],
+                "ProvisionedIops": [
+                    {
+                        "From": 0,
+                        "To": 0,
+                        "Step": 1
+                    }
+                ],
+                "IopsToStorageRatio": [
+                    {
+                        "From": 0.0,
+                        "To": 0.0
+                    }
+                ],
+                "ProvisionedStorageThroughput": [
+                    {
+                        "From": 0,
+                        "To": 0,
+                        "Step": 1
+                    }
+                ],
+                "StorageThroughputToIopsRatio": [
+                    {
+                        "From": 0.0,
+                        "To": 0.0
+                    }
+                ],
+                "SupportsStorageAutoscaling": false
+            }
+        ],
+        "ValidProcessorFeatures": [],
+        "SupportsDedicatedLogVolume": false
+    }
+}
