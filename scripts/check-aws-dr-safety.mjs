@@ -147,6 +147,7 @@ const gatedApplyScripts = new Map([
   ],
 ]);
 const selfPath = "scripts/check-aws-dr-safety.mjs";
+const costOptimizationAnalyzerPath = "scripts/aws/analyze-cost-optimization.mjs";
 const mutationOperationNames = [
   "apply-route53-change",
   "apply-route53-rollback",
@@ -366,6 +367,41 @@ for (const scanRoot of scanRoots) {
             line: 1,
             message: "Auto failover monitor must upload dry-run evidence artifacts.",
           });
+        }
+      }
+
+      if (repoPath === costOptimizationAnalyzerPath) {
+        const blockedCostAnalyzerPatterns = [
+          { id: "cost-analyzer-route53-change", pattern: /\baws\s+\S+\s+change-resource-record-sets\b/i },
+          { id: "cost-analyzer-route53-change-direct", pattern: /\baws\s+route53\s+change-resource-record-sets\b/i },
+          { id: "cost-analyzer-rds-delete-stop-modify", pattern: /\baws\s+rds\s+(?:delete|stop|modify)-/i },
+          { id: "cost-analyzer-elasticache-delete-modify", pattern: /\baws\s+elasticache\s+(?:delete|modify)-/i },
+          { id: "cost-analyzer-ec2-terminate-stop", pattern: /\baws\s+ec2\s+(?:terminate|stop)-/i },
+          { id: "cost-analyzer-elbv2-delete-modify", pattern: /\baws\s+elbv2\s+(?:delete|modify)-/i },
+          { id: "cost-analyzer-s3-rb", pattern: /\baws\s+s3\s+rb\b/i },
+          { id: "cost-analyzer-s3api-delete-bucket", pattern: /\baws\s+s3api\s+delete-bucket\b/i },
+          { id: "cost-analyzer-iam-delete-detach", pattern: /\baws\s+iam\s+(?:delete|detach)-/i },
+          { id: "cost-analyzer-delete", pattern: /\baws\s+\S+\s+\S*delete-\S*/i },
+          { id: "cost-analyzer-terminate", pattern: /\baws\s+\S+\s+\S*terminate-\S*/i },
+          { id: "cost-analyzer-stop", pattern: /\baws\s+\S+\s+\S*stop-\S*/i },
+          { id: "cost-analyzer-modify", pattern: /\baws\s+\S+\s+\S*modify-\S*/i },
+          { id: "cost-analyzer-put", pattern: /\baws\s+\S+\s+\S*put-\S*/i },
+          { id: "cost-analyzer-create", pattern: /\baws\s+\S+\s+\S*create-\S*/i },
+          { id: "cost-analyzer-deregister", pattern: /\baws\s+\S+\s+\S*deregister\S*/i },
+          { id: "cost-analyzer-detach", pattern: /\baws\s+\S+\s+\S*detach\S*/i },
+          { id: "cost-analyzer-remove", pattern: /\baws\s+\S+\s+\S*remove\S*/i },
+          { id: "cost-analyzer-empty", pattern: /\baws\s+\S+\s+\S*empty\S*/i },
+          { id: "cost-analyzer-purge", pattern: /\baws\s+\S+\s+\S*purge\S*/i },
+        ];
+        for (const rule of blockedCostAnalyzerPatterns) {
+          const references = executableLineReferences(source, rule.pattern);
+          if (references.length > 0) {
+            findings.push({
+              repoPath,
+              line: references[0].lineNumber,
+              message: `Cost optimization analyzer must remain read-only: ${rule.id}.`,
+            });
+          }
         }
       }
 

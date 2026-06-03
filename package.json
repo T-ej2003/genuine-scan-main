@@ -50,6 +50,7 @@
     "ops:three-region-truth-table": "node scripts/dr/check-three-region-truth-table.mjs",
     "ops:auto-failover-dry-run": "node scripts/dr/auto-failover-dry-run.mjs",
     "ops:legacy-cleanup-inventory": "node scripts/aws/classify-legacy-inventory.mjs",
+    "ops:cost-optimization": "node scripts/aws/analyze-cost-optimization.mjs",
     "lint": "eslint .",
     "report:lint:changed": "node scripts/lint-changed.mjs",
     "lint:changed": "node scripts/lint-changed.mjs",
