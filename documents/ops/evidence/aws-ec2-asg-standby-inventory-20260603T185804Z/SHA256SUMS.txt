@@ -1,5 +1,5 @@
 35692f93cfe5d7045eedfb2cc96d5730eef1cfa932d84c5c15f035dfbd7bbbab  ./00-account-identity.json
-c842b411db790dda837366d19bfe1058b34bfa873cd610e47f4b61e628cf767c  ./01-ec2-instances.json
+b99e44f5e9d173f711630ad3447eef4dd1ad65e128e5ed5a940af451000ea161  ./01-ec2-instances.json
 13b4369aafccf6b3e5c7707f66c3e4f7e02fe66125cc342d72c118a7b91bf33f  ./02-auto-scaling-groups.json
 3e4aa50da77e8d38e5df7ad1bf69bcab84a004e0922e8c30b28c2feb2e0f74f4  ./03-launch-templates.json
 291d350a3a64d502fdf53319c95cd09d38a68ef5849da94e4aafcf895f2a080d  ./04-launch-configurations.json
