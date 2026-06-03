@@ -1,7 +1,7 @@
 35692f93cfe5d7045eedfb2cc96d5730eef1cfa932d84c5c15f035dfbd7bbbab  ./00-account-identity.json
 9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa  ./00-account-identity.status
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./00-account-identity.stderr
-ff367146ae677b8e071bd0d18fecf3193eee17128906916b8aae29ccb1a85066  ./01-ec2-instances.json
+4a92a26f1744c5a00316ebfdfde376d2ce5636c8da43b4ced15db0a4e58466ee  ./01-ec2-instances.json
 9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa  ./01-ec2-instances.status
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./01-ec2-instances.stderr
 0daa6cd44a6622952962b59e886528116475e9ca1fd533b1e92194f20e6ba5e1  ./02-addresses.json

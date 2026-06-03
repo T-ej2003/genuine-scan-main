@@ -164,7 +164,7 @@
           "PublicDnsName": "ec2-13-246-21-7.af-south-1.compute.amazonaws.com",
           "StateTransitionReason": "",
           "KeyName": "mscqr-capetown",
-          "AmiLaunchIndex": 0,
+          "AmiLaunchIndex": "REDACTED",
           "ProductCodes": [],
           "InstanceType": "t3.medium",
           "LaunchTime": "2026-06-01T19:05:02+00:00",
