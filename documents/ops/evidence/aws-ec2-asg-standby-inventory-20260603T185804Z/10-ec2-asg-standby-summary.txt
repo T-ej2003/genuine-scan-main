@@ -1,0 +1,35 @@
+EC2 instances:
+- i-024ec40bcbdb30035 mscqr-prod_london
+  state: running
+  type: t3.medium
+  az: eu-west-2a
+  private_ip: 10.0.14.142
+  public_ip: 13.135.108.69
+  asg: -
+  subnet: subnet-0756dbd09eb4ece7f
+
+- i-0628b4a4a06f6e4d3 mscqr-github-actions-runner
+  state: running
+  type: t3.micro
+  az: eu-west-2a
+  private_ip: 10.0.12.63
+  public_ip: 16.61.0.97
+  asg: -
+  subnet: subnet-0756dbd09eb4ece7f
+
+Auto Scaling groups:
+- none
+Load balancers:
+- mscqr-alb-euw2
+  type: application
+  scheme: internet-facing
+  state: active
+  dns: mscqr-alb-euw2-524835535.eu-west-2.elb.amazonaws.com
+
+Target groups:
+- mscqr-frontend-tg-euw2
+  type: ip
+  port: 80
+  protocol: HTTP
+  load_balancers: arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/cda0292be6e39608
+

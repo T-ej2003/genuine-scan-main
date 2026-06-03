@@ -1,0 +1,23 @@
+=== mscqr-frontend-tg-euw2 ===
+arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-frontend-tg-euw2/09ef3648e65481e6
+{
+    "TargetHealthDescriptions": [
+        {
+            "Target": {
+                "Id": "10.0.14.142",
+                "Port": 80,
+                "AvailabilityZone": "eu-west-2a"
+            },
+            "HealthCheckPort": "80",
+            "TargetHealth": {
+                "State": "healthy"
+            },
+            "AdministrativeOverride": {
+                "State": "no_override",
+                "Reason": "AdministrativeOverride.NoOverride",
+                "Description": "No override is currently active on target"
+            }
+        }
+    ]
+}
+

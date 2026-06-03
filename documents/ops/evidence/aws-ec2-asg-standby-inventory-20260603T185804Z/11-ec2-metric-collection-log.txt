@@ -1,0 +1,14 @@
+=== i-024ec40bcbdb30035 ===
+CPUUtilization: datapoints=336 -> metrics-i-024ec40bcbdb30035-CPUUtilization.json
+NetworkIn: datapoints=336 -> metrics-i-024ec40bcbdb30035-NetworkIn.json
+NetworkOut: datapoints=336 -> metrics-i-024ec40bcbdb30035-NetworkOut.json
+StatusCheckFailed: datapoints=336 -> metrics-i-024ec40bcbdb30035-StatusCheckFailed.json
+StatusCheckFailed_Instance: datapoints=336 -> metrics-i-024ec40bcbdb30035-StatusCheckFailed_Instance.json
+StatusCheckFailed_System: datapoints=336 -> metrics-i-024ec40bcbdb30035-StatusCheckFailed_System.json
+=== i-0628b4a4a06f6e4d3 ===
+CPUUtilization: datapoints=336 -> metrics-i-0628b4a4a06f6e4d3-CPUUtilization.json
+NetworkIn: datapoints=336 -> metrics-i-0628b4a4a06f6e4d3-NetworkIn.json
+NetworkOut: datapoints=336 -> metrics-i-0628b4a4a06f6e4d3-NetworkOut.json
+StatusCheckFailed: datapoints=336 -> metrics-i-0628b4a4a06f6e4d3-StatusCheckFailed.json
+StatusCheckFailed_Instance: datapoints=336 -> metrics-i-0628b4a4a06f6e4d3-StatusCheckFailed_Instance.json
+StatusCheckFailed_System: datapoints=336 -> metrics-i-0628b4a4a06f6e4d3-StatusCheckFailed_System.json

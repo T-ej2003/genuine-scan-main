@@ -1,0 +1,29 @@
+EC2/ASG optimization analysis
+
+Instance: i-024ec40bcbdb30035 mscqr-prod_london
+- state: running
+- type: t3.medium
+- asg: -
+- public_ip: 13.135.108.69
+- cpu_avg_max_14d: 7.123140670206598
+- network_in_sum_14d: 2785245862.0
+- network_out_sum_14d: 1397547863.0
+- status_check_failed_max_14d: 0.0
+
+Instance: i-0628b4a4a06f6e4d3 mscqr-github-actions-runner
+- state: running
+- type: t3.micro
+- asg: -
+- public_ip: 16.61.0.97
+- cpu_avg_max_14d: 3.0215632490681847
+- network_in_sum_14d: 392334225.0
+- network_out_sum_14d: 312744211.0
+- status_check_failed_max_14d: 0.0
+
+ASG posture:
+- none
+Decision framework:
+- If ASG desired > 0 but service is unused or broken: scale desired/min to 0 after dependency proof.
+- If EC2 instance is standalone, running, low/no traffic, and not target healthy: stop first, then terminate later.
+- If ALB target group has no healthy/registered targets but ALB/frontend is still served elsewhere: remove unused target group/ASG path later.
+- Do not terminate instances before confirming no production dependency.

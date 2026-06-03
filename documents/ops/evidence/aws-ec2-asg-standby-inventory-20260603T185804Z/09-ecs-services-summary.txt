@@ -1,0 +1,146 @@
+=== CLUSTER arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main ===
+{
+    "serviceArns": [
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"
+    ]
+}
+
+{
+    "services": [
+        {
+            "serviceArn": "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
+            "serviceName": "mscqr-backend-servi-euw2",
+            "clusterArn": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main",
+            "loadBalancers": [
+                {
+                    "targetGroupArn": "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2/6e970e6a19a28d75",
+                    "containerName": "backend",
+                    "containerPort": 4000
+                }
+            ],
+            "serviceRegistries": [],
+            "status": "ACTIVE",
+            "desiredCount": 2,
+            "runningCount": 0,
+            "pendingCount": 0,
+            "launchType": "FARGATE",
+            "platformVersion": "LATEST",
+            "platformFamily": "Linux",
+            "taskDefinition": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:8",
+            "deploymentConfiguration": {
+                "deploymentCircuitBreaker": {
+                    "enable": true,
+                    "rollback": true
+                },
+                "maximumPercent": 200,
+                "minimumHealthyPercent": 100,
+                "strategy": "ROLLING",
+                "bakeTimeInMinutes": 0
+            },
+            "deployments": [
+                {
+                    "id": "ecs-svc/2159316988915271172",
+                    "status": "PRIMARY",
+                    "taskDefinition": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:8",
+                    "desiredCount": 2,
+                    "pendingCount": 0,
+                    "runningCount": 0,
+                    "failedTasks": 4,
+                    "createdAt": "2026-04-20T15:18:20.423000+01:00",
+                    "updatedAt": "2026-04-20T15:23:20.092000+01:00",
+                    "launchType": "FARGATE",
+                    "platformVersion": "1.4.0",
+                    "platformFamily": "Linux",
+                    "networkConfiguration": {
+                        "awsvpcConfiguration": {
+                            "subnets": [
+                                "subnet-068d949017bd2ce45",
+                                "subnet-07e0a76e3a5241138"
+                            ],
+                            "securityGroups": [
+                                "sg-0db971332ae625441"
+                            ],
+                            "assignPublicIp": "DISABLED"
+                        }
+                    },
+                    "rolloutState": "FAILED",
+                    "rolloutStateReason": "ECS deployment circuit breaker: tasks failed to start."
+                }
+            ],
+            "roleArn": "arn:aws:iam::368992683803:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS",
+            "events": [
+                {
+                    "id": "a1fa15d7-e492-4976-a2f0-dbef45b68efe",
+                    "createdAt": "2026-04-20T15:24:34.301000+01:00",
+                    "message": "(service mscqr-backend-servi-euw2) was unable to place a task. Reason: CannotPullContainerError: pull image manifest has been retried 7 time(s): image Manifest does not contain descriptor matching platform 'linux/amd64'."
+                },
+                {
+                    "id": "98482c93-3e28-4e94-a1ba-c8a81f9225bb",
+                    "createdAt": "2026-04-20T15:23:20.100000+01:00",
+                    "message": "(service mscqr-backend-servi-euw2) (deployment ecs-svc/2159316988915271172) deployment failed: tasks failed to start."
+                },
+                {
+                    "id": "18c62941-453c-4d1f-8bb7-01758c772431",
+                    "createdAt": "2026-04-20T15:23:04.566000+01:00",
+                    "message": "(service mscqr-backend-servi-euw2) has started 2 tasks: (task 37960bfb121f49509259ae23f54a8b34) (task c1e89ac62b5a4af0a9254c2100e4091b)."
+                },
+                {
+                    "id": "ef848e38-7165-4803-bf15-12c56ae46520",
+                    "createdAt": "2026-04-20T15:22:32.246000+01:00",
+                    "message": "(service mscqr-backend-servi-euw2) was unable to place a task. Reason: CannotPullContainerError: pull image manifest has been retried 7 time(s): image Manifest does not contain descriptor matching platform 'linux/amd64'."
+                },
+                {
+                    "id": "9897499c-cd0f-4fe8-8719-710a57717e96",
+                    "createdAt": "2026-04-20T15:21:03.192000+01:00",
+                    "message": "(service mscqr-backend-servi-euw2) has started 2 tasks: (task 119662186bf84e29b579bb12a1775801) (task 278179bed05249e082146297c68ee730)."
+                },
+                {
+                    "id": "92fbfced-6769-4b9c-9c3a-b50b988f5bda",
+                    "createdAt": "2026-04-20T15:20:31.980000+01:00",
+                    "message": "(service mscqr-backend-servi-euw2) was unable to place a task. Reason: CannotPullContainerError: pull image manifest has been retried 7 time(s): image Manifest does not contain descriptor matching platform 'linux/amd64'."
+                },
+                {
+                    "id": "39412d9e-edd1-4bae-b40c-d72d97cddedf",
+                    "createdAt": "2026-04-20T15:18:48.938000+01:00",
+                    "message": "(service mscqr-backend-servi-euw2) has started 2 tasks: (task b726799aeb944edca04d821c52eb694c) (task f5b7720cbcea45afb0c7c06c236c2131)."
+                }
+            ],
+            "createdAt": "2026-04-20T15:18:20.423000+01:00",
+            "currentServiceRevisions": [
+                {
+                    "arn": "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/2159316988915271172",
+                    "requestedTaskCount": 2,
+                    "runningTaskCount": 0,
+                    "pendingTaskCount": 0
+                }
+            ],
+            "placementConstraints": [],
+            "placementStrategy": [],
+            "networkConfiguration": {
+                "awsvpcConfiguration": {
+                    "subnets": [
+                        "subnet-068d949017bd2ce45",
+                        "subnet-07e0a76e3a5241138"
+                    ],
+                    "securityGroups": [
+                        "sg-0db971332ae625441"
+                    ],
+                    "assignPublicIp": "DISABLED"
+                }
+            },
+            "healthCheckGracePeriodSeconds": 180,
+            "schedulingStrategy": "REPLICA",
+            "deploymentController": {
+                "type": "ECS"
+            },
+            "createdBy": "arn:aws:iam::368992683803:root",
+            "enableECSManagedTags": true,
+            "propagateTags": "NONE",
+            "enableExecuteCommand": false,
+            "availabilityZoneRebalancing": "ENABLED",
+            "resourceManagementType": "CUSTOMER"
+        }
+    ],
+    "failures": []
+}
+
