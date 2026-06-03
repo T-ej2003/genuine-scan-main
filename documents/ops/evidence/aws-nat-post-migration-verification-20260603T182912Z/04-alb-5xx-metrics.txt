@@ -1,0 +1,8 @@
+=== mscqr-alb-euw2 ===
+LoadBalancer dimension: app/mscqr-alb-euw2/cda0292be6e39608
+Window: 2026-06-03T18:01:14Z -> 2026-06-03T18:31:14Z
+{
+    "Label": "HTTPCode_ELB_5XX_Count",
+    "Datapoints": []
+}
+

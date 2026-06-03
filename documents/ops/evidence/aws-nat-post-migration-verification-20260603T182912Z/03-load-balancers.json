@@ -1,0 +1,34 @@
+{
+    "LoadBalancers": [
+        {
+            "LoadBalancerArn": "arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/cda0292be6e39608",
+            "DNSName": "mscqr-alb-euw2-524835535.eu-west-2.elb.amazonaws.com",
+            "CanonicalHostedZoneId": "ZHURV8PSTC4K8",
+            "CreatedTime": "2026-04-18T15:22:52.262000+00:00",
+            "LoadBalancerName": "mscqr-alb-euw2",
+            "Scheme": "internet-facing",
+            "VpcId": "vpc-09825a6dc884b486a",
+            "State": {
+                "Code": "active"
+            },
+            "Type": "application",
+            "AvailabilityZones": [
+                {
+                    "ZoneName": "eu-west-2b",
+                    "SubnetId": "subnet-028957bce09fae0c0",
+                    "LoadBalancerAddresses": []
+                },
+                {
+                    "ZoneName": "eu-west-2a",
+                    "SubnetId": "subnet-0756dbd09eb4ece7f",
+                    "LoadBalancerAddresses": []
+                }
+            ],
+            "SecurityGroups": [
+                "sg-0a7cbddd9770b220d"
+            ],
+            "IpAddressType": "ipv4",
+            "EnablePrefixForIpv6SourceNat": "off"
+        }
+    ]
+}

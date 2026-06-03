@@ -1,0 +1,35 @@
+{
+    "Label": "BytesInFromSource",
+    "Datapoints": [
+        {
+            "Timestamp": "2026-06-03T19:01:00+01:00",
+            "Sum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-06-03T19:06:00+01:00",
+            "Sum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-06-03T19:11:00+01:00",
+            "Sum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-06-03T19:16:00+01:00",
+            "Sum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-06-03T19:21:00+01:00",
+            "Sum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-06-03T19:26:00+01:00",
+            "Sum": 0.0,
+            "Unit": "Bytes"
+        }
+    ]
+}
