@@ -1,0 +1,40 @@
+{
+    "DBSubnetGroups": [
+        {
+            "DBSubnetGroupName": "rds-ec2-db-subnet-group-1",
+            "DBSubnetGroupDescription": "Created from the RDS Management Console",
+            "VpcId": "vpc-09825a6dc884b486a",
+            "SubnetGroupStatus": "Complete",
+            "Subnets": [
+                {
+                    "SubnetIdentifier": "subnet-08c91af6e22933f3f",
+                    "SubnetAvailabilityZone": {
+                        "Name": "eu-west-2a"
+                    },
+                    "SubnetOutpost": {},
+                    "SubnetStatus": "Active"
+                },
+                {
+                    "SubnetIdentifier": "subnet-0bf2f384be86fd560",
+                    "SubnetAvailabilityZone": {
+                        "Name": "eu-west-2c"
+                    },
+                    "SubnetOutpost": {},
+                    "SubnetStatus": "Active"
+                },
+                {
+                    "SubnetIdentifier": "subnet-06d49071d962ab1b4",
+                    "SubnetAvailabilityZone": {
+                        "Name": "eu-west-2b"
+                    },
+                    "SubnetOutpost": {},
+                    "SubnetStatus": "Active"
+                }
+            ],
+            "DBSubnetGroupArn": "arn:aws:rds:eu-west-2:368992683803:subgrp:rds-ec2-db-subnet-group-1",
+            "SupportedNetworkTypes": [
+                "IPV4"
+            ]
+        }
+    ]
+}

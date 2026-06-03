@@ -1,0 +1,19 @@
+RDS clusters:
+- none
+RDS instances:
+- DBInstanceIdentifier: mscqr-prod-db
+  Engine: postgres 18.3
+  Status: available
+  Class: db.t4g.medium
+  AllocatedStorage: 20
+  StorageType: gp3
+  MultiAZ: False
+  PubliclyAccessible: False
+  StorageEncrypted: True
+  BackupRetentionPeriod: 7
+  DeletionProtection: False
+  DBClusterIdentifier: None
+  AvailabilityZone: eu-west-2a
+  SecondaryAvailabilityZone: None
+  VpcSecurityGroups: sg-07db1a9130c6df8d5
+

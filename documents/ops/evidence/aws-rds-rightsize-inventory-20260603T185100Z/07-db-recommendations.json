@@ -1,0 +1,154 @@
+{
+    "DBRecommendations": [
+        {
+            "RecommendationId": "acb44258-2e0b-4a48-8cb2-5796389a5b26",
+            "TypeId": "config_recommendation::performance_insights_off",
+            "Severity": "informational",
+            "ResourceArn": "arn:aws:rds:eu-west-2:368992683803:db:mscqr-prod-db",
+            "Status": "active",
+            "CreatedTime": "2026-04-25T22:13:01.085000+00:00",
+            "UpdatedTime": "2026-04-25T22:13:01+00:00",
+            "Detection": "**[resource-name]** doesn't have performance insights enabled",
+            "Recommendation": "Turn on Performance Insights",
+            "Description": "Amazon RDS Performance Insights monitors your DB instance load to help analyze and resolve database performance issues. We recommend that you turn on Performance Insights.",
+            "RecommendedActions": [
+                {
+                    "ActionId": "ce5abb4989aa8d40044de4fb6810a439",
+                    "Operation": "modifyDbInstance",
+                    "Parameters": [
+                        {
+                            "Key": "PerformanceInsightsRetentionPeriod",
+                            "Value": "7"
+                        },
+                        {
+                            "Key": "DBInstanceIdentifier",
+                            "Value": "mscqr-prod-db"
+                        },
+                        {
+                            "Key": "EnablePerformanceInsights",
+                            "Value": "true"
+                        }
+                    ],
+                    "ApplyModes": [
+                        "immediately"
+                    ],
+                    "Status": "ready",
+                    "ContextAttributes": [
+                        {
+                            "Key": "Recommended value (days)",
+                            "Value": "7"
+                        }
+                    ]
+                }
+            ],
+            "Category": "operational excellence",
+            "Source": "RDS",
+            "TypeDetection": "**[resource-count] resources** don't have performance insights enabled",
+            "TypeRecommendation": "Turn on Performance Insights",
+            "Impact": "Reduced operational visibility",
+            "AdditionalInfo": "Performance Insights uses a lightweight data collection method that doesn't impact the performance of your applications. Performance Insights helps you assess the database load quickly.",
+            "Links": [
+                {
+                    "Text": "Overview of Performance Insights on Amazon RDS",
+                    "Url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PerfInsights.html"
+                }
+            ]
+        },
+        {
+            "RecommendationId": "6697867a-bf23-483e-bb85-6d39c451dc43",
+            "TypeId": "config_recommendation::multi_az_instance",
+            "Severity": "informational",
+            "ResourceArn": "arn:aws:rds:eu-west-2:368992683803:db:mscqr-prod-db",
+            "Status": "active",
+            "CreatedTime": "2026-04-25T22:13:01.006000+00:00",
+            "UpdatedTime": "2026-04-25T22:13:01+00:00",
+            "Detection": "**[resource-name]** is not a Multi-AZ instance",
+            "Recommendation": "Set up Multi-AZ for the impacted DB instances",
+            "Description": "We recommend that you use Multi-AZ deployment. The Multi-AZ deployments enhance the availability and durability of the DB instance. Click Info for more details about Multi-AZ deployment and pricing.",
+            "RecommendedActions": [
+                {
+                    "ActionId": "70295a3e12f5141fef62944076a4427a",
+                    "Operation": "modifyDbInstance",
+                    "Parameters": [
+                        {
+                            "Key": "DBInstanceIdentifier",
+                            "Value": "mscqr-prod-db"
+                        },
+                        {
+                            "Key": "MultiAZ",
+                            "Value": "true"
+                        }
+                    ],
+                    "ApplyModes": [
+                        "immediately",
+                        "next-maintenance-window"
+                    ],
+                    "Status": "ready",
+                    "ContextAttributes": []
+                }
+            ],
+            "Category": "reliability",
+            "Source": "RDS",
+            "TypeDetection": "**[resource-count] resources** are not Multi-AZ instances",
+            "TypeRecommendation": "Set up Multi-AZ for the impacted DB instances",
+            "Impact": "Data availability at risk",
+            "AdditionalInfo": "In an Amazon RDS Multi-AZ deployment, Amazon RDS automatically creates a primary database instance and replicates the data to an instance in a different Availability Zone. When it detects a failure, Amazon RDS automatically fails over to a standby instance without manual intervention.",
+            "Links": [
+                {
+                    "Text": "Pricing for Amazon RDS Multi-AZ",
+                    "Url": "https://aws.amazon.com/rds/features/multi-az/#Pricing"
+                }
+            ]
+        },
+        {
+            "RecommendationId": "10efa69c-3c5c-431a-9f6c-86f33641b229",
+            "TypeId": "config_recommendation::enhanced_monitoring_off",
+            "Severity": "informational",
+            "ResourceArn": "arn:aws:rds:eu-west-2:368992683803:db:mscqr-prod-db",
+            "Status": "active",
+            "CreatedTime": "2026-04-25T22:13:01.046000+00:00",
+            "UpdatedTime": "2026-04-25T22:13:01+00:00",
+            "Detection": "**[resource-name]** doesn't have Enhanced Monitoring enabled",
+            "Recommendation": "Turn on Enhanced Monitoring",
+            "Description": "Your database resources don't have Enhanced Monitoring turned on. Enhanced Monitoring provides real-time operating system metrics for monitoring and troubleshooting.",
+            "RecommendedActions": [
+                {
+                    "ActionId": "039eba60e327034ef32676178fe7afea",
+                    "Operation": "modifyDbInstance",
+                    "Parameters": [
+                        {
+                            "Key": "MonitoringInterval",
+                            "Value": "60"
+                        },
+                        {
+                            "Key": "DBInstanceIdentifier",
+                            "Value": "mscqr-prod-db"
+                        }
+                    ],
+                    "ApplyModes": [
+                        "immediately"
+                    ],
+                    "Status": "ready",
+                    "ContextAttributes": [
+                        {
+                            "Key": "Recommended value (seconds)",
+                            "Value": "60"
+                        }
+                    ]
+                }
+            ],
+            "Category": "operational excellence",
+            "Source": "RDS",
+            "TypeDetection": "**[resource-count] resources** don't have Enhanced Monitoring enabled",
+            "TypeRecommendation": "Turn on Enhanced Monitoring",
+            "Impact": "Reduced operational visibility",
+            "AdditionalInfo": "Enhanced Monitoring for Amazon RDS provides additional visibility on the health of your DB instances. We recommend that you turn on Enhanced Monitoring. When the Enhanced Monitoring option is turned on for your DB instance, it collects vital operating system metrics and process information.",
+            "Links": [
+                {
+                    "Text": "Turning Enhanced Monitoring on and off",
+                    "Url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_Monitoring.OS.Enabling.html#USER_Monitoring.OS.Enabling.Procedure"
+                }
+            ]
+        }
+    ]
+}

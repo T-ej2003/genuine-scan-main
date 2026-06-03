@@ -1,0 +1,15 @@
+=== mscqr-prod-db ===
+CPUUtilization: datapoints=336 -> metrics-mscqr-prod-db-CPUUtilization.json
+DatabaseConnections: datapoints=336 -> metrics-mscqr-prod-db-DatabaseConnections.json
+FreeableMemory: datapoints=336 -> metrics-mscqr-prod-db-FreeableMemory.json
+FreeStorageSpace: datapoints=336 -> metrics-mscqr-prod-db-FreeStorageSpace.json
+ReadIOPS: datapoints=336 -> metrics-mscqr-prod-db-ReadIOPS.json
+WriteIOPS: datapoints=336 -> metrics-mscqr-prod-db-WriteIOPS.json
+ReadLatency: datapoints=336 -> metrics-mscqr-prod-db-ReadLatency.json
+WriteLatency: datapoints=336 -> metrics-mscqr-prod-db-WriteLatency.json
+ReadThroughput: datapoints=336 -> metrics-mscqr-prod-db-ReadThroughput.json
+WriteThroughput: datapoints=336 -> metrics-mscqr-prod-db-WriteThroughput.json
+SwapUsage: datapoints=336 -> metrics-mscqr-prod-db-SwapUsage.json
+BurstBalance: datapoints=0 -> metrics-mscqr-prod-db-BurstBalance.json
+CPUCreditBalance: datapoints=336 -> metrics-mscqr-prod-db-CPUCreditBalance.json
+CPUCreditUsage: datapoints=336 -> metrics-mscqr-prod-db-CPUCreditUsage.json

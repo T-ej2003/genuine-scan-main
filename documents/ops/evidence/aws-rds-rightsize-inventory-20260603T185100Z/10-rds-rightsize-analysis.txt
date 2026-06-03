@@ -1,0 +1,27 @@
+RDS rightsize analysis
+
+Instance: mscqr-prod-db
+- class: db.t4g.medium
+- engine: postgres 18.3
+- cluster: None
+- multi_az: False
+- publicly_accessible: False
+- deletion_protection: False
+- allocated_storage_gib: 20
+- storage_type: gp3
+- cpu_avg_max_14d: 4.184056778109225
+- db_connections_avg_max_14d: 6.0
+- freeable_memory_avg_min_14d: 177293721.6
+- free_storage_avg_min_14d: 18180861405.866665
+- read_iops_avg_max_14d: 0.7164640496596275
+- write_iops_avg_max_14d: 2.844965356487852
+- swap_avg_max_14d: 144046080.0
+- cpu_credit_balance_avg_min_14d: 18.091548829166666
+
+Cluster posture:
+Initial decision framework:
+- If Aurora/RDS has writer + reader and low/no traffic: remove reader first, not writer.
+- If single instance is oversized but active: downsize class.
+- If storage is overallocated: do not shrink in-place; plan snapshot/restore only if worth it.
+- If DB is unused and app is not using it: final snapshot then delete only after dependency proof.
+- Preserve all mutations with evidence before moving to EC2/ASG.
