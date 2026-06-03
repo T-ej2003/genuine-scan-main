@@ -190,7 +190,6 @@
               }
             }
           ],
-          "ClientToken": null,
           "EbsOptimized": true,
           "EnaSupport": true,
           "Hypervisor": "xen",

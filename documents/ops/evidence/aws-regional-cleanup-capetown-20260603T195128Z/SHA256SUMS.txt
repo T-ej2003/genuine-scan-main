@@ -1,7 +1,7 @@
 35692f93cfe5d7045eedfb2cc96d5730eef1cfa932d84c5c15f035dfbd7bbbab  ./00-account-identity.json
 9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa  ./00-account-identity.status
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./00-account-identity.stderr
-98133c473672af05c2340a55d687a52c4f4d72e8c38cd4aae8ff3abd2e17f1a9  ./01-ec2-instances.json
+5b30c25fd76a869afc5922911223b35ec98ef5c8891622d5876f7f63326d6bff  ./01-ec2-instances.json
 9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa  ./01-ec2-instances.status
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./01-ec2-instances.stderr
 e01f5828100e48125190bab3684f86f53f22e2e491e59873f5155bd9df636abb  ./02-addresses.json
@@ -67,3 +67,4 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./21-ecs-servi
 9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa  ./22-regional-cleanup-summary.status
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./22-regional-cleanup-summary.stderr
 372f746cb06246c5b7cc1a2d513173fa6b1813a27d2a6954894d4cb81ffd14f2  ./22-regional-cleanup-summary.txt
+9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa  ./SHA256SUMS.status

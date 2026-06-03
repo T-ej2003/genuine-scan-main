@@ -1,538 +1,537 @@
 {
-    "Reservations": [
+  "Reservations": [
+    {
+      "ReservationId": "r-095ad5c35e9efbf82",
+      "OwnerId": "368992683803",
+      "RequesterId": "712833928105",
+      "Groups": [],
+      "Instances": [
         {
-            "ReservationId": "r-095ad5c35e9efbf82",
-            "OwnerId": "368992683803",
-            "RequesterId": "712833928105",
-            "Groups": [],
-            "Instances": [
+          "Architecture": "x86_64",
+          "BlockDeviceMappings": [
+            {
+              "DeviceName": "/dev/sda1",
+              "Ebs": {
+                "AttachTime": "2026-06-01T19:05:03+00:00",
+                "DeleteOnTermination": true,
+                "Status": "attached",
+                "VolumeId": "vol-03ecace0015529ecf",
+                "EbsCardIndex": 0
+              }
+            }
+          ],
+          "EbsOptimized": false,
+          "EnaSupport": true,
+          "Hypervisor": "xen",
+          "IamInstanceProfile": {
+            "Arn": "arn:aws:iam::368992683803:instance-profile/mscqr-asg-web-instance-profile-aps1",
+            "Id": "AIPAVL2NNQ4NVH3576RDU"
+          },
+          "NetworkInterfaces": [
+            {
+              "Association": {
+                "IpOwnerId": "amazon",
+                "PublicDnsName": "ec2-13-246-21-7.af-south-1.compute.amazonaws.com",
+                "PublicIp": "13.246.21.7"
+              },
+              "Attachment": {
+                "AttachTime": "2026-06-01T19:05:02+00:00",
+                "AttachmentId": "eni-attach-08b634ee8f0f6530d",
+                "DeleteOnTermination": true,
+                "DeviceIndex": 0,
+                "Status": "attached",
+                "NetworkCardIndex": 0
+              },
+              "Description": "",
+              "Groups": [
                 {
-                    "Architecture": "x86_64",
-                    "BlockDeviceMappings": [
-                        {
-                            "DeviceName": "/dev/sda1",
-                            "Ebs": {
-                                "AttachTime": "2026-06-01T19:05:03+00:00",
-                                "DeleteOnTermination": true,
-                                "Status": "attached",
-                                "VolumeId": "vol-03ecace0015529ecf",
-                                "EbsCardIndex": 0
-                            }
-                        }
-                    ],
-                    "ClientToken": "bd867a12-4ce6-17a5-eae3-d3fe92334438",
-                    "EbsOptimized": false,
-                    "EnaSupport": true,
-                    "Hypervisor": "xen",
-                    "IamInstanceProfile": {
-                        "Arn": "arn:aws:iam::368992683803:instance-profile/mscqr-asg-web-instance-profile-aps1",
-                        "Id": "AIPAVL2NNQ4NVH3576RDU"
-                    },
-                    "NetworkInterfaces": [
-                        {
-                            "Association": {
-                                "IpOwnerId": "amazon",
-                                "PublicDnsName": "ec2-13-246-21-7.af-south-1.compute.amazonaws.com",
-                                "PublicIp": "13.246.21.7"
-                            },
-                            "Attachment": {
-                                "AttachTime": "2026-06-01T19:05:02+00:00",
-                                "AttachmentId": "eni-attach-08b634ee8f0f6530d",
-                                "DeleteOnTermination": true,
-                                "DeviceIndex": 0,
-                                "Status": "attached",
-                                "NetworkCardIndex": 0
-                            },
-                            "Description": "",
-                            "Groups": [
-                                {
-                                    "GroupId": "sg-0d8f560e4f6452aa5",
-                                    "GroupName": "mscqr-ec2-web-sg-afs1"
-                                }
-                            ],
-                            "Ipv6Addresses": [],
-                            "MacAddress": "0a:e0:81:5d:30:ed",
-                            "NetworkInterfaceId": "eni-06f2da01d828ec730",
-                            "OwnerId": "368992683803",
-                            "PrivateDnsName": "ip-10-40-19-212.af-south-1.compute.internal",
-                            "PrivateIpAddress": "10.40.19.212",
-                            "PrivateIpAddresses": [
-                                {
-                                    "Association": {
-                                        "IpOwnerId": "amazon",
-                                        "PublicDnsName": "ec2-13-246-21-7.af-south-1.compute.amazonaws.com",
-                                        "PublicIp": "13.246.21.7"
-                                    },
-                                    "Primary": true,
-                                    "PrivateDnsName": "ip-10-40-19-212.af-south-1.compute.internal",
-                                    "PrivateIpAddress": "10.40.19.212"
-                                }
-                            ],
-                            "SourceDestCheck": true,
-                            "Status": "in-use",
-                            "SubnetId": "subnet-0f790d50a4dd152be",
-                            "VpcId": "vpc-00c554109a7edab19",
-                            "InterfaceType": "interface",
-                            "Operator": {
-                                "Managed": false
-                            }
-                        }
-                    ],
-                    "RootDeviceName": "/dev/sda1",
-                    "RootDeviceType": "ebs",
-                    "SecurityGroups": [
-                        {
-                            "GroupId": "sg-0d8f560e4f6452aa5",
-                            "GroupName": "mscqr-ec2-web-sg-afs1"
-                        }
-                    ],
-                    "SourceDestCheck": true,
-                    "Tags": [
-                        {
-                            "Key": "Project",
-                            "Value": "MSCQR"
-                        },
-                        {
-                            "Key": "aws:ec2launchtemplate:id",
-                            "Value": "lt-04eeeecdf7ff884fe"
-                        },
-                        {
-                            "Key": "RegionGroup",
-                            "Value": "capetown"
-                        },
-                        {
-                            "Key": "Purpose",
-                            "Value": "DR"
-                        },
-                        {
-                            "Key": "aws:ec2launchtemplate:version",
-                            "Value": "1"
-                        },
-                        {
-                            "Key": "aws:autoscaling:groupName",
-                            "Value": "mscqr-capetown-dr-asg"
-                        }
-                    ],
-                    "VirtualizationType": "hvm",
-                    "CpuOptions": {
-                        "CoreCount": 1,
-                        "ThreadsPerCore": 2
-                    },
-                    "CapacityReservationSpecification": {
-                        "CapacityReservationPreference": "open"
-                    },
-                    "HibernationOptions": {
-                        "Configured": false
-                    },
-                    "MetadataOptions": {
-                        "State": "applied",
-                        "HttpTokens": "required",
-                        "HttpPutResponseHopLimit": 2,
-                        "HttpEndpoint": "enabled",
-                        "HttpProtocolIpv6": "disabled",
-                        "InstanceMetadataTags": "disabled"
-                    },
-                    "EnclaveOptions": {
-                        "Enabled": false
-                    },
-                    "BootMode": "uefi-preferred",
-                    "PlatformDetails": "Linux/UNIX",
-                    "UsageOperation": "RunInstances",
-                    "UsageOperationUpdateTime": "2026-06-01T19:05:02+00:00",
-                    "PrivateDnsNameOptions": {
-                        "HostnameType": "ip-name",
-                        "EnableResourceNameDnsARecord": false,
-                        "EnableResourceNameDnsAAAARecord": false
-                    },
-                    "MaintenanceOptions": {
-                        "AutoRecovery": "default",
-                        "RebootMigration": "default"
-                    },
-                    "CurrentInstanceBootMode": "uefi",
-                    "NetworkPerformanceOptions": {
-                        "BandwidthWeighting": "default"
-                    },
-                    "Operator": {
-                        "Managed": false
-                    },
-                    "InstanceId": "i-01b1f9da435ed2f99",
-                    "ImageId": "ami-0026d53e1887d8949",
-                    "State": {
-                        "Code": 16,
-                        "Name": "running"
-                    },
-                    "PrivateDnsName": "ip-10-40-19-212.af-south-1.compute.internal",
+                  "GroupId": "sg-0d8f560e4f6452aa5",
+                  "GroupName": "mscqr-ec2-web-sg-afs1"
+                }
+              ],
+              "Ipv6Addresses": [],
+              "MacAddress": "0a:e0:81:5d:30:ed",
+              "NetworkInterfaceId": "eni-06f2da01d828ec730",
+              "OwnerId": "368992683803",
+              "PrivateDnsName": "ip-10-40-19-212.af-south-1.compute.internal",
+              "PrivateIpAddress": "10.40.19.212",
+              "PrivateIpAddresses": [
+                {
+                  "Association": {
+                    "IpOwnerId": "amazon",
                     "PublicDnsName": "ec2-13-246-21-7.af-south-1.compute.amazonaws.com",
-                    "StateTransitionReason": "",
-                    "KeyName": "mscqr-capetown",
-                    "AmiLaunchIndex": 0,
-                    "ProductCodes": [],
-                    "InstanceType": "t3.medium",
-                    "LaunchTime": "2026-06-01T19:05:02+00:00",
-                    "Placement": {
-                        "AvailabilityZoneId": "afs1-az2",
-                        "GroupName": "",
-                        "Tenancy": "default",
-                        "AvailabilityZone": "af-south-1b"
-                    },
-                    "Monitoring": {
-                        "State": "disabled"
-                    },
-                    "SubnetId": "subnet-0f790d50a4dd152be",
-                    "VpcId": "vpc-00c554109a7edab19",
-                    "PrivateIpAddress": "10.40.19.212",
-                    "PublicIpAddress": "13.246.21.7"
+                    "PublicIp": "13.246.21.7"
+                  },
+                  "Primary": true,
+                  "PrivateDnsName": "ip-10-40-19-212.af-south-1.compute.internal",
+                  "PrivateIpAddress": "10.40.19.212"
                 }
-            ]
-        },
-        {
-            "ReservationId": "r-0f93644d62bda3d91",
-            "OwnerId": "368992683803",
-            "Groups": [],
-            "Instances": [
-                {
-                    "Architecture": "x86_64",
-                    "BlockDeviceMappings": [
-                        {
-                            "DeviceName": "/dev/sda1",
-                            "Ebs": {
-                                "AttachTime": "2026-04-27T19:40:20+00:00",
-                                "DeleteOnTermination": true,
-                                "Status": "attached",
-                                "VolumeId": "vol-01c1a3af78626c883",
-                                "EbsCardIndex": 0
-                            }
-                        }
-                    ],
-                    "ClientToken": "d84c5081-bb3b-4be1-a9e9-8be67aab233b",
-                    "EbsOptimized": true,
-                    "EnaSupport": true,
-                    "Hypervisor": "xen",
-                    "IamInstanceProfile": {
-                        "Arn": "arn:aws:iam::368992683803:instance-profile/mscqr-ec2-s3-artifacts-role-afs1",
-                        "Id": "AIPAVL2NNQ4NXN5LFGU5F"
-                    },
-                    "NetworkInterfaces": [
-                        {
-                            "Association": {
-                                "IpOwnerId": "368992683803",
-                                "PublicDnsName": "ec2-15-240-28-113.af-south-1.compute.amazonaws.com",
-                                "PublicIp": "15.240.28.113"
-                            },
-                            "Attachment": {
-                                "AttachTime": "2026-04-27T19:40:19+00:00",
-                                "AttachmentId": "eni-attach-0f79e368ef97f1cb5",
-                                "DeleteOnTermination": true,
-                                "DeviceIndex": 0,
-                                "Status": "attached",
-                                "NetworkCardIndex": 0
-                            },
-                            "Description": "",
-                            "Groups": [
-                                {
-                                    "GroupId": "sg-0d8f560e4f6452aa5",
-                                    "GroupName": "mscqr-ec2-web-sg-afs1"
-                                }
-                            ],
-                            "Ipv6Addresses": [],
-                            "MacAddress": "06:8e:67:54:94:49",
-                            "NetworkInterfaceId": "eni-0f834b8389774d57e",
-                            "OwnerId": "368992683803",
-                            "PrivateDnsName": "ip-10-40-10-98.af-south-1.compute.internal",
-                            "PrivateIpAddress": "10.40.10.98",
-                            "PrivateIpAddresses": [
-                                {
-                                    "Association": {
-                                        "IpOwnerId": "368992683803",
-                                        "PublicDnsName": "ec2-15-240-28-113.af-south-1.compute.amazonaws.com",
-                                        "PublicIp": "15.240.28.113"
-                                    },
-                                    "Primary": true,
-                                    "PrivateDnsName": "ip-10-40-10-98.af-south-1.compute.internal",
-                                    "PrivateIpAddress": "10.40.10.98"
-                                }
-                            ],
-                            "SourceDestCheck": true,
-                            "Status": "in-use",
-                            "SubnetId": "subnet-04c638841c2a6b5ed",
-                            "VpcId": "vpc-00c554109a7edab19",
-                            "InterfaceType": "interface",
-                            "Operator": {
-                                "Managed": false
-                            }
-                        }
-                    ],
-                    "RootDeviceName": "/dev/sda1",
-                    "RootDeviceType": "ebs",
-                    "SecurityGroups": [
-                        {
-                            "GroupId": "sg-0d8f560e4f6452aa5",
-                            "GroupName": "mscqr-ec2-web-sg-afs1"
-                        }
-                    ],
-                    "SourceDestCheck": true,
-                    "Tags": [
-                        {
-                            "Key": "Name",
-                            "Value": "mscqr-prod-capetown"
-                        }
-                    ],
-                    "VirtualizationType": "hvm",
-                    "CpuOptions": {
-                        "CoreCount": 1,
-                        "ThreadsPerCore": 2
-                    },
-                    "CapacityReservationSpecification": {
-                        "CapacityReservationPreference": "open"
-                    },
-                    "HibernationOptions": {
-                        "Configured": false
-                    },
-                    "MetadataOptions": {
-                        "State": "applied",
-                        "HttpTokens": "required",
-                        "HttpPutResponseHopLimit": 2,
-                        "HttpEndpoint": "enabled",
-                        "HttpProtocolIpv6": "disabled",
-                        "InstanceMetadataTags": "disabled"
-                    },
-                    "EnclaveOptions": {
-                        "Enabled": false
-                    },
-                    "BootMode": "uefi-preferred",
-                    "PlatformDetails": "Linux/UNIX",
-                    "UsageOperation": "RunInstances",
-                    "UsageOperationUpdateTime": "2026-04-27T19:40:19+00:00",
-                    "PrivateDnsNameOptions": {
-                        "HostnameType": "ip-name",
-                        "EnableResourceNameDnsARecord": false,
-                        "EnableResourceNameDnsAAAARecord": false
-                    },
-                    "MaintenanceOptions": {
-                        "AutoRecovery": "default",
-                        "RebootMigration": "default"
-                    },
-                    "CurrentInstanceBootMode": "uefi",
-                    "NetworkPerformanceOptions": {
-                        "BandwidthWeighting": "default"
-                    },
-                    "Operator": {
-                        "Managed": false
-                    },
-                    "InstanceId": "i-064223a25caf64770",
-                    "ImageId": "ami-0026d53e1887d8949",
-                    "State": {
-                        "Code": 16,
-                        "Name": "running"
-                    },
-                    "PrivateDnsName": "ip-10-40-10-98.af-south-1.compute.internal",
-                    "PublicDnsName": "ec2-15-240-28-113.af-south-1.compute.amazonaws.com",
-                    "StateTransitionReason": "",
-                    "KeyName": "mscqr-capetown",
-                    "AmiLaunchIndex": 0,
-                    "ProductCodes": [],
-                    "InstanceType": "t3.medium",
-                    "LaunchTime": "2026-04-27T23:25:09+00:00",
-                    "Placement": {
-                        "AvailabilityZoneId": "afs1-az1",
-                        "GroupName": "",
-                        "Tenancy": "default",
-                        "AvailabilityZone": "af-south-1a"
-                    },
-                    "Monitoring": {
-                        "State": "disabled"
-                    },
-                    "SubnetId": "subnet-04c638841c2a6b5ed",
-                    "VpcId": "vpc-00c554109a7edab19",
-                    "PrivateIpAddress": "10.40.10.98",
-                    "PublicIpAddress": "15.240.28.113"
-                }
-            ]
-        },
-        {
-            "ReservationId": "r-08fadc51f5c6d49c1",
-            "OwnerId": "368992683803",
-            "RequesterId": "712833928105",
-            "Groups": [],
-            "Instances": [
-                {
-                    "Architecture": "x86_64",
-                    "BlockDeviceMappings": [
-                        {
-                            "DeviceName": "/dev/sda1",
-                            "Ebs": {
-                                "AttachTime": "2026-06-01T19:25:21+00:00",
-                                "DeleteOnTermination": true,
-                                "Status": "attached",
-                                "VolumeId": "vol-069f748509579be8f",
-                                "EbsCardIndex": 0
-                            }
-                        }
-                    ],
-                    "ClientToken": "e9867a12-9742-5104-4497-649581739d71",
-                    "EbsOptimized": false,
-                    "EnaSupport": true,
-                    "Hypervisor": "xen",
-                    "IamInstanceProfile": {
-                        "Arn": "arn:aws:iam::368992683803:instance-profile/mscqr-asg-web-instance-profile-aps1",
-                        "Id": "AIPAVL2NNQ4NVH3576RDU"
-                    },
-                    "NetworkInterfaces": [
-                        {
-                            "Association": {
-                                "IpOwnerId": "amazon",
-                                "PublicDnsName": "ec2-13-247-245-32.af-south-1.compute.amazonaws.com",
-                                "PublicIp": "13.247.245.32"
-                            },
-                            "Attachment": {
-                                "AttachTime": "2026-06-01T19:25:20+00:00",
-                                "AttachmentId": "eni-attach-09356929dd28a692b",
-                                "DeleteOnTermination": true,
-                                "DeviceIndex": 0,
-                                "Status": "attached",
-                                "NetworkCardIndex": 0
-                            },
-                            "Description": "",
-                            "Groups": [
-                                {
-                                    "GroupId": "sg-0d8f560e4f6452aa5",
-                                    "GroupName": "mscqr-ec2-web-sg-afs1"
-                                }
-                            ],
-                            "Ipv6Addresses": [],
-                            "MacAddress": "06:9e:c3:4c:6a:a1",
-                            "NetworkInterfaceId": "eni-0afad4f6297c8dd80",
-                            "OwnerId": "368992683803",
-                            "PrivateDnsName": "ip-10-40-6-35.af-south-1.compute.internal",
-                            "PrivateIpAddress": "10.40.6.35",
-                            "PrivateIpAddresses": [
-                                {
-                                    "Association": {
-                                        "IpOwnerId": "amazon",
-                                        "PublicDnsName": "ec2-13-247-245-32.af-south-1.compute.amazonaws.com",
-                                        "PublicIp": "13.247.245.32"
-                                    },
-                                    "Primary": true,
-                                    "PrivateDnsName": "ip-10-40-6-35.af-south-1.compute.internal",
-                                    "PrivateIpAddress": "10.40.6.35"
-                                }
-                            ],
-                            "SourceDestCheck": true,
-                            "Status": "in-use",
-                            "SubnetId": "subnet-04c638841c2a6b5ed",
-                            "VpcId": "vpc-00c554109a7edab19",
-                            "InterfaceType": "interface",
-                            "Operator": {
-                                "Managed": false
-                            }
-                        }
-                    ],
-                    "RootDeviceName": "/dev/sda1",
-                    "RootDeviceType": "ebs",
-                    "SecurityGroups": [
-                        {
-                            "GroupId": "sg-0d8f560e4f6452aa5",
-                            "GroupName": "mscqr-ec2-web-sg-afs1"
-                        }
-                    ],
-                    "SourceDestCheck": true,
-                    "Tags": [
-                        {
-                            "Key": "aws:ec2launchtemplate:version",
-                            "Value": "1"
-                        },
-                        {
-                            "Key": "Project",
-                            "Value": "MSCQR"
-                        },
-                        {
-                            "Key": "RegionGroup",
-                            "Value": "capetown"
-                        },
-                        {
-                            "Key": "aws:autoscaling:groupName",
-                            "Value": "mscqr-capetown-dr-asg"
-                        },
-                        {
-                            "Key": "aws:ec2launchtemplate:id",
-                            "Value": "lt-04eeeecdf7ff884fe"
-                        },
-                        {
-                            "Key": "Purpose",
-                            "Value": "DR"
-                        }
-                    ],
-                    "VirtualizationType": "hvm",
-                    "CpuOptions": {
-                        "CoreCount": 1,
-                        "ThreadsPerCore": 2
-                    },
-                    "CapacityReservationSpecification": {
-                        "CapacityReservationPreference": "open"
-                    },
-                    "HibernationOptions": {
-                        "Configured": false
-                    },
-                    "MetadataOptions": {
-                        "State": "applied",
-                        "HttpTokens": "required",
-                        "HttpPutResponseHopLimit": 2,
-                        "HttpEndpoint": "enabled",
-                        "HttpProtocolIpv6": "disabled",
-                        "InstanceMetadataTags": "disabled"
-                    },
-                    "EnclaveOptions": {
-                        "Enabled": false
-                    },
-                    "BootMode": "uefi-preferred",
-                    "PlatformDetails": "Linux/UNIX",
-                    "UsageOperation": "RunInstances",
-                    "UsageOperationUpdateTime": "2026-06-01T19:25:20+00:00",
-                    "PrivateDnsNameOptions": {
-                        "HostnameType": "ip-name",
-                        "EnableResourceNameDnsARecord": false,
-                        "EnableResourceNameDnsAAAARecord": false
-                    },
-                    "MaintenanceOptions": {
-                        "AutoRecovery": "default",
-                        "RebootMigration": "default"
-                    },
-                    "CurrentInstanceBootMode": "uefi",
-                    "NetworkPerformanceOptions": {
-                        "BandwidthWeighting": "default"
-                    },
-                    "Operator": {
-                        "Managed": false
-                    },
-                    "InstanceId": "i-0ec7b53df203291ff",
-                    "ImageId": "ami-0026d53e1887d8949",
-                    "State": {
-                        "Code": 16,
-                        "Name": "running"
-                    },
-                    "PrivateDnsName": "ip-10-40-6-35.af-south-1.compute.internal",
-                    "PublicDnsName": "ec2-13-247-245-32.af-south-1.compute.amazonaws.com",
-                    "StateTransitionReason": "",
-                    "KeyName": "mscqr-capetown",
-                    "AmiLaunchIndex": 0,
-                    "ProductCodes": [],
-                    "InstanceType": "t3.medium",
-                    "LaunchTime": "2026-06-01T19:25:20+00:00",
-                    "Placement": {
-                        "AvailabilityZoneId": "afs1-az1",
-                        "GroupName": "",
-                        "Tenancy": "default",
-                        "AvailabilityZone": "af-south-1a"
-                    },
-                    "Monitoring": {
-                        "State": "disabled"
-                    },
-                    "SubnetId": "subnet-04c638841c2a6b5ed",
-                    "VpcId": "vpc-00c554109a7edab19",
-                    "PrivateIpAddress": "10.40.6.35",
-                    "PublicIpAddress": "13.247.245.32"
-                }
-            ]
+              ],
+              "SourceDestCheck": true,
+              "Status": "in-use",
+              "SubnetId": "subnet-0f790d50a4dd152be",
+              "VpcId": "vpc-00c554109a7edab19",
+              "InterfaceType": "interface",
+              "Operator": {
+                "Managed": false
+              }
+            }
+          ],
+          "RootDeviceName": "/dev/sda1",
+          "RootDeviceType": "ebs",
+          "SecurityGroups": [
+            {
+              "GroupId": "sg-0d8f560e4f6452aa5",
+              "GroupName": "mscqr-ec2-web-sg-afs1"
+            }
+          ],
+          "SourceDestCheck": true,
+          "Tags": [
+            {
+              "Key": "Project",
+              "Value": "MSCQR"
+            },
+            {
+              "Key": "aws:ec2launchtemplate:id",
+              "Value": "lt-04eeeecdf7ff884fe"
+            },
+            {
+              "Key": "RegionGroup",
+              "Value": "capetown"
+            },
+            {
+              "Key": "Purpose",
+              "Value": "DR"
+            },
+            {
+              "Key": "aws:ec2launchtemplate:version",
+              "Value": "1"
+            },
+            {
+              "Key": "aws:autoscaling:groupName",
+              "Value": "mscqr-capetown-dr-asg"
+            }
+          ],
+          "VirtualizationType": "hvm",
+          "CpuOptions": {
+            "CoreCount": 1,
+            "ThreadsPerCore": 2
+          },
+          "CapacityReservationSpecification": {
+            "CapacityReservationPreference": "open"
+          },
+          "HibernationOptions": {
+            "Configured": false
+          },
+          "MetadataOptions": {
+            "State": "applied",
+            "HttpTokens": "required",
+            "HttpPutResponseHopLimit": 2,
+            "HttpEndpoint": "enabled",
+            "HttpProtocolIpv6": "disabled",
+            "InstanceMetadataTags": "disabled"
+          },
+          "EnclaveOptions": {
+            "Enabled": false
+          },
+          "BootMode": "uefi-preferred",
+          "PlatformDetails": "Linux/UNIX",
+          "UsageOperation": "RunInstances",
+          "UsageOperationUpdateTime": "2026-06-01T19:05:02+00:00",
+          "PrivateDnsNameOptions": {
+            "HostnameType": "ip-name",
+            "EnableResourceNameDnsARecord": false,
+            "EnableResourceNameDnsAAAARecord": false
+          },
+          "MaintenanceOptions": {
+            "AutoRecovery": "default",
+            "RebootMigration": "default"
+          },
+          "CurrentInstanceBootMode": "uefi",
+          "NetworkPerformanceOptions": {
+            "BandwidthWeighting": "default"
+          },
+          "Operator": {
+            "Managed": false
+          },
+          "InstanceId": "i-01b1f9da435ed2f99",
+          "ImageId": "ami-0026d53e1887d8949",
+          "State": {
+            "Code": 16,
+            "Name": "running"
+          },
+          "PrivateDnsName": "ip-10-40-19-212.af-south-1.compute.internal",
+          "PublicDnsName": "ec2-13-246-21-7.af-south-1.compute.amazonaws.com",
+          "StateTransitionReason": "",
+          "KeyName": "mscqr-capetown",
+          "AmiLaunchIndex": 0,
+          "ProductCodes": [],
+          "InstanceType": "t3.medium",
+          "LaunchTime": "2026-06-01T19:05:02+00:00",
+          "Placement": {
+            "AvailabilityZoneId": "afs1-az2",
+            "GroupName": "",
+            "Tenancy": "default",
+            "AvailabilityZone": "af-south-1b"
+          },
+          "Monitoring": {
+            "State": "disabled"
+          },
+          "SubnetId": "subnet-0f790d50a4dd152be",
+          "VpcId": "vpc-00c554109a7edab19",
+          "PrivateIpAddress": "10.40.19.212",
+          "PublicIpAddress": "13.246.21.7"
         }
-    ]
+      ]
+    },
+    {
+      "ReservationId": "r-0f93644d62bda3d91",
+      "OwnerId": "368992683803",
+      "Groups": [],
+      "Instances": [
+        {
+          "Architecture": "x86_64",
+          "BlockDeviceMappings": [
+            {
+              "DeviceName": "/dev/sda1",
+              "Ebs": {
+                "AttachTime": "2026-04-27T19:40:20+00:00",
+                "DeleteOnTermination": true,
+                "Status": "attached",
+                "VolumeId": "vol-01c1a3af78626c883",
+                "EbsCardIndex": 0
+              }
+            }
+          ],
+          "ClientToken": "d84c5081-bb3b-4be1-a9e9-8be67aab233b",
+          "EbsOptimized": true,
+          "EnaSupport": true,
+          "Hypervisor": "xen",
+          "IamInstanceProfile": {
+            "Arn": "arn:aws:iam::368992683803:instance-profile/mscqr-ec2-s3-artifacts-role-afs1",
+            "Id": "AIPAVL2NNQ4NXN5LFGU5F"
+          },
+          "NetworkInterfaces": [
+            {
+              "Association": {
+                "IpOwnerId": "368992683803",
+                "PublicDnsName": "ec2-15-240-28-113.af-south-1.compute.amazonaws.com",
+                "PublicIp": "15.240.28.113"
+              },
+              "Attachment": {
+                "AttachTime": "2026-04-27T19:40:19+00:00",
+                "AttachmentId": "eni-attach-0f79e368ef97f1cb5",
+                "DeleteOnTermination": true,
+                "DeviceIndex": 0,
+                "Status": "attached",
+                "NetworkCardIndex": 0
+              },
+              "Description": "",
+              "Groups": [
+                {
+                  "GroupId": "sg-0d8f560e4f6452aa5",
+                  "GroupName": "mscqr-ec2-web-sg-afs1"
+                }
+              ],
+              "Ipv6Addresses": [],
+              "MacAddress": "06:8e:67:54:94:49",
+              "NetworkInterfaceId": "eni-0f834b8389774d57e",
+              "OwnerId": "368992683803",
+              "PrivateDnsName": "ip-10-40-10-98.af-south-1.compute.internal",
+              "PrivateIpAddress": "10.40.10.98",
+              "PrivateIpAddresses": [
+                {
+                  "Association": {
+                    "IpOwnerId": "368992683803",
+                    "PublicDnsName": "ec2-15-240-28-113.af-south-1.compute.amazonaws.com",
+                    "PublicIp": "15.240.28.113"
+                  },
+                  "Primary": true,
+                  "PrivateDnsName": "ip-10-40-10-98.af-south-1.compute.internal",
+                  "PrivateIpAddress": "10.40.10.98"
+                }
+              ],
+              "SourceDestCheck": true,
+              "Status": "in-use",
+              "SubnetId": "subnet-04c638841c2a6b5ed",
+              "VpcId": "vpc-00c554109a7edab19",
+              "InterfaceType": "interface",
+              "Operator": {
+                "Managed": false
+              }
+            }
+          ],
+          "RootDeviceName": "/dev/sda1",
+          "RootDeviceType": "ebs",
+          "SecurityGroups": [
+            {
+              "GroupId": "sg-0d8f560e4f6452aa5",
+              "GroupName": "mscqr-ec2-web-sg-afs1"
+            }
+          ],
+          "SourceDestCheck": true,
+          "Tags": [
+            {
+              "Key": "Name",
+              "Value": "mscqr-prod-capetown"
+            }
+          ],
+          "VirtualizationType": "hvm",
+          "CpuOptions": {
+            "CoreCount": 1,
+            "ThreadsPerCore": 2
+          },
+          "CapacityReservationSpecification": {
+            "CapacityReservationPreference": "open"
+          },
+          "HibernationOptions": {
+            "Configured": false
+          },
+          "MetadataOptions": {
+            "State": "applied",
+            "HttpTokens": "required",
+            "HttpPutResponseHopLimit": 2,
+            "HttpEndpoint": "enabled",
+            "HttpProtocolIpv6": "disabled",
+            "InstanceMetadataTags": "disabled"
+          },
+          "EnclaveOptions": {
+            "Enabled": false
+          },
+          "BootMode": "uefi-preferred",
+          "PlatformDetails": "Linux/UNIX",
+          "UsageOperation": "RunInstances",
+          "UsageOperationUpdateTime": "2026-04-27T19:40:19+00:00",
+          "PrivateDnsNameOptions": {
+            "HostnameType": "ip-name",
+            "EnableResourceNameDnsARecord": false,
+            "EnableResourceNameDnsAAAARecord": false
+          },
+          "MaintenanceOptions": {
+            "AutoRecovery": "default",
+            "RebootMigration": "default"
+          },
+          "CurrentInstanceBootMode": "uefi",
+          "NetworkPerformanceOptions": {
+            "BandwidthWeighting": "default"
+          },
+          "Operator": {
+            "Managed": false
+          },
+          "InstanceId": "i-064223a25caf64770",
+          "ImageId": "ami-0026d53e1887d8949",
+          "State": {
+            "Code": 16,
+            "Name": "running"
+          },
+          "PrivateDnsName": "ip-10-40-10-98.af-south-1.compute.internal",
+          "PublicDnsName": "ec2-15-240-28-113.af-south-1.compute.amazonaws.com",
+          "StateTransitionReason": "",
+          "KeyName": "mscqr-capetown",
+          "AmiLaunchIndex": 0,
+          "ProductCodes": [],
+          "InstanceType": "t3.medium",
+          "LaunchTime": "2026-04-27T23:25:09+00:00",
+          "Placement": {
+            "AvailabilityZoneId": "afs1-az1",
+            "GroupName": "",
+            "Tenancy": "default",
+            "AvailabilityZone": "af-south-1a"
+          },
+          "Monitoring": {
+            "State": "disabled"
+          },
+          "SubnetId": "subnet-04c638841c2a6b5ed",
+          "VpcId": "vpc-00c554109a7edab19",
+          "PrivateIpAddress": "10.40.10.98",
+          "PublicIpAddress": "15.240.28.113"
+        }
+      ]
+    },
+    {
+      "ReservationId": "r-08fadc51f5c6d49c1",
+      "OwnerId": "368992683803",
+      "RequesterId": "712833928105",
+      "Groups": [],
+      "Instances": [
+        {
+          "Architecture": "x86_64",
+          "BlockDeviceMappings": [
+            {
+              "DeviceName": "/dev/sda1",
+              "Ebs": {
+                "AttachTime": "2026-06-01T19:25:21+00:00",
+                "DeleteOnTermination": true,
+                "Status": "attached",
+                "VolumeId": "vol-069f748509579be8f",
+                "EbsCardIndex": 0
+              }
+            }
+          ],
+          "ClientToken": "e9867a12-9742-5104-4497-649581739d71",
+          "EbsOptimized": false,
+          "EnaSupport": true,
+          "Hypervisor": "xen",
+          "IamInstanceProfile": {
+            "Arn": "arn:aws:iam::368992683803:instance-profile/mscqr-asg-web-instance-profile-aps1",
+            "Id": "AIPAVL2NNQ4NVH3576RDU"
+          },
+          "NetworkInterfaces": [
+            {
+              "Association": {
+                "IpOwnerId": "amazon",
+                "PublicDnsName": "ec2-13-247-245-32.af-south-1.compute.amazonaws.com",
+                "PublicIp": "13.247.245.32"
+              },
+              "Attachment": {
+                "AttachTime": "2026-06-01T19:25:20+00:00",
+                "AttachmentId": "eni-attach-09356929dd28a692b",
+                "DeleteOnTermination": true,
+                "DeviceIndex": 0,
+                "Status": "attached",
+                "NetworkCardIndex": 0
+              },
+              "Description": "",
+              "Groups": [
+                {
+                  "GroupId": "sg-0d8f560e4f6452aa5",
+                  "GroupName": "mscqr-ec2-web-sg-afs1"
+                }
+              ],
+              "Ipv6Addresses": [],
+              "MacAddress": "06:9e:c3:4c:6a:a1",
+              "NetworkInterfaceId": "eni-0afad4f6297c8dd80",
+              "OwnerId": "368992683803",
+              "PrivateDnsName": "ip-10-40-6-35.af-south-1.compute.internal",
+              "PrivateIpAddress": "10.40.6.35",
+              "PrivateIpAddresses": [
+                {
+                  "Association": {
+                    "IpOwnerId": "amazon",
+                    "PublicDnsName": "ec2-13-247-245-32.af-south-1.compute.amazonaws.com",
+                    "PublicIp": "13.247.245.32"
+                  },
+                  "Primary": true,
+                  "PrivateDnsName": "ip-10-40-6-35.af-south-1.compute.internal",
+                  "PrivateIpAddress": "10.40.6.35"
+                }
+              ],
+              "SourceDestCheck": true,
+              "Status": "in-use",
+              "SubnetId": "subnet-04c638841c2a6b5ed",
+              "VpcId": "vpc-00c554109a7edab19",
+              "InterfaceType": "interface",
+              "Operator": {
+                "Managed": false
+              }
+            }
+          ],
+          "RootDeviceName": "/dev/sda1",
+          "RootDeviceType": "ebs",
+          "SecurityGroups": [
+            {
+              "GroupId": "sg-0d8f560e4f6452aa5",
+              "GroupName": "mscqr-ec2-web-sg-afs1"
+            }
+          ],
+          "SourceDestCheck": true,
+          "Tags": [
+            {
+              "Key": "aws:ec2launchtemplate:version",
+              "Value": "1"
+            },
+            {
+              "Key": "Project",
+              "Value": "MSCQR"
+            },
+            {
+              "Key": "RegionGroup",
+              "Value": "capetown"
+            },
+            {
+              "Key": "aws:autoscaling:groupName",
+              "Value": "mscqr-capetown-dr-asg"
+            },
+            {
+              "Key": "aws:ec2launchtemplate:id",
+              "Value": "lt-04eeeecdf7ff884fe"
+            },
+            {
+              "Key": "Purpose",
+              "Value": "DR"
+            }
+          ],
+          "VirtualizationType": "hvm",
+          "CpuOptions": {
+            "CoreCount": 1,
+            "ThreadsPerCore": 2
+          },
+          "CapacityReservationSpecification": {
+            "CapacityReservationPreference": "open"
+          },
+          "HibernationOptions": {
+            "Configured": false
+          },
+          "MetadataOptions": {
+            "State": "applied",
+            "HttpTokens": "required",
+            "HttpPutResponseHopLimit": 2,
+            "HttpEndpoint": "enabled",
+            "HttpProtocolIpv6": "disabled",
+            "InstanceMetadataTags": "disabled"
+          },
+          "EnclaveOptions": {
+            "Enabled": false
+          },
+          "BootMode": "uefi-preferred",
+          "PlatformDetails": "Linux/UNIX",
+          "UsageOperation": "RunInstances",
+          "UsageOperationUpdateTime": "2026-06-01T19:25:20+00:00",
+          "PrivateDnsNameOptions": {
+            "HostnameType": "ip-name",
+            "EnableResourceNameDnsARecord": false,
+            "EnableResourceNameDnsAAAARecord": false
+          },
+          "MaintenanceOptions": {
+            "AutoRecovery": "default",
+            "RebootMigration": "default"
+          },
+          "CurrentInstanceBootMode": "uefi",
+          "NetworkPerformanceOptions": {
+            "BandwidthWeighting": "default"
+          },
+          "Operator": {
+            "Managed": false
+          },
+          "InstanceId": "i-0ec7b53df203291ff",
+          "ImageId": "ami-0026d53e1887d8949",
+          "State": {
+            "Code": 16,
+            "Name": "running"
+          },
+          "PrivateDnsName": "ip-10-40-6-35.af-south-1.compute.internal",
+          "PublicDnsName": "ec2-13-247-245-32.af-south-1.compute.amazonaws.com",
+          "StateTransitionReason": "",
+          "KeyName": "mscqr-capetown",
+          "AmiLaunchIndex": 0,
+          "ProductCodes": [],
+          "InstanceType": "t3.medium",
+          "LaunchTime": "2026-06-01T19:25:20+00:00",
+          "Placement": {
+            "AvailabilityZoneId": "afs1-az1",
+            "GroupName": "",
+            "Tenancy": "default",
+            "AvailabilityZone": "af-south-1a"
+          },
+          "Monitoring": {
+            "State": "disabled"
+          },
+          "SubnetId": "subnet-04c638841c2a6b5ed",
+          "VpcId": "vpc-00c554109a7edab19",
+          "PrivateIpAddress": "10.40.6.35",
+          "PublicIpAddress": "13.247.245.32"
+        }
+      ]
+    }
+  ]
 }

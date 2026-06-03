@@ -17,3 +17,9 @@ d5743dce3535a0c4eaa4d12391a10d9372c82b86:src/test/login-mfa-enforcement.test.tsx
 6a5594ef4f565d548bec4749736fc4993465b62d:src/test/login-mfa-enforcement.test.tsx:generic-api-key:49
 ff8617a52108982a2a8e2d02eeee23b1322494dc:databasefiles/key1.pem:private-key:1
 575ef73ebb3b0fba6bc0d7cf634c53d668fcd16c:documents/ops/evidence/aws-ec2-frontend-resize-followup-20260603T193519Z/01-current-instance.json:generic-api-key:22
+9d7e551ce50f724f31b69a63cfc3dc3003934c12:documents/ops/evidence/aws-regional-cleanup-capetown-20260603T195128Z/01-ec2-instances.json:generic-api-key:23
+9d7e551ce50f724f31b69a63cfc3dc3003934c12:documents/ops/evidence/aws-regional-cleanup-capetown-20260603T195128Z/01-ec2-instances.json:generic-api-key:207
+9d7e551ce50f724f31b69a63cfc3dc3003934c12:documents/ops/evidence/aws-regional-cleanup-capetown-20260603T195128Z/01-ec2-instances.json:generic-api-key:372
+9d7e551ce50f724f31b69a63cfc3dc3003934c12:documents/ops/evidence/aws-regional-cleanup-mumbai-20260603T195128Z/01-ec2-instances.json:generic-api-key:23
+9d7e551ce50f724f31b69a63cfc3dc3003934c12:documents/ops/evidence/aws-regional-cleanup-mumbai-20260603T195128Z/01-ec2-instances.json:generic-api-key:208
+9d7e551ce50f724f31b69a63cfc3dc3003934c12:documents/ops/evidence/aws-regional-cleanup-mumbai-20260603T195128Z/01-ec2-instances.json:generic-api-key:374
