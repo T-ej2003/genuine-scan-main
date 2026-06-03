@@ -1,0 +1,4 @@
+0a5ad71ffeb72f9b13248bafe83f3a67614d23b0656354296bc8f61f9d46ad3b  ./01-current-db-instance.json
+b712c9a7f8b0b8d3e7872733c8020fd33e71dc0ad280d85069e7d0ceb471f319  ./02-valid-db-instance-modifications.json
+873275e05269c60c876d4a645e2e69292285732974a0ef65d7bc3a10af5c9f3e  ./03-orderable-db-instance-options.json
+cdd85b176ba04dbad06f76f43bd99cd83d6f5a475080e7832506d3f45df5662a  ./04-rds-class-downsize-decision.txt
