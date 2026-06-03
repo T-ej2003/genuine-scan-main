@@ -4,7 +4,12 @@ const allowedConventionalMarkdown = new Set([
   "README.md",
   "SECURITY.md",
   ".github/PULL_REQUEST_TEMPLATE.md",
+  "playbooks/aws-cleanup/README.md",
 ]);
+
+const allowedDocumentationPrefixes = [
+  "tools/aws-webapp-cost-optimizer/",
+];
 
 const trackedDocuments = execFileSync("git", ["ls-files", "*.md", "*.docx"], {
   encoding: "utf8",
@@ -15,7 +20,8 @@ const trackedDocuments = execFileSync("git", ["ls-files", "*.md", "*.docx"], {
 
 const misplaced = trackedDocuments.filter((filePath) => {
   if (filePath.startsWith("documents/")) return false;
-  return !allowedConventionalMarkdown.has(filePath);
+  if (allowedConventionalMarkdown.has(filePath)) return false;
+  return !allowedDocumentationPrefixes.some((prefix) => filePath.startsWith(prefix));
 });
 
 if (misplaced.length > 0) {
