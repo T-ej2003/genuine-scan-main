@@ -1,0 +1,66 @@
+{
+    "Images": [
+        {
+            "PlatformDetails": "Linux/UNIX",
+            "UsageOperation": "RunInstances",
+            "BlockDeviceMappings": [
+                {
+                    "Ebs": {
+                        "DeleteOnTermination": true,
+                        "Iops": 3000,
+                        "SnapshotId": "snap-0415b3af4c3bba637",
+                        "VolumeSize": 60,
+                        "VolumeType": "gp3",
+                        "Throughput": 125,
+                        "Encrypted": false
+                    },
+                    "DeviceName": "/dev/sda1"
+                },
+                {
+                    "DeviceName": "/dev/sdb",
+                    "VirtualName": "ephemeral0"
+                },
+                {
+                    "DeviceName": "/dev/sdc",
+                    "VirtualName": "ephemeral1"
+                }
+            ],
+            "Description": "Pre-resize AMI for mscqr-prod_london before t3.medium to t3.small on 20260603T190354Z",
+            "EnaSupport": true,
+            "Hypervisor": "xen",
+            "Name": "mscqr-prod-london-pre-resize-20260603T190354Z",
+            "RootDeviceName": "/dev/sda1",
+            "RootDeviceType": "ebs",
+            "SriovNetSupport": "simple",
+            "Tags": [
+                {
+                    "Key": "SourceInstanceId",
+                    "Value": "i-024ec40bcbdb30035"
+                },
+                {
+                    "Key": "Name",
+                    "Value": "mscqr-prod-london-pre-resize-20260603T190354Z"
+                },
+                {
+                    "Key": "Purpose",
+                    "Value": "pre-ec2-resize"
+                }
+            ],
+            "VirtualizationType": "hvm",
+            "BootMode": "uefi-preferred",
+            "SourceInstanceId": "i-024ec40bcbdb30035",
+            "DeregistrationProtection": "disabled",
+            "SourceImageId": "ami-090f0cf86291c77fa",
+            "SourceImageRegion": "eu-west-2",
+            "FreeTierEligible": true,
+            "ImageId": "ami-0fe5ba33e4407c12f",
+            "ImageLocation": "368992683803/mscqr-prod-london-pre-resize-20260603T190354Z",
+            "State": "pending",
+            "OwnerId": "368992683803",
+            "CreationDate": "2026-06-03T19:03:59.000Z",
+            "Public": false,
+            "Architecture": "x86_64",
+            "ImageType": "machine"
+        }
+    ]
+}

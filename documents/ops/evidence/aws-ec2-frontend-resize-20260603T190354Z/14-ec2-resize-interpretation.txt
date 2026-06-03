@@ -1,0 +1,9 @@
+instance_id: i-024ec40bcbdb30035
+state: running
+instance_type: t3.small
+private_ip: 10.0.14.142
+public_ip: 13.135.108.69
+ami_id: ami-0fe5ba33e4407c12f
+target_states: unhealthy
+
+DECISION: REVIEW_OR_ROLLBACK
