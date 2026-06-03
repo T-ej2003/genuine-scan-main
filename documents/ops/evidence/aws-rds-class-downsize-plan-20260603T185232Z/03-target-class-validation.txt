@@ -1,0 +1,4 @@
+target_class: db.t4g.small
+valid_classes:
+
+DECISION: TARGET_CLASS_NOT_VALID
