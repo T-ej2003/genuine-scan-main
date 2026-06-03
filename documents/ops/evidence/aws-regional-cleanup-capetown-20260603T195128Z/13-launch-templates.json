@@ -1,0 +1,29 @@
+{
+    "LaunchTemplates": [
+        {
+            "LaunchTemplateId": "lt-04eeeecdf7ff884fe",
+            "LaunchTemplateName": "mscqr-capetown-dr-lt",
+            "CreateTime": "2026-06-01T16:25:00+00:00",
+            "CreatedBy": "arn:aws:iam::368992683803:root",
+            "DefaultVersionNumber": 1,
+            "LatestVersionNumber": 1,
+            "Tags": [
+                {
+                    "Key": "Project",
+                    "Value": "MSCQR"
+                },
+                {
+                    "Key": "Purpose",
+                    "Value": "DR"
+                },
+                {
+                    "Key": "RegionGroup",
+                    "Value": "capetown"
+                }
+            ],
+            "Operator": {
+                "Managed": false
+            }
+        }
+    ]
+}

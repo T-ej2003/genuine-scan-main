@@ -1,0 +1,72 @@
+# AWS Regional Cleanup Inventory Summary: mumbai (ap-south-1)
+
+This is read-only inventory evidence. Preliminary candidates are not deletion approval.
+
+## Counts
+- EC2 instances by state: {'running': 3}
+- EIPs total: 3
+- EIPs associated: 3
+- EIPs idle/unassociated: 0
+- NAT gateways by state: {}
+- NAT gateways referenced by route tables: []
+- Load balancers: 1
+- Target groups: 1
+- RDS instances: 1
+- RDS clusters: 0
+- ElastiCache replication groups: 1
+- ElastiCache cache clusters: 2
+- ASGs: 1
+- EBS volumes by state: {'in-use': 3}
+- Unattached EBS volumes: 0
+- Owned snapshots: 0
+- ENIs by status: {'in-use': 8}
+- VPC endpoints: 0
+
+## Load balancers
+- mscqr-mumbai-alb state=active type=application
+
+## Target groups
+- mscqr-mumbai-frontend-tg targetType=instance protocol=HTTP port=80
+
+## RDS instances
+- mscqr-prod-db-aps1 class=db.t4g.medium status=available engine=postgres
+
+## RDS clusters
+- none
+
+## ElastiCache replication groups
+- mscqr-redis-aps1-primary status=available nodeGroups=1
+
+## ElastiCache cache clusters
+- mscqr-redis-aps1-primary-001 nodeType=cache.t4g.medium status=available
+- mscqr-redis-aps1-primary-002 nodeType=cache.t4g.medium status=available
+
+## Auto Scaling groups
+- mscqr-mumbai-dr-asg min=2 desired=2 max=4
+
+## Preliminary cleanup candidates
+These candidates require console screenshots, resource ID/ARN, cost evidence, rollback path, backup check, and manual approval. They are not deletion approval.
+
+### Idle EIPs
+- none
+
+### Unreferenced NAT gateways
+- none
+
+### Stopped EC2 instances
+- none
+
+### Unattached EBS volumes
+- none
+
+### Empty target groups
+- none
+
+### ASGs with desired 0
+- none
+
+### Load balancers with no target groups
+- none
+
+## Warning
+Preliminary candidates are not deletion approval. No cleanup action is approved by this inventory.

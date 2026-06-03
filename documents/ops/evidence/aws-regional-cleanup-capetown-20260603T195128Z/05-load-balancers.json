@@ -1,0 +1,34 @@
+{
+    "LoadBalancers": [
+        {
+            "LoadBalancerArn": "arn:aws:elasticloadbalancing:af-south-1:368992683803:loadbalancer/app/mscqr-capetown-alb/b7defd5707ad181c",
+            "DNSName": "mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com",
+            "CanonicalHostedZoneId": "Z268VQBMOI5EKX",
+            "CreatedTime": "2026-05-14T12:05:49.205000+00:00",
+            "LoadBalancerName": "mscqr-capetown-alb",
+            "Scheme": "internet-facing",
+            "VpcId": "vpc-00c554109a7edab19",
+            "State": {
+                "Code": "active"
+            },
+            "Type": "application",
+            "AvailabilityZones": [
+                {
+                    "ZoneName": "af-south-1a",
+                    "SubnetId": "subnet-04c638841c2a6b5ed",
+                    "LoadBalancerAddresses": []
+                },
+                {
+                    "ZoneName": "af-south-1b",
+                    "SubnetId": "subnet-0f790d50a4dd152be",
+                    "LoadBalancerAddresses": []
+                }
+            ],
+            "SecurityGroups": [
+                "sg-0ad358fd72d15bd3f"
+            ],
+            "IpAddressType": "ipv4",
+            "EnablePrefixForIpv6SourceNat": "off"
+        }
+    ]
+}

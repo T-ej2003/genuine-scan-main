@@ -1,0 +1,137 @@
+{
+    "RouteTables": [
+        {
+            "Associations": [
+                {
+                    "Main": false,
+                    "RouteTableAssociationId": "rtbassoc-0c6adee7598e20806",
+                    "RouteTableId": "rtb-00c0b2d40a14ad550",
+                    "SubnetId": "subnet-0f790d50a4dd152be",
+                    "AssociationState": {
+                        "State": "associated"
+                    }
+                },
+                {
+                    "Main": false,
+                    "RouteTableAssociationId": "rtbassoc-0574f18c457fe030c",
+                    "RouteTableId": "rtb-00c0b2d40a14ad550",
+                    "SubnetId": "subnet-04c638841c2a6b5ed",
+                    "AssociationState": {
+                        "State": "associated"
+                    }
+                }
+            ],
+            "PropagatingVgws": [],
+            "RouteTableId": "rtb-00c0b2d40a14ad550",
+            "Routes": [
+                {
+                    "DestinationCidrBlock": "10.40.0.0/16",
+                    "GatewayId": "local",
+                    "Origin": "CreateRouteTable",
+                    "State": "active"
+                },
+                {
+                    "DestinationCidrBlock": "0.0.0.0/0",
+                    "GatewayId": "igw-036a50f1e77506d76",
+                    "Origin": "CreateRoute",
+                    "State": "active"
+                }
+            ],
+            "Tags": [
+                {
+                    "Key": "Name",
+                    "Value": "mscqr-capetown-rtb-public"
+                }
+            ],
+            "VpcId": "vpc-00c554109a7edab19",
+            "OwnerId": "368992683803"
+        },
+        {
+            "Associations": [
+                {
+                    "Main": false,
+                    "RouteTableAssociationId": "rtbassoc-00acb0ccf12eb220a",
+                    "RouteTableId": "rtb-0ede7a816590f51f1",
+                    "SubnetId": "subnet-0caaded9b3a55ef4f",
+                    "AssociationState": {
+                        "State": "associated"
+                    }
+                }
+            ],
+            "PropagatingVgws": [],
+            "RouteTableId": "rtb-0ede7a816590f51f1",
+            "Routes": [
+                {
+                    "DestinationCidrBlock": "10.40.0.0/16",
+                    "GatewayId": "local",
+                    "Origin": "CreateRouteTable",
+                    "State": "active"
+                }
+            ],
+            "Tags": [
+                {
+                    "Key": "Name",
+                    "Value": "mscqr-capetown-rtb-private1-af-south-1a"
+                }
+            ],
+            "VpcId": "vpc-00c554109a7edab19",
+            "OwnerId": "368992683803"
+        },
+        {
+            "Associations": [
+                {
+                    "Main": true,
+                    "RouteTableAssociationId": "rtbassoc-0ba8ab0748b5c05b9",
+                    "RouteTableId": "rtb-0484ad6272647f822",
+                    "AssociationState": {
+                        "State": "associated"
+                    }
+                }
+            ],
+            "PropagatingVgws": [],
+            "RouteTableId": "rtb-0484ad6272647f822",
+            "Routes": [
+                {
+                    "DestinationCidrBlock": "10.40.0.0/16",
+                    "GatewayId": "local",
+                    "Origin": "CreateRouteTable",
+                    "State": "active"
+                }
+            ],
+            "Tags": [],
+            "VpcId": "vpc-00c554109a7edab19",
+            "OwnerId": "368992683803"
+        },
+        {
+            "Associations": [
+                {
+                    "Main": false,
+                    "RouteTableAssociationId": "rtbassoc-043a8a7158fcb0c80",
+                    "RouteTableId": "rtb-0fd3e4d6883b1b9d4",
+                    "SubnetId": "subnet-02f28a52d94ac8d3e",
+                    "AssociationState": {
+                        "State": "associated"
+                    }
+                }
+            ],
+            "PropagatingVgws": [],
+            "RouteTableId": "rtb-0fd3e4d6883b1b9d4",
+            "Routes": [
+                {
+                    "DestinationCidrBlock": "10.40.0.0/16",
+                    "GatewayId": "local",
+                    "Origin": "CreateRouteTable",
+                    "State": "active"
+                }
+            ],
+            "Tags": [
+                {
+                    "Key": "Name",
+                    "Value": "mscqr-capetown-rtb-private2-af-south-1b"
+                }
+            ],
+            "VpcId": "vpc-00c554109a7edab19",
+            "OwnerId": "368992683803"
+        }
+    ]
+}

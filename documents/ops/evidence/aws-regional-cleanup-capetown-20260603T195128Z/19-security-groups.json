@@ -1,0 +1,238 @@
+{
+    "SecurityGroups": [
+        {
+            "GroupId": "sg-0f768d6fc564123b1",
+            "IpPermissionsEgress": [],
+            "VpcId": "vpc-00c554109a7edab19",
+            "SecurityGroupArn": "arn:aws:ec2:af-south-1:368992683803:security-group/sg-0f768d6fc564123b1",
+            "OwnerId": "368992683803",
+            "GroupName": "mscqr-rds-sg-afs1",
+            "Description": "MSCQR Cape Town database security group",
+            "IpPermissions": [
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 5432,
+                    "ToPort": 5432,
+                    "UserIdGroupPairs": [
+                        {
+                            "UserId": "368992683803",
+                            "GroupId": "sg-0d8f560e4f6452aa5"
+                        }
+                    ],
+                    "IpRanges": [],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ]
+        },
+        {
+            "GroupId": "sg-0d6af4df627e3fe43",
+            "IpPermissionsEgress": [
+                {
+                    "IpProtocol": "-1",
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ],
+            "VpcId": "vpc-00c554109a7edab19",
+            "SecurityGroupArn": "arn:aws:ec2:af-south-1:368992683803:security-group/sg-0d6af4df627e3fe43",
+            "OwnerId": "368992683803",
+            "GroupName": "default",
+            "Description": "default VPC security group",
+            "IpPermissions": [
+                {
+                    "IpProtocol": "-1",
+                    "UserIdGroupPairs": [
+                        {
+                            "UserId": "368992683803",
+                            "GroupId": "sg-0d6af4df627e3fe43"
+                        }
+                    ],
+                    "IpRanges": [],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ]
+        },
+        {
+            "GroupId": "sg-061c4ffc734e1d149",
+            "IpPermissionsEgress": [
+                {
+                    "IpProtocol": "-1",
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ],
+            "VpcId": "vpc-00c554109a7edab19",
+            "SecurityGroupArn": "arn:aws:ec2:af-south-1:368992683803:security-group/sg-061c4ffc734e1d149",
+            "OwnerId": "368992683803",
+            "GroupName": "mscqr-redis-sg-afs1",
+            "Description": "MSCQR Cape Town Redis access from web nodes",
+            "IpPermissions": [
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 6379,
+                    "ToPort": 6379,
+                    "UserIdGroupPairs": [
+                        {
+                            "UserId": "368992683803",
+                            "GroupId": "sg-0d8f560e4f6452aa5"
+                        }
+                    ],
+                    "IpRanges": [],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ]
+        },
+        {
+            "GroupId": "sg-0ad358fd72d15bd3f",
+            "IpPermissionsEgress": [
+                {
+                    "IpProtocol": "-1",
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ],
+            "Tags": [
+                {
+                    "Key": "Project",
+                    "Value": "MSCQR"
+                },
+                {
+                    "Key": "RegionGroup",
+                    "Value": "capetown"
+                },
+                {
+                    "Key": "Purpose",
+                    "Value": "DR"
+                }
+            ],
+            "VpcId": "vpc-00c554109a7edab19",
+            "SecurityGroupArn": "arn:aws:ec2:af-south-1:368992683803:security-group/sg-0ad358fd72d15bd3f",
+            "OwnerId": "368992683803",
+            "GroupName": "mscqr-capetown-alb-sg",
+            "Description": "MSCQR capetown ALB entrypoint",
+            "IpPermissions": [
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 80,
+                    "ToPort": 80,
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "Description": "MSCQR regional ALB public HTTPS entrypoint",
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                },
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 443,
+                    "ToPort": 443,
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "Description": "MSCQR regional ALB public HTTPS entrypoint",
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ]
+        },
+        {
+            "GroupId": "sg-0d8f560e4f6452aa5",
+            "IpPermissionsEgress": [
+                {
+                    "IpProtocol": "-1",
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ],
+            "Tags": [
+                {
+                    "Key": "Name",
+                    "Value": "mscqr-ec2-web-sg-afs1"
+                }
+            ],
+            "VpcId": "vpc-00c554109a7edab19",
+            "SecurityGroupArn": "arn:aws:ec2:af-south-1:368992683803:security-group/sg-0d8f560e4f6452aa5",
+            "OwnerId": "368992683803",
+            "GroupName": "mscqr-ec2-web-sg-afs1",
+            "Description": "    MSCQR Cape Town web security group",
+            "IpPermissions": [
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 80,
+                    "ToPort": 80,
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                },
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 22,
+                    "ToPort": 22,
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "CidrIp": "90.197.233.229/32"
+                        },
+                        {
+                            "Description": "GitHub self-hosted deploy runner",
+                            "CidrIp": "16.61.0.97/32"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                },
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 443,
+                    "ToPort": 443,
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ]
+        }
+    ]
+}

@@ -1,0 +1,86 @@
+{
+    "Volumes": [
+        {
+            "AvailabilityZoneId": "aps1-az1",
+            "Iops": 100,
+            "VolumeType": "gp2",
+            "MultiAttachEnabled": false,
+            "Operator": {
+                "Managed": false
+            },
+            "VolumeId": "vol-0565b1380fd5b95af",
+            "Size": 8,
+            "SnapshotId": "snap-057bb958ae3c2e6a4",
+            "AvailabilityZone": "ap-south-1a",
+            "State": "in-use",
+            "CreateTime": "2026-06-01T00:04:33.222000+00:00",
+            "Attachments": [
+                {
+                    "DeleteOnTermination": true,
+                    "EbsCardIndex": 0,
+                    "VolumeId": "vol-0565b1380fd5b95af",
+                    "InstanceId": "i-0278c3cd414aa7d29",
+                    "Device": "/dev/sda1",
+                    "State": "attached",
+                    "AttachTime": "2026-06-01T00:04:33+00:00"
+                }
+            ],
+            "Encrypted": false
+        },
+        {
+            "AvailabilityZoneId": "aps1-az3",
+            "Iops": 100,
+            "VolumeType": "gp2",
+            "MultiAttachEnabled": false,
+            "Operator": {
+                "Managed": false
+            },
+            "VolumeId": "vol-0470fcba474e66369",
+            "Size": 8,
+            "SnapshotId": "snap-057bb958ae3c2e6a4",
+            "AvailabilityZone": "ap-south-1b",
+            "State": "in-use",
+            "CreateTime": "2026-05-31T23:44:20.341000+00:00",
+            "Attachments": [
+                {
+                    "DeleteOnTermination": true,
+                    "EbsCardIndex": 0,
+                    "VolumeId": "vol-0470fcba474e66369",
+                    "InstanceId": "i-01a75d3af870584c7",
+                    "Device": "/dev/sda1",
+                    "State": "attached",
+                    "AttachTime": "2026-05-31T23:44:20+00:00"
+                }
+            ],
+            "Encrypted": false
+        },
+        {
+            "AvailabilityZoneId": "aps1-az1",
+            "Iops": 3000,
+            "VolumeType": "gp3",
+            "MultiAttachEnabled": false,
+            "Throughput": 125,
+            "Operator": {
+                "Managed": false
+            },
+            "VolumeId": "vol-0df4e7d2594aa7ef3",
+            "Size": 40,
+            "SnapshotId": "snap-057bb958ae3c2e6a4",
+            "AvailabilityZone": "ap-south-1a",
+            "State": "in-use",
+            "CreateTime": "2026-04-27T12:49:12.642000+00:00",
+            "Attachments": [
+                {
+                    "DeleteOnTermination": true,
+                    "EbsCardIndex": 0,
+                    "VolumeId": "vol-0df4e7d2594aa7ef3",
+                    "InstanceId": "i-04ae3b689ab72a68a",
+                    "Device": "/dev/sda1",
+                    "State": "attached",
+                    "AttachTime": "2026-04-27T12:49:12+00:00"
+                }
+            ],
+            "Encrypted": false
+        }
+    ]
+}

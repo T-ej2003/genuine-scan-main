@@ -1,0 +1,234 @@
+{
+    "SecurityGroups": [
+        {
+            "GroupId": "sg-0771ea7e59f7a49d4",
+            "IpPermissionsEgress": [
+                {
+                    "IpProtocol": "-1",
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "Description": "for downloads and stuff",
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ],
+            "VpcId": "vpc-0e728e3a63292a9b7",
+            "SecurityGroupArn": "arn:aws:ec2:ap-south-1:368992683803:security-group/sg-0771ea7e59f7a49d4",
+            "OwnerId": "368992683803",
+            "GroupName": "mscqr-ec2-web-sg-aps1",
+            "Description": "    MSCQR Mumbai web security group",
+            "IpPermissions": [
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 80,
+                    "ToPort": 80,
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                },
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 22,
+                    "ToPort": 22,
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "Description": "ssh ",
+                            "CidrIp": "90.197.233.229/32"
+                        },
+                        {
+                            "Description": "GitHub self-hosted deploy runner",
+                            "CidrIp": "16.61.0.97/32"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                },
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 443,
+                    "ToPort": 443,
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ]
+        },
+        {
+            "GroupId": "sg-0ce45eda9cd11aa80",
+            "IpPermissionsEgress": [],
+            "VpcId": "vpc-0e728e3a63292a9b7",
+            "SecurityGroupArn": "arn:aws:ec2:ap-south-1:368992683803:security-group/sg-0ce45eda9cd11aa80",
+            "OwnerId": "368992683803",
+            "GroupName": "mscqr-rds-sg-aps1",
+            "Description": "MSCQR Mumbai database security group",
+            "IpPermissions": [
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 5432,
+                    "ToPort": 5432,
+                    "UserIdGroupPairs": [
+                        {
+                            "UserId": "368992683803",
+                            "GroupId": "sg-0771ea7e59f7a49d4"
+                        }
+                    ],
+                    "IpRanges": [],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ]
+        },
+        {
+            "GroupId": "sg-080278ac70122fce1",
+            "IpPermissionsEgress": [
+                {
+                    "IpProtocol": "-1",
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ],
+            "VpcId": "vpc-0e728e3a63292a9b7",
+            "SecurityGroupArn": "arn:aws:ec2:ap-south-1:368992683803:security-group/sg-080278ac70122fce1",
+            "OwnerId": "368992683803",
+            "GroupName": "default",
+            "Description": "default VPC security group",
+            "IpPermissions": [
+                {
+                    "IpProtocol": "-1",
+                    "UserIdGroupPairs": [
+                        {
+                            "UserId": "368992683803",
+                            "GroupId": "sg-080278ac70122fce1"
+                        }
+                    ],
+                    "IpRanges": [],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ]
+        },
+        {
+            "GroupId": "sg-0924027a22e96be48",
+            "IpPermissionsEgress": [
+                {
+                    "IpProtocol": "-1",
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ],
+            "Tags": [
+                {
+                    "Key": "RegionGroup",
+                    "Value": "mumbai"
+                },
+                {
+                    "Key": "Purpose",
+                    "Value": "DR"
+                },
+                {
+                    "Key": "Project",
+                    "Value": "MSCQR"
+                }
+            ],
+            "VpcId": "vpc-0e728e3a63292a9b7",
+            "SecurityGroupArn": "arn:aws:ec2:ap-south-1:368992683803:security-group/sg-0924027a22e96be48",
+            "OwnerId": "368992683803",
+            "GroupName": "mscqr-mumbai-alb-sg",
+            "Description": "MSCQR mumbai ALB entrypoint",
+            "IpPermissions": [
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 80,
+                    "ToPort": 80,
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "Description": "MSCQR regional ALB public HTTPS entrypoint",
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                },
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 443,
+                    "ToPort": 443,
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "Description": "MSCQR regional ALB public HTTPS entrypoint",
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ]
+        },
+        {
+            "GroupId": "sg-05a60dd45bc09e637",
+            "IpPermissionsEgress": [
+                {
+                    "IpProtocol": "-1",
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ],
+            "VpcId": "vpc-0e728e3a63292a9b7",
+            "SecurityGroupArn": "arn:aws:ec2:ap-south-1:368992683803:security-group/sg-05a60dd45bc09e637",
+            "OwnerId": "368992683803",
+            "GroupName": "mscqr-redis-sg-aps1",
+            "Description": "MSCQR Mumbai Redis access from web nodes",
+            "IpPermissions": [
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 6379,
+                    "ToPort": 6379,
+                    "UserIdGroupPairs": [
+                        {
+                            "UserId": "368992683803",
+                            "GroupId": "sg-0771ea7e59f7a49d4"
+                        }
+                    ],
+                    "IpRanges": [],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ]
+        }
+    ]
+}

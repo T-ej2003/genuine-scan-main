@@ -1,0 +1,447 @@
+{
+    "NetworkInterfaces": [
+        {
+            "Association": {
+                "AllocationId": "eipalloc-0cda0cfe1df1a8322",
+                "AssociationId": "eipassoc-0c410f10fcd6c218a",
+                "IpOwnerId": "368992683803",
+                "PublicDnsName": "ec2-13-207-106-241.ap-south-1.compute.amazonaws.com",
+                "PublicIp": "13.207.106.241"
+            },
+            "Attachment": {
+                "AttachTime": "2026-06-01T13:40:13+00:00",
+                "AttachmentId": "eni-attach-091077c1f929195cb",
+                "DeleteOnTermination": false,
+                "DeviceIndex": 1,
+                "NetworkCardIndex": 0,
+                "InstanceOwnerId": "amazon-elb",
+                "Status": "attached"
+            },
+            "AvailabilityZone": "ap-south-1b",
+            "Description": "ELB app/mscqr-mumbai-alb/025ad0cb77546ee0",
+            "Groups": [
+                {
+                    "GroupId": "sg-0924027a22e96be48",
+                    "GroupName": "mscqr-mumbai-alb-sg"
+                }
+            ],
+            "InterfaceType": "interface",
+            "Ipv6Addresses": [],
+            "MacAddress": "0a:12:53:65:e1:87",
+            "NetworkInterfaceId": "eni-094f3f5cf0ab1fa8e",
+            "OwnerId": "368992683803",
+            "PrivateDnsName": "ip-10-30-19-85.ap-south-1.compute.internal",
+            "PublicDnsName": "ec2-13-207-106-241.ap-south-1.compute.amazonaws.com",
+            "PublicIpDnsNameOptions": {
+                "DnsHostnameType": "public-ipv4-dns-name",
+                "PublicIpv4DnsName": "ec2-13-207-106-241.ap-south-1.compute.amazonaws.com"
+            },
+            "PrivateIpAddress": "10.30.19.85",
+            "PrivateIpAddresses": [
+                {
+                    "Association": {
+                        "AllocationId": "eipalloc-0cda0cfe1df1a8322",
+                        "AssociationId": "eipassoc-0c410f10fcd6c218a",
+                        "IpOwnerId": "368992683803",
+                        "PublicDnsName": "ec2-13-207-106-241.ap-south-1.compute.amazonaws.com",
+                        "PublicIp": "13.207.106.241"
+                    },
+                    "Primary": true,
+                    "PrivateDnsName": "ip-10-30-19-85.ap-south-1.compute.internal",
+                    "PrivateIpAddress": "10.30.19.85"
+                }
+            ],
+            "RequesterId": "amazon-elb",
+            "RequesterManaged": true,
+            "SourceDestCheck": true,
+            "Status": "in-use",
+            "SubnetId": "subnet-06859c5885399fe90",
+            "TagSet": [],
+            "VpcId": "vpc-0e728e3a63292a9b7",
+            "Operator": {
+                "Managed": false
+            },
+            "AvailabilityZoneId": "aps1-az3"
+        },
+        {
+            "Association": {
+                "IpOwnerId": "amazon",
+                "PublicDnsName": "ec2-13-201-191-180.ap-south-1.compute.amazonaws.com",
+                "PublicIp": "13.201.191.180"
+            },
+            "Attachment": {
+                "AttachTime": "2026-05-31T23:44:19+00:00",
+                "AttachmentId": "eni-attach-01b69d07f9616880f",
+                "DeleteOnTermination": true,
+                "DeviceIndex": 0,
+                "NetworkCardIndex": 0,
+                "InstanceId": "i-01a75d3af870584c7",
+                "InstanceOwnerId": "368992683803",
+                "Status": "attached"
+            },
+            "AvailabilityZone": "ap-south-1b",
+            "Description": "",
+            "Groups": [
+                {
+                    "GroupId": "sg-0771ea7e59f7a49d4",
+                    "GroupName": "mscqr-ec2-web-sg-aps1"
+                }
+            ],
+            "InterfaceType": "interface",
+            "Ipv6Addresses": [],
+            "MacAddress": "0a:44:14:d6:da:f7",
+            "NetworkInterfaceId": "eni-06fff34694b568940",
+            "OwnerId": "368992683803",
+            "PrivateDnsName": "ip-10-30-24-146.ap-south-1.compute.internal",
+            "PublicDnsName": "ec2-13-201-191-180.ap-south-1.compute.amazonaws.com",
+            "PublicIpDnsNameOptions": {
+                "DnsHostnameType": "public-ipv4-dns-name",
+                "PublicIpv4DnsName": "ec2-13-201-191-180.ap-south-1.compute.amazonaws.com"
+            },
+            "PrivateIpAddress": "10.30.24.146",
+            "PrivateIpAddresses": [
+                {
+                    "Association": {
+                        "IpOwnerId": "amazon",
+                        "PublicDnsName": "ec2-13-201-191-180.ap-south-1.compute.amazonaws.com",
+                        "PublicIp": "13.201.191.180"
+                    },
+                    "Primary": true,
+                    "PrivateDnsName": "ip-10-30-24-146.ap-south-1.compute.internal",
+                    "PrivateIpAddress": "10.30.24.146"
+                }
+            ],
+            "RequesterManaged": false,
+            "SourceDestCheck": true,
+            "Status": "in-use",
+            "SubnetId": "subnet-06859c5885399fe90",
+            "TagSet": [],
+            "VpcId": "vpc-0e728e3a63292a9b7",
+            "Operator": {
+                "Managed": false
+            },
+            "AvailabilityZoneId": "aps1-az3"
+        },
+        {
+            "Attachment": {
+                "AttachTime": "2026-05-14T22:31:35+00:00",
+                "AttachmentId": "eni-attach-0f7bbe6ba4b078309",
+                "DeleteOnTermination": false,
+                "DeviceIndex": 1,
+                "NetworkCardIndex": 0,
+                "InstanceOwnerId": "amazon-elasticache",
+                "Status": "attached"
+            },
+            "AvailabilityZone": "ap-south-1b",
+            "Description": "ElastiCache mscqr-redis-aps1-primary-002",
+            "Groups": [
+                {
+                    "GroupId": "sg-05a60dd45bc09e637",
+                    "GroupName": "mscqr-redis-sg-aps1"
+                }
+            ],
+            "InterfaceType": "interface",
+            "Ipv6Addresses": [],
+            "MacAddress": "0a:8e:57:a8:7e:73",
+            "NetworkInterfaceId": "eni-0e7ca9fd62b446766",
+            "OwnerId": "368992683803",
+            "PrivateDnsName": "ip-10-30-147-71.ap-south-1.compute.internal",
+            "PublicDnsName": "",
+            "PrivateIpAddress": "10.30.147.71",
+            "PrivateIpAddresses": [
+                {
+                    "Primary": true,
+                    "PrivateDnsName": "ip-10-30-147-71.ap-south-1.compute.internal",
+                    "PrivateIpAddress": "10.30.147.71"
+                }
+            ],
+            "RequesterId": "amazon-elasticache",
+            "RequesterManaged": true,
+            "SourceDestCheck": true,
+            "Status": "in-use",
+            "SubnetId": "subnet-06264f5bfbe3fb01e",
+            "TagSet": [],
+            "VpcId": "vpc-0e728e3a63292a9b7",
+            "Operator": {
+                "Managed": false
+            },
+            "AvailabilityZoneId": "aps1-az3"
+        },
+        {
+            "Association": {
+                "AllocationId": "eipalloc-09b30cdf6c251f1ad",
+                "AssociationId": "eipassoc-0ad7dad6f7a0f64de",
+                "IpOwnerId": "368992683803",
+                "PublicDnsName": "ec2-13-207-98-190.ap-south-1.compute.amazonaws.com",
+                "PublicIp": "13.207.98.190"
+            },
+            "Attachment": {
+                "AttachTime": "2026-06-01T02:48:30+00:00",
+                "AttachmentId": "eni-attach-09769c0a9dc67c6ce",
+                "DeleteOnTermination": false,
+                "DeviceIndex": 1,
+                "NetworkCardIndex": 0,
+                "InstanceOwnerId": "amazon-elb",
+                "Status": "attached"
+            },
+            "AvailabilityZone": "ap-south-1a",
+            "Description": "ELB app/mscqr-mumbai-alb/025ad0cb77546ee0",
+            "Groups": [
+                {
+                    "GroupId": "sg-0924027a22e96be48",
+                    "GroupName": "mscqr-mumbai-alb-sg"
+                }
+            ],
+            "InterfaceType": "interface",
+            "Ipv6Addresses": [],
+            "MacAddress": "02:9f:98:cf:d9:e9",
+            "NetworkInterfaceId": "eni-0b0c78c72654108b0",
+            "OwnerId": "368992683803",
+            "PrivateDnsName": "ip-10-30-3-94.ap-south-1.compute.internal",
+            "PublicDnsName": "ec2-13-207-98-190.ap-south-1.compute.amazonaws.com",
+            "PublicIpDnsNameOptions": {
+                "DnsHostnameType": "public-ipv4-dns-name",
+                "PublicIpv4DnsName": "ec2-13-207-98-190.ap-south-1.compute.amazonaws.com"
+            },
+            "PrivateIpAddress": "10.30.3.94",
+            "PrivateIpAddresses": [
+                {
+                    "Association": {
+                        "AllocationId": "eipalloc-09b30cdf6c251f1ad",
+                        "AssociationId": "eipassoc-0ad7dad6f7a0f64de",
+                        "IpOwnerId": "368992683803",
+                        "PublicDnsName": "ec2-13-207-98-190.ap-south-1.compute.amazonaws.com",
+                        "PublicIp": "13.207.98.190"
+                    },
+                    "Primary": true,
+                    "PrivateDnsName": "ip-10-30-3-94.ap-south-1.compute.internal",
+                    "PrivateIpAddress": "10.30.3.94"
+                }
+            ],
+            "RequesterId": "amazon-elb",
+            "RequesterManaged": true,
+            "SourceDestCheck": true,
+            "Status": "in-use",
+            "SubnetId": "subnet-02bc2a99031a9addf",
+            "TagSet": [],
+            "VpcId": "vpc-0e728e3a63292a9b7",
+            "Operator": {
+                "Managed": false
+            },
+            "AvailabilityZoneId": "aps1-az1"
+        },
+        {
+            "Attachment": {
+                "AttachTime": "2026-05-23T09:27:20+00:00",
+                "AttachmentId": "eni-attach-0d8ddffc1ab71fbd7",
+                "DeleteOnTermination": false,
+                "DeviceIndex": 1,
+                "NetworkCardIndex": 0,
+                "InstanceOwnerId": "amazon-rds",
+                "Status": "attached"
+            },
+            "AvailabilityZone": "ap-south-1a",
+            "Description": "RDSNetworkInterface",
+            "Groups": [
+                {
+                    "GroupId": "sg-0ce45eda9cd11aa80",
+                    "GroupName": "mscqr-rds-sg-aps1"
+                }
+            ],
+            "InterfaceType": "interface",
+            "Ipv6Addresses": [],
+            "MacAddress": "02:78:48:6e:af:07",
+            "NetworkInterfaceId": "eni-0b6e91ad3c22886d2",
+            "OwnerId": "368992683803",
+            "PrivateDnsName": "ip-10-30-139-23.ap-south-1.compute.internal",
+            "PublicDnsName": "",
+            "PrivateIpAddress": "10.30.139.23",
+            "PrivateIpAddresses": [
+                {
+                    "Primary": true,
+                    "PrivateDnsName": "ip-10-30-139-23.ap-south-1.compute.internal",
+                    "PrivateIpAddress": "10.30.139.23"
+                }
+            ],
+            "RequesterId": "amazon-rds",
+            "RequesterManaged": true,
+            "SourceDestCheck": true,
+            "Status": "in-use",
+            "SubnetId": "subnet-0ebf1fd57086758e9",
+            "TagSet": [],
+            "VpcId": "vpc-0e728e3a63292a9b7",
+            "DenyAllIgwTraffic": true,
+            "Operator": {
+                "Managed": false
+            },
+            "AvailabilityZoneId": "aps1-az1"
+        },
+        {
+            "Association": {
+                "AllocationId": "eipalloc-0edf6fdd3b389d52e",
+                "AssociationId": "eipassoc-0f990bdfbede5e70b",
+                "IpOwnerId": "368992683803",
+                "PublicDnsName": "ec2-15-206-45-108.ap-south-1.compute.amazonaws.com",
+                "PublicIp": "15.206.45.108"
+            },
+            "Attachment": {
+                "AttachTime": "2026-04-27T12:49:11+00:00",
+                "AttachmentId": "eni-attach-080b3bcd86428fc4b",
+                "DeleteOnTermination": true,
+                "DeviceIndex": 0,
+                "NetworkCardIndex": 0,
+                "InstanceId": "i-04ae3b689ab72a68a",
+                "InstanceOwnerId": "368992683803",
+                "Status": "attached"
+            },
+            "AvailabilityZone": "ap-south-1a",
+            "Description": "",
+            "Groups": [
+                {
+                    "GroupId": "sg-0771ea7e59f7a49d4",
+                    "GroupName": "mscqr-ec2-web-sg-aps1"
+                }
+            ],
+            "InterfaceType": "interface",
+            "Ipv6Addresses": [],
+            "MacAddress": "02:66:9c:49:65:67",
+            "NetworkInterfaceId": "eni-02c00fca9c1e649e0",
+            "OwnerId": "368992683803",
+            "PrivateDnsName": "ip-10-30-14-134.ap-south-1.compute.internal",
+            "PublicDnsName": "ec2-15-206-45-108.ap-south-1.compute.amazonaws.com",
+            "PublicIpDnsNameOptions": {
+                "DnsHostnameType": "public-ipv4-dns-name",
+                "PublicIpv4DnsName": "ec2-15-206-45-108.ap-south-1.compute.amazonaws.com"
+            },
+            "PrivateIpAddress": "10.30.14.134",
+            "PrivateIpAddresses": [
+                {
+                    "Association": {
+                        "AllocationId": "eipalloc-0edf6fdd3b389d52e",
+                        "AssociationId": "eipassoc-0f990bdfbede5e70b",
+                        "IpOwnerId": "368992683803",
+                        "PublicDnsName": "ec2-15-206-45-108.ap-south-1.compute.amazonaws.com",
+                        "PublicIp": "15.206.45.108"
+                    },
+                    "Primary": true,
+                    "PrivateDnsName": "ip-10-30-14-134.ap-south-1.compute.internal",
+                    "PrivateIpAddress": "10.30.14.134"
+                }
+            ],
+            "RequesterManaged": false,
+            "SourceDestCheck": true,
+            "Status": "in-use",
+            "SubnetId": "subnet-02bc2a99031a9addf",
+            "TagSet": [],
+            "VpcId": "vpc-0e728e3a63292a9b7",
+            "Operator": {
+                "Managed": false
+            },
+            "AvailabilityZoneId": "aps1-az1"
+        },
+        {
+            "Association": {
+                "IpOwnerId": "amazon",
+                "PublicDnsName": "ec2-13-127-174-138.ap-south-1.compute.amazonaws.com",
+                "PublicIp": "13.127.174.138"
+            },
+            "Attachment": {
+                "AttachTime": "2026-06-01T00:04:32+00:00",
+                "AttachmentId": "eni-attach-05fe8fb4b860e4c2f",
+                "DeleteOnTermination": true,
+                "DeviceIndex": 0,
+                "NetworkCardIndex": 0,
+                "InstanceId": "i-0278c3cd414aa7d29",
+                "InstanceOwnerId": "368992683803",
+                "Status": "attached"
+            },
+            "AvailabilityZone": "ap-south-1a",
+            "Description": "",
+            "Groups": [
+                {
+                    "GroupId": "sg-0771ea7e59f7a49d4",
+                    "GroupName": "mscqr-ec2-web-sg-aps1"
+                }
+            ],
+            "InterfaceType": "interface",
+            "Ipv6Addresses": [],
+            "MacAddress": "02:0f:8b:6c:ad:13",
+            "NetworkInterfaceId": "eni-01bcb43b1608b173e",
+            "OwnerId": "368992683803",
+            "PrivateDnsName": "ip-10-30-11-47.ap-south-1.compute.internal",
+            "PublicDnsName": "ec2-13-127-174-138.ap-south-1.compute.amazonaws.com",
+            "PublicIpDnsNameOptions": {
+                "DnsHostnameType": "public-ipv4-dns-name",
+                "PublicIpv4DnsName": "ec2-13-127-174-138.ap-south-1.compute.amazonaws.com"
+            },
+            "PrivateIpAddress": "10.30.11.47",
+            "PrivateIpAddresses": [
+                {
+                    "Association": {
+                        "IpOwnerId": "amazon",
+                        "PublicDnsName": "ec2-13-127-174-138.ap-south-1.compute.amazonaws.com",
+                        "PublicIp": "13.127.174.138"
+                    },
+                    "Primary": true,
+                    "PrivateDnsName": "ip-10-30-11-47.ap-south-1.compute.internal",
+                    "PrivateIpAddress": "10.30.11.47"
+                }
+            ],
+            "RequesterManaged": false,
+            "SourceDestCheck": true,
+            "Status": "in-use",
+            "SubnetId": "subnet-02bc2a99031a9addf",
+            "TagSet": [],
+            "VpcId": "vpc-0e728e3a63292a9b7",
+            "Operator": {
+                "Managed": false
+            },
+            "AvailabilityZoneId": "aps1-az1"
+        },
+        {
+            "Attachment": {
+                "AttachTime": "2026-05-14T22:31:14+00:00",
+                "AttachmentId": "eni-attach-08fbae696c9904402",
+                "DeleteOnTermination": false,
+                "DeviceIndex": 1,
+                "NetworkCardIndex": 0,
+                "InstanceOwnerId": "amazon-elasticache",
+                "Status": "attached"
+            },
+            "AvailabilityZone": "ap-south-1a",
+            "Description": "ElastiCache mscqr-redis-aps1-primary-001",
+            "Groups": [
+                {
+                    "GroupId": "sg-05a60dd45bc09e637",
+                    "GroupName": "mscqr-redis-sg-aps1"
+                }
+            ],
+            "InterfaceType": "interface",
+            "Ipv6Addresses": [],
+            "MacAddress": "02:82:28:1a:64:7f",
+            "NetworkInterfaceId": "eni-0e8ea92f98fe0cd2f",
+            "OwnerId": "368992683803",
+            "PrivateDnsName": "ip-10-30-143-28.ap-south-1.compute.internal",
+            "PublicDnsName": "",
+            "PrivateIpAddress": "10.30.143.28",
+            "PrivateIpAddresses": [
+                {
+                    "Primary": true,
+                    "PrivateDnsName": "ip-10-30-143-28.ap-south-1.compute.internal",
+                    "PrivateIpAddress": "10.30.143.28"
+                }
+            ],
+            "RequesterId": "amazon-elasticache",
+            "RequesterManaged": true,
+            "SourceDestCheck": true,
+            "Status": "in-use",
+            "SubnetId": "subnet-0ebf1fd57086758e9",
+            "TagSet": [],
+            "VpcId": "vpc-0e728e3a63292a9b7",
+            "Operator": {
+                "Managed": false
+            },
+            "AvailabilityZoneId": "aps1-az1"
+        }
+    ]
+}

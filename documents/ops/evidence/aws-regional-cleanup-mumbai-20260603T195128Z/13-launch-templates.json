@@ -1,0 +1,29 @@
+{
+    "LaunchTemplates": [
+        {
+            "LaunchTemplateId": "lt-02570cc00f696ee4c",
+            "LaunchTemplateName": "mscqr-mumbai-dr-lt",
+            "CreateTime": "2026-05-15T00:20:54+00:00",
+            "CreatedBy": "arn:aws:iam::368992683803:root",
+            "DefaultVersionNumber": 18,
+            "LatestVersionNumber": 18,
+            "Tags": [
+                {
+                    "Key": "Project",
+                    "Value": "MSCQR"
+                },
+                {
+                    "Key": "Purpose",
+                    "Value": "DR"
+                },
+                {
+                    "Key": "RegionGroup",
+                    "Value": "mumbai"
+                }
+            ],
+            "Operator": {
+                "Managed": false
+            }
+        }
+    ]
+}

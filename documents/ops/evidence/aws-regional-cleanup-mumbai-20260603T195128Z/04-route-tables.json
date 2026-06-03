@@ -1,0 +1,137 @@
+{
+    "RouteTables": [
+        {
+            "Associations": [
+                {
+                    "Main": true,
+                    "RouteTableAssociationId": "rtbassoc-0190c22eea627a9d6",
+                    "RouteTableId": "rtb-0996351f9efdd738a",
+                    "AssociationState": {
+                        "State": "associated"
+                    }
+                }
+            ],
+            "PropagatingVgws": [],
+            "RouteTableId": "rtb-0996351f9efdd738a",
+            "Routes": [
+                {
+                    "DestinationCidrBlock": "10.30.0.0/16",
+                    "GatewayId": "local",
+                    "Origin": "CreateRouteTable",
+                    "State": "active"
+                }
+            ],
+            "Tags": [],
+            "VpcId": "vpc-0e728e3a63292a9b7",
+            "OwnerId": "368992683803"
+        },
+        {
+            "Associations": [
+                {
+                    "Main": false,
+                    "RouteTableAssociationId": "rtbassoc-0514d1a2866d5527b",
+                    "RouteTableId": "rtb-09ca9c31fc82eb3ed",
+                    "SubnetId": "subnet-06859c5885399fe90",
+                    "AssociationState": {
+                        "State": "associated"
+                    }
+                },
+                {
+                    "Main": false,
+                    "RouteTableAssociationId": "rtbassoc-015a6d709b10b2a8b",
+                    "RouteTableId": "rtb-09ca9c31fc82eb3ed",
+                    "SubnetId": "subnet-02bc2a99031a9addf",
+                    "AssociationState": {
+                        "State": "associated"
+                    }
+                }
+            ],
+            "PropagatingVgws": [],
+            "RouteTableId": "rtb-09ca9c31fc82eb3ed",
+            "Routes": [
+                {
+                    "DestinationCidrBlock": "10.30.0.0/16",
+                    "GatewayId": "local",
+                    "Origin": "CreateRouteTable",
+                    "State": "active"
+                },
+                {
+                    "DestinationCidrBlock": "0.0.0.0/0",
+                    "GatewayId": "igw-0975b4fadb8650508",
+                    "Origin": "CreateRoute",
+                    "State": "active"
+                }
+            ],
+            "Tags": [
+                {
+                    "Key": "Name",
+                    "Value": "mscqr-mumbai-rtb-public"
+                }
+            ],
+            "VpcId": "vpc-0e728e3a63292a9b7",
+            "OwnerId": "368992683803"
+        },
+        {
+            "Associations": [
+                {
+                    "Main": false,
+                    "RouteTableAssociationId": "rtbassoc-0fc24722e7253fc40",
+                    "RouteTableId": "rtb-08d4939054a8970c9",
+                    "SubnetId": "subnet-06264f5bfbe3fb01e",
+                    "AssociationState": {
+                        "State": "associated"
+                    }
+                }
+            ],
+            "PropagatingVgws": [],
+            "RouteTableId": "rtb-08d4939054a8970c9",
+            "Routes": [
+                {
+                    "DestinationCidrBlock": "10.30.0.0/16",
+                    "GatewayId": "local",
+                    "Origin": "CreateRouteTable",
+                    "State": "active"
+                }
+            ],
+            "Tags": [
+                {
+                    "Key": "Name",
+                    "Value": "mscqr-mumbai-rtb-private2-ap-south-1b"
+                }
+            ],
+            "VpcId": "vpc-0e728e3a63292a9b7",
+            "OwnerId": "368992683803"
+        },
+        {
+            "Associations": [
+                {
+                    "Main": false,
+                    "RouteTableAssociationId": "rtbassoc-031b537f134af3f3f",
+                    "RouteTableId": "rtb-02ad9ae236e05f4ea",
+                    "SubnetId": "subnet-0ebf1fd57086758e9",
+                    "AssociationState": {
+                        "State": "associated"
+                    }
+                }
+            ],
+            "PropagatingVgws": [],
+            "RouteTableId": "rtb-02ad9ae236e05f4ea",
+            "Routes": [
+                {
+                    "DestinationCidrBlock": "10.30.0.0/16",
+                    "GatewayId": "local",
+                    "Origin": "CreateRouteTable",
+                    "State": "active"
+                }
+            ],
+            "Tags": [
+                {
+                    "Key": "Name",
+                    "Value": "mscqr-mumbai-rtb-private1-ap-south-1a"
+                }
+            ],
+            "VpcId": "vpc-0e728e3a63292a9b7",
+            "OwnerId": "368992683803"
+        }
+    ]
+}
