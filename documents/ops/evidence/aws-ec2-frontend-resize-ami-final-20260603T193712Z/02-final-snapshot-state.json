@@ -1,0 +1,18 @@
+{
+    "Snapshots": [
+        {
+            "StorageTier": "standard",
+            "TransferType": "standard",
+            "FullSnapshotSizeInBytes": 49628577792,
+            "SnapshotId": "snap-0415b3af4c3bba637",
+            "VolumeId": "vol-05b02fe2ee329505f",
+            "State": "pending",
+            "StartTime": "2026-06-03T19:03:59.351000+00:00",
+            "Progress": "99%",
+            "OwnerId": "368992683803",
+            "Description": "Created by CreateImage(i-024ec40bcbdb30035) for ami-0fe5ba33e4407c12f",
+            "VolumeSize": 60,
+            "Encrypted": false
+        }
+    ]
+}

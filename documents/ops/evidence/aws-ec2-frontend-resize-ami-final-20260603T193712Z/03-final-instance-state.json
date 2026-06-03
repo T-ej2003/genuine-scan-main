@@ -1,0 +1,175 @@
+{
+  "Reservations": [
+    {
+      "ReservationId": "r-07e728eca9f618842",
+      "OwnerId": "368992683803",
+      "Groups": [],
+      "Instances": [
+        {
+          "Architecture": "x86_64",
+          "BlockDeviceMappings": [
+            {
+              "DeviceName": "/dev/sda1",
+              "Ebs": {
+                "AttachTime": "2026-04-24T14:12:51+00:00",
+                "DeleteOnTermination": true,
+                "Status": "attached",
+                "VolumeId": "vol-05b02fe2ee329505f",
+                "EbsCardIndex": 0
+              }
+            }
+          ],
+          "EbsOptimized": true,
+          "EnaSupport": true,
+          "Hypervisor": "xen",
+          "IamInstanceProfile": {
+            "Arn": "arn:aws:iam::368992683803:instance-profile/mscqr-ec2-s3-artifacts-role",
+            "Id": "AIPAVL2NNQ4N53KIGTZQ7"
+          },
+          "NetworkInterfaces": [
+            {
+              "Association": {
+                "IpOwnerId": "368992683803",
+                "PublicDnsName": "ec2-13-135-108-69.eu-west-2.compute.amazonaws.com",
+                "PublicIp": "13.135.108.69"
+              },
+              "Attachment": {
+                "AttachTime": "2026-04-24T14:12:50+00:00",
+                "AttachmentId": "eni-attach-0a0ff0df83f736c07",
+                "DeleteOnTermination": true,
+                "DeviceIndex": 0,
+                "Status": "attached",
+                "NetworkCardIndex": 0
+              },
+              "Description": "",
+              "Groups": [
+                {
+                  "GroupId": "sg-0e669ac5a54fdca9d",
+                  "GroupName": "mscqr-ec2-web-sg-euw2"
+                },
+                {
+                  "GroupId": "sg-017d8b3b4be470165",
+                  "GroupName": "ec2-rds-1"
+                }
+              ],
+              "Ipv6Addresses": [],
+              "MacAddress": "06:95:a8:3c:0d:13",
+              "NetworkInterfaceId": "eni-04f64b96fad9969ce",
+              "OwnerId": "368992683803",
+              "PrivateDnsName": "ip-10-0-14-142.eu-west-2.compute.internal",
+              "PrivateIpAddress": "10.0.14.142",
+              "PrivateIpAddresses": [
+                {
+                  "Association": {
+                    "IpOwnerId": "368992683803",
+                    "PublicDnsName": "ec2-13-135-108-69.eu-west-2.compute.amazonaws.com",
+                    "PublicIp": "13.135.108.69"
+                  },
+                  "Primary": true,
+                  "PrivateDnsName": "ip-10-0-14-142.eu-west-2.compute.internal",
+                  "PrivateIpAddress": "10.0.14.142"
+                }
+              ],
+              "SourceDestCheck": true,
+              "Status": "in-use",
+              "SubnetId": "subnet-0756dbd09eb4ece7f",
+              "VpcId": "vpc-09825a6dc884b486a",
+              "InterfaceType": "interface",
+              "Operator": {
+                "Managed": false
+              }
+            }
+          ],
+          "RootDeviceName": "/dev/sda1",
+          "RootDeviceType": "ebs",
+          "SecurityGroups": [
+            {
+              "GroupId": "sg-0e669ac5a54fdca9d",
+              "GroupName": "mscqr-ec2-web-sg-euw2"
+            },
+            {
+              "GroupId": "sg-017d8b3b4be470165",
+              "GroupName": "ec2-rds-1"
+            }
+          ],
+          "SourceDestCheck": true,
+          "Tags": [
+            {
+              "Key": "Name",
+              "Value": "mscqr-prod_london"
+            }
+          ],
+          "VirtualizationType": "hvm",
+          "CpuOptions": {
+            "CoreCount": 1,
+            "ThreadsPerCore": 2
+          },
+          "CapacityReservationSpecification": {
+            "CapacityReservationPreference": "open"
+          },
+          "HibernationOptions": {
+            "Configured": false
+          },
+          "MetadataOptions": {
+            "State": "applied",
+            "HttpTokens": "required",
+            "HttpPutResponseHopLimit": 2,
+            "HttpEndpoint": "enabled",
+            "HttpProtocolIpv6": "disabled",
+            "InstanceMetadataTags": "disabled"
+          },
+          "EnclaveOptions": {
+            "Enabled": false
+          },
+          "BootMode": "uefi-preferred",
+          "PlatformDetails": "Linux/UNIX",
+          "UsageOperation": "RunInstances",
+          "UsageOperationUpdateTime": "2026-04-24T14:12:50+00:00",
+          "PrivateDnsNameOptions": {
+            "HostnameType": "ip-name",
+            "EnableResourceNameDnsARecord": false,
+            "EnableResourceNameDnsAAAARecord": false
+          },
+          "MaintenanceOptions": {
+            "AutoRecovery": "default",
+            "RebootMigration": "default"
+          },
+          "CurrentInstanceBootMode": "uefi",
+          "NetworkPerformanceOptions": {
+            "BandwidthWeighting": "default"
+          },
+          "Operator": {
+            "Managed": false
+          },
+          "InstanceId": "i-024ec40bcbdb30035",
+          "ImageId": "ami-090f0cf86291c77fa",
+          "State": {
+            "Code": 16,
+            "Name": "running"
+          },
+          "PrivateDnsName": "ip-10-0-14-142.eu-west-2.compute.internal",
+          "PublicDnsName": "ec2-13-135-108-69.eu-west-2.compute.amazonaws.com",
+          "StateTransitionReason": "",
+          "KeyName": "mscqrec2instance",
+          "AmiLaunchIndex": 0,
+          "ProductCodes": [],
+          "InstanceType": "t3.small",
+          "LaunchTime": "2026-06-03T19:14:25+00:00",
+          "Placement": {
+            "AvailabilityZoneId": "euw2-az2",
+            "GroupName": "",
+            "Tenancy": "default",
+            "AvailabilityZone": "eu-west-2a"
+          },
+          "Monitoring": {
+            "State": "disabled"
+          },
+          "SubnetId": "subnet-0756dbd09eb4ece7f",
+          "VpcId": "vpc-09825a6dc884b486a",
+          "PrivateIpAddress": "10.0.14.142",
+          "PublicIpAddress": "13.135.108.69"
+        }
+      ]
+    }
+  ]
+}
