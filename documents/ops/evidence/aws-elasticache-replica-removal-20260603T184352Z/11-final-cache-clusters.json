@@ -1,0 +1,57 @@
+{
+    "CacheClusters": [
+        {
+            "CacheClusterId": "mscqr-redis-euw2-primary-002",
+            "ClientDownloadLandingPage": "https://console.aws.amazon.com/elasticache/home#client-download:",
+            "CacheNodeType": "cache.t4g.medium",
+            "Engine": "valkey",
+            "EngineVersion": "9.0.0",
+            "CacheClusterStatus": "available",
+            "NumCacheNodes": 1,
+            "PreferredAvailabilityZone": "eu-west-2a",
+            "CacheClusterCreateTime": "2026-04-18T20:26:44.550000+00:00",
+            "PreferredMaintenanceWindow": "fri:23:30-sat:00:30",
+            "PendingModifiedValues": {},
+            "CacheSecurityGroups": [],
+            "CacheParameterGroup": {
+                "CacheParameterGroupName": "default.valkey9",
+                "ParameterApplyStatus": "in-sync",
+                "CacheNodeIdsToReboot": []
+            },
+            "CacheSubnetGroupName": "mscqr-redis-subnet-euw2",
+            "CacheNodes": [
+                {
+                    "CacheNodeId": "0001",
+                    "CacheNodeStatus": "available",
+                    "CacheNodeCreateTime": "2026-04-18T20:26:44.550000+00:00",
+                    "Endpoint": {
+                        "Address": "mscqr-redis-euw2-primary-002.mscqr-redis-euw2-primary.mwntvg.euw2.cache.amazonaws.com",
+                        "Port": 6379
+                    },
+                    "ParameterGroupStatus": "in-sync",
+                    "CustomerAvailabilityZone": "eu-west-2a"
+                }
+            ],
+            "AutoMinorVersionUpgrade": true,
+            "SecurityGroups": [
+                {
+                    "SecurityGroupId": "sg-0db971332ae625441",
+                    "Status": "active"
+                }
+            ],
+            "ReplicationGroupId": "mscqr-redis-euw2-primary",
+            "SnapshotRetentionLimit": 7,
+            "SnapshotWindow": "04:30-05:30",
+            "AuthTokenEnabled": true,
+            "AuthTokenLastModifiedDate": "2026-04-18T20:21:13.527000+00:00",
+            "TransitEncryptionEnabled": true,
+            "AtRestEncryptionEnabled": true,
+            "ARN": "arn:aws:elasticache:eu-west-2:368992683803:cluster:mscqr-redis-euw2-primary-002",
+            "ReplicationGroupLogDeliveryEnabled": false,
+            "LogDeliveryConfigurations": [],
+            "NetworkType": "ipv4",
+            "IpDiscovery": "ipv4",
+            "TransitEncryptionMode": "required"
+        }
+    ]
+}

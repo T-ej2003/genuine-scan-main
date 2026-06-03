@@ -1,0 +1,13 @@
+2026-06-03T18:44:28Z status=modifying member_count=2
+2026-06-03T18:44:49Z status=available member_count=2
+2026-06-03T18:45:12Z status=available member_count=2
+2026-06-03T18:45:34Z status=available member_count=2
+2026-06-03T18:45:55Z status=available member_count=2
+2026-06-03T18:46:16Z status=available member_count=2
+2026-06-03T18:46:37Z status=available member_count=2
+2026-06-03T18:46:59Z status=available member_count=2
+2026-06-03T18:47:21Z status=available member_count=2
+2026-06-03T18:47:42Z status=available member_count=2
+2026-06-03T18:48:03Z status=available member_count=2
+2026-06-03T18:48:24Z status=available member_count=2
+2026-06-03T18:48:45Z status=available member_count=1

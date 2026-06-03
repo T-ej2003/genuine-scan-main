@@ -1,0 +1,15 @@
+25f8ea46ba9da4f5ec754f5c7b9a38e6a44aed7d12240f9ae6d78bb19b7924b6  ./01-pre-change-replication-group.json
+56fec8ff4a7fc046bc2a961db03ebeabbbd194d4ce09c954e8e4e344a843bbe5  ./02-pre-change-cache-clusters.json
+9de0cf23224e54a5237c2d650874759f5cf2e1871bb597d9cdb72f7fa26eb899  ./03-pre-change-ecs-service.json
+7b7929ef3db27477c009be4d1a96ace104bdf3fcfb4601f1ffb6f9b20177bdc8  ./04-disable-failover-response.json
+f66cdced9095faa101aacfaf0a961641aa1a7d5d5b854d693e8f16efcdbf2f91  ./05-disable-failover-poll.txt
+31d232e0c92eb0405ef48fdc965fd8dbd176d921bda75d13e8e3bee6c96f8342  ./06-post-failover-disable-replication-group.json
+3e34e9bd26bc6a65f274a58e71b454088c8d40e6433bf1495e005fa9dcdbaa74  ./07-decrease-replica-count-response.json
+be2891804a2411a173a288307947a6dc1a46b58a19bbda7a1bf0a66221c263d4  ./08-replica-removal-state-latest.json
+7237d5173cc926ce72b001bc6d5ad40ebb4d713257d3de0247e799ed5f7bc126  ./09-replica-removal-poll.txt
+66dbb47b11ddb507653f56a0fa87e75359fcc01de8de32dfa71576d854fa4337  ./10-final-replication-group.json
+b8f6499139c7b5f7385b04d7b9a9977c38ec02f9388189b1d687fb2eb4ebc31f  ./11-final-cache-clusters.json
+bd947928a9474b7aef606d1d3a11367aae28861c57cfa623d347009093908e12  ./12-post-change-external-https-check.txt
+f52b1db110d476c7ef9c5d69718006171b89662590d348a59aa513ebed9499df  ./13-elasticache-replica-removal-interpretation.txt
+9850eee89a1a020c7fd3f3b1e3fae04f9275d1a3bb11fb6a4ad86f8e078306ee  ./elasticache-replica-removal-note.md
+451f35ff94adf5734066598de181014258ab10cb6ff58eb5e3ecba9746b9a795  ./SHA256SUMS.txt

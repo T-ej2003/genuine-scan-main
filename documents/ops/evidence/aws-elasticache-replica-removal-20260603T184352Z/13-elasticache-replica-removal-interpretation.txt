@@ -1,0 +1,12 @@
+replication_group: mscqr-redis-euw2-primary
+status: available
+automatic_failover: disabled
+multi_az: disabled
+member_cluster_count: 1
+member_clusters: mscqr-redis-euw2-primary-002
+cache_cluster_count_in_region_response: 1
+roles:
+- mscqr-redis-euw2-primary-002 / primary / eu-west-2a
+
+DECISION: REPLICA_REMOVAL_SUCCESS
+ElastiCache was reduced from 2 nodes to 1 node.

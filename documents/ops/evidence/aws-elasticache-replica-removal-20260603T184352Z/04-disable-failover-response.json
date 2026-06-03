@@ -1,0 +1,67 @@
+{
+    "ReplicationGroup": {
+        "ReplicationGroupId": "mscqr-redis-euw2-primary",
+        "Description": " ",
+        "GlobalReplicationGroupInfo": {},
+        "Status": "modifying",
+        "PendingModifiedValues": {},
+        "MemberClusters": [
+            "mscqr-redis-euw2-primary-001",
+            "mscqr-redis-euw2-primary-002"
+        ],
+        "NodeGroups": [
+            {
+                "NodeGroupId": "0001",
+                "Status": "modifying",
+                "PrimaryEndpoint": {
+                    "Address": "master.mscqr-redis-euw2-primary.mwntvg.euw2.cache.amazonaws.com",
+                    "Port": 6379
+                },
+                "ReaderEndpoint": {
+                    "Address": "replica.mscqr-redis-euw2-primary.mwntvg.euw2.cache.amazonaws.com",
+                    "Port": 6379
+                },
+                "NodeGroupMembers": [
+                    {
+                        "CacheClusterId": "mscqr-redis-euw2-primary-001",
+                        "CacheNodeId": "0001",
+                        "ReadEndpoint": {
+                            "Address": "mscqr-redis-euw2-primary-001.mscqr-redis-euw2-primary.mwntvg.euw2.cache.amazonaws.com",
+                            "Port": 6379
+                        },
+                        "PreferredAvailabilityZone": "eu-west-2b",
+                        "CurrentRole": "replica"
+                    },
+                    {
+                        "CacheClusterId": "mscqr-redis-euw2-primary-002",
+                        "CacheNodeId": "0001",
+                        "ReadEndpoint": {
+                            "Address": "mscqr-redis-euw2-primary-002.mscqr-redis-euw2-primary.mwntvg.euw2.cache.amazonaws.com",
+                            "Port": 6379
+                        },
+                        "PreferredAvailabilityZone": "eu-west-2a",
+                        "CurrentRole": "primary"
+                    }
+                ]
+            }
+        ],
+        "SnapshottingClusterId": "mscqr-redis-euw2-primary-002",
+        "AutomaticFailover": "disabling",
+        "MultiAZ": "disabled",
+        "SnapshotRetentionLimit": 7,
+        "SnapshotWindow": "04:30-05:30",
+        "ClusterEnabled": false,
+        "CacheNodeType": "cache.t4g.medium",
+        "TransitEncryptionEnabled": true,
+        "AtRestEncryptionEnabled": true,
+        "ARN": "arn:aws:elasticache:eu-west-2:368992683803:replicationgroup:mscqr-redis-euw2-primary",
+        "LogDeliveryConfigurations": [],
+        "ReplicationGroupCreateTime": "2026-04-18T20:21:13.528000+00:00",
+        "AutoMinorVersionUpgrade": true,
+        "NetworkType": "ipv4",
+        "IpDiscovery": "ipv4",
+        "TransitEncryptionMode": "required",
+        "ClusterMode": "disabled",
+        "Engine": "valkey"
+    }
+}
