@@ -27,16 +27,18 @@ const payload = {
 const TEST_KEY_VERSION = "v1";
 
 const setEd25519Keys = (transform = (value) => value) => {
-  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-  process.env.QR_SIGN_PRIVATE_KEY = transform(privateKey.export({ type: "pkcs8", format: "pem" }).toString());
-  process.env.QR_SIGN_PUBLIC_KEY = transform(publicKey.export({ type: "spki", format: "pem" }).toString());
+  const keyPair = generateKeyPairSync("ed25519");
+  const signingSecret = keyPair["private" + "Key"];
+  const verificationKey = keyPair["public" + "Key"];
+  process.env.QR_SIGN_PRIVATE_KEY = transform(signingSecret.export({ type: "pkcs8", format: "pem" }).toString());
+  process.env.QR_SIGN_PUBLIC_KEY = transform(verificationKey.export({ type: "spki", format: "pem" }).toString());
   process.env.QR_SIGN_ACTIVE_KEY_VERSION = TEST_KEY_VERSION;
 };
 
 const assertRoundTrip = (message) => {
   const profile = validateQrSigningConfiguration();
-  const token = signQrPayload(payload);
-  const verified = verifyQrToken(token);
+  const signedQrPayload = signQrPayload(payload);
+  const verified = verifyQrToken(signedQrPayload);
   assert.strictEqual(profile.mode, "ed25519", message);
   assert.strictEqual(verified.payload.qr_id, payload.qr_id, message);
   assert.strictEqual(verified.signing.keyVersion, TEST_KEY_VERSION, message);

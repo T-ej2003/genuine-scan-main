@@ -18,17 +18,17 @@ type AuthenticatedFixtures = {
 const seededCredentials: Record<SeededRole, RoleCredentials> = {
   superAdmin: {
     email: String(process.env.E2E_SUPERADMIN_EMAIL || "admin@mscqr.com").trim(),
-    password: process.env.E2E_SUPERADMIN_PASSWORD?.trim() ?? "",
+    password: process.env.E2E_SUPERADMIN_PASSWORD?.trim() ?? "fake-password",
     displayName: "Super Admin",
   },
   licenseeAdmin: {
     email: String(process.env.E2E_LICENSEE_ADMIN_EMAIL || "admin@acme.com").trim(),
-    password: process.env.E2E_LICENSEE_ADMIN_PASSWORD?.trim() ?? "",
+    password: process.env.E2E_LICENSEE_ADMIN_PASSWORD?.trim() ?? "fake-password",
     displayName: "Brand Admin",
   },
   manufacturer: {
     email: String(process.env.E2E_MANUFACTURER_EMAIL || "factory1@acme.com").trim(),
-    password: process.env.E2E_MANUFACTURER_PASSWORD?.trim() ?? "",
+    password: process.env.E2E_MANUFACTURER_PASSWORD?.trim() ?? "fake-password",
     displayName: "Manufacturer",
   },
 };

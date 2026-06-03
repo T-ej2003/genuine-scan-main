@@ -23,12 +23,17 @@ coverage
 !.env.example
 !.env.production.mumbai.example
 !.env.production.capetown.example
+backend/.env
+backend/.env.*
 !backend/.env.example
+.local-secret-backups/
 deploy/certbot/conf/*
 !deploy/certbot/conf/.gitkeep
 deploy/certbot/www/*
 !deploy/certbot/www/.gitkeep
 *.pem
+databasefiles/*.pem
+!databasefiles/README.md
 *.key
 *.crt
 *.p12

@@ -361,7 +361,7 @@ Branch: main
 operation: aws-regional-alb-inventory
 target_region_group: mumbai
 aws_region: ap-south-1
-ec2_public_ip: 15.206.45.108
+203.0.113.10
 domain_name: mscqr.com
 www_domain_name: www.mscqr.com
 hosted_zone_id: Z0569586VLFIGGVI7HAZ
@@ -441,7 +441,7 @@ Cape Town uses the same sequence with:
 ```text
 target_region_group: capetown
 aws_region: af-south-1
-ec2_public_ip: 15.240.28.113
+203.0.113.10
 ```
 
 Only after Mumbai and Cape Town inventory, plan, apply, and regional test-record validation pass should operators move into the protected DNS cutover phase.
@@ -484,7 +484,7 @@ Mumbai readiness values:
 ```text
 target_region_group: mumbai
 aws_region: ap-south-1
-ec2_public_ip: 15.206.45.108
+203.0.113.10
 alb_arn: arn:aws:elasticloadbalancing:ap-south-1:368992683803:loadbalancer/app/mscqr-mumbai-alb/025ad0cb77546ee0
 alb_dns_name: mscqr-mumbai-alb-1249752376.ap-south-1.elb.amazonaws.com
 target_group_arn: arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgroup/mscqr-mumbai-frontend-tg/68982ccd4d8c26c1
@@ -496,7 +496,7 @@ Cape Town readiness values:
 ```text
 target_region_group: capetown
 aws_region: af-south-1
-ec2_public_ip: 15.240.28.113
+203.0.113.10
 alb_arn: arn:aws:elasticloadbalancing:af-south-1:368992683803:loadbalancer/app/mscqr-capetown-alb/b7defd5707ad181c
 alb_dns_name: mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com
 target_group_arn: arn:aws:elasticloadbalancing:af-south-1:368992683803:targetgroup/mscqr-capetown-frontend-tg/a9b43fd2d346e26d
@@ -599,7 +599,7 @@ Mumbai hardening values:
 ```text
 target_region_group: mumbai
 aws_region: ap-south-1
-ec2_public_ip: 15.206.45.108
+203.0.113.10
 alb_arn: arn:aws:elasticloadbalancing:ap-south-1:368992683803:loadbalancer/app/mscqr-mumbai-alb/025ad0cb77546ee0
 alb_dns_name: mscqr-mumbai-alb-1249752376.ap-south-1.elb.amazonaws.com
 target_group_arn: arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgroup/mscqr-mumbai-frontend-tg/68982ccd4d8c26c1
@@ -711,7 +711,7 @@ Cape Town hardening values:
 ```text
 target_region_group: capetown
 aws_region: af-south-1
-ec2_public_ip: 15.240.28.113
+203.0.113.10
 alb_arn: arn:aws:elasticloadbalancing:af-south-1:368992683803:loadbalancer/app/mscqr-capetown-alb/b7defd5707ad181c
 alb_dns_name: mscqr-capetown-alb-1730011881.af-south-1.elb.amazonaws.com
 target_group_arn: arn:aws:elasticloadbalancing:af-south-1:368992683803:targetgroup/mscqr-capetown-frontend-tg/a9b43fd2d346e26d
