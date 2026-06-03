@@ -32,7 +32,10 @@ const parseJson = (repoPath, source) => {
 };
 
 const asgCompose = read("docker-compose.asg-web.yml");
-const localCompose = read("docker-compose.yml");
+const productionCompose = read("docker-compose.yml");
+const localCompose = read("docker-compose.local.yml");
+const deployPlaybook = read("ops/deploy/deploy.yml");
+const standbyDeployPlaybook = read("ops/deploy/deploy-standby.yml");
 const bootstrap = read("scripts/dr/bootstrap-asg-web-node.sh");
 const manifestRaw = read("documents/ops/aws-asg-web-ssm-parameter-manifest.json");
 const packageJsonRaw = read("package.json");
@@ -44,9 +47,24 @@ const recoveryReadme = read("documents/ops/object-storage-recovery/README.md");
 const manifest = parseJson("documents/ops/aws-asg-web-ssm-parameter-manifest.json", manifestRaw);
 const packageJson = parseJson("package.json", packageJsonRaw);
 
-requireMatch("local compose", localCompose, /^\s{2}minio:\n\s+image:\s+minio\/minio:/m, "local docker-compose.yml must keep MinIO for local development.");
-requireMatch("local compose", localCompose, /^\s{2}minio-init:\n\s+image:\s+minio\/mc:/m, "local docker-compose.yml must keep MinIO bucket bootstrap for local development.");
-requireMatch("local compose", localCompose, /^\s{2}minio_data:/m, "local docker-compose.yml must keep the local MinIO volume declaration.");
+forbidMatch("production compose", productionCompose, /^\s{2}minio:/m, "docker-compose.yml must not define a production MinIO service.");
+forbidMatch("production compose", productionCompose, /^\s{2}minio-init:/m, "docker-compose.yml must not define a production MinIO init service.");
+forbidMatch("production compose", productionCompose, /minio\/(?:minio|mc)/i, "docker-compose.yml must not use MinIO images in the production path.");
+forbidMatch("production compose", productionCompose, /\bminio_data\b/i, "docker-compose.yml must not define or mount MinIO volumes in the production path.");
+forbidMatch("production compose", productionCompose, /depends_on:[\s\S]{0,240}\bminio(?:-init)?\b/i, "production services must not depend on MinIO.");
+requireMatch("local compose override", localCompose, /^\s{2}minio:\n\s+image:\s+minio\/minio:/m, "docker-compose.local.yml must keep MinIO for local development.");
+requireMatch("local compose override", localCompose, /^\s+profiles:\n\s+- local-minio/m, "local MinIO must require the explicit local-minio profile.");
+requireMatch("local compose override", localCompose, /^\s{2}minio-init:\n\s+image:\s+minio\/mc:/m, "docker-compose.local.yml must keep MinIO bucket bootstrap for local development.");
+requireMatch("local compose override", localCompose, /^\s{2}minio_data:/m, "docker-compose.local.yml must keep the local MinIO volume declaration.");
+
+for (const [label, source] of [
+  ["production deploy playbook", deployPlaybook],
+  ["standby deploy playbook", standbyDeployPlaybook],
+]) {
+  requireMatch(label, source, /docker compose --profile worker build backend worker frontend/, "deploy builds must target production services explicitly.");
+  requireMatch(label, source, /docker compose --profile worker up -d --no-build redis backend worker frontend/, "deploy up must target redis, backend, worker, and frontend explicitly.");
+  forbidMatch(label, source, /docker compose --profile worker up -d --no-build\s*(?:\n|$)/, "deploy must not run a bare profile up that can start local-only services.");
+}
 
 forbidMatch("ASG compose", asgCompose, /^\s{2}minio:/m, "docker-compose.asg-web.yml must not define a MinIO service.");
 forbidMatch("ASG compose", asgCompose, /^\s{2}minio-init:/m, "docker-compose.asg-web.yml must not define a MinIO init service.");

@@ -29,9 +29,10 @@
         "Operator evidence: regional object storage uses S3/default credentials with endpoint=null and mode=default-credentials.",
         "Operator evidence: OBJECT_STORAGE_ENDPOINT, OBJECT_STORAGE_ACCESS_KEY, and OBJECT_STORAGE_SECRET_KEY are empty in both regional env files.",
         ".env.production.mumbai.example and .env.production.capetown.example now keep static object storage endpoint and credentials empty.",
-        "docker-compose.asg-web.yml has no MinIO service."
+        "docker-compose.yml and docker-compose.asg-web.yml have no MinIO service.",
+        "docker-compose.local.yml keeps local MinIO only behind the local-minio profile."
       ],
-      "condition": "ASG web nodes must use regional S3/default credentials. The local MinIO service in docker-compose.yml is retained only for legacy/local-state Compose paths."
+      "condition": "ASG web nodes and production standalone EC2 deploys must use regional S3/default credentials. Local MinIO is retained only in docker-compose.local.yml behind the explicit local-minio profile."
     },
     {
       "id": "WORKER_TOPOLOGY_CONDITIONALLY_PROVEN",
@@ -41,7 +42,7 @@
         "docker-compose.yml keeps the worker behind profiles: [\"worker\"].",
         "docker-compose.asg-web.yml contains backend and frontend only, with no worker service.",
         "Both backend Compose modes force RUN_BACKGROUND_WORKERS=false for HTTP backend processes.",
-        "Existing standalone regional EC2 worker ownership is explicit: docker compose --profile worker up -d --build backend worker frontend.",
+        "Existing standalone regional EC2 worker ownership is explicit: docker compose --profile worker up -d --build redis backend worker frontend.",
         "Operator evidence: current worker containers run with RUN_BACKGROUND_WORKERS=true.",
         "Operator evidence: COMPLIANCE_PACK_SCHEDULER_ENABLED=false in both regions."
       ],

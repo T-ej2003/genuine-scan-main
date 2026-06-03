@@ -12,7 +12,8 @@ Do not delete MinIO data automatically. Do not change production DNS. Do not mut
 
 | Reference | Classification | Phase C decision |
 | --- | --- | --- |
-| `docker-compose.yml` `minio`, `minio-init`, `minio_data` | Local development only / legacy single-node path | Preserve for local development. Do not copy to ASG web mode. |
+| `docker-compose.yml` | Production standalone EC2 path | Must remain free of MinIO services, MinIO volumes, and MinIO dependencies. |
+| `docker-compose.local.yml` `minio`, `minio-init`, `minio_data` | Local development only | Preserve for local development behind the explicit `local-minio` profile. Do not use in production. |
 | `docker-compose.asg-web.yml` | Production/ASG DR path | Must remain free of MinIO services, MinIO volumes, and MinIO dependencies. |
 | `backend/src/services/objectStorageService.ts` endpoint/static credential mode | Legacy custom S3-compatible path | Keep generic support, but ASG web mode must force S3/default credentials. |
 | `backend/src/index.ts` production startup object-storage validation | Production startup validation | Keep object storage required. Known default/static credential rejection remains. |
@@ -33,7 +34,23 @@ Do not delete MinIO data automatically. Do not change production DNS. Do not mut
 - [ ] Confirm current ASG instances have the expected instance profile attached.
 - [ ] Confirm at least one safe non-sensitive object read path works.
 - [ ] Confirm backend logs show no MinIO endpoint, access denied, or endpoint-resolution errors.
+- [ ] Confirm production deploy commands target `redis backend worker frontend` explicitly and do not run a bare Compose profile that can start local-only services.
 - [ ] Preserve evidence under `documents/ops/evidence/` or the approved incident evidence location.
+
+## Production Compose Rule
+
+Production must not start MinIO or `minio-init`. The active and standby Ansible deploy paths must use the default production compose file only:
+
+```bash
+docker compose --profile worker build backend worker frontend
+docker compose --profile worker up -d --no-build redis backend worker frontend
+```
+
+Local MinIO remains available only for developer workflows:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local.yml --profile local-minio up -d minio minio-init
+```
 
 ## No-Secret Validation Commands
 
@@ -157,7 +174,7 @@ Before any MinIO service retirement, preserve a local archive or platform snapsh
 Inventory local MinIO without printing credentials:
 
 ```bash
-docker compose -f docker-compose.yml ps minio minio-init
+docker compose -f docker-compose.yml -f docker-compose.local.yml --profile local-minio ps minio minio-init
 docker volume ls | grep -E '(^|_)minio_data$' || true
 docker volume inspect genuine-scan-main_minio_data
 docker exec genuine-scan-minio sh -lc 'du -sh /data && find /data -maxdepth 2 -type d | sed -n "1,80p"'

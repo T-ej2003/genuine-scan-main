@@ -133,8 +133,8 @@
           - "QR_SIGN_PRIVATE_KEY_FORMAT={{ qr_sign_private_key_format }}"
           - "QR_SIGN_PUBLIC_KEY_FORMAT={{ qr_sign_public_key_format }}"
 
-    - name: Build Docker Compose stack with singleton worker profile
-      command: docker compose --profile worker build
+    - name: Build production Docker Compose services
+      command: docker compose --profile worker build backend worker frontend
       args:
         chdir: "{{ app_dir }}"
       environment: "{{ qr_sign_compose_environment }}"
@@ -147,12 +147,20 @@
       environment: "{{ qr_sign_compose_environment }}"
       no_log: true
 
-    - name: Restart Docker Compose stack with singleton worker profile
-      command: docker compose --profile worker up -d --no-build
+    - name: Restart production Docker Compose services
+      command: docker compose --profile worker up -d --no-build redis backend worker frontend
       args:
         chdir: "{{ app_dir }}"
       environment: "{{ qr_sign_compose_environment }}"
       no_log: true
+
+    - name: Assert MinIO containers are not running in production
+      shell: >
+        docker ps --format '{{ "{{" }}.Names{{ "}}" }}\t{{ "{{" }}.Image{{ "}}" }}\t{{ "{{" }}.Status{{ "}}" }}'
+        | awk 'BEGIN{IGNORECASE=1} $1 ~ /(^|[-_])minio([-_]|$)/ || $2 ~ /^minio\/(minio|mc)(:|$)/ {print}'
+      register: production_minio_runtime
+      changed_when: false
+      failed_when: production_minio_runtime.stdout | length > 0
 
     - name: Show Docker Compose status
       command: docker compose ps

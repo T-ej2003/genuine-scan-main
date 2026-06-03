@@ -25,6 +25,7 @@ const doc = requireFile("documents/ops/aws-asg-multi-instance-readiness.md");
 const checklistRaw = requireFile("documents/ops/aws-asg-multi-instance-readiness.checklist.json");
 const packageJsonRaw = requireFile("package.json");
 const compose = requireFile("docker-compose.yml");
+const localCompose = requireFile("docker-compose.local.yml");
 const asgWebCompose = requireFile("docker-compose.asg-web.yml");
 const asgBootstrap = requireFile("scripts/dr/bootstrap-asg-web-node.sh");
 const asgComposeInterpolationCheck = requireFile("scripts/dr/check-asg-compose-interpolation.mjs");
@@ -129,7 +130,7 @@ requireMatch("readiness doc", doc, /MinIO|object storage/i, "must cover MinIO/ob
 requireMatch("readiness doc", doc, /RUN_DB_MIGRATIONS_ON_START=false/, "must document migration-on-start gating.");
 requireMatch("readiness doc", doc, /RUN_BACKGROUND_WORKERS=false/, "must document disabled background workers on web nodes.");
 requireMatch("readiness doc", doc, /docker-compose\.asg-web\.yml/, "must document ASG web-node compose mode.");
-requireMatch("readiness doc", doc, /docker compose --profile worker up -d --build backend worker frontend/, "must document intentional singleton worker profile command.");
+requireMatch("readiness doc", doc, /docker compose --profile worker up -d --build redis backend worker frontend/, "must document intentional singleton worker profile command.");
 requireMatch("readiness doc", doc, /COMPLIANCE_PACK_SCHEDULER_ENABLED=false/, "must document compliance scheduler disabled condition.");
 requireMatch("readiness doc", doc, /Worker topology is conditionally proven/, "must mark worker topology conditionally proven.");
 requireMatch("readiness doc", doc, /scripts\/dr\/bootstrap-asg-web-node\.sh/, "must document ASG web bootstrap script.");
@@ -218,7 +219,12 @@ if (!String(packageJson.scripts?.["verify:guardrails"] || "").includes("check:as
 }
 
 requireMatch("docker-compose", compose, /\bredis:\n\s+image:\s+redis:/, "must expose the local Redis service so the blocker remains visible.");
-requireMatch("docker-compose", compose, /\bminio:\n\s+image:\s+minio\/minio:/, "must expose the local MinIO service so the blocker remains visible.");
+if (/\bminio(?:-init)?:\n|minio\/(?:minio|mc)|\bminio_data\b/i.test(compose)) {
+  failures.push("docker-compose.yml must keep MinIO out of the production compose graph.");
+}
+requireMatch("docker-compose.local", localCompose, /\bminio:\n\s+image:\s+minio\/minio:/, "must expose the local MinIO service only through the local override.");
+requireMatch("docker-compose.local", localCompose, /\bminio-init:\n\s+image:\s+minio\/mc:/, "must expose local MinIO bucket bootstrap only through the local override.");
+requireMatch("docker-compose.local", localCompose, /profiles:\n\s+- local-minio/, "local MinIO must require the explicit local-minio profile.");
 requireMatch("docker-compose", compose, /RUN_DB_MIGRATIONS_ON_START:\s+\$\{RUN_DB_MIGRATIONS_ON_START:-false\}/, "backend migrations must default off.");
 requireMatch("docker-compose", compose, /RUN_BACKGROUND_WORKERS:\s+"false"/, "web backend nodes must default background workers off.");
 requireMatch("docker-compose", compose, /RUN_BACKGROUND_WORKERS:\s+"true"/, "worker service must be explicitly separate from web.");

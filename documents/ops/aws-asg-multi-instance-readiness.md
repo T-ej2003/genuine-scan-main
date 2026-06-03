@@ -45,7 +45,8 @@ Repository shape:
 - Frontend: Vite/React static bundle served by Nginx.
 - Backend: Express/Prisma service in `backend/src/index.ts`.
 - Worker: `backend/src/worker.ts` using the same backend image with a worker entrypoint.
-- Legacy/local orchestration: `docker-compose.yml` with `frontend`, `backend`, profiled `worker`, `redis`, `minio`, and `minio-init`.
+- Standalone production orchestration: `docker-compose.yml` with `frontend`, `backend`, profiled `worker`, and `redis`.
+- Local MinIO orchestration: `docker-compose.local.yml` adds `minio` and `minio-init` only behind the explicit `local-minio` profile.
 - ASG web-node orchestration: `docker-compose.asg-web.yml` with `frontend` and `backend` only.
 - Database: Prisma/PostgreSQL through `DATABASE_URL`.
 - Object storage: S3-compatible client in `backend/src/services/objectStorageService.ts`.
@@ -59,7 +60,7 @@ Runtime defaults that matter for ASG:
 - `docker-compose.asg-web.yml` has no `worker`, `redis`, `minio`, or `minio-init` service.
 - `docker-compose.asg-web.yml` uses backend `/health/live` for container health and keeps `/api/health/ready` as the deeper dependency readiness gate.
 - `docker-compose.yml` defaults `REDIS_URL` to `redis://redis:6379/0`.
-- `docker-compose.yml` includes local `minio_data` and `redis_data` volumes.
+- `docker-compose.yml` includes the production `redis_data` volume. `docker-compose.local.yml` keeps local-only `minio_data`.
 
 ## A. Redis And Sessions
 
@@ -96,7 +97,7 @@ Evidence:
 - Production startup refuses to run without object storage.
 - Incident and support uploads stage through Multer local disk, then upload to object storage and remove local files when object storage is configured.
 - Compliance packs now upload generated zip buffers to object storage when configured and record `storageMode` in job summary. Local disk remains only as fallback for non-production/degraded recovery.
-- `docker-compose.yml` still defines a local MinIO service and `minio_data` volume.
+- `docker-compose.yml` does not define MinIO, `minio-init`, or `minio_data`; local MinIO lives only in `docker-compose.local.yml` behind `local-minio`.
 - Regional env examples now keep `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_ACCESS_KEY`, and `OBJECT_STORAGE_SECRET_KEY` empty for S3/default credentials.
 - Operator evidence confirms Mumbai and Cape Town use regional S3/default credentials with `endpoint=null` and `mode=default-credentials`.
 - Phase C Mumbai ASG evidence shows the backend runs inside Docker on EC2 and must receive instance-profile credentials through the AWS SDK default provider chain. IMDSv2 remains required, but launch templates must set `MetadataOptions.HttpPutResponseHopLimit=2`; hop limit `1` can prevent containerized backend processes from receiving IMDSv2 responses and leaves object storage in `configured=true ready=false` with `Could not load credentials from any providers`.
@@ -104,7 +105,7 @@ Evidence:
 Residual risk:
 
 - MinIO per ASG node is unsafe because uploads and generated artifacts would be visible only on the node that received the request.
-- `docker-compose.asg-web.yml` avoids local MinIO entirely; the legacy MinIO service remains only for local/legacy Compose paths.
+- `docker-compose.yml` and `docker-compose.asg-web.yml` avoid local MinIO entirely; local MinIO remains only in the explicit local override.
 
 ASG requirement:
 
@@ -115,7 +116,7 @@ ASG requirement:
 ASG requirement:
 
 - ASG launch templates must use `docker-compose.asg-web.yml` and regional S3/default credentials.
-- Do not use the legacy local MinIO service in ASG web nodes.
+- Do not use the local MinIO override in ASG web nodes or production standalone EC2 deploys.
 - Use the ASG web instance profile as the credential source for S3. Static AWS keys are forbidden for ASG web object storage.
 - Keep `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_ACCESS_KEY`, and `OBJECT_STORAGE_SECRET_KEY` empty in ASG web mode.
 
@@ -168,7 +169,7 @@ docker compose -f docker-compose.asg-web.yml up -d --build backend frontend
 - Existing standalone regional EC2 hosts that intentionally own the singleton worker must opt in to the worker profile:
 
 ```bash
-docker compose --profile worker up -d --build backend worker frontend
+docker compose --profile worker up -d --build redis backend worker frontend
 ```
 
 - Run exactly one worker container per region for now.

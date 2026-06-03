@@ -16,9 +16,7 @@ unset RUN_DB_MIGRATIONS_ON_START
 
 docker compose build backend frontend
 docker compose run --rm backend npx prisma migrate deploy
-docker compose up -d redis minio
-docker compose up minio-init
-docker compose --profile worker up -d --force-recreate backend worker frontend
+docker compose --profile worker up -d --force-recreate redis backend worker frontend
 ```
 
 ## Strict Pre-Release Verify
@@ -37,9 +35,7 @@ export DOCKER_BUILD_VERIFY=true
 npm run verify:release
 docker compose build backend frontend
 docker compose run --rm backend npx prisma migrate deploy
-docker compose up -d redis minio
-docker compose up minio-init
-docker compose --profile worker up -d --force-recreate backend worker frontend
+docker compose --profile worker up -d --force-recreate redis backend worker frontend
 
 unset DOCKER_BUILD_VERIFY
 ```
@@ -66,5 +62,15 @@ docker compose -f docker-compose.asg-web.yml up -d --build backend frontend
 Standalone regional EC2 hosts that are responsible for the single worker must opt in explicitly:
 
 ```bash
-docker compose --profile worker up -d --build backend worker frontend
+docker compose --profile worker up -d --build redis backend worker frontend
+```
+
+## Local MinIO Mode
+
+MinIO is dev/local only. Production uses regional S3 through default credentials with an empty `OBJECT_STORAGE_ENDPOINT`, no static object-storage keys, and path-style addressing disabled.
+
+Enable local MinIO intentionally through the local override and profile:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local.yml --profile local-minio up -d minio minio-init
 ```
