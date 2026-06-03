@@ -1,0 +1,89 @@
+documents/ops/evidence/auto-failover-monitor-live-noop-20260603T095117Z/auto-failover-dry-run-26876846857-1/20260603T094644Z/auto-failover-dry-run/decision.json
+{
+  "timestamp": "2026-06-03T09:46:44.378Z",
+  "targetSha": "f1ae5108b6533a998d65214a80039eea4ae50a3b",
+  "inputEvidencePath": "/home/runner/work/genuine-scan-main/genuine-scan-main/artifacts/dr/20260603T094642Z/three-region-truth-table/truth-table-summary.json.gz",
+  "inputEvidencePaths": [
+    "/home/runner/work/genuine-scan-main/genuine-scan-main/artifacts/dr/20260603T094607Z/three-region-truth-table/truth-table-summary.json.gz",
+    "/home/runner/work/genuine-scan-main/genuine-scan-main/artifacts/dr/20260603T094642Z/three-region-truth-table/truth-table-summary.json.gz"
+  ],
+  "failedChecks": [],
+  "selectedOperation": "",
+  "recommendedPlanJsonPath": "",
+  "recommendedPlanJsonSha256": "",
+  "decisionStatus": "NOOP",
+  "reason": "No failover recommendation; all regional health samples are passing or WARN-only rows are ignored.",
+  "threshold": 2,
+  "strictWarn": false,
+  "regionEvaluations": {
+    "europe": {
+      "region": "europe",
+      "label": "Europe EU -> London",
+      "operation": "rollback-europe",
+      "manualOnly": false,
+      "consecutiveFailures": 0,
+      "samples": [
+        {
+          "generatedAt": "2026-06-03T09:46:11.939Z",
+          "path": "/home/runner/work/genuine-scan-main/genuine-scan-main/artifacts/dr/20260603T094607Z/three-region-truth-table/truth-table-summary.json.gz",
+          "status": "PASS",
+          "failedChecks": [],
+          "warnChecks": []
+        },
+        {
+          "generatedAt": "2026-06-03T09:46:44.215Z",
+          "path": "/home/runner/work/genuine-scan-main/genuine-scan-main/artifacts/dr/20260603T094642Z/three-region-truth-table/truth-table-summary.json.gz",
+          "status": "PASS",
+          "failedChecks": [],
+          "warnChecks": []
+        }
+      ]
+    },
+    "africa": {
+      "region": "africa",
+      "label": "Africa AF -> Cape Town",
+      "operation": "rollback-africa",
+      "manualOnly": false,
+      "consecutiveFailures": 0,
+      "samples": [
+        {
+          "generatedAt": "2026-06-03T09:46:11.939Z",
+          "path": "/home/runner/work/genuine-scan-main/genuine-scan-main/artifacts/dr/20260603T094607Z/three-region-truth-table/truth-table-summary.json.gz",
+          "status": "PASS",
+          "failedChecks": [],
+          "warnChecks": []
+        },
+        {
+          "generatedAt": "2026-06-03T09:46:44.215Z",
+          "path": "/home/runner/work/genuine-scan-main/genuine-scan-main/artifacts/dr/20260603T094642Z/three-region-truth-table/truth-table-summary.json.gz",
+          "status": "PASS",
+          "failedChecks": [],
+          "warnChecks": []
+        }
+      ]
+    },
+    "default": {
+      "region": "default",
+      "label": "Default/global * -> Mumbai",
+      "operation": "",
+      "manualOnly": true,
+      "consecutiveFailures": 0,
+      "samples": [
+        {
+          "generatedAt": "2026-06-03T09:46:11.939Z",
+          "path": "/home/runner/work/genuine-scan-main/genuine-scan-main/artifacts/dr/20260603T094607Z/three-region-truth-table/truth-table-summary.json.gz",
+          "status": "PASS",
+          "failedChecks": [],
+          "warnChecks": []
+        },
+        {
+          "generatedAt": "2026-06-03T09:46:44.215Z",
+          "path": "/home/runner/work/genuine-scan-main/genuine-scan-main/artifacts/dr/20260603T094642Z/three-region-truth-table/truth-table-summary.json.gz",
+          "status": "PASS",
+          "failedChecks": [],
+          "warnChecks": []
+        }
+      ]
+    }
+  }
+}
