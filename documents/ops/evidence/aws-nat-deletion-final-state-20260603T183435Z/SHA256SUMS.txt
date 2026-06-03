@@ -2,6 +2,5 @@ e636ff0f491bdc81577b867e925b83afc39fe7a0ba4cd9218270dd73e48f839d  ./01-final-nat
 af8af3e97ab8c59b9f9e79ca625132859bdc8b8a99b3ad48223b88f4c4374dd1  ./02-old-nat-eip-allocation-state.json
 37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570  ./03-retired-nat-route-references.json
 6cfd92e2fea67afb7d3a8012d39a60dfe1f5ea7c227d8fcfe8a8e99b854f3e45  ./04-external-https-final-check.txt
-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./05-final-state-interpretation.txt
+26aac2429a48304503e363d07068b1f757ec9570a8fb9ae527d54429b4b1645b  ./05-final-state-interpretation.txt
 c19cd57bb9a958f8d2ee0579fa873bd63fb9807b298d4497780d32a25ac2599a  ./final-state-note.md
-5ae65cb40c9d8d625cec790a1f949ac7f8871324bea5bb6e344780a7e8d26fb7  ./SHA256SUMS.txt

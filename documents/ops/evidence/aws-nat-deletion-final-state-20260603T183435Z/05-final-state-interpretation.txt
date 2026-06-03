@@ -1,0 +1,12 @@
+retiring_nat_id: nat-0a51226e1f9190b2e
+retiring_nat_state: deleted
+survivor_nat_id: nat-0be609dfc6ce97dc3
+survivor_nat_state: available
+old_nat_eip_allocation: eipalloc-0d5bae537b16aece4
+old_nat_eip_public_ip: 35.179.203.86
+old_nat_eip_association_id: -
+old_nat_eip_network_interface_id: -
+retired_nat_route_reference_count: 0
+
+DECISION: OLD_NAT_EIP_IS_IDLE_CANDIDATE
+The old NAT EIP is unassociated and can be released in the next controlled cleanup step.
