@@ -1,0 +1,9 @@
+fd7497cea383f2009e0e0a8f7f7897723a6473a7b3f85354c787582baf3a39f8  ./01-pre-delete-retiring-nat.json
+37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570  ./02-pre-delete-retiring-nat-route-references.json
+2eac2d4d85779f4631f0155ee597925b491ee1a3bfd1efa6c445fd785970e331  ./03-pre-delete-private-default-routes.txt
+aad91ac4c0639cdab529e6a4edb9fcb3bc80a346f969382c290db828f5646082  ./04-delete-nat-gateway-response.json
+882011458c29c1cb43ac5b99d03532cc3ad89418a0218f8977c8c5ea2f1c50a4  ./05-post-delete-nat-gateways.json
+37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570  ./06-post-delete-retiring-nat-route-references.json
+39121c12156796dd3d89aa28b5d7f79741014a57ee739614ccbe8c296637aa00  ./07-post-delete-external-https-check.txt
+2ee0603809988ce5d2c3e3f75ba8ce17be0ba4062453e5daee3fe03896e8220c  ./nat-deletion-note.md
+53640de86be0ef3e524404158ce0ac11e426eb049c7f442987d832968a7e2d91  ./SHA256SUMS.txt

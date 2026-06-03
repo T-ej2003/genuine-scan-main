@@ -1,0 +1,31 @@
+{
+    "NatGateways": [
+        {
+            "CreateTime": "2026-04-17T15:02:09+00:00",
+            "NatGatewayAddresses": [
+                {
+                    "AllocationId": "eipalloc-0d5bae537b16aece4",
+                    "NetworkInterfaceId": "eni-04093255d4b517221",
+                    "PrivateIp": "10.0.29.131",
+                    "PublicIp": "35.179.203.86",
+                    "AssociationId": "eipassoc-0c30b4521801f46cd",
+                    "IsPrimary": true,
+                    "Status": "succeeded"
+                }
+            ],
+            "NatGatewayId": "nat-0a51226e1f9190b2e",
+            "State": "available",
+            "SubnetId": "subnet-028957bce09fae0c0",
+            "VpcId": "vpc-09825a6dc884b486a",
+            "Tags": [
+                {
+                    "Key": "Name",
+                    "Value": "mscqr-prod-euw2-nat-public2-eu-west-2b"
+                }
+            ],
+            "ConnectivityType": "public",
+            "AvailabilityMode": "zonal",
+            "AttachedAppliances": []
+        }
+    ]
+}
