@@ -1,0 +1,90 @@
+=== REGION=eu-west-2 Elastic IPs ===
+[
+    {
+        "Region": "eu-west-2",
+        "PublicIp": "13.135.108.69",
+        "AllocationId": "eipalloc-0e355030bdb47ec4d",
+        "AssociationId": "eipassoc-093ae0114d8ded63e",
+        "InstanceId": "i-024ec40bcbdb30035",
+        "NetworkInterfaceId": "eni-04f64b96fad9969ce",
+        "NetworkInterfaceOwnerId": "368992683803",
+        "PrivateIpAddress": "10.0.14.142",
+        "Domain": "vpc",
+        "Tags": [
+            {
+                "Key": "Name",
+                "Value": "E-ip mscqr-prod"
+            }
+        ]
+    },
+    {
+        "Region": "eu-west-2",
+        "PublicIp": "16.61.0.97",
+        "AllocationId": "eipalloc-0e1f6867d5a411bb1",
+        "AssociationId": "eipassoc-040bd316f8b4e0b14",
+        "InstanceId": "i-0628b4a4a06f6e4d3",
+        "NetworkInterfaceId": "eni-006057d805dacec95",
+        "NetworkInterfaceOwnerId": "368992683803",
+        "PrivateIpAddress": "10.0.12.63",
+        "Domain": "vpc",
+        "Tags": null
+    },
+    {
+        "Region": "eu-west-2",
+        "PublicIp": "18.133.208.221",
+        "AllocationId": "eipalloc-00779949767f21cfa",
+        "AssociationId": "eipassoc-04922dd8c542aa1a8",
+        "InstanceId": null,
+        "NetworkInterfaceId": "eni-0f7e94c94c71d04ba",
+        "NetworkInterfaceOwnerId": "368992683803",
+        "PrivateIpAddress": "10.0.25.211",
+        "Domain": "vpc",
+        "Tags": null
+    },
+    {
+        "Region": "eu-west-2",
+        "PublicIp": "18.135.158.1",
+        "AllocationId": "eipalloc-056bbb4cf49779295",
+        "AssociationId": "eipassoc-07506927299c55682",
+        "InstanceId": null,
+        "NetworkInterfaceId": "eni-0a5cd8d8da0c87d0a",
+        "NetworkInterfaceOwnerId": "368992683803",
+        "PrivateIpAddress": "10.0.3.73",
+        "Domain": "vpc",
+        "Tags": null
+    },
+    {
+        "Region": "eu-west-2",
+        "PublicIp": "3.9.15.121",
+        "AllocationId": "eipalloc-0d048b9168225c496",
+        "AssociationId": "eipassoc-0bdf16df65022db09",
+        "InstanceId": null,
+        "NetworkInterfaceId": "eni-0bcec4c899f2fa5bc",
+        "NetworkInterfaceOwnerId": "368992683803",
+        "PrivateIpAddress": "10.0.4.219",
+        "Domain": "vpc",
+        "Tags": [
+            {
+                "Key": "Name",
+                "Value": "mscqr-prod-euw2-eip-eu-west-2a"
+            }
+        ]
+    },
+    {
+        "Region": "eu-west-2",
+        "PublicIp": "35.179.203.86",
+        "AllocationId": "eipalloc-0d5bae537b16aece4",
+        "AssociationId": "eipassoc-0c30b4521801f46cd",
+        "InstanceId": null,
+        "NetworkInterfaceId": "eni-04093255d4b517221",
+        "NetworkInterfaceOwnerId": "368992683803",
+        "PrivateIpAddress": "10.0.29.131",
+        "Domain": "vpc",
+        "Tags": [
+            {
+                "Key": "Name",
+                "Value": "mscqr-prod-euw2-eip-eu-west-2b"
+            }
+        ]
+    }
+]

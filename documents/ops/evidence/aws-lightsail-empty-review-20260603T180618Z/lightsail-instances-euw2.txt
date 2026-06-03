@@ -1,0 +1,4 @@
+=== Lightsail instances eu-west-2 ===
+{
+    "instances": []
+}

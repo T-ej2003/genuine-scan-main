@@ -1,0 +1,22 @@
+171bec83b201c662f133505b5047d355d79dcf8b10338145c1511fbc31d4dbfb  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/01-target-group-details.png
+4e6984e31bbfd8e2c25d26ddd76e063ee26129d1a2b1ccd0484df653bffa0920  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/02-target-group-targets.png
+5ceda045302b16714cd3e4596bfba07a11d2d292ff98d4ba198d96e37c2f2488  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/03-target-group-tags.png
+8c226c8045adaf830801e3cc55b46c3789e2b287c4f66821cb310ada2aab0ced  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/12-cost-explorer-service-forecast.png.png
+4ea2f061f8a00d764ec2cc2b15eefb7abfe0c69f58f18f57413f13449eee886c  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/13-cost-explorer-service-forecast.png
+df115420852e38e63f17ac6f26decd52cd74a90bdfeddbc67fdb93ee2e8da202  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/14-rds-cost-usage-type.png
+0775c9d55e4b906858c681e8e20f940964e3689424374e52b54d238db1112d2f  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/15-elasticache-cost-usage-type.png
+ce92251675ec4bc3abe4a8dbc5e9cc4adc5e5b81cd6db954bb54267b0119ddd7  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/16-ec2-other-usage-type.png
+57772134755f3114c0771ce14802e55fde407b06ebaf356995e92c51296cef1e  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/17-vpc-cost-usage-type.png
+863c86c11e91287035491a03b0cce1064fc43adc52df2b5d43bf511a50b1dd4f  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/18-cost-explorer-all-services-overview.csv
+f37a6537f047c49738deae551a9c63fcffde002e06ec4ddaba3125e03b72403f  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/18-cost-explorer-all-services-overview.png
+eebdae8066e4caeaf621b8c5baacf6ddf1f74dfa2eda82055e9749898a34ee2c  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/21-euw2-route-tables-using-nat-0a51226e1f9190b2e.png
+afa0b83f4eeb33d66d0d840a41aee6650d48c78dc51a4bdc699ac57143a00493  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/21-euw2-route-tables-using-nat-0a51226e1f9190b2e(2).png
+2fc2e000def637bf751f74e32e88987de85e3d5dfdd52a799a186c10e35173b3  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/22-euw2-route-tables-using-nat-0be609dfc6ce97dc3.png
+2ed2bef1a89fc7c2d4a6303e03ea7ac5bd514043d495f4699813fe494c643da9  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/22-euw2-route-tables-using-nat-0be609dfc6ce97dc3(2).png
+863c86c11e91287035491a03b0cce1064fc43adc52df2b5d43bf511a50b1dd4f  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/costs (1).csv
+6c82f75d3280231ea64120e4d2f9de86adc7a8c112b8aa66026b2b55ec376151  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/costs (2).csv
+a05adc143ed123b0faec8efb898f2bbaac68936f73f826d811b9a44983708f61  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/costs (3).csv
+4ff3d504b67b6ad8db66130fc23a043bd83e313c368030a10b10fa234527e4a2  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/costs (4).csv
+5eef57b0eb2d60bfc3c462d4abdbd936f27c704e6b1fb5d4dc31805f26c8ff00  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/costs (5).csv
+257597d50db703295a4a95bf52864a9703a4ee86e634d7cfd9116334f0474ff2  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/costs.csv
+b24b8aaf437c2fda90270f2c86dc65c85ee25bddd5bc24ace90b4578cb9a85c1  documents/ops/evidence/aws-first-cleanup-deletion-pass-20260603T174823Z/deletion-plan.md

@@ -1,0 +1,4 @@
+=== Lightsail static IPs eu-west-2 ===
+{
+    "staticIps": []
+}

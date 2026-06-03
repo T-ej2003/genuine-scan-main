@@ -1,0 +1,5 @@
+6b365d49421163aec1ce5d223197723d9b4758adff64b5c3fd1cf79c79d42e16  documents/ops/evidence/aws-lightsail-empty-review-20260603T180618Z/lightsail-disk-snapshots-euw2.txt
+50bf2d7e130db3188d5676ccb7ea8a791755dd5ddc2b47ea670f78af90738cd6  documents/ops/evidence/aws-lightsail-empty-review-20260603T180618Z/lightsail-instance-snapshots-euw2.txt
+50746fdc1cacc0f7e84d370c9d25ed2ee0cc71bf26354b605d0d2b6550534538  documents/ops/evidence/aws-lightsail-empty-review-20260603T180618Z/lightsail-instances-euw2.txt
+65692b0391fbbe0c6d026b8ba0938d6e24c1a8120cec2ea3b0baf38622e13460  documents/ops/evidence/aws-lightsail-empty-review-20260603T180618Z/lightsail-static-ips-euw2.txt
+8e62310e709b0f157656cbef6099d644c226e3d1aca6b0be6d1aa233402a794a  documents/ops/evidence/aws-lightsail-empty-review-20260603T180618Z/SHA256SUMS.txt

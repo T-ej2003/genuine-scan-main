@@ -1,0 +1,44 @@
+=== REGION=af-south-1 Elastic IPs ===
+[
+    {
+        "Region": "af-south-1",
+        "PublicIp": "13.247.109.230",
+        "AllocationId": "eipalloc-0966c373ad1b03e69",
+        "AssociationId": "eipassoc-07a17b05ec4579970",
+        "InstanceId": null,
+        "NetworkInterfaceId": "eni-06d9d12a42b3e1054",
+        "NetworkInterfaceOwnerId": "368992683803",
+        "PrivateIpAddress": "10.40.15.191",
+        "Domain": "vpc",
+        "Tags": null
+    },
+    {
+        "Region": "af-south-1",
+        "PublicIp": "13.247.165.129",
+        "AllocationId": "eipalloc-0e1efff274edfe8d7",
+        "AssociationId": "eipassoc-01b758b8b2fc08a92",
+        "InstanceId": null,
+        "NetworkInterfaceId": "eni-0f44c7a9f12a7173a",
+        "NetworkInterfaceOwnerId": "368992683803",
+        "PrivateIpAddress": "10.40.29.251",
+        "Domain": "vpc",
+        "Tags": null
+    },
+    {
+        "Region": "af-south-1",
+        "PublicIp": "15.240.28.113",
+        "AllocationId": "eipalloc-01e38750bd4be698f",
+        "AssociationId": "eipassoc-00944e635c89e9c72",
+        "InstanceId": "i-064223a25caf64770",
+        "NetworkInterfaceId": "eni-0f834b8389774d57e",
+        "NetworkInterfaceOwnerId": "368992683803",
+        "PrivateIpAddress": "10.40.10.98",
+        "Domain": "vpc",
+        "Tags": [
+            {
+                "Key": "Name",
+                "Value": "mscqr-capetown-eip"
+            }
+        ]
+    }
+]

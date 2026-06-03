@@ -1,0 +1,4 @@
+=== Lightsail instance snapshots eu-west-2 ===
+{
+    "instanceSnapshots": []
+}

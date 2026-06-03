@@ -1,0 +1,44 @@
+=== REGION=ap-south-1 Elastic IPs ===
+[
+    {
+        "Region": "ap-south-1",
+        "PublicIp": "13.207.106.241",
+        "AllocationId": "eipalloc-0cda0cfe1df1a8322",
+        "AssociationId": "eipassoc-0c410f10fcd6c218a",
+        "InstanceId": null,
+        "NetworkInterfaceId": "eni-094f3f5cf0ab1fa8e",
+        "NetworkInterfaceOwnerId": "368992683803",
+        "PrivateIpAddress": "10.30.19.85",
+        "Domain": "vpc",
+        "Tags": null
+    },
+    {
+        "Region": "ap-south-1",
+        "PublicIp": "13.207.98.190",
+        "AllocationId": "eipalloc-09b30cdf6c251f1ad",
+        "AssociationId": "eipassoc-0ad7dad6f7a0f64de",
+        "InstanceId": null,
+        "NetworkInterfaceId": "eni-0b0c78c72654108b0",
+        "NetworkInterfaceOwnerId": "368992683803",
+        "PrivateIpAddress": "10.30.3.94",
+        "Domain": "vpc",
+        "Tags": null
+    },
+    {
+        "Region": "ap-south-1",
+        "PublicIp": "15.206.45.108",
+        "AllocationId": "eipalloc-0edf6fdd3b389d52e",
+        "AssociationId": "eipassoc-0f990bdfbede5e70b",
+        "InstanceId": "i-04ae3b689ab72a68a",
+        "NetworkInterfaceId": "eni-02c00fca9c1e649e0",
+        "NetworkInterfaceOwnerId": "368992683803",
+        "PrivateIpAddress": "10.30.14.134",
+        "Domain": "vpc",
+        "Tags": [
+            {
+                "Key": "Name",
+                "Value": "mscqr_mumbai_eip "
+            }
+        ]
+    }
+]

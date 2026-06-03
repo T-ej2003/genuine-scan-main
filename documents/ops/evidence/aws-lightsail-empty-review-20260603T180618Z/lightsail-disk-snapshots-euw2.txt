@@ -1,0 +1,4 @@
+=== Lightsail disk snapshots eu-west-2 ===
+{
+    "diskSnapshots": []
+}
