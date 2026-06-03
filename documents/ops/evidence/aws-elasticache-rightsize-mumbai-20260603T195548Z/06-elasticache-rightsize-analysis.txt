@@ -1,0 +1,36 @@
+ElastiCache rightsize analysis: mumbai
+
+replication_group: mscqr-redis-aps1-primary
+status: available
+automatic_failover: enabled
+multi_az: enabled
+member_clusters: mscqr-redis-aps1-primary-001, mscqr-redis-aps1-primary-002
+cache_node_type: cache.t4g.medium
+
+Cluster: mscqr-redis-aps1-primary-001
+- node_type: cache.t4g.medium
+- status: available
+- az: ap-south-1a
+- cpu_max_14d: 15.258079032016134
+- memory_pct_max_14d: 0.8244765872591623
+- curr_connections_max_14d: 10.0
+- evictions_sum_14d: 0.0
+- swap_max_14d: 258048.0
+- cache_hit_rate_14d: 0.934423
+
+Cluster: mscqr-redis-aps1-primary-002
+- node_type: cache.t4g.medium
+- status: available
+- az: ap-south-1b
+- cpu_max_14d: 12.858572381587724
+- memory_pct_max_14d: 0.8242608660259033
+- curr_connections_max_14d: 7.0
+- evictions_sum_14d: 0.0
+- swap_max_14d: 258048.0
+- cache_hit_rate_14d: NO_DATA
+
+Decision framework:
+- If low utilization and DR cost pressure is high: candidate to remove replica after disabling failover/Multi-AZ.
+- If primary is active but low load: keep one node, not delete replication group.
+- If app depends on Redis secrets/endpoints: do not delete whole Redis.
+- Mutation requires separate evidence dir, rollback note, and post-change health verification.

@@ -1,0 +1,2357 @@
+{
+    "Label": "NewConnections",
+    "Datapoints": [
+        {
+            "Timestamp": "2026-05-27T08:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T15:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T01:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T22:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T02:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T09:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T12:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T19:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T06:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T13:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T20:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T20:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T03:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T10:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T17:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T04:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T11:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T14:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T21:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T07:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T22:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T05:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T12:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T15:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T08:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T02:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T09:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T16:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T23:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T10:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T23:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T10:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T17:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T00:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T07:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T18:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T11:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T21:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T04:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T21:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T04:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T11:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T18:56:00+01:00",
+            "Average": 0.016666666666666666,
+            "Sum": 1.0,
+            "Maximum": 1.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T05:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T15:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T22:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T08:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T09:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 1.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T16:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T19:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T02:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T06:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T13:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T20:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T23:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T07:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T10:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T17:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T00:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T18:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T11:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T01:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T08:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T05:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T12:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T19:56:00+01:00",
+            "Average": 0.18840579710144928,
+            "Sum": 13.0,
+            "Maximum": 7.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T22:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T06:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T09:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T16:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T23:56:00+01:00",
+            "Average": 0.06666666666666667,
+            "Sum": 4.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T06:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T10:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T13:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T20:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T03:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T14:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T21:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T00:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T07:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T17:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T07:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T01:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T02:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T16:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T10:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T20:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T11:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T05:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T19:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T09:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T00:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T10:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T18:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T04:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T19:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T13:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T03:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T22:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T12:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T07:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T21:56:00+01:00",
+            "Average": 0.06666666666666667,
+            "Sum": 4.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T15:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T06:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T16:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T00:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T10:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T01:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T19:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T05:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T09:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T00:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T14:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T08:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T23:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T09:56:00+01:00",
+            "Average": 0.06666666666666667,
+            "Sum": 4.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T17:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T03:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T18:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-20T22:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T12:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T02:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T12:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T03:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T21:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T07:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T22:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T16:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T06:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T00:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T15:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T01:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T19:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T05:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T20:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T14:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T00:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T15:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T09:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T23:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T17:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T08:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T18:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T02:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T17:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T07:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T03:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T21:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T11:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T12:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T06:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T20:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T15:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T14:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T05:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T19:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T10:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-20T20:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T04:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T14:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T05:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T23:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T13:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T22:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T08:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T16:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T03:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T10:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T17:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T00:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T18:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T21:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T04:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T11:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T14:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T18:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T01:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T08:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T15:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T19:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T02:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T05:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T12:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T13:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T23:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T06:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T06:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T13:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T17:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T00:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T07:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T14:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T18:56:00+01:00",
+            "Average": 0.06666666666666667,
+            "Sum": 4.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T01:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T04:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T11:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T22:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T05:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T01:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T08:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T15:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T19:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T16:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T02:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T09:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T20:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T03:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-20T23:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T20:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T03:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T06:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T13:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T14:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T00:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T07:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T17:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T14:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T21:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T04:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T11:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T22:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T01:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T08:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T15:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T02:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T09:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T12:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T19:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T16:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T13:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T20:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T17:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T10:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T03:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T14:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T21:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T04:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T00:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T07:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T04:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T11:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T18:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T01:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T22:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T05:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T12:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T15:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T23:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T02:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T09:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T16:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T23:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T14:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T00:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T08:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T18:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T09:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T03:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T13:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T04:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T22:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T12:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T16:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T07:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T17:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T01:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T11:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T02:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T20:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T06:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-20T21:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T15:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T05:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T13:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T14:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T04:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T23:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T17:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T18:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T08:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T12:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T03:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T02:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T06:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T21:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T07:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T01:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T15:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T16:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T10:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T20:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T11:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T05:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T19:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T05:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T19:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T20:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T14:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T04:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T09:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T23:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T13:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T18:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T08:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T12:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T22:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T13:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T03:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T07:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T21:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T02:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-03T06:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T16:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T10:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T01:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-22T11:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T09:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T10:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-31T00:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T18:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-27T04:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T19:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T13:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T23:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T08:56:00+01:00",
+            "Average": 0.03333333333333333,
+            "Sum": 2.0,
+            "Maximum": 2.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T22:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-01T02:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-30T17:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-24T03:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-06-02T11:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-26T21:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-25T12:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-28T06:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-21T16:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-23T01:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        },
+        {
+            "Timestamp": "2026-05-29T15:56:00+01:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Count"
+        }
+    ]
+}
