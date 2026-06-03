@@ -1,0 +1,9 @@
+af8af3e97ab8c59b9f9e79ca625132859bdc8b8a99b3ad48223b88f4c4374dd1  ./01-pre-release-eip-state.json
+e636ff0f491bdc81577b867e925b83afc39fe7a0ba4cd9218270dd73e48f839d  ./02-pre-release-nat-states.json
+37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570  ./03-pre-release-retired-nat-route-references.json
+6cadcde5dd786833063acad585d8a7671e663c8165541bb3833882c6e687844f  ./04-post-release-eip-lookup-status.txt
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./04-post-release-eip-lookup.json
+1c261bbc4eb6fafb44f346f04ab5dd2aa33f6fa6209d3a07d552b50a06d699bc  ./04-post-release-eip-lookup.stderr
+e7c1c400c742b5b540fa33b1ebd0293e07e776d365597b3debb041c4fc5c1a36  ./05-post-release-external-https-check.txt
+9c5f2daa65c1cee17880bcb96f2c9570109e8e2aa9d6d16f46089ca271358a48  ./eip-release-note.md
+a11152b995d811bfa9139a06c10b25ac13b07cfb93eec38865e45ff86e519daf  ./SHA256SUMS.txt
