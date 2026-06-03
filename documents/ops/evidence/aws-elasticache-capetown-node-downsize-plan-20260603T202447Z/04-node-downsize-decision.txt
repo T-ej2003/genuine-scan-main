@@ -1,0 +1,10 @@
+replication_group: mscqr-redis-afs1-primary
+current_node_type: cache.t3.micro
+automatic_failover: enabled
+multi_az: enabled
+member_clusters: mscqr-redis-afs1-primary-001, mscqr-redis-afs1-primary-002
+
+scale_down_modifications:
+
+DECISION: NO_ELASTICACHE_DOWNSIZE_AVAILABLE
+Cape Town ElastiCache is already at the practical lower node class. Keep 2 nodes and HA.
